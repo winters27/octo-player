@@ -62,9 +62,9 @@ fun mix(from: Color, to: Color, amount: Float) = Color(
 private val GlazeTint = Color.Black.copy(alpha = 0.16f)
 
 // The film for glass over one smooth field of colour, like the player's
-// background. With no detail behind it to blur, the dim above would read as
-// a darker patch, so this glass lifts the colour a touch instead.
-val GlazeLightFilm = Color.White.copy(alpha = 0.08f)
+// background: none at all. With no detail behind to blur, a dim reads as a
+// darker patch and a wash as a brighter one; bare glass is just its rim.
+val GlazeClearFilm = Color.Transparent
 
 // The darker pill that marks the chosen item inside a glaze, like the
 // selected tab: a plain shade, with none of the glaze's lighting.
