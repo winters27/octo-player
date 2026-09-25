@@ -28,6 +28,26 @@ interface UserDao {
     @Insert
     suspend fun addPlay(row: PlayEventEntity)
 
+    // Every played song the library still has; songs that are gone drop out.
+    @Query(
+        """
+        SELECT t.*, COUNT(*) AS plays, MAX(p.startedAt) AS lastPlayedAt
+        FROM play_event p JOIN track t ON t.id = p.trackId
+        GROUP BY t.id
+        """,
+    )
+    fun playedTracks(): Flow<List<PlayedTrack>>
+
+    // Every album with a played song that the library still has.
+    @Query(
+        """
+        SELECT a.*, MAX(p.startedAt) AS lastPlayedAt
+        FROM play_event p JOIN track t ON t.id = p.trackId JOIN album a ON a.id = t.albumId
+        GROUP BY a.id
+        """,
+    )
+    fun playedAlbums(): Flow<List<PlayedAlbum>>
+
     // The saved queue
 
     @Query("SELECT * FROM queue_item ORDER BY position")

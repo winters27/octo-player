@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
@@ -28,6 +29,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
 import app.winters.octo.catalog.AlbumEntity
+import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
@@ -37,6 +39,7 @@ import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistCircle
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
+import app.winters.octo.ui.common.SongCard
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
@@ -47,6 +50,8 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
     val access by vm.library.access.collectAsStateWithLifecycle()
     val recent by vm.recent.collectAsStateWithLifecycle()
     val count by vm.songCount.collectAsStateWithLifecycle()
+    val recentlyPlayed by vm.recentlyPlayed.collectAsStateWithLifecycle()
+    val mostPlayed by vm.mostPlayed.collectAsStateWithLifecycle()
 
     PullToRefreshBox(
         isRefreshing = vm.refreshing,
@@ -59,7 +64,9 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
                 access != Access.Granted -> item { AccessCard(access, vm) }
                 count == 0 -> item { EmptyCard() }
                 else -> {
+                    shelf("Recently played", recentlyPlayed, onOpen)
                     shelf("Recently added", recent.orEmpty(), onOpen)
+                    songShelf("Most played", mostPlayed, vm::play)
                     shelf("Something different", vm.surprise, onOpen)
                     if (vm.artists.isNotEmpty()) {
                         item { SectionTitle("Artists", Modifier.padding(top = 18.dp)) }
@@ -94,6 +101,26 @@ private fun androidx.compose.foundation.lazy.LazyListScope.shelf(
         ) {
             items(albums, key = { it.id }) { album ->
                 AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) })
+            }
+        }
+    }
+}
+
+// A row of songs; tapping one plays the row from that song.
+private fun androidx.compose.foundation.lazy.LazyListScope.songShelf(
+    title: String,
+    tracks: List<TrackEntity>,
+    onPlay: (List<TrackEntity>, Int) -> Unit,
+) {
+    if (tracks.isEmpty()) return
+    item(key = "title:$title") { SectionTitle(title, Modifier.padding(top = 18.dp)) }
+    item(key = "row:$title") {
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            itemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
+                SongCard(track, onClick = { onPlay(tracks, index) })
             }
         }
     }
