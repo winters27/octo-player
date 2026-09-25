@@ -10,7 +10,7 @@ fun OctoTheme(content: @Composable () -> Unit) {
         colorScheme = darkColorScheme(
             primary = OctoColors.Accent,
             background = OctoColors.Background,
-            surface = OctoColors.Surface,
+            surface = OctoColors.BackgroundTertiary,
             onBackground = OctoColors.TextPrimary,
             onSurface = OctoColors.TextPrimary,
             error = OctoColors.Error,

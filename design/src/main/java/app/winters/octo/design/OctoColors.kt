@@ -2,19 +2,17 @@ package app.winters.octo.design
 
 import androidx.compose.ui.graphics.Color
 
-// The app is dark only; these are the only surface and text colours.
+// Winters' Glass, the palette the other apps share. Dark only.
 object OctoColors {
-    val Background = Color(0xFF090A0F)
-    val Surface = Color(0xFF12141C)
-    val SurfaceRaised = Color(0xFF181A24)
-    val GlassBase = Color(0xFF161822)
-    val GlassFallback = Color(0xFF161820)
-    val Accent = Color(0xFFAEA69B)
-    val AccentLight = Color(0xFFF0EBE1)
-    val TextPrimary = Color(0xFFFFFFFF)
-    val TextSecondary = Color(0xFFB0B8C8)
-    val TextMuted = Color(0xFF6B7280)
-    val IconIdle = Color(0xFF64748B)
-    val Border = Color(0xFF22253A)
-    val Error = Color(0xFFFF4D4F)
+    val Background = Color(0xFF0C0C0D)
+    // A low-alpha wash that tints glass panels.
+    val BackgroundSecondary = Color.White.copy(alpha = 0.03f)
+    // The solid surface under cards and glazed controls.
+    val BackgroundTertiary = Color(0xFF1A1A1B)
+    val Accent = Color(0xFF97B1B9)
+    val AccentHover = Color(0xFFADC4CC)
+    val TextPrimary = Color.White
+    val TextSecondary = Accent
+    val TextMuted = Accent.copy(alpha = 0.6f)
+    val Error = Color(0xFFEF4444)
 }
