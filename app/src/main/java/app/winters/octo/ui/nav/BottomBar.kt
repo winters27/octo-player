@@ -180,7 +180,7 @@ private fun TabBar(
             ),
     ) {
         val column = (fullWidth - 12.dp) / tabs.size
-        val capsuleWidth = 56.dp
+        val capsuleWidth = 68.dp
         val capsuleX by animateDpAsState(
             targetValue = 6.dp + column * selected + (column - capsuleWidth) / 2,
             animationSpec = spring(dampingRatio = 0.8f, stiffness = 350f),
@@ -190,13 +190,15 @@ private fun TabBar(
         // circle while it fades, carrying the tab's icon, so the folded tab is
         // the same glazed button as the one at the other end of the bar.
         val glazeX = lerp(capsuleX, 0.dp, folded)
+        // Narrows to the circle as it folds, so the icon it carries stays centred.
+        val pillWidth = lerp(capsuleWidth, BarHeight, folded)
         Box(Modifier.matchParentSize().clip(CircleShape)) {
             if (folded < 1f) {
                 GlazeSelected(
                     Modifier
                         .align(Alignment.CenterStart)
                         .offset { IntOffset(glazeX.roundToPx(), 0) }
-                        .size(width = capsuleWidth, height = lerp(40.dp, BarHeight, folded))
+                        .size(width = pillWidth, height = lerp(46.dp, BarHeight, folded))
                         .alpha(1f - folded),
                 )
             }
@@ -230,7 +232,7 @@ private fun TabBar(
                     tint = OctoColors.TextPrimary,
                     modifier = Modifier
                         .align(Alignment.CenterStart)
-                        .offset { IntOffset((glazeX + (capsuleWidth - 22.dp) / 2).roundToPx(), 0) }
+                        .offset { IntOffset((glazeX + (pillWidth - 22.dp) / 2).roundToPx(), 0) }
                         .size(22.dp),
                 )
             }
