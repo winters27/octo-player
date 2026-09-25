@@ -8,6 +8,7 @@ import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.VisibilityThreshold
@@ -50,6 +51,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -106,6 +108,7 @@ import app.winters.octo.playback.SleepState
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.asClock
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // The full player. It opens over everything, with the artwork flying in
@@ -401,29 +404,49 @@ private fun Progress(now: NowPlaying, model: PlayerViewModel) {
     }
 }
 
-// What kind of file is playing, as a small glazed badge: the tier in full
-// strength, then the details softer, like "Lossless  FLAC 16/44.1".
+// What kind of file is playing, as a small glazed label: a waveform mark
+// and "LOSSLESS" or "HI-RES" for lossless files, or just the format, like
+// "OPUS". A tap shows everything, like "FLAC · 24-bit · 48 kHz", for a few
+// seconds.
 @Composable
 private fun QualityBadge(quality: AudioQuality, modifier: Modifier) {
-    val label = listOfNotNull(quality.tier, quality.detail).joinToString(", ")
-    Glaze(modifier.height(24.dp).clearAndSetSemantics { contentDescription = label }) {
-        Row(Modifier.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                quality.tier,
-                style = OctoType.caption.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
-                color = OctoColors.TextPrimary,
-            )
-            quality.detail?.let {
-                Text(
-                    it,
-                    style = OctoType.caption.copy(fontSize = 11.sp, fontFeatureSettings = "tnum"),
-                    color = OctoColors.TextPrimary.copy(alpha = 0.6f),
-                    modifier = Modifier.padding(start = 6.dp),
+    var open by remember(quality) { mutableStateOf(false) }
+    LaunchedEffect(open) {
+        if (open) {
+            delay(4_000)
+            open = false
+        }
+    }
+    Glaze(
+        modifier
+            .height(24.dp)
+            .clickable(interactionSource = null, indication = null, role = Role.Button) { open = !open }
+            .clearAndSetSemantics { contentDescription = "${quality.label}, ${quality.full}" },
+    ) {
+        Row(
+            Modifier.animateContentSize(spring(0.8f, 400f)).padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (quality.lossless) {
+                Icon(
+                    painterResource(OctoIcons.Lossless),
+                    contentDescription = null,
+                    tint = OctoColors.TextPrimary,
+                    modifier = Modifier.padding(end = 5.dp).size(13.dp),
                 )
             }
+            Text(
+                if (open) quality.full else quality.label.uppercase(),
+                style = if (open) BadgeDetail else BadgeLabel,
+                color = OctoColors.TextPrimary,
+                maxLines = 1,
+            )
         }
     }
 }
+
+private val BadgeLabel = OctoType.caption.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp)
+private val BadgeDetail = OctoType.caption.copy(fontSize = 11.sp)
 
 @Composable
 private fun Transport(now: NowPlaying, model: PlayerViewModel) {

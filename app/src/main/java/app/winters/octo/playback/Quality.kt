@@ -5,10 +5,25 @@ import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Tracks
 
-// How a song is encoded, for the badge under the progress line: a short
-// tier like "Lossless" or "Opus", and the details after it, like "FLAC 24/96"
-// or "128 kbps".
-data class AudioQuality(val tier: String, val detail: String?)
+// How a song is encoded, for the badge under the progress line.
+data class AudioQuality(
+    val codec: String,
+    val lossless: Boolean,
+    // Lossless above 48 kHz.
+    val hiRes: Boolean,
+    // Like "24-bit · 48 kHz" for lossless, or "128 kbps" for everything else.
+    val specs: String?,
+) {
+    // What the badge says at a glance.
+    val label: String get() = when {
+        hiRes -> "Hi-Res"
+        lossless -> "Lossless"
+        else -> codec
+    }
+
+    // Everything, shown when the badge is tapped.
+    val full: String get() = listOfNotNull(codec, specs).joinToString(" · ")
+}
 
 // Uses what the decoder reports once the song is open, and the file type
 // before then.
@@ -33,17 +48,13 @@ internal fun audioQuality(
     bitrate: Int,
 ): AudioQuality? {
     val codec = codecName(codecMime) ?: codecName(fileMime) ?: return null
+    val rate = sampleRate.takeIf { it > 0 }?.let { "${kilohertz(it)} kHz" }
     if (codec in Lossless) {
-        // Written the short way, like 24/96 for 24-bit at 96 kHz.
-        val spec = listOfNotNull(bitDepth(pcmEncoding)?.toString(), sampleRate.takeIf { it > 0 }?.let(::kilohertz))
-            .joinToString("/")
-        // Above 48 kHz counts as high resolution.
-        val tier = if (sampleRate > 48_000) "Hi-Res Lossless" else "Lossless"
-        return AudioQuality(tier, listOf(codec, spec).filter { it.isNotEmpty() }.joinToString(" "))
+        val specs = listOfNotNull(bitDepth(pcmEncoding)?.let { "$it-bit" }, rate).joinToString(" · ").ifEmpty { null }
+        return AudioQuality(codec, lossless = true, hiRes = sampleRate > 48_000, specs = specs)
     }
-    val detail = bitrate.takeIf { it > 0 }?.let { "${it / 1000} kbps" }
-        ?: sampleRate.takeIf { it > 0 }?.let { "${kilohertz(it)} kHz" }
-    return AudioQuality(codec, detail)
+    val specs = bitrate.takeIf { it > 0 }?.let { "${it / 1000} kbps" } ?: rate
+    return AudioQuality(codec, lossless = false, hiRes = false, specs = specs)
 }
 
 private val Lossless = setOf("FLAC", "ALAC", "WAV")

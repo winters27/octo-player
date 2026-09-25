@@ -9,38 +9,44 @@ import org.junit.Test
 class QualityTest {
     @Test
     fun cdQualityFlacIsLossless() {
-        val quality = audioQuality("audio/flac", "audio/flac", C.ENCODING_PCM_16BIT, 44_100, Format.NO_VALUE)
-        assertEquals(AudioQuality("Lossless", "FLAC 16/44.1"), quality)
+        val quality = audioQuality("audio/flac", "audio/flac", C.ENCODING_PCM_16BIT, 44_100, Format.NO_VALUE)!!
+        assertEquals("Lossless", quality.label)
+        assertEquals("FLAC · 16-bit · 44.1 kHz", quality.full)
     }
 
     @Test
     fun above48KilohertzIsHiRes() {
-        val quality = audioQuality("audio/flac", "audio/flac", C.ENCODING_PCM_24BIT, 96_000, Format.NO_VALUE)
-        assertEquals(AudioQuality("Hi-Res Lossless", "FLAC 24/96"), quality)
+        val quality = audioQuality("audio/flac", "audio/flac", C.ENCODING_PCM_24BIT, 96_000, Format.NO_VALUE)!!
+        assertEquals("Hi-Res", quality.label)
+        assertEquals("FLAC · 24-bit · 96 kHz", quality.full)
     }
 
     @Test
     fun twentyFourBitAt48IsStillLossless() {
-        val quality = audioQuality("audio/flac", "audio/flac", C.ENCODING_PCM_24BIT, 48_000, Format.NO_VALUE)
-        assertEquals(AudioQuality("Lossless", "FLAC 24/48"), quality)
+        val quality = audioQuality("audio/flac", "audio/flac", C.ENCODING_PCM_24BIT, 48_000, Format.NO_VALUE)!!
+        assertEquals("Lossless", quality.label)
+        assertEquals("FLAC · 24-bit · 48 kHz", quality.full)
     }
 
     @Test
-    fun lossyShowsItsBitrate() {
-        val quality = audioQuality("audio/mpeg", "audio/mpeg", Format.NO_VALUE, 44_100, 320_000)
-        assertEquals(AudioQuality("MP3", "320 kbps"), quality)
+    fun lossyShowsItsCodecAndBitrate() {
+        val quality = audioQuality("audio/mpeg", "audio/mpeg", Format.NO_VALUE, 44_100, 320_000)!!
+        assertEquals("MP3", quality.label)
+        assertEquals("MP3 · 320 kbps", quality.full)
     }
 
     @Test
     fun lossyWithoutBitrateShowsSampleRate() {
-        val quality = audioQuality("audio/opus", "audio/ogg", Format.NO_VALUE, 48_000, Format.NO_VALUE)
-        assertEquals(AudioQuality("Opus", "48 kHz"), quality)
+        val quality = audioQuality("audio/opus", "audio/ogg", Format.NO_VALUE, 48_000, Format.NO_VALUE)!!
+        assertEquals("Opus", quality.label)
+        assertEquals("Opus · 48 kHz", quality.full)
     }
 
     @Test
     fun beforeTheDecoderReportsTheFileTypeIsUsed() {
-        val quality = audioQuality(null, "audio/flac", Format.NO_VALUE, Format.NO_VALUE, Format.NO_VALUE)
-        assertEquals(AudioQuality("Lossless", "FLAC"), quality)
+        val quality = audioQuality(null, "audio/flac", Format.NO_VALUE, Format.NO_VALUE, Format.NO_VALUE)!!
+        assertEquals("Lossless", quality.label)
+        assertEquals("FLAC", quality.full)
     }
 
     @Test

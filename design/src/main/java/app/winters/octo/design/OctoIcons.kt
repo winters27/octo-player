@@ -14,4 +14,5 @@ object OctoIcons {
     val Queue = R.drawable.sym_queue_music
     val VolumeDown = R.drawable.sym_volume_down
     val VolumeUp = R.drawable.sym_volume_up
+    val Lossless = R.drawable.sym_graphic_eq
 }
