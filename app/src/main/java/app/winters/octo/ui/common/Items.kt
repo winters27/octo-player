@@ -57,6 +57,42 @@ fun AlbumCard(album: AlbumEntity, onClick: () -> Unit, modifier: Modifier = Modi
     }
 }
 
+// A song as a picture with its title and artist under it, for rows of
+// songs. A tap plays; a long press opens the song's menu.
+@Composable
+fun SongCard(track: TrackEntity, onClick: () -> Unit) {
+    val menu = LocalSongMenu.current
+    val haptics = LocalHapticFeedback.current
+    Column(
+        Modifier
+            .width(150.dp)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    menu.open(track.id)
+                },
+            ),
+    ) {
+        ArtworkFill(track.artwork)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            track.title,
+            style = OctoType.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+            color = OctoColors.TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            track.artist,
+            style = OctoType.caption,
+            color = OctoColors.TextMuted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
 // What sits at the start of a song row.
 sealed interface SongLead {
     data object Artwork : SongLead
