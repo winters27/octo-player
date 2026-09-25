@@ -4,16 +4,12 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
-import android.util.Size
 import androidx.annotation.OptIn
-import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.BitmapLoader
 import androidx.media3.common.util.UnstableApi
-import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.catalog.TrackEntity
-import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import java.util.concurrent.Callable
@@ -79,10 +75,9 @@ class OctoArtLoader(private val context: Context, private val fallback: BitmapLo
 
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> {
         if (uri.scheme != ART_SCHEME) return fallback.loadBitmap(uri)
-        val art = ArtworkRef.decode(uri.schemeSpecificPart) as? ArtworkRef.Device
-            ?: return Futures.immediateFailedFuture(IllegalArgumentException("No artwork"))
+        val ref = uri.schemeSpecificPart
         return worker.submit(
-            Callable { context.contentResolver.loadThumbnail(art.uri.toUri(), Size(512, 512), null) },
+            Callable { artworkBitmap(context, ref, 512) ?: throw IllegalArgumentException("No artwork") },
         )
     }
 }

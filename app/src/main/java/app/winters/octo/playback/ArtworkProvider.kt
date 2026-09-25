@@ -7,10 +7,7 @@ import android.database.Cursor
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.ParcelFileDescriptor
-import android.util.Size
-import androidx.core.net.toUri
 import app.winters.octo.BuildConfig
-import app.winters.octo.catalog.ArtworkRef
 import java.io.File
 import java.io.FileNotFoundException
 import java.security.MessageDigest
@@ -35,10 +32,7 @@ class ArtworkProvider : ContentProvider() {
         val dir = File(ctx.cacheDir, "car-art").apply { mkdirs() }
         val file = File(dir, sha1(ref) + ".jpg")
         if (file.exists()) return file
-        val art = ArtworkRef.decode(ref) as? ArtworkRef.Device ?: return null
-        val loaded = runCatching {
-            ctx.contentResolver.loadThumbnail(art.uri.toUri(), Size(ART_SIZE, ART_SIZE), null)
-        }.getOrNull() ?: return null
+        val loaded = artworkBitmap(ctx, ref, ART_SIZE) ?: return null
         // The size asked for is only a hint, so bring it down to size here.
         val bitmap = shrink(loaded)
         // Written aside first, so a half-written file is never served.

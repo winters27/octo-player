@@ -21,6 +21,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import androidx.navigation3.runtime.NavKey
 import app.winters.octo.BuildConfig
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.design.AccentButton
@@ -39,6 +40,7 @@ import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.screenPadding
+import app.winters.octo.ui.nav.SignInRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
@@ -82,7 +84,7 @@ class SettingsViewModel @Inject constructor(
 private val CardShape = RoundedCornerShape(20.dp)
 
 @Composable
-fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
+fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewModel()) {
     val access by vm.library.access.collectAsStateWithLifecycle()
     val scanning by vm.library.scanning.collectAsStateWithLifecycle()
     val count by vm.songCount.collectAsStateWithLifecycle()
@@ -124,6 +126,8 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
             }
         }
 
+        ServerCard(onConnect = { onOpen(SignInRoute) }, Modifier.padding(top = 16.dp))
+
         Card("Player", Modifier.padding(top = 16.dp)) {
             SwitchLine(
                 label = "Live background",
@@ -152,7 +156,7 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
 }
 
 @Composable
-private fun Card(title: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+internal fun Card(title: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Column(
         modifier
             .padding(horizontal = 20.dp)
@@ -167,7 +171,7 @@ private fun Card(title: String, modifier: Modifier = Modifier, content: @Composa
 }
 
 @Composable
-private fun Line(label: String, value: String) {
+internal fun Line(label: String, value: String) {
     Row(Modifier.fillMaxWidth()) {
         Text(label, style = OctoType.bodySmall, color = OctoColors.TextSecondary, modifier = Modifier.weight(1f))
         Text(value, style = OctoType.bodySmall, color = OctoColors.TextPrimary)

@@ -68,6 +68,13 @@ data class Song(
     val bitDepth: Int? = null,
     val size: Long? = null,
     val starred: String? = null,
+    // What a full library copy also keeps: who the album is by, the genre,
+    // when the song was added and last played, and how often.
+    val displayAlbumArtist: String? = null,
+    val genre: String? = null,
+    val created: String? = null,
+    val played: String? = null,
+    val playCount: Long? = null,
 )
 
 @Serializable
