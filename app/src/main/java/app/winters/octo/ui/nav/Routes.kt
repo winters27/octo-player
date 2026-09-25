@@ -9,3 +9,5 @@ import kotlinx.serialization.Serializable
 @Serializable data object SettingsRoute : NavKey
 @Serializable data class AlbumRoute(val id: String) : NavKey
 @Serializable data class ArtistRoute(val id: String) : NavKey
+@Serializable data object GenresRoute : NavKey
+@Serializable data class GenreRoute(val name: String) : NavKey

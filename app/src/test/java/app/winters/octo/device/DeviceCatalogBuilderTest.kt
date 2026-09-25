@@ -18,6 +18,7 @@ class DeviceCatalogBuilderTest {
         folder: String? = "Music/Album/",
         compilation: Boolean = false,
         mbAlbumId: String? = null,
+        genres: List<String> = emptyList(),
     ) = DeviceRow(
         id = id,
         uri = "content://media/external/audio/media/$id",
@@ -32,6 +33,7 @@ class DeviceCatalogBuilderTest {
         year = year,
         compilation = compilation,
         mbAlbumId = mbAlbumId,
+        genres = genres,
         durationMs = 180_000,
         addedAtSeconds = 1_700_000_000 + id,
         mimeType = "audio/flac",
@@ -159,5 +161,24 @@ class DeviceCatalogBuilderTest {
     fun albumSearchKeyHoldsTitleAndArtist() {
         val catalog = buildDeviceCatalog(listOf(row(1, album = "Nightcall", albumArtist = "Kavinsky")))
         assertEquals("nightcall kavinsky", catalog.albums.single().searchKey)
+    }
+
+    @Test
+    fun songsTakeTheirFirstGenre() {
+        val catalog = buildDeviceCatalog(listOf(row(1, genres = listOf("Synthwave", "Electronic")), row(2)))
+        assertEquals(listOf("Synthwave", ""), catalog.tracks.sortedBy { it.id }.map { it.genre })
+    }
+
+    @Test
+    fun genreSpellingsMergeToTheMostCommon() {
+        val catalog = buildDeviceCatalog(
+            listOf(
+                row(1, genres = listOf("hip-hop")),
+                row(2, genres = listOf("Hip-Hop")),
+                row(3, genres = listOf("Hip-Hop")),
+                row(4, genres = listOf("Pop", "HIP-HOP")),
+            ),
+        )
+        assertEquals(listOf("Hip-Hop", "Hip-Hop", "Hip-Hop", "Pop"), catalog.tracks.sortedBy { it.id }.map { it.genre })
     }
 }

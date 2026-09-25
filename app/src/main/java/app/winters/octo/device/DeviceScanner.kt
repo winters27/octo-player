@@ -33,6 +33,7 @@ class DeviceScanner @Inject constructor(@ApplicationContext private val context:
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 add(MediaStore.Audio.Media.ALBUM_ARTIST)
                 add(MediaStore.Audio.Media.DISC_NUMBER)
+                add(MediaStore.Audio.Media.GENRE)
             }
         }.toTypedArray()
 
@@ -68,6 +69,7 @@ class DeviceScanner @Inject constructor(@ApplicationContext private val context:
                         trackNo = packed?.rem(1000)?.takeIf { it > 0 },
                         discNo = disc,
                         year = c.int(MediaStore.Audio.Media.YEAR)?.takeIf { it > 0 },
+                        genres = parseGenres(listOfNotNull(c.string(MediaStore.Audio.Media.GENRE))),
                     ),
                 )
             }

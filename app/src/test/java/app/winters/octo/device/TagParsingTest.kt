@@ -50,4 +50,40 @@ class TagParsingTest {
         assertTrue(tags("COMPILATION" to listOf("1")).compilation)
         assertFalse(tags().compilation)
     }
+
+    @Test
+    fun genreValuesAreKeptInOrder() {
+        assertEquals(listOf("Synthwave", "Electronic"), tags("GENRE" to listOf("Synthwave", " Electronic ")).genres)
+        assertEquals(emptyList<String>(), tags().genres)
+    }
+
+    @Test
+    fun oneGenreValueSplitsOnSemicolonSlashAndComma() {
+        assertEquals(listOf("Rock", "Pop", "Indie", "Folk"), parseGenres(listOf("Rock; Pop/Indie , Folk")))
+        assertEquals(listOf("Rock", "Pop"), parseGenres(listOf("Rock\u0000Pop")))
+    }
+
+    @Test
+    fun ampersandNeverSplitsAGenre() {
+        assertEquals(listOf("R&B", "Drum & Bass"), parseGenres(listOf("R&B; Drum & Bass")))
+    }
+
+    @Test
+    fun namesWrittenWithASeparatorStayWhole() {
+        assertEquals(listOf("Singer/Songwriter", "Folk"), parseGenres(listOf("Singer/Songwriter; Folk")))
+        assertEquals(listOf("hip-hop/rap"), parseGenres(listOf("hip-hop/rap")))
+        assertEquals(listOf("Folk, World, & Country", "Pop"), parseGenres(listOf("Folk, World, & Country, Pop")))
+        assertEquals(listOf("Rock", "R&B/Soul"), parseGenres(listOf("Rock / R&B/Soul")))
+    }
+
+    @Test
+    fun keptNamesAreOnlyWholePieces() {
+        assertEquals(listOf("Pop", "Soulful House"), parseGenres(listOf("Pop/Soulful House")))
+        assertEquals(listOf("Hip-Hop", "Rapcore"), parseGenres(listOf("Hip-Hop/Rapcore")))
+    }
+
+    @Test
+    fun genresAreTidiedAndDeduplicated() {
+        assertEquals(listOf("Deep House"), parseGenres(listOf("  Deep   House ;; deep house", ";", "")))
+    }
 }

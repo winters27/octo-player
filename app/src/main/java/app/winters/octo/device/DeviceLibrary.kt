@@ -39,6 +39,10 @@ import javax.inject.Singleton
 // How many files are read for tags at once.
 private const val READERS = 4
 
+// Raised whenever reading tags learns something new, so every file is
+// read again once. Rows saved before genres were read are version 0.
+private const val TAGS_VERSION = 1
+
 // Whether the app may read the phone's music.
 enum class Access { Granted, NotAsked, Denied, DeniedForever }
 
@@ -152,7 +156,8 @@ class DeviceLibrary @Inject constructor(
         val saved = dao.fileTags().associateBy { it.mediaId }
         val stale = files.filter { file ->
             val known = saved[file.id]
-            known == null || known.modifiedAt != file.modifiedAt || known.size != file.sizeBytes
+            known == null || known.modifiedAt != file.modifiedAt || known.size != file.sizeBytes ||
+                known.tagsVersion != TAGS_VERSION
         }
         // Several files at once; each read opens its own handle.
         val fresh = coroutineScope {
@@ -168,7 +173,10 @@ class DeviceLibrary @Inject constructor(
         return (saved - gone + fresh.associateBy { it.mediaId })
             .filterValues { it.readOk }
             .mapValues { (_, t) ->
-                FileTags(t.title, t.artist, t.albumArtist, t.album, t.trackNo, t.discNo, t.year, t.compilation, t.mbAlbumId)
+                FileTags(
+                    t.title, t.artist, t.albumArtist, t.album, t.trackNo, t.discNo, t.year, t.compilation, t.mbAlbumId,
+                    genres = t.genres.lines().filter(String::isNotEmpty),
+                )
             }
     }
 
@@ -186,6 +194,8 @@ class DeviceLibrary @Inject constructor(
         year = tags?.year,
         compilation = tags?.compilation ?: false,
         mbAlbumId = tags?.mbAlbumId,
+        genres = tags?.genres.orEmpty().joinToString("\n"),
+        tagsVersion = TAGS_VERSION,
     )
 
     private fun granted() =

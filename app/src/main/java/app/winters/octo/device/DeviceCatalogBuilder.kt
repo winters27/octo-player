@@ -39,6 +39,7 @@ fun buildDeviceCatalog(rows: List<DeviceRow>): DeviceCatalog {
 
     val tracks = mutableListOf<TrackEntity>()
     val albums = mutableListOf<AlbumEntity>()
+    val genreNames = genreSpellings(rows)
 
     for ((nameKey, splitKey, group) in groups) {
         val albumId = "$DEVICE:album:${stableId("$nameKey|$splitKey")}"
@@ -72,6 +73,7 @@ fun buildDeviceCatalog(rows: List<DeviceRow>): DeviceCatalog {
                 uri = row.uri,
                 albumOrder = index,
                 relinkKey = relinkKey(artist, title, row.disc, number, trackTitle, row.durationMs),
+                genre = row.genres.firstOrNull()?.let { genreNames.getValue(it.lowercase()) } ?: "",
             )
         }
 
@@ -133,6 +135,11 @@ private fun albumArtistOf(group: List<DeviceRow>): String {
         else -> group.mapNotNull { it.artist.orNull() }.takeIf { it.isNotEmpty() }?.let(::mostCommon) ?: UNKNOWN_ARTIST
     }
 }
+
+// One spelling per genre across the library, the most common one, so
+// "Hip-Hop" and "hip-hop" are the same genre.
+private fun genreSpellings(rows: List<DeviceRow>): Map<String, String> =
+    rows.flatMap { it.genres }.groupBy(String::lowercase).mapValues { (_, names) -> mostCommon(names) }
 
 private fun artistIdOf(name: String) = "$DEVICE:artist:${searchKey(name)}"
 

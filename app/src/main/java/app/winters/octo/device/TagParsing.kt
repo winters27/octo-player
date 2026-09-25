@@ -11,6 +11,8 @@ data class FileTags(
     val year: Int? = null,
     val compilation: Boolean = false,
     val mbAlbumId: String? = null,
+    // The first is the main one.
+    val genres: List<String> = emptyList(),
 )
 
 private val leadingYear = Regex("""^\s*(\d{4})""")
@@ -36,6 +38,7 @@ fun parseTags(raw: Map<String, Array<String>>): FileTags {
         year = yearOf(first("ORIGINALDATE", "DATE", "YEAR", "ORIGINALYEAR")),
         compilation = first("COMPILATION")?.let { it == "1" || it.equals("true", ignoreCase = true) } ?: false,
         mbAlbumId = first("MUSICBRAINZ_ALBUMID"),
+        genres = parseGenres(values("GENRE").orEmpty()),
     )
 }
 
@@ -46,3 +49,38 @@ fun positionNumber(text: String?): Int? =
 // "2015", "2015-09-04" and "20150904" all mean 2015.
 fun yearOf(text: String?): Int? =
     text?.let { leadingYear.find(it)?.groupValues?.get(1)?.toInt() }?.takeIf { it in 1000..2999 }
+
+// What joins several genres into one tag value. "&" is not one, so "R&B"
+// and "Drum & Bass" stay whole.
+private val genreSeparators = Regex("[;/,]")
+private val spaces = Regex("""\s+""")
+// Stands in for a name set aside while a value is split.
+private val keptWhole = Regex("\u0000(\\d+)\u0000")
+
+// Genre names that are commonly written with a separator inside them.
+private val wholeGenres = listOf("Folk, World, & Country", "Hip-Hop/Rap", "R&B/Soul", "Singer/Songwriter")
+    .map { Regex("""(?<![^;/,\s])${Regex.escape(it)}(?![^;/,\s])""", RegexOption.IGNORE_CASE) }
+
+// A genre tag as clean names: several values, or one value joined by ";",
+// "/" or ",", become a list in the order written. Repeats that differ only
+// in case are dropped.
+fun parseGenres(values: List<String>): List<String> =
+    values.flatMap(::splitGenres)
+        .map { it.replace(spaces, " ").trim() }
+        .filter(String::isNotEmpty)
+        .distinctBy(String::lowercase)
+
+// Splits one value, first setting aside the names that must stay whole.
+private fun splitGenres(value: String): List<String> {
+    val kept = mutableListOf<String>()
+    // A null inside a value joins several values, so it splits like ";".
+    val marked = wholeGenres.fold(value.replace('\u0000', ';')) { text, name ->
+        name.replace(text) { match ->
+            kept += match.value
+            "\u0000${kept.lastIndex}\u0000"
+        }
+    }
+    return marked.split(genreSeparators).map { piece ->
+        keptWhole.replace(piece) { kept[it.groupValues[1].toInt()] }
+    }
+}

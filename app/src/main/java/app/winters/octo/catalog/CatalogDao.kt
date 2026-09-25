@@ -54,6 +54,23 @@ interface CatalogDao {
     @Query("SELECT * FROM album WHERE artistId = :artistId ORDER BY year DESC, sortKey")
     fun artistAlbums(artistId: String): Flow<List<AlbumEntity>>
 
+    // Genres by name, leaving out songs with none. Each source already keeps
+    // one spelling per genre; case is ignored here too so sources agree.
+    @Query(
+        "SELECT genre AS name, COUNT(*) AS songCount, MIN(artwork) AS artwork FROM track WHERE genre != '' " +
+            "GROUP BY genre COLLATE NOCASE ORDER BY genre COLLATE NOCASE",
+    )
+    fun genres(): Flow<List<GenreSummary>>
+
+    @Query("SELECT * FROM track WHERE genre = :name COLLATE NOCASE ORDER BY sortKey")
+    fun genreTracks(name: String): Flow<List<TrackEntity>>
+
+    @Query(
+        "SELECT * FROM album WHERE id IN (SELECT albumId FROM track WHERE genre = :name COLLATE NOCASE) " +
+            "ORDER BY sortKey",
+    )
+    fun genreAlbums(name: String): Flow<List<AlbumEntity>>
+
     @Query("SELECT * FROM artist WHERE searchKey LIKE '%' || :q || '%' ORDER BY sortKey LIMIT :limit")
     suspend fun searchArtists(q: String, limit: Int): List<ArtistEntity>
 
