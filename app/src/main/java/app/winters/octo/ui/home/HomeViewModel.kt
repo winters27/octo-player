@@ -9,11 +9,11 @@ import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.TrackEntity
-import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.byLatestPlay
 import app.winters.octo.catalog.byPlayCount
 import app.winters.octo.device.DEVICE
 import app.winters.octo.device.DeviceLibrary
+import app.winters.octo.listening.PlayHistory
 import app.winters.octo.playback.PlaybackConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
@@ -27,17 +27,18 @@ import javax.inject.Inject
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val dao: CatalogDao,
-    userDao: UserDao,
+    history: PlayHistory,
     private val playback: PlaybackConnection,
     val library: DeviceLibrary,
 ) : ViewModel() {
-    // Both follow the play history, so a song that just counted shows up.
+    // Both follow the play history, here and on the server, so a song that
+    // just counted shows up.
     val recentlyPlayed: StateFlow<List<AlbumEntity>> =
-        userDao.playedAlbums().map { byLatestPlay(it, 20) }
+        history.albums.map { byLatestPlay(it, 20) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val mostPlayed: StateFlow<List<TrackEntity>> =
-        userDao.playedTracks().map { byPlayCount(it, 20) }
+        history.tracks.map { byPlayCount(it, 20) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val recent: StateFlow<List<AlbumEntity>?> =

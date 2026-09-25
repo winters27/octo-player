@@ -16,6 +16,7 @@ import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.byLatestPlay
 import app.winters.octo.catalog.byPlayCount
 import app.winters.octo.catalog.summarize
+import app.winters.octo.listening.PlayHistory
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
@@ -28,6 +29,7 @@ class CarLibrary @Inject constructor(
     @ApplicationContext private val context: Context,
     private val catalog: CatalogDao,
     private val user: UserDao,
+    private val history: PlayHistory,
 ) {
     fun root(): MediaItem = folder(CarNode.Root, "Octo")
 
@@ -41,8 +43,8 @@ class CarLibrary @Inject constructor(
                 folder(CarNode.Artists, "Artists"),
             )
             CarNode.Recent -> {
-                val albums = byLatestPlay(user.playedAlbums().first(), 20)
-                val songs = byPlayCount(user.playedTracks().first(), 20)
+                val albums = byLatestPlay(history.albums.first(), 20)
+                val songs = byPlayCount(history.tracks.first(), 20)
                 albums.map { albumItem(it, group = "Recently played") } +
                     songs.map { songItem(it, CarNode.MostPlayed, group = "Most played") }
             }
@@ -107,7 +109,7 @@ class CarLibrary @Inject constructor(
         is CarNode.Album -> catalog.albumTracks(node.id).first()
         is CarNode.Playlist -> user.playlistTracks(node.id).first().map { it.track }
         CarNode.Liked -> user.likedTracks().first()
-        CarNode.MostPlayed -> byPlayCount(user.playedTracks().first(), 20)
+        CarNode.MostPlayed -> byPlayCount(history.tracks.first(), 20)
         else -> emptyList()
     }
 
