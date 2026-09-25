@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.playback.QueueEntry
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,6 +24,7 @@ class PlayerViewModel @Inject constructor(
     settings: PlayerSettings,
 ) : ViewModel() {
     val now: StateFlow<NowPlaying> = playback.now
+    val upNext: StateFlow<List<QueueEntry>> = playback.upNext
 
     val prefs: StateFlow<PlayerPrefs> = settings.prefs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerPrefs())
@@ -42,4 +44,7 @@ class PlayerViewModel @Inject constructor(
     fun previous() = playback.previous()
     fun toggleShuffle() = playback.toggleShuffle()
     fun cycleRepeat() = playback.cycleRepeat()
+    fun moveInQueue(from: Int, to: Int) = playback.moveInQueue(from, to)
+    fun removeFromQueue(index: Int) = playback.removeFromQueue(index)
+    fun playAt(index: Int) = playback.playAt(index)
 }

@@ -52,6 +52,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -88,6 +89,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
 import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.design.AccentFill
+import app.winters.octo.design.GlassSheet
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.GlazeInset
 import app.winters.octo.design.GlazeLight
@@ -120,6 +122,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     val scope = rememberCoroutineScope()
     // How far the player has been pulled down, in pixels.
     var pull by remember { mutableFloatStateOf(0f) }
+    var showQueue by remember { mutableStateOf(false) }
 
     BackHandler(onBack = onClose)
     LightOnDarkBars()
@@ -175,7 +178,11 @@ fun AnimatedVisibilityScope.PlayerOverlay(
                 BlurredArtwork(now.artwork)
             }
             Shade()
-            PlayerContent(now, model, artModifier, onClose, onOpenArtist)
+            PlayerContent(now, model, artModifier, onClose, onOpenArtist, onOpenQueue = { showQueue = true })
+        }
+        GlassSheet(visible = showQueue, onDismiss = { showQueue = false }) {
+            val upNext by model.upNext.collectAsStateWithLifecycle()
+            QueueSheet(upNext, now.shuffle, model::moveInQueue, model::removeFromQueue, model::playAt)
         }
     }
 }
@@ -218,6 +225,7 @@ private fun AnimatedVisibilityScope.PlayerContent(
     artModifier: Modifier,
     onClose: () -> Unit,
     onOpenArtist: (String) -> Unit,
+    onOpenQueue: () -> Unit,
 ) {
     val density = LocalDensity.current
     Column(
@@ -275,6 +283,12 @@ private fun AnimatedVisibilityScope.PlayerContent(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
             ) {
+                ActionCircle(
+                    icon = OctoIcons.Queue,
+                    description = "Up next",
+                    on = false,
+                    onClick = onOpenQueue,
+                )
                 ActionCircle(
                     icon = OctoIcons.Shuffle,
                     description = "Shuffle",
