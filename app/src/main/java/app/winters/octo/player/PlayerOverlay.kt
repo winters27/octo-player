@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -61,6 +62,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -70,6 +72,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -80,12 +83,15 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
 import app.winters.octo.catalog.ArtworkRef
+import app.winters.octo.design.AccentFill
 import app.winters.octo.design.GlassSheet
+import app.winters.octo.design.GlazeInset
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.GlazeLight
 import app.winters.octo.design.LineSlider
@@ -94,6 +100,7 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.elevation3
 import app.winters.octo.playback.NowPlaying
+import app.winters.octo.playback.SleepState
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.asClock
 import coil3.compose.AsyncImage
@@ -118,6 +125,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     // How far the player has been pulled down, in pixels.
     var pull by remember { mutableFloatStateOf(0f) }
     var showQueue by remember { mutableStateOf(false) }
+    var showSleep by remember { mutableStateOf(false) }
 
     BackHandler(onBack = onClose)
     LightOnDarkBars()
@@ -172,11 +180,14 @@ fun AnimatedVisibilityScope.PlayerOverlay(
             } else {
                 BlurredArtwork(now.artwork)
             }
-            PlayerContent(now, model, artModifier, onClose, onOpenArtist, onOpenQueue = { showQueue = true })
+            PlayerContent(now, model, artModifier, onClose, onOpenArtist, onOpenQueue = { showQueue = true }, onOpenSleep = { showSleep = true })
         }
         GlassSheet(visible = showQueue, onDismiss = { showQueue = false }) {
             val upNext by model.upNext.collectAsStateWithLifecycle()
             QueueSheet(upNext, now.shuffle, model::moveInQueue, model::removeFromQueue, model::playAt)
+        }
+        GlassSheet(visible = showSleep, onDismiss = { showSleep = false }) {
+            SleepSheet(model, onDone = { showSleep = false })
         }
     }
 }
@@ -204,6 +215,7 @@ private fun AnimatedVisibilityScope.PlayerContent(
     onClose: () -> Unit,
     onOpenArtist: (String) -> Unit,
     onOpenQueue: () -> Unit,
+    onOpenSleep: () -> Unit,
 ) {
     val density = LocalDensity.current
     Column(
@@ -263,6 +275,7 @@ private fun AnimatedVisibilityScope.PlayerContent(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
             ) {
+                SleepCircle(model, onClick = onOpenSleep)
                 ActionCircle(
                     icon = OctoIcons.Queue,
                     description = "Up next",
@@ -468,6 +481,45 @@ private fun ActionCircle(
         } else {
             val tint = if (on) OctoColors.Accent else OctoColors.TextMuted
             Icon(painterResource(icon), contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        }
+    }
+}
+
+// Opens the sleep timer. Lit while one is set, with the minutes left on a
+// small badge while it counts down.
+@Composable
+private fun SleepCircle(model: PlayerViewModel, onClick: () -> Unit) {
+    val sleep by model.sleep.collectAsStateWithLifecycle()
+    val minutes = (sleep as? SleepState.Counting)?.let { ((it.remainingMs + 59_999) / 60_000).toInt() }
+    Box {
+        ActionCircle(
+            icon = OctoIcons.SleepTimer,
+            description = "Sleep timer",
+            on = sleep != SleepState.Off,
+            state = when {
+                minutes != null -> "$minutes min left"
+                sleep == SleepState.EndOfSong -> "At the end of this song"
+                else -> "Off"
+            },
+            onClick = onClick,
+        )
+        if (minutes != null) {
+            GlazeInset(
+                fill = AccentFill,
+                shape = CircleShape,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 6.dp, y = (-4).dp)
+                    .height(18.dp)
+                    .clearAndSetSemantics { },
+            ) {
+                Text(
+                    "$minutes",
+                    style = OctoType.caption.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"),
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 6.dp),
+                )
+            }
         }
     }
 }

@@ -6,6 +6,8 @@ import app.winters.octo.playback.DeviceVolume
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.QueueEntry
+import app.winters.octo.playback.SleepState
+import app.winters.octo.playback.SleepTimer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,6 +26,7 @@ class PlayerViewModel @Inject constructor(
     palette: ArtworkPalette,
     settings: PlayerSettings,
     private val deviceVolume: DeviceVolume,
+    private val sleepTimer: SleepTimer,
 ) : ViewModel() {
     val now: StateFlow<NowPlaying> = playback.now
     val upNext: StateFlow<List<QueueEntry>> = playback.upNext
@@ -51,4 +54,9 @@ class PlayerViewModel @Inject constructor(
     fun moveInQueue(from: Int, to: Int) = playback.moveInQueue(from, to)
     fun removeFromQueue(index: Int) = playback.removeFromQueue(index)
     fun playAt(index: Int) = playback.playAt(index)
+
+    val sleep: StateFlow<SleepState> = sleepTimer.state
+    fun sleepIn(minutes: Int) = sleepTimer.start(minutes)
+    fun sleepAtEndOfSong() = sleepTimer.startEndOfSong()
+    fun cancelSleep() = sleepTimer.cancel()
 }
