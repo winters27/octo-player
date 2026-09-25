@@ -12,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -22,19 +23,21 @@ import app.winters.octo.BuildConfig
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.glassPanel
 import app.winters.octo.device.Access
 import app.winters.octo.device.DEVICE
 import app.winters.octo.device.DeviceLibrary
+import app.winters.octo.device.MusicFolder
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.screenPadding
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -47,6 +50,10 @@ class SettingsViewModel @Inject constructor(
     fun rescan() {
         viewModelScope.launch { library.rescan() }
     }
+
+    fun setFolderIncluded(folder: String, included: Boolean) {
+        viewModelScope.launch { library.setFolderIncluded(folder, included) }
+    }
 }
 
 private val CardShape = RoundedCornerShape(20.dp)
@@ -56,6 +63,7 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
     val access by vm.library.access.collectAsStateWithLifecycle()
     val scanning by vm.library.scanning.collectAsStateWithLifecycle()
     val count by vm.songCount.collectAsStateWithLifecycle()
+    val folders by vm.library.folders.collectAsStateWithLifecycle()
     val padding = screenPadding()
 
     Column(
@@ -77,6 +85,19 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                 loading = scanning,
                 modifier = Modifier.padding(top = 8.dp),
             )
+        }
+
+        if (folders.isNotEmpty()) {
+            Card("Music folders", Modifier.padding(top = 16.dp)) {
+                Text(
+                    "Switch a folder off to leave its music out of your library.",
+                    style = OctoType.caption,
+                    color = OctoColors.TextMuted,
+                )
+                folders.forEach { folder ->
+                    FolderLine(folder) { on -> vm.setFolderIncluded(folder.name, on) }
+                }
+            }
         }
 
         Card("About", Modifier.padding(top = 16.dp)) {
@@ -107,3 +128,19 @@ private fun Line(label: String, value: String) {
         Text(value, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
     }
 }
+
+@Composable
+private fun FolderLine(folder: MusicFolder, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                folder.name.ifEmpty { "Phone storage" },
+                style = OctoType.bodySmall,
+                color = if (folder.included) OctoColors.TextPrimary else OctoColors.TextMuted,
+            )
+            Text("%,d songs".format(folder.songs), style = OctoType.caption, color = OctoColors.TextMuted)
+        }
+        OctoSwitch(checked = folder.included, onCheckedChange = onChange)
+    }
+}
+

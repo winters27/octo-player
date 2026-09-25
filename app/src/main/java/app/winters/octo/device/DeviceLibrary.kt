@@ -26,6 +26,9 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -46,6 +49,7 @@ class DeviceLibrary @Inject constructor(
     private val scanner: DeviceScanner,
     private val reader: TagReader,
     private val dao: CatalogDao,
+    private val rules: FolderRules,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val scanLock = Mutex()
@@ -62,12 +66,20 @@ class DeviceLibrary @Inject constructor(
     private val _scanning = MutableStateFlow(false)
     val scanning: StateFlow<Boolean> = _scanning
 
+    // Every folder music was found in, including switched-off ones.
+    private val _folders = MutableStateFlow<List<MusicFolder>>(emptyList())
+    val folders: StateFlow<List<MusicFolder>> = _folders
+
+    suspend fun setFolderIncluded(folder: String, included: Boolean) = rules.setIncluded(folder, included)
+
     @OptIn(FlowPreview::class)
     fun start() {
         if (started) return
         started = true
         // A big copy fires many changes; wait for a quiet moment, then scan once.
         scope.launch { changes.debounce(2000).collect { rescan() } }
+        // Switching a folder on or off rebuilds the library straight away.
+        scope.launch { rules.excluded.drop(1).distinctUntilChanged().collect { rescan() } }
         context.contentResolver.registerContentObserver(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             true,
@@ -108,8 +120,12 @@ class DeviceLibrary @Inject constructor(
             try {
                 val started = SystemClock.elapsedRealtime()
                 val files = scanner.list()
+                // Tags are kept for every file, so switching a folder back on
+                // needs no re-reading.
                 val tags = refreshTags(files)
-                val catalog = buildDeviceCatalog(files.map { it.toRow(tags[it.id]) })
+                val excluded = rules.excluded.first()
+                _folders.value = files.folders(excluded)
+                val catalog = buildDeviceCatalog(files.withoutFolders(excluded).map { it.toRow(tags[it.id]) })
                 dao.replaceSource(DEVICE, catalog.tracks, catalog.albums, catalog.artists)
                 // Counts only, so the library can be checked against the phone.
                 Log.i(
