@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import app.winters.octo.R
 import app.winters.octo.design.GlassPanelDark
@@ -100,7 +101,7 @@ private fun TabBar(
             Glaze(
                 Modifier
                     .align(Alignment.CenterStart)
-                    .offset(x = capsuleX)
+                    .offset { IntOffset(capsuleX.roundToPx(), 0) }
                     .size(width = capsuleWidth, height = 40.dp),
             )
             Row(Modifier.fillMaxSize()) {

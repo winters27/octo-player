@@ -12,25 +12,29 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
-import app.winters.octo.data.Session
-import androidx.compose.material3.Text
 import app.winters.octo.design.OctoColors
-import app.winters.octo.design.OctoType
+import app.winters.octo.device.DeviceLibrary
+import app.winters.octo.ui.album.AlbumScreen
+import app.winters.octo.ui.artist.ArtistScreen
 import app.winters.octo.ui.common.LocalHaze
-import app.winters.octo.ui.common.LocalSubsonic
+import app.winters.octo.ui.home.HomeScreen
+import app.winters.octo.ui.library.LibraryScreen
+import app.winters.octo.ui.search.SearchScreen
+import app.winters.octo.ui.settings.SettingsScreen
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 
-// Everything after sign-in: one back stack per tab, the screens, and the
-// floating bar over them.
+// The whole app: one back stack per tab, the screens, and the floating
+// bar over them.
 @Composable
-fun MainShell(session: Session) {
+fun MainShell(library: DeviceLibrary) {
     val haze = rememberHazeState()
     // Called once each, always in this order.
     val stacks = listOf(
@@ -44,7 +48,13 @@ fun MainShell(session: Session) {
     val open: (NavKey) -> Unit = { stack.add(it) }
     val back: () -> Unit = { stack.removeLastOrNull() }
 
-    CompositionLocalProvider(LocalSubsonic provides session.client, LocalHaze provides haze) {
+    // Access can be changed in system settings while the app is away.
+    LifecycleResumeEffect(Unit) {
+        library.refresh()
+        onPauseOrDispose { }
+    }
+
+    CompositionLocalProvider(LocalHaze provides haze) {
         Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
             NavDisplay(
                 backStack = stack,
@@ -55,13 +65,12 @@ fun MainShell(session: Session) {
                 ),
                 modifier = Modifier.fillMaxSize().hazeSource(haze),
                 entryProvider = entryProvider {
-                    entry<HomeRoute> { Placeholder("Home") }
-                    entry<SearchRoute> { Placeholder("Search") }
-                    entry<LibraryRoute> { Placeholder("Library") }
-                    entry<SettingsRoute> { Placeholder("Settings") }
-                    entry<AlbumRoute> { Placeholder("Album") }
-                    entry<ArtistRoute> { Placeholder("Artist") }
-                    entry<PlaylistRoute> { Placeholder("Playlist") }
+                    entry<HomeRoute> { HomeScreen(open) }
+                    entry<SearchRoute> { SearchScreen(open) }
+                    entry<LibraryRoute> { LibraryScreen(open) }
+                    entry<SettingsRoute> { SettingsScreen() }
+                    entry<AlbumRoute> { AlbumScreen(it.id, open, back) }
+                    entry<ArtistRoute> { ArtistScreen(it.id, open, back) }
                 },
             )
             // Back from the top of another tab goes Home rather than out.
@@ -81,12 +90,5 @@ fun MainShell(session: Session) {
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
-    }
-}
-
-@Composable
-private fun Placeholder(title: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(title, style = OctoType.display, color = OctoColors.TextMuted)
     }
 }
