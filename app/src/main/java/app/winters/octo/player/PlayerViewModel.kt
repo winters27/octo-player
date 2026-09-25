@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.playback.SleepState
+import app.winters.octo.playback.SleepTimer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,6 +23,7 @@ class PlayerViewModel @Inject constructor(
     private val playback: PlaybackConnection,
     palette: ArtworkPalette,
     settings: PlayerSettings,
+    private val sleepTimer: SleepTimer,
 ) : ViewModel() {
     val now: StateFlow<NowPlaying> = playback.now
 
@@ -42,4 +45,9 @@ class PlayerViewModel @Inject constructor(
     fun previous() = playback.previous()
     fun toggleShuffle() = playback.toggleShuffle()
     fun cycleRepeat() = playback.cycleRepeat()
+
+    val sleep: StateFlow<SleepState> = sleepTimer.state
+    fun sleepIn(minutes: Int) = sleepTimer.start(minutes)
+    fun sleepAtEndOfSong() = sleepTimer.startEndOfSong()
+    fun cancelSleep() = sleepTimer.cancel()
 }

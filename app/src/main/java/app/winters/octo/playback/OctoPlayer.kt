@@ -63,9 +63,23 @@ private const val DUCKED_VOLUME = 0.2f
 // deck that is playing, so the deck can be swapped (for crossfade) without
 // anything outside noticing. It also owns audio focus.
 @OptIn(UnstableApi::class)
-class OctoPlayer(context: Context, initial: ExoPlayer) : ForwardingSimpleBasePlayer(initial) {
+class OctoPlayer(context: Context, initial: ExoPlayer) : ForwardingSimpleBasePlayer(initial), SleepTarget {
     var deck: ExoPlayer = initial
         private set
+
+    private var ducked = false
+
+    override var sleepFade = 1f
+        set(value) {
+            field = value
+            applyVolume()
+        }
+
+    override var pauseAtEndOfSong: Boolean
+        get() = deck.pauseAtEndOfMediaItems
+        set(value) {
+            deck.pauseAtEndOfMediaItems = value
+        }
 
     private var resumeWhenFocusReturns = false
     private val focus: AudioFocus = AudioFocus(context) { change ->
@@ -108,7 +122,14 @@ class OctoPlayer(context: Context, initial: ExoPlayer) : ForwardingSimpleBasePla
     }
 
     private fun duck(on: Boolean) {
-        deck.volume = if (on) DUCKED_VOLUME else 1f
+        ducked = on
+        applyVolume()
+    }
+
+    // The one place the deck's volume is set, so ducking and the sleep
+    // timer's fade multiply instead of undoing each other.
+    private fun applyVolume() {
+        deck.volume = (if (ducked) DUCKED_VOLUME else 1f) * sleepFade
     }
 
     private fun releaseFocus(): Unit = focus.abandon()

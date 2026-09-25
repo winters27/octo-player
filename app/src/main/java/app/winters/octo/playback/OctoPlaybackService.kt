@@ -55,6 +55,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var likes: LikeStore
     @Inject lateinit var queue: QueueStore
     @Inject lateinit var plays: PlayStore
+    @Inject lateinit var sleep: SleepTimer
 
     private val scope = MainScope()
     private lateinit var player: OctoPlayer
@@ -73,6 +74,7 @@ class OctoPlaybackService : MediaLibraryService() {
         tracker = PlayTracker(plays) { player.isPlaying }
         player.addListener(tracker)
         player.addListener(Watcher())
+        sleep.attach(player)
 
         session = MediaLibrarySession.Builder(this, player, Callback())
             .setBitmapLoader(CacheBitmapLoader(OctoArtLoader(this, DataSourceBitmapLoader(this))))
@@ -109,6 +111,7 @@ class OctoPlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         saveQueue()
         tracker.flush()
+        sleep.detach()
         session?.release()
         player.release()
         session = null
