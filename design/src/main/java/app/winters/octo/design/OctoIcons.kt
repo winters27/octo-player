@@ -22,4 +22,6 @@ object OctoIcons {
     val AddToQueue = R.drawable.sym_add_to_queue
     val Album = R.drawable.sym_album
     val Artist = R.drawable.sym_person
+    val Songs = R.drawable.sym_music_note
+    val Chevron = R.drawable.sym_chevron_right
 }

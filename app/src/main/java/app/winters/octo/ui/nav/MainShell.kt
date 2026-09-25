@@ -40,7 +40,10 @@ import app.winters.octo.ui.album.AlbumScreen
 import app.winters.octo.ui.artist.ArtistScreen
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.home.HomeScreen
+import app.winters.octo.ui.library.AlbumsScreen
+import app.winters.octo.ui.library.ArtistsScreen
 import app.winters.octo.ui.library.LibraryScreen
+import app.winters.octo.ui.library.SongsScreen
 import app.winters.octo.ui.menu.LocalSongMenu
 import app.winters.octo.ui.menu.SongMenuHost
 import app.winters.octo.ui.menu.SongMenuState
@@ -127,6 +130,9 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                         entry<SettingsRoute> { SettingsScreen() }
                         entry<AlbumRoute> { AlbumScreen(it.id, open, back) }
                         entry<ArtistRoute> { ArtistScreen(it.id, open, back) }
+                        entry<AlbumsRoute> { AlbumsScreen(open, back) }
+                        entry<ArtistsRoute> { ArtistsScreen(open, back) }
+                        entry<SongsRoute> { SongsScreen(back) }
                     },
                 )
                 // Back from the top of another tab goes Home rather than out.

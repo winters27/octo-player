@@ -18,6 +18,10 @@ class LibraryViewModel @Inject constructor(
     dao: CatalogDao,
     private val playback: PlaybackConnection,
 ) : ViewModel() {
+    // The newest albums, for the front page.
+    val recent: StateFlow<List<AlbumEntity>> =
+        dao.recentAlbums(20).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     // Null until the first read, so a loading moment is not shown as empty.
     val albums: StateFlow<List<AlbumEntity>?> =
         dao.albums().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
