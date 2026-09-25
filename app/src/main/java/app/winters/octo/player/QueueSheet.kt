@@ -1,26 +1,19 @@
 package app.winters.octo.player
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material3.Icon
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
@@ -32,12 +25,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.GlazeInset
@@ -47,6 +36,8 @@ import app.winters.octo.design.elevation3
 import app.winters.octo.design.mix
 import app.winters.octo.playback.QueueEntry
 import app.winters.octo.ui.common.Artwork
+import app.winters.octo.ui.common.DragHandle
+import app.winters.octo.ui.common.RemoveBackground
 import app.winters.octo.ui.common.asLength
 import app.winters.octo.ui.common.songs
 import sh.calvin.reorderable.ReorderableItem
@@ -59,9 +50,6 @@ private val RowFill = mix(OctoColors.Background, OctoColors.Accent, 0.05f)
 
 // The song that is on, lit a little brighter than the sheet.
 private val CurrentFill = mix(OctoColors.BackgroundTertiary, OctoColors.Accent, 0.12f)
-
-// What is behind a row as it is swiped away.
-private val RemoveFill = OctoColors.Error.copy(alpha = 0.25f)
 
 // The "Up next" sheet: the song that is on, then the rest of the queue in
 // the order it will play. Drag a song to move it, swipe it left to take it
@@ -132,7 +120,7 @@ fun ColumnScope.QueueSheet(
                         rows = rows - entry
                         onRemove(entry.index)
                     },
-                    backgroundContent = { RemoveBackground(swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart) },
+                    backgroundContent = { RemoveBackground(swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart, RowShape) },
                 ) {
                     SongLine(
                         entry,
@@ -168,33 +156,5 @@ private fun SongLine(entry: QueueEntry, modifier: Modifier = Modifier, handle: M
             Text(entry.artist, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (handle != null) DragHandle(handle)
-    }
-}
-
-// Two short lines, the grip a row is dragged by.
-@Composable
-private fun DragHandle(modifier: Modifier) {
-    Box(
-        modifier.size(40.dp).semantics { contentDescription = "Reorder" },
-        contentAlignment = Alignment.Center,
-    ) {
-        Canvas(Modifier.size(width = 18.dp, height = 8.dp)) {
-            val stroke = 2.dp.toPx()
-            listOf(stroke / 2, size.height - stroke / 2).forEach { y ->
-                drawLine(OctoColors.TextMuted, Offset(0f, y), Offset(size.width, y), stroke, StrokeCap.Round)
-            }
-        }
-    }
-}
-
-// Shown behind a row being swiped left: a wash of red and a bin at the end.
-@Composable
-private fun RemoveBackground(active: Boolean) {
-    if (!active) return
-    Box(
-        Modifier.fillMaxSize().background(RemoveFill, RowShape).padding(horizontal = 24.dp),
-        contentAlignment = Alignment.CenterEnd,
-    ) {
-        Icon(Icons.Rounded.Delete, contentDescription = "Remove", tint = OctoColors.TextPrimary, modifier = Modifier.size(22.dp))
     }
 }

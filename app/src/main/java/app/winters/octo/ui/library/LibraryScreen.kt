@@ -52,12 +52,14 @@ import app.winters.octo.ui.nav.AlbumsRoute
 import app.winters.octo.ui.nav.ArtistRoute
 import app.winters.octo.ui.nav.ArtistsRoute
 import app.winters.octo.ui.nav.GenresRoute
+import app.winters.octo.ui.nav.PlaylistsRoute
 import app.winters.octo.ui.nav.SongsRoute
 
 // One way into the library, like Albums or Songs.
 private class Section(@DrawableRes val icon: Int, val label: String, val route: NavKey)
 
 private val sections = listOf(
+    Section(OctoIcons.Playlists, "Playlists", PlaylistsRoute),
     Section(OctoIcons.Artist, "Artists", ArtistsRoute),
     Section(OctoIcons.Album, "Albums", AlbumsRoute),
     Section(OctoIcons.Songs, "Songs", SongsRoute),
