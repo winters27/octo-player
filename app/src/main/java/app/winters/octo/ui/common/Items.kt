@@ -59,16 +59,18 @@ sealed interface SongLead {
     data class Number(val track: Int?) : SongLead
 }
 
-// A song line. Not tappable yet: playing arrives with the player.
+// A song line; tapping it plays it.
 @Composable
 fun SongRow(
     track: TrackEntity,
     lead: SongLead = SongLead.Artwork,
     subtitle: String? = "${track.artist} • ${track.album}",
+    onClick: (() -> Unit)? = null,
 ) {
     Row(
         Modifier
             .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .height(56.dp)
             .padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically,

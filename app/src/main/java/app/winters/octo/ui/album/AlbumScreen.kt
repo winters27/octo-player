@@ -1,8 +1,10 @@
 package app.winters.octo.ui.album
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -27,9 +29,12 @@ import androidx.navigation3.runtime.NavKey
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.design.AccentButton
+import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.elevation3
+import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
@@ -49,13 +54,19 @@ import kotlinx.coroutines.flow.stateIn
 
 @HiltViewModel(assistedFactory = AlbumViewModel.Factory::class)
 class AlbumViewModel @AssistedInject constructor(
-    @Assisted id: String,
+    @Assisted private val id: String,
     dao: CatalogDao,
+    private val playback: PlaybackConnection,
 ) : ViewModel() {
     val album: StateFlow<AlbumEntity?> =
         dao.album(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val tracks: StateFlow<List<TrackEntity>> =
         dao.albumTracks(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // Plays the album from one of its songs.
+    fun play(index: Int) = playback.playTracks(tracks.value.map { it.id }, index)
+
+    fun shuffle() = playback.playAlbum(id, shuffle = true)
 
     @AssistedFactory
     interface Factory {
@@ -78,7 +89,9 @@ fun AlbumScreen(
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
             album?.let { a ->
-                item(key = "header") { Header(a) { onOpen(ArtistRoute(a.artistId)) } }
+                item(key = "header") {
+                    Header(a, onArtist = { onOpen(ArtistRoute(a.artistId)) }, onPlay = { vm.play(0) }, onShuffle = vm::shuffle)
+                }
             }
             val discs = tracks.groupBy { it.discNo ?: 1 }
             discs.forEach { (disc, onDisc) ->
@@ -95,7 +108,7 @@ fun AlbumScreen(
                 items(onDisc, key = { it.id }) { track ->
                     // Only say who is singing when it is not the album's artist.
                     val subtitle = track.artist.takeIf { it != album?.artist }
-                    SongRow(track, SongLead.Number(track.trackNo), subtitle)
+                    SongRow(track, SongLead.Number(track.trackNo), subtitle) { vm.play(tracks.indexOf(track)) }
                 }
             }
         }
@@ -104,7 +117,7 @@ fun AlbumScreen(
 }
 
 @Composable
-private fun Header(album: AlbumEntity, onArtist: () -> Unit) {
+private fun Header(album: AlbumEntity, onArtist: () -> Unit, onPlay: () -> Unit, onShuffle: () -> Unit) {
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -128,5 +141,9 @@ private fun Header(album: AlbumEntity, onArtist: () -> Unit) {
             color = OctoColors.TextMuted,
             modifier = Modifier.padding(top = 4.dp),
         )
+        Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AccentButton("Play", onClick = onPlay)
+            GlazeButton("Shuffle", onClick = onShuffle)
+        }
     }
 }

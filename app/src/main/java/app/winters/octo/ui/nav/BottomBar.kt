@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
@@ -37,8 +36,8 @@ import androidx.compose.ui.unit.dp
 import app.winters.octo.R
 import app.winters.octo.design.GlassPanelDark
 import app.winters.octo.design.Glaze
-import app.winters.octo.design.GlazedIconButton
 import app.winters.octo.design.OctoColors
+import app.winters.octo.playback.NowPlaying
 import dev.chrisbanes.haze.HazeState
 
 private class Tab(val icon: ImageVector, @StringRes val label: Int)
@@ -58,6 +57,9 @@ fun BottomBar(
     haze: HazeState,
     selected: Int,
     onSelect: (Int) -> Unit,
+    now: NowPlaying,
+    positionMs: () -> Long,
+    onPlayPause: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -69,13 +71,7 @@ fun BottomBar(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         TabBar(haze, selected, Modifier.weight(1f), onSelect)
-        GlazedIconButton(
-            backdrop = haze,
-            icon = Icons.Rounded.PlayArrow,
-            contentDescription = stringResource(R.string.now_playing),
-            onClick = {},
-            size = BarHeight,
-        )
+        NowPlayingButton(haze, now, positionMs, onPlayPause)
     }
 }
 

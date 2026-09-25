@@ -92,7 +92,7 @@ fun LibraryScreen(onOpen: (NavKey) -> Unit, vm: LibraryViewModel = hiltViewModel
                 val songs by vm.songs.collectAsStateWithLifecycle()
                 Loaded(songs) { list ->
                     LazyColumn(Modifier.fillMaxSize(), contentPadding = bottom) {
-                        lettered(list, { it.sortKey }, { it.id }) { SongRow(it) }
+                        lettered(list, { it.sortKey }, { it.id }) { track -> SongRow(track) { vm.playSong(track) } }
                     }
                 }
             }

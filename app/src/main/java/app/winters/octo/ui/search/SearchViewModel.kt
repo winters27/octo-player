@@ -11,6 +11,7 @@ import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.searchKey
+import app.winters.octo.playback.PlaybackConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -32,7 +33,10 @@ class SearchResults(
 }
 
 @HiltViewModel
-class SearchViewModel @Inject constructor(private val dao: CatalogDao) : ViewModel() {
+class SearchViewModel @Inject constructor(
+    private val dao: CatalogDao,
+    private val playback: PlaybackConnection,
+) : ViewModel() {
     var text by mutableStateOf("")
 
     // Null until at least two characters are typed.
@@ -49,4 +53,10 @@ class SearchViewModel @Inject constructor(private val dao: CatalogDao) : ViewMod
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // Plays the found songs from the one tapped.
+    fun playSong(track: TrackEntity) {
+        val songs = results.value?.songs ?: return
+        playback.playTracks(songs.map { it.id }, songs.indexOf(track).coerceAtLeast(0))
+    }
 }

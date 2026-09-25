@@ -84,7 +84,7 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
                 }
                 if (found.songs.isNotEmpty()) {
                     item { SectionTitle("Songs", Modifier.padding(top = 12.dp)) }
-                    items(found.songs, key = { it.id }) { SongRow(it) }
+                    items(found.songs, key = { it.id }) { track -> SongRow(track) { vm.playSong(track) } }
                 }
             }
         }

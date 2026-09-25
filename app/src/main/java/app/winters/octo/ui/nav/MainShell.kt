@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
@@ -21,6 +22,7 @@ import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import app.winters.octo.design.OctoColors
 import app.winters.octo.device.DeviceLibrary
+import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.ui.album.AlbumScreen
 import app.winters.octo.ui.artist.ArtistScreen
 import app.winters.octo.ui.common.LocalHaze
@@ -34,7 +36,8 @@ import dev.chrisbanes.haze.rememberHazeState
 // The whole app: one back stack per tab, the screens, and the floating
 // bar over them.
 @Composable
-fun MainShell(library: DeviceLibrary) {
+fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
+    val now by playback.now.collectAsStateWithLifecycle()
     val haze = rememberHazeState()
     // Called once each, always in this order.
     val stacks = listOf(
@@ -79,6 +82,9 @@ fun MainShell(library: DeviceLibrary) {
             BottomBar(
                 haze = haze,
                 selected = selected,
+                now = now,
+                positionMs = playback::positionMs,
+                onPlayPause = playback::togglePlayPause,
                 onSelect = { index ->
                     if (index == selected) {
                         // Tapping the current tab goes back to its top.
