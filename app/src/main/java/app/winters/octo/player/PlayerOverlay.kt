@@ -96,7 +96,6 @@ import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.design.AccentFill
 import app.winters.octo.design.GlassSheet
 import app.winters.octo.design.GlazeInset
-import app.winters.octo.design.GlazeSelected
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.OctoColors
@@ -525,8 +524,9 @@ private fun CloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
-// One of the buttons under the controls: a plain icon, sitting in the same
-// darker pill as a selected tab while its setting is on.
+// One of the buttons under the controls: a plain icon, bright white while
+// its setting is on and dimmed while off, the way the progress line is
+// bright where it has played.
 @Composable
 private fun ActionButton(
     @DrawableRes icon: Int,
@@ -545,11 +545,10 @@ private fun ActionButton(
             },
         contentAlignment = Alignment.Center,
     ) {
-        if (on) GlazeSelected(Modifier.matchParentSize())
         Icon(
             painterResource(icon),
             contentDescription = null,
-            tint = if (on) OctoColors.TextPrimary else OctoColors.TextMuted,
+            tint = if (on) Color.White else Color.White.copy(alpha = 0.45f),
             modifier = Modifier.size(22.dp),
         )
     }
