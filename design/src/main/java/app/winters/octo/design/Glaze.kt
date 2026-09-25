@@ -56,14 +56,14 @@ fun mix(from: Color, to: Color, amount: Float) = Color(
     blue = from.blue + (to.blue - from.blue) * amount,
 )
 
-// The film: a thin, light wash with a little accent in it. It is clear
-// glass rather than a dark plate, so whatever is behind (the page, or a
-// song's colours) shows through, a touch brighter.
-private val GlazeTint = mix(Color.White, OctoColors.Accent, 0.25f).copy(alpha = 0.08f)
+// The film: clear glass with the faintest dim, so whatever is behind (the
+// page, or a song's colours) shows through in its own colour without
+// glaring when it is bright.
+private val GlazeTint = Color.Black.copy(alpha = 0.16f)
 
 // The darker pill that marks the chosen item inside a glaze, like the
 // selected tab: a plain shade, with none of the glaze's lighting.
-private val GlazeSelectedFill = Color.Black.copy(alpha = 0.28f)
+private val GlazeSelectedFill = Color.Black.copy(alpha = 0.45f)
 
 // The specular fades out toward both ends. A rim bright all the way round
 // reads as a drawn border; one bright only where light would catch reads as
@@ -74,9 +74,9 @@ private val SpecularMask = Brush.horizontalGradient(
 
 private val GlazeBlur = HazeBlurStyle {
     backgroundColor(OctoColors.Background)
-    blurRadius(backdropBlur(12f))
+    blurRadius(backdropBlur(4f))
     noiseFactor(0f)
-    colorEffects(listOf(HazeColorEffect.colorFilter(saturation(1.2f))))
+    colorEffects(listOf(HazeColorEffect.colorFilter(saturation(1.1f))))
     fallbackColorEffect(HazeColorEffect.tint(OctoColors.BackgroundTertiary))
 }
 
