@@ -63,7 +63,7 @@ private val GlazeTint = Color.Black.copy(alpha = 0.16f)
 
 // The darker pill that marks the chosen item inside a glaze, like the
 // selected tab: a plain shade, with none of the glaze's lighting.
-private val GlazeSelectedFill = Color.Black.copy(alpha = 0.45f)
+private val GlazeSelectedFill = Color.Black.copy(alpha = 0.6f)
 
 // The specular fades out toward both ends. A rim bright all the way round
 // reads as a drawn border; one bright only where light would catch reads as
