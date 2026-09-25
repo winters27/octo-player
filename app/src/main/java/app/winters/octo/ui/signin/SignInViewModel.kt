@@ -24,6 +24,11 @@ class SignInViewModel @Inject constructor(private val sessions: SessionRepositor
     var error by mutableStateOf<String?>(null)
         private set
 
+    // True once signed in, so the screen can close. The library copy
+    // starts on its own.
+    var signedIn by mutableStateOf(false)
+        private set
+
     // Plain http to an address outside the home network.
     val insecure by derivedStateOf {
         val url = normalizeServerUrl(address)
@@ -35,8 +40,12 @@ class SignInViewModel @Inject constructor(private val sessions: SessionRepositor
         busy = true
         error = null
         viewModelScope.launch {
-            // Success needs nothing here: the app follows the session state.
             error = sessions.signIn(address, username, password)?.userMessage()
+            // Once in, the password is kept only in the sealed vault.
+            if (error == null) {
+                password = ""
+                signedIn = true
+            }
             busy = false
         }
     }

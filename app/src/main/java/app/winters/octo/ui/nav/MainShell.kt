@@ -56,7 +56,11 @@ import app.winters.octo.ui.playlist.PlaylistSheets
 import app.winters.octo.ui.playlist.PlaylistSheetsHost
 import app.winters.octo.ui.playlist.PlaylistsScreen
 import app.winters.octo.ui.search.SearchScreen
+import app.winters.octo.ui.settings.DisconnectPrompt
+import app.winters.octo.ui.settings.DisconnectSheetHost
+import app.winters.octo.ui.settings.LocalDisconnectPrompt
 import app.winters.octo.ui.settings.SettingsScreen
+import app.winters.octo.ui.signin.SignInScreen
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 
@@ -115,6 +119,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
 
     val songMenu = remember { SongMenuState() }
     val playlistSheets = remember { PlaylistSheets() }
+    val disconnectPrompt = remember { DisconnectPrompt() }
     // Going to a page from the song menu also closes the player.
     val openFromMenu: (NavKey) -> Unit = { key ->
         playerOpen = false
@@ -125,6 +130,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
         LocalHaze provides haze,
         LocalSongMenu provides songMenu,
         LocalPlaylistSheets provides playlistSheets,
+        LocalDisconnectPrompt provides disconnectPrompt,
     ) {
         SharedTransitionLayout {
             Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
@@ -140,7 +146,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                         entry<HomeRoute> { HomeScreen(open) }
                         entry<SearchRoute> { SearchScreen(open) }
                         entry<LibraryRoute> { LibraryScreen(open) }
-                        entry<SettingsRoute> { SettingsScreen() }
+                        entry<SettingsRoute> { SettingsScreen(open) }
                         entry<AlbumRoute> { AlbumScreen(it.id, open, back) }
                         entry<ArtistRoute> { ArtistScreen(it.id, open, back) }
                         entry<AlbumsRoute> { AlbumsScreen(open, back) }
@@ -151,6 +157,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                         entry<PlaylistsRoute> { PlaylistsScreen(open, back) }
                         entry<LikedRoute> { LikedScreen(back) }
                         entry<PlaylistRoute> { PlaylistScreen(it.id, back) }
+                        entry<SignInRoute> { SignInScreen(back) }
                     },
                 )
                 // Back from the top of another tab goes Home rather than out.
@@ -196,6 +203,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                 }
                 SongMenuHost(songMenu, onOpen = openFromMenu)
                 PlaylistSheetsHost(playlistSheets)
+                DisconnectSheetHost(disconnectPrompt)
             }
         }
     }

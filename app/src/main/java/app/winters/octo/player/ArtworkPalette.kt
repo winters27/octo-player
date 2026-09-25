@@ -2,12 +2,10 @@ package app.winters.octo.player
 
 import android.content.Context
 import android.util.LruCache
-import android.util.Size
 import androidx.compose.ui.graphics.Color
 import androidx.core.graphics.ColorUtils
-import androidx.core.net.toUri
 import androidx.palette.graphics.Palette
-import app.winters.octo.catalog.ArtworkRef
+import app.winters.octo.playback.artworkBitmap
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -36,17 +34,15 @@ class ArtworkPalette @Inject constructor(@ApplicationContext private val context
     suspend fun colorsFor(ref: String?): PlayerColors {
         if (ref == null) return PlayerColors.Quiet
         cache.get(ref)?.let { return it }
-        val colors = withContext(Dispatchers.Default) { extract(ref) } ?: return PlayerColors.Quiet
+        // Off the main thread, since a server's cover may need downloading.
+        val colors = withContext(Dispatchers.IO) { extract(ref) } ?: return PlayerColors.Quiet
         cache.put(ref, colors)
         return colors
     }
 
     private fun extract(ref: String): PlayerColors? {
-        val art = ArtworkRef.decode(ref) as? ArtworkRef.Device ?: return null
         // A small picture is plenty to find its main colours, and fast.
-        val bitmap = runCatching {
-            context.contentResolver.loadThumbnail(art.uri.toUri(), Size(128, 128), null)
-        }.getOrNull() ?: return null
+        val bitmap = artworkBitmap(context, ref, 128) ?: return null
         val palette = Palette.from(bitmap).maximumColorCount(16).generate()
 
         val main = palette.dominantSwatch?.rgb ?: palette.darkMutedSwatch?.rgb ?: return null

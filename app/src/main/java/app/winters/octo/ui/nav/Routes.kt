@@ -17,3 +17,4 @@ import kotlinx.serialization.Serializable
 @Serializable data object PlaylistsRoute : NavKey
 @Serializable data object LikedRoute : NavKey
 @Serializable data class PlaylistRoute(val id: String) : NavKey
+@Serializable data object SignInRoute : NavKey

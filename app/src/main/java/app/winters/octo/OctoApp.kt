@@ -1,9 +1,13 @@
 package app.winters.octo
 
 import android.app.Application
+import app.winters.octo.data.SessionRepository
 import app.winters.octo.device.DeviceArtworkFetcher
 import app.winters.octo.device.DeviceArtworkKeyer
 import app.winters.octo.device.DeviceLibrary
+import app.winters.octo.server.ServerArtworkFetcher
+import app.winters.octo.server.ServerArtworkKeyer
+import app.winters.octo.server.ServerSync
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
@@ -17,11 +21,15 @@ import javax.inject.Inject
 class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var http: OkHttpClient
     @Inject lateinit var deviceLibrary: DeviceLibrary
+    @Inject lateinit var sessions: SessionRepository
+    @Inject lateinit var serverSync: ServerSync
 
     override fun onCreate() {
         super.onCreate()
         // Keep the library in step with the music on the phone.
         deviceLibrary.start()
+        // And with the server's, when one is connected.
+        serverSync.start()
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader =
@@ -32,6 +40,9 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
                 // Artwork embedded in files on the phone.
                 add(DeviceArtworkFetcher.Factory(this@OctoApp))
                 add(DeviceArtworkKeyer())
+                // Covers on the signed-in server.
+                add(ServerArtworkFetcher.Factory(sessions))
+                add(ServerArtworkKeyer())
             }
             .crossfade(true)
             .build()

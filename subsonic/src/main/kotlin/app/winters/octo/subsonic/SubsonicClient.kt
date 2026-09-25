@@ -102,6 +102,24 @@ class SubsonicClient(
             SearchResult(),
         )
 
+    // One page of every song on the server, for copying the whole library.
+    // An empty search matches everything on servers that allow it; others
+    // answer with nothing.
+    suspend fun songPage(size: Int, offset: Int): List<Song> =
+        get(
+            "search3",
+            mapOf(
+                "query" to "",
+                "artistCount" to "0",
+                "albumCount" to "0",
+                "songCount" to "$size",
+                "songOffset" to "$offset",
+            ),
+            "searchResult3",
+            SearchResult.serializer(),
+            SearchResult(),
+        ).song
+
     suspend fun starred(): Starred =
         get("getStarred2", key = "starred2", serializer = Starred.serializer(), default = Starred())
 

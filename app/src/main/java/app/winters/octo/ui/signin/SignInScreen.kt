@@ -20,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,17 +40,30 @@ import app.winters.octo.design.GlassInput
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.glassPanel
+import app.winters.octo.ui.common.BackButton
+import app.winters.octo.ui.common.DetailTopGap
 
 private val CardShape = RoundedCornerShape(20.dp)
 
+// Opened from Settings. Signing in goes back there, and the server's
+// music starts copying on its own.
 @Composable
-fun SignInScreen(vm: SignInViewModel = hiltViewModel()) {
+fun SignInScreen(onBack: () -> Unit, vm: SignInViewModel = hiltViewModel()) {
+    LaunchedEffect(vm.signedIn) { if (vm.signedIn) onBack() }
+
+    Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
+        SignInForm(vm)
+        BackButton(onBack)
+    }
+}
+
+@Composable
+private fun SignInForm(vm: SignInViewModel) {
     var reveal by remember { mutableStateOf(false) }
 
     Box(
         Modifier
             .fillMaxSize()
-            .background(OctoColors.Background)
             .systemBarsPadding()
             .imePadding()
             .verticalScroll(rememberScrollState()),
@@ -59,7 +73,8 @@ fun SignInScreen(vm: SignInViewModel = hiltViewModel()) {
             Modifier
                 .widthIn(max = 420.dp)
                 .fillMaxWidth()
-                .padding(24.dp),
+                // Clear of the back button above and the floating bar below.
+                .padding(start = 24.dp, end = 24.dp, top = DetailTopGap, bottom = 120.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text("Octo", style = OctoType.display, color = OctoColors.TextPrimary)
