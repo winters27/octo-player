@@ -59,11 +59,11 @@ fun mix(from: Color, to: Color, amount: Float) = Color(
 // The film: a thin, light wash with a little accent in it. It is clear
 // glass rather than a dark plate, so whatever is behind (the page, or a
 // song's colours) shows through, a touch brighter.
-private val GlazeTint = mix(Color.White, OctoColors.Accent, 0.25f).copy(alpha = 0.12f)
+private val GlazeTint = mix(Color.White, OctoColors.Accent, 0.25f).copy(alpha = 0.08f)
 
 // The darker pill that marks the chosen item inside a glaze, like the
-// selected tab: glass sitting in glass, a shade deeper than around it.
-val GlazeSelectedFill = Color.Black.copy(alpha = 0.30f)
+// selected tab: a plain shade, with none of the glaze's lighting.
+private val GlazeSelectedFill = Color.Black.copy(alpha = 0.28f)
 
 // The specular fades out toward both ends. A rim bright all the way round
 // reads as a drawn border; one bright only where light would catch reads as
@@ -74,9 +74,9 @@ private val SpecularMask = Brush.horizontalGradient(
 
 private val GlazeBlur = HazeBlurStyle {
     backgroundColor(OctoColors.Background)
-    blurRadius(backdropBlur(20f))
+    blurRadius(backdropBlur(12f))
     noiseFactor(0f)
-    colorEffects(listOf(HazeColorEffect.colorFilter(saturation(1.4f))))
+    colorEffects(listOf(HazeColorEffect.colorFilter(saturation(1.2f))))
     fallbackColorEffect(HazeColorEffect.tint(OctoColors.BackgroundTertiary))
 }
 
@@ -172,8 +172,9 @@ fun FloatingGlaze(
     }
 }
 
-// The chosen item inside a glaze: a darker pill set into the glass.
+// The chosen item inside a glaze: a darker pill set into the glass, unlit,
+// so only the glaze around it carries the light.
 @Composable
 fun GlazeSelected(modifier: Modifier = Modifier, shape: Shape = CircleShape) {
-    GlazeInset(fill = GlazeSelectedFill, shape = shape, modifier = modifier) {}
+    Box(modifier.clip(shape).background(GlazeSelectedFill))
 }
