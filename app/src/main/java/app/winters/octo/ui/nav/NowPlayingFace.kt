@@ -26,7 +26,7 @@ import app.winters.octo.ui.common.Artwork
 // behind a play or pause sign, with a thin ring showing how far through the
 // song it is. The bar supplies the glass around it.
 @Composable
-fun NowPlayingFace(now: NowPlaying, progress: Float, size: Dp = BarHeight) {
+fun NowPlayingFace(now: NowPlaying, progress: () -> Float, size: Dp = BarHeight) {
     Glaze(Modifier.size(size)) {
         if (now.artwork != null) {
             Artwork(now.artwork, size - 12.dp, shape = CircleShape)
@@ -42,14 +42,15 @@ fun NowPlayingFace(now: NowPlaying, progress: Float, size: Dp = BarHeight) {
     }
 }
 
-// How far through the song it is, as an arc from the top.
+// How far through the song it is, as an arc from the top. The value is read
+// while drawing, so the arc can move every frame without recomposing.
 @Composable
-fun ProgressRing(progress: Float, modifier: Modifier) {
+fun ProgressRing(progress: () -> Float, modifier: Modifier) {
     Canvas(modifier) {
         drawArc(
             color = OctoColors.Accent,
             startAngle = -90f,
-            sweepAngle = 360f * progress,
+            sweepAngle = 360f * progress(),
             useCenter = false,
             style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
         )

@@ -33,7 +33,7 @@ import androidx.compose.ui.unit.dp
 // does not stutter the audio; `live` sends it all along, for volume.
 @Composable
 fun LineSlider(
-    fraction: Float,
+    fraction: () -> Float,
     onSeek: (Float) -> Unit,
     modifier: Modifier = Modifier,
     live: Boolean = false,
@@ -43,7 +43,6 @@ fun LineSlider(
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
     val seek by rememberUpdatedState(onSeek)
-    val shown = if (dragging) dragFraction else fraction.coerceIn(0f, 1f)
 
     val thickness by animateDpAsState(if (dragging) 8.dp else 3.5.dp, spring(0.5f, 200f), label = "track")
     val thumb by animateDpAsState(if (dragging) 9.dp else 0.dp, spring(0.5f, 200f), label = "thumb")
@@ -78,7 +77,8 @@ fun LineSlider(
             .drawBehind {
                 val y = size.height / 2
                 val stroke = thickness.toPx()
-                val end = size.width * shown
+                // Read here, in drawing, so a moving value only redraws.
+                val end = size.width * (if (dragging) dragFraction else fraction().coerceIn(0f, 1f))
                 drawLine(trackColor, Offset(0f, y), Offset(size.width, y), stroke, StrokeCap.Round)
                 if (end > 0f) {
                     // Three soft passes of the same line make the glow: wide and

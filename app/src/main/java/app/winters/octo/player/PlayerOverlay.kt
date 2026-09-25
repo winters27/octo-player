@@ -50,6 +50,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -99,6 +100,7 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.elevation3
+import app.winters.octo.playback.AudioQuality
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.SleepState
 import app.winters.octo.ui.common.Artwork
@@ -372,29 +374,54 @@ private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit) {
 @Composable
 private fun Progress(now: NowPlaying, model: PlayerViewModel) {
     val position = rememberPositionMs(now, model::positionMs)
-    val played = position.longValue.coerceIn(0, now.durationMs.coerceAtLeast(0))
+    val duration = now.durationMs.coerceAtLeast(0)
+    // The line moves every frame, but the times only change once a second,
+    // so only they recompose, and only then.
+    val playedSeconds by remember(duration) {
+        derivedStateOf { (position.longValue.coerceIn(0, duration) / 1000).toInt() }
+    }
     val times = OctoType.caption.copy(fontFeatureSettings = "tnum")
     LineSlider(
-        fraction = now.fractionAt(played),
+        fraction = { now.fractionAt(position.longValue) },
         onSeek = { fraction ->
             val target = (fraction * now.durationMs).toLong()
             position.longValue = target
             model.seekTo(target)
         },
     )
-    Row(Modifier.fillMaxWidth().offset(y = (-8).dp)) {
-        Text((played / 1000).toInt().asClock(), style = times, color = OctoColors.TextMuted)
-        Spacer(Modifier.weight(1f))
-        Text("-" + ((now.durationMs - played) / 1000).toInt().asClock(), style = times, color = OctoColors.TextMuted)
-    }
-    now.quality?.let {
+    Box(Modifier.fillMaxWidth().offset(y = (-8).dp)) {
+        Text(playedSeconds.asClock(), style = times, color = OctoColors.TextMuted, modifier = Modifier.align(Alignment.CenterStart))
+        now.quality?.let { QualityBadge(it, Modifier.align(Alignment.Center)) }
         Text(
-            it,
-            style = OctoType.caption,
-            color = OctoColors.TextPrimary.copy(alpha = 0.5f),
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
+            "-" + ((duration / 1000).toInt() - playedSeconds).coerceAtLeast(0).asClock(),
+            style = times,
+            color = OctoColors.TextMuted,
+            modifier = Modifier.align(Alignment.CenterEnd),
         )
+    }
+}
+
+// What kind of file is playing, as a small glazed badge: the tier in full
+// strength, then the details softer, like "Lossless  FLAC 16/44.1".
+@Composable
+private fun QualityBadge(quality: AudioQuality, modifier: Modifier) {
+    val label = listOfNotNull(quality.tier, quality.detail).joinToString(", ")
+    Glaze(modifier.height(24.dp).clearAndSetSemantics { contentDescription = label }) {
+        Row(Modifier.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                quality.tier,
+                style = OctoType.caption.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                color = OctoColors.TextPrimary,
+            )
+            quality.detail?.let {
+                Text(
+                    it,
+                    style = OctoType.caption.copy(fontSize = 11.sp, fontFeatureSettings = "tnum"),
+                    color = OctoColors.TextPrimary.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
+        }
     }
 }
 
@@ -424,7 +451,7 @@ private fun Volume(model: PlayerViewModel) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Icon(painterResource(OctoIcons.VolumeDown), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(20.dp))
         LineSlider(
-            fraction = volume,
+            fraction = { volume },
             onSeek = model::setVolume,
             live = true,
             modifier = Modifier

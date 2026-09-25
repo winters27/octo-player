@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -102,8 +101,8 @@ fun BottomBar(
     modifier: Modifier = Modifier,
 ) {
     val grown by animateFloatAsState(if (playerShown) 1f else 0f, spring(0.75f, 200f), label = "bar shape")
-    val position = rememberPositionMs(now, positionMs, everyMs = 500)
-    val progress = now.fractionAt(position.longValue)
+    val position = rememberPositionMs(now, positionMs)
+    val progress = { now.fractionAt(position.longValue) }
 
     BoxWithConstraints(
         modifier
@@ -275,7 +274,7 @@ private fun TabButton(
 @Composable
 private fun PlayerCapsule(
     now: NowPlaying,
-    progress: Float,
+    progress: () -> Float,
     width: Dp,
     artModifier: Modifier,
     artShape: Shape,

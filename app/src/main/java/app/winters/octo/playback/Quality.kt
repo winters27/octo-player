@@ -5,23 +5,45 @@ import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Tracks
 
-// A short line about how the song is encoded, like "FLAC · 24-bit · 96 kHz"
-// or "MP3 · 320 kbps". It uses what the decoder reports once the song is
-// open, and the file type before then.
-fun qualityLabel(fileMime: String?, tracks: Tracks): String? {
+// How a song is encoded, for the badge under the progress line: a short
+// tier like "Lossless" or "Opus", and the details after it, like "FLAC 24/96"
+// or "128 kbps".
+data class AudioQuality(val tier: String, val detail: String?)
+
+// Uses what the decoder reports once the song is open, and the file type
+// before then.
+fun audioQuality(fileMime: String?, tracks: Tracks): AudioQuality? {
     val format = tracks.groups
         .firstOrNull { it.type == C.TRACK_TYPE_AUDIO && it.isSelected }
         ?.let { group -> (0 until group.length).firstOrNull(group::isTrackSelected)?.let(group::getTrackFormat) }
-    val codec = codecName(format?.sampleMimeType) ?: codecName(fileMime) ?: return null
-    val parts = mutableListOf(codec)
-    if (format != null) {
-        val lossless = codec in Lossless
-        bitDepth(format.pcmEncoding)?.takeIf { lossless }?.let { parts += "$it-bit" }
-        val bitrate = format.averageBitrate.takeIf { it > 0 } ?: format.bitrate.takeIf { it > 0 }
-        if (!lossless && bitrate != null) parts += "${bitrate / 1000} kbps"
-        if (format.sampleRate != Format.NO_VALUE) parts += sampleRate(format.sampleRate)
+    return audioQuality(
+        codecMime = format?.sampleMimeType,
+        fileMime = fileMime,
+        pcmEncoding = format?.pcmEncoding ?: Format.NO_VALUE,
+        sampleRate = format?.sampleRate ?: Format.NO_VALUE,
+        bitrate = format?.let { it.averageBitrate.takeIf { rate -> rate > 0 } ?: it.bitrate } ?: Format.NO_VALUE,
+    )
+}
+
+internal fun audioQuality(
+    codecMime: String?,
+    fileMime: String?,
+    pcmEncoding: Int,
+    sampleRate: Int,
+    bitrate: Int,
+): AudioQuality? {
+    val codec = codecName(codecMime) ?: codecName(fileMime) ?: return null
+    if (codec in Lossless) {
+        // Written the short way, like 24/96 for 24-bit at 96 kHz.
+        val spec = listOfNotNull(bitDepth(pcmEncoding)?.toString(), sampleRate.takeIf { it > 0 }?.let(::kilohertz))
+            .joinToString("/")
+        // Above 48 kHz counts as high resolution.
+        val tier = if (sampleRate > 48_000) "Hi-Res Lossless" else "Lossless"
+        return AudioQuality(tier, listOf(codec, spec).filter { it.isNotEmpty() }.joinToString(" "))
     }
-    return parts.joinToString(" · ")
+    val detail = bitrate.takeIf { it > 0 }?.let { "${it / 1000} kbps" }
+        ?: sampleRate.takeIf { it > 0 }?.let { "${kilohertz(it)} kHz" }
+    return AudioQuality(codec, detail)
 }
 
 private val Lossless = setOf("FLAC", "ALAC", "WAV")
@@ -47,8 +69,6 @@ private fun bitDepth(encoding: Int): Int? = when (encoding) {
     else -> null
 }
 
-// 44100 reads as "44.1 kHz", 48000 as "48 kHz".
-private fun sampleRate(hz: Int): String {
-    val khz = hz / 1000.0
-    return if (hz % 1000 == 0) "${hz / 1000} kHz" else "%.1f kHz".format(khz)
-}
+// 44100 reads as "44.1", 48000 as "48".
+private fun kilohertz(hz: Int): String =
+    if (hz % 1000 == 0) "${hz / 1000}" else "%.1f".format(hz / 1000.0)
