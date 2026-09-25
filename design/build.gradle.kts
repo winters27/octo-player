@@ -23,4 +23,6 @@ dependencies {
     api(libs.compose.material3)
     api(libs.haze)
     api(libs.haze.blur)
+    // Back closes sheets.
+    implementation(libs.androidx.activity.compose)
 }
