@@ -38,6 +38,8 @@ data class TrackEntity(
     @ColumnInfo(defaultValue = "") val relinkKey: String = "",
     // The song's main genre, or empty when it has none.
     @ColumnInfo(defaultValue = "") val genre: String = "",
+    // Whether a copy is on the phone. A song only on a server streams.
+    @ColumnInfo(defaultValue = "1") val onPhone: Boolean = true,
 )
 
 @Entity(

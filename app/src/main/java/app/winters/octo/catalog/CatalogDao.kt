@@ -83,14 +83,14 @@ interface CatalogDao {
     @Query("SELECT COUNT(*) FROM track WHERE sourceId = :sourceId")
     fun trackCount(sourceId: String): Flow<Int>
 
-    @Query("DELETE FROM track WHERE sourceId = :sourceId")
-    suspend fun deleteTracks(sourceId: String)
+    @Query("DELETE FROM track")
+    suspend fun deleteTracks()
 
-    @Query("DELETE FROM album WHERE sourceId = :sourceId")
-    suspend fun deleteAlbums(sourceId: String)
+    @Query("DELETE FROM album")
+    suspend fun deleteAlbums()
 
-    @Query("DELETE FROM artist WHERE sourceId = :sourceId")
-    suspend fun deleteArtists(sourceId: String)
+    @Query("DELETE FROM artist")
+    suspend fun deleteArtists()
 
     @Insert
     suspend fun insertTracks(rows: List<TrackEntity>)
@@ -110,20 +110,15 @@ interface CatalogDao {
     @Query("DELETE FROM file_tags WHERE mediaId IN (:ids)")
     suspend fun deleteFileTags(ids: List<Long>)
 
-    // Swaps everything one source contributed, all at once, so screens
-    // never see a half-written library.
+    // Swaps in the whole merged library at once, so screens never see a
+    // half-written one.
     @Transaction
-    suspend fun replaceSource(
-        sourceId: String,
-        tracks: List<TrackEntity>,
-        albums: List<AlbumEntity>,
-        artists: List<ArtistEntity>,
-    ) {
-        deleteTracks(sourceId)
-        deleteAlbums(sourceId)
-        deleteArtists(sourceId)
-        insertArtists(artists)
-        insertAlbums(albums)
-        insertTracks(tracks)
+    suspend fun replaceAll(tracks: List<TrackEntity>, albums: List<AlbumEntity>, artists: List<ArtistEntity>) {
+        deleteTracks()
+        deleteAlbums()
+        deleteArtists()
+        artists.chunked(500).forEach { insertArtists(it) }
+        albums.chunked(500).forEach { insertAlbums(it) }
+        tracks.chunked(500).forEach { insertTracks(it) }
     }
 }

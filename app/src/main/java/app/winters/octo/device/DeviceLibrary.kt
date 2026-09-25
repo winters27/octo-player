@@ -14,7 +14,9 @@ import android.os.SystemClock
 import androidx.core.net.toUri
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.FileTagsEntity
-import app.winters.octo.catalog.UserDao
+import app.winters.octo.catalog.CatalogMerge
+import app.winters.octo.catalog.SourceDao
+import app.winters.octo.catalog.toSource
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -55,7 +57,8 @@ class DeviceLibrary @Inject constructor(
     private val reader: TagReader,
     private val dao: CatalogDao,
     private val rules: FolderRules,
-    private val userDao: UserDao,
+    private val sources: SourceDao,
+    private val merge: CatalogMerge,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val scanLock = Mutex()
@@ -132,15 +135,22 @@ class DeviceLibrary @Inject constructor(
                 val excluded = rules.excluded.first()
                 _folders.value = files.folders(excluded)
                 val catalog = buildDeviceCatalog(files.withoutFolders(excluded).map { it.toRow(tags[it.id]) })
-                dao.replaceSource(DEVICE, catalog.tracks, catalog.albums, catalog.artists)
-                // Likes, plays and playlists follow songs whose ids changed.
-                userDao.relinkAll()
+                // The phone's own copy, then the library rebuilt with any
+                // server's music merged in.
+                sources.replaceSource(
+                    DEVICE,
+                    catalog.tracks.map { it.toSource() },
+                    catalog.albums.map { it.toSource() },
+                    catalog.artists.map { it.toSource() },
+                )
+                val library = merge.rebuild()
                 // Counts only, so the library can be checked against the phone.
                 Log.i(
                     "Octo",
                     "phone scan: ${catalog.tracks.size} tracks, ${catalog.albums.size} albums, " +
                         "${catalog.artists.size} artists, $lastReread files read, " +
-                        "${SystemClock.elapsedRealtime() - started} ms",
+                        "${SystemClock.elapsedRealtime() - started} ms; library ${library.tracks.size} tracks, " +
+                        "${library.albums.size} albums, ${library.artists.size} artists",
                 )
             } finally {
                 _scanning.value = false
