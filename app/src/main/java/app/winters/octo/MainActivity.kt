@@ -1,6 +1,9 @@
 package app.winters.octo
 
+import android.app.SearchManager
+import android.content.Intent
 import android.os.Bundle
+import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -21,6 +24,19 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         // The app opens on the library; servers are an optional add-on.
         setContent { OctoTheme { MainShell(library, playback) } }
+        // Opened by a voice request; not again when the screen turns.
+        if (savedInstanceState == null) playIfAsked(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        playIfAsked(intent)
+    }
+
+    // "Play Drake on Octo": the assistant sends what was said.
+    private fun playIfAsked(intent: Intent) {
+        if (intent.action != MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH) return
+        playback.playFromSearch(intent.getStringExtra(SearchManager.QUERY).orEmpty())
     }
 
     override fun onStart() {

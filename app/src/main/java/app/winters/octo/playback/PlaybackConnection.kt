@@ -121,6 +121,15 @@ class PlaybackConnection @Inject constructor(
         }
     }
 
+    // Plays what was asked for out loud, like "Drake". The service works out
+    // what that means; saying nothing in particular shuffles everything.
+    fun playFromSearch(query: String) = withController { c ->
+        val request = MediaItem.RequestMetadata.Builder().setSearchQuery(query).build()
+        c.setMediaItem(MediaItem.Builder().setRequestMetadata(request).build())
+        c.prepare()
+        c.play()
+    }
+
     fun seekTo(positionMs: Long) = withController { it.seekTo(positionMs.coerceAtLeast(0)) }
 
     fun toggleShuffle() = withController { it.shuffleModeEnabled = !it.shuffleModeEnabled }

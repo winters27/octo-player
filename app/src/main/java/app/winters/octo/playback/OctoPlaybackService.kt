@@ -6,7 +6,6 @@ import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSourceBitmapLoader
@@ -45,7 +44,13 @@ import javax.inject.Inject
 // The like toggle offered in the notification and on the lock screen.
 private val LIKE = SessionCommand("app.winters.octo.LIKE", Bundle.EMPTY)
 
-private const val ROOT_ID = "root"
+// Apps that drive playback from a car or by voice: Android Auto and the
+// assistant. They get full control even when not system apps.
+private val carApps = setOf(
+    "com.google.android.projection.gearhead",
+    "com.google.android.carassistant",
+    "com.google.android.googlequicksearchbox",
+)
 
 // Plays music with the screen off, and answers the lock screen, the
 // notification, headphone buttons and the app.
@@ -58,6 +63,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var plays: PlayStore
     @Inject lateinit var sleep: SleepTimer
     @Inject lateinit var playerSettings: PlayerSettings
+    @Inject lateinit var car: CarLibrary
 
     private val scope = MainScope()
     private lateinit var player: OctoPlayer
@@ -201,7 +207,8 @@ class OctoPlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
         ): ListenableFuture<ConnectionResult> {
             // Apps we don't trust keep the read-only access Media3 gives them.
-            if (!controller.isTrusted) return super.onConnectAsync(session, controller)
+            // A car and the voice assistant need to press play too.
+            if (!controller.isTrusted && controller.packageName !in carApps) return super.onConnectAsync(session, controller)
             // The app connects only once the saved queue is back, so it never
             // mistakes a player still restoring for an empty one.
             return scope.future {
@@ -231,7 +238,11 @@ class OctoPlaybackService : MediaLibraryService() {
             mediaSession: MediaSession,
             controller: MediaSession.ControllerInfo,
             mediaItems: MutableList<MediaItem>,
-        ): ListenableFuture<MutableList<MediaItem>> = scope.future { resolve(mediaItems).toMutableList() }
+        ): ListenableFuture<MutableList<MediaItem>> = scope.future {
+            // An album or playlist chosen in a car adds all its songs.
+            val ids = mediaItems.flatMap { car.playFor(it.mediaId)?.first ?: listOf(it.mediaId) }
+            catalog.tracksByIds(ids).map { it.toMediaItem() }.toMutableList()
+        }
 
         override fun onSetMediaItems(
             mediaSession: MediaSession,
@@ -240,6 +251,21 @@ class OctoPlaybackService : MediaLibraryService() {
             startIndex: Int,
             startPositionMs: Long,
         ): ListenableFuture<MediaItemsWithStartPosition> = scope.future {
+            val single = mediaItems.singleOrNull()
+            // Something said out loud, like "play Drake on Octo".
+            single?.requestMetadata?.searchQuery?.let { query ->
+                val (ids, shuffle) = car.forVoice(query)
+                val songs = catalog.tracksByIds(ids).map { it.toMediaItem() }
+                player.shuffleModeEnabled = shuffle
+                val first = if (shuffle && songs.isNotEmpty()) songs.indices.random() else 0
+                return@future MediaItemsWithStartPosition(songs, first, 0)
+            }
+            // An album, playlist, or a song inside one, chosen in a car.
+            single?.let { car.playFor(it.mediaId) }?.let { (ids, start) ->
+                val songs = catalog.tracksByIds(ids).map { it.toMediaItem() }
+                val index = startIndex(songs.map { it.mediaId }, ids.getOrNull(start))
+                return@future MediaItemsWithStartPosition(songs, index, 0)
+            }
             val resolved = resolve(mediaItems)
             // Keep starting on the chosen song even if some before it are gone.
             val wanted = mediaItems.getOrNull(startIndex)?.mediaId
@@ -268,16 +294,9 @@ class OctoPlaybackService : MediaLibraryService() {
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
             params: LibraryParams?,
-        ): ListenableFuture<LibraryResult<MediaItem>> = Futures.immediateFuture(
-            LibraryResult.ofItem(
-                MediaItem.Builder()
-                    .setMediaId(ROOT_ID)
-                    .setMediaMetadata(MediaMetadata.Builder().setIsBrowsable(true).setIsPlayable(false).setTitle("Octo").build())
-                    .build(),
-                params,
-            ),
-        )
+        ): ListenableFuture<LibraryResult<MediaItem>> = Futures.immediateFuture(LibraryResult.ofItem(car.root(), params))
 
+        // Browsing from a car: its tabs, and the albums, songs and playlists in them.
         override fun onGetChildren(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
@@ -285,8 +304,33 @@ class OctoPlaybackService : MediaLibraryService() {
             page: Int,
             pageSize: Int,
             params: LibraryParams?,
-        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
-            // Browsing from a car or watch arrives with Android Auto support.
-            Futures.immediateFuture(LibraryResult.ofItemList(ImmutableList.of(), params))
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
+            val items = car.children(parentId, page, pageSize)
+            car.grantArtwork(browser.packageName, items)
+            LibraryResult.ofItemList(items, params)
+        }
+
+        override fun onSearch(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<Void>> = scope.future {
+            session.notifySearchResultChanged(browser, query, car.search(query).size, params)
+            LibraryResult.ofVoid()
+        }
+
+        override fun onGetSearchResult(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
+            val items = car.search(query).drop(page * pageSize).take(pageSize)
+            car.grantArtwork(browser.packageName, items)
+            LibraryResult.ofItemList(items, params)
+        }
     }
 }
