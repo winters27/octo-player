@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,12 +24,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.Glaze
+import app.winters.octo.design.GlazeSelected
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
-import app.winters.octo.design.glassPanel
 
-// A row of choices in a glass capsule, with a lit capsule gliding under
-// the chosen one: the same movement as the tab bar.
+// A row of choices on the glaze, with a darker pill gliding under the
+// chosen one: the same look and movement as the tab bar.
 @Composable
 fun Segments(
     labels: List<String>,
@@ -41,23 +40,23 @@ fun Segments(
     BoxWithConstraints(
         modifier
             .fillMaxWidth()
-            .height(44.dp)
-            .glassPanel(CircleShape)
-            .padding(4.dp),
+            .height(44.dp),
     ) {
-        val segment = maxWidth / labels.size
+        Glaze(Modifier.matchParentSize())
+        val segment = (maxWidth - 8.dp) / labels.size
         val x by animateDpAsState(
             targetValue = segment * selected,
             animationSpec = spring(dampingRatio = 0.8f, stiffness = 350f),
             label = "segment",
         )
-        Glaze(
+        GlazeSelected(
             Modifier
+                .padding(4.dp)
                 .offset { IntOffset(x.roundToPx(), 0) }
                 .width(segment)
                 .fillMaxHeight(),
         )
-        Row(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxSize().padding(4.dp)) {
             labels.forEachIndexed { index, label ->
                 val color by animateColorAsState(
                     if (index == selected) OctoColors.TextPrimary else OctoColors.TextMuted,

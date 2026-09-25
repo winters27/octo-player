@@ -3,6 +3,7 @@ package app.winters.octo.design
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -55,9 +56,14 @@ fun mix(from: Color, to: Color, amount: Float) = Color(
     blue = from.blue + (to.blue - from.blue) * amount,
 )
 
-// The floor: the solid surface with a little accent in it, so a glazed
-// control belongs to the theme instead of sitting on top of it.
-private val GlazeTint = mix(OctoColors.BackgroundTertiary, OctoColors.Accent, 0.08f).copy(alpha = 0.34f)
+// The film: a thin, light wash with a little accent in it. It is clear
+// glass rather than a dark plate, so whatever is behind (the page, or a
+// song's colours) shows through, a touch brighter.
+private val GlazeTint = mix(Color.White, OctoColors.Accent, 0.25f).copy(alpha = 0.12f)
+
+// The darker pill that marks the chosen item inside a glaze, like the
+// selected tab: glass sitting in glass, a shade deeper than around it.
+val GlazeSelectedFill = Color.Black.copy(alpha = 0.30f)
 
 // The specular fades out toward both ends. A rim bright all the way round
 // reads as a drawn border; one bright only where light would catch reads as
@@ -137,4 +143,37 @@ fun Glaze(
         )
         content()
     }
+}
+
+// A glaze floating over the page, like the bottom bar: the lit glass,
+// frosting what scrolls behind it, with a soft shadow pooled underneath.
+// The content sits on top; place it with the box's alignment.
+@Composable
+fun FloatingGlaze(
+    backdrop: HazeState,
+    modifier: Modifier = Modifier,
+    shape: Shape = CircleShape,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    Box(modifier) {
+        // The shadow is cast by a shape 12dp smaller on every side, so it
+        // pools under the glass instead of haloing around it.
+        Box(
+            Modifier
+                .matchParentSize()
+                .padding(12.dp)
+                .dropShadow(
+                    shape,
+                    Shadow(radius = shadowBlur(24f), color = Color.Black.copy(alpha = 0.45f), offset = DpOffset(0.dp, 8.dp)),
+                ),
+        )
+        Glaze(Modifier.matchParentSize(), shape = shape, backdrop = backdrop)
+        content()
+    }
+}
+
+// The chosen item inside a glaze: a darker pill set into the glass.
+@Composable
+fun GlazeSelected(modifier: Modifier = Modifier, shape: Shape = CircleShape) {
+    GlazeInset(fill = GlazeSelectedFill, shape = shape, modifier = modifier) {}
 }

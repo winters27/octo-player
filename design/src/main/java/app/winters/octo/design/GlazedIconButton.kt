@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -13,8 +14,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
 
-// A lone round control floating over content: the bar's dark glass, lit by
-// the glaze across the whole circle, so it matches the bar beside it.
+// A lone round control floating over content, the same glaze as the bar.
 @Composable
 fun GlazedIconButton(
     backdrop: HazeState,
@@ -24,7 +24,7 @@ fun GlazedIconButton(
     modifier: Modifier = Modifier,
     size: Dp = 56.dp,
 ) {
-    GlassPanelDark(
+    FloatingGlaze(
         backdrop,
         modifier
             .size(size)
@@ -35,13 +35,11 @@ fun GlazedIconButton(
                 onClick = onClick,
             ),
     ) {
-        Glaze(Modifier.matchParentSize()) {
-            Icon(
-                icon,
-                contentDescription = contentDescription,
-                tint = OctoColors.TextPrimary,
-                modifier = Modifier.size(if (size >= 56.dp) 22.dp else 20.dp),
-            )
-        }
+        Icon(
+            icon,
+            contentDescription = contentDescription,
+            tint = OctoColors.TextPrimary,
+            modifier = Modifier.align(Alignment.Center).size(if (size >= 56.dp) 22.dp else 20.dp),
+        )
     }
 }

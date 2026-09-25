@@ -51,8 +51,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import app.winters.octo.R
-import app.winters.octo.design.GlassPanelDark
-import app.winters.octo.design.Glaze
+import app.winters.octo.design.FloatingGlaze
+import app.winters.octo.design.GlazeSelected
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -115,7 +115,7 @@ fun BottomBar(
         val fullTabs = maxWidth - BarHeight - Gap
         val tabsWidth = lerp(fullTabs, BarHeight, grown)
         TabBar(haze, selected, grown, playerShown, fullTabs, Modifier.width(tabsWidth), actions)
-        GlassPanelDark(
+        FloatingGlaze(
             haze,
             Modifier
                 .offset(x = tabsWidth + Gap)
@@ -154,9 +154,9 @@ fun BottomBar(
     }
 }
 
-// A dark glass panel, with the selected tab marked by a lit capsule that
-// glides between tabs. Folded, it is one circle showing the current tab,
-// which unfolds the tabs again.
+// The glaze across the whole bar, with the selected tab marked by a darker
+// pill that glides between tabs. Folded, it is one glazed circle showing the
+// current tab, which unfolds the tabs again.
 @Composable
 private fun TabBar(
     haze: HazeState,
@@ -167,7 +167,7 @@ private fun TabBar(
     modifier: Modifier,
     actions: BarActions,
 ) {
-    GlassPanelDark(
+    FloatingGlaze(
         haze,
         modifier
             .fillMaxHeight()
@@ -186,18 +186,20 @@ private fun TabBar(
             animationSpec = spring(dampingRatio = 0.8f, stiffness = 350f),
             label = "tab capsule",
         )
-        // Folding, the lit capsule slides left and swells into the whole
-        // circle, carrying the selected tab's icon, so the folded tab reads as
+        // Folding, the selected pill slides left and swells into the whole
+        // circle while it fades, carrying the tab's icon, so the folded tab is
         // the same glazed button as the one at the other end of the bar.
         val glazeX = lerp(capsuleX, 0.dp, folded)
         Box(Modifier.matchParentSize().clip(CircleShape)) {
-            // Flat: the panel under it is already frosted.
-            Glaze(
-                Modifier
-                    .align(Alignment.CenterStart)
-                    .offset { IntOffset(glazeX.roundToPx(), 0) }
-                    .size(width = capsuleWidth, height = lerp(40.dp, BarHeight, folded)),
-            )
+            if (folded < 1f) {
+                GlazeSelected(
+                    Modifier
+                        .align(Alignment.CenterStart)
+                        .offset { IntOffset(glazeX.roundToPx(), 0) }
+                        .size(width = capsuleWidth, height = lerp(40.dp, BarHeight, folded))
+                        .alpha(1f - folded),
+                )
+            }
             if (folded < 1f) {
                 // Laid out at full width and clipped, so the tabs slide under
                 // the folding edge instead of squeezing together.

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -15,7 +16,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import app.winters.octo.design.Glaze
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.PauseGlyph
@@ -24,10 +24,10 @@ import app.winters.octo.ui.common.Artwork
 
 // The face of the round button at the end of the bar: the song's artwork
 // behind a play or pause sign, with a thin ring showing how far through the
-// song it is. The bar supplies the glass around it.
+// song it is. The bar supplies the glaze around it.
 @Composable
 fun NowPlayingFace(now: NowPlaying, progress: () -> Float, size: Dp = BarHeight) {
-    Glaze(Modifier.size(size)) {
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         if (now.artwork != null) {
             Artwork(now.artwork, size - 12.dp, shape = CircleShape)
             // Darkens the picture so the sign on top stays readable.
