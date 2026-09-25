@@ -29,7 +29,11 @@ const val EXTRA_ALBUM_ORDER = "app.winters.octo.albumOrder"
 private fun artworkUri(ref: String?): Uri? = ref?.let { Uri.fromParts(ART_SCHEME, it, null) }
 
 // A song from the catalog, ready to play.
-fun TrackEntity.toMediaItem(): MediaItem =
+fun TrackEntity.toMediaItem(): MediaItem = toMediaItem(uri, mimeType)
+
+// A song from the catalog, playing from one of its copies: where that copy
+// is, and what the player will receive from it.
+fun TrackEntity.toMediaItem(uri: String?, mimeType: String?): MediaItem =
     MediaItem.Builder()
         .setMediaId(id)
         .setUri(uri)

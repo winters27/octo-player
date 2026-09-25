@@ -9,15 +9,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -27,6 +30,7 @@ import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.ui.menu.LocalSongMenu
 
@@ -83,14 +87,29 @@ fun SongCard(track: TrackEntity, onClick: () -> Unit) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Text(
-            track.artist,
-            style = OctoType.caption,
-            color = OctoColors.TextMuted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                track.artist,
+                style = OctoType.caption,
+                color = OctoColors.TextMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (!track.onPhone) CloudMark()
+        }
     }
+}
+
+// Marks a song that is not on the phone, so it streams from the server.
+@Composable
+private fun CloudMark() {
+    Icon(
+        painterResource(OctoIcons.Cloud),
+        contentDescription = "Streams from your server",
+        tint = OctoColors.TextMuted,
+        modifier = Modifier.size(14.dp),
+    )
 }
 
 // What sits at the start of a song row.
@@ -143,7 +162,10 @@ fun SongRow(
                 Text(subtitle, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        Text((track.durationMs / 1000).toInt().asClock(), style = OctoType.caption, color = OctoColors.TextMuted)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (!track.onPhone) CloudMark()
+            Text((track.durationMs / 1000).toInt().asClock(), style = OctoType.caption, color = OctoColors.TextMuted)
+        }
         trailing?.invoke()
     }
 }

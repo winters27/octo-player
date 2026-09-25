@@ -34,6 +34,9 @@ interface SourceDao {
         """,
     )
     suspend fun serverCopies(): List<ServerCopy>
+    // Every copy of many library songs at once, in no particular order.
+    @Query("SELECT * FROM source_track WHERE mergedId IN (:trackIds)")
+    suspend fun copiesOf(trackIds: List<String>): List<SourceTrackEntity>
 
     @Query("DELETE FROM source_track WHERE sourceId = :sourceId")
     suspend fun deleteTracks(sourceId: String)

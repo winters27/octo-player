@@ -149,6 +149,8 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
             if (player.crossfade) CrossfadeLength(player.crossfadeSeconds, vm::setCrossfadeSeconds)
         }
 
+        StreamingCard(Modifier.padding(top = 16.dp))
+
         Card("About", Modifier.padding(top = 16.dp)) {
             Line("Octo", BuildConfig.VERSION_NAME)
         }

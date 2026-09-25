@@ -13,13 +13,16 @@ import androidx.media3.common.ForwardingSimpleBasePlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.MediaSource
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 
 // One engine that plays audio. Crossfade runs two of these; audio focus is
-// handled above them, so each deck ignores it.
-fun buildDeck(context: Context): ExoPlayer =
-    ExoPlayer.Builder(context)
+// handled above them, so each deck ignores it. `sources` opens both phone
+// files and streams.
+@OptIn(UnstableApi::class)
+fun buildDeck(context: Context, sources: MediaSource.Factory): ExoPlayer =
+    ExoPlayer.Builder(context, sources)
         .setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)

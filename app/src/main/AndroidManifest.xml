@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Whether a stream goes over Wi-Fi or mobile data, or cannot go at all. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- The music already on the phone. -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission
