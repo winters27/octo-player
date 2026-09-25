@@ -275,13 +275,13 @@ private fun AnimatedVisibilityScope.PlayerContent(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
             ) {
-                SleepCircle(model, onClick = onOpenSleep)
                 ActionCircle(
                     icon = OctoIcons.Queue,
                     description = "Up next",
                     on = false,
                     onClick = onOpenQueue,
                 )
+                SleepCircle(model, onClick = onOpenSleep)
                 ActionCircle(
                     icon = OctoIcons.Shuffle,
                     description = "Shuffle",
