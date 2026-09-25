@@ -84,3 +84,19 @@ private fun splitGenres(value: String): List<String> {
         keptWhole.replace(piece) { kept[it.groupValues[1].toInt()] }
     }
 }
+
+// Which genre a name belongs to, so the ways of writing one genre fold
+// together. Case, spaces and punctuation are ignored ("Hip Hop", "Hip-Hop",
+// "hiphop"), "&" counts as "and", and a few genres commonly written several
+// ways share one key.
+fun genreKey(name: String): String {
+    val bare = name.lowercase().replace("&", "and").filter(Char::isLetterOrDigit)
+    return genreFamilies[bare] ?: bare
+}
+
+private val genreFamilies: Map<String, String> = listOf(
+    "hiphop" to listOf("hiphoprap", "raphiphop", "rap", "hiphopandrap", "rapandhiphop"),
+    "randb" to listOf("rnb", "rhythmandblues", "randbsoul", "rnbsoul"),
+    "electronic" to listOf("electronica", "électronique"),
+    "alternative" to listOf("alternativeandindie", "indieandalternative", "alternativeindie", "indiealternative", "alternatifetindé"),
+).flatMap { (key, names) -> names.map { it to key } }.toMap()

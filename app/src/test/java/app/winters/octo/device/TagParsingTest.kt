@@ -86,4 +86,20 @@ class TagParsingTest {
     fun genresAreTidiedAndDeduplicated() {
         assertEquals(listOf("Deep House"), parseGenres(listOf("  Deep   House ;; deep house", ";", "")))
     }
+
+    @Test
+    fun genreSpellingsShareAKey() {
+        val hipHop = listOf("Hip Hop", "Hip-Hop", "hiphop", "Hip-Hop/Rap", "Rap", "Rap & Hip-Hop")
+        assertEquals(setOf("hiphop"), hipHop.map(::genreKey).toSet())
+        assertEquals(setOf("randb"), listOf("R&B", "RnB", "Rhythm and Blues", "R&B/Soul").map(::genreKey).toSet())
+        assertEquals(genreKey("Alternative & Indie"), genreKey("Alternatif et Indé"))
+        assertEquals(genreKey("Electronic"), genreKey("Electronica"))
+        assertEquals(genreKey("Electronic"), genreKey("Électronique"))
+    }
+
+    @Test
+    fun differentGenresKeepDifferentKeys() {
+        val keys = listOf("Rock", "Pop", "Soul", "Country", "Metal", "Hip Hop", "R&B").map(::genreKey)
+        assertEquals(keys.size, keys.toSet().size)
+    }
 }
