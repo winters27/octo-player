@@ -100,6 +100,7 @@ import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.design.AccentFill
 import app.winters.octo.design.GlassSheet
 import app.winters.octo.design.GlazeInset
+import app.winters.octo.design.GlazeLightFilm
 import app.winters.octo.design.GlowIcon
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.LineSlider
@@ -445,6 +446,7 @@ private fun QualityBadge(quality: AudioQuality, modifier: Modifier) {
             .clickable(interactionSource = null, indication = null, role = Role.Button) { open = !open }
             .clearAndSetSemantics { contentDescription = "${quality.label}, ${quality.full}" },
         backdrop = LocalHaze.current,
+        film = GlazeLightFilm,
     ) {
         Row(
             Modifier.animateContentSize(spring(0.8f, 400f)).padding(horizontal = 10.dp),
@@ -574,6 +576,7 @@ private fun CloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
             .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = "Close player" },
         backdrop = LocalHaze.current,
+        film = GlazeLightFilm,
     ) {
         Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(26.dp))
     }

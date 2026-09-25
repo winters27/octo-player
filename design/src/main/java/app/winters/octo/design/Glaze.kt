@@ -61,6 +61,11 @@ fun mix(from: Color, to: Color, amount: Float) = Color(
 // glaring when it is bright.
 private val GlazeTint = Color.Black.copy(alpha = 0.16f)
 
+// The film for glass over one smooth field of colour, like the player's
+// background. With no detail behind it to blur, the dim above would read as
+// a darker patch, so this glass lifts the colour a touch instead.
+val GlazeLightFilm = Color.White.copy(alpha = 0.08f)
+
 // The darker pill that marks the chosen item inside a glaze, like the
 // selected tab: a plain shade, with none of the glaze's lighting.
 private val GlazeSelectedFill = Color.Black.copy(alpha = 0.72f)
@@ -94,6 +99,7 @@ fun Glaze(
     shape: Shape = CircleShape,
     light: GlazeLight = GlazeLight.Rest,
     backdrop: HazeState? = null,
+    film: Color = GlazeTint,
     content: @Composable BoxScope.() -> Unit = {},
 ) {
     Box(
@@ -119,7 +125,7 @@ fun Glaze(
                         Modifier
                     },
                 )
-                .background(GlazeTint)
+                .background(film)
                 .background(accent(light.lift))
                 // Light along the top edge only.
                 .innerShadow(shape, Shadow(radius = 0.dp, color = accent(light.ring), offset = DpOffset(0.dp, 1.dp)))
