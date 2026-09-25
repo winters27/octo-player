@@ -8,6 +8,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -141,6 +142,56 @@ class ClientTest {
         val url = server.takeRequest().url
         assertEquals("portishead", url.queryParameter("query"))
         listOf("artistCount", "albumCount", "songCount").forEach { assertTrue(it, url.queryParameter(it) != null) }
+    }
+
+    private fun answerOk() =
+        server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"ok","version":"1.16.1"}}""").build())
+
+    @Test
+    fun starSendsEveryId() = runTest {
+        answerOk()
+        client().star(listOf("a1", "b2", "c3"))
+        val url = server.takeRequest().url
+        assertEquals("/rest/star", url.encodedPath)
+        assertEquals(listOf("a1", "b2", "c3"), url.queryParameterValues("id"))
+        assertNotNull(url.queryParameter("t"))
+    }
+
+    @Test
+    fun unstarSendsEveryId() = runTest {
+        answerOk()
+        client().unstar(listOf("a1", "b2"))
+        val url = server.takeRequest().url
+        assertEquals("/rest/unstar", url.encodedPath)
+        assertEquals(listOf("a1", "b2"), url.queryParameterValues("id"))
+    }
+
+    @Test
+    fun scrobbleSendsTheStartAndKind() = runTest {
+        answerOk()
+        answerOk()
+        val c = client()
+        c.scrobble("p6sB", 1_790_000_000_123, submission = true)
+        c.scrobble("p6sB", 1_790_000_300_000, submission = false)
+        val played = server.takeRequest().url
+        assertEquals("/rest/scrobble", played.encodedPath)
+        assertEquals("p6sB", played.queryParameter("id"))
+        assertEquals("1790000000123", played.queryParameter("time"))
+        assertEquals("true", played.queryParameter("submission"))
+        assertEquals("false", server.takeRequest().url.queryParameter("submission"))
+    }
+
+    @Test
+    fun aRefusedStarIsAnError() = runTest {
+        answer("error70")
+        assertThrowsAsync<SubsonicException.NotFound> { client().star(listOf("missing")) }
+    }
+
+    @Test
+    fun aScrobbleToADeadServerIsUnreachable() = runTest {
+        val c = client()
+        server.close()
+        assertThrowsAsync<SubsonicException.Unreachable> { c.scrobble("p6sB", 0, submission = true) }
     }
 
     @Test

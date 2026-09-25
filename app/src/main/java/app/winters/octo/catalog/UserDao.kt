@@ -18,6 +18,9 @@ interface UserDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun like(row: LikedTrackEntity)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun likeAll(rows: List<LikedTrackEntity>)
+
     @Query("DELETE FROM liked_track WHERE trackId = :trackId")
     suspend fun unlike(trackId: String)
 
@@ -130,6 +133,27 @@ interface UserDao {
         """,
     )
     fun playedAlbums(): Flow<List<PlayedAlbum>>
+
+    // Library songs a server has a play record for, one row per server copy.
+    @Query(
+        """
+        SELECT t.*, s.nativeId AS serverId, COALESCE(s.playCount, 0) AS serverPlays, s.lastPlayedAt AS serverLastPlayedAt
+        FROM source_track s JOIN track t ON t.id = s.mergedId
+        WHERE s.sourceId LIKE 'server:%' AND (s.playCount > 0 OR s.lastPlayedAt IS NOT NULL)
+        """,
+    )
+    fun serverPlayedTracks(): Flow<List<ServerPlayedTrack>>
+
+    // Every album in the library with a song a server saw played.
+    @Query(
+        """
+        SELECT a.*, MAX(s.lastPlayedAt) AS lastPlayedAt
+        FROM source_track s JOIN track t ON t.id = s.mergedId JOIN album a ON a.id = t.albumId
+        WHERE s.sourceId LIKE 'server:%' AND s.lastPlayedAt IS NOT NULL
+        GROUP BY a.id
+        """,
+    )
+    fun serverPlayedAlbums(): Flow<List<PlayedAlbum>>
 
     // The saved queue
 

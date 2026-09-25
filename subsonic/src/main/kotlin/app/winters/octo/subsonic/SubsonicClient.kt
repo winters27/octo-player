@@ -105,6 +105,23 @@ class SubsonicClient(
     suspend fun starred(): Starred =
         get("getStarred2", key = "starred2", serializer = Starred.serializer(), default = Starred())
 
+    // Marks songs as starred for the signed-in user. Several go in one call.
+    suspend fun star(ids: List<String>) = send("star", ids.map { "id" to it })
+
+    suspend fun unstar(ids: List<String>) = send("unstar", ids.map { "id" to it })
+
+    // Tells the server a song was played (submission) or is playing now.
+    // The time is when it started, in milliseconds.
+    suspend fun scrobble(id: String, time: Long, submission: Boolean) =
+        send("scrobble", listOf("id" to id, "time" to "$time", "submission" to "$submission"))
+
+    // A call that only answers ok or an error. The params may repeat a name.
+    private suspend fun send(endpoint: String, params: List<Pair<String, String>>) {
+        val url = url(endpoint).newBuilder().apply { params.forEach { (key, value) -> addQueryParameter(key, value) } }.build()
+        val body = fetch(url, endpoint)
+        withContext(Dispatchers.Default) { decode(body, null, ServerInfo.serializer(), null) }
+    }
+
     private suspend fun <T> get(
         endpoint: String,
         params: Map<String, String> = emptyMap(),
@@ -112,8 +129,14 @@ class SubsonicClient(
         serializer: KSerializer<T>,
         default: T? = null,
     ): T {
-        val request = Request.Builder().url(url(endpoint, params)).build()
-        val body = try {
+        val body = fetch(url(endpoint, params), endpoint)
+        // Big answers (all artists is ~260 KB) must not parse on the main thread.
+        return withContext(Dispatchers.Default) { decode(body, key, serializer, default) }
+    }
+
+    private suspend fun fetch(url: HttpUrl, endpoint: String): String {
+        val request = Request.Builder().url(url).build()
+        return try {
             val response = http.newCall(request).await()
             withContext(Dispatchers.IO) {
                 response.use {
@@ -126,8 +149,6 @@ class SubsonicClient(
         } catch (e: IOException) {
             throw SubsonicException.Unreachable(e)
         }
-        // Big answers (all artists is ~260 KB) must not parse on the main thread.
-        return withContext(Dispatchers.Default) { decode(body, key, serializer, default) }
     }
 
     internal fun <T> decode(body: String, key: String?, serializer: KSerializer<T>, default: T?): T {

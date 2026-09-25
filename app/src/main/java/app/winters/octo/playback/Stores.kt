@@ -7,6 +7,7 @@ import app.winters.octo.catalog.QueueItemEntity
 import app.winters.octo.catalog.QueueStateEntity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
+import app.winters.octo.listening.ListeningSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,6 +35,7 @@ suspend fun CatalogDao.tracksByIds(ids: List<String>): List<TrackEntity> {
 class LikeStore @Inject constructor(
     private val userDao: UserDao,
     private val catalog: CatalogDao,
+    private val listening: ListeningSync,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -46,9 +48,11 @@ class LikeStore @Inject constructor(
         scope.launch {
             if (userDao.isLiked(trackId)) {
                 userDao.unlike(trackId)
+                listening.likeChanged(trackId, liked = false)
             } else {
                 val track = catalog.track(trackId) ?: return@launch
                 userDao.like(LikedTrackEntity(trackId, track.relinkKey, System.currentTimeMillis()))
+                listening.likeChanged(trackId, liked = true)
             }
         }
     }
@@ -105,8 +109,12 @@ class QueueStore @Inject constructor(private val userDao: UserDao) {
 class PlayStore @Inject constructor(
     private val userDao: UserDao,
     private val catalog: CatalogDao,
+    private val listening: ListeningSync,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // A song began to play.
+    fun started(trackId: String) = listening.nowPlaying(trackId)
 
     fun record(trackId: String, startedAt: Long, playedMs: Long, durationMs: Long) {
         if (!countsAsPlay(playedMs, durationMs)) return
@@ -114,5 +122,6 @@ class PlayStore @Inject constructor(
             val key = catalog.track(trackId)?.relinkKey ?: ""
             userDao.addPlay(PlayEventEntity(trackId = trackId, relinkKey = key, startedAt = startedAt, playedMs = playedMs, durationMs = durationMs))
         }
+        listening.played(trackId, startedAt)
     }
 }

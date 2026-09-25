@@ -26,6 +26,15 @@ interface SourceDao {
     @Query("SELECT * FROM source_track WHERE mergedId = :trackId")
     suspend fun copies(trackId: String): List<SourceTrackEntity>
 
+    // Every server copy already merged into a library song.
+    @Query(
+        """
+        SELECT mergedId AS trackId, nativeId AS serverId, lastPlayedAt
+        FROM source_track WHERE sourceId LIKE 'server:%' AND mergedId != ''
+        """,
+    )
+    suspend fun serverCopies(): List<ServerCopy>
+
     @Query("DELETE FROM source_track WHERE sourceId = :sourceId")
     suspend fun deleteTracks(sourceId: String)
 

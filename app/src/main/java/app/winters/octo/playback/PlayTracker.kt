@@ -5,7 +5,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 
 // Counts how long each song was actually heard (pauses excluded) and
-// records a play when it moves on, if enough of it was heard.
+// records a play when it moves on, if enough of it was heard. Also says when
+// each song first starts to play.
 class PlayTracker(
     private val plays: PlayStore,
     private val isPlaying: () -> Boolean,
@@ -15,9 +16,15 @@ class PlayTracker(
     private var startedAt = 0L
     private var heardMs = 0L
     private var playingSince: Long? = null
+    private var announced = false
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
-        if (isPlaying) playingSince = SystemClock.elapsedRealtime() else stopClock()
+        if (isPlaying) {
+            playingSince = SystemClock.elapsedRealtime()
+            announce()
+        } else {
+            stopClock()
+        }
     }
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -26,6 +33,15 @@ class PlayTracker(
         trackId = mediaItem?.mediaId
         durationMs = mediaItem?.mediaMetadata?.durationMs ?: 0
         startedAt = System.currentTimeMillis()
+        announced = false
+        if (isPlaying()) announce()
+    }
+
+    // Once per song, the first time it actually plays.
+    private fun announce() {
+        if (announced) return
+        announced = true
+        trackId?.let(plays::started)
     }
 
     // Records the current song if it counts, then starts over.
