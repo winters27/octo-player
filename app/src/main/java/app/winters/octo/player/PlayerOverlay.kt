@@ -262,7 +262,8 @@ private fun AnimatedVisibilityScope.PlayerContent(
             contentAlignment = Alignment.Center,
         ) {
             CloseButton(onClose, Modifier.align(Alignment.CenterStart))
-            now.album?.let {
+            val album by model.albumLabel.collectAsStateWithLifecycle()
+            album?.let {
                 Text(
                     it,
                     style = OctoType.caption,

@@ -2,6 +2,7 @@ package app.winters.octo.player
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.playback.DeviceVolume
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.PlaybackConnection
@@ -13,6 +14,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
@@ -24,12 +27,26 @@ import javax.inject.Inject
 class PlayerViewModel @Inject constructor(
     private val playback: PlaybackConnection,
     palette: ArtworkPalette,
+    catalog: CatalogDao,
     settings: PlayerSettings,
     private val deviceVolume: DeviceVolume,
     private val sleepTimer: SleepTimer,
 ) : ViewModel() {
     val now: StateFlow<NowPlaying> = playback.now
     val upNext: StateFlow<List<QueueEntry>> = playback.upNext
+
+    // The album name for the top of the player, or nothing for a single.
+    val albumLabel: StateFlow<String?> = playback.now
+        .map { Triple(it.albumId, it.album, it.title) }
+        .distinctUntilChanged()
+        .flatMapLatest { (albumId, album, title) ->
+            if (albumId == null) {
+                flowOf(null)
+            } else {
+                catalog.album(albumId).map { albumLabel(album, title, it?.songCount ?: 0) }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val prefs: StateFlow<PlayerPrefs> = settings.prefs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerPrefs())

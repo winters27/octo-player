@@ -1,0 +1,21 @@
+package app.winters.octo.player
+
+// The album name at the top of the player, or nothing when the song is a
+// single: a one-song release, or one named after the song itself, would
+// only repeat the title shown below.
+fun albumLabel(album: String?, title: String?, albumSongs: Int): String? {
+    if (album.isNullOrBlank()) return null
+    if (albumSongs <= 1) return null
+    if (album.trim().lowercase().endsWith("- single")) return null
+    if (title != null && bareName(album) == bareName(title)) return null
+    return album
+}
+
+// A name without case, bracketed extras like "(feat. someone)" or
+// "[Remastered]", or a "- Single" or "- EP" ending, for comparing a release
+// with its song.
+private fun bareName(name: String): String =
+    name.lowercase()
+        .replace(Regex("""\s*[(\[][^)\]]*[)\]]"""), "")
+        .replace(Regex("""\s*-\s*(single|ep)\s*$"""), "")
+        .trim()
