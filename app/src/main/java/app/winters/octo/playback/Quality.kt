@@ -1,9 +1,11 @@
 package app.winters.octo.playback
 
+import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Tracks
+import androidx.media3.common.util.UnstableApi
 
 // How a song is encoded, for the badge under the progress line.
 data class AudioQuality(
@@ -27,6 +29,7 @@ data class AudioQuality(
 
 // Uses what the decoder reports once the song is open, and the file type
 // before then.
+@OptIn(UnstableApi::class)
 fun audioQuality(fileMime: String?, tracks: Tracks): AudioQuality? {
     val format = tracks.groups
         .firstOrNull { it.type == C.TRACK_TYPE_AUDIO && it.isSelected }
@@ -40,6 +43,7 @@ fun audioQuality(fileMime: String?, tracks: Tracks): AudioQuality? {
     )
 }
 
+@OptIn(UnstableApi::class)
 internal fun audioQuality(
     codecMime: String?,
     fileMime: String?,
@@ -59,6 +63,7 @@ internal fun audioQuality(
 
 private val Lossless = setOf("FLAC", "ALAC", "WAV")
 
+@OptIn(UnstableApi::class)
 private fun codecName(mime: String?): String? = when (mime?.lowercase()) {
     null -> null
     MimeTypes.AUDIO_FLAC, "audio/x-flac" -> "FLAC"
@@ -72,6 +77,7 @@ private fun codecName(mime: String?): String? = when (mime?.lowercase()) {
     else -> null
 }
 
+@OptIn(UnstableApi::class)
 private fun bitDepth(encoding: Int): Int? = when (encoding) {
     C.ENCODING_PCM_8BIT -> 8
     C.ENCODING_PCM_16BIT, C.ENCODING_PCM_16BIT_BIG_ENDIAN -> 16
