@@ -1,0 +1,6 @@
+<resources>
+    <!-- Dark window behind the first frame, so launch never flashes. -->
+    <style name="Theme.Octo" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/octo_background</item>
+    </style>
+</resources>
