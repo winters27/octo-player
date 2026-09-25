@@ -36,6 +36,8 @@ data class TrackEntity(
     @ColumnInfo(defaultValue = "0") val albumOrder: Int = 0,
     // Who, what and how long: finds this song again if its id changes.
     @ColumnInfo(defaultValue = "") val relinkKey: String = "",
+    // The song's main genre, or empty when it has none.
+    @ColumnInfo(defaultValue = "") val genre: String = "",
 )
 
 @Entity(
@@ -88,4 +90,13 @@ data class FileTagsEntity(
     val year: Int?,
     val compilation: Boolean,
     val mbAlbumId: String?,
+    // Every genre the file names, one per line, main one first.
+    @ColumnInfo(defaultValue = "") val genres: String = "",
+    // Which way of reading tags wrote this row; rows from an older one are
+    // read again, so what it adds reaches files already seen.
+    @ColumnInfo(defaultValue = "0") val tagsVersion: Int = 0,
 )
+
+// A genre on the Genres page: its name, how many songs, and a cover from
+// one of its albums.
+data class GenreSummary(val name: String, val songCount: Int, val artwork: String?)

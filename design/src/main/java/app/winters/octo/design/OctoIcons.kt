@@ -23,5 +23,6 @@ object OctoIcons {
     val Album = R.drawable.sym_album
     val Artist = R.drawable.sym_person
     val Songs = R.drawable.sym_music_note
+    val Genres = R.drawable.sym_genres
     val Chevron = R.drawable.sym_chevron_right
 }
