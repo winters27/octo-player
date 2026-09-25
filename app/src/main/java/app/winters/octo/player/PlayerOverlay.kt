@@ -113,6 +113,7 @@ import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.SleepState
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.menu.LocalSongMenu
 import app.winters.octo.ui.common.asClock
 import coil3.compose.AsyncImage
 import dev.chrisbanes.haze.hazeSource
@@ -291,7 +292,10 @@ private fun AnimatedVisibilityScope.PlayerContent(
                 exit = ExitTransition.None,
             ),
         ) {
-            TitleBlock(now, onOpenArtist)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { TitleBlock(now, onOpenArtist) }
+                SongButtons(now, model)
+            }
             Spacer(Modifier.height(12.dp))
             Progress(now, model)
             Spacer(Modifier.height(12.dp))
@@ -394,6 +398,40 @@ private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit) {
                 ) { song.artistId?.let(onOpenArtist) },
             )
         }
+    }
+}
+
+// Beside the song: a heart for Liked songs, glowing while it is in them,
+// and the song's menu.
+@Composable
+private fun SongButtons(now: NowPlaying, model: PlayerViewModel) {
+    val liked by model.liked.collectAsStateWithLifecycle()
+    val menu = LocalSongMenu.current
+    Box(
+        Modifier
+            .size(44.dp)
+            .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = model::toggleLike)
+            .semantics {
+                contentDescription = "Like"
+                stateDescription = if (liked) "In Liked songs" else "Not in Liked songs"
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        GlowIcon(
+            painterResource(if (liked) OctoIcons.Liked else OctoIcons.Like),
+            tint = if (liked) Color.White else Color.White.copy(alpha = 0.6f),
+            lit = liked,
+            modifier = Modifier.size(24.dp),
+        )
+    }
+    Box(
+        Modifier
+            .size(44.dp)
+            .clickable(interactionSource = null, indication = null, role = Role.Button) { now.trackId?.let(menu::open) }
+            .semantics { contentDescription = "More" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(painterResource(OctoIcons.More), contentDescription = null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(24.dp))
     }
 }
 

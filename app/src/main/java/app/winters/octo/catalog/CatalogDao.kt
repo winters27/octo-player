@@ -31,6 +31,9 @@ interface CatalogDao {
     fun album(id: String): Flow<AlbumEntity?>
 
     @Query("SELECT * FROM track WHERE id = :id")
+    fun trackFlow(id: String): Flow<TrackEntity?>
+
+    @Query("SELECT * FROM track WHERE id = :id")
     suspend fun track(id: String): TrackEntity?
 
     @Query("SELECT * FROM track WHERE id IN (:ids)")

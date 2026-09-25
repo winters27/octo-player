@@ -1,6 +1,7 @@
 package app.winters.octo.ui.common
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,6 +16,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -25,6 +28,7 @@ import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
+import app.winters.octo.ui.menu.LocalSongMenu
 
 // An album as a picture with its name and artist under it. No card
 // outline: the picture carries the edge.
@@ -67,10 +71,19 @@ fun SongRow(
     subtitle: String? = "${track.artist} • ${track.album}",
     onClick: (() -> Unit)? = null,
 ) {
+    val menu = LocalSongMenu.current
+    val haptics = LocalHapticFeedback.current
     Row(
         Modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            // A tap plays; a long press opens the song's menu.
+            .combinedClickable(
+                onClick = { onClick?.invoke() },
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    menu.open(track.id)
+                },
+            )
             .height(56.dp)
             .padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically,

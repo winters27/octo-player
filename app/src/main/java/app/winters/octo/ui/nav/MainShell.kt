@@ -18,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,6 +41,9 @@ import app.winters.octo.ui.artist.ArtistScreen
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.home.HomeScreen
 import app.winters.octo.ui.library.LibraryScreen
+import app.winters.octo.ui.menu.LocalSongMenu
+import app.winters.octo.ui.menu.SongMenuHost
+import app.winters.octo.ui.menu.SongMenuState
 import app.winters.octo.ui.search.SearchScreen
 import app.winters.octo.ui.settings.SettingsScreen
 import dev.chrisbanes.haze.hazeSource
@@ -98,7 +102,14 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
         onPauseOrDispose { }
     }
 
-    CompositionLocalProvider(LocalHaze provides haze) {
+    val songMenu = remember { SongMenuState() }
+    // Going to a page from the song menu also closes the player.
+    val openFromMenu: (NavKey) -> Unit = { key ->
+        playerOpen = false
+        stack.add(key)
+    }
+
+    CompositionLocalProvider(LocalHaze provides haze, LocalSongMenu provides songMenu) {
         SharedTransitionLayout {
             Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
                 NavDisplay(
@@ -159,6 +170,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                         },
                     )
                 }
+                SongMenuHost(songMenu, onOpen = openFromMenu)
             }
         }
     }

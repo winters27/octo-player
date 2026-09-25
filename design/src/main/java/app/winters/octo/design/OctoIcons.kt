@@ -15,4 +15,11 @@ object OctoIcons {
     val VolumeDown = R.drawable.sym_volume_down
     val VolumeUp = R.drawable.sym_volume_up
     val Lossless = R.drawable.sym_graphic_eq
+    val Like = R.drawable.sym_favorite
+    val Liked = R.drawable.sym_favorite_filled
+    val More = R.drawable.sym_more_horiz
+    val PlayNext = R.drawable.sym_queue_play_next
+    val AddToQueue = R.drawable.sym_add_to_queue
+    val Album = R.drawable.sym_album
+    val Artist = R.drawable.sym_person
 }

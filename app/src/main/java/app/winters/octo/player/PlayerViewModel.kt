@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.playback.DeviceVolume
+import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.QueueEntry
@@ -13,6 +14,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -27,6 +29,7 @@ import javax.inject.Inject
 class PlayerViewModel @Inject constructor(
     private val playback: PlaybackConnection,
     palette: ArtworkPalette,
+    private val likes: LikeStore,
     catalog: CatalogDao,
     settings: PlayerSettings,
     private val deviceVolume: DeviceVolume,
@@ -47,6 +50,14 @@ class PlayerViewModel @Inject constructor(
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // Whether the song on now is in Liked songs.
+    val liked: StateFlow<Boolean> = combine(playback.now, likes.liked) { now, liked -> now.trackId in liked }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun toggleLike() {
+        playback.now.value.trackId?.let(likes::toggle)
+    }
 
     val prefs: StateFlow<PlayerPrefs> = settings.prefs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerPrefs())
