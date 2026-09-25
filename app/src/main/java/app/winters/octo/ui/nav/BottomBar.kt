@@ -180,7 +180,7 @@ private fun TabBar(
             ),
     ) {
         val column = (fullWidth - 12.dp) / tabs.size
-        val capsuleWidth = 68.dp
+        val capsuleWidth = 62.dp
         val capsuleX by animateDpAsState(
             targetValue = 6.dp + column * selected + (column - capsuleWidth) / 2,
             animationSpec = spring(dampingRatio = 0.8f, stiffness = 350f),
@@ -198,7 +198,7 @@ private fun TabBar(
                     Modifier
                         .align(Alignment.CenterStart)
                         .offset { IntOffset(glazeX.roundToPx(), 0) }
-                        .size(width = pillWidth, height = lerp(46.dp, BarHeight, folded))
+                        .size(width = pillWidth, height = lerp(44.dp, BarHeight, folded))
                         .alpha(1f - folded),
                 )
             }
