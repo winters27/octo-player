@@ -48,6 +48,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.GlassPanelDark
+import app.winters.octo.design.GlazedIconButton
 import app.winters.octo.design.OctoColors
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
@@ -106,17 +107,13 @@ fun AppShell() {
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             TabBar(haze, selected, Modifier.weight(1f)) { selected = it }
-            // Same materials as a selected tab: the bar's dark glass, lit by
-            // the glaze. The glaze fills the whole circle, so it is one surface.
-            GlassPanelDark(haze, Modifier.size(BarHeight)) {
-                Glaze(Modifier.matchParentSize()) {
-                    Icon(
-                        Icons.Rounded.PlayArrow,
-                        contentDescription = stringResource(R.string.now_playing),
-                        tint = OctoColors.TextPrimary,
-                    )
-                }
-            }
+            GlazedIconButton(
+                backdrop = haze,
+                icon = Icons.Rounded.PlayArrow,
+                contentDescription = stringResource(R.string.now_playing),
+                onClick = {},
+                size = BarHeight,
+            )
         }
     }
 }

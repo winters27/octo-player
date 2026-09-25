@@ -49,7 +49,7 @@ class GlazeLight(
 }
 
 // Mixes two colours channel by channel, the way a stylesheet does.
-private fun mix(from: Color, to: Color, amount: Float) = Color(
+fun mix(from: Color, to: Color, amount: Float) = Color(
     red = from.red + (to.red - from.red) * amount,
     green = from.green + (to.green - from.green) * amount,
     blue = from.blue + (to.blue - from.blue) * amount,
