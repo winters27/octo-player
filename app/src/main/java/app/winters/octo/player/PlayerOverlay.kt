@@ -12,6 +12,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateInt
@@ -19,6 +20,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
@@ -29,6 +32,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.verticalDrag
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -156,19 +160,20 @@ fun AnimatedVisibilityScope.PlayerOverlay(
                     clip = pull > 0f
                 }
                 .pointerInput(Unit) {
-                    val zone = 140.dp.toPx()
                     val threshold = 96.dp.toPx()
                     val fling = 1_200.dp.toPx()
                     awaitEachGesture {
+                        // A pull down from anywhere closes the player. The sliders
+                        // keep their sideways drags: whichever way the finger
+                        // clearly moves first wins, and only downward counts here.
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        // Only a pull that starts near the top closes the player, so
-                        // the slider and buttons below keep their own gestures.
-                        if (down.position.y > zone) return@awaitEachGesture
                         val tracker = VelocityTracker()
                         tracker.addPosition(down.uptimeMillis, down.position)
                         val start = awaitVerticalTouchSlopOrCancellation(down.id) { change, over ->
-                            change.consume()
-                            pull = (over * 0.82f).coerceIn(0f, cap)
+                            if (over > 0f) {
+                                change.consume()
+                                pull = (over * 0.82f).coerceIn(0f, cap)
+                            }
                         } ?: return@awaitEachGesture
                         verticalDrag(start.id) { change ->
                             tracker.addPosition(change.uptimeMillis, change.position)
@@ -461,14 +466,14 @@ private fun Transport(now: NowPlaying, model: PlayerViewModel) {
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TransportButton(OctoIcons.Previous, "Previous", 44.dp, model::previous)
+        TransportButton(OctoIcons.Previous, "Previous", 44.dp, model::previous, nudge = (-8).dp)
         TransportButton(
             if (now.isPlaying) OctoIcons.Pause else OctoIcons.Play,
             if (now.isPlaying) "Pause" else "Play",
             56.dp,
             model::togglePlayPause,
         )
-        TransportButton(OctoIcons.Next, "Next", 44.dp, model::next)
+        TransportButton(OctoIcons.Next, "Next", 44.dp, model::next, nudge = 8.dp)
     }
 }
 
@@ -493,21 +498,58 @@ private fun Volume(model: PlayerViewModel) {
     }
 }
 
+// A play control that answers the finger: it gives a little under a press
+// and springs back, back and next nudge the way they go, and play and pause
+// pop from one to the other.
 @Composable
-private fun TransportButton(@DrawableRes icon: Int, description: String, iconSize: Dp, onClick: () -> Unit) {
+private fun TransportButton(
+    @DrawableRes icon: Int,
+    description: String,
+    iconSize: Dp,
+    onClick: () -> Unit,
+    nudge: Dp = 0.dp,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val press by animateFloatAsState(if (pressed) 0.82f else 1f, spring(0.45f, 600f), label = "press")
+    val shift = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
     Box(
         Modifier
             .size(72.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                role = Role.Button,
-                onClick = onClick,
-            )
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button) {
+                onClick()
+                if (nudge != 0.dp) {
+                    scope.launch {
+                        shift.animateTo(1f, tween(90))
+                        shift.animateTo(0f, spring(0.5f, 400f))
+                    }
+                }
+            }
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(icon), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(iconSize))
+        AnimatedContent(
+            targetState = icon,
+            transitionSpec = {
+                (fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.6f)) togetherWith
+                    (fadeOut(tween(100)) + scaleOut(tween(100), targetScale = 0.6f))
+            },
+            label = "transport icon",
+        ) { shown ->
+            Icon(
+                painterResource(shown),
+                contentDescription = null,
+                tint = OctoColors.TextPrimary,
+                modifier = Modifier
+                    .size(iconSize)
+                    .graphicsLayer {
+                        scaleX = press
+                        scaleY = press
+                        translationX = shift.value * nudge.toPx()
+                    },
+            )
+        }
     }
 }
 
