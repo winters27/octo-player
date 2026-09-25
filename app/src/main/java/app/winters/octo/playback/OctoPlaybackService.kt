@@ -6,6 +6,7 @@ import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSourceBitmapLoader
@@ -20,7 +21,6 @@ import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import app.winters.octo.MainActivity
-import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.player.PlayerSettings
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
@@ -57,7 +57,8 @@ private val carApps = setOf(
 @OptIn(UnstableApi::class)
 @AndroidEntryPoint
 class OctoPlaybackService : MediaLibraryService() {
-    @Inject lateinit var catalog: CatalogDao
+    @Inject lateinit var playable: PlayableSongs
+    @Inject lateinit var streams: Streams
     @Inject lateinit var likes: LikeStore
     @Inject lateinit var queue: QueueStore
     @Inject lateinit var plays: PlayStore
@@ -78,7 +79,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @kotlin.OptIn(FlowPreview::class)
     override fun onCreate() {
         super.onCreate()
-        player = OctoPlayer(this, buildDeck(this), buildDeck(this))
+        player = OctoPlayer(this, buildDeck(this, streams.mediaSourceFactory()), buildDeck(this, streams.mediaSourceFactory()))
         tracker = PlayTracker(plays) { player.isPlaying }
         player.addListener(tracker)
         player.addListener(Watcher())
@@ -141,14 +142,14 @@ class OctoPlaybackService : MediaLibraryService() {
     // Brings back the queue from last time, paused where it was left.
     private suspend fun restoreQueue() {
         val saved = queue.load() ?: return
-        val tracks = catalog.tracksByIds(saved.trackIds)
-        if (tracks.isEmpty() || player.mediaItemCount > 0) return
-        val complete = tracks.size == saved.trackIds.size
-        val index = tracks.indexOfFirst { it.id == saved.trackIds[saved.index] }.takeIf { it >= 0 } ?: 0
-        player.setMediaItems(tracks.map { it.toMediaItem() }, index, if (index >= 0) saved.positionMs else 0)
+        val items = playable.items(saved.trackIds)
+        if (items.isEmpty() || player.mediaItemCount > 0) return
+        val complete = items.size == saved.trackIds.size
+        val index = items.indexOfFirst { it.mediaId == saved.trackIds[saved.index] }.takeIf { it >= 0 } ?: 0
+        player.setMediaItems(items, index, if (index >= 0) saved.positionMs else 0)
         player.repeatMode = saved.repeatMode
         // The saved shuffle order only fits if every song is still here.
-        if (complete && saved.shuffleOrder.size == tracks.size) {
+        if (complete && saved.shuffleOrder.size == items.size) {
             player.deck.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(saved.shuffleOrder.toIntArray(), System.nanoTime()))
         }
         player.shuffleModeEnabled = saved.shuffle
@@ -172,13 +173,32 @@ class OctoPlaybackService : MediaLibraryService() {
     }
 
     // Turns song ids into playable songs, in order, skipping any that are gone.
-    private suspend fun resolve(items: List<MediaItem>): List<MediaItem> =
-        catalog.tracksByIds(items.map { it.mediaId }).map { it.toMediaItem() }
+    private suspend fun resolve(items: List<MediaItem>): List<MediaItem> = playable.items(items.map { it.mediaId })
 
     private inner class Watcher : Player.Listener {
+        // Songs that failed one after another, back to 0 once one plays.
+        private var failedInARow = 0
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             currentId.value = mediaItem?.mediaId
             saveQueue()
+        }
+
+        // While music plays, a song that cannot, like a stream with no
+        // connection or a file that is gone, is skipped instead of stopping
+        // the music. Once every song in the queue has failed, it stops.
+        override fun onPlayerError(error: PlaybackException) {
+            if (!player.playWhenReady) return
+            failedInARow++
+            if (failedInARow >= player.mediaItemCount || !player.hasNextMediaItem()) return
+            scope.launch {
+                player.seekToNextMediaItem()
+                player.prepare()
+            }
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_READY) failedInARow = 0
         }
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
@@ -241,7 +261,7 @@ class OctoPlaybackService : MediaLibraryService() {
         ): ListenableFuture<MutableList<MediaItem>> = scope.future {
             // An album or playlist chosen in a car adds all its songs.
             val ids = mediaItems.flatMap { car.playFor(it.mediaId)?.first ?: listOf(it.mediaId) }
-            catalog.tracksByIds(ids).map { it.toMediaItem() }.toMutableList()
+            playable.items(ids).toMutableList()
         }
 
         override fun onSetMediaItems(
@@ -255,14 +275,14 @@ class OctoPlaybackService : MediaLibraryService() {
             // Something said out loud, like "play Drake on Octo".
             single?.requestMetadata?.searchQuery?.let { query ->
                 val (ids, shuffle) = car.forVoice(query)
-                val songs = catalog.tracksByIds(ids).map { it.toMediaItem() }
+                val songs = playable.items(ids)
                 player.shuffleModeEnabled = shuffle
                 val first = if (shuffle && songs.isNotEmpty()) songs.indices.random() else 0
                 return@future MediaItemsWithStartPosition(songs, first, 0)
             }
             // An album, playlist, or a song inside one, chosen in a car.
             single?.let { car.playFor(it.mediaId) }?.let { (ids, start) ->
-                val songs = catalog.tracksByIds(ids).map { it.toMediaItem() }
+                val songs = playable.items(ids)
                 val index = startIndex(songs.map { it.mediaId }, ids.getOrNull(start))
                 return@future MediaItemsWithStartPosition(songs, index, 0)
             }
@@ -279,7 +299,7 @@ class OctoPlaybackService : MediaLibraryService() {
             isForPlayback: Boolean,
         ): ListenableFuture<MediaItemsWithStartPosition> = scope.future {
             val saved = queue.load() ?: throw UnsupportedOperationException("Nothing to resume")
-            val items = catalog.tracksByIds(saved.trackIds).map { it.toMediaItem() }
+            val items = playable.items(saved.trackIds)
             if (items.isEmpty()) throw UnsupportedOperationException("Nothing to resume")
             val index = items.indexOfFirst { it.mediaId == saved.trackIds.getOrNull(saved.index) }.coerceAtLeast(0)
             if (isForPlayback) {

@@ -145,6 +145,8 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
             if (player.crossfade) CrossfadeLength(player.crossfadeSeconds, vm::setCrossfadeSeconds)
         }
 
+        StreamingCard(Modifier.padding(top = 16.dp))
+
         Card("About", Modifier.padding(top = 16.dp)) {
             Line("Octo", BuildConfig.VERSION_NAME)
         }
@@ -152,7 +154,7 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
 }
 
 @Composable
-private fun Card(title: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+internal fun Card(title: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Column(
         modifier
             .padding(horizontal = 20.dp)

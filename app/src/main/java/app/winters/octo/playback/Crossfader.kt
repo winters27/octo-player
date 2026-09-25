@@ -94,7 +94,7 @@ internal class Crossfader(private val player: OctoPlayer, private var spare: Exo
             schedule(FAR_CHECK_MS)
             return
         }
-        val remaining = deck.duration - deck.currentPosition
+        val remaining = lengthOf(deck) - deck.currentPosition
         if (loadedFor != next && remaining <= length + LOAD_AHEAD_MS) load(next)
         if (loadedFor == next && remaining <= length && spare.playbackState == Player.STATE_READY) {
             // Late (after a seek near the end, say): blend over what is left.
@@ -112,15 +112,19 @@ internal class Crossfader(private val player: OctoPlayer, private var spare: Exo
     private fun blendLength(deck: ExoPlayer, next: Int): Long {
         if (next == C.INDEX_UNSET) return 0
         val current = deck.currentMediaItem ?: return 0
-        val duration = deck.duration.takeIf { it != C.TIME_UNSET } ?: 0
         return crossfadeLength(
-            current = current.fadeSong(duration),
+            current = current.fadeSong(lengthOf(deck)),
             next = deck.getMediaItemAt(next).let { it.fadeSong(it.mediaMetadata.durationMs ?: 0) },
             fadeMs = fadeMs,
             repeatOne = deck.repeatMode == Player.REPEAT_MODE_ONE,
             stopAtEndOfSong = deck.pauseAtEndOfMediaItems,
         )
     }
+
+    // How long the song is: what the deck measured, or the library's length
+    // for a stream that has not said.
+    private fun lengthOf(deck: ExoPlayer): Long =
+        deck.duration.takeIf { it != C.TIME_UNSET } ?: deck.currentMediaItem?.mediaMetadata?.durationMs ?: 0
 
     // The spare gets the same songs in the same shuffle order, parked
     // silently at the start of the next song.

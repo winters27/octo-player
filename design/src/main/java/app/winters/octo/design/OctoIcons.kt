@@ -29,4 +29,6 @@ object OctoIcons {
     val Genres = R.drawable.sym_genres
     val Playlists = R.drawable.sym_queue_music
     val Chevron = R.drawable.sym_chevron_right
+    val Cloud = R.drawable.sym_cloud
+    val Check = R.drawable.sym_check
 }

@@ -38,6 +38,9 @@ import app.winters.octo.player.PlayerArtCorner
 import app.winters.octo.player.PlayerOverlay
 import app.winters.octo.ui.album.AlbumScreen
 import app.winters.octo.ui.artist.ArtistScreen
+import app.winters.octo.ui.common.ChoiceSheet
+import app.winters.octo.ui.common.ChoiceSheetHost
+import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.genre.GenreScreen
 import app.winters.octo.ui.genre.GenresScreen
@@ -115,6 +118,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
 
     val songMenu = remember { SongMenuState() }
     val playlistSheets = remember { PlaylistSheets() }
+    val choiceSheet = remember { ChoiceSheet() }
     // Going to a page from the song menu also closes the player.
     val openFromMenu: (NavKey) -> Unit = { key ->
         playerOpen = false
@@ -125,6 +129,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
         LocalHaze provides haze,
         LocalSongMenu provides songMenu,
         LocalPlaylistSheets provides playlistSheets,
+        LocalChoiceSheet provides choiceSheet,
     ) {
         SharedTransitionLayout {
             Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
@@ -196,6 +201,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                 }
                 SongMenuHost(songMenu, onOpen = openFromMenu)
                 PlaylistSheetsHost(playlistSheets)
+                ChoiceSheetHost(choiceSheet)
             }
         }
     }
