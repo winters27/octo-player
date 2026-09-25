@@ -4,6 +4,7 @@ import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.relinkKey
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.catalog.sortKey
 import java.security.MessageDigest
@@ -70,6 +71,7 @@ fun buildDeviceCatalog(rows: List<DeviceRow>): DeviceCatalog {
                 artwork = artwork,
                 uri = row.uri,
                 albumOrder = index,
+                relinkKey = relinkKey(artist, title, row.disc, number, trackTitle, row.durationMs),
             )
         }
 

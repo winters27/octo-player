@@ -30,6 +30,18 @@ interface CatalogDao {
     @Query("SELECT * FROM album WHERE id = :id")
     fun album(id: String): Flow<AlbumEntity?>
 
+    @Query("SELECT * FROM track WHERE id = :id")
+    suspend fun track(id: String): TrackEntity?
+
+    @Query("SELECT * FROM track WHERE id IN (:ids)")
+    suspend fun tracksByIdsUnordered(ids: List<String>): List<TrackEntity>
+
+    @Query("SELECT id FROM track WHERE albumId = :albumId ORDER BY albumOrder")
+    suspend fun albumTrackIds(albumId: String): List<String>
+
+    @Query("SELECT id FROM track ORDER BY sortKey")
+    suspend fun allTrackIds(): List<String>
+
     @Query("SELECT * FROM track WHERE albumId = :albumId ORDER BY albumOrder")
     fun albumTracks(albumId: String): Flow<List<TrackEntity>>
 

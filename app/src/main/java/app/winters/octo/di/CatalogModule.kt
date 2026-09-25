@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.CatalogDatabase
+import app.winters.octo.catalog.UserDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -21,4 +22,7 @@ object CatalogModule {
 
     @Provides
     fun dao(db: CatalogDatabase): CatalogDao = db.dao()
+
+    @Provides
+    fun userDao(db: CatalogDatabase): UserDao = db.userDao()
 }

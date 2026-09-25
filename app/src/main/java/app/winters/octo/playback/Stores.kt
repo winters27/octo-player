@@ -1,0 +1,118 @@
+package app.winters.octo.playback
+
+import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.LikedTrackEntity
+import app.winters.octo.catalog.PlayEventEntity
+import app.winters.octo.catalog.QueueItemEntity
+import app.winters.octo.catalog.QueueStateEntity
+import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.UserDao
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+import javax.inject.Singleton
+
+// A play only counts once enough of the song was heard: half of it or four
+// minutes, whichever comes first, and never for clips under 30 seconds.
+fun countsAsPlay(playedMs: Long, durationMs: Long): Boolean =
+    durationMs >= 30_000 && playedMs >= minOf(durationMs / 2, 240_000)
+
+// Looks up songs by id, keeping the order asked for and dropping any the
+// catalog no longer has. SQLite limits how many ids fit in one query.
+suspend fun CatalogDao.tracksByIds(ids: List<String>): List<TrackEntity> {
+    val found = ids.distinct().chunked(900).flatMap { tracksByIdsUnordered(it) }.associateBy { it.id }
+    return ids.mapNotNull { found[it] }
+}
+
+@Singleton
+class LikeStore @Inject constructor(
+    private val userDao: UserDao,
+    private val catalog: CatalogDao,
+) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    val liked: StateFlow<Set<String>> =
+        userDao.likedIds().map { it.toSet() }.stateIn(scope, SharingStarted.Eagerly, emptySet())
+
+    fun isLiked(trackId: String) = trackId in liked.value
+
+    fun toggle(trackId: String) {
+        scope.launch {
+            if (userDao.isLiked(trackId)) {
+                userDao.unlike(trackId)
+            } else {
+                val track = catalog.track(trackId) ?: return@launch
+                userDao.like(LikedTrackEntity(trackId, track.relinkKey, System.currentTimeMillis()))
+            }
+        }
+    }
+}
+
+// The queue as saved: songs in play order, where playback was, and the
+// shuffle order so shuffle picks up exactly where it left off.
+data class QueueSnapshot(
+    val trackIds: List<String>,
+    // Play-order positions visited in shuffle order; empty when unknown.
+    val shuffleOrder: List<Int>,
+    val index: Int,
+    val positionMs: Long,
+    val repeatMode: Int,
+    val shuffle: Boolean,
+)
+
+fun QueueSnapshot.toRows(now: Long): Pair<List<QueueItemEntity>, QueueStateEntity> {
+    val shuffledAt = IntArray(trackIds.size) { it }
+    if (shuffleOrder.size == trackIds.size) shuffleOrder.forEachIndexed { rank, position -> shuffledAt[position] = rank }
+    val items = trackIds.mapIndexed { position, id -> QueueItemEntity(position, id, shuffledAt[position]) }
+    return items to QueueStateEntity(0, index, positionMs, repeatMode, shuffle, now)
+}
+
+fun queueFromRows(items: List<QueueItemEntity>, state: QueueStateEntity?): QueueSnapshot? {
+    if (items.isEmpty() || state == null) return null
+    val ordered = items.sortedBy { it.position }
+    return QueueSnapshot(
+        trackIds = ordered.map { it.trackId },
+        shuffleOrder = ordered.sortedBy { it.shuffledPosition }.map { it.position },
+        index = state.currentIndex.coerceIn(0, ordered.lastIndex),
+        positionMs = state.positionMs.coerceAtLeast(0),
+        repeatMode = state.repeatMode,
+        shuffle = state.shuffle,
+    )
+}
+
+@Singleton
+class QueueStore @Inject constructor(private val userDao: UserDao) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // Saving runs on its own scope so it finishes even while the service stops.
+    fun save(snapshot: QueueSnapshot) {
+        scope.launch {
+            val (items, state) = snapshot.toRows(System.currentTimeMillis())
+            userDao.saveQueue(items, state)
+        }
+    }
+
+    suspend fun load(): QueueSnapshot? = queueFromRows(userDao.queueItems(), userDao.queueState())
+}
+
+@Singleton
+class PlayStore @Inject constructor(
+    private val userDao: UserDao,
+    private val catalog: CatalogDao,
+) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    fun record(trackId: String, startedAt: Long, playedMs: Long, durationMs: Long) {
+        if (!countsAsPlay(playedMs, durationMs)) return
+        scope.launch {
+            val key = catalog.track(trackId)?.relinkKey ?: ""
+            userDao.addPlay(PlayEventEntity(trackId = trackId, relinkKey = key, startedAt = startedAt, playedMs = playedMs, durationMs = durationMs))
+        }
+    }
+}

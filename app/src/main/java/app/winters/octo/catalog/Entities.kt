@@ -9,7 +9,7 @@ import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "track",
-    indices = [Index("albumId"), Index("artistId"), Index("sourceId"), Index("sortKey"), Index("searchKey")],
+    indices = [Index("albumId"), Index("artistId"), Index("sourceId"), Index("sortKey"), Index("searchKey"), Index("relinkKey")],
 )
 data class TrackEntity(
     @PrimaryKey val id: String,
@@ -34,6 +34,8 @@ data class TrackEntity(
     val uri: String?,
     // Position within its album, worked out once when the catalog is built.
     @ColumnInfo(defaultValue = "0") val albumOrder: Int = 0,
+    // Who, what and how long: finds this song again if its id changes.
+    @ColumnInfo(defaultValue = "") val relinkKey: String = "",
 )
 
 @Entity(

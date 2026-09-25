@@ -14,6 +14,7 @@ import android.os.SystemClock
 import androidx.core.net.toUri
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.FileTagsEntity
+import app.winters.octo.catalog.UserDao
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -50,6 +51,7 @@ class DeviceLibrary @Inject constructor(
     private val reader: TagReader,
     private val dao: CatalogDao,
     private val rules: FolderRules,
+    private val userDao: UserDao,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val scanLock = Mutex()
@@ -127,6 +129,8 @@ class DeviceLibrary @Inject constructor(
                 _folders.value = files.folders(excluded)
                 val catalog = buildDeviceCatalog(files.withoutFolders(excluded).map { it.toRow(tags[it.id]) })
                 dao.replaceSource(DEVICE, catalog.tracks, catalog.albums, catalog.artists)
+                // Likes, plays and playlists follow songs whose ids changed.
+                userDao.relinkAll()
                 // Counts only, so the library can be checked against the phone.
                 Log.i(
                     "Octo",
