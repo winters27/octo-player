@@ -40,6 +40,11 @@ data class SourceTrackEntity(
     val bitrate: Int? = null,
     val sampleRate: Int? = null,
     val bitDepth: Int? = null,
+    // A server's own listening record for this copy: how often and when it
+    // was last played, and when it was starred, if it was.
+    val playCount: Int? = null,
+    val lastPlayedAt: Long? = null,
+    val starredAt: Long? = null,
     // The library song this copy was merged into.
     @ColumnInfo(defaultValue = "") val mergedId: String = "",
 )
