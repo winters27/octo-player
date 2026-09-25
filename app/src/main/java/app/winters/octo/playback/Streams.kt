@@ -90,21 +90,27 @@ class Streams @Inject constructor(
     private fun quality(prefs: StreamPrefs): StreamQuality = if (onMobileData()) prefs.mobile else prefs.wifi
 
     // Where the queue keeps a server copy.
-    fun uriFor(copy: SourceTrackEntity): String =
+    fun uriFor(copy: SourceTrackEntity): String = uriFor(copy.nativeId, copy.mimeType, bitrateOf(copy))
+
+    // Where the queue keeps any server song, by its id on the server, its
+    // type and its bits a second.
+    fun uriFor(serverId: String, mimeType: String?, bitrate: Int?): String =
         Uri.Builder()
             .scheme(STREAM_SCHEME)
             .authority("song")
-            .appendPath(copy.nativeId)
+            .appendPath(serverId)
             .apply {
-                copy.mimeType?.let { appendQueryParameter("mime", it) }
-                bitrateOf(copy)?.let { appendQueryParameter("bitrate", "$it") }
+                mimeType?.let { appendQueryParameter("mime", it) }
+                bitrate?.let { appendQueryParameter("bitrate", "$it") }
             }
             .build()
             .toString()
 
     // What the player will receive for a server copy on this connection.
-    fun mimeTypeFor(copy: SourceTrackEntity, prefs: StreamPrefs): String? =
-        streamRequest(copy.mimeType, bitrateOf(copy), quality(prefs)).mimeType(copy.mimeType)
+    fun mimeTypeFor(copy: SourceTrackEntity, prefs: StreamPrefs): String? = mimeTypeFor(copy.mimeType, bitrateOf(copy), prefs)
+
+    fun mimeTypeFor(mimeType: String?, bitrate: Int?, prefs: StreamPrefs): String? =
+        streamRequest(mimeType, bitrate, quality(prefs)).mimeType(mimeType)
 
     // What a deck loads songs with: phone files as they are, server songs
     // signed as they open. One for each deck.

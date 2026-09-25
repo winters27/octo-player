@@ -1,10 +1,12 @@
 package app.winters.octo.listening
 
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.FIND_PREFIX
 import app.winters.octo.catalog.LikedTrackEntity
 import app.winters.octo.catalog.ServerCopy
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.UserDao
+import app.winters.octo.catalog.isFind
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.playback.tracksByIds
@@ -127,8 +129,13 @@ class ListeningSync @Inject constructor(
     }
 
     // A song's copies on the server, the same one first every time.
+    // A song found online is a server song itself.
     private suspend fun serverIds(trackId: String): List<String> =
-        sources.copies(trackId).filter { it.sourceId.startsWith("server:") }.map { it.nativeId }.sorted()
+        if (isFind(trackId)) {
+            listOf(trackId.removePrefix(FIND_PREFIX))
+        } else {
+            sources.copies(trackId).filter { it.sourceId.startsWith("server:") }.map { it.nativeId }.sorted()
+        }
 
     // Runs a server call, handing back what went wrong, if anything.
     private suspend fun failureOf(call: suspend () -> Unit): SubsonicException? =

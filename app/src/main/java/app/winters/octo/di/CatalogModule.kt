@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.CatalogDatabase
+import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.UserDao
 import dagger.Module
@@ -29,4 +30,7 @@ object CatalogModule {
 
     @Provides
     fun sourceDao(db: CatalogDatabase): SourceDao = db.sourceDao()
+
+    @Provides
+    fun onlineDao(db: CatalogDatabase): OnlineDao = db.onlineDao()
 }

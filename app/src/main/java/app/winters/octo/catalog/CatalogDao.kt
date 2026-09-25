@@ -77,6 +77,17 @@ interface CatalogDao {
     @Query("SELECT * FROM album WHERE searchKey LIKE '%' || :q || '%' ORDER BY sortKey LIMIT :limit")
     suspend fun searchAlbums(q: String, limit: Int): List<AlbumEntity>
 
+    // Exact title, album and artist lookups, for telling whether something
+    // the server found is already in the library.
+    @Query("SELECT * FROM track WHERE searchKey IN (:keys)")
+    suspend fun tracksWithKeys(keys: List<String>): List<TrackEntity>
+
+    @Query("SELECT * FROM album WHERE searchKey IN (:keys)")
+    suspend fun albumsWithKeys(keys: List<String>): List<AlbumEntity>
+
+    @Query("SELECT * FROM artist WHERE searchKey IN (:keys)")
+    suspend fun artistsWithKeys(keys: List<String>): List<ArtistEntity>
+
     @Query("SELECT * FROM track WHERE searchKey LIKE '%' || :q || '%' ORDER BY sortKey LIMIT :limit")
     suspend fun searchTracks(q: String, limit: Int): List<TrackEntity>
 

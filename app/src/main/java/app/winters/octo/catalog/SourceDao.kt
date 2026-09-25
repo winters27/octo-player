@@ -38,6 +38,24 @@ interface SourceDao {
     @Query("SELECT * FROM source_track WHERE mergedId IN (:trackIds)")
     suspend fun copiesOf(trackIds: List<String>): List<SourceTrackEntity>
 
+    // Which of these server song ids are in the library, and the library
+    // song each one is.
+    @Query(
+        """
+        SELECT nativeId AS serverId, CASE WHEN mergedId = '' THEN id ELSE mergedId END AS trackId
+        FROM source_track WHERE sourceId = :sourceId AND nativeId IN (:serverIds)
+        """,
+    )
+    suspend fun libraryLinks(sourceId: String, serverIds: List<String>): List<ServerLink>
+
+    // Which of these server album ids are in the library.
+    @Query("SELECT nativeId FROM source_album WHERE sourceId = :sourceId AND nativeId IN (:serverIds)")
+    suspend fun knownAlbums(sourceId: String, serverIds: List<String>): List<String>
+
+    // Which of these artist rows, by "<source>:<server id>", are in the library.
+    @Query("SELECT id FROM source_artist WHERE id IN (:ids)")
+    suspend fun knownArtists(ids: List<String>): List<String>
+
     @Query("DELETE FROM source_track WHERE sourceId = :sourceId")
     suspend fun deleteTracks(sourceId: String)
 

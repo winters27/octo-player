@@ -14,6 +14,7 @@ import app.winters.octo.catalog.SourceDao
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.data.userMessage
+import app.winters.octo.discovery.Downloads
 import app.winters.octo.subsonic.readLibrary
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -51,6 +52,7 @@ class ServerSync @Inject constructor(
     private val sources: SourceDao,
     private val merge: CatalogMerge,
     private val listening: ListeningSync,
+    private val downloads: Downloads,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val dropLock = Mutex()
@@ -123,6 +125,8 @@ class ServerSync @Inject constructor(
             val library = merge.rebuild()
             // Brings likes and stars together, and sends any plays still waiting.
             listening.afterSync()
+            // Songs downloaded since the last copy join the library as liked.
+            downloads.afterSync()
             context.syncData.edit { p ->
                 p[SOURCE_ID] = sourceId
                 p[SYNCED_AT] = System.currentTimeMillis()

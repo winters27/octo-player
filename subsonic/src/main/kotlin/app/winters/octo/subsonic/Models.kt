@@ -167,3 +167,17 @@ enum class AlbumListType(val wire: String) {
     RANDOM("random"),
     ALPHABETICAL("alphabeticalByName"),
 }
+
+@Serializable
+data class SongList(val song: List<Song> = emptyList())
+
+@Serializable
+data class RadioStation(
+    val id: String,
+    val name: String = "",
+    val streamUrl: String = "",
+    val coverArt: String? = null,
+)
+
+@Serializable
+data class RadioStations(val internetRadioStation: List<RadioStation> = emptyList())

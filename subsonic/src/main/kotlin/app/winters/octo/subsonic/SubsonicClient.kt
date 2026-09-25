@@ -88,6 +88,27 @@ class SubsonicClient(
     suspend fun playlist(id: String): PlaylistWithSongs =
         get("getPlaylist", mapOf("id" to id), "playlist", PlaylistWithSongs.serializer())
 
+    // Songs like this one, for a radio that starts from it. On Octo these
+    // mix library songs with songs found online.
+    suspend fun similarSongs(id: String, count: Int = 50): List<Song> =
+        get(
+            "getSimilarSongs2",
+            mapOf("id" to id, "count" to "$count"),
+            "similarSongs2",
+            SongList.serializer(),
+            SongList(),
+        ).song
+
+    // Streams the server runs. On Octo each is also a read-only playlist
+    // with the same id, holding the songs it will play.
+    suspend fun radioStations(): List<RadioStation> =
+        get(
+            "getInternetRadioStations",
+            key = "internetRadioStations",
+            serializer = RadioStations.serializer(),
+            default = RadioStations(),
+        ).internetRadioStation
+
     suspend fun search(query: String, artists: Int = 10, albums: Int = 20, songs: Int = 30): SearchResult =
         get(
             "search3",
@@ -127,6 +148,9 @@ class SubsonicClient(
     suspend fun star(ids: List<String>) = send("star", ids.map { "id" to it })
 
     suspend fun unstar(ids: List<String>) = send("unstar", ids.map { "id" to it })
+
+    // Stars whole albums. On Octo an album found online is downloaded.
+    suspend fun starAlbums(ids: List<String>) = send("star", ids.map { "albumId" to it })
 
     // Tells the server a song was played (submission) or is playing now.
     // The time is when it started, in milliseconds.

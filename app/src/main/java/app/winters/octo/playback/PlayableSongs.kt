@@ -5,27 +5,52 @@ import android.provider.MediaStore
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.OnlineDao
+import app.winters.octo.catalog.OnlineSongEntity
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.SourceTrackEntity
+import app.winters.octo.catalog.isFind
+import app.winters.octo.discovery.asTrack
+import app.winters.octo.player.StreamPrefs
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// Turns library song ids into songs the player can play. Each song plays
+// Turns song ids into songs the player can play. Each library song plays
 // from one of its copies, chosen now by the settings and by what can play:
-// the phone's file, or a stream from the server.
+// the phone's file, or a stream from the server. A song found online
+// streams from the server, or plays as the library song it became once
+// downloaded.
 @Singleton
 class PlayableSongs @Inject constructor(
     @ApplicationContext private val context: Context,
     private val catalog: CatalogDao,
     private val sources: SourceDao,
     private val streams: Streams,
+    private val online: OnlineDao,
 ) {
-    // In the order asked for, dropping any the library no longer has.
+    // In the order asked for, dropping any the app no longer knows.
     suspend fun items(ids: List<String>): List<MediaItem> {
-        val tracks = catalog.tracksByIds(ids)
+        val finds = ids.filter(::isFind).distinct().chunked(900).flatMap { online.byIds(it) }.associateBy { it.id }
+        val adopted = finds.values.mapNotNull { it.adoptedId.ifEmpty { null } }
+        val library = libraryItems(ids.filterNot(::isFind) + adopted).associateBy { it.mediaId }
+        val prefs = if (finds.isEmpty()) StreamPrefs() else streams.prefs()
+        return ids.mapNotNull { id ->
+            val find = finds[id] ?: return@mapNotNull library[id]
+            library[find.adoptedId] ?: findItem(find, prefs)
+        }
+    }
+
+    private fun findItem(find: OnlineSongEntity, prefs: StreamPrefs): MediaItem {
+        val bitrate = find.bitrate?.times(1000)
+        return find.asTrack().toMediaItem(streams.uriFor(find.nativeId, find.mimeType, bitrate), streams.mimeTypeFor(find.mimeType, bitrate, prefs))
+    }
+
+    private suspend fun libraryItems(ids: List<String>): List<MediaItem> {
+        if (ids.isEmpty()) return emptyList()
+        val tracks = catalog.tracksByIds(ids.distinct())
         val copies = tracks.map { it.id }.distinct().chunked(900)
             .flatMap { sources.copiesOf(it) }
             .groupBy { it.mergedId }

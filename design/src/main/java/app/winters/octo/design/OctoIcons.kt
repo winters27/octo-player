@@ -31,4 +31,8 @@ object OctoIcons {
     val Chevron = R.drawable.sym_chevron_right
     val Cloud = R.drawable.sym_cloud
     val Check = R.drawable.sym_check
+    val Download = R.drawable.sym_download
+    val Downloading = R.drawable.sym_downloading
+    val Downloaded = R.drawable.sym_download_done
+    val Radio = R.drawable.sym_radio
 }
