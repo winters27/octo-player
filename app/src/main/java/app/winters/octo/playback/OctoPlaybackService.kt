@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -62,6 +63,8 @@ class OctoPlaybackService : MediaLibraryService() {
     private val currentId = MutableStateFlow<String?>(null)
     private val queueChanged = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private var positionSaver: Job? = null
+    // Done once last session's queue is back, or there was none.
+    private val restored = CompletableDeferred<Unit>()
 
     @OptIn(FlowPreview::class)
     override fun onCreate() {
@@ -83,7 +86,13 @@ class OctoPlaybackService : MediaLibraryService() {
             )
             .build()
 
-        scope.launch { restoreQueue() }
+        scope.launch {
+            try {
+                restoreQueue()
+            } finally {
+                restored.complete(Unit)
+            }
+        }
         // The heart follows both the song and the likes list.
         scope.launch { combine(currentId, likes.liked) { id, liked -> id != null && id in liked }.collect(::showLike) }
         // Editing the queue saves it once things settle.
@@ -194,13 +203,16 @@ class OctoPlaybackService : MediaLibraryService() {
         ): ListenableFuture<ConnectionResult> {
             // Apps we don't trust keep the read-only access Media3 gives them.
             if (!controller.isTrusted) return super.onConnectAsync(session, controller)
-            return Futures.immediateFuture(
+            // The app connects only once the saved queue is back, so it never
+            // mistakes a player still restoring for an empty one.
+            return scope.future {
+                restored.await()
                 ConnectionResult.AcceptedResultBuilder(session, controller)
                     .setAvailableSessionCommands(
                         ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon().add(LIKE).build(),
                     )
-                    .build(),
-            )
+                    .build()
+            }
         }
 
         override fun onCustomCommand(

@@ -23,8 +23,14 @@ data class NowPlaying(
     val title: String? = null,
     val artist: String? = null,
     val artwork: String? = null,
+    val album: String? = null,
+    val albumId: String? = null,
+    val artistId: String? = null,
+    val quality: String? = null,
     val isPlaying: Boolean = false,
     val durationMs: Long = 0,
+    val shuffle: Boolean = false,
+    val repeatMode: Int = Player.REPEAT_MODE_OFF,
 )
 
 // The app's line to the playback service. Screens ask it to play things and
@@ -105,6 +111,19 @@ class PlaybackConnection @Inject constructor(
         }
     }
 
+    fun seekTo(positionMs: Long) = withController { it.seekTo(positionMs.coerceAtLeast(0)) }
+
+    fun toggleShuffle() = withController { it.shuffleModeEnabled = !it.shuffleModeEnabled }
+
+    // Off, then the whole queue, then just this song.
+    fun cycleRepeat() = withController { c ->
+        c.repeatMode = when (c.repeatMode) {
+            Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+            else -> Player.REPEAT_MODE_OFF
+        }
+    }
+
     fun next() = withController { it.seekToNext() }
 
     fun previous() = withController { it.seekToPrevious() }
@@ -131,8 +150,14 @@ class PlaybackConnection @Inject constructor(
             title = meta?.title?.toString(),
             artist = meta?.artist?.toString(),
             artwork = meta?.artworkRef(),
+            album = meta?.albumTitle?.toString(),
+            albumId = meta?.extra(EXTRA_ALBUM_ID),
+            artistId = meta?.extra(EXTRA_ARTIST_ID),
+            quality = qualityLabel(meta?.extra(EXTRA_MIME), player.currentTracks),
             isPlaying = player.isPlaying,
             durationMs = player.duration.takeIf { it > 0 } ?: meta?.durationMs ?: 0,
+            shuffle = player.shuffleModeEnabled,
+            repeatMode = player.repeatMode,
         )
     }
 }

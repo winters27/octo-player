@@ -1,0 +1,456 @@
+package app.winters.octo.player
+
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import androidx.activity.compose.BackHandler
+import androidx.annotation.DrawableRes
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateInt
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.verticalDrag
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.min
+import androidx.core.view.WindowCompat
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.common.Player
+import app.winters.octo.catalog.ArtworkRef
+import app.winters.octo.design.AccentFill
+import app.winters.octo.design.Glaze
+import app.winters.octo.design.GlazeInset
+import app.winters.octo.design.GlazeLight
+import app.winters.octo.design.LineSlider
+import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.OctoType
+import app.winters.octo.design.elevation3
+import app.winters.octo.playback.NowPlaying
+import app.winters.octo.ui.common.Artwork
+import app.winters.octo.ui.common.asClock
+import coil3.compose.AsyncImage
+import kotlinx.coroutines.launch
+
+// The full player. It opens over everything, with the artwork flying in
+// from the bar, and closes on back, on the chevron, or by pulling it down
+// from the top.
+@Composable
+fun AnimatedVisibilityScope.PlayerOverlay(
+    artModifier: Modifier,
+    onClose: () -> Unit,
+    onOpenArtist: (String) -> Unit,
+    model: PlayerViewModel = hiltViewModel(),
+) {
+    val now by model.now.collectAsStateWithLifecycle()
+    val colors by model.colors.collectAsStateWithLifecycle()
+    val base by animateColorAsState(colors.base, tween(600), label = "player base")
+    val close by rememberUpdatedState(onClose)
+    val scope = rememberCoroutineScope()
+    // How far the player has been pulled down, in pixels.
+    var pull by remember { mutableFloatStateOf(0f) }
+
+    BackHandler(onBack = onClose)
+    LightOnDarkBars()
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val cap = constraints.maxHeight * 0.45f
+        val pulled = (pull / cap).coerceIn(0f, 1f)
+        // Fully rounded a fifth of the way down.
+        val corner = 28.dp * (pulled * 5f).coerceAtMost(1f)
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationY = pull
+                    scaleX = 1f - 0.06f * pulled
+                    scaleY = 1f - 0.06f * pulled
+                    shape = RoundedCornerShape(corner)
+                    clip = pull > 0f
+                }
+                .pointerInput(Unit) {
+                    val zone = 140.dp.toPx()
+                    val threshold = 96.dp.toPx()
+                    val fling = 1_200.dp.toPx()
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        // Only a pull that starts near the top closes the player, so
+                        // the slider and buttons below keep their own gestures.
+                        if (down.position.y > zone) return@awaitEachGesture
+                        val tracker = VelocityTracker()
+                        tracker.addPosition(down.uptimeMillis, down.position)
+                        val start = awaitVerticalTouchSlopOrCancellation(down.id) { change, over ->
+                            change.consume()
+                            pull = (over * 0.82f).coerceIn(0f, cap)
+                        } ?: return@awaitEachGesture
+                        verticalDrag(start.id) { change ->
+                            tracker.addPosition(change.uptimeMillis, change.position)
+                            // A little resistance, so the sheet feels weighted.
+                            pull = (pull + change.positionChange().y * 0.82f).coerceIn(0f, cap)
+                            change.consume()
+                        }
+                        if (pull > threshold || tracker.calculateVelocity().y > fling) {
+                            close()
+                        } else {
+                            scope.launch { animate(pull, 0f, animationSpec = spring(0.8f, 400f)) { value, _ -> pull = value } }
+                        }
+                    }
+                }
+                .background(base),
+        ) {
+            BlurredArtwork(now.artwork)
+            PlayerContent(now, model, artModifier, onClose, onOpenArtist)
+        }
+    }
+}
+
+// The song's own artwork, blurred into a wash of its colours and darkened
+// toward the controls.
+@Composable
+private fun BlurredArtwork(ref: String?) {
+    val picture = remember(ref) { ArtworkRef.decode(ref) }
+    if (picture != null) {
+        AsyncImage(
+            model = picture,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize().blur(80.dp).alpha(0.6f),
+        )
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    0f to Color.Black.copy(alpha = 0.03f),
+                    0.45f to Color.Black.copy(alpha = 0.45f),
+                    1f to Color.Black,
+                ),
+            ),
+    )
+}
+
+@Composable
+private fun AnimatedVisibilityScope.PlayerContent(
+    now: NowPlaying,
+    model: PlayerViewModel,
+    artModifier: Modifier,
+    onClose: () -> Unit,
+    onOpenArtist: (String) -> Unit,
+) {
+    val density = LocalDensity.current
+    Column(
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 24.dp),
+    ) {
+        Box(Modifier.fillMaxWidth().height(56.dp), contentAlignment = Alignment.Center) {
+            ActionCircle(
+                icon = null,
+                description = "Close player",
+                on = false,
+                onClick = onClose,
+                modifier = Modifier.align(Alignment.CenterStart),
+            )
+            now.album?.let {
+                Text(
+                    it,
+                    style = OctoType.caption,
+                    color = OctoColors.TextMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 60.dp),
+                )
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            PlayerArt(now.artwork, min(312.dp, maxWidth), artModifier)
+        }
+        Spacer(Modifier.weight(1f))
+
+        // The controls rise into place a moment after the player opens.
+        Column(
+            Modifier.animateEnterExit(
+                enter = slideInVertically(spring(0.68f, 400f, IntOffset.VisibilityThreshold)) {
+                    with(density) { 28.dp.roundToPx() }
+                } + fadeIn(tween(380, delayMillis = 80)),
+                exit = ExitTransition.None,
+            ),
+        ) {
+            TitleBlock(now, onOpenArtist)
+            Spacer(Modifier.height(12.dp))
+            Progress(now, model)
+            Spacer(Modifier.height(12.dp))
+            Transport(now, model)
+            Spacer(Modifier.height(20.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
+            ) {
+                ActionCircle(
+                    icon = OctoIcons.Shuffle,
+                    description = "Shuffle",
+                    on = now.shuffle,
+                    onClick = model::toggleShuffle,
+                )
+                ActionCircle(
+                    icon = if (now.repeatMode == Player.REPEAT_MODE_ONE) OctoIcons.RepeatOne else OctoIcons.Repeat,
+                    description = "Repeat",
+                    on = now.repeatMode != Player.REPEAT_MODE_OFF,
+                    state = when (now.repeatMode) {
+                        Player.REPEAT_MODE_ALL -> "All songs"
+                        Player.REPEAT_MODE_ONE -> "This song"
+                        else -> "Off"
+                    },
+                    onClick = model::cycleRepeat,
+                )
+            }
+            Spacer(Modifier.height(28.dp))
+        }
+    }
+}
+
+// The artwork card. Its corners round from a circle, as it leaves the bar,
+// to a soft square as it lands.
+@Composable
+private fun AnimatedVisibilityScope.PlayerArt(ref: String?, side: Dp, artModifier: Modifier) {
+    val corner by transition.animateInt(label = "art corners") { if (it == EnterExitState.Visible) 10 else 50 }
+    val shape = RoundedCornerShape(percent = corner)
+    Box(artModifier.size(side).elevation3(shape)) {
+        Artwork(ref, side, shape = shape)
+    }
+}
+
+@Composable
+private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit) {
+    AnimatedContent(
+        targetState = now,
+        contentKey = { it.trackId },
+        transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(150)) },
+        label = "song title",
+    ) { song ->
+        Column(Modifier.fillMaxWidth()) {
+            Text(
+                song.title.orEmpty(),
+                style = OctoType.title.copy(fontWeight = FontWeight.Bold),
+                color = OctoColors.TextPrimary,
+                maxLines = 1,
+                modifier = Modifier.basicMarquee(),
+            )
+            Text(
+                song.artist.orEmpty(),
+                style = OctoType.body,
+                color = OctoColors.Accent,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clickable(
+                    enabled = song.artistId != null,
+                    interactionSource = null,
+                    indication = null,
+                    role = Role.Button,
+                ) { song.artistId?.let(onOpenArtist) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun Progress(now: NowPlaying, model: PlayerViewModel) {
+    val position = rememberPositionMs(now, model::positionMs)
+    val played = position.longValue.coerceIn(0, now.durationMs.coerceAtLeast(0))
+    val times = OctoType.caption.copy(fontFeatureSettings = "tnum")
+    LineSlider(
+        fraction = now.fractionAt(played),
+        onSeek = { fraction ->
+            val target = (fraction * now.durationMs).toLong()
+            position.longValue = target
+            model.seekTo(target)
+        },
+    )
+    Row(Modifier.fillMaxWidth().offset(y = (-8).dp)) {
+        Text((played / 1000).toInt().asClock(), style = times, color = OctoColors.TextMuted)
+        Spacer(Modifier.weight(1f))
+        Text("-" + ((now.durationMs - played) / 1000).toInt().asClock(), style = times, color = OctoColors.TextMuted)
+    }
+    now.quality?.let {
+        Text(
+            it,
+            style = OctoType.caption,
+            color = OctoColors.TextPrimary.copy(alpha = 0.5f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun Transport(now: NowPlaying, model: PlayerViewModel) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SkipButton(OctoIcons.SkipPrevious, "Previous", model::previous)
+        GlazeInset(
+            fill = AccentFill,
+            shape = CircleShape,
+            modifier = Modifier
+                .size(76.dp)
+                .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = model::togglePlayPause)
+                .semantics { contentDescription = if (now.isPlaying) "Pause" else "Play" },
+        ) {
+            Icon(
+                painterResource(if (now.isPlaying) OctoIcons.Pause else OctoIcons.Play),
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(40.dp),
+            )
+        }
+        SkipButton(OctoIcons.SkipNext, "Next", model::next)
+    }
+}
+
+@Composable
+private fun SkipButton(@DrawableRes icon: Int, description: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(64.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(painterResource(icon), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(40.dp))
+    }
+}
+
+// A small glazed circle. Lit, with an accent icon, while its setting is on.
+// With no icon it is the close chevron.
+@Composable
+private fun ActionCircle(
+    @DrawableRes icon: Int?,
+    description: String,
+    on: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    state: String? = null,
+) {
+    Glaze(
+        modifier
+            .size(44.dp)
+            .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = onClick)
+            .semantics {
+                contentDescription = description
+                stateDescription = state ?: if (on) "On" else "Off"
+            },
+        light = if (on) GlazeLight.Lifted else GlazeLight.Rest,
+    ) {
+        if (icon == null) {
+            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(26.dp))
+        } else {
+            val tint = if (on) OctoColors.Accent else OctoColors.TextMuted
+            Icon(painterResource(icon), contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        }
+    }
+}
+
+// Light status and navigation icons while the player is open, whatever the
+// rest of the app uses, put back as they were when it closes.
+@Composable
+private fun LightOnDarkBars() {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        val window = view.context.findActivity()?.window ?: return@DisposableEffect onDispose { }
+        val bars = WindowCompat.getInsetsController(window, view)
+        val status = bars.isAppearanceLightStatusBars
+        val navigation = bars.isAppearanceLightNavigationBars
+        bars.isAppearanceLightStatusBars = false
+        bars.isAppearanceLightNavigationBars = false
+        onDispose {
+            bars.isAppearanceLightStatusBars = status
+            bars.isAppearanceLightNavigationBars = navigation
+        }
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}

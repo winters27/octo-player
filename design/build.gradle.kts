@@ -8,6 +8,8 @@ android {
     compileSdk = 37
     defaultConfig { minSdk = 29 }
     buildFeatures { compose = true }
+    // The icon vectors live in this module.
+    androidResources { enable = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

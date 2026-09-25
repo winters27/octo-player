@@ -1,13 +1,23 @@
 package app.winters.octo.ui.nav
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.animateInt
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -23,6 +33,7 @@ import androidx.navigation3.ui.NavDisplay
 import app.winters.octo.design.OctoColors
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.player.PlayerOverlay
 import app.winters.octo.ui.album.AlbumScreen
 import app.winters.octo.ui.artist.ArtistScreen
 import app.winters.octo.ui.common.LocalHaze
@@ -50,6 +61,35 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
     val stack = stacks[selected]
     val open: (NavKey) -> Unit = { stack.add(it) }
     val back: () -> Unit = { stack.removeLastOrNull() }
+    val hasTrack = now.trackId != null
+    // The bar's small player, and the full one over everything.
+    var barPlayer by rememberSaveable { mutableStateOf(false) }
+    var playerOpen by rememberSaveable { mutableStateOf(false) }
+    // When the queue empties, both fold away.
+    LaunchedEffect(hasTrack) {
+        if (!hasTrack) {
+            barPlayer = false
+            playerOpen = false
+        }
+    }
+    val barActions = BarActions(
+        onSelect = { index ->
+            barPlayer = false
+            if (index == selected) {
+                // Tapping the current tab goes back to its top.
+                while (stack.size > 1) stack.removeAt(stack.lastIndex)
+            } else {
+                selected = index
+            }
+        },
+        // With nothing loaded, the round button shuffles the library.
+        onRoundButton = { if (hasTrack) barPlayer = true else playback.togglePlayPause() },
+        onShowTabs = { barPlayer = false },
+        onOpenPlayer = { playerOpen = true },
+        onPrevious = playback::previous,
+        onPlayPause = playback::togglePlayPause,
+        onNext = playback::next,
+    )
 
     // Access can be changed in system settings while the app is away.
     LifecycleResumeEffect(Unit) {
@@ -58,43 +98,71 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
     }
 
     CompositionLocalProvider(LocalHaze provides haze) {
-        Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
-            NavDisplay(
-                backStack = stack,
-                onBack = { stack.removeLastOrNull() },
-                entryDecorators = listOf(
-                    rememberSaveableStateHolderNavEntryDecorator(),
-                    rememberViewModelStoreNavEntryDecorator(),
-                ),
-                modifier = Modifier.fillMaxSize().hazeSource(haze),
-                entryProvider = entryProvider {
-                    entry<HomeRoute> { HomeScreen(open) }
-                    entry<SearchRoute> { SearchScreen(open) }
-                    entry<LibraryRoute> { LibraryScreen(open) }
-                    entry<SettingsRoute> { SettingsScreen() }
-                    entry<AlbumRoute> { AlbumScreen(it.id, open, back) }
-                    entry<ArtistRoute> { ArtistScreen(it.id, open, back) }
-                },
-            )
-            // Back from the top of another tab goes Home rather than out.
-            BackHandler(enabled = selected != 0 && stack.size == 1) { selected = 0 }
+        SharedTransitionLayout {
+            Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
+                NavDisplay(
+                    backStack = stack,
+                    onBack = { stack.removeLastOrNull() },
+                    entryDecorators = listOf(
+                        rememberSaveableStateHolderNavEntryDecorator(),
+                        rememberViewModelStoreNavEntryDecorator(),
+                    ),
+                    modifier = Modifier.fillMaxSize().hazeSource(haze),
+                    entryProvider = entryProvider {
+                        entry<HomeRoute> { HomeScreen(open) }
+                        entry<SearchRoute> { SearchScreen(open) }
+                        entry<LibraryRoute> { LibraryScreen(open) }
+                        entry<SettingsRoute> { SettingsScreen() }
+                        entry<AlbumRoute> { AlbumScreen(it.id, open, back) }
+                        entry<ArtistRoute> { ArtistScreen(it.id, open, back) }
+                    },
+                )
+                // Back from the top of another tab goes Home rather than out.
+                BackHandler(enabled = selected != 0 && stack.size == 1) { selected = 0 }
 
-            BottomBar(
-                haze = haze,
-                selected = selected,
-                now = now,
-                positionMs = playback::positionMs,
-                onPlayPause = playback::togglePlayPause,
-                onSelect = { index ->
-                    if (index == selected) {
-                        // Tapping the current tab goes back to its top.
-                        while (stack.size > 1) stack.removeAt(stack.lastIndex)
-                    } else {
-                        selected = index
+                // The bar steps aside while the full player is open; the artwork
+                // flies between the two.
+                AnimatedVisibility(
+                    visible = !playerOpen,
+                    enter = fadeIn(tween(300)),
+                    exit = fadeOut(tween(300)),
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                ) {
+                    // The mirror of the player's card: a soft square while it
+                    // flies back, a circle once it lands.
+                    val corner by transition.animateInt(label = "capsule art corners") {
+                        if (it == EnterExitState.Visible) 50 else 10
                     }
-                },
-                modifier = Modifier.align(Alignment.BottomCenter),
-            )
+                    BottomBar(
+                        haze = haze,
+                        selected = selected,
+                        now = now,
+                        positionMs = playback::positionMs,
+                        playerShown = barPlayer && hasTrack,
+                        actions = barActions,
+                        artModifier = Modifier.sharedElement(rememberSharedContentState(ArtKey), this),
+                        artShape = RoundedCornerShape(percent = corner),
+                    )
+                }
+                AnimatedVisibility(
+                    visible = playerOpen && hasTrack,
+                    enter = fadeIn(tween(400)),
+                    exit = fadeOut(tween(300)),
+                ) {
+                    PlayerOverlay(
+                        artModifier = Modifier.sharedElement(rememberSharedContentState(ArtKey), this),
+                        onClose = { playerOpen = false },
+                        onOpenArtist = { id ->
+                            playerOpen = false
+                            stack.add(ArtistRoute(id))
+                        },
+                    )
+                }
+            }
         }
     }
 }
+
+// One key for whichever song is on, so a song change mid-flight cannot
+// break the hand-off.
+private const val ArtKey = "now-playing-art"

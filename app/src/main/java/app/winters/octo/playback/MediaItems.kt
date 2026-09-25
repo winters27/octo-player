@@ -7,7 +7,6 @@ import android.os.Bundle
 import android.util.Size
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
-import androidx.core.os.bundleOf
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.BitmapLoader
@@ -24,6 +23,9 @@ private const val ART_SCHEME = "octo-art"
 
 // Where the app keeps a song's artwork reference, so screens can draw it.
 const val EXTRA_ARTWORK = "app.winters.octo.artwork"
+const val EXTRA_ALBUM_ID = "app.winters.octo.albumId"
+const val EXTRA_ARTIST_ID = "app.winters.octo.artistId"
+const val EXTRA_MIME = "app.winters.octo.mime"
 
 // Artwork for the lock screen and notification, in a form the playback
 // service can turn back into a picture.
@@ -48,7 +50,14 @@ fun TrackEntity.toMediaItem(): MediaItem =
                 .setIsPlayable(true)
                 .setIsBrowsable(false)
                 .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-                .setExtras(bundleOf(EXTRA_ARTWORK to artwork))
+                .setExtras(
+                    Bundle().apply {
+                        putString(EXTRA_ARTWORK, artwork)
+                        putString(EXTRA_ALBUM_ID, albumId)
+                        putString(EXTRA_ARTIST_ID, artistId)
+                        putString(EXTRA_MIME, mimeType)
+                    },
+                )
                 .build(),
         )
         .build()
@@ -78,3 +87,5 @@ class OctoArtLoader(private val context: Context, private val fallback: BitmapLo
 
 // Reads the artwork reference a song was sent with.
 fun MediaMetadata.artworkRef(): String? = (extras ?: Bundle.EMPTY).getString(EXTRA_ARTWORK)
+
+fun MediaMetadata.extra(key: String): String? = (extras ?: Bundle.EMPTY).getString(key)

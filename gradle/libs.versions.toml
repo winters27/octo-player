@@ -18,6 +18,7 @@ coil = "3.6.3"
 room = "2.8.5"
 taglib = "1.0.6"
 media3 = "1.11.1"
+palette = "1.0.0"
 junit = "4.13.2"
 
 [libraries]
@@ -53,6 +54,7 @@ media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", versi
 media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
 media3-ui-compose = { group = "androidx.media3", name = "media3-ui-compose", version.ref = "media3" }
 kotlinx-coroutines-guava = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-guava", version.ref = "coroutines" }
+androidx-palette = { group = "androidx.palette", name = "palette-ktx", version.ref = "palette" }
 taglib = { group = "io.github.kyant0", name = "taglib", version.ref = "taglib" }
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
 coil-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
