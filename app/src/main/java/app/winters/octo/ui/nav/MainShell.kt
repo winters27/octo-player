@@ -33,6 +33,7 @@ import androidx.navigation3.ui.NavDisplay
 import app.winters.octo.design.OctoColors
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.player.PlayerArtCorner
 import app.winters.octo.player.PlayerOverlay
 import app.winters.octo.ui.album.AlbumScreen
 import app.winters.octo.ui.artist.ArtistScreen
@@ -131,7 +132,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                     // The mirror of the player's card: a soft square while it
                     // flies back, a circle once it lands.
                     val corner by transition.animateInt(label = "capsule art corners") {
-                        if (it == EnterExitState.Visible) 50 else 10
+                        if (it == EnterExitState.Visible) 50 else PlayerArtCorner
                     }
                     BottomBar(
                         haze = haze,

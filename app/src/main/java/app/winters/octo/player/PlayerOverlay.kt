@@ -12,6 +12,7 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateInt
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -59,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -112,6 +114,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
 ) {
     val now by model.now.collectAsStateWithLifecycle()
     val colors by model.colors.collectAsStateWithLifecycle()
+    val prefs by model.prefs.collectAsStateWithLifecycle()
     val base by animateColorAsState(colors.base, tween(600), label = "player base")
     val close by rememberUpdatedState(onClose)
     val scope = rememberCoroutineScope()
@@ -166,14 +169,19 @@ fun AnimatedVisibilityScope.PlayerOverlay(
                 }
                 .background(base),
         ) {
-            BlurredArtwork(now.artwork)
+            if (prefs.liveBackground && LiveBackgroundSupported) {
+                MeshBackground(colors, now.isPlaying)
+            } else {
+                BlurredArtwork(now.artwork)
+            }
+            Shade()
             PlayerContent(now, model, artModifier, onClose, onOpenArtist)
         }
     }
 }
 
-// The song's own artwork, blurred into a wash of its colours and darkened
-// toward the controls.
+// The song's own artwork, blurred into a wash of its colours: the
+// background when the live one is off or the phone cannot draw it.
 @Composable
 private fun BlurredArtwork(ref: String?) {
     val picture = remember(ref) { ArtworkRef.decode(ref) }
@@ -185,6 +193,11 @@ private fun BlurredArtwork(ref: String?) {
             modifier = Modifier.fillMaxSize().blur(80.dp).alpha(0.6f),
         )
     }
+}
+
+// Darkens toward the bottom, so the controls always sit on something dark.
+@Composable
+private fun Shade() {
     Box(
         Modifier
             .fillMaxSize()
@@ -214,7 +227,10 @@ private fun AnimatedVisibilityScope.PlayerContent(
             .navigationBarsPadding()
             .padding(horizontal = 24.dp),
     ) {
-        Box(Modifier.fillMaxWidth().height(56.dp), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.fillMaxWidth().height(56.dp),
+            contentAlignment = Alignment.Center,
+        ) {
             ActionCircle(
                 icon = null,
                 description = "Close player",
@@ -236,7 +252,7 @@ private fun AnimatedVisibilityScope.PlayerContent(
         }
         Spacer(Modifier.weight(1f))
         BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            PlayerArt(now.artwork, min(312.dp, maxWidth), artModifier)
+            PlayerArt(now.artwork, min(312.dp, maxWidth), now.isPlaying, artModifier)
         }
         Spacer(Modifier.weight(1f))
 
@@ -282,14 +298,34 @@ private fun AnimatedVisibilityScope.PlayerContent(
     }
 }
 
+// How round the card's corners are, as a percentage of its side.
+const val PlayerArtCorner = 5
+
 // The artwork card. Its corners round from a circle, as it leaves the bar,
-// to a soft square as it lands.
+// to a soft square as it lands. It sits full size while music plays and
+// settles back smaller when paused.
 @Composable
-private fun AnimatedVisibilityScope.PlayerArt(ref: String?, side: Dp, artModifier: Modifier) {
-    val corner by transition.animateInt(label = "art corners") { if (it == EnterExitState.Visible) 10 else 50 }
+private fun AnimatedVisibilityScope.PlayerArt(ref: String?, side: Dp, playing: Boolean, artModifier: Modifier) {
+    val corner by transition.animateInt(label = "art corners") {
+        if (it == EnterExitState.Visible) PlayerArtCorner else 50
+    }
+    val scale by animateFloatAsState(
+        if (playing) 1f else 0.84f,
+        spring(dampingRatio = 0.6f, stiffness = 300f),
+        label = "art size",
+    )
     val shape = RoundedCornerShape(percent = corner)
-    Box(artModifier.size(side).elevation3(shape)) {
-        Artwork(ref, side, shape = shape)
+    Box(artModifier.size(side), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                }
+                .elevation3(shape),
+        ) {
+            Artwork(ref, side, shape = shape)
+        }
     }
 }
 

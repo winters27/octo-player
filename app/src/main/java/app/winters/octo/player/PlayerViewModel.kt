@@ -20,8 +20,12 @@ import javax.inject.Inject
 class PlayerViewModel @Inject constructor(
     private val playback: PlaybackConnection,
     palette: ArtworkPalette,
+    settings: PlayerSettings,
 ) : ViewModel() {
     val now: StateFlow<NowPlaying> = playback.now
+
+    val prefs: StateFlow<PlayerPrefs> = settings.prefs
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerPrefs())
 
     // Colours follow the artwork, not the song, so an album plays through
     // without the background flickering.

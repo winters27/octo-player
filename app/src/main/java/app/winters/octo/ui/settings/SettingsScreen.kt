@@ -30,6 +30,9 @@ import app.winters.octo.device.Access
 import app.winters.octo.device.DEVICE
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.device.MusicFolder
+import app.winters.octo.player.LiveBackgroundSupported
+import app.winters.octo.player.PlayerPrefs
+import app.winters.octo.player.PlayerSettings
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.screenPadding
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -43,7 +46,15 @@ import kotlinx.coroutines.launch
 class SettingsViewModel @Inject constructor(
     val library: DeviceLibrary,
     dao: CatalogDao,
+    private val player: PlayerSettings,
 ) : ViewModel() {
+    val playerPrefs: StateFlow<PlayerPrefs> =
+        player.prefs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerPrefs())
+
+    fun setLiveBackground(on: Boolean) {
+        viewModelScope.launch { player.setLiveBackground(on) }
+    }
+
     val songCount: StateFlow<Int> =
         dao.trackCount(DEVICE).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
@@ -64,6 +75,7 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
     val scanning by vm.library.scanning.collectAsStateWithLifecycle()
     val count by vm.songCount.collectAsStateWithLifecycle()
     val folders by vm.library.folders.collectAsStateWithLifecycle()
+    val player by vm.playerPrefs.collectAsStateWithLifecycle()
     val padding = screenPadding()
 
     Column(
@@ -100,6 +112,20 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
             }
         }
 
+        Card("Player", Modifier.padding(top = 16.dp)) {
+            SwitchLine(
+                label = "Live background",
+                detail = if (LiveBackgroundSupported) {
+                    "Colours from the artwork, moving slowly while music plays."
+                } else {
+                    "Needs Android 13 or newer. The blurred artwork is used instead."
+                },
+                checked = player.liveBackground && LiveBackgroundSupported,
+                enabled = LiveBackgroundSupported,
+                onChange = vm::setLiveBackground,
+            )
+        }
+
         Card("About", Modifier.padding(top = 16.dp)) {
             Line("Octo", BuildConfig.VERSION_NAME)
         }
@@ -126,6 +152,23 @@ private fun Line(label: String, value: String) {
     Row(Modifier.fillMaxWidth()) {
         Text(label, style = OctoType.bodySmall, color = OctoColors.TextSecondary, modifier = Modifier.weight(1f))
         Text(value, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
+    }
+}
+
+@Composable
+private fun SwitchLine(
+    label: String,
+    detail: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(label, style = OctoType.bodySmall, color = if (enabled) OctoColors.TextPrimary else OctoColors.TextMuted)
+            Text(detail, style = OctoType.caption, color = OctoColors.TextMuted)
+        }
+        OctoSwitch(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
 }
 

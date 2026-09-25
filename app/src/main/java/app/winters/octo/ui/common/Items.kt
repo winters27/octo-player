@@ -77,7 +77,7 @@ fun SongRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         when (lead) {
-            SongLead.Artwork -> Artwork(track.artwork, 44.dp, shape = RoundedCornerShape(8.dp))
+            SongLead.Artwork -> Artwork(track.artwork, 44.dp, shape = RoundedCornerShape(6.dp))
             is SongLead.Number -> Text(
                 lead.track?.toString() ?: "",
                 style = OctoType.caption,
