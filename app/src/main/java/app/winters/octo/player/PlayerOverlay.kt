@@ -96,6 +96,7 @@ import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.design.AccentFill
 import app.winters.octo.design.GlassSheet
 import app.winters.octo.design.GlazeInset
+import app.winters.octo.design.GlowIcon
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.OctoColors
@@ -524,9 +525,9 @@ private fun CloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
-// One of the buttons under the controls: a plain icon, bright white while
-// its setting is on and dimmed while off, the way the progress line is
-// bright where it has played.
+// One of the buttons under the controls: a plain icon, bright white and
+// glowing while its setting is on and dimmed while off, the way the
+// progress line glows where it has played.
 @Composable
 private fun ActionButton(
     @DrawableRes icon: Int,
@@ -545,10 +546,10 @@ private fun ActionButton(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
+        GlowIcon(
             painterResource(icon),
-            contentDescription = null,
             tint = if (on) Color.White else Color.White.copy(alpha = 0.45f),
+            lit = on,
             modifier = Modifier.size(22.dp),
         )
     }

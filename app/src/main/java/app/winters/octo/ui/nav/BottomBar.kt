@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -72,6 +73,7 @@ private val tabs = listOf(
 )
 
 val BarHeight = 56.dp
+private val TabIconSize = 25.dp
 private val Gap = 10.dp
 
 // What the bar's buttons do.
@@ -229,11 +231,13 @@ private fun TabBar(
                 Icon(
                     tabs[selected].icon,
                     contentDescription = "Show tabs",
-                    tint = OctoColors.TextPrimary,
+                    // The selected tab's accent, turning white as it folds into
+                    // a plain glaze circle like the round button.
+                    tint = lerp(OctoColors.Accent, OctoColors.TextPrimary, folded),
                     modifier = Modifier
                         .align(Alignment.CenterStart)
-                        .offset { IntOffset((glazeX + (pillWidth - 22.dp) / 2).roundToPx(), 0) }
-                        .size(22.dp),
+                        .offset { IntOffset((glazeX + (pillWidth - TabIconSize) / 2).roundToPx(), 0) }
+                        .size(TabIconSize),
                 )
             }
         }
@@ -250,7 +254,9 @@ private fun TabButton(
     onClick: () -> Unit,
 ) {
     val tint by animateColorAsState(
-        if (selected) OctoColors.TextPrimary else OctoColors.TextMuted,
+        // White by default so every tab reads clearly; the selected one takes
+        // the accent, set in its darker pill.
+        if (selected) OctoColors.Accent else OctoColors.TextPrimary,
         label = "tab tint",
     )
     Box(
@@ -268,7 +274,7 @@ private fun TabButton(
             tab.icon,
             contentDescription = stringResource(tab.label),
             tint = tint,
-            modifier = Modifier.size(22.dp).alpha(if (showIcon) 1f else 0f),
+            modifier = Modifier.size(TabIconSize).alpha(if (showIcon) 1f else 0f),
         )
     }
 }
