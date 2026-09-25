@@ -22,6 +22,7 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import app.winters.octo.MainActivity
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.player.PlayerSettings
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -56,6 +57,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var queue: QueueStore
     @Inject lateinit var plays: PlayStore
     @Inject lateinit var sleep: SleepTimer
+    @Inject lateinit var playerSettings: PlayerSettings
 
     private val scope = MainScope()
     private lateinit var player: OctoPlayer
@@ -67,17 +69,17 @@ class OctoPlaybackService : MediaLibraryService() {
     // Done once last session's queue is back, or there was none.
     private val restored = CompletableDeferred<Unit>()
 
-    @OptIn(FlowPreview::class)
+    @kotlin.OptIn(FlowPreview::class)
     override fun onCreate() {
         super.onCreate()
-        player = OctoPlayer(this, buildDeck(this))
+        player = OctoPlayer(this, buildDeck(this), buildDeck(this))
         tracker = PlayTracker(plays) { player.isPlaying }
         player.addListener(tracker)
         player.addListener(Watcher())
         sleep.attach(player)
 
         session = MediaLibrarySession.Builder(this, player, Callback())
-            .setBitmapLoader(CacheBitmapLoader(OctoArtLoader(this, DataSourceBitmapLoader(this))))
+            .setBitmapLoader(CacheBitmapLoader(OctoArtLoader(this, DataSourceBitmapLoader.Builder(this).build())))
             .setSessionActivity(
                 PendingIntent.getActivity(
                     this,
@@ -97,6 +99,8 @@ class OctoPlaybackService : MediaLibraryService() {
         }
         // The heart follows both the song and the likes list.
         scope.launch { combine(currentId, likes.liked) { id, liked -> id != null && id in liked }.collect(::showLike) }
+        // Crossfade follows its setting.
+        scope.launch { playerSettings.prefs.collect { player.crossfadeMs = it.crossfadeMs } }
         // Editing the queue saves it once things settle.
         scope.launch { queueChanged.debounce(500).collect { saveQueue() } }
     }
@@ -151,17 +155,9 @@ class OctoPlaybackService : MediaLibraryService() {
     }
 
     private fun snapshot(): QueueSnapshot {
-        val timeline = player.currentTimeline
-        val order = buildList {
-            var i = timeline.getFirstWindowIndex(true)
-            while (i != C.INDEX_UNSET) {
-                add(i)
-                i = timeline.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, true)
-            }
-        }
         return QueueSnapshot(
             trackIds = List(player.mediaItemCount) { player.getMediaItemAt(it).mediaId },
-            shuffleOrder = order,
+            shuffleOrder = shuffleOrderOf(player).toList(),
             index = player.currentMediaItemIndex,
             positionMs = player.currentPosition,
             repeatMode = player.repeatMode,

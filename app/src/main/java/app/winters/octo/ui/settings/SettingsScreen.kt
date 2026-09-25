@@ -12,6 +12,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -22,6 +24,7 @@ import androidx.lifecycle.viewModelScope
 import app.winters.octo.BuildConfig
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.design.AccentButton
+import app.winters.octo.design.LineSlider
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.OctoType
@@ -30,6 +33,7 @@ import app.winters.octo.device.Access
 import app.winters.octo.device.DEVICE
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.device.MusicFolder
+import app.winters.octo.player.CrossfadeSecondsRange
 import app.winters.octo.player.LiveBackgroundSupported
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
@@ -53,6 +57,14 @@ class SettingsViewModel @Inject constructor(
 
     fun setLiveBackground(on: Boolean) {
         viewModelScope.launch { player.setLiveBackground(on) }
+    }
+
+    fun setCrossfade(on: Boolean) {
+        viewModelScope.launch { player.setCrossfade(on) }
+    }
+
+    fun setCrossfadeSeconds(seconds: Int) {
+        viewModelScope.launch { player.setCrossfadeSeconds(seconds) }
     }
 
     val songCount: StateFlow<Int> =
@@ -124,6 +136,13 @@ fun SettingsScreen(vm: SettingsViewModel = hiltViewModel()) {
                 enabled = LiveBackgroundSupported,
                 onChange = vm::setLiveBackground,
             )
+            SwitchLine(
+                label = "Crossfade",
+                detail = "Each song fades into the next. Albums played in order stay gapless.",
+                checked = player.crossfade,
+                onChange = vm::setCrossfade,
+            )
+            if (player.crossfade) CrossfadeLength(player.crossfadeSeconds, vm::setCrossfadeSeconds)
         }
 
         Card("About", Modifier.padding(top = 16.dp)) {
@@ -169,6 +188,32 @@ private fun SwitchLine(
             Text(detail, style = OctoType.caption, color = OctoColors.TextMuted)
         }
         OctoSwitch(checked = checked, onCheckedChange = onChange, enabled = enabled)
+    }
+}
+
+// How long the blend is, from 1 to 12 seconds, saved as it changes.
+@Composable
+private fun CrossfadeLength(seconds: Int, onChange: (Int) -> Unit) {
+    val range = CrossfadeSecondsRange
+    val span = (range.last - range.first).toFloat()
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        LineSlider(
+            fraction = { (seconds - range.first) / span },
+            onSeek = { fraction ->
+                val picked = range.first + Math.round(fraction * span)
+                if (picked != seconds) onChange(picked)
+            },
+            live = true,
+            modifier = Modifier
+                .weight(1f)
+                .semantics { contentDescription = "Crossfade length" },
+        )
+        Text(
+            "$seconds s",
+            style = OctoType.bodySmall.copy(fontFeatureSettings = "tnum"),
+            color = OctoColors.TextPrimary,
+            modifier = Modifier.padding(start = 12.dp),
+        )
     }
 }
 

@@ -10,13 +10,14 @@ import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.ForwardingSimpleBasePlayer
+import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 
-// One engine that plays audio. Crossfade will run two of these; audio focus
-// is handled above them, so each deck ignores it.
+// One engine that plays audio. Crossfade runs two of these; audio focus is
+// handled above them, so each deck ignores it.
 fun buildDeck(context: Context): ExoPlayer =
     ExoPlayer.Builder(context)
         .setAudioAttributes(
@@ -60,14 +61,29 @@ private const val DUCKED_VOLUME = 0.2f
 
 // The one player the rest of the phone sees: the lock screen, the
 // notification, headphones and the app all talk to this. It forwards to the
-// deck that is playing, so the deck can be swapped (for crossfade) without
-// anything outside noticing. It also owns audio focus.
+// deck that is playing, and hands over to the other deck for a crossfade
+// without anything outside noticing. It also owns audio focus.
 @OptIn(UnstableApi::class)
-class OctoPlayer(context: Context, initial: ExoPlayer) : ForwardingSimpleBasePlayer(initial), SleepTarget {
+class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : ForwardingSimpleBasePlayer(initial), SleepTarget {
     var deck: ExoPlayer = initial
         private set
 
     private var ducked = false
+
+    // During a crossfade: the deck playing out the old song, and how loud
+    // each deck is in the blend.
+    private var outgoing: ExoPlayer? = null
+    private var fadeIn = 1f
+    private var fadeOut = 0f
+
+    private val fader = Crossfader(this, spare).also(::addListener)
+
+    // How long a crossfade is, or 0 for none.
+    var crossfadeMs: Long
+        get() = fader.fadeMs
+        set(value) {
+            fader.fadeMs = value
+        }
 
     override var sleepFade = 1f
         set(value) {
@@ -107,18 +123,90 @@ class OctoPlayer(context: Context, initial: ExoPlayer) : ForwardingSimpleBasePla
     // Playing needs focus; if the phone says no (a call is on), stay paused.
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
         if (playWhenReady && !focus.request()) return Futures.immediateVoidFuture()
-        if (!playWhenReady) resumeWhenFocusReturns = false
+        if (!playWhenReady) {
+            resumeWhenFocusReturns = false
+            fader.interrupt()
+        }
         return super.handleSetPlayWhenReady(playWhenReady)
     }
 
+    // Anything that changes what plays or where ends a blend first, so the
+    // old song never keeps sounding under the new choice.
+    override fun handleSeek(mediaItemIndex: Int, positionMs: Long, seekCommand: Int): ListenableFuture<*> {
+        fader.interrupt()
+        return super.handleSeek(mediaItemIndex, positionMs, seekCommand)
+    }
+
+    override fun handleSetMediaItems(mediaItems: List<MediaItem>, startIndex: Int, startPositionMs: Long): ListenableFuture<*> {
+        fader.interrupt()
+        return super.handleSetMediaItems(mediaItems, startIndex, startPositionMs)
+    }
+
+    override fun handleAddMediaItems(index: Int, mediaItems: List<MediaItem>): ListenableFuture<*> {
+        fader.interrupt()
+        return super.handleAddMediaItems(index, mediaItems)
+    }
+
+    override fun handleRemoveMediaItems(fromIndex: Int, toIndex: Int): ListenableFuture<*> {
+        fader.interrupt()
+        return super.handleRemoveMediaItems(fromIndex, toIndex)
+    }
+
+    override fun handleMoveMediaItems(fromIndex: Int, toIndex: Int, newIndex: Int): ListenableFuture<*> {
+        fader.interrupt()
+        return super.handleMoveMediaItems(fromIndex, toIndex, newIndex)
+    }
+
+    override fun handleReplaceMediaItems(fromIndex: Int, toIndex: Int, mediaItems: List<MediaItem>): ListenableFuture<*> {
+        fader.interrupt()
+        return super.handleReplaceMediaItems(fromIndex, toIndex, mediaItems)
+    }
+
+    override fun handleSetShuffleModeEnabled(shuffleModeEnabled: Boolean): ListenableFuture<*> {
+        fader.interrupt()
+        return super.handleSetShuffleModeEnabled(shuffleModeEnabled)
+    }
+
+    override fun handleSetRepeatMode(repeatMode: Int): ListenableFuture<*> {
+        fader.interrupt()
+        return super.handleSetRepeatMode(repeatMode)
+    }
+
     override fun handleStop(): ListenableFuture<*> {
+        fader.interrupt()
         releaseFocus()
         return super.handleStop()
     }
 
     override fun handleRelease(): ListenableFuture<*> {
+        fader.release()
         releaseFocus()
         return super.handleRelease()
+    }
+
+    // The blend begins: the incoming deck starts silent and becomes the one
+    // everything talks to, while the outgoing one keeps sounding.
+    internal fun handOver(into: ExoPlayer, from: ExoPlayer) {
+        outgoing = from
+        fadeIn = 0f
+        fadeOut = 1f
+        deck = into
+        applyVolume()
+        into.play()
+        setPlayer(into)
+    }
+
+    internal fun setFade(inVolume: Float, outVolume: Float) {
+        fadeIn = inVolume
+        fadeOut = outVolume
+        applyVolume()
+    }
+
+    internal fun endFade() {
+        outgoing = null
+        fadeIn = 1f
+        fadeOut = 0f
+        applyVolume()
     }
 
     private fun duck(on: Boolean) {
@@ -126,10 +214,12 @@ class OctoPlayer(context: Context, initial: ExoPlayer) : ForwardingSimpleBasePla
         applyVolume()
     }
 
-    // The one place the deck's volume is set, so ducking and the sleep
-    // timer's fade multiply instead of undoing each other.
+    // The one place the decks' volume is set, so ducking, the sleep timer's
+    // fade and a crossfade multiply instead of undoing each other.
     private fun applyVolume() {
-        deck.volume = (if (ducked) DUCKED_VOLUME else 1f) * sleepFade
+        val level = (if (ducked) DUCKED_VOLUME else 1f) * sleepFade
+        deck.volume = level * fadeIn
+        outgoing?.volume = level * fadeOut
     }
 
     private fun releaseFocus(): Unit = focus.abandon()

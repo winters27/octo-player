@@ -26,6 +26,7 @@ const val EXTRA_ARTWORK = "app.winters.octo.artwork"
 const val EXTRA_ALBUM_ID = "app.winters.octo.albumId"
 const val EXTRA_ARTIST_ID = "app.winters.octo.artistId"
 const val EXTRA_MIME = "app.winters.octo.mime"
+const val EXTRA_ALBUM_ORDER = "app.winters.octo.albumOrder"
 
 // Artwork for the lock screen and notification, in a form the playback
 // service can turn back into a picture.
@@ -56,6 +57,7 @@ fun TrackEntity.toMediaItem(): MediaItem =
                         putString(EXTRA_ALBUM_ID, albumId)
                         putString(EXTRA_ARTIST_ID, artistId)
                         putString(EXTRA_MIME, mimeType)
+                        putInt(EXTRA_ALBUM_ORDER, albumOrder)
                     },
                 )
                 .build(),
