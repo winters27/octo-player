@@ -10,7 +10,13 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.ContextCompat
+import android.os.SystemClock
+import androidx.core.net.toUri
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.FileTagsEntity
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +32,9 @@ import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
+// How many files are read for tags at once.
+private const val READERS = 4
+
 // Whether the app may read the phone's music.
 enum class Access { Granted, NotAsked, Denied, DeniedForever }
 
@@ -35,6 +44,7 @@ enum class Access { Granted, NotAsked, Denied, DeniedForever }
 class DeviceLibrary @Inject constructor(
     @ApplicationContext private val context: Context,
     private val scanner: DeviceScanner,
+    private val reader: TagReader,
     private val dao: CatalogDao,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -96,15 +106,67 @@ class DeviceLibrary @Inject constructor(
         scanLock.withLock {
             _scanning.value = true
             try {
-                val catalog = buildDeviceCatalog(scanner.read())
+                val started = SystemClock.elapsedRealtime()
+                val files = scanner.list()
+                val tags = refreshTags(files)
+                val catalog = buildDeviceCatalog(files.map { it.toRow(tags[it.id]) })
                 dao.replaceSource(DEVICE, catalog.tracks, catalog.albums, catalog.artists)
                 // Counts only, so the library can be checked against the phone.
-                Log.i("Octo", "phone scan: ${catalog.tracks.size} tracks, ${catalog.albums.size} albums, ${catalog.artists.size} artists")
+                Log.i(
+                    "Octo",
+                    "phone scan: ${catalog.tracks.size} tracks, ${catalog.albums.size} albums, " +
+                        "${catalog.artists.size} artists, $lastReread files read, " +
+                        "${SystemClock.elapsedRealtime() - started} ms",
+                )
             } finally {
                 _scanning.value = false
             }
         }
     }
+
+    private var lastReread = 0
+
+    // Brings the saved tags up to date: reads only files that are new or
+    // changed since last time, and forgets files that are gone.
+    private suspend fun refreshTags(files: List<DeviceFile>): Map<Long, FileTags> {
+        val saved = dao.fileTags().associateBy { it.mediaId }
+        val stale = files.filter { file ->
+            val known = saved[file.id]
+            known == null || known.modifiedAt != file.modifiedAt || known.size != file.sizeBytes
+        }
+        // Several files at once; each read opens its own handle.
+        val fresh = coroutineScope {
+            stale.chunked((stale.size / READERS).coerceAtLeast(1) + 1).map { batch ->
+                async(Dispatchers.IO) { batch.map { file -> file.toSaved(reader.read(file.uri.toUri())) } }
+            }.awaitAll().flatten()
+        }
+        fresh.chunked(500).forEach { dao.upsertFileTags(it) }
+        val gone = saved.keys - files.map { it.id }.toSet()
+        gone.chunked(500).forEach { dao.deleteFileTags(it) }
+        lastReread = fresh.size
+
+        return (saved - gone + fresh.associateBy { it.mediaId })
+            .filterValues { it.readOk }
+            .mapValues { (_, t) ->
+                FileTags(t.title, t.artist, t.albumArtist, t.album, t.trackNo, t.discNo, t.year, t.compilation, t.mbAlbumId)
+            }
+    }
+
+    private fun DeviceFile.toSaved(tags: FileTags?) = FileTagsEntity(
+        mediaId = id,
+        modifiedAt = modifiedAt,
+        size = sizeBytes,
+        readOk = tags != null,
+        title = tags?.title,
+        artist = tags?.artist,
+        albumArtist = tags?.albumArtist,
+        album = tags?.album,
+        trackNo = tags?.trackNo,
+        discNo = tags?.discNo,
+        year = tags?.year,
+        compilation = tags?.compilation ?: false,
+        mbAlbumId = tags?.mbAlbumId,
+    )
 
     private fun granted() =
         ContextCompat.checkSelfPermission(context, permissionName) == PackageManager.PERMISSION_GRANTED

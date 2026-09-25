@@ -1,5 +1,6 @@
 package app.winters.octo.catalog
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -31,6 +32,8 @@ data class TrackEntity(
     val artwork: String?,
     // Where the audio is: a content:// address for phone files.
     val uri: String?,
+    // Position within its album, worked out once when the catalog is built.
+    @ColumnInfo(defaultValue = "0") val albumOrder: Int = 0,
 )
 
 @Entity(
@@ -63,4 +66,24 @@ data class ArtistEntity(
     val albumCount: Int,
     val songCount: Int,
     val artwork: String?,
+)
+
+// Tags read from one file on the phone, kept so a rescan only re-reads
+// files that changed. Stale when the file's modified time or size moves.
+@Entity(tableName = "file_tags")
+data class FileTagsEntity(
+    @PrimaryKey val mediaId: Long,
+    val modifiedAt: Long,
+    val size: Long,
+    // False when the file could not be read; the phone's own tags are used then.
+    val readOk: Boolean,
+    val title: String?,
+    val artist: String?,
+    val albumArtist: String?,
+    val album: String?,
+    val trackNo: Int?,
+    val discNo: Int?,
+    val year: Int?,
+    val compilation: Boolean,
+    val mbAlbumId: String?,
 )

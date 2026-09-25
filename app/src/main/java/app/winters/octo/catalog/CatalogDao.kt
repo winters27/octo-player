@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -29,7 +30,7 @@ interface CatalogDao {
     @Query("SELECT * FROM album WHERE id = :id")
     fun album(id: String): Flow<AlbumEntity?>
 
-    @Query("SELECT * FROM track WHERE albumId = :albumId ORDER BY discNo, trackNo, sortKey")
+    @Query("SELECT * FROM track WHERE albumId = :albumId ORDER BY albumOrder")
     fun albumTracks(albumId: String): Flow<List<TrackEntity>>
 
     @Query("SELECT * FROM artist WHERE id = :id")
@@ -67,6 +68,15 @@ interface CatalogDao {
 
     @Insert
     suspend fun insertArtists(rows: List<ArtistEntity>)
+
+    @Query("SELECT * FROM file_tags")
+    suspend fun fileTags(): List<FileTagsEntity>
+
+    @Upsert
+    suspend fun upsertFileTags(rows: List<FileTagsEntity>)
+
+    @Query("DELETE FROM file_tags WHERE mediaId IN (:ids)")
+    suspend fun deleteFileTags(ids: List<Long>)
 
     // Swaps everything one source contributed, all at once, so screens
     // never see a half-written library.

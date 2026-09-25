@@ -16,6 +16,7 @@ coroutines = "1.11.0"
 datastore = "1.2.1"
 coil = "3.6.3"
 room = "2.8.5"
+taglib = "1.0.6"
 junit = "4.13.2"
 
 [libraries]
@@ -47,6 +48,7 @@ kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+taglib = { group = "io.github.kyant0", name = "taglib", version.ref = "taglib" }
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
 coil-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
