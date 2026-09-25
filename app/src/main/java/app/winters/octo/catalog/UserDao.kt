@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -22,6 +23,88 @@ interface UserDao {
 
     @Query("SELECT EXISTS(SELECT 1 FROM liked_track WHERE trackId = :trackId)")
     suspend fun isLiked(trackId: String): Boolean
+
+    // Liked songs the catalog still has, newest like first.
+    @Query("SELECT t.* FROM liked_track l JOIN track t ON t.id = l.trackId ORDER BY l.likedAt DESC")
+    fun likedTracks(): Flow<List<TrackEntity>>
+
+    @Query("SELECT COUNT(*) FROM liked_track l JOIN track t ON t.id = l.trackId")
+    fun likedCount(): Flow<Int>
+
+    // Playlists, the one changed last first
+
+    @Query("SELECT * FROM playlist ORDER BY updatedAt DESC")
+    fun playlists(): Flow<List<PlaylistEntity>>
+
+    @Query("SELECT * FROM playlist WHERE id = :id")
+    fun playlist(id: String): Flow<PlaylistEntity?>
+
+    // Every playlist song the catalog still has, in play order.
+    @Query(
+        """
+        SELECT i.playlistId, t.albumId, t.durationMs, t.artwork
+        FROM playlist_item i JOIN track t ON t.id = i.trackId
+        ORDER BY i.playlistId, i.position
+        """,
+    )
+    fun playlistEntries(): Flow<List<PlaylistEntry>>
+
+    @Query(
+        """
+        SELECT i.id AS itemId, t.*
+        FROM playlist_item i JOIN track t ON t.id = i.trackId
+        WHERE i.playlistId = :id
+        ORDER BY i.position
+        """,
+    )
+    fun playlistTracks(id: String): Flow<List<PlaylistTrack>>
+
+    @Insert
+    suspend fun insertPlaylist(row: PlaylistEntity)
+
+    @Query("UPDATE playlist SET name = :name, updatedAt = :now WHERE id = :id")
+    suspend fun renamePlaylist(id: String, name: String, now: Long)
+
+    @Query("UPDATE playlist SET updatedAt = :now WHERE id = :id")
+    suspend fun touchPlaylist(id: String, now: Long)
+
+    // Its songs go with it.
+    @Query("DELETE FROM playlist WHERE id = :id")
+    suspend fun deletePlaylist(id: String)
+
+    @Query("SELECT * FROM playlist_item WHERE playlistId = :id ORDER BY position")
+    suspend fun playlistItems(id: String): List<PlaylistItemEntity>
+
+    @Insert
+    suspend fun insertPlaylistItems(rows: List<PlaylistItemEntity>)
+
+    @Update
+    suspend fun updatePlaylistItems(rows: List<PlaylistItemEntity>)
+
+    @Query("DELETE FROM playlist_item WHERE id = :itemId")
+    suspend fun deletePlaylistItem(itemId: Long)
+
+    @Transaction
+    suspend fun addToPlaylist(id: String, tracks: List<TrackEntity>, now: Long) {
+        val start = playlistItems(id).lastOrNull()?.position?.plus(1) ?: 0
+        insertPlaylistItems(appendedItems(id, start, tracks))
+        touchPlaylist(id, now)
+    }
+
+    @Transaction
+    suspend fun removeFromPlaylist(id: String, itemId: Long, now: Long) {
+        deletePlaylistItem(itemId)
+        val rest = playlistItems(id)
+        savePlaces(rest, renumbered(rest))
+        touchPlaylist(id, now)
+    }
+
+    @Transaction
+    suspend fun moveInPlaylist(id: String, itemId: Long, targetId: Long, now: Long) {
+        val items = playlistItems(id)
+        savePlaces(items, movedItem(items, itemId, targetId))
+        touchPlaylist(id, now)
+    }
 
     // Plays
 
@@ -91,4 +174,10 @@ interface UserDao {
         relinkPlays()
         relinkPlaylists()
     }
+}
+
+// Writes only the playlist rows whose place changed.
+private suspend fun UserDao.savePlaces(before: List<PlaylistItemEntity>, after: List<PlaylistItemEntity>) {
+    val unchanged = before.toSet()
+    updatePlaylistItems(after.filterNot { it in unchanged })
 }

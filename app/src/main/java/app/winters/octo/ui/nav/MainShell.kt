@@ -44,6 +44,12 @@ import app.winters.octo.ui.library.LibraryScreen
 import app.winters.octo.ui.menu.LocalSongMenu
 import app.winters.octo.ui.menu.SongMenuHost
 import app.winters.octo.ui.menu.SongMenuState
+import app.winters.octo.ui.playlist.LikedScreen
+import app.winters.octo.ui.playlist.LocalPlaylistSheets
+import app.winters.octo.ui.playlist.PlaylistScreen
+import app.winters.octo.ui.playlist.PlaylistSheets
+import app.winters.octo.ui.playlist.PlaylistSheetsHost
+import app.winters.octo.ui.playlist.PlaylistsScreen
 import app.winters.octo.ui.search.SearchScreen
 import app.winters.octo.ui.settings.SettingsScreen
 import dev.chrisbanes.haze.hazeSource
@@ -103,13 +109,18 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
     }
 
     val songMenu = remember { SongMenuState() }
+    val playlistSheets = remember { PlaylistSheets() }
     // Going to a page from the song menu also closes the player.
     val openFromMenu: (NavKey) -> Unit = { key ->
         playerOpen = false
         stack.add(key)
     }
 
-    CompositionLocalProvider(LocalHaze provides haze, LocalSongMenu provides songMenu) {
+    CompositionLocalProvider(
+        LocalHaze provides haze,
+        LocalSongMenu provides songMenu,
+        LocalPlaylistSheets provides playlistSheets,
+    ) {
         SharedTransitionLayout {
             Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
                 NavDisplay(
@@ -127,6 +138,9 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                         entry<SettingsRoute> { SettingsScreen() }
                         entry<AlbumRoute> { AlbumScreen(it.id, open, back) }
                         entry<ArtistRoute> { ArtistScreen(it.id, open, back) }
+                        entry<PlaylistsRoute> { PlaylistsScreen(open, back) }
+                        entry<LikedRoute> { LikedScreen(back) }
+                        entry<PlaylistRoute> { PlaylistScreen(it.id, back) }
                     },
                 )
                 // Back from the top of another tab goes Home rather than out.
@@ -171,6 +185,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                     )
                 }
                 SongMenuHost(songMenu, onOpen = openFromMenu)
+                PlaylistSheetsHost(playlistSheets)
             }
         }
     }

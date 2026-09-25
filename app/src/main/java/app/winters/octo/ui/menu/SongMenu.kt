@@ -40,6 +40,8 @@ import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
+import app.winters.octo.ui.playlist.LocalPlaylistSheets
+import app.winters.octo.ui.playlist.PlaylistSheet
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -93,6 +95,7 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
         val liked by vm.liked.collectAsStateWithLifecycle()
         val song = track ?: return@GlassSheet
         val isLiked = trackId in liked
+        val playlistSheets = LocalPlaylistSheets.current
 
         SongHeader(song)
         Spacer(Modifier.height(8.dp))
@@ -103,6 +106,10 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
         MenuRow(OctoIcons.AddToQueue, "Add to queue") {
             vm.playLast(trackId)
             state.close()
+        }
+        MenuRow(OctoIcons.AddToPlaylist, "Add to playlist") {
+            state.close()
+            playlistSheets.show(PlaylistSheet.Pick(trackId))
         }
         MenuRow(if (isLiked) OctoIcons.Liked else OctoIcons.Like, if (isLiked) "Remove from Liked songs" else "Add to Liked songs") {
             vm.toggleLike(trackId)

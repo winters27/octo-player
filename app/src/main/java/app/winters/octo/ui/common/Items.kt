@@ -63,12 +63,14 @@ sealed interface SongLead {
     data class Number(val track: Int?) : SongLead
 }
 
-// A song line; tapping it plays it.
+// A song line; tapping it plays it. `trailing` goes after the length, such
+// as a drag handle.
 @Composable
 fun SongRow(
     track: TrackEntity,
     lead: SongLead = SongLead.Artwork,
     subtitle: String? = "${track.artist} • ${track.album}",
+    trailing: (@Composable () -> Unit)? = null,
     onClick: (() -> Unit)? = null,
 ) {
     val menu = LocalSongMenu.current
@@ -106,6 +108,7 @@ fun SongRow(
             }
         }
         Text((track.durationMs / 1000).toInt().asClock(), style = OctoType.caption, color = OctoColors.TextMuted)
+        trailing?.invoke()
     }
 }
 

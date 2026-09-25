@@ -20,6 +20,9 @@ object OctoIcons {
     val More = R.drawable.sym_more_horiz
     val PlayNext = R.drawable.sym_queue_play_next
     val AddToQueue = R.drawable.sym_add_to_queue
+    val AddToPlaylist = R.drawable.sym_playlist_add
+    val Rename = R.drawable.sym_edit
+    val Delete = R.drawable.sym_delete
     val Album = R.drawable.sym_album
     val Artist = R.drawable.sym_person
 }
