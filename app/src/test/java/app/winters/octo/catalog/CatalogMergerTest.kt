@@ -153,4 +153,55 @@ class CatalogMergerTest {
         assertEquals(matchKey("Jay-Z"), matchKey("JAY Z"))
         assertEquals(matchKey("Views"), matchKey("Views [Deluxe]"))
     }
+
+    @Test
+    fun anAlbumFiledUnderAnotherArtistStillShowsOnce() {
+        // The server credits the album to someone else, so the albums do not
+        // match, but every song is the same song by the same artist.
+        val serverSide = server(
+            tracks = listOf(
+                track("s1", "server", "Hotline Bling", "server:deluxe", no = 1),
+                track("s2", "server", "One Dance", "server:deluxe", no = 2),
+            ),
+            albums = listOf(album("server:deluxe", "server", title = "Views (Deluxe)", artist = "server:ovo", songs = 2).copy(artist = "OVO Sound")),
+            artists = listOf(artist("server:ovo", "server", name = "OVO Sound")),
+        )
+        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        assertEquals(listOf("device:album"), merged.albums.map { it.id })
+        assertEquals(2, merged.tracks.size)
+        assertEquals("p1", merged.mergedIds["s1"])
+        assertEquals("p2", merged.mergedIds["s2"])
+        // The label artist has nothing of its own left.
+        assertEquals(listOf("device:artist"), merged.artists.map { it.id })
+    }
+
+    @Test
+    fun aDeluxeEditionKeepsOnlyItsExtraSongs() {
+        val serverSide = server(
+            tracks = listOf(
+                track("s1", "server", "Hotline Bling", "server:deluxe"),
+                track("s2", "server", "Bonus Track", "server:deluxe", ms = 180_000),
+            ),
+            albums = listOf(album("server:deluxe", "server", title = "Views (Deluxe)", artist = "server:ovo", songs = 2).copy(artist = "OVO Sound")),
+            artists = listOf(artist("server:ovo", "server", name = "OVO Sound")),
+        )
+        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        val deluxe = merged.albums.single { it.id == "server:deluxe" }
+        assertEquals(1, deluxe.songCount)
+        assertEquals(listOf("Bonus Track"), merged.tracks.filter { it.albumId == "server:deluxe" }.map { it.title })
+        assertEquals("p1", merged.mergedIds["s1"])
+    }
+
+    @Test
+    fun theSameTitleByAnotherArtistIsNotTheSameSong() {
+        val cover = track("s1", "server", "One Dance", "server:covers").copy(artist = "Someone Else")
+        val serverSide = server(
+            tracks = listOf(cover),
+            albums = listOf(album("server:covers", "server", title = "Covers", artist = "server:someone")),
+            artists = listOf(artist("server:someone", "server", name = "Someone Else")),
+        )
+        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        assertEquals("s1", merged.mergedIds["s1"])
+        assertEquals(3, merged.tracks.size)
+    }
 }

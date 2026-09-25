@@ -46,17 +46,22 @@ fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
 
     // Songs, matched within each merged album
     val inAlbum = HashMap<String, MutableList<MergingSong>>()
+    // Every song so far by title and artist, for the second chance below.
+    val everywhere = HashMap<String, MutableList<MergingSong>>()
     val mergedIds = HashMap<String, String>()
     for (source in sources) {
         // A song matches at most one copy from each source.
         val taken = HashSet<String>()
         for (track in source.tracks.sortedBy { it.albumOrder }) {
             val albumId = albumIdFor[track.albumId] ?: track.albumId
-            val match = inAlbum[albumId]?.firstOrNull { song ->
-                song.id !in taken && song.sources.none { it == source.sourceId } &&
-                    matchKey(song.base.title) == matchKey(track.title) &&
-                    abs(song.base.durationMs - track.durationMs) <= SAME_LENGTH_MS
-            }
+            fun fits(song: MergingSong) = song.id !in taken && song.sources.none { it == source.sourceId } &&
+                matchKey(song.base.title) == matchKey(track.title) &&
+                abs(song.base.durationMs - track.durationMs) <= SAME_LENGTH_MS
+            // First within the matched album. Failing that, the same song by
+            // the same artist anywhere: sources often file an album under a
+            // different album artist or edition name.
+            val match = inAlbum[albumId]?.firstOrNull(::fits)
+                ?: everywhere[songKey(track)]?.firstOrNull(::fits)
             if (match != null) {
                 match.add(track, source)
                 taken += match.id
@@ -64,6 +69,7 @@ fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
             } else {
                 val song = MergingSong(track, source, albumId, artistIdFor[track.artistId] ?: track.artistId)
                 inAlbum.getOrPut(albumId) { mutableListOf() } += song
+                everywhere.getOrPut(songKey(track)) { mutableListOf() } += song
                 mergedIds[track.id] = song.id
             }
         }
@@ -86,9 +92,14 @@ fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
     }
     val tracksByAlbum = tracks.groupBy { it.albumId }
 
-    val albums = albumBases.bases.map { base ->
+    // An album whose songs all turned out to be copies of songs already in
+    // another album has nothing left, and is left out.
+    val albums = albumBases.bases.filter { it.id in tracksByAlbum }.map { base ->
         val extras = albumBases.extras[base.id].orEmpty()
-        val albumTracks = tracksByAlbum[base.id].orEmpty()
+        val albumTracks = tracksByAlbum.getValue(base.id)
+        // Counts are only worked out again for albums whose songs changed:
+        // made from several sources, or with songs gone to another album.
+        val recount = extras.isNotEmpty() || albumTracks.size != base.songCount
         AlbumEntity(
             id = base.id,
             sourceId = base.sourceId,
@@ -99,25 +110,30 @@ fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
             artist = base.artist,
             artistId = artistIdFor[base.artistId] ?: base.artistId,
             year = base.year ?: extras.firstNotNullOfOrNull { it.year },
-            // Counts are only worked out again for albums made from several
-            // sources; the rest keep what their source said.
-            songCount = if (extras.isEmpty()) base.songCount else albumTracks.size,
-            durationMs = if (extras.isEmpty()) base.durationMs else albumTracks.sumOf { it.durationMs },
+            songCount = if (recount) albumTracks.size else base.songCount,
+            durationMs = if (recount) albumTracks.sumOf { it.durationMs } else base.durationMs,
             addedAt = base.addedAt,
             artwork = base.artwork ?: extras.firstNotNullOfOrNull { it.artwork },
         )
     }
 
-    val artists = artistBases.bases.map { base ->
+    // Artists from a later source with nothing left of their own are left
+    // out too; the phone's artists always stay as they were.
+    val firstSource = sources.firstOrNull()?.sourceId
+    val artists = artistBases.bases.mapNotNull { base ->
         val several = artistBases.extras[base.id].orEmpty().isNotEmpty()
+        val later = base.sourceId != firstSource
+        val albumCount = albums.count { it.artistId == base.id }
+        val songCount = tracks.count { it.artistId == base.id }
+        if (later && albumCount == 0 && songCount == 0) return@mapNotNull null
         ArtistEntity(
             id = base.id,
             sourceId = base.sourceId,
             name = base.name,
             searchKey = base.searchKey,
             sortKey = base.sortKey,
-            albumCount = if (several) albums.count { it.artistId == base.id } else base.albumCount,
-            songCount = if (several) tracks.count { it.artistId == base.id } else base.songCount,
+            albumCount = if (several || later) albumCount else base.albumCount,
+            songCount = if (several || later) songCount else base.songCount,
             artwork = base.artwork,
         )
     }
@@ -211,6 +227,9 @@ private class MergingSong(
         onPhone = onPhone,
     )
 }
+
+// A song's title and artist, for matching it outside its album.
+private fun songKey(track: SourceTrackEntity) = matchKey(track.title) + "|" + matchKey(track.artist)
 
 // A name for matching across sources: case, punctuation, spacing and
 // bracketed extras such as "(feat. someone)" or "[Remastered]" are
