@@ -13,11 +13,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.design.ArtworkShape
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.artworkRim
 import coil3.compose.AsyncImage
+
+// Covers smaller than this are drawn without the rim.
+private val RimMinSize = 96.dp
 
 // A picture from the catalog, whatever its source, on a quiet tile until
 // it arrives. Music with no artwork keeps the tile.
@@ -43,8 +47,9 @@ fun Artwork(
                 modifier = Modifier.matchParentSize(),
             )
         }
-        // The rim sits on top of the picture, so it is drawn last.
-        Box(Modifier.matchParentSize().artworkRim(shape))
+        // The rim sits on top of the picture, so it is drawn last. Small
+        // covers go without: on a thumbnail it reads as a frame cutting in.
+        if (size >= RimMinSize) Box(Modifier.matchParentSize().artworkRim(shape))
     }
 }
 
