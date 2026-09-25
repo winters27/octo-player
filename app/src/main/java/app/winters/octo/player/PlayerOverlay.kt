@@ -152,16 +152,13 @@ fun AnimatedVisibilityScope.PlayerOverlay(
         Box(
             Modifier
                 .fillMaxSize()
-                .graphicsLayer {
-                    translationY = pull
-                    scaleX = 1f - 0.06f * pulled
-                    scaleY = 1f - 0.06f * pulled
-                    shape = RoundedCornerShape(corner)
-                    clip = pull > 0f
-                }
                 .pointerInput(Unit) {
-                    val threshold = 96.dp.toPx()
+                    // Let go past this, holding still, and the player closes.
+                    val farEnough = cap * 0.5f
                     val fling = 1_200.dp.toPx()
+                    // Any upward movement at release faster than this is a change
+                    // of mind: the player settles back.
+                    val backUp = 150.dp.toPx()
                     awaitEachGesture {
                         // A pull down from anywhere closes the player. The sliders
                         // keep their sideways drags: whichever way the finger
@@ -181,12 +178,26 @@ fun AnimatedVisibilityScope.PlayerOverlay(
                             pull = (pull + change.positionChange().y * 0.82f).coerceIn(0f, cap)
                             change.consume()
                         }
-                        if (pull > threshold || tracker.calculateVelocity().y > fling) {
+                        // Nothing is decided until the finger lifts: a flick down
+                        // closes, moving back up keeps it open, and otherwise it
+                        // closes only if pulled well down.
+                        val speed = tracker.calculateVelocity().y
+                        val closing = speed > fling || (speed > -backUp && pull > farEnough)
+                        if (closing) {
                             close()
                         } else {
                             scope.launch { animate(pull, 0f, animationSpec = spring(0.8f, 400f)) { value, _ -> pull = value } }
                         }
                     }
+                }
+                // After the gesture in this chain, so the finger is tracked on the
+                // screen rather than on the moving player.
+                .graphicsLayer {
+                    translationY = pull
+                    scaleX = 1f - 0.06f * pulled
+                    scaleY = 1f - 0.06f * pulled
+                    shape = RoundedCornerShape(corner)
+                    clip = pull > 0f
                 }
                 .background(base),
         ) {
