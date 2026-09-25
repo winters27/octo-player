@@ -8,7 +8,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.unit.dp
 
-val ArtworkShape = RoundedCornerShape(8.dp)
+val ArtworkShape = RoundedCornerShape(6.dp)
 
 // A faint line on the artwork itself. Cards carry no outline; the picture
 // is what gets the edge.

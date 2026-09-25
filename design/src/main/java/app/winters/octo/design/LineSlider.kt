@@ -27,14 +27,16 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 
-// The song's progress as a line that glows along the part already played.
-// The line thickens and a thumb appears while it is dragged; the song only
-// jumps when the finger lifts, so scrubbing does not stutter the audio.
+// A line that glows along the part already filled, for song progress and
+// volume. The line thickens and a thumb appears while it is dragged. By
+// default the value is only sent when the finger lifts, so scrubbing a song
+// does not stutter the audio; `live` sends it all along, for volume.
 @Composable
 fun LineSlider(
     fraction: Float,
     onSeek: (Float) -> Unit,
     modifier: Modifier = Modifier,
+    live: Boolean = false,
     color: Color = Color.White,
     trackColor: Color = Color.White.copy(alpha = 0.24f),
 ) {
@@ -70,6 +72,7 @@ fun LineSlider(
                     onDragCancel = { dragging = false },
                 ) { change, _ ->
                     dragFraction = (change.position.x / size.width).coerceIn(0f, 1f)
+                    if (live) seek(dragFraction)
                 }
             }
             .drawBehind {

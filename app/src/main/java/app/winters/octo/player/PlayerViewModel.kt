@@ -2,6 +2,7 @@ package app.winters.octo.player
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.winters.octo.playback.DeviceVolume
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.PlaybackConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -21,6 +22,7 @@ class PlayerViewModel @Inject constructor(
     private val playback: PlaybackConnection,
     palette: ArtworkPalette,
     settings: PlayerSettings,
+    private val deviceVolume: DeviceVolume,
 ) : ViewModel() {
     val now: StateFlow<NowPlaying> = playback.now
 
@@ -42,4 +44,6 @@ class PlayerViewModel @Inject constructor(
     fun previous() = playback.previous()
     fun toggleShuffle() = playback.toggleShuffle()
     fun cycleRepeat() = playback.cycleRepeat()
+    val volume: StateFlow<Float> = deviceVolume.level
+    fun setVolume(fraction: Float) = deviceVolume.set(fraction)
 }

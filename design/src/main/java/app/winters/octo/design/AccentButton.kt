@@ -23,7 +23,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 
 // The accent mixed into black, so white text stays readable on it.
-val AccentFill = mix(OctoColors.Accent, Color.Black, 0.45f)
+private val AccentFill = mix(OctoColors.Accent, Color.Black, 0.45f)
 
 // The one filled button on a surface.
 @Composable

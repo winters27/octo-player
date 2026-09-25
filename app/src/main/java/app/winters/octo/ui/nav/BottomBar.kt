@@ -319,9 +319,9 @@ private fun PlayerCapsule(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            CapsuleButton(OctoIcons.SkipPrevious, "Previous", actions.onPrevious)
+            CapsuleButton(OctoIcons.Previous, "Previous", actions.onPrevious)
             CapsuleButton(if (now.isPlaying) OctoIcons.Pause else OctoIcons.Play, if (now.isPlaying) "Pause" else "Play", actions.onPlayPause)
-            CapsuleButton(OctoIcons.SkipNext, "Next", actions.onNext)
+            CapsuleButton(OctoIcons.Next, "Next", actions.onNext)
         }
     }
 }

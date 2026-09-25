@@ -8,3 +8,5 @@ keystore.properties
 *.jks
 *.keystore
 captures/
+# Working copies made for parallel work.
+.claude/worktrees/

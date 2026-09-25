@@ -42,7 +42,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -61,8 +60,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -87,9 +84,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
 import app.winters.octo.catalog.ArtworkRef
-import app.winters.octo.design.AccentFill
 import app.winters.octo.design.Glaze
-import app.winters.octo.design.GlazeInset
 import app.winters.octo.design.GlazeLight
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.OctoColors
@@ -174,7 +169,6 @@ fun AnimatedVisibilityScope.PlayerOverlay(
             } else {
                 BlurredArtwork(now.artwork)
             }
-            Shade()
             PlayerContent(now, model, artModifier, onClose, onOpenArtist)
         }
     }
@@ -193,22 +187,6 @@ private fun BlurredArtwork(ref: String?) {
             modifier = Modifier.fillMaxSize().blur(80.dp).alpha(0.6f),
         )
     }
-}
-
-// Darkens toward the bottom, so the controls always sit on something dark.
-@Composable
-private fun Shade() {
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    0f to Color.Black.copy(alpha = 0.03f),
-                    0.45f to Color.Black.copy(alpha = 0.45f),
-                    1f to Color.Black,
-                ),
-            ),
-    )
 }
 
 @Composable
@@ -270,7 +248,9 @@ private fun AnimatedVisibilityScope.PlayerContent(
             Progress(now, model)
             Spacer(Modifier.height(12.dp))
             Transport(now, model)
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(8.dp))
+            Volume(model)
+            Spacer(Modifier.height(12.dp))
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
@@ -299,7 +279,7 @@ private fun AnimatedVisibilityScope.PlayerContent(
 }
 
 // How round the card's corners are, as a percentage of its side.
-const val PlayerArtCorner = 5
+const val PlayerArtCorner = 3
 
 // The artwork card. Its corners round from a circle, as it leaves the bar,
 // to a soft square as it lands. It sits full size while music plays and
@@ -398,31 +378,43 @@ private fun Transport(now: NowPlaying, model: PlayerViewModel) {
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        SkipButton(OctoIcons.SkipPrevious, "Previous", model::previous)
-        GlazeInset(
-            fill = AccentFill,
-            shape = CircleShape,
+        TransportButton(OctoIcons.Previous, "Previous", 44.dp, model::previous)
+        TransportButton(
+            if (now.isPlaying) OctoIcons.Pause else OctoIcons.Play,
+            if (now.isPlaying) "Pause" else "Play",
+            56.dp,
+            model::togglePlayPause,
+        )
+        TransportButton(OctoIcons.Next, "Next", 44.dp, model::next)
+    }
+}
+
+// The phone's media volume, quiet on the left and loud on the right. It
+// follows the volume buttons too.
+@Composable
+private fun Volume(model: PlayerViewModel) {
+    val volume by model.volume.collectAsStateWithLifecycle()
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(painterResource(OctoIcons.VolumeDown), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(20.dp))
+        LineSlider(
+            fraction = volume,
+            onSeek = model::setVolume,
+            live = true,
             modifier = Modifier
-                .size(76.dp)
-                .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = model::togglePlayPause)
-                .semantics { contentDescription = if (now.isPlaying) "Pause" else "Play" },
-        ) {
-            Icon(
-                painterResource(if (now.isPlaying) OctoIcons.Pause else OctoIcons.Play),
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(40.dp),
-            )
-        }
-        SkipButton(OctoIcons.SkipNext, "Next", model::next)
+                .weight(1f)
+                .padding(horizontal = 10.dp)
+                .semantics { contentDescription = "Volume" },
+            color = OctoColors.TextPrimary.copy(alpha = 0.85f),
+        )
+        Icon(painterResource(OctoIcons.VolumeUp), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(20.dp))
     }
 }
 
 @Composable
-private fun SkipButton(@DrawableRes icon: Int, description: String, onClick: () -> Unit) {
+private fun TransportButton(@DrawableRes icon: Int, description: String, iconSize: Dp, onClick: () -> Unit) {
     Box(
         Modifier
-            .size(64.dp)
+            .size(72.dp)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -432,7 +424,7 @@ private fun SkipButton(@DrawableRes icon: Int, description: String, onClick: () 
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(icon), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(40.dp))
+        Icon(painterResource(icon), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(iconSize))
     }
 }
 

@@ -74,7 +74,7 @@ class AlbumViewModel @AssistedInject constructor(
     }
 }
 
-private val CoverShape = RoundedCornerShape(14.dp)
+private val CoverShape = RoundedCornerShape(10.dp)
 
 @Composable
 fun AlbumScreen(
