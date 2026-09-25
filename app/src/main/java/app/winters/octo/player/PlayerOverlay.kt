@@ -50,6 +50,7 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -95,8 +96,8 @@ import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.design.AccentFill
 import app.winters.octo.design.GlassSheet
 import app.winters.octo.design.GlazeInset
+import app.winters.octo.design.GlazeSelected
 import app.winters.octo.design.Glaze
-import app.winters.octo.design.GlazeLight
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -106,8 +107,11 @@ import app.winters.octo.playback.AudioQuality
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.SleepState
 import app.winters.octo.ui.common.Artwork
+import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.asClock
 import coil3.compose.AsyncImage
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -129,6 +133,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     val scope = rememberCoroutineScope()
     // How far the player has been pulled down, in pixels.
     var pull by remember { mutableFloatStateOf(0f) }
+    val backdrop = rememberHazeState()
     var showQueue by remember { mutableStateOf(false) }
     var showSleep by remember { mutableStateOf(false) }
 
@@ -180,12 +185,18 @@ fun AnimatedVisibilityScope.PlayerOverlay(
                 }
                 .background(base),
         ) {
-            if (prefs.liveBackground && LiveBackgroundSupported) {
-                MeshBackground(colors, now.isPlaying)
-            } else {
-                BlurredArtwork(now.artwork)
+            // The background is what the player's glass frosts, the way the
+            // bar frosts the page.
+            Box(Modifier.fillMaxSize().hazeSource(backdrop)) {
+                if (prefs.liveBackground && LiveBackgroundSupported) {
+                    MeshBackground(colors, now.isPlaying)
+                } else {
+                    BlurredArtwork(now.artwork)
+                }
             }
-            PlayerContent(now, model, artModifier, onClose, onOpenArtist, onOpenQueue = { showQueue = true }, onOpenSleep = { showSleep = true })
+            CompositionLocalProvider(LocalHaze provides backdrop) {
+                PlayerContent(now, model, artModifier, onClose, onOpenArtist, onOpenQueue = { showQueue = true }, onOpenSleep = { showSleep = true })
+            }
         }
         GlassSheet(visible = showQueue, onDismiss = { showQueue = false }) {
             val upNext by model.upNext.collectAsStateWithLifecycle()
@@ -234,13 +245,7 @@ private fun AnimatedVisibilityScope.PlayerContent(
             Modifier.fillMaxWidth().height(56.dp),
             contentAlignment = Alignment.Center,
         ) {
-            ActionCircle(
-                icon = null,
-                description = "Close player",
-                on = false,
-                onClick = onClose,
-                modifier = Modifier.align(Alignment.CenterStart),
-            )
+            CloseButton(onClose, Modifier.align(Alignment.CenterStart))
             now.album?.let {
                 Text(
                     it,
@@ -280,20 +285,20 @@ private fun AnimatedVisibilityScope.PlayerContent(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
             ) {
-                ActionCircle(
+                ActionButton(
                     icon = OctoIcons.Queue,
                     description = "Up next",
                     on = false,
                     onClick = onOpenQueue,
                 )
                 SleepCircle(model, onClick = onOpenSleep)
-                ActionCircle(
+                ActionButton(
                     icon = OctoIcons.Shuffle,
                     description = "Shuffle",
                     on = now.shuffle,
                     onClick = model::toggleShuffle,
                 )
-                ActionCircle(
+                ActionButton(
                     icon = if (now.repeatMode == Player.REPEAT_MODE_ONE) OctoIcons.RepeatOne else OctoIcons.Repeat,
                     description = "Repeat",
                     on = now.repeatMode != Player.REPEAT_MODE_OFF,
@@ -422,6 +427,7 @@ private fun QualityBadge(quality: AudioQuality, modifier: Modifier) {
             .height(24.dp)
             .clickable(interactionSource = null, indication = null, role = Role.Button) { open = !open }
             .clearAndSetSemantics { contentDescription = "${quality.label}, ${quality.full}" },
+        backdrop = LocalHaze.current,
     ) {
         Row(
             Modifier.animateContentSize(spring(0.8f, 400f)).padding(horizontal = 10.dp),
@@ -505,44 +511,56 @@ private fun TransportButton(@DrawableRes icon: Int, description: String, iconSiz
     }
 }
 
-// A small glazed circle. Lit, with an accent icon, while its setting is on.
-// With no icon it is the close chevron.
+// Closes the player: a small glaze that frosts the background, like the bar.
 @Composable
-private fun ActionCircle(
-    @DrawableRes icon: Int?,
+private fun CloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Glaze(
+        modifier
+            .size(44.dp)
+            .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = "Close player" },
+        backdrop = LocalHaze.current,
+    ) {
+        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(26.dp))
+    }
+}
+
+// One of the buttons under the controls: a plain icon, sitting in the same
+// darker pill as a selected tab while its setting is on.
+@Composable
+private fun ActionButton(
+    @DrawableRes icon: Int,
     description: String,
     on: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier,
     state: String? = null,
 ) {
-    Glaze(
-        modifier
+    Box(
+        Modifier
             .size(44.dp)
             .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = onClick)
             .semantics {
                 contentDescription = description
                 stateDescription = state ?: if (on) "On" else "Off"
             },
-        light = if (on) GlazeLight.Lifted else GlazeLight.Rest,
+        contentAlignment = Alignment.Center,
     ) {
-        if (icon == null) {
-            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(26.dp))
-        } else {
-            val tint = if (on) OctoColors.Accent else OctoColors.TextMuted
-            Icon(painterResource(icon), contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
-        }
+        if (on) GlazeSelected(Modifier.matchParentSize())
+        Icon(
+            painterResource(icon),
+            contentDescription = null,
+            tint = if (on) OctoColors.TextPrimary else OctoColors.TextMuted,
+            modifier = Modifier.size(22.dp),
+        )
     }
 }
 
-// Opens the sleep timer. Lit while one is set, with the minutes left on a
-// small badge while it counts down.
 @Composable
 private fun SleepCircle(model: PlayerViewModel, onClick: () -> Unit) {
     val sleep by model.sleep.collectAsStateWithLifecycle()
     val minutes = (sleep as? SleepState.Counting)?.let { ((it.remainingMs + 59_999) / 60_000).toInt() }
     Box {
-        ActionCircle(
+        ActionButton(
             icon = OctoIcons.SleepTimer,
             description = "Sleep timer",
             on = sleep != SleepState.Off,
