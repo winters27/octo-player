@@ -49,8 +49,17 @@ class PlaybackConnection @Inject constructor(
     private val _now = MutableStateFlow(NowPlaying())
     val now: StateFlow<NowPlaying> = _now
 
+    // The current song and everything after it, in the order they will play.
+    private val _upNext = MutableStateFlow<List<QueueEntry>>(emptyList())
+    val upNext: StateFlow<List<QueueEntry>> = _upNext
+
     private val listener = object : Player.Listener {
-        override fun onEvents(player: Player, events: Player.Events) = publish(player)
+        override fun onEvents(player: Player, events: Player.Events) {
+            publish(player)
+            if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)) {
+                publishQueue(player)
+            }
+        }
     }
 
     // Called when the app comes to the front.
@@ -65,6 +74,7 @@ class PlaybackConnection @Inject constructor(
                 controller = ready
                 ready.addListener(listener)
                 publish(ready)
+                publishQueue(ready)
                 waiting.forEach { it(ready) }
                 waiting.clear()
             },
@@ -134,6 +144,17 @@ class PlaybackConnection @Inject constructor(
 
     fun playLast(trackIds: List<String>) = withController { c -> c.addMediaItems(trackIds.map(::songRequest)) }
 
+    // Queue edits from the "Up next" list, by position in the queue.
+    fun moveInQueue(from: Int, to: Int) = withController { it.moveMediaItem(from, to) }
+
+    fun removeFromQueue(index: Int) = withController { it.removeMediaItem(index) }
+
+    fun playAt(index: Int) = withController { c ->
+        c.seekToDefaultPosition(index)
+        if (c.playbackState == Player.STATE_IDLE) c.prepare()
+        c.play()
+    }
+
     private fun withController(action: (MediaController) -> Unit) {
         val ready = controller
         if (ready != null) action(ready) else {
@@ -159,5 +180,26 @@ class PlaybackConnection @Inject constructor(
             shuffle = player.shuffleModeEnabled,
             repeatMode = player.repeatMode,
         )
+    }
+
+    private fun publishQueue(player: Player) {
+        val timeline = player.currentTimeline
+        val shuffle = player.shuffleModeEnabled
+        val trackIds = List(player.mediaItemCount) { player.getMediaItemAt(it).mediaId }
+        val order = upNextOrder(trackIds, player.currentMediaItemIndex) {
+            timeline.getNextWindowIndex(it, Player.REPEAT_MODE_OFF, shuffle)
+        }
+        _upNext.value = order.map { slot ->
+            val meta = player.getMediaItemAt(slot.index).mediaMetadata
+            QueueEntry(
+                key = slot.key,
+                index = slot.index,
+                trackId = trackIds[slot.index],
+                title = meta.title?.toString().orEmpty(),
+                artist = meta.artist?.toString().orEmpty(),
+                artwork = meta.artworkRef(),
+                durationMs = meta.durationMs ?: 0,
+            )
+        }
     }
 }

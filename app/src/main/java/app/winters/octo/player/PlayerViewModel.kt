@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import app.winters.octo.playback.DeviceVolume
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.playback.QueueEntry
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
@@ -25,6 +26,7 @@ class PlayerViewModel @Inject constructor(
     private val deviceVolume: DeviceVolume,
 ) : ViewModel() {
     val now: StateFlow<NowPlaying> = playback.now
+    val upNext: StateFlow<List<QueueEntry>> = playback.upNext
 
     val prefs: StateFlow<PlayerPrefs> = settings.prefs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerPrefs())
@@ -46,4 +48,7 @@ class PlayerViewModel @Inject constructor(
     fun cycleRepeat() = playback.cycleRepeat()
     val volume: StateFlow<Float> = deviceVolume.level
     fun setVolume(fraction: Float) = deviceVolume.set(fraction)
+    fun moveInQueue(from: Int, to: Int) = playback.moveInQueue(from, to)
+    fun removeFromQueue(index: Int) = playback.removeFromQueue(index)
+    fun playAt(index: Int) = playback.playAt(index)
 }
