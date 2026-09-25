@@ -106,12 +106,16 @@ fun AppShell() {
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             TabBar(haze, selected, Modifier.weight(1f)) { selected = it }
-            Glaze(Modifier.size(BarHeight), backdrop = haze) {
-                Icon(
-                    Icons.Rounded.PlayArrow,
-                    contentDescription = stringResource(R.string.now_playing),
-                    tint = OctoColors.TextPrimary,
-                )
+            // Same materials as a selected tab: the bar's dark glass, lit by
+            // the glaze. The glaze fills the whole circle, so it is one surface.
+            GlassPanelDark(haze, Modifier.size(BarHeight)) {
+                Glaze(Modifier.matchParentSize()) {
+                    Icon(
+                        Icons.Rounded.PlayArrow,
+                        contentDescription = stringResource(R.string.now_playing),
+                        tint = OctoColors.TextPrimary,
+                    )
+                }
             }
         }
     }
