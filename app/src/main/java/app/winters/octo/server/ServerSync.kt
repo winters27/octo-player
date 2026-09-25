@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import app.winters.octo.catalog.CatalogMerge
+import app.winters.octo.listening.ListeningSync
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
@@ -49,6 +50,7 @@ class ServerSync @Inject constructor(
     private val sessions: SessionRepository,
     private val sources: SourceDao,
     private val merge: CatalogMerge,
+    private val listening: ListeningSync,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val dropLock = Mutex()
@@ -119,6 +121,8 @@ class ServerSync @Inject constructor(
             val catalog = buildServerCatalog(sourceId, client.readLibrary())
             sources.replaceSource(sourceId, catalog.tracks, catalog.albums, catalog.artists)
             val library = merge.rebuild()
+            // Brings likes and stars together, and sends any plays still waiting.
+            listening.afterSync()
             context.syncData.edit { p ->
                 p[SOURCE_ID] = sourceId
                 p[SYNCED_AT] = System.currentTimeMillis()
