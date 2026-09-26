@@ -24,3 +24,6 @@ import kotlinx.serialization.Serializable
 @Serializable data class PlaylistRoute(val id: String) : NavKey
 @Serializable data object SignInRoute : NavKey
 @Serializable data object OctoAdminRoute : NavKey
+
+// The equalizer and everything else that shapes the sound.
+@Serializable data object SoundRoute : NavKey

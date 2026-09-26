@@ -38,10 +38,14 @@ import app.winters.octo.player.CrossfadeSecondsRange
 import app.winters.octo.player.LiveBackgroundSupported
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
+import app.winters.octo.sound.SoundEngine
+import app.winters.octo.sound.SoundSettings
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.nav.OctoAdminRoute
 import app.winters.octo.ui.nav.SignInRoute
+import app.winters.octo.ui.nav.SoundRoute
+import app.winters.octo.ui.sound.soundSummary
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
@@ -54,7 +58,11 @@ class SettingsViewModel @Inject constructor(
     val library: DeviceLibrary,
     dao: CatalogDao,
     private val player: PlayerSettings,
+    soundEngine: SoundEngine,
 ) : ViewModel() {
+    // For the line that opens the Sound page.
+    val sound: StateFlow<SoundSettings> = soundEngine.current
+
     val playerPrefs: StateFlow<PlayerPrefs> =
         player.prefs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerPrefs())
 
@@ -91,6 +99,7 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
     val count by vm.songCount.collectAsStateWithLifecycle()
     val folders by vm.library.folders.collectAsStateWithLifecycle()
     val player by vm.playerPrefs.collectAsStateWithLifecycle()
+    val sound by vm.sound.collectAsStateWithLifecycle()
     val padding = screenPadding()
 
     Column(
@@ -134,6 +143,7 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
         )
 
         Card("Player", Modifier.padding(top = 16.dp)) {
+            ChoiceLine("Sound", soundSummary(sound)) { onOpen(SoundRoute) }
             SwitchLine(
                 label = "Live background",
                 detail = if (LiveBackgroundSupported) {
@@ -186,7 +196,7 @@ internal fun Line(label: String, value: String) {
 }
 
 @Composable
-private fun SwitchLine(
+internal fun SwitchLine(
     label: String,
     detail: String,
     checked: Boolean,

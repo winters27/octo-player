@@ -131,6 +131,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     artModifier: Modifier,
     onClose: () -> Unit,
     onOpenArtist: (String) -> Unit,
+    onOpenSound: () -> Unit,
     model: PlayerViewModel = hiltViewModel(),
 ) {
     val now by model.now.collectAsStateWithLifecycle()
@@ -215,7 +216,16 @@ fun AnimatedVisibilityScope.PlayerOverlay(
                 }
             }
             CompositionLocalProvider(LocalHaze provides backdrop) {
-                PlayerContent(now, model, artModifier, onClose, onOpenArtist, onOpenQueue = { showQueue = true }, onOpenSleep = { showSleep = true })
+                PlayerContent(
+                    now,
+                    model,
+                    artModifier,
+                    onClose,
+                    onOpenArtist,
+                    onOpenQueue = { showQueue = true },
+                    onOpenSleep = { showSleep = true },
+                    onOpenSound = onOpenSound,
+                )
             }
         }
         GlassSheet(visible = showQueue, onDismiss = { showQueue = false }) {
@@ -252,6 +262,7 @@ private fun AnimatedVisibilityScope.PlayerContent(
     onOpenArtist: (String) -> Unit,
     onOpenQueue: () -> Unit,
     onOpenSleep: () -> Unit,
+    onOpenSound: () -> Unit,
 ) {
     val density = LocalDensity.current
     Column(
@@ -278,6 +289,7 @@ private fun AnimatedVisibilityScope.PlayerContent(
                     modifier = Modifier.padding(horizontal = 60.dp),
                 )
             }
+            SoundButton(model, onOpenSound, Modifier.align(Alignment.CenterEnd))
         }
         Spacer(Modifier.weight(1f))
         BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -658,6 +670,30 @@ private fun ActionButton(
     ) {
         GlowIcon(
             painterResource(icon),
+            tint = if (on) Color.White else Color.White.copy(alpha = 0.45f),
+            lit = on,
+            modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
+// Opens the Sound page, across from the close button. It glows while the
+// equalizer is on, like the buttons under the controls.
+@Composable
+private fun SoundButton(model: PlayerViewModel, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val on by model.equalizerOn.collectAsStateWithLifecycle()
+    Box(
+        modifier
+            .size(44.dp)
+            .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = onClick)
+            .semantics {
+                contentDescription = "Sound"
+                stateDescription = if (on) "Equalizer on" else "Equalizer off"
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        GlowIcon(
+            painterResource(OctoIcons.Sound),
             tint = if (on) Color.White else Color.White.copy(alpha = 0.45f),
             lit = on,
             modifier = Modifier.size(22.dp),

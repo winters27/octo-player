@@ -35,4 +35,6 @@ object OctoIcons {
     val Downloading = R.drawable.sym_downloading
     val Downloaded = R.drawable.sym_download_done
     val Radio = R.drawable.sym_radio
+    // Three sliders, drawn to match the rounded set: the sound settings.
+    val Sound = R.drawable.sym_tune
 }

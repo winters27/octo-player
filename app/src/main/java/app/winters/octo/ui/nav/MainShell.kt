@@ -67,6 +67,7 @@ import app.winters.octo.ui.settings.DisconnectSheetHost
 import app.winters.octo.ui.settings.LocalDisconnectPrompt
 import app.winters.octo.ui.settings.SettingsScreen
 import app.winters.octo.ui.signin.SignInScreen
+import app.winters.octo.ui.sound.SoundScreen
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 
@@ -169,6 +170,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                         entry<PlaylistRoute> { PlaylistScreen(it.id, back) }
                         entry<SignInRoute> { SignInScreen(back) }
                         entry<OctoAdminRoute> { OctoAdminScreen(back) }
+                        entry<SoundRoute> { SoundScreen(back) }
                     },
                 )
                 // Back from the top of another tab goes Home rather than out.
@@ -209,6 +211,10 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                         onOpenArtist = { id ->
                             playerOpen = false
                             stack.add(ArtistRoute(id))
+                        },
+                        onOpenSound = {
+                            playerOpen = false
+                            stack.add(SoundRoute)
                         },
                     )
                 }
