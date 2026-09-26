@@ -92,7 +92,7 @@ fun StreamingCard(modifier: Modifier = Modifier, vm: StreamingViewModel = hiltVi
 
 // A setting and its current choice; tapping it opens the options.
 @Composable
-private fun ChoiceLine(label: String, value: String, onClick: () -> Unit) {
+internal fun ChoiceLine(label: String, value: String, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()

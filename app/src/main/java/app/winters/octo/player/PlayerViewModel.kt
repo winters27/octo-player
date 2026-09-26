@@ -14,6 +14,7 @@ import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.QueueEntry
 import app.winters.octo.playback.SleepState
 import app.winters.octo.playback.SleepTimer
+import app.winters.octo.sound.SoundEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
@@ -39,6 +40,7 @@ class PlayerViewModel @Inject constructor(
     settings: PlayerSettings,
     private val deviceVolume: DeviceVolume,
     private val sleepTimer: SleepTimer,
+    sound: SoundEngine,
 ) : ViewModel() {
     val now: StateFlow<NowPlaying> = playback.now
     val upNext: StateFlow<List<QueueEntry>> = playback.upNext
@@ -100,6 +102,11 @@ class PlayerViewModel @Inject constructor(
     fun playAt(index: Int) = playback.playAt(index)
 
     val sleep: StateFlow<SleepState> = sleepTimer.state
+
+    // Whether the equalizer is on, for the Sound button's glow.
+    val equalizerOn: StateFlow<Boolean> = sound.current
+        .map { it.eqEnabled }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
     fun sleepIn(minutes: Int) = sleepTimer.start(minutes)
     fun sleepAtEndOfSong() = sleepTimer.startEndOfSong()
     fun cancelSleep() = sleepTimer.cancel()
