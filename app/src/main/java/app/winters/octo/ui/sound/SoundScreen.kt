@@ -61,6 +61,7 @@ import app.winters.octo.sound.SoundSettings
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.ScreenTitle
+import app.winters.octo.ui.common.Segmented
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.settings.Card
 import app.winters.octo.ui.settings.ChoiceLine

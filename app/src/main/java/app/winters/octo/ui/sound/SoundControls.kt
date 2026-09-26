@@ -1,7 +1,6 @@
 package app.winters.octo.ui.sound
 
 import android.graphics.BlurMaskFilter
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -11,20 +10,17 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
@@ -59,7 +55,6 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.GlazeLight
@@ -75,49 +70,6 @@ import kotlin.math.roundToInt
 internal fun Hairline(modifier: Modifier = Modifier) {
     val onePixel = with(LocalDensity.current) { 1.toDp() }
     Box(modifier.fillMaxWidth().height(onePixel).background(OctoColors.TextPrimary.copy(alpha = 0.08f)))
-}
-
-// A few choices in one glaze, the chosen one in the darker pill that glides
-// between them, like the tabs in the bar.
-@Composable
-internal fun Segmented(
-    options: List<String>,
-    selected: Int,
-    onSelect: (Int) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Glaze(modifier.fillMaxWidth().height(40.dp)) {
-        BoxWithConstraints(Modifier.fillMaxSize().padding(4.dp)) {
-            val segment = maxWidth / options.size
-            val x by animateDpAsState(segment * selected, spring(dampingRatio = 0.8f, stiffness = 350f), label = "segment")
-            GlazeSelected(
-                Modifier
-                    .offset { IntOffset(x.roundToPx(), 0) }
-                    .width(segment)
-                    .fillMaxHeight(),
-            )
-            Row(Modifier.fillMaxSize().selectableGroup()) {
-                options.forEachIndexed { index, label ->
-                    val chosen = index == selected
-                    val tint by animateColorAsState(if (chosen) OctoColors.Accent else OctoColors.TextPrimary, label = "segment tint")
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .selectable(
-                                selected = chosen,
-                                interactionSource = null,
-                                indication = null,
-                                role = Role.Tab,
-                            ) { onSelect(index) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(label, style = OctoType.label, color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-            }
-        }
-    }
 }
 
 // One preset in the row, and whether it is the listener's own.
