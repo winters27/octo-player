@@ -104,4 +104,52 @@ class SortSettingsTest {
         store(file).edit { it[stringPreferencesKey(SortList.Songs.key)] = "Shuffle:sideways" }
         assertEquals(SortList.Songs.default, open(file).order(SortList.Songs).first())
     }
+
+    @Test
+    fun ordersGoThroughABackupToAnotherInstall() = runBlocking {
+        val before = open(SavedFile())
+        before.set(SortList.Songs, SortOrder(SongSort.RecentlyAdded, descending = true))
+        before.set(SortList.Playlists, SortOrder(PlaylistSort.entries.first(), descending = false))
+        val saved = before.saved()
+        // Only lists that were reordered are named.
+        assertEquals(setOf("songs", "playlists"), saved.keys)
+
+        val file = SavedFile()
+        open(file).restore(saved)
+        val after = open(file)
+        assertEquals(SortOrder(SongSort.RecentlyAdded, descending = true), after.order(SortList.Songs).first())
+        assertEquals(SortOrder(PlaylistSort.entries.first(), descending = false), after.order(SortList.Playlists).first())
+        assertEquals(SortList.Albums.default, after.order(SortList.Albums).first())
+        assertEquals(saved, after.saved())
+    }
+
+    @Test
+    fun aBackupsUnknownListsAndOrdersAreLeftOut() = runBlocking {
+        val file = SavedFile()
+        val settings = open(file)
+        settings.set(SortList.Artists, SortOrder(ArtistSort.SongCount, descending = true))
+        settings.restore(
+            mapOf(
+                "artists" to "Shuffle:asc",
+                "songs" to "Title:sideways",
+                "a_list_from_later" to "Title:asc",
+                "albums" to "Year:desc",
+            ),
+        )
+        // The artists order the backup could not use stays as it was.
+        assertEquals(SortOrder(ArtistSort.SongCount, descending = true), open(file).order(SortList.Artists).first())
+        assertEquals(SortList.Songs.default, open(file).order(SortList.Songs).first())
+        assertEquals(SortOrder(AlbumSort.Year, descending = true), open(file).order(SortList.Albums).first())
+        assertEquals(
+            mapOf(SortList.Albums to SortOrder(AlbumSort.Year, descending = true)),
+            restorableOrders(mapOf("albums" to "Year:desc", "x" to "y")),
+        )
+    }
+
+    @Test
+    fun anUnreadableSavedOrderIsNotBackedUp() = runBlocking {
+        val file = SavedFile()
+        store(file).edit { it[stringPreferencesKey(SortList.Songs.key)] = "Shuffle:sideways" }
+        assertEquals(emptyMap<String, String>(), open(file).saved())
+    }
 }
