@@ -10,7 +10,7 @@ import androidx.lifecycle.viewModelScope
 import app.winters.octo.sound.AudioOutput
 import app.winters.octo.sound.EqPreset
 import app.winters.octo.sound.EqPresets
-import app.winters.octo.sound.GLOBAL_AUDIO_SESSION
+import app.winters.octo.sound.AudioSession
 import app.winters.octo.sound.ParametricEqFile
 import app.winters.octo.sound.SoundEngine
 import app.winters.octo.sound.SoundFiles
@@ -36,6 +36,7 @@ class SoundViewModel @Inject constructor(
     private val engine: SoundEngine,
     private val userPresets: UserPresets,
     private val files: SoundFiles,
+    private val session: AudioSession,
 ) : ViewModel() {
     val saved: StateFlow<SoundSettings> = engine.current
     val output: StateFlow<AudioOutput> = engine.output
@@ -50,10 +51,6 @@ class SoundViewModel @Inject constructor(
     // Why the last file could not be read or written, until the next try.
     var fileProblem by mutableStateOf<String?>(null)
         private set
-
-    // The audio session to open the phone's own equalizer for. The whole
-    // output mix until the audio path hands in the player's session here.
-    var systemEqualizerSession: () -> Int = { GLOBAL_AUDIO_SESSION }
 
     // Whether the flat button is being held, with the equalizer off for it.
     var heldFlat by mutableStateOf(false)
@@ -168,7 +165,7 @@ class SoundViewModel @Inject constructor(
     }
 
     // The phone's own equalizer screen, or nothing when no app offers one.
-    fun systemEqualizer(): Intent? = files.systemEqualizer(systemEqualizerSession())
+    fun systemEqualizer(): Intent? = files.systemEqualizer(session.id)
 
     private fun current(): SoundSettings = draft ?: engine.current.value
 

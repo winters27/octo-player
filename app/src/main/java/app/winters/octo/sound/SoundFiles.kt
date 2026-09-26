@@ -18,10 +18,6 @@ import javax.inject.Singleton
 // The largest correction file read; real ones are a few hundred bytes.
 private const val MAX_FILE_BYTES = 256 * 1024
 
-// The audio session the phone's own equalizer is opened for when none is
-// given: 0, the whole output mix.
-const val GLOBAL_AUDIO_SESSION = 0
-
 // Reading and writing equalizer files the listener picks, and finding the
 // phone's own equalizer screen.
 @Singleton
