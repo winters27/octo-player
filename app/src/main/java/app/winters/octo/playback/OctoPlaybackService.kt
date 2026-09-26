@@ -21,6 +21,7 @@ import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import app.winters.octo.MainActivity
+import app.winters.octo.offline.Prefetcher
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.server.QueueSync
 import app.winters.octo.sound.AlbumRun
@@ -78,6 +79,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var audioSession: AudioSession
     @Inject lateinit var serverQueue: QueueSync
     @Inject lateinit var quickPicks: QuickPicks
+    @Inject lateinit var prefetch: Prefetcher
 
     private val scope = MainScope()
     private lateinit var player: OctoPlayer
@@ -110,6 +112,7 @@ class OctoPlaybackService : MediaLibraryService() {
         player.addListener(tracker)
         player.addListener(Watcher())
         sleep.attach(player)
+        prefetch.attach(player)
 
         session = MediaLibrarySession.Builder(this, player, Callback())
             .setBitmapLoader(CacheBitmapLoader(OctoArtLoader(this, DataSourceBitmapLoader.Builder(this).build())))
@@ -165,6 +168,7 @@ class OctoPlaybackService : MediaLibraryService() {
         widgets.clear()
         tracker.flush()
         sleep.detach()
+        prefetch.detach()
         session?.release()
         player.release()
         audioSession.close()

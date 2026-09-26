@@ -45,6 +45,7 @@ import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.ui.common.songs
 import app.winters.octo.ui.menu.MenuRow
@@ -65,7 +66,14 @@ sealed interface PlaylistSheet {
 
     // Rename or delete a playlist, or save one only on the phone to the
     // server when `canSave`. `onServer` is one kept with the server.
-    data class Options(val id: String, val name: String, val onServer: Boolean = false, val canSave: Boolean = false) : PlaylistSheet
+    // `canDownload` when some of its songs are only on a server.
+    data class Options(
+        val id: String,
+        val name: String,
+        val onServer: Boolean = false,
+        val canSave: Boolean = false,
+        val canDownload: Boolean = false,
+    ) : PlaylistSheet
     data class Rename(val id: String, val name: String) : PlaylistSheet
     data class Delete(val id: String, val name: String, val onServer: Boolean = false) : PlaylistSheet
 }
@@ -96,7 +104,10 @@ class PlaylistSheets {
 val LocalPlaylistSheets = staticCompositionLocalOf<PlaylistSheets> { error("No playlist sheets") }
 
 @HiltViewModel
-class PlaylistSheetsViewModel @Inject constructor(private val store: PlaylistStore) : ViewModel() {
+class PlaylistSheetsViewModel @Inject constructor(
+    private val store: PlaylistStore,
+    private val offline: OfflineDownloads,
+) : ViewModel() {
     val playlists: StateFlow<List<PlaylistSummary>> =
         store.playlists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -105,6 +116,9 @@ class PlaylistSheetsViewModel @Inject constructor(private val store: PlaylistSto
     fun delete(id: String) = store.delete(id)
     fun add(id: String, trackId: String) = store.add(id, listOf(trackId))
     fun saveToServer(id: String) = store.saveToServer(id)
+
+    // Downloads the playlist's songs that are only on a server, once.
+    fun download(id: String) = offline.downloadPlaylist(id)
 }
 
 @Composable
@@ -129,6 +143,12 @@ fun PlaylistSheetsHost(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel = hil
                     if (sheet.canSave) {
                         MenuRow(OctoIcons.Cloud, "Save to server") {
                             vm.saveToServer(sheet.id)
+                            sheets.close()
+                        }
+                    }
+                    if (sheet.canDownload) {
+                        MenuRow(OctoIcons.Download, "Download") {
+                            vm.download(sheet.id)
                             sheets.close()
                         }
                     }

@@ -7,6 +7,7 @@ import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.UserDao
+import app.winters.octo.offline.DownloadDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -33,4 +34,7 @@ object CatalogModule {
 
     @Provides
     fun onlineDao(db: CatalogDatabase): OnlineDao = db.onlineDao()
+
+    @Provides
+    fun downloadDao(db: CatalogDatabase): DownloadDao = db.downloadDao()
 }

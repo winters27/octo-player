@@ -8,8 +8,13 @@ import androidx.annotation.OptIn
 import androidx.core.net.toUri
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.datasource.TransferListener
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.CacheKeyFactory
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
@@ -19,6 +24,7 @@ import androidx.media3.extractor.DefaultExtractorsFactory
 import app.winters.octo.catalog.SourceTrackEntity
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
+import app.winters.octo.offline.StreamCache
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.player.StreamPrefs
 import app.winters.octo.subsonic.SubsonicClient
@@ -36,10 +42,6 @@ import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// How a server song sits in the queue: its id on the server and what its
-// file is, never a signed address. The address is signed as the song loads.
-private const val STREAM_SCHEME = "octo-stream"
-
 // How long to wait for the saved sign-in to come back as the app starts.
 private const val SESSION_WAIT_MS = 3_000L
 
@@ -48,7 +50,8 @@ class StreamUnavailable(message: String) : IOException(message)
 
 // Streams songs from the signed-in server. It knows the connection and the
 // streaming settings, and signs each request as a deck opens it, so a new
-// address is made for every load and seek and none is ever kept.
+// address is made for every load and seek and none is ever kept. Songs
+// played are saved on the phone as they stream, by song, never by address.
 @OptIn(UnstableApi::class)
 @Singleton
 class Streams @Inject constructor(
@@ -56,6 +59,7 @@ class Streams @Inject constructor(
     private val sessions: SessionRepository,
     private val settings: PlayerSettings,
     private val http: OkHttpClient,
+    private val saved: StreamCache,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
@@ -76,6 +80,9 @@ class Streams @Inject constructor(
     fun online(): Boolean =
         capabilities()?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
 
+    // Whether the phone is online over Wi-Fi or a cable, not mobile data.
+    fun onWifi(): Boolean = online() && !onMobileData()
+
     // Mobile data is any connection that is not Wi-Fi or a cable.
     private fun onMobileData(): Boolean {
         val caps = capabilities() ?: return false
@@ -90,21 +97,14 @@ class Streams @Inject constructor(
     private fun quality(prefs: StreamPrefs): StreamQuality = if (onMobileData()) prefs.mobile else prefs.wifi
 
     // Where the queue keeps a server copy.
-    fun uriFor(copy: SourceTrackEntity): String = uriFor(copy.nativeId, copy.mimeType, bitrateOf(copy))
+    fun uriFor(copy: SourceTrackEntity): String = streamUri(refFor(copy))
 
-    // Where the queue keeps any server song, by its id on the server, its
-    // type and its bits a second.
-    fun uriFor(serverId: String, mimeType: String?, bitrate: Int?): String =
-        Uri.Builder()
-            .scheme(STREAM_SCHEME)
-            .authority("song")
-            .appendPath(serverId)
-            .apply {
-                mimeType?.let { appendQueryParameter("mime", it) }
-                bitrate?.let { appendQueryParameter("bitrate", "$it") }
-            }
-            .build()
-            .toString()
+    fun refFor(copy: SourceTrackEntity): StreamRef = StreamRef(copy.sourceId, copy.nativeId, copy.mimeType, bitrateOf(copy))
+
+    // Where the queue keeps any server song, by its server, its id there,
+    // its type and its bits a second.
+    fun uriFor(sourceId: String?, serverId: String, mimeType: String?, bitrate: Int?): String =
+        streamUri(StreamRef(sourceId, serverId, mimeType, bitrate))
 
     // What the player will receive for a server copy on this connection.
     fun mimeTypeFor(copy: SourceTrackEntity, prefs: StreamPrefs): String? = mimeTypeFor(copy.mimeType, bitrateOf(copy), prefs)
@@ -113,15 +113,81 @@ class Streams @Inject constructor(
         streamRequest(mimeType, bitrate, quality(prefs)).mimeType(mimeType)
 
     // What a deck loads songs with: phone files as they are, server songs
-    // signed as they open. One for each deck.
+    // from their saved copy when there is one, otherwise signed as they open
+    // and saved as they play. One for each deck.
     fun mediaSourceFactory(): MediaSource.Factory {
-        val upstream = DefaultDataSource.Factory(context, OkHttpDataSource.Factory(http))
-        val sources = ResolvingDataSource.Factory(upstream) { spec ->
-            if (spec.uri.scheme == STREAM_SCHEME) spec.withUri(sign(spec.uri)) else spec
+        val network = networkFactory()
+        val signed = signedFactory(network)
+        val cached = cachedFactory(signed)
+        val split = DataSource.Factory {
+            SplitDataSource { spec ->
+                when {
+                    !isStream(spec.uri) -> network.createDataSource()
+                    saved.enabled.value -> cached.createDataSource()
+                    else -> signed.createDataSource()
+                }
+            }
         }
+        val sources = ResolvingDataSource.Factory(split) { spec -> if (isStream(spec.uri)) spec.withUri(pin(spec.uri)) else spec }
         // A made-on-the-way MP3 has no seek table, so seek by its steady bitrate.
         val extractors = DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true)
         return DefaultMediaSourceFactory(sources, extractors).setLoadErrorHandlingPolicy(Retries())
+    }
+
+    // Fills the saved copy of a song ahead of time, for the next songs in
+    // the queue. Null while nothing is kept.
+    fun savingSource(): CacheDataSource? =
+        if (saved.enabled.value) cachedFactory(signedFactory(networkFactory())).createDataSource() else null
+
+    // Reads a server song for downloading: from its saved copy when there is
+    // one, otherwise from the server, without filling the saved copies.
+    fun downloadSource(): DataSource {
+        val signed = signedFactory(networkFactory())
+        if (!saved.enabled.value) return signed.createDataSource()
+        return cachedFactory(signed).setCacheWriteDataSinkFactory(null).createDataSource()
+    }
+
+    // The song with the request it loads with fixed in its address: see
+    // chooseRequest. Unchanged when no server is known for it.
+    fun pinned(ref: StreamRef): StreamRef {
+        if (ref.pinned != null) return ref
+        val source = ref.sourceId ?: currentSourceId() ?: return ref
+        val request = chooseRequest(source, ref, quality(current.value), saved::isFullySaved, saved::isPartlySaved)
+        return ref.copy(sourceId = source).pin(request)
+    }
+
+    // The name a song is saved under, or null when no server is known for it.
+    fun cacheKey(ref: StreamRef): String? {
+        val source = ref.sourceId ?: currentSourceId() ?: return null
+        return streamCacheKey(source, ref, ref.request(quality(current.value)))
+    }
+
+    private fun networkFactory(): DataSource.Factory = DefaultDataSource.Factory(context, OkHttpDataSource.Factory(http))
+
+    private fun signedFactory(upstream: DataSource.Factory): DataSource.Factory =
+        ResolvingDataSource.Factory(upstream) { spec -> if (isStream(spec.uri)) spec.withUri(sign(spec.uri)) else spec }
+
+    private fun cachedFactory(upstream: DataSource.Factory): CacheDataSource.Factory =
+        CacheDataSource.Factory()
+            .setCache(saved.cache)
+            .setUpstreamDataSourceFactory(upstream)
+            .setCacheKeyFactory(keys)
+            // A saved copy that cannot be read is passed over for the server's.
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+    // Songs are saved by server, song, type and request, never by address.
+    private val keys = CacheKeyFactory { spec ->
+        parseStreamUri(spec.uri.toString())?.let(::cacheKey) ?: spec.key ?: spec.uri.toString()
+    }
+
+    private fun isStream(uri: Uri): Boolean = uri.scheme == STREAM_SCHEME
+
+    private fun currentSourceId(): String? = (sessions.state.value as? SessionState.SignedIn)?.session?.sourceId
+
+    // Runs on the loading thread, before the saved copy is looked for.
+    private fun pin(uri: Uri): Uri {
+        val ref = parseStreamUri(uri.toString()) ?: return uri
+        return streamUri(pinned(ref)).toUri()
     }
 
     // Runs on the loading thread, each time a stream opens.
@@ -129,9 +195,9 @@ class Streams @Inject constructor(
         if (!online()) throw StreamUnavailable("No connection")
         val client = (sessions.state.value as? SessionState.SignedIn)?.session?.client
             ?: throw StreamUnavailable("No server signed in")
-        val id = uri.lastPathSegment ?: throw StreamUnavailable("No song id")
-        val request = streamRequest(uri.getQueryParameter("mime"), uri.getQueryParameter("bitrate")?.toIntOrNull(), quality(current.value))
-        return client.url("stream", mapOf("id" to id) + request.params).toString().toUri()
+        val ref = parseStreamUri(uri.toString()) ?: throw StreamUnavailable("No song id")
+        val request = ref.request(quality(current.value))
+        return client.url("stream", mapOf("id" to ref.serverId) + request.params).toString().toUri()
     }
 
     // A failed load is tried again as usual, except with no connection or
@@ -143,5 +209,38 @@ class Streams @Inject constructor(
             } else {
                 super.getRetryDelayMsFor(loadErrorInfo)
             }
+    }
+}
+
+// Opens server songs and everything else from different sources, picked
+// as each one opens.
+@OptIn(UnstableApi::class)
+private class SplitDataSource(private val pick: (DataSpec) -> DataSource) : DataSource {
+    private val listeners = ArrayList<TransferListener>()
+    private var current: DataSource? = null
+
+    override fun addTransferListener(transferListener: TransferListener) {
+        listeners += transferListener
+    }
+
+    override fun open(dataSpec: DataSpec): Long {
+        val source = pick(dataSpec)
+        listeners.forEach(source::addTransferListener)
+        current = source
+        return source.open(dataSpec)
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int = checkNotNull(current).read(buffer, offset, length)
+
+    override fun getUri(): Uri? = current?.uri
+
+    override fun getResponseHeaders(): Map<String, List<String>> = current?.responseHeaders ?: emptyMap()
+
+    override fun close() {
+        try {
+            current?.close()
+        } finally {
+            current = null
+        }
     }
 }

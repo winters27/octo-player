@@ -5,6 +5,7 @@ import app.winters.octo.data.SessionRepository
 import app.winters.octo.device.DeviceArtworkFetcher
 import app.winters.octo.device.DeviceArtworkKeyer
 import app.winters.octo.device.DeviceLibrary
+import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.server.ServerArtworkFetcher
 import app.winters.octo.server.ServerArtworkKeyer
 import app.winters.octo.server.ServerSync
@@ -23,6 +24,7 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var deviceLibrary: DeviceLibrary
     @Inject lateinit var sessions: SessionRepository
     @Inject lateinit var serverSync: ServerSync
+    @Inject lateinit var offline: OfflineDownloads
 
     override fun onCreate() {
         super.onCreate()
@@ -30,6 +32,8 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
         deviceLibrary.start()
         // And with the server's, when one is connected.
         serverSync.start()
+        // Downloads left waiting last time carry on.
+        offline.start()
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader =
