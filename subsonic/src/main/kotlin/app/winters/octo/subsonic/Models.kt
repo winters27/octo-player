@@ -305,3 +305,122 @@ data class Cue(
 // The older lyrics call's answer: one block of plain text.
 @Serializable
 data class PlainLyrics(val artist: String? = null, val title: String? = null, val value: String? = null)
+
+// The play queue a server keeps for the signed-in user, so another device
+// can pick it up. The older form names the current song by id; the
+// OpenSubsonic index-based form gives its place in the list, which works
+// when a song is in the queue twice. Position is in milliseconds into the
+// current song; changed is when it was saved, and changedBy the name of
+// the client that saved it.
+@Serializable
+data class PlayQueue(
+    val entry: List<Song> = emptyList(),
+    val current: String? = null,
+    val position: Long = 0,
+    val username: String? = null,
+    val changed: String? = null,
+    val changedBy: String? = null,
+)
+
+@Serializable
+data class PlayQueueByIndex(
+    val entry: List<Song> = emptyList(),
+    val currentIndex: Int? = null,
+    val position: Long = 0,
+    val username: String? = null,
+    val changed: String? = null,
+    val changedBy: String? = null,
+)
+
+// A link anyone can open to listen to some songs or an album. Expires is
+// when it stops working, missing for never; visitCount is how often it was
+// opened.
+@Serializable
+data class Share(
+    val id: String,
+    val url: String = "",
+    val description: String? = null,
+    val username: String? = null,
+    val created: String? = null,
+    val expires: String? = null,
+    val lastVisited: String? = null,
+    val visitCount: Int = 0,
+    val entry: List<Song> = emptyList(),
+)
+
+@Serializable
+data class Shares(val share: List<Share> = emptyList())
+
+// Whether the server is reading its music folders now, and how many songs
+// it has counted so far.
+@Serializable
+data class ScanStatus(
+    val scanning: Boolean = false,
+    val count: Long = 0,
+    val folderCount: Long? = null,
+    val lastScan: String? = null,
+)
+
+// A song someone is playing right now, who they are, how many minutes ago
+// it started, and on which player.
+@Serializable
+data class NowPlayingEntry(
+    val id: String,
+    val title: String = "",
+    val artist: String? = null,
+    val album: String? = null,
+    val coverArt: String? = null,
+    val username: String = "",
+    val minutesAgo: Int = 0,
+    @Serializable(with = LooseString::class) val playerId: String? = null,
+    val playerName: String? = null,
+)
+
+@Serializable
+data class NowPlayingList(val entry: List<NowPlayingEntry> = emptyList())
+
+// An internet radio station with everything a server keeps about it, for
+// editing: its name, stream and home page.
+@Serializable
+data class RadioStationDetails(
+    val id: String,
+    val name: String = "",
+    val streamUrl: String = "",
+    val homePageUrl: String? = null,
+    val coverArt: String? = null,
+)
+
+@Serializable
+data class RadioStationDetailsList(val internetRadioStation: List<RadioStationDetails> = emptyList())
+
+// The OpenSubsonic extension for saving the queue by place in the list.
+const val INDEX_BASED_QUEUE = "indexBasedQueue"
+
+// What a queue save sends: every song id in order, and where playback is.
+// In the index-based form the current song is its place in the list;
+// otherwise it is the song's id. An empty queue sends no current song.
+fun queueSaveParams(ids: List<String>, currentIndex: Int, positionMs: Long, indexBased: Boolean): List<Pair<String, String>> =
+    buildList {
+        ids.forEach { add("id" to it) }
+        val index = currentIndex.takeIf { it in ids.indices } ?: return@buildList
+        if (indexBased) add("currentIndex" to "$index") else add("current" to ids[index])
+        add("position" to "${positionMs.coerceAtLeast(0)}")
+    }
+
+// What creating a share sends: the ids (songs, or one album), an optional
+// description, and when it expires, in milliseconds since 1970. No expiry
+// means the link never expires.
+fun shareParams(ids: List<String>, description: String?, expiresAtMs: Long?): List<Pair<String, String>> =
+    buildList {
+        ids.forEach { add("id" to it) }
+        description?.takeIf(String::isNotBlank)?.let { add("description" to it) }
+        expiresAtMs?.let { add("expires" to "$it") }
+    }
+
+// What adding or changing a radio station sends. A blank home page is left out.
+fun stationParams(streamUrl: String, name: String, homepageUrl: String?): List<Pair<String, String>> =
+    buildList {
+        add("streamUrl" to streamUrl.trim())
+        add("name" to name.trim())
+        homepageUrl?.trim()?.takeIf(String::isNotEmpty)?.let { add("homepageUrl" to it) }
+    }

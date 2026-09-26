@@ -322,6 +322,80 @@ class SubsonicClient(
     // The params with the folder added, when there is one.
     private fun Map<String, String>.inFolder(folder: String?) = if (folder == null) this else this + ("musicFolderId" to folder)
 
+    // The queue saved on the server, or null when none is. Only for
+    // servers that list the indexBasedQueue extension.
+    suspend fun playQueueByIndex(): PlayQueueByIndex? =
+        get("getPlayQueueByIndex", key = "playQueueByIndex", serializer = PlayQueueByIndex.serializer(), default = PlayQueueByIndex())
+            .takeIf { it.entry.isNotEmpty() }
+
+    // The older form, where the current song is named by id.
+    suspend fun playQueue(): PlayQueue? =
+        get("getPlayQueue", key = "playQueue", serializer = PlayQueue.serializer(), default = PlayQueue())
+            .takeIf { it.entry.isNotEmpty() }
+
+    // Saves the queue, with the current song as its place in the list.
+    suspend fun savePlayQueueByIndex(ids: List<String>, currentIndex: Int, positionMs: Long) =
+        send("savePlayQueueByIndex", queueSaveParams(ids, currentIndex, positionMs, indexBased = true))
+
+    // Saves the queue, with the current song named by id.
+    suspend fun savePlayQueue(ids: List<String>, currentIndex: Int, positionMs: Long) =
+        send("savePlayQueue", queueSaveParams(ids, currentIndex, positionMs, indexBased = false))
+
+    // Makes a public link to songs or an album. Servers answer with the new
+    // share; one with sharing switched off answers with an error.
+    suspend fun createShare(ids: List<String>, description: String? = null, expiresAtMs: Long? = null): Share =
+        getWith("createShare", shareParams(ids, description, expiresAtMs), "shares", Shares.serializer(), Shares())
+            .share.firstOrNull() ?: throw SubsonicException.Server(0, "The server made no share")
+
+    // The signed-in user's shares.
+    suspend fun shares(): List<Share> =
+        get("getShares", key = "shares", serializer = Shares.serializer(), default = Shares()).share
+
+    suspend fun deleteShare(id: String) = send("deleteShare", listOf("id" to id))
+
+    // Asks the server to read its music folders again. Needs an admin.
+    suspend fun startScan(): ScanStatus =
+        get("startScan", key = "scanStatus", serializer = ScanStatus.serializer(), default = ScanStatus())
+
+    suspend fun scanStatus(): ScanStatus =
+        get("getScanStatus", key = "scanStatus", serializer = ScanStatus.serializer(), default = ScanStatus())
+
+    // What everyone on the server is playing right now.
+    suspend fun nowPlaying(): List<NowPlayingEntry> =
+        get("getNowPlaying", key = "nowPlaying", serializer = NowPlayingList.serializer(), default = NowPlayingList()).entry
+
+    // The radio stations with their home pages, for editing. Patient for
+    // the same reason as radioStations.
+    suspend fun radioStationDetails(): List<RadioStationDetails> =
+        get(
+            "getInternetRadioStations",
+            key = "internetRadioStations",
+            serializer = RadioStationDetailsList.serializer(),
+            default = RadioStationDetailsList(),
+            http = patient,
+        ).internetRadioStation
+
+    suspend fun createRadioStation(streamUrl: String, name: String, homepageUrl: String? = null) =
+        send("createInternetRadioStation", stationParams(streamUrl, name, homepageUrl))
+
+    suspend fun updateRadioStation(id: String, streamUrl: String, name: String, homepageUrl: String? = null) =
+        send("updateInternetRadioStation", listOf("id" to id) + stationParams(streamUrl, name, homepageUrl))
+
+    suspend fun deleteRadioStation(id: String) = send("deleteInternetRadioStation", listOf("id" to id))
+
+    // Like get, for params that may repeat a name.
+    private suspend fun <T> getWith(
+        endpoint: String,
+        params: List<Pair<String, String>>,
+        key: String,
+        serializer: KSerializer<T>,
+        default: T,
+    ): T {
+        val url = url(endpoint).newBuilder().apply { params.forEach { (name, value) -> addQueryParameter(name, value) } }.build()
+        val body = fetch(url, endpoint)
+        return withContext(Dispatchers.Default) { decode(body, key, serializer, default) }
+    }
+
     private companion object {
         val json = Json {
             ignoreUnknownKeys = true
