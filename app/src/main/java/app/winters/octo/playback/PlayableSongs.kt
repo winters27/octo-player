@@ -38,17 +38,21 @@ class PlayableSongs @Inject constructor(
     private val offlineSettings: OfflineSettings,
 ) {
     // In the order asked for, dropping any the app no longer knows.
-    suspend fun items(ids: List<String>): List<MediaItem> {
+    suspend fun items(ids: List<String>): List<MediaItem> = itemsEach(ids).filterNotNull()
+
+    // One for each id asked for, in order: nothing for any the app no
+    // longer knows, so a caller can tell which ones went.
+    suspend fun itemsEach(ids: List<String>): List<MediaItem?> {
         val finds = ids.filter(::isFind).distinct().chunked(900).flatMap { online.byIds(it) }.associateBy { it.id }
         val adopted = finds.values.mapNotNull { it.adoptedId.ifEmpty { null } }
         val library = libraryItems(ids.filterNot { isFind(it) || isRadio(it) || isOpenedFile(it) } + adopted).associateBy { it.mediaId }
         val prefs = if (finds.isEmpty()) StreamPrefs() else streams.prefs()
-        return ids.mapNotNull { id ->
+        return ids.map { id ->
             // A radio station plays from the address in its id.
-            if (isRadio(id)) return@mapNotNull radioItem(id)
+            if (isRadio(id)) return@map radioItem(id)
             // So does a file opened from another app, while Octo may read it.
-            if (isOpenedFile(id)) return@mapNotNull openedFileItem(context, id)
-            val find = finds[id] ?: return@mapNotNull library[id]
+            if (isOpenedFile(id)) return@map openedFileItem(context, id)
+            val find = finds[id] ?: return@map library[id]
             library[find.adoptedId] ?: findItem(find, prefs)
         }
     }

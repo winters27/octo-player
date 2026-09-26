@@ -296,6 +296,11 @@ private fun ConfirmAgain(name: String, onCancel: () -> Unit, onAdd: () -> Unit) 
     }
 }
 
+// The new playlist name form on its own, for a playlist made from songs
+// chosen somewhere else, such as the queue. `onCreate` gets the name.
+@Composable
+fun NewPlaylistForm(onCreate: (String) -> Unit) = NameForm("New playlist", "", "Create", onCreate)
+
 // Asks before a playlist is deleted. Its songs stay in the library. One
 // kept with the server goes from the server too.
 @Composable

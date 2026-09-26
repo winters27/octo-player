@@ -90,6 +90,23 @@ class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : Forwa
     // set on each and a crossfade hands over at the same pace.
     private val decks = listOf(initial, spare)
 
+    // The next queue entry id to give out.
+    private var nextEntry = 0L
+
+    init {
+        // Songs put into a shuffled queue land where they were asked for,
+        // never at random.
+        decks.forEach { it.setShuffleOrder(QueueShuffleOrder(IntArray(0))) }
+    }
+
+    // Whether a crossfade is under way, so a song change now is the song
+    // ending on its own.
+    override val isBlending: Boolean get() = outgoing != null
+
+    override val currentKey: String? get() = currentMediaItem?.entryId
+
+    override fun hasEntry(key: String): Boolean = (0 until mediaItemCount).any { getMediaItemAt(it).entryId == key }
+
     // How long a crossfade is, or 0 for none.
     var crossfadeMs: Long
         get() = fader.fadeMs
@@ -158,13 +175,70 @@ class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : Forwa
 
     override fun handleSetMediaItems(mediaItems: List<MediaItem>, startIndex: Int, startPositionMs: Long): ListenableFuture<*> {
         fader.interrupt()
-        return super.handleSetMediaItems(mediaItems, startIndex, startPositionMs)
+        return super.handleSetMediaItems(stamped(mediaItems), startIndex, startPositionMs)
     }
 
+    // Songs the listener adds at the end go before any Autoplay songs still
+    // to come, since those only fill in once the listener's own run out.
+    // Under shuffle, added songs take their place in the play order by the
+    // rules in ShuffleQueue.kt instead of a random one.
     override fun handleAddMediaItems(index: Int, mediaItems: List<MediaItem>): ListenableFuture<*> {
         fader.interrupt()
-        return super.handleAddMediaItems(index, mediaItems)
+        val size = deck.mediaItemCount
+        if (size == 0 || mediaItems.isEmpty()) return super.handleAddMediaItems(index, stamped(mediaItems))
+        val order = shuffleOrderOf(deck)
+        val current = deck.currentMediaItemIndex
+        val autoplay = List(size) { deck.getMediaItemAt(it).isAutoplay }
+        val adding = mediaItems.all { it.isAutoplay }
+        val next = playingNext
+        val at = if (adding || next) index else ownSongsAt(index, upcoming(deck), autoplay)
+        val beforeAutoplay = !adding && autoplay.getOrElse(at) { false }
+        val rank = shuffleRankFor(order, at, size, current, playNext = next, beforeAutoplay = beforeAutoplay)
+        val result = super.handleAddMediaItems(at, stamped(mediaItems))
+        if (deck.mediaItemCount == size + mediaItems.size) {
+            deck.setShuffleOrder(QueueShuffleOrder(insertIntoShuffle(order, at, mediaItems.size, rank)))
+        }
+        return result
     }
+
+    // "Play next": the songs go right after the song that is on, in the
+    // queue and, under shuffle, in the play order too. Told apart from "Add
+    // to queue", since both add at the end while the last song is on.
+    private var playingNext = false
+
+    fun addNext(items: List<MediaItem>) {
+        if (items.isEmpty()) return
+        playingNext = true
+        try {
+            addMediaItems((currentMediaItemIndex + 1).coerceAtMost(mediaItemCount), items)
+        } finally {
+            playingNext = false
+        }
+    }
+
+    // Sets the play order for shuffle, as saved or as it was before an edit.
+    internal fun setPlayOrder(order: IntArray) {
+        if (order.size == deck.mediaItemCount) deck.setShuffleOrder(QueueShuffleOrder(order))
+    }
+
+    // Puts songs back where they were, exactly, entry ids and all, for an
+    // undo. `runs` are queue positions and the songs that go there, lowest
+    // first; `order` is the play order once they are all back.
+    internal fun putBack(runs: List<Pair<Int, List<MediaItem>>>, order: IntArray) {
+        fader.interrupt()
+        runs.forEach { (at, items) -> deck.addMediaItems(at, items) }
+        setPlayOrder(order)
+    }
+
+    // Takes out runs of songs, last run first. The rest keep their play order.
+    internal fun removeRuns(runs: List<IntRange>) {
+        fader.interrupt()
+        runs.forEach { deck.removeMediaItems(it.first, it.last + 1) }
+    }
+
+    // Each song gets a queue entry id as it goes in, unless it has one.
+    private fun stamped(items: List<MediaItem>): List<MediaItem> =
+        items.map { if (it.entryId != null) it else it.withEntry("q:${nextEntry++}") }
 
     override fun handleRemoveMediaItems(fromIndex: Int, toIndex: Int): ListenableFuture<*> {
         fader.interrupt()
@@ -178,7 +252,7 @@ class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : Forwa
 
     override fun handleReplaceMediaItems(fromIndex: Int, toIndex: Int, mediaItems: List<MediaItem>): ListenableFuture<*> {
         fader.interrupt()
-        return super.handleReplaceMediaItems(fromIndex, toIndex, mediaItems)
+        return super.handleReplaceMediaItems(fromIndex, toIndex, stamped(mediaItems))
     }
 
     override fun handleSetShuffleModeEnabled(shuffleModeEnabled: Boolean): ListenableFuture<*> {

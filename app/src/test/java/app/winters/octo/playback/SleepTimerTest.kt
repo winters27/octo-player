@@ -1,6 +1,7 @@
 package app.winters.octo.playback
 
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -23,8 +24,19 @@ class SleepTimerTest {
                 fades += value
             }
         override var pauseAtEndOfSong = false
+        override var currentKey: String? = "q:0"
+        override var isBlending = false
+        val entries = mutableSetOf("q:0", "q:1", "q:2", "q:3")
         var paused = false
         var listener: Player.Listener? = null
+
+        override fun hasEntry(key: String) = key in entries
+
+        // The next song starts, for the given reason.
+        fun moveTo(key: String, reason: Int) {
+            currentKey = key
+            listener?.onMediaItemTransition(null, reason)
+        }
 
         override fun pause() {
             paused = true
@@ -167,6 +179,122 @@ class SleepTimerTest {
         timer.start(1)
         assertFalse(player.pauseAtEndOfSong)
         assertEquals(SleepState.Counting(60_000), timer.state.value)
+    }
+
+    @Test
+    fun extendingAddsTimeAndLiftsTheFade() = runTest {
+        val player = FakePlayer()
+        val timer = timerWith(player)
+
+        timer.start(1)
+        elapse(45_000)
+        assertEquals(0.25f, player.sleepFade, 0.0001f)
+
+        timer.extend(5)
+        assertEquals(SleepState.Counting(315_000), timer.state.value)
+        assertEquals(1f, player.sleepFade, 0f)
+
+        // The first timer's end passes without a pause.
+        elapse(60_000)
+        assertFalse(player.paused)
+    }
+
+    @Test
+    fun extendingDoesNothingWithoutACountdown() = runTest {
+        val player = FakePlayer()
+        val timer = timerWith(player)
+
+        timer.extend(10)
+        assertEquals(SleepState.Off, timer.state.value)
+        timer.startEndOfSong()
+        timer.extend(10)
+        assertEquals(SleepState.EndOfSong, timer.state.value)
+    }
+
+    @Test
+    fun countsSongsAsTheyEndAndStopsAfterTheLast() = runTest {
+        val player = FakePlayer()
+        val timer = timerWith(player)
+
+        timer.startAfterSongs(3)
+        assertEquals(SleepState.Songs(3), timer.state.value)
+        assertFalse(player.pauseAtEndOfSong)
+
+        // A skip does not count as a song played.
+        player.moveTo("q:1", Player.MEDIA_ITEM_TRANSITION_REASON_SEEK)
+        assertEquals(SleepState.Songs(3), timer.state.value)
+
+        player.moveTo("q:2", Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
+        assertEquals(SleepState.Songs(2), timer.state.value)
+
+        // A crossfade into the next song counts too.
+        player.isBlending = true
+        player.moveTo("q:3", Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED)
+        player.isBlending = false
+        assertEquals(SleepState.EndOfSong, timer.state.value)
+        assertTrue(player.pauseAtEndOfSong)
+
+        player.listener?.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM)
+        assertEquals(SleepState.Off, timer.state.value)
+        assertFalse(player.pauseAtEndOfSong)
+    }
+
+    @Test
+    fun aNewQueueIsNotASongEnding() = runTest {
+        val player = FakePlayer()
+        val timer = timerWith(player)
+
+        timer.startAfterSongs(2)
+        player.moveTo("q:1", Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED)
+        assertEquals(SleepState.Songs(2), timer.state.value)
+    }
+
+    @Test
+    fun oneSongIsTheEndOfThisSong() = runTest {
+        val timer = timerWith(FakePlayer())
+        timer.startAfterSongs(1)
+        assertEquals(SleepState.EndOfSong, timer.state.value)
+    }
+
+    @Test
+    fun stopsAfterAChosenSongOnceItPlays() = runTest {
+        val player = FakePlayer()
+        val timer = timerWith(player)
+
+        timer.startAfter("q:2", "Song two")
+        assertEquals(SleepState.AfterSong("q:2", "Song two"), timer.state.value)
+        assertFalse(player.pauseAtEndOfSong)
+
+        player.moveTo("q:1", Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
+        assertFalse(player.pauseAtEndOfSong)
+        // A pause at the end of a song that is not the chosen one leaves it waiting.
+        player.listener?.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM)
+        assertEquals(SleepState.AfterSong("q:2", "Song two"), timer.state.value)
+
+        player.moveTo("q:2", Player.MEDIA_ITEM_TRANSITION_REASON_SEEK)
+        assertTrue(player.pauseAtEndOfSong)
+
+        player.listener?.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM)
+        assertEquals(SleepState.Off, timer.state.value)
+        assertFalse(player.pauseAtEndOfSong)
+    }
+
+    @Test
+    fun choosingTheSongOnNowIsTheEndOfThisSong() = runTest {
+        val timer = timerWith(FakePlayer())
+        timer.startAfter("q:0", "Song zero")
+        assertEquals(SleepState.EndOfSong, timer.state.value)
+    }
+
+    @Test
+    fun takingTheChosenSongOutOfTheQueueTurnsTheTimerOff() = runTest {
+        val player = FakePlayer()
+        val timer = timerWith(player)
+
+        timer.startAfter("q:3", "Song three")
+        player.entries -= "q:3"
+        player.listener?.onTimelineChanged(Timeline.EMPTY, Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED)
+        assertEquals(SleepState.Off, timer.state.value)
     }
 
     @Test

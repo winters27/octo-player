@@ -3,6 +3,7 @@ package app.winters.octo.playback
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -11,7 +12,6 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSourceBitmapLoader
-import androidx.media3.exoplayer.source.ShuffleOrder
 import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
@@ -22,6 +22,12 @@ import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import app.winters.octo.MainActivity
+import app.winters.octo.R
+import app.winters.octo.catalog.OnlineDao
+import app.winters.octo.catalog.isFind
+import app.winters.octo.design.OctoIcons
+import app.winters.octo.discovery.Downloads
+import app.winters.octo.discovery.asTrack
 import app.winters.octo.offline.Prefetcher
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
@@ -57,8 +63,17 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-// The like toggle offered in the notification and on the lock screen.
+// The like toggle offered in the notification and on the lock screen, the
+// download that stands in for it on a song found online, and Close.
 private val LIKE = SessionCommand("app.winters.octo.LIKE", Bundle.EMPTY)
+private val DOWNLOAD = SessionCommand("app.winters.octo.DOWNLOAD", Bundle.EMPTY)
+private val CLOSE = SessionCommand("app.winters.octo.CLOSE", Bundle.EMPTY)
+
+// "Play next" from the app, with the song ids to play.
+internal val PLAY_NEXT = SessionCommand("app.winters.octo.PLAY_NEXT", Bundle.EMPTY)
+private const val ARG_IDS = "ids"
+
+internal fun playNextArgs(trackIds: List<String>) = Bundle().apply { putStringArrayList(ARG_IDS, ArrayList(trackIds)) }
 
 // Apps that drive playback from a car or by voice: Android Auto and the
 // assistant. They get full control even when not system apps.
@@ -86,6 +101,10 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var serverQueue: QueueSync
     @Inject lateinit var quickPicks: QuickPicks
     @Inject lateinit var prefetch: Prefetcher
+    @Inject lateinit var editor: QueueEditor
+    @Inject lateinit var autoplay: Autoplay
+    @Inject lateinit var downloads: Downloads
+    @Inject lateinit var online: OnlineDao
 
     private val scope = MainScope()
     private lateinit var player: OctoPlayer
@@ -97,6 +116,8 @@ class OctoPlaybackService : MediaLibraryService() {
     private var positionSaver: Job? = null
     // Done once last session's queue is back, or there was none.
     private val restored = CompletableDeferred<Unit>()
+    // Set by Close, until something plays again.
+    private var closed = false
     // The home screen widgets: what they show, and what their buttons do.
     private val widgets by lazy { WidgetUpdates(this, scope) }
     private val widgetRemote by lazy { WidgetRemote(this, player, quickPicks, playable::items) }
@@ -120,6 +141,8 @@ class OctoPlaybackService : MediaLibraryService() {
         player.addListener(Watcher())
         sleep.attach(player)
         prefetch.attach(player)
+        editor.attach(player)
+        autoplay.attach(player, scope)
 
         session = MediaLibrarySession.Builder(this, player, Callback())
             .setBitmapLoader(CacheBitmapLoader(OctoArtLoader(this, DataSourceBitmapLoader.Builder(this).build())))
@@ -140,8 +163,11 @@ class OctoPlaybackService : MediaLibraryService() {
                 restored.complete(Unit)
             }
         }
-        // The heart follows both the song and the likes list.
-        scope.launch { combine(currentId, likes.liked) { id, liked -> id != null && id in liked }.collect(::showLike) }
+        // The heart follows the song, the likes list, and for a song found
+        // online, whether its download was asked for.
+        scope.launch {
+            combine(currentId, likes.liked, downloads.states, ::notificationHeart).distinctUntilChanged().collect(::showButtons)
+        }
         // Crossfade, speed and pitch, and skipping silence follow their
         // settings, each only when it changes, so a blend is not cut short.
         val prefs = playerSettings.prefs.stateIn(scope, SharingStarted.Eagerly, PlayerPrefs())
@@ -192,6 +218,8 @@ class OctoPlaybackService : MediaLibraryService() {
         headsets.stop()
         sleep.detach()
         prefetch.detach()
+        editor.detach()
+        autoplay.detach()
         session?.release()
         player.release()
         audioSession.close()
@@ -200,28 +228,79 @@ class OctoPlaybackService : MediaLibraryService() {
         super.onDestroy()
     }
 
-    private fun showLike(liked: Boolean) {
-        val button = CommandButton.Builder(if (liked) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED)
-            .setDisplayName(if (liked) "Unlike" else "Like")
-            .setSessionCommand(LIKE)
-            .setSlots(CommandButton.SLOT_OVERFLOW)
-            .build()
-        session?.setMediaButtonPreferences(ImmutableList.of(button))
+    // Previous, play and next keep their places. The heart (or download)
+    // comes first after them and Close second. The phone's own media
+    // controls only take extra buttons offered for the overflow slot, and
+    // show the first two of those alongside previous, play and next, so
+    // these two are always in view there. Apps that know Media3's slots put the heart
+    // beside next and Close beside previous.
+    private fun showButtons(heart: NotificationHeart) {
+        val buttons = buildList {
+            when (heart) {
+                is NotificationHeart.Like -> add(
+                    CommandButton.Builder(if (heart.liked) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED)
+                        .setDisplayName(if (heart.liked) "Unlike" else "Like")
+                        .setSessionCommand(LIKE)
+                        .setSlots(CommandButton.SLOT_FORWARD_SECONDARY, CommandButton.SLOT_OVERFLOW)
+                        .build(),
+                )
+                NotificationHeart.Download -> add(
+                    CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+                        .setCustomIconResId(OctoIcons.Download)
+                        .setDisplayName("Download")
+                        .setSessionCommand(DOWNLOAD)
+                        .setSlots(CommandButton.SLOT_FORWARD_SECONDARY, CommandButton.SLOT_OVERFLOW)
+                        .build(),
+                )
+                NotificationHeart.None -> Unit
+            }
+            add(
+                CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+                    .setCustomIconResId(R.drawable.sym_close)
+                    .setDisplayName("Close")
+                    .setSessionCommand(CLOSE)
+                    .setSlots(CommandButton.SLOT_BACK_SECONDARY, CommandButton.SLOT_OVERFLOW)
+                    .build(),
+            )
+        }
+        session?.setMediaButtonPreferences(buttons)
     }
 
-    // Brings back the queue from last time, paused where it was left.
+    // Close: the music stops, the queue is kept for next time, the
+    // notification goes, and the service stops once the app lets go of it.
+    private fun close() {
+        saveQueue()
+        sleep.cancel()
+        closed = true
+        // A stopped player normally keeps its notification; this one goes.
+        setShowNotificationForIdlePlayer(SHOW_NOTIFICATION_FOR_IDLE_PLAYER_NEVER)
+        player.pause()
+        player.stop()
+        pauseAllPlayersAndStopSelf()
+    }
+
+    // Asks the server to download the song found online that is on now.
+    private fun downloadCurrent() {
+        val id = currentId.value?.takeIf(::isFind) ?: return
+        scope.launch {
+            val track = online.byIds(listOf(id)).firstOrNull()?.asTrack() ?: return@launch
+            if (!downloads.request(track)) Log.w("Octo", "notification download: not asked")
+        }
+    }
+
+    // Brings back the queue from last time, paused where it was left: at
+    // the saved song and place, or at the start when that song is gone.
     private suspend fun restoreQueue() {
         val saved = queue.load() ?: return
-        val items = playable.items(saved.trackIds)
+        val each = playable.itemsEach(saved.trackIds)
+        val items = each.filterNotNull()
         if (items.isEmpty() || player.mediaItemCount > 0) return
-        val complete = items.size == saved.trackIds.size
-        val index = items.indexOfFirst { it.mediaId == saved.trackIds[saved.index] }.takeIf { it >= 0 } ?: 0
-        player.setMediaItems(items, index, if (index >= 0) saved.positionMs else 0)
+        val found = each.map { it != null }
+        val (index, positionMs) = restorePoint(found, saved.index, saved.positionMs)
+        player.setMediaItems(items, index, positionMs)
         player.repeatMode = saved.repeatMode
-        // The saved shuffle order only fits if every song is still here.
-        if (complete && saved.shuffleOrder.size == items.size) {
-            player.deck.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(saved.shuffleOrder.toIntArray(), System.nanoTime()))
-        }
+        // The saved shuffle order, less any songs that are gone.
+        restoredShuffle(saved.shuffleOrder, found)?.let(player::setPlayOrder)
         player.shuffleModeEnabled = saved.shuffle
         player.prepare()
         serverQueue.restored(snapshot())
@@ -255,7 +334,12 @@ class OctoPlaybackService : MediaLibraryService() {
             saveQueue()
             widgets.show(player)
             serverQueue.changed(snapshot())
+            autoplay.check()
         }
+
+        override fun onRepeatModeChanged(repeatMode: Int) = autoplay.check()
+
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = autoplay.check()
 
         // While music plays, a song that cannot, like a stream with no
         // connection or a file that is gone, is skipped instead of stopping
@@ -274,11 +358,18 @@ class OctoPlaybackService : MediaLibraryService() {
             if (playbackState == Player.STATE_READY) failedInARow = 0
             // Equalizer apps let go once the music has stopped, not at a pause.
             if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) audioSession.close()
+            // Playing again after Close: a stop keeps its notification again.
+            if (closed && playbackState != Player.STATE_IDLE) {
+                closed = false
+                setShowNotificationForIdlePlayer(SHOW_NOTIFICATION_FOR_IDLE_PLAYER_AFTER_STOP_OR_ERROR)
+            }
+            autoplay.check()
         }
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
             queueChanged.tryEmit(Unit)
             serverQueue.changed(snapshot())
+            autoplay.check()
         }
 
         // A pause keeps the server's copy of the queue exact.
@@ -289,6 +380,7 @@ class OctoPlaybackService : MediaLibraryService() {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             positionSaver?.cancel()
             widgets.show(player)
+            autoplay.check()
             if (isPlaying) {
                 // Equalizer apps on the phone can attach to the music now.
                 audioSession.open()
@@ -319,7 +411,9 @@ class OctoPlaybackService : MediaLibraryService() {
                 restored.await()
                 ConnectionResult.AcceptedResultBuilder(session, controller)
                     .setAvailableSessionCommands(
-                        ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon().add(LIKE).build(),
+                        ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+                            .add(LIKE).add(DOWNLOAD).add(CLOSE).add(PLAY_NEXT)
+                            .build(),
                     )
                     .build()
             }
@@ -331,11 +425,14 @@ class OctoPlaybackService : MediaLibraryService() {
             customCommand: SessionCommand,
             args: Bundle,
         ): ListenableFuture<SessionResult> {
-            if (customCommand == LIKE) {
-                currentId.value?.let(likes::toggle)
-                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            when (customCommand) {
+                LIKE -> currentId.value?.takeUnless(::isFind)?.let(likes::toggle)
+                DOWNLOAD -> downloadCurrent()
+                CLOSE -> close()
+                PLAY_NEXT -> args.getStringArrayList(ARG_IDS)?.let { ids -> scope.launch { player.addNext(playable.items(ids)) } }
+                else -> return super.onCustomCommand(session, controller, customCommand, args)
             }
-            return super.onCustomCommand(session, controller, customCommand, args)
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
 
         override fun onAddMediaItems(
@@ -383,14 +480,16 @@ class OctoPlaybackService : MediaLibraryService() {
             isForPlayback: Boolean,
         ): ListenableFuture<MediaItemsWithStartPosition> = scope.future {
             val saved = queue.load() ?: throw UnsupportedOperationException("Nothing to resume")
-            val items = playable.items(saved.trackIds)
+            val each = playable.itemsEach(saved.trackIds)
+            val items = each.filterNotNull()
             if (items.isEmpty()) throw UnsupportedOperationException("Nothing to resume")
-            val index = items.indexOfFirst { it.mediaId == saved.trackIds.getOrNull(saved.index) }.coerceAtLeast(0)
+            // The saved song where it was left, or the first from its start.
+            val (index, positionMs) = restorePoint(each.map { it != null }, saved.index, saved.positionMs)
             if (isForPlayback) {
-                MediaItemsWithStartPosition(items, index, saved.positionMs)
+                MediaItemsWithStartPosition(items, index, positionMs)
             } else {
                 // The media controls only need the song to show.
-                MediaItemsWithStartPosition(listOf(items[index]), 0, saved.positionMs)
+                MediaItemsWithStartPosition(listOf(items[index]), 0, positionMs)
             }
         }
 

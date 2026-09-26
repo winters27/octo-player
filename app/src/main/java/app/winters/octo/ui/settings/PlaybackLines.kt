@@ -29,6 +29,10 @@ class PlaybackLinesViewModel @Inject constructor(private val settings: PlayerSet
         viewModelScope.launch { settings.setSkipSilence(on) }
     }
 
+    fun setAutoplay(on: Boolean) {
+        viewModelScope.launch { settings.setAutoplay(on) }
+    }
+
     fun setResumeWired(on: Boolean) {
         viewModelScope.launch { settings.setResumeWired(on) }
     }
@@ -42,8 +46,8 @@ class PlaybackLinesViewModel @Inject constructor(private val settings: PlayerSet
     }
 }
 
-// The Player card's lines for how songs play: skipping silence, and music
-// coming back when headphones connect.
+// The Player card's lines for how songs play: skipping silence, Autoplay,
+// and music coming back when headphones connect.
 @Composable
 internal fun PlaybackLines(vm: PlaybackLinesViewModel = hiltViewModel()) {
     val prefs by vm.prefs.collectAsStateWithLifecycle()
@@ -52,6 +56,12 @@ internal fun PlaybackLines(vm: PlaybackLinesViewModel = hiltViewModel()) {
         detail = "Quiet stretches inside songs are skipped.",
         checked = prefs.skipSilence,
         onChange = vm::setSkipSilence,
+    )
+    SwitchLine(
+        label = "Autoplay",
+        detail = "When the queue ends, similar songs keep playing: songs like it from your server, or by the same artist or in the same genre.",
+        checked = prefs.autoplay,
+        onChange = vm::setAutoplay,
     )
     Text("Headphones", style = OctoType.label, color = OctoColors.TextSecondary, modifier = Modifier.padding(top = 8.dp))
     SwitchLine(
