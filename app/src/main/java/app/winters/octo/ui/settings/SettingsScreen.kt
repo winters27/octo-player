@@ -149,6 +149,7 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
         )
 
         PlaylistsCard(Modifier.padding(top = 16.dp))
+        ScrobblingCard(Modifier.padding(top = 16.dp))
 
         Card("Player", Modifier.padding(top = 16.dp)) {
             ChoiceLine("Sound", soundSummary(sound)) { onOpen(SoundRoute) }

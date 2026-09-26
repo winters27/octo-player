@@ -13,9 +13,12 @@ import javax.inject.Singleton
 
 // Keeps the server password encrypted with a key that never leaves the
 // phone's keystore. If the key is gone (a restored backup on a new phone)
-// open returns null and the user signs in again.
+// open returns null and the user signs in again. Other secrets use a vault
+// with their own key, so forgetting one leaves the rest.
 @Singleton
-class CredentialVault @Inject constructor() {
+class CredentialVault(private val alias: String) {
+    @Inject constructor() : this(ALIAS)
+
     private val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
 
     fun seal(plain: String): String {
@@ -32,16 +35,16 @@ class CredentialVault @Inject constructor() {
     }.getOrNull()
 
     fun forget() {
-        if (keyStore.containsAlias(ALIAS)) keyStore.deleteEntry(ALIAS)
+        if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
     }
 
     private fun key(): SecretKey =
-        (keyStore.getKey(ALIAS, null) as SecretKey?) ?: KeyGenerator
+        (keyStore.getKey(alias, null) as SecretKey?) ?: KeyGenerator
             .getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE)
             .apply {
                 init(
                     KeyGenParameterSpec.Builder(
-                        ALIAS,
+                        alias,
                         KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
                     )
                         .setBlockModes(KeyProperties.BLOCK_MODE_GCM)

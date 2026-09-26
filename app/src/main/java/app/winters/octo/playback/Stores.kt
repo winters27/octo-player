@@ -7,6 +7,7 @@ import app.winters.octo.catalog.QueueItemEntity
 import app.winters.octo.catalog.QueueStateEntity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
+import app.winters.octo.listening.ListenBrainzSync
 import app.winters.octo.listening.ListeningSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -147,11 +148,15 @@ class PlayStore @Inject constructor(
     private val userDao: UserDao,
     private val catalog: CatalogDao,
     private val listening: ListeningSync,
+    private val listenBrainz: ListenBrainzSync,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // A song began to play.
-    fun started(trackId: String) = listening.nowPlaying(trackId)
+    fun started(trackId: String) {
+        listening.nowPlaying(trackId)
+        listenBrainz.nowPlaying(trackId)
+    }
 
     fun record(trackId: String, startedAt: Long, playedMs: Long, durationMs: Long) {
         if (!countsAsPlay(playedMs, durationMs)) return
@@ -160,5 +165,6 @@ class PlayStore @Inject constructor(
             userDao.addPlay(PlayEventEntity(trackId = trackId, relinkKey = key, startedAt = startedAt, playedMs = playedMs, durationMs = durationMs))
         }
         listening.played(trackId, startedAt)
+        listenBrainz.played(trackId, startedAt)
     }
 }
