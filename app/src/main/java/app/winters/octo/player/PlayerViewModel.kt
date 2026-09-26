@@ -14,10 +14,14 @@ import app.winters.octo.playback.DeviceVolume
 import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.playback.PlaylistStore
+import app.winters.octo.playback.QueueEditor
 import app.winters.octo.playback.QueueEntry
 import app.winters.octo.playback.SleepState
 import app.winters.octo.playback.SleepTimer
+import app.winters.octo.playback.isRadio
 import app.winters.octo.sound.SoundEngine
+import app.winters.octo.ui.common.Feedback
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,9 +51,13 @@ class PlayerViewModel @Inject constructor(
     private val sleepTimer: SleepTimer,
     sound: SoundEngine,
     private val lyricsRepository: LyricsRepository,
+    private val editor: QueueEditor,
+    private val playlists: PlaylistStore,
+    private val feedback: Feedback,
 ) : ViewModel() {
     val now: StateFlow<NowPlaying> = playback.now
     val upNext: StateFlow<List<QueueEntry>> = playback.upNext
+    val played: StateFlow<List<QueueEntry>> = playback.played
 
     // The album name for the top of the player, or nothing for a single. A
     // song found online has no album in the library to count, so it shows none.
@@ -104,8 +112,35 @@ class PlayerViewModel @Inject constructor(
     val volume: StateFlow<Float> = deviceVolume.level
     fun setVolume(fraction: Float) = deviceVolume.set(fraction)
     fun moveInQueue(from: Int, to: Int) = playback.moveInQueue(from, to)
-    fun removeFromQueue(index: Int) = playback.removeFromQueue(index)
     fun playAt(index: Int) = playback.playAt(index)
+
+    // Queue edits go by each song's key, so a quick second swipe never
+    // takes out the wrong song. Those that take songs out can be undone.
+    fun removeFromQueue(entry: QueueEntry) {
+        val undo = editor.remove(entry.key) ?: return
+        feedback.undoable("Removed from the queue") { editor.undo(undo) }
+    }
+
+    // Everything but the song that is on.
+    fun clearQueue() {
+        val undo = editor.clear() ?: return
+        feedback.undoable("Queue cleared") { editor.undo(undo) }
+    }
+
+    fun removePlayed() {
+        val undo = editor.removePlayed() ?: return
+        feedback.undoable("Played songs removed") { editor.undo(undo) }
+    }
+
+    fun playNextInQueue(entry: QueueEntry) = editor.playNext(entry.key)
+
+    // The listener's queue as a playlist: what played, the song on now and
+    // what is still to come, without the songs Autoplay added.
+    fun saveQueueAsPlaylist(name: String) {
+        val ids = (played.value + upNext.value).filterNot { it.autoplay || isRadio(it.trackId) }.map { it.trackId }
+        playlists.create(name, ids)
+        feedback.show("Saved as ${name.trim()}")
+    }
 
     val sleep: StateFlow<SleepState> = sleepTimer.state
 
@@ -115,7 +150,15 @@ class PlayerViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
     fun sleepIn(minutes: Int) = sleepTimer.start(minutes)
     fun sleepAtEndOfSong() = sleepTimer.startEndOfSong()
+    fun sleepAfterSongs(count: Int) = sleepTimer.startAfterSongs(count)
+    fun extendSleep(minutes: Int) = sleepTimer.extend(minutes)
     fun cancelSleep() = sleepTimer.cancel()
+
+    // From a queue row's menu: the music stops once that song has played.
+    fun sleepAfter(entry: QueueEntry) {
+        sleepTimer.startAfter(entry.key, entry.title)
+        feedback.undoable("Stops after ${entry.title}") { sleepTimer.cancel() }
+    }
 
     // The rating of the song on now, 0 when it has none or was found online.
     val rating: StateFlow<Int> = playback.now

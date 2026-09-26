@@ -30,6 +30,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.winters.octo.design.AccentButton
@@ -41,17 +42,34 @@ import app.winters.octo.design.OctoType
 import app.winters.octo.playback.SleepState
 import app.winters.octo.playback.speedLabel
 import app.winters.octo.ui.common.asClock
+import app.winters.octo.ui.common.songs
 
 // The lengths offered, in minutes.
 private val SleepChoices = listOf(5, 15, 30, 45, 60)
+
+// What a running countdown can be lengthened by, in minutes.
+private val SleepExtensions = listOf(5, 10)
+
+// How many songs the music can stop after, the one playing included.
+private val SongChoices = listOf(1, 2, 3, 5)
+
+// A timer in words, for the sheet and the sleep button.
+fun sleepSummary(state: SleepState): String = when (state) {
+    SleepState.Off -> "Off"
+    is SleepState.Counting -> "${((state.remainingMs + 59_999) / 60_000).toInt()} min left"
+    SleepState.EndOfSong -> "At the end of this song"
+    is SleepState.Songs -> "After ${songs(state.left)}"
+    is SleepState.AfterSong -> "After ${state.title}"
+}
 
 // The longest custom timer: twelve hours.
 private const val MAX_SLEEP_MINUTES = 720
 
 // The sleep timer, inside a GlassSheet: how long until the music stops, or
-// the end of the song, and the time left once one is set. Starting or
-// cancelling a timer calls onDone so the sheet can close. Playback speed,
-// the other setting about time, opens from its foot.
+// after how many songs, and the time left once one is set, with more time
+// to add while it counts down. Starting or cancelling a timer calls onDone
+// so the sheet can close. Playback speed, the other setting about time,
+// opens from its foot.
 @Composable
 fun SleepSheet(model: PlayerViewModel, onDone: () -> Unit, onOpenSpeed: () -> Unit) {
     val sleep by model.sleep.collectAsStateWithLifecycle()
@@ -78,9 +96,11 @@ fun SleepSheet(model: PlayerViewModel, onDone: () -> Unit, onOpenSpeed: () -> Un
                     )
                 } else {
                     Text(
-                        "At the end of this song",
+                        sleepSummary(state),
                         style = OctoType.body,
                         color = OctoColors.TextPrimary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -88,6 +108,15 @@ fun SleepSheet(model: PlayerViewModel, onDone: () -> Unit, onOpenSpeed: () -> Un
                     model.cancelSleep()
                     onDone()
                 })
+            }
+            // More time on a running countdown, without closing the sheet.
+            if (state is SleepState.Counting) {
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SleepExtensions.forEach { minutes ->
+                        GlazeButton("+$minutes min", onClick = { model.extendSleep(minutes) })
+                    }
+                }
             }
         }
         Spacer(Modifier.height(20.dp))
@@ -101,11 +130,21 @@ fun SleepSheet(model: PlayerViewModel, onDone: () -> Unit, onOpenSpeed: () -> Un
                     onDone()
                 })
             }
-            GlazeButton("End of song", onClick = {
-                model.sleepAtEndOfSong()
-                onDone()
-            })
             GlazeButton("Custom", onClick = { custom = true })
+        }
+        Spacer(Modifier.height(16.dp))
+        Text("Stop after", style = OctoType.label, color = OctoColors.TextSecondary)
+        Spacer(Modifier.height(10.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            SongChoices.forEach { count ->
+                GlazeButton(if (count == 1) "This song" else "$count songs", onClick = {
+                    model.sleepAfterSongs(count)
+                    onDone()
+                })
+            }
         }
         if (custom) {
             Spacer(Modifier.height(16.dp))

@@ -10,7 +10,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.ShuffleOrder
 
 // Start loading the next song this long before the blend, so it is ready.
 private const val LOAD_AHEAD_MS = 5_000L
@@ -132,7 +131,9 @@ internal class Crossfader(private val player: OctoPlayer, private var spare: Exo
     private fun load(next: Int) {
         val deck = player.deck
         spare.setMediaItems(List(deck.mediaItemCount, deck::getMediaItemAt), next, 0)
-        spare.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(shuffleOrderOf(deck), System.nanoTime()))
+        // The same kind of order too, so songs added after the blend still
+        // land where they are asked for.
+        spare.setShuffleOrder(QueueShuffleOrder(shuffleOrderOf(deck)))
         spare.shuffleModeEnabled = deck.shuffleModeEnabled
         spare.repeatMode = deck.repeatMode
         // The same pace, so the blend does not jump in speed or pitch.

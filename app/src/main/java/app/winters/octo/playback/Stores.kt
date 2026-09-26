@@ -90,6 +90,25 @@ fun queueFromRows(items: List<QueueItemEntity>, state: QueueStateEntity?): Queue
     )
 }
 
+// Where a saved queue picks up once the songs gone from the library are
+// dropped: `found` says which saved songs are still here, in saved order.
+// The saved song at the place it was, or when that song is gone, the first
+// song from its start.
+fun restorePoint(found: List<Boolean>, savedIndex: Int, positionMs: Long): Pair<Int, Long> {
+    if (found.getOrNull(savedIndex) != true) return 0 to 0L
+    return found.take(savedIndex).count { it } to positionMs.coerceAtLeast(0)
+}
+
+// The saved shuffle order with the songs that are gone left out, so the
+// rest still play in the order they would have.
+fun restoredShuffle(order: List<Int>, found: List<Boolean>): IntArray? {
+    if (order.size != found.size || order.sorted() != found.indices.toList()) return null
+    val newIndex = IntArray(found.size)
+    var kept = 0
+    found.forEachIndexed { i, here -> newIndex[i] = if (here) kept++ else -1 }
+    return order.filter { found[it] }.map { newIndex[it] }.toIntArray()
+}
+
 @Singleton
 class QueueStore @Inject constructor(private val userDao: UserDao) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

@@ -51,6 +51,25 @@ class UpNextTest {
     }
 
     @Test
+    fun entryIdsAreTheKeysWhenSongsHaveThem() {
+        val slots = upNextOrder(listOf("a", "b", "a"), current = 0, entryIds = listOf("q:1", "q:2", "q:3"), next = straight(3))
+        assertEquals(listOf("q:1", "q:2", "q:3"), slots.map { it.key })
+    }
+
+    @Test
+    fun playedSongsComeOldestFirstAndStopBeforeTheCurrentOne() {
+        val order = listOf(3, 0, 4, 1, 2)
+        val previous: (Int) -> Int = { i -> order.getOrNull(order.indexOf(i) - 1) ?: C.INDEX_UNSET }
+        val slots = playedOrder(listOf("a", "b", "c", "d", "e"), current = 4, previous = previous)
+        assertEquals(listOf(3, 0), slots.map { it.index })
+    }
+
+    @Test
+    fun theFirstSongHasNothingPlayedBeforeIt() {
+        assertTrue(playedOrder(listOf("a", "b"), current = 0, previous = { C.INDEX_UNSET }).isEmpty())
+    }
+
+    @Test
     fun anOrderThatLoopsStillEnds() {
         val slots = upNextOrder(listOf("a", "b"), current = 0, next = { 1 - it })
         assertEquals(listOf(0, 1), slots.map { it.index })

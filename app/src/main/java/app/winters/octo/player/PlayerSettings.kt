@@ -39,6 +39,8 @@ data class PlayerPrefs(
     val pitchSemitones: Int = 0,
     // Quiet stretches inside songs are skipped.
     val skipSilence: Boolean = false,
+    // Similar songs keep playing once the queue runs out.
+    val autoplay: Boolean = true,
     // Carrying on when headphones come back: over a cable, over Bluetooth,
     // and whether to play on connect even when the music was not paused by
     // the headphones going.
@@ -79,6 +81,7 @@ private val SPEED = floatPreferencesKey("speed")
 private val KEEP_PITCH = booleanPreferencesKey("keep_pitch")
 private val PITCH_SEMITONES = intPreferencesKey("pitch_semitones")
 private val SKIP_SILENCE = booleanPreferencesKey("skip_silence")
+private val AUTOPLAY = booleanPreferencesKey("autoplay")
 private val RESUME_WIRED = booleanPreferencesKey("resume_wired")
 private val RESUME_BLUETOOTH = booleanPreferencesKey("resume_bluetooth")
 private val RESUME_ALWAYS = booleanPreferencesKey("resume_always")
@@ -104,6 +107,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             pitchSemitones = (stored[PITCH_SEMITONES] ?: defaults.pitchSemitones)
                 .coerceIn(-PITCH_RANGE_SEMITONES, PITCH_RANGE_SEMITONES),
             skipSilence = stored[SKIP_SILENCE] ?: defaults.skipSilence,
+            autoplay = stored[AUTOPLAY] ?: defaults.autoplay,
             resumeWired = stored[RESUME_WIRED] ?: defaults.resumeWired,
             resumeBluetooth = stored[RESUME_BLUETOOTH] ?: defaults.resumeBluetooth,
             resumeAlways = stored[RESUME_ALWAYS] ?: defaults.resumeAlways,
@@ -160,6 +164,10 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
         context.playerPrefs.edit { it[SKIP_SILENCE] = on }
     }
 
+    suspend fun setAutoplay(on: Boolean) {
+        context.playerPrefs.edit { it[AUTOPLAY] = on }
+    }
+
     suspend fun setResumeWired(on: Boolean) {
         context.playerPrefs.edit { it[RESUME_WIRED] = on }
     }
@@ -186,6 +194,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             it[KEEP_PITCH] = player.keepPitch
             it[PITCH_SEMITONES] = player.pitchSemitones.coerceIn(-PITCH_RANGE_SEMITONES, PITCH_RANGE_SEMITONES)
             it[SKIP_SILENCE] = player.skipSilence
+            it[AUTOPLAY] = player.autoplay
             it[RESUME_WIRED] = player.resumeWired
             it[RESUME_BLUETOOTH] = player.resumeBluetooth
             it[RESUME_ALWAYS] = player.resumeAlways

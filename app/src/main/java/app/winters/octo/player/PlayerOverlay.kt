@@ -232,10 +232,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
                 )
             }
         }
-        GlassSheet(visible = showQueue, onDismiss = { showQueue = false }) {
-            val upNext by model.upNext.collectAsStateWithLifecycle()
-            QueueSheet(upNext, now.shuffle, model::moveInQueue, model::removeFromQueue, model::playAt)
-        }
+        QueueSheets(model, now.shuffle, visible = showQueue, onDismiss = { showQueue = false })
         GlassSheet(visible = showSleep, onDismiss = { showSleep = false }) {
             SleepSheet(model, onDone = { showSleep = false }, onOpenSpeed = {
                 showSleep = false
@@ -782,8 +779,7 @@ private fun SleepCircle(model: PlayerViewModel, onClick: () -> Unit) {
             on = sleep != SleepState.Off,
             state = when {
                 minutes != null -> "$minutes min left"
-                sleep == SleepState.EndOfSong -> "At the end of this song"
-                else -> "Off"
+                else -> sleepSummary(sleep)
             },
             onClick = onClick,
         )
