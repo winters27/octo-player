@@ -174,6 +174,6 @@ class Discovery @Inject constructor(
 
     private fun server(): Pair<SubsonicClient, String>? {
         val client = (sessions.state.value as? SessionState.SignedIn)?.session?.client ?: return null
-        return client to serverSourceId(client.baseUrl)
+        return client to serverSourceId(client.primaryUrl)
     }
 }

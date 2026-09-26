@@ -173,22 +173,6 @@ class ServerCatalogTest {
     }
 
     @Test
-    fun theHomeAddressKeepsTheMainAddressesSource() {
-        val main = "https://music.example.com/".toHttpUrl()
-        val home = "http://192.168.1.20:4533/".toHttpUrl()
-        try {
-            useHomeAddress(main, home)
-            assertEquals("server:music.example.com", serverSourceId(home))
-            assertEquals("server:music.example.com", serverSourceId(main))
-            // Any other address is itself.
-            assertEquals("server:10.0.0.5:4533", serverSourceId("http://10.0.0.5:4533/".toHttpUrl()))
-        } finally {
-            useHomeAddress(null, null)
-        }
-        assertEquals("server:192.168.1.20:4533", serverSourceId(home))
-    }
-
-    @Test
     fun datesWithAndWithoutAZone() {
         assertEquals(1_790_150_400_000, epochMs("2026-09-23T08:00:00Z"))
         assertEquals(1_790_150_400_000, epochMs("2026-09-23T10:00:00+02:00"))

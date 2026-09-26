@@ -110,7 +110,7 @@ class Downloads @Inject constructor(
     suspend fun afterSync() {
         val client = client() ?: return
         val now = System.currentTimeMillis()
-        online.prune(serverSourceId(client.baseUrl), now - FORGET_MS)
+        online.prune(serverSourceId(client.primaryUrl), now - FORGET_MS)
         val waiting = online.waiting().ifEmpty { return }
         val candidates = waiting.flatMap { titleKeys(it.title) }.distinct().chunked(900).flatMap { catalog.tracksWithKeys(it) }
         val byTitle = candidates.filter { !isFind(it.id) }.groupBy { matchKey(it.title) }

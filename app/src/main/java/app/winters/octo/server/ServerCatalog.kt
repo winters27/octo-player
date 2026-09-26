@@ -20,27 +20,11 @@ private const val UNKNOWN_ARTIST = "Unknown artist"
 private const val UNKNOWN_ALBUM = "Unknown album"
 
 // The source a server's music is kept under: its host, and its port when
-// that is not the usual one for the address. A server's home address maps
-// to its main one, so moving between home and away keeps the same source
-// (and so the same library) whichever address the caller holds.
+// that is not the usual one for the address. Always made from the server's
+// main address, so moving between home and away keeps the same library.
 fun serverSourceId(base: HttpUrl): String {
-    val plain = plainSourceId(base)
-    return homeAliases[plain] ?: plain
-}
-
-private fun plainSourceId(base: HttpUrl): String {
     val port = if (base.port == HttpUrl.defaultPort(base.scheme)) "" else ":${base.port}"
     return "$SERVER:${base.host}$port"
-}
-
-// The signed-in server's home address, as a source id, to its main one.
-@Volatile private var homeAliases: Map<String, String> = emptyMap()
-
-// Set when a server is signed in: calls for its home address count as the
-// main one. Null home (or signing out) forgets it.
-fun useHomeAddress(main: HttpUrl?, home: HttpUrl?) {
-    homeAliases = if (main == null || home == null) emptyMap()
-    else mapOf(plainSourceId(home) to plainSourceId(main)).filter { it.key != it.value }
 }
 
 fun isServerSource(sourceId: String) = sourceId.startsWith("$SERVER:")

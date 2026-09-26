@@ -14,7 +14,6 @@ import app.winters.octo.connection.mask
 import app.winters.octo.connection.opened
 import app.winters.octo.connection.sealed
 import app.winters.octo.server.serverSourceId
-import app.winters.octo.server.useHomeAddress
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.Credentials
 import app.winters.octo.subsonic.MusicFolder
@@ -229,7 +228,6 @@ class SessionRepository @Inject constructor(
         credentials = null
         chooser.clear()
         security.clear()
-        useHomeAddress(null, null)
         _state.value = SessionState.SignedOut
     }
 
@@ -315,7 +313,6 @@ class SessionRepository @Inject constructor(
         extensions: Set<String>,
     ): Session {
         applySecurity(main, settings)
-        useHomeAddress(main, settings.home)
         credentials = creds
         chooser.use(main, settings.home) { url -> answersAt(url, creds) }
         val client = SubsonicClient(main, creds, http, musicFolderId = settings.folder?.id, route = { chooser.activeUrl(main) })
