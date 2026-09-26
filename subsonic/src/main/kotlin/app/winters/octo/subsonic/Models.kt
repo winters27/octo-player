@@ -1,6 +1,13 @@
 package app.winters.octo.subsonic
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.jsonPrimitive
 
 // Every field has a default, so a server that leaves one out still parses.
 
@@ -181,3 +188,24 @@ data class RadioStation(
 
 @Serializable
 data class RadioStations(val internetRadioStation: List<RadioStation> = emptyList())
+
+// A library folder. Servers send its id as a number or as a string, so it
+// is read as either and kept as text.
+@Serializable
+data class MusicFolder(@Serializable(with = LooseString::class) val id: String, val name: String = "")
+
+@Serializable
+data class MusicFolders(val musicFolder: List<MusicFolder> = emptyList())
+
+@Serializable
+data class TokenInfo(val username: String? = null)
+
+// Reads a number or a string as text.
+internal object LooseString : KSerializer<String> {
+    override val descriptor = PrimitiveSerialDescriptor("LooseString", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): String =
+        (decoder as? JsonDecoder)?.decodeJsonElement()?.jsonPrimitive?.content ?: decoder.decodeString()
+
+    override fun serialize(encoder: Encoder, value: String) = encoder.encodeString(value)
+}

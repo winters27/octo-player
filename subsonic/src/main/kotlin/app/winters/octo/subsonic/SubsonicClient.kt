@@ -23,33 +23,50 @@ import kotlin.coroutines.resumeWithException
 const val API_VERSION = "1.16.1"
 
 class SubsonicClient(
-    val baseUrl: HttpUrl,
+    // The address the server is known by. Its library is kept under this
+    // address whichever one the calls go to.
+    val primaryUrl: HttpUrl,
     private val credentials: Credentials,
-    private val http: OkHttpClient,
+    http: OkHttpClient,
     private val clientName: String = "Octo",
+    // Headers every request to the server carries, such as a proxy's
+    // access token. They go only to the server's own addresses.
+    headers: Map<String, String> = emptyMap(),
+    // The library folder calls are limited to, or null for all of them.
+    val musicFolderId: String? = null,
+    // Where calls go right now, when the server has more than one address.
+    private val route: () -> HttpUrl = { primaryUrl },
 ) {
+    // The address calls go to right now: a home address while it answers,
+    // otherwise the primary one.
+    val baseUrl: HttpUrl get() = route()
+
     val username: String get() = credentials.username
+
+    val authMode: AuthMode get() = credentials.mode
+
+    private val http: OkHttpClient =
+        if (headers.isEmpty()) http
+        else http.newBuilder()
+            .addNetworkInterceptor(ServerHeaders { HeaderScope(setOf(origin(primaryUrl), origin(baseUrl)), headers) })
+            .build()
 
     // For the one call that can take minutes: Octo builds the stations the
     // first time they are asked for after it starts.
-    private val patient: OkHttpClient by lazy { http.newBuilder().readTimeout(3, TimeUnit.MINUTES).build() }
+    private val patient: OkHttpClient by lazy { this.http.newBuilder().readTimeout(3, TimeUnit.MINUTES).build() }
 
     // A signed address for an endpoint. Every call gets a fresh salt, so
     // never use one of these as a cache key.
-    fun url(endpoint: String, params: Map<String, String> = emptyMap()): HttpUrl {
-        val salt = newSalt()
-        return baseUrl.newBuilder()
+    fun url(endpoint: String, params: Map<String, String> = emptyMap()): HttpUrl =
+        baseUrl.newBuilder()
             .addPathSegment("rest")
             .addPathSegment(endpoint)
-            .addQueryParameter("u", credentials.username)
-            .addQueryParameter("t", credentials.sign(salt))
-            .addQueryParameter("s", salt)
+            .apply { credentials.authParams().forEach { (key, value) -> addQueryParameter(key, value) } }
             .addQueryParameter("v", API_VERSION)
             .addQueryParameter("c", clientName)
             .addQueryParameter("f", "json")
             .apply { params.forEach { (key, value) -> addQueryParameter(key, value) } }
             .build()
-    }
 
     fun coverArtUrl(coverId: String, size: Int): HttpUrl =
         url("getCoverArt", mapOf("id" to coverId, "size" to size.toString()))
@@ -67,10 +84,15 @@ class SubsonicClient(
     suspend fun user(username: String): User =
         get("getUser", mapOf("username" to username), "user", User.serializer())
 
-    suspend fun albumList(type: AlbumListType, size: Int, offset: Int = 0): List<Album> =
+    suspend fun albumList(
+        type: AlbumListType,
+        size: Int,
+        offset: Int = 0,
+        musicFolderId: String? = this.musicFolderId,
+    ): List<Album> =
         get(
             "getAlbumList2",
-            mapOf("type" to type.wire, "size" to size.toString(), "offset" to offset.toString()),
+            mapOf("type" to type.wire, "size" to size.toString(), "offset" to offset.toString()).inFolder(musicFolderId),
             "albumList2",
             AlbumList.serializer(),
             AlbumList(),
@@ -79,8 +101,28 @@ class SubsonicClient(
     suspend fun album(id: String): AlbumWithSongs =
         get("getAlbum", mapOf("id" to id), "album", AlbumWithSongs.serializer())
 
-    suspend fun artists(): List<ArtistIndex> =
-        get("getArtists", key = "artists", serializer = Artists.serializer(), default = Artists()).index
+    suspend fun artists(musicFolderId: String? = this.musicFolderId): List<ArtistIndex> =
+        get(
+            "getArtists",
+            emptyMap<String, String>().inFolder(musicFolderId),
+            "artists",
+            Artists.serializer(),
+            Artists(),
+        ).index
+
+    // The library folders on the server. A server with several libraries
+    // lists each as a folder.
+    suspend fun musicFolders(): List<MusicFolder> =
+        get(
+            "getMusicFolders",
+            key = "musicFolders",
+            serializer = MusicFolders.serializer(),
+            default = MusicFolders(),
+        ).musicFolder
+
+    // Who an API key belongs to. Only servers that take API keys answer.
+    suspend fun tokenInfo(): String? =
+        get("tokenInfo", key = "tokenInfo", serializer = TokenInfo.serializer(), default = TokenInfo()).username
 
     suspend fun artist(id: String): ArtistWithAlbums =
         get("getArtist", mapOf("id" to id), "artist", ArtistWithAlbums.serializer())
@@ -115,7 +157,13 @@ class SubsonicClient(
             http = patient,
         ).internetRadioStation
 
-    suspend fun search(query: String, artists: Int = 10, albums: Int = 20, songs: Int = 30): SearchResult =
+    suspend fun search(
+        query: String,
+        artists: Int = 10,
+        albums: Int = 20,
+        songs: Int = 30,
+        musicFolderId: String? = this.musicFolderId,
+    ): SearchResult =
         get(
             "search3",
             mapOf(
@@ -123,7 +171,7 @@ class SubsonicClient(
                 "artistCount" to "$artists",
                 "albumCount" to "$albums",
                 "songCount" to "$songs",
-            ),
+            ).inFolder(musicFolderId),
             "searchResult3",
             SearchResult.serializer(),
             SearchResult(),
@@ -132,7 +180,7 @@ class SubsonicClient(
     // One page of every song on the server, for copying the whole library.
     // An empty search matches everything on servers that allow it; others
     // answer with nothing.
-    suspend fun songPage(size: Int, offset: Int): List<Song> =
+    suspend fun songPage(size: Int, offset: Int, musicFolderId: String? = this.musicFolderId): List<Song> =
         get(
             "search3",
             mapOf(
@@ -141,7 +189,7 @@ class SubsonicClient(
                 "albumCount" to "0",
                 "songCount" to "$size",
                 "songOffset" to "$offset",
-            ),
+            ).inFolder(musicFolderId),
             "searchResult3",
             SearchResult.serializer(),
             SearchResult(),
@@ -209,7 +257,8 @@ class SubsonicClient(
             val code = error?.get("code")?.jsonPrimitive?.intOrNull ?: 0
             val message = error?.get("message")?.jsonPrimitive?.contentOrNull ?: "Request failed"
             throw when (code) {
-                40, 41 -> SubsonicException.WrongCredentials(message)
+                40, 44 -> SubsonicException.WrongCredentials(message)
+                41, 42 -> SubsonicException.AuthNotSupported(code, message)
                 70 -> SubsonicException.NotFound(message)
                 else -> SubsonicException.Server(code, message)
             }
@@ -221,6 +270,9 @@ class SubsonicClient(
             else -> throw SubsonicException.Server(0, "Missing \"$key\" in the answer")
         }
     }
+
+    // The params with the folder added, when there is one.
+    private fun Map<String, String>.inFolder(folder: String?) = if (folder == null) this else this + ("musicFolderId" to folder)
 
     private companion object {
         val json = Json {
