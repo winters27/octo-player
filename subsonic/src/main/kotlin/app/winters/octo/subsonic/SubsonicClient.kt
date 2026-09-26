@@ -272,6 +272,13 @@ class SubsonicClient(
     // Stars whole albums. On Octo an album found online is downloaded.
     suspend fun starAlbums(ids: List<String>) = send("star", ids.map { "albumId" to it })
 
+    suspend fun unstarAlbums(ids: List<String>) = send("unstar", ids.map { "albumId" to it })
+
+    // Stars whole artists, as favourites. Several go in one call.
+    suspend fun starArtists(ids: List<String>) = send("star", ids.map { "artistId" to it })
+
+    suspend fun unstarArtists(ids: List<String>) = send("unstar", ids.map { "artistId" to it })
+
     // Tells the server a song was played (submission) or is playing now.
     // The time is when it started, in milliseconds.
     suspend fun scrobble(id: String, time: Long, submission: Boolean) =

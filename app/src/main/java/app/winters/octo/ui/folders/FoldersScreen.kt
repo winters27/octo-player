@@ -50,6 +50,7 @@ import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.EmptyLibraryNote
 import app.winters.octo.ui.common.LoadState
 import app.winters.octo.ui.common.Pickable
+import app.winters.octo.ui.common.Refreshable
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.SelectableSongs
@@ -73,7 +74,7 @@ fun FoldersScreen(onBack: () -> Unit, vm: FoldersViewModel = hiltViewModel()) {
 
     BackHandler(enabled = trail.isNotEmpty()) { vm.up() }
 
-    Box(Modifier.fillMaxSize()) {
+    Refreshable(onRefresh = vm::reloadServer) {
         val known = sources
         val top = known?.top
         when {

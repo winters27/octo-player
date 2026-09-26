@@ -109,6 +109,15 @@ enum class DownloadSort(override val label: String, override val startsDescendin
     override val id: String get() = name
 }
 
+// The Favourites page, for its albums and its artists alike.
+enum class FavouriteSort(override val label: String, override val startsDescending: Boolean, override val byName: Boolean = false) : SortOption {
+    DateAdded("Date added", startsDescending = true),
+    Name("Name", startsDescending = false, byName = true),
+    ;
+
+    override val id: String get() = name
+}
+
 // The orders any full list of songs offers.
 private val songSorts = listOf(
     SongSort.Title, SongSort.Artist, SongSort.Album, SongSort.RecentlyAdded, SongSort.Year, SongSort.Length,
@@ -144,6 +153,7 @@ enum class SortList(val key: String, val options: List<SortOption>, val default:
     Artists("artists", ArtistSort.entries, SortOrder(ArtistSort.Name, descending = false)),
     Playlists("playlists", PlaylistSort.entries, SortOrder(PlaylistSort.RecentlyChanged, descending = true)),
     Downloads("downloads", DownloadSort.entries, SortOrder(DownloadSort.RecentlyDownloaded, descending = true)),
+    Favourites("favourites", FavouriteSort.entries, SortOrder(FavouriteSort.DateAdded, descending = true)),
     ;
 
     // Saved as "<option>:asc" or "<option>:desc".

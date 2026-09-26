@@ -3,7 +3,6 @@ package app.winters.octo.ui.playlist
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -30,6 +29,7 @@ import app.winters.octo.sort.Sorted
 import app.winters.octo.sort.sortPlaylists
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
+import app.winters.octo.ui.common.Refreshable
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SortButton
 import app.winters.octo.ui.common.TopOnNewOrder
@@ -94,7 +94,7 @@ fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsV
     val state = rememberLazyListState()
     playlists?.let { TopOnNewOrder(it.order, state) }
 
-    Box(Modifier.fillMaxSize()) {
+    Refreshable {
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding(extraTop = DetailTopGap)) {
             item(key = "title") {
                 Row(verticalAlignment = Alignment.CenterVertically) {

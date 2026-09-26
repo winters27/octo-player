@@ -74,3 +74,11 @@ fun sortFolderSongs(songs: List<TrackEntity>, order: SortOrder): List<TrackEntit
         else -> if (descending) songs.asReversed().toList() else songs
     }
 }
+
+// Favourite albums or artists: by when they became favourites, or by name
+// (the sort key of an album's title or an artist's name).
+fun <T> sortFavourites(items: List<T>, order: SortOrder, likedAt: (T) -> Long, name: (T) -> String, id: (T) -> String): List<T> =
+    when (order.by) {
+        FavouriteSort.Name -> sortedByKey(items, order.descending, name, compareBy(id))
+        else -> sortedByKey(items, order.descending, likedAt, compareBy(name, id))
+    }

@@ -10,12 +10,15 @@ import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.FavouritesDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.byLatestPlay
 import app.winters.octo.catalog.byPlayCount
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.Station
+import app.winters.octo.favourites.PinStore
+import app.winters.octo.favourites.PinnedItem
 import app.winters.octo.listening.PlayHistory
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.server.ServerSync
@@ -44,7 +47,18 @@ class HomeViewModel @Inject constructor(
     private val prefs: HomePrefs,
     private val feedback: Feedback,
     serverSync: ServerSync,
+    pins: PinStore,
+    favourites: FavouritesDao,
 ) : ViewModel() {
+    // What is pinned to the front of Home, in its order.
+    val pinned: StateFlow<List<PinnedItem>> =
+        pins.items.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // The latest favourite albums, newest favourite first.
+    val favouriteAlbums: StateFlow<List<AlbumEntity>> =
+        favourites.likedAlbums().map { rows -> rows.sortedByDescending { it.likedAt }.take(20).map { it.album } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     // Both follow the play history, here and on the server, so a song that
     // just counted shows up.
     val recentlyPlayed: StateFlow<List<AlbumEntity>> =

@@ -59,6 +59,7 @@ import app.winters.octo.discovery.ArtistExtrasSource
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.OnlineArtist
 import app.winters.octo.discovery.SimilarArtist
+import app.winters.octo.listening.FavouriteKind
 import app.winters.octo.listening.PlayHistory
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.sort.SortList
@@ -72,8 +73,10 @@ import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.DownloadButton
+import app.winters.octo.ui.common.FavouriteHeart
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.common.QuietButton
+import app.winters.octo.ui.common.Refreshable
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.SortBar
@@ -92,6 +95,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -99,15 +103,16 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel(assistedFactory = ArtistViewModel.Factory::class)
 class ArtistViewModel @AssistedInject constructor(
-    @Assisted id: String,
+    @Assisted private val id: String,
     dao: CatalogDao,
-    extrasSource: ArtistExtrasSource,
+    private val extrasSource: ArtistExtrasSource,
     history: PlayHistory,
     private val sorted: SortedLibrary,
     private val playback: PlaybackConnection,
@@ -126,11 +131,15 @@ class ArtistViewModel @AssistedInject constructor(
         viewModelScope.launch { sorted.setOrder(SortList.ArtistAlbums, order) }
     }
 
+    // Goes up by one each time the page is pulled, to ask the server again.
+    private val reload = MutableStateFlow(0)
+
     // What the server adds: top songs, a biography and similar artists.
     // Nothing until it answers, and nothing at all without a server.
     val extras: StateFlow<ArtistExtras?> = dao.artist(id)
         .filterNotNull()
         .distinctUntilChanged { a, b -> a.id == b.id && a.name == b.name }
+        .combine(reload) { artist, _ -> artist }
         .mapLatest { artist ->
             try {
                 extrasSource.forArtist(artist)
@@ -183,6 +192,12 @@ class ArtistViewModel @AssistedInject constructor(
         }
     }
 
+    // A pull on the page: what the server knows about the artist is asked for again.
+    fun reloadExtras() {
+        extrasSource.forget(id)
+        reload.update { it + 1 }
+    }
+
     // Plays the top songs from one of them.
     fun playTop(index: Int) {
         val songs = extras.value?.topSongs ?: return
@@ -216,28 +231,35 @@ fun ArtistScreen(
     val grid = rememberLazyGridState()
     // A new order scrolls back to the albums' own line, below the header,
     // the buttons, the songs and any top songs.
-    val above = listOf(artist != null, ownSongs.isNotEmpty(), ownSongs.isNotEmpty(), top.isNotEmpty()).count { it }
+    val above = listOf(artist != null, artist != null, ownSongs.isNotEmpty(), top.isNotEmpty()).count { it }
     sortedAlbums?.let { TopOnNewOrder(it.order, grid, top = above) }
 
-    Box(Modifier.fillMaxSize()) {
+    Refreshable(onRefresh = vm::reloadExtras) {
         ArtistGrid(grid) {
             artist?.let { a ->
                 item(key = "header", span = { GridItemSpan(maxLineSpan) }) {
                     ArtistHeader(a.artwork, a.name, "${albums(a.albumCount)} • ${songs(a.songCount)}")
                 }
             }
-            if (ownSongs.isNotEmpty()) {
+            // The heart always; the buttons that play once there are songs.
+            if (artist != null) {
                 wide("buttons") {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        AccentButton("Play", onClick = { vm.play(shuffle = false) })
-                        GlazeButton("Shuffle", onClick = { vm.play(shuffle = true) })
-                        // A radio needs the server, to find songs like these.
-                        if (radio) GlazeButton("Radio", onClick = vm::startRadio)
+                        if (ownSongs.isNotEmpty()) {
+                            AccentButton("Play", onClick = { vm.play(shuffle = false) })
+                            GlazeButton("Shuffle", onClick = { vm.play(shuffle = true) })
+                            // A radio needs the server, to find songs like these.
+                            if (radio) GlazeButton("Radio", onClick = vm::startRadio)
+                        }
+                        FavouriteHeart(FavouriteKind.Artist, id)
                     }
                 }
+            }
+            if (ownSongs.isNotEmpty()) {
                 wide("songs") {
                     Column {
                         val more = ownSongs.size > ARTIST_SONGS

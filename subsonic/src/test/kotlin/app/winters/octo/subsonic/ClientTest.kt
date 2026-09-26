@@ -167,6 +167,24 @@ class ClientTest {
     }
 
     @Test
+    fun albumsAndArtistsStarAndUnstarByTheirOwnParameter() = runTest {
+        repeat(4) { answerOk() }
+        val c = client()
+        c.starAlbums(listOf("al1", "al2"))
+        c.unstarAlbums(listOf("al1"))
+        c.starArtists(listOf("ar1", "ar2"))
+        c.unstarArtists(listOf("ar2"))
+        val calls = List(4) { server.takeRequest().url }
+        assertEquals(listOf("/rest/star", "/rest/unstar", "/rest/star", "/rest/unstar"), calls.map { it.encodedPath })
+        assertEquals(listOf("al1", "al2"), calls[0].queryParameterValues("albumId"))
+        assertEquals(listOf("al1"), calls[1].queryParameterValues("albumId"))
+        assertEquals(listOf("ar1", "ar2"), calls[2].queryParameterValues("artistId"))
+        assertEquals(listOf("ar2"), calls[3].queryParameterValues("artistId"))
+        // Never as a song id, which would star something else.
+        calls.forEach { assertTrue(it.queryParameterValues("id").isEmpty()) }
+    }
+
+    @Test
     fun scrobbleSendsTheStartAndKind() = runTest {
         answerOk()
         answerOk()

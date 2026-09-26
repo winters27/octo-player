@@ -51,6 +51,7 @@ import app.winters.octo.ui.common.rememberAccessRequest
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
+import app.winters.octo.ui.nav.FavouritesRoute
 import app.winters.octo.ui.nav.HistoryRoute
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,6 +63,8 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
     val accessDismissed by vm.accessDismissed.collectAsStateWithLifecycle()
     val recentlyPlayed by vm.recentlyPlayed.collectAsStateWithLifecycle()
     val mostPlayed by vm.mostPlayed.collectAsStateWithLifecycle()
+    val pinned by vm.pinned.collectAsStateWithLifecycle()
+    val favouriteAlbums by vm.favouriteAlbums.collectAsStateWithLifecycle()
 
     LifecycleResumeEffect(Unit) {
         vm.onShown()
@@ -82,9 +85,11 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
             when {
                 layout.empty -> item(key = "empty") { EmptyCard(offerAccess = !layout.askAccess) }
                 layout.shelves -> {
+                    pinnedShelf(pinned, onOpen)
                     shelf("Recently played", recentlyPlayed, onOpen, onTitle = { onOpen(HistoryRoute()) })
                     stationShelf(vm.stations, vm.startingStation, vm::playStation)
                     shelf("Recently added", recent.orEmpty(), onOpen)
+                    shelf("Favourite albums", favouriteAlbums, onOpen, onTitle = { onOpen(FavouritesRoute) })
                     songShelf("Most played", mostPlayed, vm::play, onTitle = { onOpen(HistoryRoute(mostPlayed = true)) })
                     shelf("Something different", vm.surprise, onOpen)
                     if (vm.artists.isNotEmpty()) {
