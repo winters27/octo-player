@@ -54,6 +54,7 @@ import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.RatingStore
 import app.winters.octo.ui.common.RatingStars
 import app.winters.octo.ui.common.Artwork
+import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
 import app.winters.octo.ui.playlist.LocalPlaylistSheets
@@ -172,6 +173,7 @@ class SongMenuViewModel @Inject constructor(
     private val ratings: RatingStore,
     private val controls: ServerControls,
     private val offline: OfflineDownloads,
+    private val feedback: Feedback,
 ) : ViewModel() {
     val liked: StateFlow<Set<String>> = likes.liked
     val downloadStates: StateFlow<Map<String, DownloadState>> = downloads.states
@@ -180,7 +182,7 @@ class SongMenuViewModel @Inject constructor(
     val kept: StateFlow<Map<String, DownloadEntity>> = offline.byTrack
 
     fun keepOffline(id: String) = offline.download(listOf(id))
-    fun removeOffline(id: String) = offline.remove(id)
+    fun removeOffline(id: String) = offline.remove(id) { restore -> feedback.undoable("Download removed", restore) }
     fun retryOffline(id: String) = offline.retry(id)
 
     // Whether songs can start a radio: only with a server signed in.
@@ -214,13 +216,14 @@ class SongMenuViewModel @Inject constructor(
                 withContext(Dispatchers.IO) { discovery.radio(track) }
             } catch (e: SubsonicException) {
                 Log.w("Octo", "radio failed: ${e.javaClass.simpleName}")
+                feedback.show("Could not start a radio for this song")
                 return@launch
             }
             // Only the song itself back means the server found nothing like it.
             if (songs.size > 1) {
                 playback.playTracks(songs.map { it.id }, 0)
             } else {
-                Log.i("Octo", "radio: nothing similar found")
+                feedback.show("No similar songs found")
             }
         }
     }

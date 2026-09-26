@@ -56,6 +56,24 @@ class LikeStore @Inject constructor(
             }
         }
     }
+
+    // Takes a like away. `removed` hears the like as it was, to put it back.
+    fun unlike(trackId: String, removed: (LikedTrackEntity) -> Unit) {
+        scope.launch {
+            val row = userDao.likedRow(trackId) ?: return@launch
+            userDao.unlike(trackId)
+            listening.likeChanged(trackId, liked = false)
+            removed(row)
+        }
+    }
+
+    // Puts a like back as it was, with its own time, so it keeps its place.
+    fun restore(row: LikedTrackEntity) {
+        scope.launch {
+            userDao.like(row)
+            listening.likeChanged(row.trackId, liked = true)
+        }
+    }
 }
 
 // The queue as saved: songs in play order, where playback was, and the

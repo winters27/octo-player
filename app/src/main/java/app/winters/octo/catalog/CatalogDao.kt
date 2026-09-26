@@ -94,6 +94,10 @@ interface CatalogDao {
     @Query("SELECT COUNT(*) FROM track WHERE sourceId = :sourceId")
     fun trackCount(sourceId: String): Flow<Int>
 
+    // Every song in the library, from the phone and the server together.
+    @Query("SELECT COUNT(*) FROM track")
+    fun libraryTrackCount(): Flow<Int>
+
     @Query("DELETE FROM track")
     suspend fun deleteTracks()
 

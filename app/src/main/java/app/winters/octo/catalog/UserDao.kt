@@ -27,6 +27,9 @@ interface UserDao {
     @Query("SELECT EXISTS(SELECT 1 FROM liked_track WHERE trackId = :trackId)")
     suspend fun isLiked(trackId: String): Boolean
 
+    @Query("SELECT * FROM liked_track WHERE trackId = :trackId")
+    suspend fun likedRow(trackId: String): LikedTrackEntity?
+
     // Liked songs the catalog still has, newest like first.
     @Query("SELECT t.* FROM liked_track l JOIN track t ON t.id = l.trackId ORDER BY l.likedAt DESC")
     fun likedTracks(): Flow<List<TrackEntity>>
@@ -256,8 +259,9 @@ interface UserDao {
     @Query("SELECT * FROM playlist_item WHERE playlistId = :id ORDER BY position")
     suspend fun playlistItems(id: String): List<PlaylistItemEntity>
 
+    // Answers the new rows' ids.
     @Insert
-    suspend fun insertPlaylistItems(rows: List<PlaylistItemEntity>)
+    suspend fun insertPlaylistItems(rows: List<PlaylistItemEntity>): List<Long>
 
     @Update
     suspend fun updatePlaylistItems(rows: List<PlaylistItemEntity>)
@@ -265,20 +269,54 @@ interface UserDao {
     @Query("DELETE FROM playlist_item WHERE id = :itemId")
     suspend fun deletePlaylistItem(itemId: Long)
 
+    // Answers the new rows' ids, so the add can be taken back.
     @Transaction
-    suspend fun addToPlaylist(id: String, tracks: List<TrackEntity>, now: Long) {
+    suspend fun addToPlaylist(id: String, tracks: List<TrackEntity>, now: Long): List<Long> {
         val start = playlistItems(id).lastOrNull()?.position?.plus(1) ?: 0
-        insertPlaylistItems(appendedItems(id, start, tracks))
+        val added = insertPlaylistItems(appendedItems(id, start, tracks))
         touchPlaylist(id, now)
+        return added
     }
 
+    // Answers the row taken out, its position set to the place it had, so
+    // it can be put back there. Null when it was already gone.
     @Transaction
-    suspend fun removeFromPlaylist(id: String, itemId: Long, now: Long) {
+    suspend fun removeFromPlaylist(id: String, itemId: Long, now: Long): PlaylistItemEntity? {
+        val items = playlistItems(id)
+        val index = items.indexOfFirst { it.id == itemId }
+        if (index < 0) return null
         deletePlaylistItem(itemId)
         val rest = playlistItems(id)
         savePlaces(rest, renumbered(rest))
         touchPlaylist(id, now)
+        return items[index].copy(position = index)
     }
+
+    // Takes out several rows at once, such as the songs just added.
+    @Transaction
+    suspend fun removeItemsFromPlaylist(id: String, itemIds: List<Long>, now: Long) {
+        itemIds.forEach { deletePlaylistItem(it) }
+        val rest = playlistItems(id)
+        savePlaces(rest, renumbered(rest))
+        touchPlaylist(id, now)
+    }
+
+    // Puts a row taken out back where it was, with its own id, unless the
+    // playlist is gone or the row is back already.
+    @Transaction
+    suspend fun restoreToPlaylist(id: String, item: PlaylistItemEntity, now: Long) {
+        if (playlistRow(id) == null) return
+        val items = playlistItems(id)
+        if (items.any { it.id == item.id }) return
+        val after = restoredItems(items, item)
+        insertPlaylistItems(after.filter { it.id == item.id })
+        savePlaces(items, after.filter { it.id != item.id })
+        touchPlaylist(id, now)
+    }
+
+    // The playlists a song is on, to ask before it goes on one twice.
+    @Query("SELECT DISTINCT playlistId FROM playlist_item WHERE trackId = :trackId")
+    fun playlistsWith(trackId: String): Flow<List<String>>
 
     @Transaction
     suspend fun moveInPlaylist(id: String, itemId: Long, targetId: Long, now: Long) {

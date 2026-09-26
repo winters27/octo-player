@@ -42,6 +42,7 @@ import app.winters.octo.design.OctoType
 import app.winters.octo.folders.ServerLevel
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
+import app.winters.octo.ui.common.EmptyLibraryNote
 import app.winters.octo.ui.common.LoadState
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
@@ -71,7 +72,7 @@ fun FoldersScreen(onBack: () -> Unit, vm: FoldersViewModel = hiltViewModel()) {
             }
             top == null -> Column(Modifier.fillMaxSize().padding(screenPadding(extraTop = DetailTopGap))) {
                 ScreenTitle("Folders")
-                Quiet("Folders show here once there is music on this phone or a server is signed in.")
+                EmptyLibraryNote("Folders show here once there is music on this phone or a server is signed in.")
             }
             else -> {
                 val stops = listOf(top) + trail

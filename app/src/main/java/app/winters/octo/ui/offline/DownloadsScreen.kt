@@ -51,6 +51,7 @@ import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
+import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.common.RemoveBackground
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.songs
@@ -65,6 +66,7 @@ import javax.inject.Inject
 class OfflineDownloadsViewModel @Inject constructor(
     private val offline: OfflineDownloads,
     private val playback: PlaybackConnection,
+    private val feedback: Feedback,
     userDao: UserDao,
 ) : ViewModel() {
     // Null until first read.
@@ -76,7 +78,8 @@ class OfflineDownloadsViewModel @Inject constructor(
         .map { list -> list.associate { it.id to it.name } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
-    fun remove(trackId: String) = offline.remove(trackId)
+    // Removes a download, with an Undo while its file can still come back.
+    fun remove(trackId: String) = offline.remove(trackId) { restore -> feedback.undoable("Download removed", restore) }
     fun removeAll() = offline.removeAll()
     fun retry(trackId: String) = offline.retry(trackId)
 

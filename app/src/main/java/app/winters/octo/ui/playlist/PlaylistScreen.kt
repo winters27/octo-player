@@ -38,6 +38,7 @@ import app.winters.octo.playlists.PlaylistSync
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.DragHandle
+import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.common.RemoveBackground
 import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.screenPadding
@@ -67,6 +68,7 @@ class PlaylistViewModel @AssistedInject constructor(
     userDao: UserDao,
     private val store: PlaylistStore,
     private val playback: PlaybackConnection,
+    private val feedback: Feedback,
     sync: PlaylistSync,
 ) : ViewModel() {
     // Null until first read.
@@ -88,7 +90,13 @@ class PlaylistViewModel @AssistedInject constructor(
 
     fun shuffle() = playback.playTracks(ids(), shuffle = true)
 
-    fun remove(itemId: Long) = store.remove(id, itemId)
+    // Takes a song out, with an Undo that puts it back in its place.
+    fun remove(itemId: Long) {
+        val name = page.value?.playlist?.name ?: "the playlist"
+        store.remove(id, itemId) { row ->
+            feedback.undoable("Removed from $name") { store.restore(id, row) }
+        }
+    }
 
     fun move(itemId: Long, targetId: Long) = store.move(id, itemId, targetId)
 
