@@ -65,6 +65,18 @@ private const val RULES_SETTLE_MS = 1_500L
 private const val TRIES = 3
 private const val RETRY_AFTER_MS = 5_000L
 
+// How long the file of a download removed by hand is set aside, so the
+// removal can be taken back. A little longer than the undo line stays up.
+private const val UNDO_KEEP_MS = 10_000L
+
+// A download let go of, with its file set aside while it can still come back.
+private data class SetAside(val row: DownloadEntity, val file: File?)
+
+// Whether a removal can be taken back: every finished download kept its
+// file. Unfinished ones only need to wait in line again.
+fun canRestore(removed: List<Pair<DownloadStatus, Boolean>>): Boolean =
+    removed.isNotEmpty() && removed.none { (state, fileKept) -> state == DownloadStatus.Done && !fileKept }
+
 // Server songs kept on the phone as real files, one at a time, in the order
 // asked for. Asked for by hand, or kept in step with rules: Liked songs, and
 // chosen playlists. The queue lives in the database, so it carries on when
@@ -114,6 +126,8 @@ class OfflineDownloads @Inject constructor(
         if (started) return
         started = true
         scope.launch {
+            // Files set aside by a removal the app closed on before it was final.
+            asideDir().listFiles()?.forEach { it.delete() }
             dao.requeueInterrupted()
             // The saved songs open in the background, not when a song first plays.
             saved.refreshUsed()
@@ -160,14 +174,63 @@ class OfflineDownloads @Inject constructor(
     }
 
     // Lets go of a download asked for by hand. One a rule also keeps stays.
-    fun remove(trackId: String) {
+    // When the download itself goes, `gone` hears a way to bring it back,
+    // as long as its file could be set aside for a moment.
+    fun remove(trackId: String, gone: (restore: () -> Unit) -> Unit = {}) {
+        scope.launch {
+            val aside = lock.withLock {
+                val reasons = heldByTrack()[trackId] ?: return@withLock null
+                val left = reasons - Reasons.MANUAL
+                if (left.isEmpty()) {
+                    setAside(trackId)
+                } else {
+                    setReasons(trackId, left)
+                    null
+                }
+            } ?: return@launch
+            // The set aside files go for good once the undo has passed.
+            scope.launch {
+                delay(UNDO_KEEP_MS)
+                lock.withLock { aside.forEach { it.file?.delete() } }
+            }
+            if (canRestore(aside.map { it.row.state to (it.file != null) })) gone { restore(aside) }
+        }
+    }
+
+    // Takes back a removal: finished files move back, anything unfinished
+    // waits to download again. One asked for again meanwhile just stays
+    // wanted by hand.
+    private fun restore(aside: List<SetAside>) {
         scope.launch {
             lock.withLock {
-                val reasons = heldByTrack()[trackId] ?: return@withLock
-                val left = reasons - Reasons.MANUAL
-                if (left.isEmpty()) delete(trackId) else setReasons(trackId, left)
+                val rows = aside
+                    .filter { dao.get(it.row.sourceId, it.row.serverId) == null }
+                    .map { (row, file) ->
+                        when {
+                            row.state == DownloadStatus.Done && file != null && file.renameTo(File(row.path)) -> row
+                            row.state == DownloadStatus.Failed -> row
+                            else -> row.copy(state = DownloadStatus.Queued, progress = 0f, path = "", sizeBytes = 0)
+                        }
+                    }
+                if (rows.isNotEmpty()) dao.upsert(rows)
+                val held = heldByTrack()
+                aside.map { it.row.trackId }.distinct().forEach { trackId ->
+                    held[trackId]?.let { setReasons(trackId, it + Reasons.MANUAL) }
+                }
             }
+            poke()
         }
+    }
+
+    // Removes a song's downloads, moving each finished file aside rather
+    // than deleting it. A file that cannot be moved is deleted.
+    private suspend fun setAside(trackId: String): List<SetAside> = dao.forTrack(trackId).map { row ->
+        running?.let { (key, job) -> if (key == key(row)) job.cancel() }
+        dao.delete(row.sourceId, row.serverId)
+        val file = File(row.path).takeIf { row.path.isNotEmpty() && it.exists() }
+        val kept = file?.let { File(asideDir(), "${System.nanoTime()}-${it.name}") }?.takeIf { file.renameTo(it) }
+        if (file != null && kept == null) file.delete()
+        SetAside(row, kept)
     }
 
     // Stops keeping anything: the rules are switched off and every file goes.
@@ -411,6 +474,9 @@ class OfflineDownloads @Inject constructor(
         File(dir, ".nomedia").takeIf { !it.exists() }?.createNewFile()
         return dir
     }
+
+    // Where removed files wait out their undo.
+    private fun asideDir(): File = File(downloadDir(), ".removed").apply { mkdirs() }
 
     private fun key(row: DownloadEntity) = "${row.sourceId}|${row.serverId}"
 }

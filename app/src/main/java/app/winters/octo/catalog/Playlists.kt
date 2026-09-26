@@ -65,6 +65,15 @@ fun appendedItems(playlistId: String, start: Int, tracks: List<TrackEntity>): Li
 fun renumbered(items: List<PlaylistItemEntity>): List<PlaylistItemEntity> =
     items.mapIndexed { index, item -> if (item.position == index) item else item.copy(position = index) }
 
+// Puts a row taken out back at the place it had, `item.position`, and
+// renumbers. A place past the end puts it last. A row already there
+// changes nothing.
+fun restoredItems(items: List<PlaylistItemEntity>, item: PlaylistItemEntity): List<PlaylistItemEntity> {
+    if (items.any { it.id == item.id }) return items
+    val at = item.position.coerceIn(0, items.size)
+    return renumbered(items.toMutableList().apply { add(at, item) })
+}
+
 // Moves one row into the place of another, the one it was dropped on, and
 // renumbers. Rows are expected in play order. Unknown ids change nothing.
 fun movedItem(items: List<PlaylistItemEntity>, itemId: Long, targetId: Long): List<PlaylistItemEntity> {

@@ -43,6 +43,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.PlaylistSummary
+import app.winters.octo.catalog.UserDao
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.GlassInput
 import app.winters.octo.design.GlassSheet
@@ -54,9 +55,11 @@ import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.playlists.PlaylistFiles
 import app.winters.octo.playlists.playlistFileName
+import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.common.songs
 import app.winters.octo.ui.menu.MenuRow
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -116,14 +119,32 @@ class PlaylistSheetsViewModel @Inject constructor(
     private val store: PlaylistStore,
     private val offline: OfflineDownloads,
     private val files: PlaylistFiles,
+    private val userDao: UserDao,
+    private val feedback: Feedback,
 ) : ViewModel() {
     val playlists: StateFlow<List<PlaylistSummary>> =
         store.playlists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    fun create(name: String, trackId: String?) = store.create(name, listOfNotNull(trackId))
+    // The playlists a song is on already. Null until first read.
+    fun playlistsWith(trackId: String): Flow<List<String>?> = userDao.playlistsWith(trackId)
+
+    // A new playlist with the song in it says where the song went, since
+    // nothing on screen shows it.
+    fun create(name: String, trackId: String?) {
+        store.create(name, listOfNotNull(trackId))
+        if (trackId != null) feedback.show("Added to ${name.trim()}")
+    }
+
     fun rename(id: String, name: String) = store.rename(id, name)
     fun delete(id: String) = store.delete(id)
-    fun add(id: String, trackId: String) = store.add(id, listOf(trackId))
+
+    // Adds the song, with an Undo that takes it back out.
+    fun add(playlist: PlaylistSummary, trackId: String) {
+        store.add(playlist.id, listOf(trackId)) { rows ->
+            feedback.undoable("Added to ${playlist.name}") { store.removeRows(playlist.id, rows) }
+        }
+    }
+
     fun saveToServer(id: String) = store.saveToServer(id)
 
     // Downloads the playlist's songs that are only on a server, once.
@@ -131,7 +152,10 @@ class PlaylistSheetsViewModel @Inject constructor(
 
     fun export(id: String, uri: Uri) {
         viewModelScope.launch {
-            if (!files.export(id, uri)) Log.w("Octo", "playlist export: could not write the file")
+            if (!files.export(id, uri)) {
+                Log.w("Octo", "playlist export: could not write the file")
+                feedback.show("Could not export the playlist")
+            }
         }
     }
 }
@@ -200,17 +224,27 @@ private fun SheetTitle(text: String, modifier: Modifier = Modifier) {
     Text(text, style = OctoType.section, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier)
 }
 
-// "New playlist" first, then the playlists. Picking one adds the song and closes.
+// "New playlist" first, then the playlists. Picking one adds the song and
+// closes. Picking one the song is on already asks first.
 @Composable
 private fun ColumnScope.Picker(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel, trackId: String) {
     val playlists by vm.playlists.collectAsStateWithLifecycle()
+    val holding by remember(trackId) { vm.playlistsWith(trackId) }.collectAsStateWithLifecycle(null)
+    var again by remember { mutableStateOf<PlaylistSummary?>(null) }
+    val add = { playlist: PlaylistSummary ->
+        vm.add(playlist, trackId)
+        sheets.close()
+    }
+    again?.let { playlist ->
+        ConfirmAgain(playlist.name, onCancel = { again = null }, onAdd = { add(playlist) })
+        return
+    }
     SheetTitle("Add to playlist", Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp))
     LazyColumn(Modifier.weight(1f, fill = false), contentPadding = PaddingValues(bottom = 12.dp)) {
         item(key = "new") { NewPlaylistLine { sheets.show(PlaylistSheet.Create(trackId)) } }
         items(playlists, key = { it.id }) { playlist ->
             PlaylistLine(playlist.name, songs(playlist.songCount), onClick = {
-                vm.add(playlist.id, trackId)
-                sheets.close()
+                if (holding.orEmpty().contains(playlist.id)) again = playlist else add(playlist)
             }, onServer = playlist.onServer) {
                 PlaylistCover(playlist.covers, 56.dp)
             }
@@ -246,6 +280,18 @@ private fun NameForm(title: String, initial: String, action: String, onDone: (St
             )
             Spacer(Modifier.width(10.dp))
             AccentButton(action, onClick = { onDone(name) }, enabled = ready)
+        }
+    }
+}
+
+// Asks before a song goes on a playlist it is on already.
+@Composable
+private fun ConfirmAgain(name: String, onCancel: () -> Unit, onAdd: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
+        Text("Already in $name. Add again?", style = OctoType.section, color = OctoColors.TextPrimary, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AccentButton("Add", onClick = onAdd)
+            GlazeButton("Cancel", onClick = onCancel)
         }
     }
 }

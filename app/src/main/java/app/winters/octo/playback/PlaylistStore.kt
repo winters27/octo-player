@@ -2,6 +2,7 @@ package app.winters.octo.playback
 
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.PlaylistEntity
+import app.winters.octo.catalog.PlaylistItemEntity
 import app.winters.octo.catalog.PlaylistSummary
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.summarize
@@ -56,17 +57,36 @@ class PlaylistStore @Inject constructor(
         }
     }
 
-    // Adds songs to the end.
-    fun add(id: String, trackIds: List<String>) {
+    // Adds songs to the end. `added` hears the new rows, to take them back out.
+    fun add(id: String, trackIds: List<String>, added: (List<Long>) -> Unit = {}) {
         scope.launch {
-            userDao.addToPlaylist(id, catalog.tracksByIds(trackIds), System.currentTimeMillis())
+            val rows = userDao.addToPlaylist(id, catalog.tracksByIds(trackIds), System.currentTimeMillis())
+            sync.changed(id)
+            if (rows.isNotEmpty()) added(rows)
+        }
+    }
+
+    // Takes a song out. `removed` hears the row as it was, to put it back.
+    fun remove(id: String, itemId: Long, removed: (PlaylistItemEntity) -> Unit = {}) {
+        scope.launch {
+            val row = userDao.removeFromPlaylist(id, itemId, System.currentTimeMillis()) ?: return@launch
+            sync.changed(id)
+            removed(row)
+        }
+    }
+
+    // Takes back an add: the rows it made go again.
+    fun removeRows(id: String, itemIds: List<Long>) {
+        scope.launch {
+            userDao.removeItemsFromPlaylist(id, itemIds, System.currentTimeMillis())
             sync.changed(id)
         }
     }
 
-    fun remove(id: String, itemId: Long) {
+    // Puts a song taken out back in the place it had.
+    fun restore(id: String, row: PlaylistItemEntity) {
         scope.launch {
-            userDao.removeFromPlaylist(id, itemId, System.currentTimeMillis())
+            userDao.restoreToPlaylist(id, row, System.currentTimeMillis())
             sync.changed(id)
         }
     }

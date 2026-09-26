@@ -86,6 +86,33 @@ class PlaylistsTest {
     }
 
     @Test
+    fun anUndoPutsARowBackInItsPlace() {
+        // 11 was taken out from place 1; the rest were renumbered around it.
+        val rest = renumbered(listOf(item(10, 0), item(12, 2), item(13, 3)))
+        val restored = restoredItems(rest, item(11, 1))
+        assertEquals(listOf(10L, 11L, 12L, 13L), order(restored))
+        assertEquals(listOf(0, 1, 2, 3), restored.map { it.position })
+    }
+
+    @Test
+    fun anUndoPutsTheFirstAndLastRowsBack() {
+        assertEquals(listOf(10L, 11L, 12L, 13L), order(restoredItems(renumbered(items.drop(1)), item(10, 0))))
+        assertEquals(listOf(10L, 11L, 12L, 13L), order(restoredItems(renumbered(items.dropLast(1)), item(13, 3))))
+    }
+
+    @Test
+    fun anUndoAfterTheListShrankPutsTheRowLast() {
+        val restored = restoredItems(listOf(item(10, 0)), item(13, 3))
+        assertEquals(listOf(10L, 13L), order(restored))
+        assertEquals(listOf(0, 1), restored.map { it.position })
+    }
+
+    @Test
+    fun anUndoForARowAlreadyBackChangesNothing() {
+        assertSame(items, restoredItems(items, item(12, 0)))
+    }
+
+    @Test
     fun summariesCountLengthAndCoversPerPlaylist() {
         val playlists = listOf(
             PlaylistEntity("new", "Empty", createdAt = 2, updatedAt = 2),
