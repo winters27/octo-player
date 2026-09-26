@@ -314,9 +314,10 @@ interface UserDao {
         touchPlaylist(id, now)
     }
 
-    // The playlists a song is on, to ask before it goes on one twice.
-    @Query("SELECT DISTINCT playlistId FROM playlist_item WHERE trackId = :trackId")
-    fun playlistsWith(trackId: String): Flow<List<String>>
+    // Which of these songs each playlist has, to ask before a song goes on
+    // one twice. At most 900 songs at a time, for the database's limit.
+    @Query("SELECT DISTINCT playlistId, trackId FROM playlist_item WHERE trackId IN (:trackIds)")
+    fun playlistHoldings(trackIds: List<String>): Flow<List<PlaylistHolding>>
 
     @Transaction
     suspend fun moveInPlaylist(id: String, itemId: Long, targetId: Long, now: Long) {

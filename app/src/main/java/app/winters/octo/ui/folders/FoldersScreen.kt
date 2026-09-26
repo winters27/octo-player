@@ -49,8 +49,10 @@ import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.EmptyLibraryNote
 import app.winters.octo.ui.common.LoadState
+import app.winters.octo.ui.common.Pickable
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
+import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.SortBar
 import app.winters.octo.ui.common.TopOnNewOrder
@@ -98,16 +100,19 @@ fun FoldersScreen(onBack: () -> Unit, vm: FoldersViewModel = hiltViewModel()) {
                 key(here) {
                     val state = rememberLazyListState()
                     TopOnNewOrder(order, state, top = songsAt)
-                    LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding(extraTop = DetailTopGap)) {
-                        item(key = "header") {
-                            Header(names, onCrumb = { vm.goTo(it - 1) })
+                    val pickable = remember(sortedSongs) { sortedSongs.map { Pickable(it.id, it) } }
+                    SelectableSongs(pickable) {
+                        LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding(extraTop = DetailTopGap)) {
+                            item(key = "header") {
+                                Header(names, onCrumb = { vm.goTo(it - 1) })
+                            }
+                            when (here) {
+                                FolderStop.Top -> topLevel(known, vm::open)
+                                is FolderStop.Phone -> phoneLevel(known, here, vm)
+                                is FolderStop.Server -> serverLevel(here, level, gathering, note, vm)
+                            }
+                            songRows(sortedSongs, order, vm)
                         }
-                        when (here) {
-                            FolderStop.Top -> topLevel(known, vm::open)
-                            is FolderStop.Phone -> phoneLevel(known, here, vm)
-                            is FolderStop.Server -> serverLevel(here, level, gathering, note, vm)
-                        }
-                        songRows(sortedSongs, order, vm)
                     }
                 }
                 if (here is FolderStop.Server) LaunchedEffect(here.id) { vm.load(here.id) }

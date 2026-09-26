@@ -53,4 +53,16 @@ object OctoIcons {
     val Sort = R.drawable.sym_sort
     val Ascending = R.drawable.sym_arrow_upward
     val Descending = R.drawable.sym_arrow_downward
+
+    // Everything known about a song.
+    val Info = R.drawable.sym_info
+
+    // Picking songs in a list, and a picked one.
+    val Select = R.drawable.sym_check_circle
+
+    // Closes a bar or a panel.
+    val Close = R.drawable.sym_close
+
+    // Takes a song off a playlist.
+    val RemoveFromPlaylist = R.drawable.sym_playlist_remove
 }

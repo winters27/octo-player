@@ -71,6 +71,7 @@ import app.winters.octo.ui.common.TopOnNewOrder
 import app.winters.octo.ui.common.albums
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.common.songs
+import app.winters.octo.ui.menu.SongMenuContext
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
 import app.winters.octo.ui.nav.OnlineArtistRoute
@@ -173,7 +174,7 @@ fun ArtistScreen(
                             // A song found online can be downloaded from here.
                             val download: (@Composable () -> Unit)? =
                                 if (isFind(track.id)) ({ DownloadButton(track, size = 40.dp, iconSize = 22.dp) }) else null
-                            SongRow(track, subtitle = track.album, trailing = download) { vm.playTop(index) }
+                            SongRow(track, subtitle = track.album, trailing = download, menuContext = SongMenuContext(artistId = id)) { vm.playTop(index) }
                         }
                     }
                 }

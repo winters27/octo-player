@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -39,11 +40,14 @@ import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
+import app.winters.octo.ui.common.Pickable
+import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.SongLead
 import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.asLength
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.common.songs
+import app.winters.octo.ui.menu.SongMenuContext
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
 import dagger.assisted.Assisted
@@ -89,47 +93,53 @@ fun AlbumScreen(
     val tracks by vm.tracks.collectAsStateWithLifecycle()
     PageArtwork(AlbumRoute(id), album?.artwork)
 
+    val pickable = remember(tracks) { tracks.map { Pickable(it.id, it) } }
+    // Its songs' menus leave out the way back to this page.
+    val menuContext = remember(id) { SongMenuContext(albumId = id) }
+
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
-            album?.let { a ->
-                item(key = "header") {
-                    AlbumHeader(
-                        artwork = a.artwork,
-                        title = a.title,
-                        artist = a.artist,
-                        details = listOfNotNull(
-                            a.year?.toString(),
-                            songs(a.songCount),
-                            (a.durationMs / 1000).toInt().asLength(),
-                        ).joinToString(" • "),
-                        onArtist = { onOpen(ArtistRoute(a.artistId)) },
-                        onPlay = { vm.play(0) },
-                        onShuffle = vm::shuffle,
-                        more = {
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                AlbumShareButton(id, a.title)
-                                AlbumDownloadButton(tracks)
-                            }
-                        },
-                    )
-                }
-            }
-            val discs = tracks.groupBy { it.discNo ?: 1 }
-            discs.forEach { (disc, onDisc) ->
-                if (discs.size > 1) {
-                    item(key = "disc:$disc") {
-                        Text(
-                            "Disc $disc",
-                            style = OctoType.caption.copy(fontWeight = FontWeight.Bold),
-                            color = OctoColors.TextMuted,
-                            modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 4.dp),
+        SelectableSongs(pickable) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
+                album?.let { a ->
+                    item(key = "header") {
+                        AlbumHeader(
+                            artwork = a.artwork,
+                            title = a.title,
+                            artist = a.artist,
+                            details = listOfNotNull(
+                                a.year?.toString(),
+                                songs(a.songCount),
+                                (a.durationMs / 1000).toInt().asLength(),
+                            ).joinToString(" • "),
+                            onArtist = { onOpen(ArtistRoute(a.artistId)) },
+                            onPlay = { vm.play(0) },
+                            onShuffle = vm::shuffle,
+                            more = {
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    AlbumShareButton(id, a.title)
+                                    AlbumDownloadButton(tracks)
+                                }
+                            },
                         )
                     }
                 }
-                items(onDisc, key = { it.id }) { track ->
-                    // Only say who is singing when it is not the album's artist.
-                    val subtitle = track.artist.takeIf { it != album?.artist }
-                    SongRow(track, SongLead.Number(track.trackNo), subtitle) { vm.play(tracks.indexOf(track)) }
+                val discs = tracks.groupBy { it.discNo ?: 1 }
+                discs.forEach { (disc, onDisc) ->
+                    if (discs.size > 1) {
+                        item(key = "disc:$disc") {
+                            Text(
+                                "Disc $disc",
+                                style = OctoType.caption.copy(fontWeight = FontWeight.Bold),
+                                color = OctoColors.TextMuted,
+                                modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 4.dp),
+                            )
+                        }
+                    }
+                    items(onDisc, key = { it.id }) { track ->
+                        // Only say who is singing when it is not the album's artist.
+                        val subtitle = track.artist.takeIf { it != album?.artist }
+                        SongRow(track, SongLead.Number(track.trackNo), subtitle, menuContext = menuContext) { vm.play(tracks.indexOf(track)) }
+                    }
                 }
             }
         }
