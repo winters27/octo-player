@@ -291,11 +291,36 @@ private fun AnimatedVisibilityScope.PlayerContent(
             }
             SoundButton(model, onOpenSound, Modifier.align(Alignment.CenterEnd))
         }
-        Spacer(Modifier.weight(1f))
-        BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            PlayerArt(now.artwork, min(312.dp, maxWidth), now.isPlaying, artModifier)
+        // The artwork, or the lyrics in its place. The artwork stays laid out
+        // under them, so it can still fly back to the bar when the player
+        // closes.
+        val lyricsOpen by model.lyricsOpen.collectAsStateWithLifecycle()
+        val lyrics by model.lyrics.collectAsStateWithLifecycle()
+        val lyricsShown by animateFloatAsState(if (lyricsOpen) 1f else 0f, tween(300), label = "lyrics shown")
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            val side = min(312.dp, min(maxWidth, maxHeight))
+            Box(
+                Modifier.graphicsLayer {
+                    alpha = 1f - lyricsShown
+                    scaleX = 1f - 0.08f * lyricsShown
+                    scaleY = 1f - 0.08f * lyricsShown
+                },
+            ) {
+                PlayerArt(now.artwork, side, now.isPlaying, artModifier)
+            }
+            if (lyricsShown > 0f) {
+                LyricsPane(
+                    lyrics,
+                    now,
+                    model::positionMs,
+                    model::seekTo,
+                    Modifier
+                        .fillMaxSize()
+                        .padding(vertical = 8.dp)
+                        .graphicsLayer { alpha = lyricsShown },
+                )
+            }
         }
-        Spacer(Modifier.weight(1f))
 
         // The controls rise into place a moment after the player opens.
         Column(
@@ -321,6 +346,13 @@ private fun AnimatedVisibilityScope.PlayerContent(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
             ) {
+                ActionButton(
+                    icon = OctoIcons.Lyrics,
+                    description = "Lyrics",
+                    on = lyricsOpen,
+                    state = if (lyricsOpen) "Showing" else "Hidden",
+                    onClick = model::toggleLyrics,
+                )
                 ActionButton(
                     icon = OctoIcons.Queue,
                     description = "Up next",

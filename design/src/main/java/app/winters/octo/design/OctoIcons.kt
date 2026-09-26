@@ -37,4 +37,6 @@ object OctoIcons {
     val Radio = R.drawable.sym_radio
     // Three sliders, drawn to match the rounded set: the sound settings.
     val Sound = R.drawable.sym_tune
+    // A speech bubble holding lines and a note, drawn to match: lyrics.
+    val Lyrics = R.drawable.sym_lyrics
 }
