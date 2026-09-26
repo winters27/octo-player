@@ -10,6 +10,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
+import app.winters.octo.ui.common.Feedback
 import app.winters.octo.design.OctoTheme
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.playback.PlaybackConnection
@@ -25,6 +26,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var library: DeviceLibrary
     @Inject lateinit var playback: PlaybackConnection
     @Inject lateinit var queueSync: QueueSync
+    @Inject lateinit var feedback: Feedback
 
     // Counts up each time a home screen widget asks for the full player.
     private var openPlayer by mutableIntStateOf(0)
@@ -33,7 +35,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // The app opens on the library; servers are an optional add-on.
-        setContent { OctoTheme { ProvideOfflineMarks { MainShell(library, playback, openPlayer) } } }
+        setContent { OctoTheme { ProvideOfflineMarks { MainShell(library, playback, feedback, openPlayer) } } }
         // Opened by a voice request or a widget; not again when the screen turns.
         if (savedInstanceState == null) {
             playIfAsked(intent)

@@ -41,6 +41,9 @@ import app.winters.octo.ui.album.AlbumScreen
 import app.winters.octo.ui.artist.ArtistScreen
 import app.winters.octo.ui.common.ChoiceSheet
 import app.winters.octo.ui.common.ChoiceSheetHost
+import app.winters.octo.ui.common.Feedback
+import app.winters.octo.ui.common.FeedbackHost
+import app.winters.octo.ui.common.LocalFeedback
 import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.folders.FoldersScreen
@@ -81,7 +84,7 @@ import dev.chrisbanes.haze.rememberHazeState
 // The whole app: one back stack per tab, the screens, and the floating
 // bar over them. A change in openPlayer brings up the full player.
 @Composable
-fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, openPlayer: Int = 0) {
+fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Feedback, openPlayer: Int = 0) {
     val now by playback.now.collectAsStateWithLifecycle()
     val haze = rememberHazeState()
     // Called once each, always in this order.
@@ -153,6 +156,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, openPlayer: 
         LocalDisconnectPrompt provides disconnectPrompt,
         LocalChoiceSheet provides choiceSheet,
         LocalShareSheet provides shareSheet,
+        LocalFeedback provides feedback,
     ) {
         SharedTransitionLayout {
             Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
@@ -241,6 +245,8 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, openPlayer: 
                 DisconnectSheetHost(disconnectPrompt)
                 ChoiceSheetHost(choiceSheet)
                 ShareSheetHost(shareSheet)
+                // Above the sheets, so an undo stays reachable while one is open.
+                FeedbackHost(feedback)
             }
         }
     }
