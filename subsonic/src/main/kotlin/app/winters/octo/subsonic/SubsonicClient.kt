@@ -163,6 +163,29 @@ class SubsonicClient(
     suspend fun scrobble(id: String, time: Long, submission: Boolean) =
         send("scrobble", listOf("id" to id, "time" to "$time", "submission" to "$submission"))
 
+    // Every set of lyrics the server has for a song. Only for servers that
+    // list the songLyrics extension. Enhanced (version 2) adds word timings,
+    // who sings each line, and translations.
+    suspend fun lyricsBySongId(id: String, enhanced: Boolean): List<StructuredLyrics> =
+        get(
+            "getLyricsBySongId",
+            if (enhanced) mapOf("id" to id, "enhanced" to "true") else mapOf("id" to id),
+            "lyricsList",
+            LyricsList.serializer(),
+            LyricsList(),
+        ).structuredLyrics
+
+    // The older lyrics call, found by artist and title: plain text, or null
+    // when the server has none.
+    suspend fun lyrics(artist: String, title: String): String? =
+        get(
+            "getLyrics",
+            mapOf("artist" to artist, "title" to title),
+            "lyrics",
+            PlainLyrics.serializer(),
+            PlainLyrics(),
+        ).value?.takeIf(String::isNotBlank)
+
     // A call that only answers ok or an error. The params may repeat a name.
     private suspend fun send(endpoint: String, params: List<Pair<String, String>>) {
         val url = url(endpoint).newBuilder().apply { params.forEach { (key, value) -> addQueryParameter(key, value) } }.build()
