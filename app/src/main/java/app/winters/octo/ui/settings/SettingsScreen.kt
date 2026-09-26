@@ -180,6 +180,7 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
                 checked = player.lyricsOnline,
                 onChange = vm::setLyricsOnline,
             )
+            LyricsScreenLine()
         }
 
         StreamingCard(Modifier.padding(top = 16.dp))
