@@ -66,6 +66,10 @@ interface SourceDao {
     @Query("SELECT nativeId FROM source_album WHERE sourceId = :sourceId AND nativeId IN (:serverIds)")
     suspend fun knownAlbums(sourceId: String, serverIds: List<String>): List<String>
 
+    // One source's artists filed under this name.
+    @Query("SELECT * FROM source_artist WHERE sourceId = :sourceId AND searchKey = :key")
+    suspend fun artistsNamed(sourceId: String, key: String): List<SourceArtistEntity>
+
     // Which of these artist rows, by "<source>:<server id>", are in the library.
     @Query("SELECT id FROM source_artist WHERE id IN (:ids)")
     suspend fun knownArtists(ids: List<String>): List<String>

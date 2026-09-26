@@ -116,6 +116,13 @@ class Discovery @Inject constructor(
         )
     }
 
+    // Songs from the signed-in server as the app shows them, in the order
+    // sent. Nothing when no server is signed in.
+    internal suspend fun resolveFromServer(songs: List<Song>): List<TrackEntity> {
+        val (client, sourceId) = server() ?: return emptyList()
+        return resolve(client, sourceId, songs)
+    }
+
     // Songs from the server as the app shows them, in the order sent: a
     // library song as it is in the library, anything else as a find.
     private suspend fun resolve(client: SubsonicClient, sourceId: String, songs: List<Song>): List<TrackEntity> {
