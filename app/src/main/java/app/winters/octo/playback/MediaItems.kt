@@ -10,6 +10,8 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.BitmapLoader
 import androidx.media3.common.util.UnstableApi
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.sound.ReplayGainInfo
+import app.winters.octo.sound.storedReplayGain
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import java.util.concurrent.Callable
@@ -24,6 +26,12 @@ const val EXTRA_ARTIST_ID = "app.winters.octo.artistId"
 const val EXTRA_MIME = "app.winters.octo.mime"
 const val EXTRA_ALBUM_ORDER = "app.winters.octo.albumOrder"
 
+// A song's stored loudness, for when the sound itself carries no tags.
+private const val EXTRA_TRACK_GAIN = "app.winters.octo.trackGain"
+private const val EXTRA_TRACK_PEAK = "app.winters.octo.trackPeak"
+private const val EXTRA_ALBUM_GAIN = "app.winters.octo.albumGain"
+private const val EXTRA_ALBUM_PEAK = "app.winters.octo.albumPeak"
+
 // Artwork for the lock screen and notification, in a form the playback
 // service can turn back into a picture.
 private fun artworkUri(ref: String?): Uri? = ref?.let { Uri.fromParts(ART_SCHEME, it, null) }
@@ -32,8 +40,9 @@ private fun artworkUri(ref: String?): Uri? = ref?.let { Uri.fromParts(ART_SCHEME
 fun TrackEntity.toMediaItem(): MediaItem = toMediaItem(uri, mimeType)
 
 // A song from the catalog, playing from one of its copies: where that copy
-// is, and what the player will receive from it.
-fun TrackEntity.toMediaItem(uri: String?, mimeType: String?): MediaItem =
+// is, what the player will receive from it, and how loud the song is when
+// its source says.
+fun TrackEntity.toMediaItem(uri: String?, mimeType: String?, loudness: ReplayGainInfo? = null): MediaItem =
     MediaItem.Builder()
         .setMediaId(id)
         .setUri(uri)
@@ -58,6 +67,10 @@ fun TrackEntity.toMediaItem(uri: String?, mimeType: String?): MediaItem =
                         putString(EXTRA_ARTIST_ID, artistId)
                         putString(EXTRA_MIME, mimeType)
                         putInt(EXTRA_ALBUM_ORDER, albumOrder)
+                        loudness?.trackGain?.let { putFloat(EXTRA_TRACK_GAIN, it) }
+                        loudness?.trackPeak?.let { putFloat(EXTRA_TRACK_PEAK, it) }
+                        loudness?.albumGain?.let { putFloat(EXTRA_ALBUM_GAIN, it) }
+                        loudness?.albumPeak?.let { putFloat(EXTRA_ALBUM_PEAK, it) }
                     },
                 )
                 .build(),
@@ -90,3 +103,10 @@ class OctoArtLoader(private val context: Context, private val fallback: BitmapLo
 fun MediaMetadata.artworkRef(): String? = (extras ?: Bundle.EMPTY).getString(EXTRA_ARTWORK)
 
 fun MediaMetadata.extra(key: String): String? = (extras ?: Bundle.EMPTY).getString(key)
+
+// The loudness a song was sent with, if its source knew it.
+fun MediaMetadata.storedLoudness(): ReplayGainInfo? {
+    val extras = extras ?: return null
+    fun value(key: String) = if (extras.containsKey(key)) extras.getFloat(key) else null
+    return storedReplayGain(value(EXTRA_TRACK_GAIN), value(EXTRA_TRACK_PEAK), value(EXTRA_ALBUM_GAIN), value(EXTRA_ALBUM_PEAK))
+}

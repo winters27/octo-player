@@ -127,6 +127,27 @@ class SubsonicClient(
     suspend fun artist(id: String): ArtistWithAlbums =
         get("getArtist", mapOf("id" to id), "artist", ArtistWithAlbums.serializer())
 
+    // An artist's biography, pictures and artists like them. The id may also
+    // be an album's or a song's, for their artist.
+    suspend fun artistInfo(id: String, similar: Int = 20): ArtistInfo =
+        get("getArtistInfo2", mapOf("id" to id, "count" to "$similar"), "artistInfo2", ArtistInfo.serializer(), ArtistInfo())
+
+    // An artist's most played songs. Servers look them up by name; one that
+    // lists the "topSongsByArtistId" extension can take the artist's id too,
+    // which is surer when two artists share a name.
+    suspend fun topSongs(artistName: String, count: Int = 10, artistId: String? = null): List<Song> =
+        get(
+            "getTopSongs",
+            buildMap {
+                put("artist", artistName)
+                put("count", "$count")
+                artistId?.let { put("id", it) }
+            },
+            "topSongs",
+            SongList.serializer(),
+            SongList(),
+        ).song
+
     // On Octo this call also sets up per-user playlists and the radio
     // profile, so callers keep the result for the session.
     suspend fun playlists(): List<Playlist> =
@@ -202,6 +223,10 @@ class SubsonicClient(
     suspend fun star(ids: List<String>) = send("star", ids.map { "id" to it })
 
     suspend fun unstar(ids: List<String>) = send("unstar", ids.map { "id" to it })
+
+    // Rates a song for the signed-in user, 1 to 5 stars; 0 takes the rating off.
+    suspend fun setRating(id: String, rating: Int) =
+        send("setRating", listOf("id" to id, "rating" to "${rating.coerceIn(0, 5)}"))
 
     // Stars whole albums. On Octo an album found online is downloaded.
     suspend fun starAlbums(ids: List<String>) = send("star", ids.map { "albumId" to it })

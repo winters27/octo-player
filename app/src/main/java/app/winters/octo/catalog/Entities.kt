@@ -40,6 +40,9 @@ data class TrackEntity(
     @ColumnInfo(defaultValue = "") val genre: String = "",
     // Whether a copy is on the phone. A song only on a server streams.
     @ColumnInfo(defaultValue = "1") val onPhone: Boolean = true,
+    // The listener's rating, 1 to 5 stars, or 0 for none: the server's when
+    // it has one, otherwise the one made on the phone.
+    @ColumnInfo(defaultValue = "0") val rating: Int = 0,
 )
 
 @Entity(

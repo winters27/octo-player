@@ -45,6 +45,8 @@ import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.asTrack
 import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.playback.RatingStore
+import app.winters.octo.ui.common.RatingStars
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
@@ -81,16 +83,34 @@ class SongMenuState {
     fun close() {
         trackId = null
     }
+
+    // The song the rating sheet is open for, if any, and the last one, kept
+    // while the sheet slides away.
+    var ratingTrackId by mutableStateOf<String?>(null)
+        private set
+    var lastRatingTrackId by mutableStateOf<String?>(null)
+        private set
+
+    // Swaps the menu for the rating sheet.
+    fun openRating(trackId: String) {
+        this.trackId = null
+        ratingTrackId = trackId
+        lastRatingTrackId = trackId
+    }
+
+    fun closeRating() {
+        ratingTrackId = null
+    }
 }
 
 val LocalSongMenu = staticCompositionLocalOf<SongMenuState> { error("No song menu") }
 
 // The choices in a song's menu, in the order shown.
-enum class SongAction { PlayNext, AddToQueue, StartRadio, Download, AddToPlaylist, Like, GoToAlbum, GoToArtist }
+enum class SongAction { PlayNext, AddToQueue, StartRadio, Download, AddToPlaylist, Like, Rate, GoToAlbum, GoToArtist }
 
 // What a song's menu offers. A song found online has no album or artist in
-// the library and cannot be liked or put in a playlist yet, so it offers a
-// download instead. Radio needs a server signed in.
+// the library and cannot be liked, rated or put in a playlist yet, so it
+// offers a download instead. Radio needs a server signed in.
 fun songActions(find: Boolean, radio: Boolean): List<SongAction> = buildList {
     add(SongAction.PlayNext)
     add(SongAction.AddToQueue)
@@ -100,6 +120,7 @@ fun songActions(find: Boolean, radio: Boolean): List<SongAction> = buildList {
     } else {
         add(SongAction.AddToPlaylist)
         add(SongAction.Like)
+        add(SongAction.Rate)
         add(SongAction.GoToAlbum)
         add(SongAction.GoToArtist)
     }
@@ -120,6 +141,7 @@ class SongMenuViewModel @Inject constructor(
     private val playback: PlaybackConnection,
     private val discovery: Discovery,
     private val downloads: Downloads,
+    private val ratings: RatingStore,
 ) : ViewModel() {
     val liked: StateFlow<Set<String>> = likes.liked
     val downloadStates: StateFlow<Map<String, DownloadState>> = downloads.states
@@ -135,6 +157,7 @@ class SongMenuViewModel @Inject constructor(
     fun playNext(id: String) = playback.playNext(listOf(id))
     fun playLast(id: String) = playback.playLast(listOf(id))
     fun toggleLike(id: String) = likes.toggle(id)
+    fun rate(id: String, rating: Int) = ratings.rate(id, rating)
 
     fun download(track: TrackEntity) {
         viewModelScope.launch { downloads.request(track) }
@@ -211,6 +234,9 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
                 ) {
                     vm.toggleLike(trackId)
                 }
+                SongAction.Rate -> MenuRow(if (song.rating > 0) OctoIcons.StarFilled else OctoIcons.Star, "Rate") {
+                    state.openRating(trackId)
+                }
                 SongAction.GoToAlbum -> MenuRow(OctoIcons.Album, "Go to album") {
                     state.close()
                     onOpen(AlbumRoute(song.albumId))
@@ -223,10 +249,11 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
         }
         Spacer(Modifier.height(12.dp))
     }
+    RatingSheet(state, vm)
 }
 
 @Composable
-private fun SongHeader(song: TrackEntity) {
+internal fun SongHeader(song: TrackEntity) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -236,6 +263,7 @@ private fun SongHeader(song: TrackEntity) {
         Column(Modifier.weight(1f)) {
             Text(song.title, style = OctoType.body, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(song.artist, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (song.rating > 0) RatingStars(song.rating, Modifier.padding(top = 4.dp))
         }
     }
 }

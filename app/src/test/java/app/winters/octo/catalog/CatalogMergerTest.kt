@@ -63,6 +63,22 @@ class CatalogMergerTest {
     }
 
     @Test
+    fun aServerRatingReachesTheLibrarySong() {
+        val serverSide = server(
+            tracks = listOf(
+                track("s1", "server", "Hotline Bling", "server:album").copy(rating = 4),
+                track("s2", "server", "One Dance", "server:album").copy(rating = 0),
+            ),
+            albums = listOf(album("server:album", "server", songs = 2)),
+            artists = listOf(artist("server:artist", "server")),
+        )
+        val merged = mergeCatalogs(listOf(phoneOnly, serverSide)).tracks.associateBy { it.id }
+        // The phone's songs keep their ids and take the server's rating; none is none.
+        assertEquals(4, merged.getValue("p1").rating)
+        assertEquals(0, merged.getValue("p2").rating)
+    }
+
+    @Test
     fun albumsOfTheSameNameInOneSourceStayApart() {
         val twin = phone(
             tracks = listOf(track("a", "device", "Intro", "device:a"), track("b", "device", "Intro", "device:b")),

@@ -8,6 +8,7 @@ import app.winters.octo.ui.menu.SongAction.GoToAlbum
 import app.winters.octo.ui.menu.SongAction.GoToArtist
 import app.winters.octo.ui.menu.SongAction.Like
 import app.winters.octo.ui.menu.SongAction.PlayNext
+import app.winters.octo.ui.menu.SongAction.Rate
 import app.winters.octo.ui.menu.SongAction.StartRadio
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -16,7 +17,7 @@ class SongActionsTest {
     @Test
     fun aLibrarySongOffersEverything() {
         assertEquals(
-            listOf(PlayNext, AddToQueue, StartRadio, AddToPlaylist, Like, GoToAlbum, GoToArtist),
+            listOf(PlayNext, AddToQueue, StartRadio, AddToPlaylist, Like, Rate, GoToAlbum, GoToArtist),
             songActions(find = false, radio = true),
         )
     }
@@ -24,7 +25,7 @@ class SongActionsTest {
     @Test
     fun radioNeedsAServer() {
         assertEquals(
-            listOf(PlayNext, AddToQueue, AddToPlaylist, Like, GoToAlbum, GoToArtist),
+            listOf(PlayNext, AddToQueue, AddToPlaylist, Like, Rate, GoToAlbum, GoToArtist),
             songActions(find = false, radio = false),
         )
     }
@@ -33,6 +34,13 @@ class SongActionsTest {
     fun aFindOffersADownloadInsteadOfLibraryChoices() {
         assertEquals(listOf(PlayNext, AddToQueue, StartRadio, Download), songActions(find = true, radio = true))
         assertEquals(listOf(PlayNext, AddToQueue, Download), songActions(find = true, radio = false))
+    }
+
+    @Test
+    fun tappingAStarSetsTheRatingAndTappingItAgainClearsIt() {
+        assertEquals(4, nextRating(current = 0, tapped = 4))
+        assertEquals(2, nextRating(current = 4, tapped = 2))
+        assertEquals(0, nextRating(current = 4, tapped = 4))
     }
 
     @Test

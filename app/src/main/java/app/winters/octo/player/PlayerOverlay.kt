@@ -115,6 +115,7 @@ import app.winters.octo.playback.SleepState
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.DownloadButton
 import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.RatingStars
 import app.winters.octo.ui.menu.LocalSongMenu
 import app.winters.octo.ui.common.asClock
 import coil3.compose.AsyncImage
@@ -310,6 +311,9 @@ private fun AnimatedVisibilityScope.PlayerContent(
                 Box(Modifier.weight(1f)) { TitleBlock(now, onOpenArtist) }
                 SongButtons(now, model)
             }
+            // The song's rating, only once it has one.
+            val rating by model.rating.collectAsStateWithLifecycle()
+            RatingStars(rating, Modifier.padding(top = 2.dp), size = 12.dp)
             Spacer(Modifier.height(12.dp))
             Progress(now, model)
             Spacer(Modifier.height(12.dp))

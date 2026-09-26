@@ -19,6 +19,16 @@ data class LikedTrackEntity(
     val likedAt: Long,
 )
 
+// A song's rating made on the phone, 1 to 5 stars. A song with no rating
+// has no row.
+@Entity(tableName = "track_rating")
+data class TrackRatingEntity(
+    @PrimaryKey val trackId: String,
+    val relinkKey: String,
+    val rating: Int,
+    val ratedAt: Long,
+)
+
 @Entity(tableName = "play_event", indices = [Index("trackId"), Index("startedAt")])
 data class PlayEventEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

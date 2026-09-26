@@ -110,4 +110,13 @@ class PlayerViewModel @Inject constructor(
     fun sleepIn(minutes: Int) = sleepTimer.start(minutes)
     fun sleepAtEndOfSong() = sleepTimer.startEndOfSong()
     fun cancelSleep() = sleepTimer.cancel()
+
+    // The rating of the song on now, 0 when it has none or was found online.
+    val rating: StateFlow<Int> = playback.now
+        .map { it.trackId }
+        .distinctUntilChanged()
+        .flatMapLatest { id ->
+            if (id == null || isFind(id)) flowOf(0) else catalog.trackFlow(id).map { it?.rating ?: 0 }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 }

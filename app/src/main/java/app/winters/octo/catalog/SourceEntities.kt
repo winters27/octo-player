@@ -45,6 +45,17 @@ data class SourceTrackEntity(
     val playCount: Int? = null,
     val lastPlayedAt: Long? = null,
     val starredAt: Long? = null,
+    // How loud the song is, where the source says: gains in decibels, peaks
+    // where 1 is full scale. The base gain is one the file already applies;
+    // the fallback is what the server suggests for a song with no gain.
+    val trackGain: Float? = null,
+    val albumGain: Float? = null,
+    val trackPeak: Float? = null,
+    val albumPeak: Float? = null,
+    val baseGain: Float? = null,
+    val fallbackGain: Float? = null,
+    // The listener's rating on the server, 1 to 5 stars, or 0 for none.
+    val rating: Int? = null,
     // The library song this copy was merged into.
     @ColumnInfo(defaultValue = "") val mergedId: String = "",
 )

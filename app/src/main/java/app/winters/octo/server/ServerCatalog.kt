@@ -106,6 +106,13 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
                 playCount = song.playCount?.toInt(),
                 lastPlayedAt = epochMs(song.played),
                 starredAt = epochMs(song.starred),
+                trackGain = song.replayGain?.trackGain.finite(),
+                albumGain = song.replayGain?.albumGain.finite(),
+                trackPeak = song.replayGain?.trackPeak.finite()?.takeIf { it > 0f },
+                albumPeak = song.replayGain?.albumPeak.finite()?.takeIf { it > 0f },
+                baseGain = song.replayGain?.baseGain.finite(),
+                fallbackGain = song.replayGain?.fallbackGain.finite(),
+                rating = song.userRating?.coerceIn(0, 5),
             )
         }
     }
@@ -158,6 +165,8 @@ private fun inAlbumOrder(songs: List<Song>): List<Song> =
 
 // Servers send 0 for a number they do not know.
 private fun Int?.positive(): Int? = this?.takeIf { it > 0 }
+
+private fun Float?.finite(): Float? = this?.takeIf { it.isFinite() }
 
 // The kind of file, from its extension.
 internal fun mimeFor(suffix: String?): String? = when (suffix?.lowercase()) {
