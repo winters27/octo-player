@@ -105,6 +105,18 @@ class PlaybackConnection @Inject constructor(
         }
     }
 
+    // Puts a list of songs in place of the queue, at one of them and a place
+    // in it, paused: for picking up a queue from another device.
+    fun loadQueue(trackIds: List<String>, index: Int, positionMs: Long) {
+        if (trackIds.isEmpty()) return
+        withController { c ->
+            c.shuffleModeEnabled = false
+            c.setMediaItems(trackIds.map(::songRequest), index.coerceIn(trackIds.indices), positionMs.coerceAtLeast(0))
+            c.pause()
+            c.prepare()
+        }
+    }
+
     fun playAlbum(albumId: String, shuffle: Boolean = false) {
         scope.launch { playTracks(catalog.albumTrackIds(albumId), 0, shuffle) }
     }

@@ -26,6 +26,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import androidx.navigation3.runtime.NavKey
 import app.winters.octo.connection.ConnectionChooser
 import app.winters.octo.connection.FolderChoice
 import app.winters.octo.connection.Place
@@ -86,6 +87,7 @@ internal fun ServerCard(
     onOpenAdmin: () -> Unit,
     onEditConnection: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpen: (NavKey) -> Unit = {},
     vm: ServerViewModel = hiltViewModel(),
 ) {
     val state by vm.session.collectAsStateWithLifecycle()
@@ -149,6 +151,7 @@ internal fun ServerCard(
                 folderProblem?.let { Text(it, style = OctoType.caption, color = OctoColors.Error) }
                 OpenLine("Edit connection", onClick = onEditConnection)
                 OpenLine("Octo admin", onClick = onOpenAdmin)
+                ServerExtras(onOpen)
                 problem?.let { Text(it, style = OctoType.caption, color = OctoColors.Error) }
                 Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     AccentButton("Sync now", onClick = vm::syncNow, loading = syncing)

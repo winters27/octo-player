@@ -29,5 +29,9 @@ import kotlinx.serialization.Serializable
 @Serializable data object EditConnectionRoute : NavKey
 @Serializable data object OctoAdminRoute : NavKey
 
+// The server's shared links, and its internet radio stations.
+@Serializable data object SharesRoute : NavKey
+@Serializable data object RadioStationsRoute : NavKey
+
 // The equalizer and everything else that shapes the sound.
 @Serializable data object SoundRoute : NavKey

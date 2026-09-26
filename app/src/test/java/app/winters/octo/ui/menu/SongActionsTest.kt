@@ -9,6 +9,7 @@ import app.winters.octo.ui.menu.SongAction.GoToArtist
 import app.winters.octo.ui.menu.SongAction.Like
 import app.winters.octo.ui.menu.SongAction.PlayNext
 import app.winters.octo.ui.menu.SongAction.Rate
+import app.winters.octo.ui.menu.SongAction.Share
 import app.winters.octo.ui.menu.SongAction.StartRadio
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -28,6 +29,16 @@ class SongActionsTest {
             listOf(PlayNext, AddToQueue, AddToPlaylist, Like, Rate, GoToAlbum, GoToArtist),
             songActions(find = false, radio = false),
         )
+    }
+
+    @Test
+    fun shareFollowsAPlaylistWhenTheSongIsOnAServerThatShares() {
+        assertEquals(
+            listOf(PlayNext, AddToQueue, StartRadio, AddToPlaylist, Share, Like, Rate, GoToAlbum, GoToArtist),
+            songActions(find = false, radio = true, share = true),
+        )
+        // A find is never shared: it is not in the server's library.
+        assertEquals(listOf(PlayNext, AddToQueue, StartRadio, Download), songActions(find = true, radio = true, share = true))
     }
 
     @Test

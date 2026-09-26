@@ -146,6 +146,7 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
             onOpenAdmin = { onOpen(OctoAdminRoute) },
             onEditConnection = { onOpen(EditConnectionRoute) },
             modifier = Modifier.padding(top = 16.dp),
+            onOpen = onOpen,
         )
 
         PlaylistsCard(Modifier.padding(top = 16.dp))
