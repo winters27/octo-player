@@ -62,6 +62,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -69,11 +71,14 @@ import javax.inject.Inject
 // The sheets for playlists. They are drawn over everything, the bar
 // included, so any page or the song menu can open one.
 sealed interface PlaylistSheet {
-    // Choose a playlist to add a song to.
-    data class Pick(val trackId: String) : PlaylistSheet
+    // Choose a playlist to add songs to: one song from its menu, or many
+    // picked in a list or from an album's menu.
+    data class Pick(val trackIds: List<String>) : PlaylistSheet {
+        constructor(trackId: String) : this(listOf(trackId))
+    }
 
-    // Name a new playlist, and put the song in it if there is one.
-    data class Create(val trackId: String? = null) : PlaylistSheet
+    // Name a new playlist, and put the songs in it if there are any.
+    data class Create(val trackIds: List<String> = emptyList()) : PlaylistSheet
 
     // Rename or delete a playlist, or save one only on the phone to the
     // server when `canSave`. `onServer` is one kept with the server.
@@ -125,23 +130,27 @@ class PlaylistSheetsViewModel @Inject constructor(
     val playlists: StateFlow<List<PlaylistSummary>> =
         store.playlists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // The playlists a song is on already. Null until first read.
-    fun playlistsWith(trackId: String): Flow<List<String>?> = userDao.playlistsWith(trackId)
+    // Which of the songs each playlist has already, by playlist.
+    fun holdings(trackIds: List<String>): Flow<Map<String, Set<String>>> {
+        val parts = trackIds.distinct().chunked(900).map { userDao.playlistHoldings(it) }
+        if (parts.isEmpty()) return flowOf(emptyMap())
+        return combine(parts) { rows -> holdingsByPlaylist(rows.flatMap { part -> part.map { it.playlistId to it.trackId } }) }
+    }
 
-    // A new playlist with the song in it says where the song went, since
-    // nothing on screen shows it.
-    fun create(name: String, trackId: String?) {
-        store.create(name, listOfNotNull(trackId))
-        if (trackId != null) feedback.show("Added to ${name.trim()}")
+    // A new playlist with songs in it says where they went, since nothing
+    // on screen shows it.
+    fun create(name: String, trackIds: List<String>) {
+        store.create(name, trackIds)
+        if (trackIds.isNotEmpty()) feedback.show(addedMessage(name.trim(), trackIds.size))
     }
 
     fun rename(id: String, name: String) = store.rename(id, name)
     fun delete(id: String) = store.delete(id)
 
-    // Adds the song, with an Undo that takes it back out.
-    fun add(playlist: PlaylistSummary, trackId: String) {
-        store.add(playlist.id, listOf(trackId)) { rows ->
-            feedback.undoable("Added to ${playlist.name}") { store.removeRows(playlist.id, rows) }
+    // Adds the songs, with an Undo that takes them back out.
+    fun add(playlist: PlaylistSummary, trackIds: List<String>) {
+        store.add(playlist.id, trackIds) { rows ->
+            feedback.undoable(addedMessage(playlist.name, rows.size)) { store.removeRows(playlist.id, rows) }
         }
     }
 
@@ -177,9 +186,9 @@ fun PlaylistSheetsHost(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel = hil
         val sheet = sheets.last ?: return@GlassSheet
         key(sheets.shown) {
             when (sheet) {
-                is PlaylistSheet.Pick -> Picker(sheets, vm, sheet.trackId)
+                is PlaylistSheet.Pick -> Picker(sheets, vm, sheet.trackIds)
                 is PlaylistSheet.Create -> NameForm("New playlist", "", "Create") { name ->
-                    vm.create(name, sheet.trackId)
+                    vm.create(name, sheet.trackIds)
                     sheets.close()
                 }
                 is PlaylistSheet.Options -> {
@@ -224,27 +233,35 @@ private fun SheetTitle(text: String, modifier: Modifier = Modifier) {
     Text(text, style = OctoType.section, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier)
 }
 
-// "New playlist" first, then the playlists. Picking one adds the song and
-// closes. Picking one the song is on already asks first.
+// "New playlist" first, then the playlists. Picking one adds the songs and
+// closes. Picking one that has some of them already asks first.
 @Composable
-private fun ColumnScope.Picker(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel, trackId: String) {
+private fun ColumnScope.Picker(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel, trackIds: List<String>) {
     val playlists by vm.playlists.collectAsStateWithLifecycle()
-    val holding by remember(trackId) { vm.playlistsWith(trackId) }.collectAsStateWithLifecycle(null)
-    var again by remember { mutableStateOf<PlaylistSummary?>(null) }
-    val add = { playlist: PlaylistSummary ->
-        vm.add(playlist, trackId)
+    val holdings by remember(trackIds) { vm.holdings(trackIds) }.collectAsStateWithLifecycle(null)
+    var asking by remember { mutableStateOf<Pair<PlaylistSummary, AddPlan>?>(null) }
+    val add = { playlist: PlaylistSummary, songs: List<String> ->
+        vm.add(playlist, songs)
         sheets.close()
     }
-    again?.let { playlist ->
-        ConfirmAgain(playlist.name, onCancel = { again = null }, onAdd = { add(playlist) })
+    asking?.let { (playlist, plan) ->
+        ConfirmAgain(
+            addAgainQuestion(playlist.name, plan),
+            plan,
+            onCancel = { asking = null },
+            onAddAll = { add(playlist, plan.songs) },
+            onAddNew = { add(playlist, plan.fresh) },
+        )
         return
     }
-    SheetTitle("Add to playlist", Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp))
+    val title = if (trackIds.size == 1) "Add to playlist" else "Add ${songs(trackIds.size)} to a playlist"
+    SheetTitle(title, Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp))
     LazyColumn(Modifier.weight(1f, fill = false), contentPadding = PaddingValues(bottom = 12.dp)) {
-        item(key = "new") { NewPlaylistLine { sheets.show(PlaylistSheet.Create(trackId)) } }
+        item(key = "new") { NewPlaylistLine { sheets.show(PlaylistSheet.Create(trackIds.distinct())) } }
         items(playlists, key = { it.id }) { playlist ->
             PlaylistLine(playlist.name, songs(playlist.songCount), onClick = {
-                if (holding.orEmpty().contains(playlist.id)) again = playlist else add(playlist)
+                val plan = planAdd(trackIds, holdings?.get(playlist.id).orEmpty())
+                if (plan.asks) asking = playlist to plan else add(playlist, plan.songs)
             }, onServer = playlist.onServer) {
                 PlaylistCover(playlist.covers, 56.dp)
             }
@@ -284,14 +301,20 @@ private fun NameForm(title: String, initial: String, action: String, onDone: (St
     }
 }
 
-// Asks before a song goes on a playlist it is on already.
+// Asks before songs go on a playlist that has them already. With some new
+// ones among them, the choice is all of them or only the new ones.
 @Composable
-private fun ConfirmAgain(name: String, onCancel: () -> Unit, onAdd: () -> Unit) {
+private fun ConfirmAgain(question: String, plan: AddPlan, onCancel: () -> Unit, onAddAll: () -> Unit, onAddNew: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
-        Text("Already in $name. Add again?", style = OctoType.section, color = OctoColors.TextPrimary, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        Text(question, style = OctoType.section, color = OctoColors.TextPrimary, maxLines = 3, overflow = TextOverflow.Ellipsis)
         Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            AccentButton("Add", onClick = onAdd)
-            GlazeButton("Cancel", onClick = onCancel)
+            if (plan.offersNewOnly) {
+                AccentButton("Add new ones", onClick = onAddNew)
+                GlazeButton("Add all", onClick = onAddAll)
+            } else {
+                AccentButton(if (plan.songs.size == 1) "Add" else "Add again", onClick = onAddAll)
+                GlazeButton("Cancel", onClick = onCancel)
+            }
         }
     }
 }

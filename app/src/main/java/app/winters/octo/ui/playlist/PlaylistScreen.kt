@@ -39,9 +39,13 @@ import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.DragHandle
 import app.winters.octo.ui.common.Feedback
+import app.winters.octo.ui.common.LocalSongSelection
+import app.winters.octo.ui.common.Pickable
 import app.winters.octo.ui.common.RemoveBackground
+import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.screenPadding
+import app.winters.octo.ui.menu.SongMenuContext
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -98,6 +102,16 @@ class PlaylistViewModel @AssistedInject constructor(
         }
     }
 
+    // Takes picked songs out, with an Undo that puts them all back.
+    fun removeMany(itemIds: List<Long>) {
+        if (itemIds.isEmpty()) return
+        val name = page.value?.playlist?.name ?: "the playlist"
+        store.removeAll(id, itemIds) { rows ->
+            val text = if (rows.size == 1) "Removed from $name" else "Removed ${rows.size} songs from $name"
+            feedback.undoable(text) { store.restoreAll(id, rows) }
+        }
+    }
+
     fun move(itemId: Long, targetId: Long) = store.move(id, itemId, targetId)
 
     @AssistedFactory
@@ -142,68 +156,82 @@ fun PlaylistScreen(
                 }
             }
 
-            LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = screenPadding(extraTop = DetailTopGap)) {
-                item(key = "header") {
-                    ListHeader(
-                        title = playlist.name,
-                        songCount = tracks.size,
-                        durationMs = current.durationMs,
-                        onPlay = { vm.play(0) },
-                        onShuffle = vm::shuffle,
-                        onMore = {
-                            val onServer = playlist.sourceId != null
-                            val canDownload = tracks.any { !it.track.onPhone && !isFind(it.track.id) }
-                            sheets.show(
-                                PlaylistSheet.Options(playlist.id, playlist.name, onServer, canSave = serverAvailable && !onServer, canDownload = canDownload),
-                            )
-                        },
-                    ) { modifier, shape -> PlaylistCover(current.covers, 240.dp, modifier, shape) }
-                }
-                item(key = "keep") { KeepPlaylistDownloaded(playlist.id, tracks.map { it.track }) }
-                if (playlist.sourceId != null && phoneOnly > 0) {
-                    item(key = "phone-only") { EmptyNote(phoneOnlyNote(phoneOnly)) }
-                }
-                if (rows.isEmpty()) {
-                    item(key = "empty") { EmptyNote("This playlist is empty. Long press any song and choose Add to playlist.") }
-                }
-                items(rows, key = { it.itemId }) { entry ->
-                    ReorderableItem(reorder, key = entry.itemId) { dragging ->
-                        // Moves the song into the place of the one it landed on.
-                        val drop = {
-                            val landed = rows.indexOfFirst { it.itemId == entry.itemId }
-                            val target = tracks.getOrNull(landed)?.itemId
-                            if (target != null && target != entry.itemId) vm.move(entry.itemId, target)
-                        }
-                        val swipe = rememberSwipeToDismissBoxState()
-                        SwipeToDismissBox(
-                            state = swipe,
-                            enableDismissFromStartToEnd = false,
-                            gesturesEnabled = !dragging,
-                            onDismiss = {
-                                rows = rows - entry
-                                vm.remove(entry.itemId)
+            // Songs are picked by their row, since a song can be here twice.
+            val pickable = remember(rows) { rows.map { Pickable(it.itemId.toString(), it.track) } }
+            SelectableSongs(pickable, onRemove = { picked ->
+                val gone = picked.mapNotNull { it.key.toLongOrNull() }.toSet()
+                rows = rows.filterNot { it.itemId in gone }
+                vm.removeMany(gone.toList())
+            }) {
+                val selecting = LocalSongSelection.current?.active == true
+                LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = screenPadding(extraTop = DetailTopGap)) {
+                    item(key = "header") {
+                        ListHeader(
+                            title = playlist.name,
+                            songCount = tracks.size,
+                            durationMs = current.durationMs,
+                            onPlay = { vm.play(0) },
+                            onShuffle = vm::shuffle,
+                            onMore = {
+                                val onServer = playlist.sourceId != null
+                                val canDownload = tracks.any { !it.track.onPhone && !isFind(it.track.id) }
+                                sheets.show(
+                                    PlaylistSheet.Options(playlist.id, playlist.name, onServer, canSave = serverAvailable && !onServer, canDownload = canDownload),
+                                )
                             },
-                            backgroundContent = { RemoveBackground(swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart, RowShape) },
-                        ) {
-                            // Solid under the row while it moves, so it hides what it
-                            // passes over; clear at rest, so the page's glow shows.
-                            val swiping = swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart
-                            Box(
-                                Modifier
-                                    .then(if (dragging) Modifier.elevation3(RowShape) else Modifier)
-                                    .background(
-                                        when {
-                                            dragging -> OctoColors.BackgroundTertiary
-                                            swiping -> OctoColors.Background
-                                            else -> Color.Transparent
-                                        },
-                                        RowShape,
-                                    ),
+                        ) { modifier, shape -> PlaylistCover(current.covers, 240.dp, modifier, shape) }
+                    }
+                    item(key = "keep") { KeepPlaylistDownloaded(playlist.id, tracks.map { it.track }) }
+                    if (playlist.sourceId != null && phoneOnly > 0) {
+                        item(key = "phone-only") { EmptyNote(phoneOnlyNote(phoneOnly)) }
+                    }
+                    if (rows.isEmpty()) {
+                        item(key = "empty") { EmptyNote("This playlist is empty. Long press any song and choose Add to playlist.") }
+                    }
+                    items(rows, key = { it.itemId }) { entry ->
+                        ReorderableItem(reorder, key = entry.itemId) { dragging ->
+                            // Moves the song into the place of the one it landed on.
+                            val drop = {
+                                val landed = rows.indexOfFirst { it.itemId == entry.itemId }
+                                val target = tracks.getOrNull(landed)?.itemId
+                                if (target != null && target != entry.itemId) vm.move(entry.itemId, target)
+                            }
+                            val swipe = rememberSwipeToDismissBoxState()
+                            SwipeToDismissBox(
+                                state = swipe,
+                                enableDismissFromStartToEnd = false,
+                                gesturesEnabled = !dragging && !selecting,
+                                onDismiss = {
+                                    rows = rows - entry
+                                    vm.remove(entry.itemId)
+                                },
+                                backgroundContent = { RemoveBackground(swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart, RowShape) },
                             ) {
-                                SongRow(
-                                    entry.track,
-                                    trailing = { DragHandle(Modifier.draggableHandle(onDragStopped = drop)) },
-                                ) { vm.play(tracks.indexOf(entry)) }
+                                // Solid under the row while it moves, so it hides what it
+                                // passes over; clear at rest, so the page's glow shows.
+                                val swiping = swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart
+                                Box(
+                                    Modifier
+                                        .then(if (dragging) Modifier.elevation3(RowShape) else Modifier)
+                                        .background(
+                                            when {
+                                                dragging -> OctoColors.BackgroundTertiary
+                                                swiping -> OctoColors.Background
+                                                else -> Color.Transparent
+                                            },
+                                            RowShape,
+                                        ),
+                                ) {
+                                    SongRow(
+                                        entry.track,
+                                        // No moving songs while picking them.
+                                        trailing = if (selecting) null else ({ DragHandle(Modifier.draggableHandle(onDragStopped = drop)) }),
+                                        menuContext = SongMenuContext(playlistId = playlist.id, playlistItemId = entry.itemId),
+                                        selectKey = entry.itemId.toString(),
+                                        // A swipe left takes the song out here.
+                                        swipeToPlayNext = false,
+                                    ) { vm.play(tracks.indexOf(entry)) }
+                                }
                             }
                         }
                     }

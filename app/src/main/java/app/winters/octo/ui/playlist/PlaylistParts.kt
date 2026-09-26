@@ -2,6 +2,7 @@ package app.winters.octo.ui.playlist
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,7 +27,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -93,21 +97,39 @@ fun LikedCover(size: Dp, modifier: Modifier = Modifier, shape: Shape = ArtworkSh
     IconTile(painterResource(OctoIcons.Liked), LikedFill, size, modifier, shape)
 
 // A line in a list of playlists: picture, name, and a line under it, with
-// the cloud mark when the playlist is kept on the server too.
+// the cloud mark when the playlist is kept on the server too. `onLongClick`
+// opens the playlist's menu, where it has one.
 @Composable
 fun PlaylistLine(
     title: String,
     subtitle: String?,
     onClick: () -> Unit,
     onServer: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
     picture: @Composable () -> Unit,
 ) {
+    val haptics = LocalHapticFeedback.current
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onClick)
-            .height(72.dp)
-            .padding(horizontal = 20.dp),
+            .then(
+                if (onLongClick == null) {
+                    Modifier.clickable(role = Role.Button, onClick = onClick)
+                } else {
+                    Modifier.combinedClickable(
+                        role = Role.Button,
+                        onClick = onClick,
+                        onLongClickLabel = "More options",
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onLongClick()
+                        },
+                    )
+                },
+            )
+            // At least a row tall; taller when large text needs it.
+            .heightIn(min = 72.dp)
+            .padding(horizontal = 20.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {

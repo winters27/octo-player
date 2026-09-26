@@ -36,7 +36,10 @@ import app.winters.octo.sort.SortedLibrary
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.Feedback
+import app.winters.octo.ui.common.LocalSongSelection
+import app.winters.octo.ui.common.Pickable
 import app.winters.octo.ui.common.RemoveBackground
+import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.SortBar
 import app.winters.octo.ui.common.TopOnNewOrder
@@ -94,39 +97,45 @@ fun LikedScreen(onBack: () -> Unit, vm: LikedViewModel = hiltViewModel()) {
             // The rows as drawn: a swiped one goes at once, the list catches up.
             var rows by remember(list) { mutableStateOf(list) }
             TopOnNewOrder(sorted.order, state, top = SORT_ROW)
-            LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding(extraTop = DetailTopGap)) {
-                item(key = "header") {
-                    ListHeader(
-                        title = "Liked songs",
-                        songCount = list.size,
-                        durationMs = list.sumOf { it.durationMs },
-                        onPlay = { vm.play(0) },
-                        onShuffle = vm::shuffle,
-                    ) { modifier, shape -> LikedCover(240.dp, modifier, shape) }
-                }
-                item(key = "keep") { KeepLikedDownloaded(list) }
-                if (rows.isEmpty()) {
-                    item(key = "empty") { EmptyNote("Songs you like show up here. Tap the heart in the player, or long press any song.") }
-                } else {
-                    item(key = "sort") { SortBar(SortList.Liked, sorted.order, vm::setOrder) }
-                }
-                items(rows, key = { it.id }) { track ->
-                    val swipe = rememberSwipeToDismissBoxState()
-                    SwipeToDismissBox(
-                        state = swipe,
-                        modifier = Modifier.animateItem(),
-                        enableDismissFromStartToEnd = false,
-                        onDismiss = {
-                            rows = rows - track
-                            vm.unlike(track.id)
-                        },
-                        backgroundContent = { RemoveBackground(swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart, RowShape) },
-                    ) {
-                        // Solid under the row while it moves, so it hides what it
-                        // passes over; clear at rest, so the page's glow shows.
-                        val swiping = swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart
-                        Box(Modifier.background(if (swiping) OctoColors.Background else Color.Transparent, RowShape)) {
-                            SongRow(track) { vm.play(list.indexOf(track)) }
+            val pickable = remember(rows) { rows.map { Pickable(it.id, it) } }
+            SelectableSongs(pickable) {
+                val selecting = LocalSongSelection.current?.active == true
+                LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding(extraTop = DetailTopGap)) {
+                    item(key = "header") {
+                        ListHeader(
+                            title = "Liked songs",
+                            songCount = list.size,
+                            durationMs = list.sumOf { it.durationMs },
+                            onPlay = { vm.play(0) },
+                            onShuffle = vm::shuffle,
+                        ) { modifier, shape -> LikedCover(240.dp, modifier, shape) }
+                    }
+                    item(key = "keep") { KeepLikedDownloaded(list) }
+                    if (rows.isEmpty()) {
+                        item(key = "empty") { EmptyNote("Songs you like show up here. Tap the heart in the player, or long press any song.") }
+                    } else {
+                        item(key = "sort") { SortBar(SortList.Liked, sorted.order, vm::setOrder) }
+                    }
+                    items(rows, key = { it.id }) { track ->
+                        val swipe = rememberSwipeToDismissBoxState()
+                        SwipeToDismissBox(
+                            state = swipe,
+                            modifier = Modifier.animateItem(),
+                            enableDismissFromStartToEnd = false,
+                            gesturesEnabled = !selecting,
+                            onDismiss = {
+                                rows = rows - track
+                                vm.unlike(track.id)
+                            },
+                            backgroundContent = { RemoveBackground(swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart, RowShape) },
+                        ) {
+                            // Solid under the row while it moves, so it hides what it
+                            // passes over; clear at rest, so the page's glow shows.
+                            val swiping = swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart
+                            Box(Modifier.background(if (swiping) OctoColors.Background else Color.Transparent, RowShape)) {
+                                // A swipe left unlikes here.
+                                SongRow(track, swipeToPlayNext = false) { vm.play(list.indexOf(track)) }
+                            }
                         }
                     }
                 }

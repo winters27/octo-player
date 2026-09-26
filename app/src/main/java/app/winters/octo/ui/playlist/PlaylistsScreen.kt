@@ -36,6 +36,8 @@ import app.winters.octo.ui.common.TopOnNewOrder
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.common.sortedRows
 import app.winters.octo.ui.common.songs
+import app.winters.octo.ui.menu.CollectionTarget
+import app.winters.octo.ui.menu.LocalSongMenu
 import app.winters.octo.ui.nav.LikedRoute
 import app.winters.octo.ui.nav.PlaylistRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -86,6 +88,7 @@ fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsV
     val likedCount by vm.likedCount.collectAsStateWithLifecycle()
     val importState by vm.importState.collectAsStateWithLifecycle()
     val sheets = LocalPlaylistSheets.current
+    val menus = LocalSongMenu.current.collections
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::importFile) }
 
     val state = rememberLazyListState()
@@ -108,7 +111,13 @@ fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsV
                 PlaylistLine("Liked songs", songs(likedCount), onClick = { onOpen(LikedRoute) }) { LikedCover(56.dp) }
             }
             sortedRows(playlists?.items.orEmpty(), key = { it.id }) { playlist ->
-                PlaylistLine(playlist.name, songs(playlist.songCount), onClick = { onOpen(PlaylistRoute(playlist.id)) }, onServer = playlist.onServer) {
+                PlaylistLine(
+                    playlist.name,
+                    songs(playlist.songCount),
+                    onClick = { onOpen(PlaylistRoute(playlist.id)) },
+                    onServer = playlist.onServer,
+                    onLongClick = { menus.open(CollectionTarget.Playlist(playlist.id)) },
+                ) {
                     PlaylistCover(playlist.covers, 56.dp)
                 }
             }

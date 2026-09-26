@@ -50,7 +50,9 @@ import app.winters.octo.ui.common.FeedbackHost
 import app.winters.octo.ui.common.LocalFeedback
 import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.LocalNowPlayingId
 import app.winters.octo.ui.common.LocalOpenPage
+import app.winters.octo.ui.common.NowMark
 import app.winters.octo.ui.folders.FoldersScreen
 import app.winters.octo.ui.genre.GenreScreen
 import app.winters.octo.ui.genre.GenresScreen
@@ -168,6 +170,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         LocalFeedback provides feedback,
         LocalPageArtworks provides pageArtworks,
         LocalOpenPage provides open,
+        LocalNowPlayingId provides NowMark(now.trackId, now.isPlaying),
     ) {
         SharedTransitionLayout {
             Box(Modifier.fillMaxSize().background(OctoColors.Background)) {

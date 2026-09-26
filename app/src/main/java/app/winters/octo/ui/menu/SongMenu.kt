@@ -9,12 +9,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -34,6 +36,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.OnlineDao
+import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
 import app.winters.octo.design.GlassSheet
@@ -51,10 +54,14 @@ import app.winters.octo.offline.Reasons
 import app.winters.octo.offline.reasons
 import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.playback.RatingStore
 import app.winters.octo.ui.common.RatingStars
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.Feedback
+import app.winters.octo.ui.common.SelectionBarHost
+import app.winters.octo.ui.common.SelectionBarState
+import app.winters.octo.ui.common.SongSelection
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
 import app.winters.octo.ui.playlist.LocalPlaylistSheets
@@ -74,8 +81,31 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
+// Where a song's menu was opened from, so it can offer what fits there and
+// leave out what would only lead back to the same page: the album page it
+// is on, the artist page, or its row on a playlist page. `selection` is the
+// list's, when the list can pick songs, and `selectKey` the row's key in it.
+data class SongMenuContext(
+    val albumId: String? = null,
+    val artistId: String? = null,
+    val playlistId: String? = null,
+    val playlistItemId: Long? = null,
+    val selection: SongSelection? = null,
+    val selectKey: String? = null,
+)
+
+// What a song row can do without opening the menu: a swipe, or a screen
+// reader's actions. The menu's host fills it in, since it has the player.
+// Play next from here says so, with an Undo, since nothing else shows it.
+interface QuickSongActions {
+    fun playNext(trackId: String)
+    fun addToQueue(trackId: String)
+}
+
 // Which song the menu is open for, if any. Any song on any screen can
-// open it: a long press on a row, or the more button in the player.
+// open it: a long press on a row, or the more button in the player. It also
+// carries what shares the menu's layer: the menus for albums, artists and
+// playlists, the song info sheet, and the bar for picked songs.
 class SongMenuState {
     var trackId by mutableStateOf<String?>(null)
         private set
@@ -85,9 +115,42 @@ class SongMenuState {
     var lastTrackId by mutableStateOf<String?>(null)
         private set
 
-    fun open(trackId: String) {
+    // Where the last song was opened from.
+    var lastContext by mutableStateOf(SongMenuContext())
+        private set
+
+    fun open(trackId: String, context: SongMenuContext = SongMenuContext()) {
         this.trackId = trackId
         lastTrackId = trackId
+        lastContext = context
+    }
+
+    // The menus for albums, artists and playlists.
+    val collections = CollectionMenuState()
+
+    // The bar that acts on picked songs.
+    val selectionBar = SelectionBarState()
+
+    // Set by the host while it is shown.
+    var quick: QuickSongActions? = null
+        internal set
+
+    // The song the info sheet is open for, if any, and the last one, kept
+    // while the sheet slides away.
+    var infoTrackId by mutableStateOf<String?>(null)
+        private set
+    var lastInfoTrackId by mutableStateOf<String?>(null)
+        private set
+
+    // Swaps the menu for the info sheet.
+    fun openInfo(trackId: String) {
+        this.trackId = null
+        infoTrackId = trackId
+        lastInfoTrackId = trackId
+    }
+
+    fun closeInfo() {
+        infoTrackId = null
     }
 
     fun close() {
@@ -116,28 +179,62 @@ class SongMenuState {
 val LocalSongMenu = staticCompositionLocalOf<SongMenuState> { error("No song menu") }
 
 // The choices in a song's menu, in the order shown.
-enum class SongAction { PlayNext, AddToQueue, StartRadio, Download, AddToPlaylist, KeepOffline, Share, Like, Rate, GoToAlbum, GoToArtist }
+enum class SongAction {
+    PlayNext, AddToQueue, StartRadio, Download, AddToPlaylist, RemoveFromPlaylist, Select, KeepOffline, Share, Like, Rate,
+    GoToAlbum, GoToArtist, Info,
+}
+
+// Where the menu was opened, as the choices care about it.
+data class MenuPlace(
+    // On the page of the song's own album, or its own artist.
+    val onAlbumPage: Boolean = false,
+    val onArtistPage: Boolean = false,
+    // On a row of a playlist page, which can be taken out.
+    val inPlaylist: Boolean = false,
+    // In a list that can pick songs, and not picking already.
+    val selectable: Boolean = false,
+)
+
+// What the context means for one song: "Go to album" only leads somewhere
+// from a page other than that album's.
+fun menuPlace(context: SongMenuContext, albumId: String, artistId: String): MenuPlace = MenuPlace(
+    onAlbumPage = context.albumId != null && context.albumId == albumId,
+    onArtistPage = context.artistId != null && context.artistId == artistId,
+    inPlaylist = context.playlistId != null && context.playlistItemId != null,
+    selectable = context.selection != null && context.selectKey != null && !context.selection.active,
+)
 
 // What a song's menu offers. A song found online has no album or artist in
 // the library and cannot be liked, rated or put in a playlist yet, so it
 // offers a download instead. Radio needs a server signed in; sharing needs
 // a copy of the song on a server that shares. A library song only on a
 // server (`offline`) can be downloaded to the phone.
-fun songActions(find: Boolean, radio: Boolean, share: Boolean = false, offline: Boolean = false): List<SongAction> = buildList {
+fun songActions(
+    find: Boolean,
+    radio: Boolean,
+    share: Boolean = false,
+    offline: Boolean = false,
+    place: MenuPlace = MenuPlace(),
+): List<SongAction> = buildList {
     add(SongAction.PlayNext)
     add(SongAction.AddToQueue)
     if (radio) add(SongAction.StartRadio)
     if (find) {
         add(SongAction.Download)
+        if (place.inPlaylist) add(SongAction.RemoveFromPlaylist)
+        if (place.selectable) add(SongAction.Select)
     } else {
         add(SongAction.AddToPlaylist)
+        if (place.inPlaylist) add(SongAction.RemoveFromPlaylist)
+        if (place.selectable) add(SongAction.Select)
         if (offline) add(SongAction.KeepOffline)
         if (share) add(SongAction.Share)
         add(SongAction.Like)
         add(SongAction.Rate)
-        add(SongAction.GoToAlbum)
-        add(SongAction.GoToArtist)
+        if (!place.onAlbumPage) add(SongAction.GoToAlbum)
+        if (!place.onArtistPage) add(SongAction.GoToArtist)
     }
+    add(SongAction.Info)
 }
 
 // The download row's words for where a find's download is.
@@ -173,6 +270,8 @@ class SongMenuViewModel @Inject constructor(
     private val ratings: RatingStore,
     private val controls: ServerControls,
     private val offline: OfflineDownloads,
+    private val playlists: PlaylistStore,
+    private val userDao: UserDao,
     private val feedback: Feedback,
 ) : ViewModel() {
     val liked: StateFlow<Set<String>> = likes.liked
@@ -204,6 +303,20 @@ class SongMenuViewModel @Inject constructor(
     fun toggleLike(id: String) = likes.toggle(id)
     fun rate(id: String, rating: Int) = ratings.rate(id, rating)
 
+    // Play next from a swipe, which nothing else on screen confirms, so it
+    // says so and offers to take that one song back out of the queue.
+    fun playNextUndoable(id: String) = playback.playNextUndoable(listOf(id)) { undo -> feedback.undoable("Playing next", undo) }
+
+    // Takes the song's row out of a playlist, with an Undo that puts it back.
+    fun removeFromPlaylist(playlistId: String, itemId: Long) {
+        viewModelScope.launch {
+            val name = userDao.playlistRow(playlistId)?.name ?: "the playlist"
+            playlists.remove(playlistId, itemId) { row ->
+                feedback.undoable("Removed from $name") { playlists.restore(playlistId, row) }
+            }
+        }
+    }
+
     fun download(track: TrackEntity) {
         viewModelScope.launch { downloads.request(track) }
     }
@@ -211,21 +324,26 @@ class SongMenuViewModel @Inject constructor(
     // Plays the song and then songs like it, in place of the queue. When the
     // server cannot answer, nothing changes.
     fun startRadio(track: TrackEntity) {
-        viewModelScope.launch {
-            val songs = try {
-                withContext(Dispatchers.IO) { discovery.radio(track) }
-            } catch (e: SubsonicException) {
-                Log.w("Octo", "radio failed: ${e.javaClass.simpleName}")
-                feedback.show("Could not start a radio for this song")
-                return@launch
-            }
-            // Only the song itself back means the server found nothing like it.
-            if (songs.size > 1) {
-                playback.playTracks(songs.map { it.id }, 0)
-            } else {
-                feedback.show("No similar songs found")
-            }
-        }
+        viewModelScope.launch { playRadio(track, discovery, playback, feedback, "this song") }
+    }
+}
+
+// Plays a song and then songs like it, in place of the queue. When the
+// server cannot answer, nothing changes. `what` names what the radio was
+// asked for, for the message when it cannot start.
+internal suspend fun playRadio(seed: TrackEntity, discovery: Discovery, playback: PlaybackConnection, feedback: Feedback, what: String) {
+    val songs = try {
+        withContext(Dispatchers.IO) { discovery.radio(seed) }
+    } catch (e: SubsonicException) {
+        Log.w("Octo", "radio failed: ${e.javaClass.simpleName}")
+        feedback.show("Could not start a radio for $what")
+        return
+    }
+    // Only the song itself back means the server found nothing like it.
+    if (songs.size > 1) {
+        playback.playTracks(songs.map { it.id }, 0)
+    } else {
+        feedback.show("No similar songs found")
     }
 }
 
@@ -233,8 +351,19 @@ class SongMenuViewModel @Inject constructor(
 // goes to a page, and is expected to close the player if it is open.
 @Composable
 fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuViewModel = hiltViewModel()) {
+    // Rows swipe and speak through these while the host is shown.
+    DisposableEffect(state, vm) {
+        state.quick = object : QuickSongActions {
+            override fun playNext(trackId: String) = vm.playNextUndoable(trackId)
+            override fun addToQueue(trackId: String) = vm.playLast(trackId)
+        }
+        onDispose { state.quick = null }
+    }
+    // Over the bottom bar and under every sheet, as the bar it stands in for.
+    SelectionBarHost(state.selectionBar)
     GlassSheet(visible = state.trackId != null, onDismiss = state::close) {
         val trackId = state.lastTrackId ?: return@GlassSheet
+        val context = state.lastContext
         val track by remember(trackId) { vm.track(trackId) }.collectAsStateWithLifecycle(null)
         val liked by vm.liked.collectAsStateWithLifecycle()
         val downloads by vm.downloadStates.collectAsStateWithLifecycle()
@@ -252,7 +381,8 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
 
         SongHeader(song)
         Spacer(Modifier.height(8.dp))
-        for (action in songActions(isFind(trackId), radio, share = shareId != null, offline = !song.onPhone || keptRow != null)) {
+        val place = menuPlace(context, song.albumId, song.artistId)
+        for (action in songActions(isFind(trackId), radio, share = shareId != null, offline = !song.onPhone || keptRow != null, place = place)) {
             when (action) {
                 SongAction.PlayNext -> MenuRow(OctoIcons.PlayNext, "Play next") {
                     vm.playNext(trackId)
@@ -280,6 +410,16 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
                 SongAction.AddToPlaylist -> MenuRow(OctoIcons.AddToPlaylist, "Add to playlist") {
                     state.close()
                     playlistSheets.show(PlaylistSheet.Pick(trackId))
+                }
+                SongAction.RemoveFromPlaylist -> MenuRow(OctoIcons.RemoveFromPlaylist, "Remove from this playlist") {
+                    state.close()
+                    val playlistId = context.playlistId
+                    val itemId = context.playlistItemId
+                    if (playlistId != null && itemId != null) vm.removeFromPlaylist(playlistId, itemId)
+                }
+                SongAction.Select -> MenuRow(OctoIcons.Select, "Select") {
+                    state.close()
+                    context.selectKey?.let { key -> context.selection?.start(key) }
                 }
                 SongAction.KeepOffline -> {
                     val state = keptRow?.state
@@ -317,11 +457,16 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
                     state.close()
                     onOpen(ArtistRoute(song.artistId))
                 }
+                SongAction.Info -> MenuRow(OctoIcons.Info, "Song info") {
+                    state.openInfo(trackId)
+                }
             }
         }
         Spacer(Modifier.height(12.dp))
     }
     RatingSheet(state, vm)
+    SongInfoSheet(state)
+    CollectionMenuHost(state.collections, onOpen)
 }
 
 @Composable
@@ -348,8 +493,9 @@ fun MenuRow(@DrawableRes icon: Int, label: String, enabled: Boolean = true, onCl
         Modifier
             .fillMaxWidth()
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .height(52.dp)
-            .padding(horizontal = 20.dp),
+            // Grows with the text at large font sizes.
+            .heightIn(min = 52.dp)
+            .padding(horizontal = 20.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -359,6 +505,11 @@ fun MenuRow(@DrawableRes icon: Int, label: String, enabled: Boolean = true, onCl
             tint = if (enabled) OctoColors.TextSecondary else OctoColors.TextMuted,
             modifier = Modifier.size(22.dp),
         )
-        Text(label, style = OctoType.bodySmall, color = if (enabled) OctoColors.TextPrimary else OctoColors.TextMuted)
+        Text(
+            label,
+            style = OctoType.bodySmall,
+            color = if (enabled) OctoColors.TextPrimary else OctoColors.TextMuted,
+            modifier = Modifier.weight(1f),
+        )
     }
 }

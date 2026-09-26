@@ -47,6 +47,8 @@ import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.EmptyLibraryNote
 import app.winters.octo.ui.common.LetterRail
+import app.winters.octo.ui.common.Pickable
+import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.RAIL_MIN_ITEMS
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
@@ -198,7 +200,10 @@ fun SongsScreen(onBack: () -> Unit, vm: LibraryViewModel = hiltViewModel()) {
         songs?.let { SortButton(SortList.Songs, it.order, onChange = { order -> vm.setOrder(SortList.Songs, order) }) }
     }) {
         Loaded(songs) { sorted ->
-            SortedList(sorted, key = { it.id }) { track -> SongRow(track) { vm.playSong(track) } }
+            val pickable = remember(sorted.items) { sorted.items.map { Pickable(it.id, it) } }
+            SelectableSongs(pickable) {
+                SortedList(sorted, key = { it.id }) { track -> SongRow(track) { vm.playSong(track) } }
+            }
         }
     }
 }

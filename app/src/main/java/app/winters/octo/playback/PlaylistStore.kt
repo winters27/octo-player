@@ -75,6 +75,28 @@ class PlaylistStore @Inject constructor(
         }
     }
 
+    // Takes several songs out, one after another. `removed` hears the rows
+    // as they were, in the order they went, to put them back.
+    fun removeAll(id: String, itemIds: List<Long>, removed: (List<PlaylistItemEntity>) -> Unit = {}) {
+        scope.launch {
+            val now = System.currentTimeMillis()
+            val rows = itemIds.mapNotNull { userDao.removeFromPlaylist(id, it, now) }
+            if (rows.isEmpty()) return@launch
+            sync.changed(id)
+            removed(rows)
+        }
+    }
+
+    // Puts songs taken out together back, the last taken out first, so each
+    // lands in the place it had.
+    fun restoreAll(id: String, rows: List<PlaylistItemEntity>) {
+        scope.launch {
+            val now = System.currentTimeMillis()
+            rows.asReversed().forEach { userDao.restoreToPlaylist(id, it, now) }
+            sync.changed(id)
+        }
+    }
+
     // Takes back an add: the rows it made go again.
     fun removeRows(id: String, itemIds: List<Long>) {
         scope.launch {

@@ -17,6 +17,9 @@ data class PlaylistSummary(
     val updatedAt: Long = 0,
 )
 
+// A song on a playlist, as far as asking before adding it again goes.
+data class PlaylistHolding(val playlistId: String, val trackId: String)
+
 // One song of a playlist, as much of it as the list of playlists needs.
 data class PlaylistEntry(
     val playlistId: String,

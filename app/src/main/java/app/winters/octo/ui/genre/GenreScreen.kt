@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -41,6 +42,8 @@ import app.winters.octo.sort.SortedLibrary
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
+import app.winters.octo.ui.common.Pickable
+import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.SortBar
 import app.winters.octo.ui.common.TopOnNewOrder
@@ -113,27 +116,30 @@ fun GenreScreen(
         // A new order scrolls back to the songs' own line, below the header
         // and the albums.
         sortedTracks?.let { TopOnNewOrder(it.order, state, top = 1 + albumRows.size) }
-        LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding(extraTop = DetailTopGap)) {
-            item(key = "header") {
-                Header(name, albumList.size, tracks.size, onPlay = { vm.play(0) }, onShuffle = vm::shuffle)
-            }
-            items(albumRows, key = { "albums:${it.first().id}" }) { row ->
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 18.dp),
-                    horizontalArrangement = Arrangement.spacedBy(CardGap),
-                ) {
-                    row.forEach { album ->
-                        AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, modifier = Modifier.weight(1f), width = null)
-                    }
-                    repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+        val pickable = remember(tracks) { tracks.map { Pickable(it.id, it) } }
+        SelectableSongs(pickable) {
+            LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding(extraTop = DetailTopGap)) {
+                item(key = "header") {
+                    Header(name, albumList.size, tracks.size, onPlay = { vm.play(0) }, onShuffle = vm::shuffle)
                 }
-            }
-            val sorted = sortedTracks
-            if (sorted != null && tracks.isNotEmpty()) {
-                item(key = "songs") { SortBar(SortList.GenreSongs, sorted.order, vm::setOrder, title = "Songs") }
-            }
-            itemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
-                Box(Modifier.animateItem()) { SongRow(track) { vm.play(index) } }
+                items(albumRows, key = { "albums:${it.first().id}" }) { row ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 18.dp),
+                        horizontalArrangement = Arrangement.spacedBy(CardGap),
+                    ) {
+                        row.forEach { album ->
+                            AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, modifier = Modifier.weight(1f), width = null)
+                        }
+                        repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+                val sorted = sortedTracks
+                if (sorted != null && tracks.isNotEmpty()) {
+                    item(key = "songs") { SortBar(SortList.GenreSongs, sorted.order, vm::setOrder, title = "Songs") }
+                }
+                itemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
+                    Box(Modifier.animateItem()) { SongRow(track) { vm.play(index) } }
+                }
             }
         }
         BackButton(onBack)

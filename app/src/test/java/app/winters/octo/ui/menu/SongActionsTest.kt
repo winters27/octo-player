@@ -7,6 +7,7 @@ import app.winters.octo.ui.menu.SongAction.AddToQueue
 import app.winters.octo.ui.menu.SongAction.Download
 import app.winters.octo.ui.menu.SongAction.GoToAlbum
 import app.winters.octo.ui.menu.SongAction.GoToArtist
+import app.winters.octo.ui.menu.SongAction.Info
 import app.winters.octo.ui.menu.SongAction.KeepOffline
 import app.winters.octo.ui.menu.SongAction.Like
 import app.winters.octo.ui.menu.SongAction.PlayNext
@@ -20,7 +21,7 @@ class SongActionsTest {
     @Test
     fun aLibrarySongOffersEverything() {
         assertEquals(
-            listOf(PlayNext, AddToQueue, StartRadio, AddToPlaylist, Like, Rate, GoToAlbum, GoToArtist),
+            listOf(PlayNext, AddToQueue, StartRadio, AddToPlaylist, Like, Rate, GoToAlbum, GoToArtist, Info),
             songActions(find = false, radio = true),
         )
     }
@@ -28,7 +29,7 @@ class SongActionsTest {
     @Test
     fun radioNeedsAServer() {
         assertEquals(
-            listOf(PlayNext, AddToQueue, AddToPlaylist, Like, Rate, GoToAlbum, GoToArtist),
+            listOf(PlayNext, AddToQueue, AddToPlaylist, Like, Rate, GoToAlbum, GoToArtist, Info),
             songActions(find = false, radio = false),
         )
     }
@@ -36,17 +37,17 @@ class SongActionsTest {
     @Test
     fun shareFollowsAPlaylistWhenTheSongIsOnAServerThatShares() {
         assertEquals(
-            listOf(PlayNext, AddToQueue, StartRadio, AddToPlaylist, Share, Like, Rate, GoToAlbum, GoToArtist),
+            listOf(PlayNext, AddToQueue, StartRadio, AddToPlaylist, Share, Like, Rate, GoToAlbum, GoToArtist, Info),
             songActions(find = false, radio = true, share = true),
         )
         // A find is never shared: it is not in the server's library.
-        assertEquals(listOf(PlayNext, AddToQueue, StartRadio, Download), songActions(find = true, radio = true, share = true))
+        assertEquals(listOf(PlayNext, AddToQueue, StartRadio, Download, Info), songActions(find = true, radio = true, share = true))
     }
 
     @Test
     fun aFindOffersADownloadInsteadOfLibraryChoices() {
-        assertEquals(listOf(PlayNext, AddToQueue, StartRadio, Download), songActions(find = true, radio = true))
-        assertEquals(listOf(PlayNext, AddToQueue, Download), songActions(find = true, radio = false))
+        assertEquals(listOf(PlayNext, AddToQueue, StartRadio, Download, Info), songActions(find = true, radio = true))
+        assertEquals(listOf(PlayNext, AddToQueue, Download, Info), songActions(find = true, radio = false))
     }
 
     @Test
@@ -59,11 +60,11 @@ class SongActionsTest {
     @Test
     fun aSongOnlyOnTheServerCanBeDownloadedToThePhone() {
         assertEquals(
-            listOf(PlayNext, AddToQueue, StartRadio, AddToPlaylist, KeepOffline, Like, Rate, GoToAlbum, GoToArtist),
+            listOf(PlayNext, AddToQueue, StartRadio, AddToPlaylist, KeepOffline, Like, Rate, GoToAlbum, GoToArtist, Info),
             songActions(find = false, radio = true, offline = true),
         )
         // A find downloads to the server first, never straight to the phone.
-        assertEquals(listOf(PlayNext, AddToQueue, Download), songActions(find = true, radio = false, offline = true))
+        assertEquals(listOf(PlayNext, AddToQueue, Download, Info), songActions(find = true, radio = false, offline = true))
     }
 
     @Test

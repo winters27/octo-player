@@ -181,6 +181,30 @@ class PlaybackConnection @Inject constructor(
         c.play()
     }
 
+    // ---- Play next with an undo, for a swipe on a song row ----
+
+    // Puts songs next, like playNext, then hands `inserted` a way to take
+    // those same songs back out, wherever they have moved to since.
+    fun playNextUndoable(trackIds: List<String>, inserted: (undo: () -> Unit) -> Unit) {
+        if (trackIds.isEmpty()) return
+        withController { c ->
+            // Through the same command as Play next, so it lands right after
+            // the current song in shuffled order too. It goes in just after
+            // the current song in the list, which is where undo looks first.
+            val at = (c.currentMediaItemIndex + 1).coerceAtMost(c.mediaItemCount)
+            c.sendCustomCommand(PLAY_NEXT, playNextArgs(trackIds))
+            inserted { removeInserted(trackIds, at) }
+        }
+    }
+
+    private fun removeInserted(trackIds: List<String>, insertedAt: Int) = withController { c ->
+        val queue = List(c.mediaItemCount) { c.getMediaItemAt(it).mediaId }
+        val start = findInserted(queue, trackIds, insertedAt) ?: return@withController
+        c.removeMediaItems(start, start + trackIds.size)
+    }
+
+    // ---- End of play next with an undo ----
+
     private fun withController(action: (MediaController) -> Unit) {
         val ready = controller
         if (ready != null) action(ready) else {
