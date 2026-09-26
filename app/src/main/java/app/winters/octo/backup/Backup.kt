@@ -1,5 +1,6 @@
 package app.winters.octo.backup
 
+import app.winters.octo.catalog.PinKind
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.matchKey
 import app.winters.octo.discovery.sameArtist
@@ -54,6 +55,24 @@ data class LibraryBackup(
     val newPlaylistsOnServer: Boolean = false,
 )
 
+// A favourite or pinned album or artist as a backup names it: its relink
+// key (the library's search key for it) and its names, so it can be found
+// again after a reinstall or in another library. An artist has no artist.
+@Serializable
+data class HeldKey(val relinkKey: String = "", val name: String = "", val artist: String = "")
+
+// Something pinned to Home, in row order. A playlist is named by its name.
+@Serializable
+data class PinBackup(val kind: String, val item: HeldKey)
+
+// A song's lyrics moved earlier or later by hand.
+@Serializable
+data class LyricsOffsetBackup(val song: SongKey, val offsetMs: Long)
+
+// Whether the screen stays on while lyrics show, and each song's timing.
+@Serializable
+data class LyricsBackup(val keepScreenOn: Boolean = true, val offsets: List<LyricsOffsetBackup> = emptyList())
+
 // The server signed in to, for reference: its address and user name only.
 // Passwords, keys, header values and certificates are never in a backup,
 // so signing in again is needed.
@@ -76,6 +95,10 @@ data class Backup(
     val playlists: List<PlaylistBackup> = emptyList(),
     val likes: List<SongKey> = emptyList(),
     val ratings: List<RatedSong> = emptyList(),
+    val favouriteAlbums: List<HeldKey> = emptyList(),
+    val favouriteArtists: List<HeldKey> = emptyList(),
+    val pins: List<PinBackup> = emptyList(),
+    val lyrics: LyricsBackup? = null,
 )
 
 private val BackupJson = Json {
@@ -148,6 +171,29 @@ class SongFinder(library: List<TrackEntity>) {
     private fun sameLength(a: Long, b: Long) = a <= 0 || b <= 0 || abs(a - b) <= SAME_LENGTH_MS
 }
 
+// A library album or artist as the finder sees it. An artist has no artist.
+data class Named(val id: String, val relinkKey: String, val name: String, val artist: String = "")
+
+// Finds albums or artists named in a backup in this library: by relink key
+// first, then by name (and artist, for an album). When several match, the
+// first by id wins, so the choice is the same every time.
+class NameFinder(library: List<Named>) {
+    private val byRelink = library.filter { it.relinkKey.isNotEmpty() }.groupBy { it.relinkKey }
+    private val byName = library.groupBy { nameKey(it.name, it.artist) }
+
+    fun find(key: HeldKey): String? {
+        if (key.relinkKey.isNotEmpty()) byRelink[key.relinkKey]?.minOf { it.id }?.let { return it }
+        if (key.name.isBlank()) return null
+        return byName[nameKey(key.name, key.artist)]?.minOf { it.id }
+    }
+
+    private fun nameKey(name: String, artist: String) = "${matchKey(name)}|${matchKey(artist)}"
+}
+
+// A pin to add on restore: an album or artist by its library id, or a
+// playlist by its name, since restored playlists get new ids.
+data class PinPlan(val kind: PinKind, val target: String)
+
 // One playlist to make on restore: its name, the songs found, and how many
 // the backup had.
 data class PlaylistPlan(val name: String, val trackIds: List<String>, val total: Int)
@@ -162,15 +208,33 @@ data class RestorePlan(
     val likesTotal: Int,
     val ratings: Map<String, Int>,
     val ratingsTotal: Int,
+    val favouriteAlbums: List<String> = emptyList(),
+    val favouriteAlbumsTotal: Int = 0,
+    val favouriteArtists: List<String> = emptyList(),
+    val favouriteArtistsTotal: Int = 0,
+    val pins: List<PinPlan> = emptyList(),
+    val pinsTotal: Int = 0,
+    val lyricsOffsets: Map<String, Long> = emptyMap(),
+    val lyricsOffsetsTotal: Int = 0,
 ) {
     val playlistSongs: Int get() = playlists.sumOf { it.trackIds.size }
     val playlistSongsTotal: Int get() = playlists.sumOf { it.total }
 }
 
-fun planRestore(backup: Backup, library: List<TrackEntity>, existingPlaylists: Collection<String>): RestorePlan {
+fun planRestore(
+    backup: Backup,
+    library: List<TrackEntity>,
+    existingPlaylists: Collection<String>,
+    albums: List<Named> = emptyList(),
+    artists: List<Named> = emptyList(),
+): RestorePlan {
     val finder = SongFinder(library)
+    val albumFinder = NameFinder(albums)
+    val artistFinder = NameFinder(artists)
     val taken = existingPlaylists.mapTo(HashSet()) { it.trim().lowercase() }
     val (skipped, wanted) = backup.playlists.partition { it.name.trim().lowercase() in taken }
+    // Playlists here after the restore: those already here and those it makes.
+    val playlistNames = taken + wanted.map { it.name.trim().lowercase() }
     return RestorePlan(
         playlists = wanted.map { playlist ->
             PlaylistPlan(playlist.name.trim(), playlist.songs.mapNotNull(finder::find), playlist.songs.size)
@@ -182,6 +246,23 @@ fun planRestore(backup: Backup, library: List<TrackEntity>, existingPlaylists: C
             .mapNotNull { rated -> finder.find(rated.song)?.let { it to rated.rating } }
             .toMap(),
         ratingsTotal = backup.ratings.size,
+        favouriteAlbums = backup.favouriteAlbums.mapNotNull(albumFinder::find).distinct(),
+        favouriteAlbumsTotal = backup.favouriteAlbums.size,
+        favouriteArtists = backup.favouriteArtists.mapNotNull(artistFinder::find).distinct(),
+        favouriteArtistsTotal = backup.favouriteArtists.size,
+        pins = backup.pins.mapNotNull { pin ->
+            when (PinKind.of(pin.kind)) {
+                PinKind.Album -> albumFinder.find(pin.item)?.let { PinPlan(PinKind.Album, it) }
+                PinKind.Artist -> artistFinder.find(pin.item)?.let { PinPlan(PinKind.Artist, it) }
+                PinKind.Playlist -> pin.item.name.trim().takeIf { it.lowercase() in playlistNames }?.let { PinPlan(PinKind.Playlist, it) }
+                null -> null
+            }
+        }.distinct(),
+        pinsTotal = backup.pins.size,
+        lyricsOffsets = backup.lyrics?.offsets.orEmpty()
+            .mapNotNull { moved -> finder.find(moved.song)?.let { it to moved.offsetMs } }
+            .toMap(),
+        lyricsOffsetsTotal = backup.lyrics?.offsets?.size ?: 0,
     )
 }
 
@@ -192,6 +273,7 @@ fun describeBackup(backup: Backup): List<String> = buildList {
         "streaming".takeIf { backup.streaming != null },
         "sound".takeIf { backup.sound != null },
         "library".takeIf { backup.library != null },
+        "lyrics".takeIf { backup.lyrics != null },
     )
     if (settings.isNotEmpty()) add("Settings: ${settings.joinToString(", ")}")
     backup.sound?.let { sound ->
@@ -204,6 +286,10 @@ fun describeBackup(backup: Backup): List<String> = buildList {
     }
     if (backup.likes.isNotEmpty()) add(plural(backup.likes.size, "liked song", "liked songs"))
     if (backup.ratings.isNotEmpty()) add(plural(backup.ratings.size, "rating", "ratings"))
+    if (backup.favouriteAlbums.isNotEmpty()) add(plural(backup.favouriteAlbums.size, "favourite album", "favourite albums"))
+    if (backup.favouriteArtists.isNotEmpty()) add(plural(backup.favouriteArtists.size, "favourite artist", "favourite artists"))
+    if (backup.pins.isNotEmpty()) add(plural(backup.pins.size, "pin on Home", "pins on Home"))
+    backup.lyrics?.offsets?.takeIf { it.isNotEmpty() }?.let { add("Lyrics timing for " + plural(it.size, "song", "songs")) }
     backup.server?.let { add("Server: ${it.address} as ${it.username}. Sign in again to use it.") }
 }
 
@@ -218,6 +304,16 @@ fun describePlan(plan: RestorePlan): List<String> = buildList {
     }
     if (plan.likesTotal > 0) add("Likes: ${plan.likes.size.grouped()} of ${plan.likesTotal.grouped()} found")
     if (plan.ratingsTotal > 0) add("Ratings: ${plan.ratings.size.grouped()} of ${plan.ratingsTotal.grouped()} found")
+    if (plan.favouriteAlbumsTotal > 0) {
+        add("Favourite albums: ${plan.favouriteAlbums.size.grouped()} of ${plan.favouriteAlbumsTotal.grouped()} found")
+    }
+    if (plan.favouriteArtistsTotal > 0) {
+        add("Favourite artists: ${plan.favouriteArtists.size.grouped()} of ${plan.favouriteArtistsTotal.grouped()} found")
+    }
+    if (plan.pinsTotal > 0) add("Pins: ${plan.pins.size.grouped()} of ${plan.pinsTotal.grouped()} found")
+    if (plan.lyricsOffsetsTotal > 0) {
+        add("Lyrics timing: ${plan.lyricsOffsets.size.grouped()} of ${plan.lyricsOffsetsTotal.grouped()} songs found")
+    }
 }
 
 private fun Int.grouped() = "%,d".format(this)

@@ -75,4 +75,18 @@ object OctoIcons {
 
     // The phone's ringtone and other sounds.
     val Ringtone = R.drawable.sym_ring_volume
+
+    // The settings categories: how songs play, how the app looks, the
+    // library, listening stats, and saving settings to a file.
+    val Playback = R.drawable.sym_play_circle
+    val Appearance = R.drawable.sym_palette
+    val Library = R.drawable.sym_library_music
+    val Scrobbling = R.drawable.sym_insights
+    val Backup = R.drawable.sym_settings_backup_restore
+
+    // Looking something up by name.
+    val Search = R.drawable.sym_search
+
+    // The phone itself, as a place music is kept.
+    val Phone = R.drawable.sym_smartphone
 }

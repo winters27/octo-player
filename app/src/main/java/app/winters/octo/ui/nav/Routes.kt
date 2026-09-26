@@ -1,12 +1,17 @@
 package app.winters.octo.ui.nav
 
 import androidx.navigation3.runtime.NavKey
+import app.winters.octo.ui.settings.SettingsPage
 import kotlinx.serialization.Serializable
 
 @Serializable data object HomeRoute : NavKey
 @Serializable data object SearchRoute : NavKey
 @Serializable data object LibraryRoute : NavKey
 @Serializable data object SettingsRoute : NavKey
+
+// One page of Settings, and the row a search result points at, if any.
+@Serializable data class SettingsPageRoute(val page: SettingsPage, val highlight: String? = null) : NavKey
+
 @Serializable data class AlbumRoute(val id: String) : NavKey
 @Serializable data class ArtistRoute(val id: String) : NavKey
 
