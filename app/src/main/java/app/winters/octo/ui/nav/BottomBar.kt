@@ -3,6 +3,7 @@ package app.winters.octo.ui.nav
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -32,15 +33,23 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -63,7 +72,14 @@ import app.winters.octo.playback.NowPlaying
 import app.winters.octo.player.fractionAt
 import app.winters.octo.player.rememberPositionMs
 import app.winters.octo.ui.common.Artwork
+import app.winters.octo.ui.common.AxisDrag
+import app.winters.octo.ui.common.SwipeSkip
+import app.winters.octo.ui.common.detectAxisDrags
+import app.winters.octo.ui.common.swipeSkip
+import app.winters.octo.ui.common.swipeUp
 import dev.chrisbanes.haze.HazeState
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 private class Tab(val icon: ImageVector, @StringRes val label: Int)
 
@@ -109,6 +125,7 @@ fun BottomBar(
     val grown by animateFloatAsState(if (playerShown) 1f else 0f, spring(0.75f, 200f), label = "bar shape")
     val position = rememberPositionMs(now, positionMs)
     val progress = { now.fractionAt(position.longValue) }
+    val swipe = rememberBarSwipe(hasSong = now.trackId != null, actions)
 
     BoxWithConstraints(
         modifier
@@ -126,13 +143,15 @@ fun BottomBar(
             Modifier
                 .offset(x = tabsWidth + Gap)
                 .width(maxWidth - tabsWidth - Gap)
-                .fillMaxHeight(),
+                .fillMaxHeight()
+                .then(swipe.gestures),
             film = film,
         ) {
             if (grown < 1f) {
                 Box(
                     Modifier
                         .size(BarHeight)
+                        .then(swipe.follow)
                         .alpha(1f - grown)
                         .clickable(
                             enabled = !playerShown,
@@ -155,6 +174,7 @@ fun BottomBar(
                     artShape = artShape,
                     actions = actions,
                     modifier = Modifier.matchParentSize().clip(CircleShape).alpha(grown),
+                    follow = swipe.follow,
                 )
             }
         }
@@ -287,7 +307,8 @@ private fun TabButton(
 }
 
 // The small player: artwork with its progress ring, the song, and back,
-// play and next. Tapping anywhere else opens the full player.
+// play and next. Tapping anywhere else opens the full player; so does a
+// swipe up, and a swipe sideways skips.
 @Composable
 private fun PlayerCapsule(
     now: NowPlaying,
@@ -297,6 +318,7 @@ private fun PlayerCapsule(
     artShape: Shape,
     actions: BarActions,
     modifier: Modifier,
+    follow: Modifier,
 ) {
     Box(
         modifier.clickable(
@@ -312,6 +334,7 @@ private fun PlayerCapsule(
                 .wrapContentWidth(Alignment.Start, unbounded = true)
                 .width(width)
                 .fillMaxHeight()
+                .then(follow)
                 .padding(start = 6.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -358,4 +381,75 @@ private fun CapsuleButton(@DrawableRes icon: Int, description: String, onClick: 
     ) {
         Icon(painterResource(icon), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(28.dp))
     }
+}
+
+// Swipes on the round button and the small player: sideways skips (left to
+// the next song, right to the one before), and up opens the full player.
+// Taps still go to the buttons. `gestures` goes on the glass, which stays
+// put; `follow` goes on what is inside it, which leans a little with the
+// finger.
+private class BarSwipe(val gestures: Modifier, val follow: Modifier)
+
+@Composable
+private fun rememberBarSwipe(hasSong: Boolean, actions: BarActions): BarSwipe {
+    val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    val current by rememberUpdatedState(actions)
+    // How far the finger has gone, sideways and up, in pixels.
+    var sideways by remember { mutableFloatStateOf(0f) }
+    var up by remember { mutableFloatStateOf(0f) }
+    val follow = Modifier.graphicsLayer {
+        translationX = sideways * 0.3f
+        translationY = up * 0.3f
+    }
+    if (!hasSong) return BarSwipe(Modifier, follow)
+    val gestures = Modifier.pointerInput(Unit) {
+        val skipAt = 56.dp.toPx()
+        val openAt = 28.dp.toPx()
+        val fling = 700.dp.toPx()
+        var armed = false
+        // A tick when the finger passes the point where letting go acts.
+        fun mark(past: Boolean) {
+            if (past != armed) {
+                armed = past
+                if (past) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+            }
+        }
+        fun settle(set: (Float) -> Unit, from: Float) {
+            armed = false
+            scope.launch { animate(from, 0f, animationSpec = spring(0.8f, 400f)) { value, _ -> set(value) } }
+        }
+        detectAxisDrags(
+            horizontal = AxisDrag(
+                onMove = { offset ->
+                    sideways = offset
+                    mark(abs(offset) >= skipAt)
+                },
+                onEnd = { offset, velocity ->
+                    when (swipeSkip(offset, velocity, skipAt, fling)) {
+                        SwipeSkip.Next -> current.onNext()
+                        SwipeSkip.Previous -> current.onPrevious()
+                        SwipeSkip.Stay -> Unit
+                    }
+                    settle({ sideways = it }, sideways)
+                },
+            ),
+            vertical = AxisDrag(
+                onMove = { offset ->
+                    up = offset.coerceAtMost(0f)
+                    mark(offset <= -openAt)
+                },
+                onEnd = { offset, velocity ->
+                    if (swipeUp(offset, velocity, openAt, fling)) {
+                        armed = false
+                        up = 0f
+                        current.onOpenPlayer()
+                    } else {
+                        settle({ up = it }, up)
+                    }
+                },
+            ),
+        )
+    }
+    return BarSwipe(gestures, follow)
 }

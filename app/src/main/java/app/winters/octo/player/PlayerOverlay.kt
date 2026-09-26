@@ -39,6 +39,8 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.displayCutoutPadding
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -72,11 +74,13 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -114,6 +118,10 @@ import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.SleepState
 import app.winters.octo.playback.speedLabel
 import app.winters.octo.ui.common.Artwork
+import app.winters.octo.ui.common.AxisDrag
+import app.winters.octo.ui.common.SwipeSkip
+import app.winters.octo.ui.common.detectAxisDrags
+import app.winters.octo.ui.common.swipeSkip
 import app.winters.octo.ui.common.DownloadButton
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.RatingStars
@@ -122,17 +130,20 @@ import app.winters.octo.ui.common.asClock
 import coil3.compose.AsyncImage
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 // The full player. It opens over everything, with the artwork flying in
 // from the bar, and closes on back, on the chevron, or by pulling it down
-// from the top.
+// from the top. Turned sideways, the artwork sits beside the controls.
 @Composable
 fun AnimatedVisibilityScope.PlayerOverlay(
     artModifier: Modifier,
     onClose: () -> Unit,
     onOpenArtist: (String) -> Unit,
+    onOpenAlbum: (String) -> Unit,
     onOpenSound: () -> Unit,
     model: PlayerViewModel = hiltViewModel(),
 ) {
@@ -225,6 +236,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
                     artModifier,
                     onClose,
                     onOpenArtist,
+                    onOpenAlbum,
                     onOpenQueue = { showQueue = true },
                     onOpenSleep = { showSleep = true },
                     onOpenSound = onOpenSound,
@@ -267,130 +279,277 @@ private fun AnimatedVisibilityScope.PlayerContent(
     artModifier: Modifier,
     onClose: () -> Unit,
     onOpenArtist: (String) -> Unit,
+    onOpenAlbum: (String) -> Unit,
     onOpenQueue: () -> Unit,
     onOpenSleep: () -> Unit,
     onOpenSound: () -> Unit,
     onOpenSpeed: () -> Unit,
 ) {
-    val density = LocalDensity.current
-    Column(
+    val lyricsOpen by model.lyricsOpen.collectAsStateWithLifecycle()
+    val header: @Composable () -> Unit = { TopLine(now, model, onClose, onOpenAlbum, onOpenSound) }
+    val controls: @Composable (Boolean) -> Unit = { roomy ->
+        Controls(now, model, lyricsOpen, onOpenArtist, onOpenQueue, onOpenSleep, onOpenSpeed, roomy)
+    }
+    BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(horizontal = 24.dp),
+            .displayCutoutPadding(),
     ) {
-        Box(
-            Modifier.fillMaxWidth().height(56.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            CloseButton(onClose, Modifier.align(Alignment.CenterStart))
-            val album by model.albumLabel.collectAsStateWithLifecycle()
-            album?.let {
-                Text(
-                    it,
-                    style = OctoType.caption,
-                    color = OctoColors.TextMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 60.dp),
+        val roomy = maxHeight >= 360.dp
+        if (maxWidth > maxHeight) {
+            // Turned sideways: the artwork on the left, everything else on
+            // the right. A short screen drops the volume line; the phone's
+            // own buttons still set it.
+            Row(
+                Modifier.fillMaxSize().padding(horizontal = 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(32.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ArtStage(
+                    now,
+                    model,
+                    lyricsOpen,
+                    maxSide = 420.dp,
+                    modifier = Modifier.weight(1f).fillMaxHeight().padding(vertical = 12.dp),
+                    artModifier = artModifier,
                 )
+                Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.Center) {
+                    header()
+                    controls(roomy)
+                }
             }
-            SoundButton(model, onOpenSound, Modifier.align(Alignment.CenterEnd))
+        } else {
+            Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
+                header()
+                ArtStage(now, model, lyricsOpen, maxSide = 312.dp, modifier = Modifier.weight(1f).fillMaxWidth(), artModifier = artModifier)
+                controls(true)
+                Spacer(Modifier.height(16.dp))
+            }
         }
-        // The artwork, or the lyrics in its place. The artwork stays laid out
-        // under them, so it can still fly back to the bar when the player
-        // closes.
-        val lyricsOpen by model.lyricsOpen.collectAsStateWithLifecycle()
-        val lyrics by model.lyrics.collectAsStateWithLifecycle()
-        val lyricsShown by animateFloatAsState(if (lyricsOpen) 1f else 0f, tween(300), label = "lyrics shown")
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            val side = min(312.dp, min(maxWidth, maxHeight))
-            Box(
-                Modifier.graphicsLayer {
-                    alpha = 1f - lyricsShown
+    }
+}
+
+// The line across the top: close, the album's name, and Sound. The album
+// opens like the artist does, closing the player on the way.
+@Composable
+private fun TopLine(
+    now: NowPlaying,
+    model: PlayerViewModel,
+    onClose: () -> Unit,
+    onOpenAlbum: (String) -> Unit,
+    onOpenSound: () -> Unit,
+) {
+    Box(
+        Modifier.fillMaxWidth().height(56.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        CloseButton(onClose, Modifier.align(Alignment.CenterStart))
+        val album by model.albumLabel.collectAsStateWithLifecycle()
+        album?.let {
+            // The name shows only for an album in the library, so there is
+            // always a page to open.
+            val albumId = now.albumId?.takeIf { id -> id.isNotEmpty() && now.trackId?.let(::isFind) != true }
+            Text(
+                it,
+                style = OctoType.caption,
+                color = OctoColors.TextMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .padding(horizontal = 60.dp)
+                    .clickable(
+                        enabled = albumId != null,
+                        interactionSource = null,
+                        indication = null,
+                        role = Role.Button,
+                        onClickLabel = "Open album",
+                    ) { albumId?.let(onOpenAlbum) }
+                    .padding(vertical = 8.dp),
+            )
+        }
+        SoundButton(model, onOpenSound, Modifier.align(Alignment.CenterEnd))
+    }
+}
+
+// The artwork, or the lyrics in its place. The artwork stays laid out under
+// them, so it can still fly back to the bar when the player closes. Swiping
+// the artwork sideways skips: it follows the finger a little way, and a
+// tick marks the point past which letting go skips.
+@Composable
+private fun AnimatedVisibilityScope.ArtStage(
+    now: NowPlaying,
+    model: PlayerViewModel,
+    lyricsOpen: Boolean,
+    maxSide: Dp,
+    modifier: Modifier,
+    artModifier: Modifier,
+) {
+    val lyrics by model.lyrics.collectAsStateWithLifecycle()
+    val lyricsShown by animateFloatAsState(if (lyricsOpen) 1f else 0f, tween(300), label = "lyrics shown")
+    val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    // How far the artwork has been swiped, in pixels.
+    var swipe by remember { mutableFloatStateOf(0f) }
+    BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
+        val side = min(maxSide, min(maxWidth, maxHeight))
+        val width = constraints.maxWidth.toFloat()
+        Box(
+            Modifier
+                .pointerInput(lyricsOpen, width) {
+                    if (lyricsOpen) return@pointerInput
+                    val distance = 88.dp.toPx()
+                    val fling = 900.dp.toPx()
+                    var armed = false
+                    // A new swipe takes over from one still settling.
+                    var settling: Job? = null
+                    detectAxisDrags(
+                        horizontal = AxisDrag(
+                            onMove = { offset ->
+                                settling?.cancel()
+                                // Held back, so it reads as a nudge rather than a page turn.
+                                swipe = offset * 0.55f
+                                val past = abs(offset) >= distance
+                                if (past != armed) {
+                                    armed = past
+                                    if (past) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                                }
+                            },
+                            onEnd = { offset, velocity ->
+                                val skip = swipeSkip(offset, velocity, distance, fling)
+                                if (skip != SwipeSkip.Stay && !armed) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                                armed = false
+                                settling = scope.launch { settleSwipe(skip, width, { swipe }, { swipe = it }, model::next, model::previous) }
+                            },
+                        ),
+                    )
+                }
+                // After the gesture in this chain, so the finger is tracked on
+                // the screen rather than on the moving artwork.
+                .graphicsLayer {
+                    translationX = swipe
+                    alpha = (1f - lyricsShown) * (1f - 0.5f * (abs(swipe) / (width * 0.5f)).coerceAtMost(1f))
                     scaleX = 1f - 0.08f * lyricsShown
                     scaleY = 1f - 0.08f * lyricsShown
                 },
-            ) {
-                PlayerArt(now.artwork, side, now.isPlaying, artModifier)
-            }
-            if (lyricsShown > 0f) {
-                LyricsPane(
-                    lyrics,
-                    now,
-                    model::positionMs,
-                    model::seekTo,
-                    Modifier
-                        .fillMaxSize()
-                        .padding(vertical = 8.dp)
-                        .graphicsLayer { alpha = lyricsShown },
-                )
-            }
-        }
-
-        // The controls rise into place a moment after the player opens.
-        Column(
-            Modifier.animateEnterExit(
-                enter = slideInVertically(spring(0.68f, 400f, IntOffset.VisibilityThreshold)) {
-                    with(density) { 28.dp.roundToPx() }
-                } + fadeIn(tween(380, delayMillis = 80)),
-                exit = ExitTransition.None,
-            ),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { TitleBlock(now, onOpenArtist) }
-                SongButtons(now, model)
-            }
-            // The song's rating, only once it has one.
-            val rating by model.rating.collectAsStateWithLifecycle()
-            RatingStars(rating, Modifier.padding(top = 2.dp), size = 12.dp)
-            Spacer(Modifier.height(12.dp))
-            Progress(now, model, onOpenSpeed)
-            Spacer(Modifier.height(12.dp))
-            Transport(now, model)
+            PlayerArt(now.artwork, side, now.isPlaying, artModifier)
+        }
+        if (lyricsShown > 0f) {
+            LyricsPane(
+                lyrics,
+                now,
+                model::positionMs,
+                model::seekTo,
+                Modifier
+                    .fillMaxSize()
+                    .padding(vertical = 8.dp)
+                    .graphicsLayer { alpha = lyricsShown },
+            )
+        }
+    }
+}
+
+// Finishes a swipe of the artwork. A skip carries it on out the way it was
+// going, changes the song, and brings the new one in from the other side;
+// otherwise it springs back.
+private suspend fun settleSwipe(
+    skip: SwipeSkip,
+    width: Float,
+    current: () -> Float,
+    set: (Float) -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+) {
+    if (skip == SwipeSkip.Stay) {
+        animate(current(), 0f, animationSpec = spring(0.8f, 400f)) { value, _ -> set(value) }
+        return
+    }
+    val way = if (skip == SwipeSkip.Next) -1f else 1f
+    animate(current(), way * width * 0.5f, animationSpec = tween(120)) { value, _ -> set(value) }
+    if (skip == SwipeSkip.Next) onNext() else onPrevious()
+    animate(-way * width * 0.2f, 0f, animationSpec = spring(0.8f, 300f)) { value, _ -> set(value) }
+}
+
+// Everything under the artwork: the song, the progress line, the controls,
+// the volume and the row of switches. They rise into place a moment after
+// the player opens. `roomy` is off only on a short sideways screen.
+@Composable
+private fun AnimatedVisibilityScope.Controls(
+    now: NowPlaying,
+    model: PlayerViewModel,
+    lyricsOpen: Boolean,
+    onOpenArtist: (String) -> Unit,
+    onOpenQueue: () -> Unit,
+    onOpenSleep: () -> Unit,
+    onOpenSpeed: () -> Unit,
+    roomy: Boolean,
+) {
+    val density = LocalDensity.current
+    val gap = if (roomy) 12.dp else 4.dp
+    Column(
+        Modifier.animateEnterExit(
+            enter = slideInVertically(spring(0.68f, 400f, IntOffset.VisibilityThreshold)) {
+                with(density) { 28.dp.roundToPx() }
+            } + fadeIn(tween(380, delayMillis = 80)),
+            exit = ExitTransition.None,
+        ),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { TitleBlock(now, onOpenArtist) }
+            SongButtons(now, model)
+        }
+        // The song's rating, only once it has one.
+        val rating by model.rating.collectAsStateWithLifecycle()
+        RatingStars(rating, Modifier.padding(top = 2.dp), size = 12.dp)
+        Spacer(Modifier.height(12.dp))
+        Progress(now, model, onOpenSpeed)
+        Spacer(Modifier.height(gap))
+        Transport(now, model)
+        if (roomy) {
             Spacer(Modifier.height(8.dp))
             Volume(model)
-            Spacer(Modifier.height(12.dp))
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
-            ) {
-                ActionButton(
-                    icon = OctoIcons.Lyrics,
-                    description = "Lyrics",
-                    on = lyricsOpen,
-                    state = if (lyricsOpen) "Showing" else "Hidden",
-                    onClick = model::toggleLyrics,
-                )
-                ActionButton(
-                    icon = OctoIcons.Queue,
-                    description = "Up next",
-                    on = false,
-                    onClick = onOpenQueue,
-                )
-                SleepCircle(model, onClick = onOpenSleep)
-                ActionButton(
-                    icon = OctoIcons.Shuffle,
-                    description = "Shuffle",
-                    on = now.shuffle,
-                    onClick = model::toggleShuffle,
-                )
-                ActionButton(
-                    icon = if (now.repeatMode == Player.REPEAT_MODE_ONE) OctoIcons.RepeatOne else OctoIcons.Repeat,
-                    description = "Repeat",
-                    on = now.repeatMode != Player.REPEAT_MODE_OFF,
-                    state = when (now.repeatMode) {
-                        Player.REPEAT_MODE_ALL -> "All songs"
-                        Player.REPEAT_MODE_ONE -> "This song"
-                        else -> "Off"
-                    },
-                    onClick = model::cycleRepeat,
-                )
-            }
-            Spacer(Modifier.height(28.dp))
         }
+        Spacer(Modifier.height(gap))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
+        ) {
+            ActionButton(
+                icon = OctoIcons.Lyrics,
+                description = "Lyrics",
+                on = lyricsOpen,
+                state = if (lyricsOpen) "Showing" else "Hidden",
+                onClick = model::toggleLyrics,
+            )
+            ActionButton(
+                icon = OctoIcons.Queue,
+                description = "Up next",
+                on = false,
+                onClick = onOpenQueue,
+            )
+            SleepCircle(model, onClick = onOpenSleep)
+            ActionButton(
+                icon = OctoIcons.Shuffle,
+                description = "Shuffle",
+                on = now.shuffle,
+                onClick = model::toggleShuffle,
+            )
+            ActionButton(
+                icon = if (now.repeatMode == Player.REPEAT_MODE_ONE) OctoIcons.RepeatOne else OctoIcons.Repeat,
+                description = "Repeat",
+                on = now.repeatMode != Player.REPEAT_MODE_OFF,
+                state = when (now.repeatMode) {
+                    Player.REPEAT_MODE_ALL -> "All songs"
+                    Player.REPEAT_MODE_ONE -> "This song"
+                    else -> "Off"
+                },
+                onClick = model::cycleRepeat,
+            )
+        }
+        Spacer(Modifier.height(gap))
     }
 }
 

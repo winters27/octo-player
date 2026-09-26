@@ -10,7 +10,14 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -56,6 +63,7 @@ import app.winters.octo.ui.common.NowMark
 import app.winters.octo.ui.folders.FoldersScreen
 import app.winters.octo.ui.genre.GenreScreen
 import app.winters.octo.ui.genre.GenresScreen
+import app.winters.octo.ui.history.HistoryScreen
 import app.winters.octo.ui.home.HomeScreen
 import app.winters.octo.ui.library.AlbumsScreen
 import app.winters.octo.ui.library.ArtistsScreen
@@ -185,7 +193,9 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             rememberSaveableStateHolderNavEntryDecorator(),
                             rememberViewModelStoreNavEntryDecorator(),
                         ),
-                        modifier = Modifier.fillMaxSize(),
+                        // Turned sideways, pages keep clear of the camera cutout and
+                        // a side navigation bar; the glow still fills the screen.
+                        modifier = Modifier.fillMaxSize().windowInsetsPadding(SideInsets),
                         entryProvider = entryProvider {
                             entry<HomeRoute> { HomeScreen(open) }
                             entry<SearchRoute> { SearchScreen(open) }
@@ -211,6 +221,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             entry<SoundRoute> { SoundScreen(back) }
                             entry<SharesRoute> { SharesScreen(back) }
                             entry<RadioStationsRoute> { RadioStationsScreen(back) }
+                            entry<HistoryRoute> { HistoryScreen(it.mostPlayed, back) }
                         },
                     )
                 }
@@ -254,6 +265,10 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             playerOpen = false
                             stack.add(ArtistRoute(id))
                         },
+                        onOpenAlbum = { id ->
+                            playerOpen = false
+                            stack.add(AlbumRoute(id))
+                        },
                         onOpenSound = {
                             playerOpen = false
                             stack.add(SoundRoute)
@@ -271,6 +286,10 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         }
     }
 }
+
+// The sides a sideways phone keeps for its cutout and navigation bar.
+private val SideInsets: WindowInsets
+    @Composable get() = WindowInsets.displayCutout.union(WindowInsets.navigationBars).only(WindowInsetsSides.Horizontal)
 
 // One key for whichever song is on, so a song change mid-flight cannot
 // break the hand-off.
