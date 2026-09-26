@@ -45,6 +45,18 @@ data class PlaylistEntity(
     val name: String,
     val createdAt: Long,
     val updatedAt: Long,
+    // The server playlist this one is kept in step with: its id there, and
+    // which server. One waiting to be made on the server has the server but
+    // no id yet. Both are null for a playlist only on the phone.
+    val serverId: String? = null,
+    val sourceId: String? = null,
+    // What updatedAt was when both sides last agreed. A later change has not
+    // reached the server yet.
+    val syncedAt: Long? = null,
+    // The name both sides agreed on then, and the server's changed time and
+    // song count as they were, to tell whether the server changed since.
+    val syncedName: String? = null,
+    val serverStamp: String? = null,
 )
 
 @Entity(
@@ -65,6 +77,9 @@ data class PlaylistItemEntity(
     val trackId: String,
     val relinkKey: String,
     val position: Int,
+    // The server's id for this song when it came from the server's copy of
+    // the playlist, so it goes back as the same song.
+    val serverSongId: String? = null,
 )
 
 // The queue as it was, one row per song in play order.

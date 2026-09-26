@@ -63,10 +63,11 @@ sealed interface PlaylistSheet {
     // Name a new playlist, and put the song in it if there is one.
     data class Create(val trackId: String? = null) : PlaylistSheet
 
-    // Rename or delete a playlist.
-    data class Options(val id: String, val name: String) : PlaylistSheet
+    // Rename or delete a playlist, or save one only on the phone to the
+    // server when `canSave`. `onServer` is one kept with the server.
+    data class Options(val id: String, val name: String, val onServer: Boolean = false, val canSave: Boolean = false) : PlaylistSheet
     data class Rename(val id: String, val name: String) : PlaylistSheet
-    data class Delete(val id: String, val name: String) : PlaylistSheet
+    data class Delete(val id: String, val name: String, val onServer: Boolean = false) : PlaylistSheet
 }
 
 class PlaylistSheets {
@@ -103,6 +104,7 @@ class PlaylistSheetsViewModel @Inject constructor(private val store: PlaylistSto
     fun rename(id: String, name: String) = store.rename(id, name)
     fun delete(id: String) = store.delete(id)
     fun add(id: String, trackId: String) = store.add(id, listOf(trackId))
+    fun saveToServer(id: String) = store.saveToServer(id)
 }
 
 @Composable
@@ -124,14 +126,20 @@ fun PlaylistSheetsHost(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel = hil
                     SheetTitle(sheet.name, Modifier.padding(horizontal = 20.dp))
                     Spacer(Modifier.height(8.dp))
                     MenuRow(OctoIcons.Rename, "Rename") { sheets.show(PlaylistSheet.Rename(sheet.id, sheet.name)) }
-                    MenuRow(OctoIcons.Delete, "Delete") { sheets.show(PlaylistSheet.Delete(sheet.id, sheet.name)) }
+                    if (sheet.canSave) {
+                        MenuRow(OctoIcons.Cloud, "Save to server") {
+                            vm.saveToServer(sheet.id)
+                            sheets.close()
+                        }
+                    }
+                    MenuRow(OctoIcons.Delete, "Delete") { sheets.show(PlaylistSheet.Delete(sheet.id, sheet.name, sheet.onServer)) }
                     Spacer(Modifier.height(12.dp))
                 }
                 is PlaylistSheet.Rename -> NameForm("Rename playlist", sheet.name, "Save") { name ->
                     vm.rename(sheet.id, name)
                     sheets.close()
                 }
-                is PlaylistSheet.Delete -> ConfirmDelete(sheet.name, onCancel = sheets::close) {
+                is PlaylistSheet.Delete -> ConfirmDelete(sheet.name, sheet.onServer, onCancel = sheets::close) {
                     vm.delete(sheet.id)
                     sheets.close()
                 }
@@ -156,7 +164,7 @@ private fun ColumnScope.Picker(sheets: PlaylistSheets, vm: PlaylistSheetsViewMod
             PlaylistLine(playlist.name, songs(playlist.songCount), onClick = {
                 vm.add(playlist.id, trackId)
                 sheets.close()
-            }) {
+            }, onServer = playlist.onServer) {
                 PlaylistCover(playlist.covers, 56.dp)
             }
         }
@@ -195,13 +203,14 @@ private fun NameForm(title: String, initial: String, action: String, onDone: (St
     }
 }
 
-// Asks before a playlist is deleted. Its songs stay in the library.
+// Asks before a playlist is deleted. Its songs stay in the library. One
+// kept with the server goes from the server too.
 @Composable
-private fun ConfirmDelete(name: String, onCancel: () -> Unit, onDelete: () -> Unit) {
+private fun ConfirmDelete(name: String, onServer: Boolean, onCancel: () -> Unit, onDelete: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
         SheetTitle("Delete \"$name\"?")
         Text(
-            "The songs stay in your library.",
+            if (onServer) "It is deleted from your server too. The songs stay in your library." else "The songs stay in your library.",
             style = OctoType.bodySmall,
             color = OctoColors.TextMuted,
             modifier = Modifier.padding(top = 6.dp),

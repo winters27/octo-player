@@ -5,6 +5,7 @@ import app.winters.octo.catalog.PlaylistEntity
 import app.winters.octo.catalog.PlaylistSummary
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.summarize
+import app.winters.octo.playlists.PlaylistSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,11 +17,13 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 // The listener's playlists. Changes run on the store's own scope, so they
-// finish even if the page that asked for them closes.
+// finish even if the page that asked for them closes. A playlist kept with
+// the server sends each change there.
 @Singleton
 class PlaylistStore @Inject constructor(
     private val userDao: UserDao,
     private val catalog: CatalogDao,
+    private val sync: PlaylistSync,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -34,28 +37,48 @@ class PlaylistStore @Inject constructor(
             val now = System.currentTimeMillis()
             userDao.insertPlaylist(PlaylistEntity(id, name.trim(), createdAt = now, updatedAt = now))
             if (trackIds.isNotEmpty()) userDao.addToPlaylist(id, catalog.tracksByIds(trackIds), now)
+            sync.created(id)
         }
     }
 
     fun rename(id: String, name: String) {
-        scope.launch { userDao.renamePlaylist(id, name.trim(), System.currentTimeMillis()) }
+        scope.launch {
+            userDao.renamePlaylist(id, name.trim(), System.currentTimeMillis())
+            sync.changed(id)
+        }
     }
 
     fun delete(id: String) {
-        scope.launch { userDao.deletePlaylist(id) }
+        scope.launch {
+            val playlist = userDao.playlistRow(id) ?: return@launch
+            userDao.deletePlaylist(id)
+            sync.deleted(playlist)
+        }
     }
 
     // Adds songs to the end.
     fun add(id: String, trackIds: List<String>) {
-        scope.launch { userDao.addToPlaylist(id, catalog.tracksByIds(trackIds), System.currentTimeMillis()) }
+        scope.launch {
+            userDao.addToPlaylist(id, catalog.tracksByIds(trackIds), System.currentTimeMillis())
+            sync.changed(id)
+        }
     }
 
     fun remove(id: String, itemId: Long) {
-        scope.launch { userDao.removeFromPlaylist(id, itemId, System.currentTimeMillis()) }
+        scope.launch {
+            userDao.removeFromPlaylist(id, itemId, System.currentTimeMillis())
+            sync.changed(id)
+        }
     }
 
     // Moves a song into the place of the one it was dropped on.
     fun move(id: String, itemId: Long, targetId: Long) {
-        scope.launch { userDao.moveInPlaylist(id, itemId, targetId, System.currentTimeMillis()) }
+        scope.launch {
+            userDao.moveInPlaylist(id, itemId, targetId, System.currentTimeMillis())
+            sync.changed(id)
+        }
     }
+
+    // Makes a playlist only on the phone on the server too, and keeps them in step.
+    fun saveToServer(id: String) = sync.saveToServer(id)
 }

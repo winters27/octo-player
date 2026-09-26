@@ -10,6 +10,8 @@ data class PlaylistSummary(
     val songCount: Int,
     val durationMs: Long,
     val covers: List<String>,
+    // Kept in step with a copy on the server.
+    val onServer: Boolean = false,
 )
 
 // One song of a playlist, as much of it as the list of playlists needs.
@@ -48,6 +50,7 @@ fun summarize(playlists: List<PlaylistEntity>, entries: List<PlaylistEntry>): Li
             songCount = songs.size,
             durationMs = songs.sumOf { it.durationMs },
             covers = mosaicCovers(songs.map { it.albumId to it.artwork }),
+            onServer = playlist.sourceId != null,
         )
     }
 }

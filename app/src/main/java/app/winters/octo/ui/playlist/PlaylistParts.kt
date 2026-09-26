@@ -46,6 +46,7 @@ import app.winters.octo.design.artworkRim
 import app.winters.octo.design.elevation3
 import app.winters.octo.design.mix
 import app.winters.octo.ui.common.Artwork
+import app.winters.octo.ui.common.CloudMark
 import app.winters.octo.ui.common.asLength
 import app.winters.octo.ui.common.songs
 import coil3.compose.AsyncImage
@@ -91,9 +92,16 @@ fun IconTile(icon: Painter, fill: Color, size: Dp, modifier: Modifier = Modifier
 fun LikedCover(size: Dp, modifier: Modifier = Modifier, shape: Shape = ArtworkShape) =
     IconTile(painterResource(OctoIcons.Liked), LikedFill, size, modifier, shape)
 
-// A line in a list of playlists: picture, name, and a line under it.
+// A line in a list of playlists: picture, name, and a line under it, with
+// the cloud mark when the playlist is kept on the server too.
 @Composable
-fun PlaylistLine(title: String, subtitle: String?, onClick: () -> Unit, picture: @Composable () -> Unit) {
+fun PlaylistLine(
+    title: String,
+    subtitle: String?,
+    onClick: () -> Unit,
+    onServer: Boolean = false,
+    picture: @Composable () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -107,7 +115,10 @@ fun PlaylistLine(title: String, subtitle: String?, onClick: () -> Unit, picture:
         Column(Modifier.weight(1f)) {
             Text(title, style = OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (subtitle != null) {
-                Text(subtitle, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 1)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(subtitle, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 1)
+                    if (onServer) CloudMark("On your server")
+                }
             }
         }
     }

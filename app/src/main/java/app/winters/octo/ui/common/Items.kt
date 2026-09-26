@@ -113,12 +113,13 @@ fun SongCard(track: TrackEntity, onClick: () -> Unit) {
     }
 }
 
-// Marks a song that is not on the phone, so it streams from the server.
+// Marks a song that is not on the phone, so it streams from the server,
+// or anything else that lives on the server.
 @Composable
-private fun CloudMark() {
+internal fun CloudMark(description: String = "Streams from your server") {
     Icon(
         painterResource(OctoIcons.Cloud),
-        contentDescription = "Streams from your server",
+        contentDescription = description,
         tint = OctoColors.TextMuted,
         modifier = Modifier.size(14.dp),
     )
