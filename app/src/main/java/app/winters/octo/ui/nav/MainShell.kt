@@ -52,6 +52,8 @@ import app.winters.octo.ui.library.SongsScreen
 import app.winters.octo.ui.menu.LocalSongMenu
 import app.winters.octo.ui.menu.SongMenuHost
 import app.winters.octo.ui.menu.SongMenuState
+import app.winters.octo.ui.online.OnlineAlbumScreen
+import app.winters.octo.ui.online.OnlineArtistScreen
 import app.winters.octo.ui.playlist.LikedScreen
 import app.winters.octo.ui.playlist.LocalPlaylistSheets
 import app.winters.octo.ui.playlist.PlaylistScreen
@@ -154,6 +156,8 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                         entry<SettingsRoute> { SettingsScreen(open) }
                         entry<AlbumRoute> { AlbumScreen(it.id, open, back) }
                         entry<ArtistRoute> { ArtistScreen(it.id, open, back) }
+                        entry<OnlineAlbumRoute> { OnlineAlbumScreen(it.id, open, back) }
+                        entry<OnlineArtistRoute> { OnlineArtistScreen(it.id, open, back) }
                         entry<AlbumsRoute> { AlbumsScreen(open, back) }
                         entry<ArtistsRoute> { ArtistsScreen(open, back) }
                         entry<SongsRoute> { SongsScreen(back) }
