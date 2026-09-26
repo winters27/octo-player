@@ -23,12 +23,19 @@ class WhatsNewTest {
 
     @Test
     fun theListIsPlainWords() {
-        assertTrue(WhatsNewItems.isNotEmpty())
-        // The long dash, by its code, so this file does not hold one.
-        val longDash = Char(0x2014)
-        WhatsNewItems.forEach { item ->
-            assertTrue(item.title.isNotBlank() && item.detail.isNotBlank())
-            assertFalse(longDash in item.title || longDash in item.detail)
+        assertTrue(WhatsNewGroups.isNotEmpty())
+        // The long dashes, by their codes, so this file does not hold one.
+        val dashes = listOf(Char(0x2014), Char(0x2013))
+        val text = listOf(WhatsNewSummary) + WhatsNewGroups.flatMap { listOf(it.title) + it.lines }
+        text.forEach { line ->
+            assertTrue(line.isNotBlank())
+            assertFalse(line, dashes.any { it in line })
         }
+        WhatsNewGroups.forEach { assertTrue(it.title, it.lines.isNotEmpty()) }
+    }
+
+    @Test
+    fun theHomeCardLineIsShort() {
+        assertTrue(WhatsNewSummary.length <= 70)
     }
 }

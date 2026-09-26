@@ -1,5 +1,6 @@
 package app.winters.octo.whatsnew
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,7 +17,8 @@ import app.winters.octo.BuildConfig
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 
-// The list of what is new, inside a sheet. It scrolls when it is long.
+// The list of what is new, inside a sheet, a heading for each part of the
+// app. It scrolls when it is long.
 @Composable
 fun WhatsNewList() {
     Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
@@ -25,10 +27,13 @@ fun WhatsNewList() {
             Text("Version ${BuildConfig.VERSION_NAME}", style = OctoType.caption, color = OctoColors.TextMuted)
         }
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            WhatsNewItems.forEach { item ->
-                Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                    Text(item.title, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
-                    Text(item.detail, style = OctoType.caption, color = OctoColors.TextMuted)
+            WhatsNewGroups.forEach { group ->
+                Column(
+                    Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(group.title, style = OctoType.label, color = OctoColors.TextPrimary)
+                    group.lines.forEach { line -> Text(line, style = OctoType.bodySmall, color = OctoColors.TextMuted) }
                 }
             }
         }

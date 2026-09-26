@@ -29,9 +29,9 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.glassPanel
 import app.winters.octo.ui.common.FloatingSheet
-import app.winters.octo.whatsnew.WhatsNewItems
 import app.winters.octo.whatsnew.WhatsNewList
 import app.winters.octo.whatsnew.WhatsNewStore
+import app.winters.octo.whatsnew.WhatsNewSummary
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -71,7 +71,7 @@ fun WhatsNewCard(vm: WhatsNewViewModel = hiltViewModel()) {
         ) {
             Text("New in Octo", style = OctoType.caption, color = OctoColors.TextMuted)
             Text(
-                WhatsNewItems.take(3).joinToString(", ") { it.title },
+                WhatsNewSummary,
                 style = OctoType.body,
                 color = OctoColors.TextPrimary,
                 maxLines = 2,
