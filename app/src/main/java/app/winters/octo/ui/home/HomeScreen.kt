@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
 import app.winters.octo.catalog.AlbumEntity
@@ -35,6 +36,7 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.glassPanel
 import app.winters.octo.device.Access
+import app.winters.octo.discovery.Station
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistCircle
 import app.winters.octo.ui.common.ScreenTitle
@@ -53,6 +55,11 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
     val recentlyPlayed by vm.recentlyPlayed.collectAsStateWithLifecycle()
     val mostPlayed by vm.mostPlayed.collectAsStateWithLifecycle()
 
+    LifecycleResumeEffect(Unit) {
+        vm.onShown()
+        onPauseOrDispose { }
+    }
+
     PullToRefreshBox(
         isRefreshing = vm.refreshing,
         onRefresh = vm::refresh,
@@ -65,6 +72,7 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
                 count == 0 -> item { EmptyCard() }
                 else -> {
                     shelf("Recently played", recentlyPlayed, onOpen)
+                    stationShelf(vm.stations, vm.startingStation, vm::playStation)
                     shelf("Recently added", recent.orEmpty(), onOpen)
                     songShelf("Most played", mostPlayed, vm::play)
                     shelf("Something different", vm.surprise, onOpen)
@@ -121,6 +129,26 @@ private fun androidx.compose.foundation.lazy.LazyListScope.songShelf(
         ) {
             itemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
                 SongCard(track, onClick = { onPlay(tracks, index) })
+            }
+        }
+    }
+}
+
+// The server's stations; tapping one plays what it has lined up.
+private fun androidx.compose.foundation.lazy.LazyListScope.stationShelf(
+    stations: List<Station>,
+    starting: String?,
+    onPlay: (Station) -> Unit,
+) {
+    if (stations.isEmpty()) return
+    item(key = "title:Stations") { SectionTitle("Stations", Modifier.padding(top = 18.dp)) }
+    item(key = "row:Stations") {
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            items(stations, key = { it.id }) { station ->
+                StationCard(station, starting = station.id == starting, onClick = { onPlay(station) })
             }
         }
     }
