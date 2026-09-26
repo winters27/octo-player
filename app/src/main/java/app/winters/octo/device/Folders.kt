@@ -30,6 +30,10 @@ fun List<DeviceFile>.folders(excluded: Set<String>): List<MusicFolder> =
         .map { (name, count) -> MusicFolder(name, count, name !in excluded) }
         .sortedByDescending { it.songs }
 
+// A file's path from the top of its storage, like "Music/Kavinsky/01.mp3".
+fun relativeFile(folder: String?, fileName: String): String =
+    listOfNotNull(folder?.trim('/')?.takeIf(String::isNotEmpty), fileName).joinToString("/")
+
 // The phone's main storage, as the media library names it.
 private const val MAIN_STORAGE = "external_primary"
 

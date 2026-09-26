@@ -1,5 +1,9 @@
 package app.winters.octo.ui.playlist
 
+import android.net.Uri
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -23,6 +27,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
@@ -46,12 +51,15 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.playback.PlaylistStore
+import app.winters.octo.playlists.PlaylistFiles
+import app.winters.octo.playlists.playlistFileName
 import app.winters.octo.ui.common.songs
 import app.winters.octo.ui.menu.MenuRow
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 // The sheets for playlists. They are drawn over everything, the bar
@@ -96,7 +104,10 @@ class PlaylistSheets {
 val LocalPlaylistSheets = staticCompositionLocalOf<PlaylistSheets> { error("No playlist sheets") }
 
 @HiltViewModel
-class PlaylistSheetsViewModel @Inject constructor(private val store: PlaylistStore) : ViewModel() {
+class PlaylistSheetsViewModel @Inject constructor(
+    private val store: PlaylistStore,
+    private val files: PlaylistFiles,
+) : ViewModel() {
     val playlists: StateFlow<List<PlaylistSummary>> =
         store.playlists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -105,6 +116,12 @@ class PlaylistSheetsViewModel @Inject constructor(private val store: PlaylistSto
     fun delete(id: String) = store.delete(id)
     fun add(id: String, trackId: String) = store.add(id, listOf(trackId))
     fun saveToServer(id: String) = store.saveToServer(id)
+
+    fun export(id: String, uri: Uri) {
+        viewModelScope.launch {
+            if (!files.export(id, uri)) Log.w("Octo", "playlist export: could not write the file")
+        }
+    }
 }
 
 @Composable
@@ -112,6 +129,13 @@ fun PlaylistSheetsHost(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel = hil
     // Closing puts the keyboard away with it.
     val focus = LocalFocusManager.current
     LaunchedEffect(sheets.open) { if (sheets.open == null) focus.clearFocus() }
+    // The playlist being exported while the file picker is open.
+    var exporting by rememberSaveable { mutableStateOf<String?>(null) }
+    val exportTo = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/x-mpegurl")) { uri ->
+        val id = exporting
+        exporting = null
+        if (uri != null && id != null) vm.export(id, uri)
+    }
 
     GlassSheet(visible = sheets.open != null, onDismiss = sheets::close) {
         val sheet = sheets.last ?: return@GlassSheet
@@ -131,6 +155,11 @@ fun PlaylistSheetsHost(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel = hil
                             vm.saveToServer(sheet.id)
                             sheets.close()
                         }
+                    }
+                    MenuRow(OctoIcons.Share, "Export as M3U") {
+                        exporting = sheet.id
+                        sheets.close()
+                        exportTo.launch(playlistFileName(sheet.name))
                     }
                     MenuRow(OctoIcons.Delete, "Delete") { sheets.show(PlaylistSheet.Delete(sheet.id, sheet.name, sheet.onServer)) }
                     Spacer(Modifier.height(12.dp))
