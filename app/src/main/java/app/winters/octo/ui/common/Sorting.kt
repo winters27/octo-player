@@ -20,7 +20,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
@@ -39,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -48,6 +51,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -159,17 +163,24 @@ fun <T> LazyListScope.sortedRows(items: List<T>, key: (T) -> Any, row: @Composab
     }
 }
 
+// The letter a run of rows starts with. It stays at the top while its rows
+// scroll, as a small dark pill rather than a full-width band, so the page's
+// glow still shows around it.
 @Composable
 private fun LetterHeading(letter: Char) {
-    Text(
-        letter.toString(),
-        style = OctoType.caption.copy(fontWeight = FontWeight.Bold),
-        color = OctoColors.TextMuted,
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(OctoColors.Background)
-            .padding(horizontal = 20.dp, vertical = 6.dp),
-    )
+    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Text(
+            letter.toString(),
+            style = OctoType.caption.copy(fontWeight = FontWeight.Bold),
+            color = OctoColors.TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .background(Color.Black.copy(alpha = 0.55f), CircleShape)
+                .sizeIn(minWidth = 26.dp, minHeight = 26.dp)
+                .wrapContentHeight(Alignment.CenterVertically)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+    }
 }
 
 // A list this long, ordered by name, gets the letter rail.
