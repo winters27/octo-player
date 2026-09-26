@@ -52,7 +52,7 @@ private val SheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 private val SheetFill = mix(OctoColors.Background, OctoColors.Accent, 0.05f).copy(alpha = 0.97f)
 
 // A panel that rises from the bottom over a dimmed screen, at most 70% of
-// the screen tall. Tapping the dim area, pulling the panel down, or back
+// the screen tall; what does not fit scrolls. Tapping the dim area, pulling the panel down, or back
 // closes it. Place it last inside a full-screen box so it sits on top.
 @Composable
 fun GlassSheet(
@@ -118,7 +118,9 @@ fun GlassSheet(
                     ) {
                         Box(Modifier.size(width = 36.dp, height = 4.dp).clip(CircleShape).background(OctoColors.TextMuted))
                     }
-                    content()
+                    // The lines scroll under the handle when there are more
+                    // than fit.
+                    SheetColumn(content = content)
                 }
             }
         }
