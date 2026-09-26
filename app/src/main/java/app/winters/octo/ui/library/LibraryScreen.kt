@@ -68,6 +68,7 @@ import app.winters.octo.ui.nav.ArtistsRoute
 import app.winters.octo.ui.nav.DownloadsRoute
 import app.winters.octo.ui.nav.FoldersRoute
 import app.winters.octo.ui.nav.GenresRoute
+import app.winters.octo.ui.nav.HistoryRoute
 import app.winters.octo.ui.nav.PlaylistsRoute
 import app.winters.octo.ui.nav.SongsRoute
 
@@ -82,6 +83,8 @@ private val sections = listOf(
     Section(OctoIcons.Genres, "Genres", GenresRoute),
     Section(OctoIcons.Folder, "Folders", FoldersRoute),
     Section(OctoIcons.Downloaded, "Downloads", DownloadsRoute),
+    // Stands in until the history symbol joins the icon set.
+    Section(OctoIcons.Lossless, "History", HistoryRoute()),
 )
 
 // The library's front page: a menu of ways in, then the newest albums,

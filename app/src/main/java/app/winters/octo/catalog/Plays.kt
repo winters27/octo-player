@@ -9,6 +9,12 @@ data class PlayedTrack(
     val lastPlayedAt: Long,
 )
 
+// One play of a song still in the library, and when it started.
+data class PlayedAt(
+    @Embedded val track: TrackEntity,
+    val startedAt: Long,
+)
+
 // An album still in the library, with when any of its songs was last played.
 data class PlayedAlbum(
     @Embedded val album: AlbumEntity,

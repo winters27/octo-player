@@ -61,6 +61,7 @@ import app.winters.octo.ui.common.LocalOpenPage
 import app.winters.octo.ui.folders.FoldersScreen
 import app.winters.octo.ui.genre.GenreScreen
 import app.winters.octo.ui.genre.GenresScreen
+import app.winters.octo.ui.history.HistoryScreen
 import app.winters.octo.ui.home.HomeScreen
 import app.winters.octo.ui.library.AlbumsScreen
 import app.winters.octo.ui.library.ArtistsScreen
@@ -217,6 +218,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             entry<SoundRoute> { SoundScreen(back) }
                             entry<SharesRoute> { SharesScreen(back) }
                             entry<RadioStationsRoute> { RadioStationsScreen(back) }
+                            entry<HistoryRoute> { HistoryScreen(it.mostPlayed, back) }
                         },
                     )
                 }

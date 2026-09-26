@@ -1,23 +1,30 @@
 package app.winters.octo.ui.home
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -27,6 +34,7 @@ import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.GlazeButton
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.glassPanel
@@ -43,6 +51,7 @@ import app.winters.octo.ui.common.rememberAccessRequest
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
+import app.winters.octo.ui.nav.HistoryRoute
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,10 +82,10 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
             when {
                 layout.empty -> item(key = "empty") { EmptyCard(offerAccess = !layout.askAccess) }
                 layout.shelves -> {
-                    shelf("Recently played", recentlyPlayed, onOpen)
+                    shelf("Recently played", recentlyPlayed, onOpen, onTitle = { onOpen(HistoryRoute()) })
                     stationShelf(vm.stations, vm.startingStation, vm::playStation)
                     shelf("Recently added", recent.orEmpty(), onOpen)
-                    songShelf("Most played", mostPlayed, vm::play)
+                    songShelf("Most played", mostPlayed, vm::play, onTitle = { onOpen(HistoryRoute(mostPlayed = true)) })
                     shelf("Something different", vm.surprise, onOpen)
                     if (vm.artists.isNotEmpty()) {
                         item { SectionTitle("Artists", Modifier.padding(top = 18.dp)) }
@@ -101,9 +110,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.shelf(
     title: String,
     albums: List<AlbumEntity>,
     onOpen: (NavKey) -> Unit,
+    onTitle: (() -> Unit)? = null,
 ) {
     if (albums.isEmpty()) return
-    item(key = "title:$title") { SectionTitle(title, Modifier.padding(top = 18.dp)) }
+    item(key = "title:$title") { ShelfTitle(title, onTitle) }
     item(key = "row:$title") {
         LazyRow(
             contentPadding = PaddingValues(horizontal = 20.dp),
@@ -121,9 +131,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.songShelf(
     title: String,
     tracks: List<TrackEntity>,
     onPlay: (List<TrackEntity>, Int) -> Unit,
+    onTitle: (() -> Unit)? = null,
 ) {
     if (tracks.isEmpty()) return
-    item(key = "title:$title") { SectionTitle(title, Modifier.padding(top = 18.dp)) }
+    item(key = "title:$title") { ShelfTitle(title, onTitle) }
     item(key = "row:$title") {
         LazyRow(
             contentPadding = PaddingValues(horizontal = 20.dp),
@@ -133,6 +144,31 @@ private fun androidx.compose.foundation.lazy.LazyListScope.songShelf(
                 SongCard(track, onClick = { onPlay(tracks, index) })
             }
         }
+    }
+}
+
+// A shelf's name. One that leads to a page of its own is a button, with a
+// chevron saying so.
+@Composable
+private fun ShelfTitle(title: String, onClick: (() -> Unit)?) {
+    if (onClick == null) {
+        SectionTitle(title, Modifier.padding(top = 18.dp))
+        return
+    }
+    Row(
+        Modifier
+            .padding(top = 18.dp)
+            .clickable(role = Role.Button, onClickLabel = "Open $title", onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SectionTitle(title)
+        // Drawn into the title's own end margin, close to the words.
+        Icon(
+            painterResource(OctoIcons.Chevron),
+            contentDescription = null,
+            tint = OctoColors.TextMuted,
+            modifier = Modifier.offset(x = (-16).dp).size(22.dp),
+        )
     }
 }
 

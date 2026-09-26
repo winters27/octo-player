@@ -340,6 +340,29 @@ interface UserDao {
     )
     fun playedTracks(): Flow<List<PlayedTrack>>
 
+    // Played songs counted from a moment on, for "most played" over a
+    // stretch of time.
+    @Query(
+        """
+        SELECT t.*, COUNT(*) AS plays, MAX(p.startedAt) AS lastPlayedAt
+        FROM play_event p JOIN track t ON t.id = p.trackId
+        WHERE p.startedAt >= :since
+        GROUP BY t.id
+        """,
+    )
+    fun playedTracksSince(since: Long): Flow<List<PlayedTrack>>
+
+    // The latest plays one by one, newest first, of songs the library still has.
+    @Query(
+        """
+        SELECT t.*, p.startedAt AS startedAt
+        FROM play_event p JOIN track t ON t.id = p.trackId
+        ORDER BY p.startedAt DESC
+        LIMIT :limit
+        """,
+    )
+    fun recentPlays(limit: Int): Flow<List<PlayedAt>>
+
     // Every album with a played song that the library still has.
     @Query(
         """

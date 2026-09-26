@@ -36,3 +36,6 @@ import kotlinx.serialization.Serializable
 
 // The equalizer and everything else that shapes the sound.
 @Serializable data object SoundRoute : NavKey
+
+// What was played: the latest plays by day, or the most played songs.
+@Serializable data class HistoryRoute(val mostPlayed: Boolean = false) : NavKey
