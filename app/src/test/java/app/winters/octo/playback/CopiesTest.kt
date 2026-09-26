@@ -144,4 +144,53 @@ class CopiesTest {
         assertEquals("MP3", open.label)
         assertEquals("MP3 · 192 kbps", open.full)
     }
+
+    private val downloaded = downloadedCopy(serverFlac, "file:///music/Octo/song.flac", "audio/flac", 30_000_000)
+
+    @Test
+    fun aDownloadPlaysBeforeTheStream() {
+        for (preference in CopyPreference.entries) {
+            val picked = chooseCopy(listOf(serverFlac), downloaded, streamInstead = false, preference, serverReachable = true)
+            assertEquals(preference.name, "file:///music/Octo/song.flac", picked?.uri)
+        }
+    }
+
+    @Test
+    fun aDownloadPlaysWithNoConnection() {
+        val picked = chooseCopy(listOf(serverFlac), downloaded, streamInstead = true, CopyPreference.PhoneFirst, serverReachable = false)
+        assertEquals("file:///music/Octo/song.flac", picked?.uri)
+    }
+
+    @Test
+    fun preferringStreamsOnWifiStreamsEvenWhenDownloaded() {
+        val picked = chooseCopy(listOf(serverFlac), downloaded, streamInstead = true, CopyPreference.PhoneFirst, serverReachable = true)
+        assertEquals("s", picked?.id)
+    }
+
+    @Test
+    fun aPhoneFileStillComesFirstWhenThereIsOne() {
+        val picked = chooseCopy(listOf(serverFlac, phoneMp3), downloaded, streamInstead = false, CopyPreference.PhoneFirst, serverReachable = true)
+        assertEquals("p", picked?.id)
+        // Best quality weighs the phone's file against the download, never the stream.
+        val best = chooseCopy(listOf(serverFlac, phoneMp3), downloaded, streamInstead = false, CopyPreference.BestQuality, serverReachable = true)
+        assertEquals(downloaded.id, best?.id)
+    }
+
+    @Test
+    fun withoutADownloadNothingChanges() {
+        val picked = chooseCopy(listOf(serverFlac, phoneMp3), null, streamInstead = false, CopyPreference.BestQuality, serverReachable = true)
+        assertEquals("s", picked?.id)
+    }
+
+    @Test
+    fun aDownloadIsACopyOnThePhone() {
+        assertEquals(false, downloaded.isServerCopy)
+        assertEquals(DOWNLOAD_SOURCE, downloaded.sourceId)
+        assertEquals(serverFlac.bitDepth, downloaded.bitDepth)
+        // One made smaller keeps only what is still true of it.
+        val small = downloadedCopy(serverFlac, "file:///music/Octo/song.mp3", "audio/mpeg", 5_760_000)
+        assertEquals("audio/mpeg", small.mimeType)
+        assertNull(small.bitDepth)
+        assertEquals(192_000, bitrateOf(small))
+    }
 }

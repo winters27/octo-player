@@ -22,6 +22,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object FoldersRoute : NavKey
 @Serializable data object PlaylistsRoute : NavKey
 @Serializable data object LikedRoute : NavKey
+@Serializable data object DownloadsRoute : NavKey
 @Serializable data class PlaylistRoute(val id: String) : NavKey
 @Serializable data object SignInRoute : NavKey
 

@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
@@ -29,7 +30,6 @@ import androidx.compose.ui.unit.dp
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.TrackEntity
-import app.winters.octo.catalog.isFind
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -82,6 +82,7 @@ fun SongCard(track: TrackEntity, onClick: () -> Unit) {
     Column(
         Modifier
             .width(150.dp)
+            .alpha(if (LocalOfflineMarks.current.isOutOfReach(track)) OutOfReachAlpha else 1f)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = {
@@ -108,7 +109,7 @@ fun SongCard(track: TrackEntity, onClick: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
             )
-            if (!track.onPhone) CloudMark()
+            SourceMark(track, cloudForFinds = true)
         }
     }
 }
@@ -155,7 +156,9 @@ fun SongRow(
                 },
             )
             .height(56.dp)
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 20.dp)
+            // With no connection, a song that cannot play is drawn faint.
+            .alpha(if (LocalOfflineMarks.current.isOutOfReach(track)) OutOfReachAlpha else 1f),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -178,7 +181,7 @@ fun SongRow(
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             // A song found online carries a download button instead, and
             // often has no known length.
-            if (!track.onPhone && !isFind(track.id)) CloudMark()
+            SourceMark(track)
             if (track.durationMs > 0) {
                 Text((track.durationMs / 1000).toInt().asClock(), style = OctoType.caption, color = OctoColors.TextMuted)
             }

@@ -27,6 +27,7 @@ import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.PlaylistEntity
 import app.winters.octo.catalog.PlaylistTrack
 import app.winters.octo.catalog.UserDao
+import app.winters.octo.catalog.isFind
 import app.winters.octo.catalog.mosaicCovers
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.elevation3
@@ -142,10 +143,14 @@ fun PlaylistScreen(
                         onShuffle = vm::shuffle,
                         onMore = {
                             val onServer = playlist.sourceId != null
-                            sheets.show(PlaylistSheet.Options(playlist.id, playlist.name, onServer, canSave = serverAvailable && !onServer))
+                            val canDownload = tracks.any { !it.track.onPhone && !isFind(it.track.id) }
+                            sheets.show(
+                                PlaylistSheet.Options(playlist.id, playlist.name, onServer, canSave = serverAvailable && !onServer, canDownload = canDownload),
+                            )
                         },
                     ) { modifier, shape -> PlaylistCover(current.covers, 240.dp, modifier, shape) }
                 }
+                item(key = "keep") { KeepPlaylistDownloaded(playlist.id, tracks.map { it.track }) }
                 if (playlist.sourceId != null && phoneOnly > 0) {
                     item(key = "phone-only") { EmptyNote(phoneOnlyNote(phoneOnly)) }
                 }

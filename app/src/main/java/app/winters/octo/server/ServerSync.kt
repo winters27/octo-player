@@ -15,6 +15,7 @@ import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.data.userMessage
 import app.winters.octo.discovery.Downloads
+import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playlists.PlaylistSync
 import app.winters.octo.subsonic.readLibrary
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -55,6 +56,7 @@ class ServerSync @Inject constructor(
     private val listening: ListeningSync,
     private val downloads: Downloads,
     private val playlists: PlaylistSync,
+    private val offline: OfflineDownloads,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val dropLock = Mutex()
@@ -141,6 +143,8 @@ class ServerSync @Inject constructor(
             downloads.afterSync()
             // Brings the server's playlists and the phone's copies together.
             playlists.afterSync()
+            // Downloads follow their songs, and songs kept downloaded that just arrived start.
+            offline.afterSync()
             context.syncData.edit { p ->
                 p[SOURCE_ID] = sourceId
                 p[SYNCED_AT] = System.currentTimeMillis()

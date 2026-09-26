@@ -44,6 +44,11 @@ import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.DownloadState
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.asTrack
+import app.winters.octo.offline.DownloadEntity
+import app.winters.octo.offline.DownloadStatus
+import app.winters.octo.offline.OfflineDownloads
+import app.winters.octo.offline.Reasons
+import app.winters.octo.offline.reasons
 import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.RatingStore
@@ -110,13 +115,14 @@ class SongMenuState {
 val LocalSongMenu = staticCompositionLocalOf<SongMenuState> { error("No song menu") }
 
 // The choices in a song's menu, in the order shown.
-enum class SongAction { PlayNext, AddToQueue, StartRadio, Download, AddToPlaylist, Share, Like, Rate, GoToAlbum, GoToArtist }
+enum class SongAction { PlayNext, AddToQueue, StartRadio, Download, AddToPlaylist, KeepOffline, Share, Like, Rate, GoToAlbum, GoToArtist }
 
 // What a song's menu offers. A song found online has no album or artist in
 // the library and cannot be liked, rated or put in a playlist yet, so it
 // offers a download instead. Radio needs a server signed in; sharing needs
-// a copy of the song on a server that shares.
-fun songActions(find: Boolean, radio: Boolean, share: Boolean = false): List<SongAction> = buildList {
+// a copy of the song on a server that shares. A library song only on a
+// server (`offline`) can be downloaded to the phone.
+fun songActions(find: Boolean, radio: Boolean, share: Boolean = false, offline: Boolean = false): List<SongAction> = buildList {
     add(SongAction.PlayNext)
     add(SongAction.AddToQueue)
     if (radio) add(SongAction.StartRadio)
@@ -124,6 +130,7 @@ fun songActions(find: Boolean, radio: Boolean, share: Boolean = false): List<Son
         add(SongAction.Download)
     } else {
         add(SongAction.AddToPlaylist)
+        if (offline) add(SongAction.KeepOffline)
         if (share) add(SongAction.Share)
         add(SongAction.Like)
         add(SongAction.Rate)
@@ -139,6 +146,21 @@ fun downloadLabel(state: DownloadState): String = when (state) {
     DownloadState.Done -> "In your library"
 }
 
+// The row's words for a library song downloaded to the phone, or not yet.
+// `byHand` is a download asked for from a menu, which can be removed here;
+// one a rule keeps (Liked songs, a playlist) goes with its rule.
+fun keepOfflineLabel(state: DownloadStatus?, byHand: Boolean): String = when (state) {
+    null -> "Download"
+    DownloadStatus.Queued -> "Waiting to download"
+    DownloadStatus.Downloading -> "Downloading"
+    DownloadStatus.Done -> if (byHand) "Remove download" else "Kept downloaded"
+    DownloadStatus.Failed -> "Download failed, try again"
+}
+
+// Whether the row can be tapped.
+fun keepOfflineEnabled(state: DownloadStatus?, byHand: Boolean): Boolean =
+    state == null || state == DownloadStatus.Failed || (state == DownloadStatus.Done && byHand)
+
 @HiltViewModel
 class SongMenuViewModel @Inject constructor(
     private val catalog: CatalogDao,
@@ -149,9 +171,17 @@ class SongMenuViewModel @Inject constructor(
     private val downloads: Downloads,
     private val ratings: RatingStore,
     private val controls: ServerControls,
+    private val offline: OfflineDownloads,
 ) : ViewModel() {
     val liked: StateFlow<Set<String>> = likes.liked
     val downloadStates: StateFlow<Map<String, DownloadState>> = downloads.states
+
+    // Library songs downloaded to the phone, or on their way.
+    val kept: StateFlow<Map<String, DownloadEntity>> = offline.byTrack
+
+    fun keepOffline(id: String) = offline.download(listOf(id))
+    fun removeOffline(id: String) = offline.remove(id)
+    fun retryOffline(id: String) = offline.retry(id)
 
     // Whether songs can start a radio: only with a server signed in.
     val radio: StateFlow<Boolean> = discovery.available
@@ -205,6 +235,7 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
         val track by remember(trackId) { vm.track(trackId) }.collectAsStateWithLifecycle(null)
         val liked by vm.liked.collectAsStateWithLifecycle()
         val downloads by vm.downloadStates.collectAsStateWithLifecycle()
+        val kept by vm.kept.collectAsStateWithLifecycle()
         val radio by vm.radio.collectAsStateWithLifecycle()
         val sharing by vm.sharing.collectAsStateWithLifecycle()
         val shareId by produceState<String?>(null, trackId, sharing) { value = if (sharing) vm.shareId(trackId) else null }
@@ -213,9 +244,12 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
         val isLiked = trackId in liked
         val playlistSheets = LocalPlaylistSheets.current
 
+        val keptRow = kept[trackId]
+        val byHand = keptRow?.reasons?.contains(Reasons.MANUAL) == true
+
         SongHeader(song)
         Spacer(Modifier.height(8.dp))
-        for (action in songActions(isFind(trackId), radio, share = shareId != null)) {
+        for (action in songActions(isFind(trackId), radio, share = shareId != null, offline = !song.onPhone || keptRow != null)) {
             when (action) {
                 SongAction.PlayNext -> MenuRow(OctoIcons.PlayNext, "Play next") {
                     vm.playNext(trackId)
@@ -243,6 +277,21 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
                 SongAction.AddToPlaylist -> MenuRow(OctoIcons.AddToPlaylist, "Add to playlist") {
                     state.close()
                     playlistSheets.show(PlaylistSheet.Pick(trackId))
+                }
+                SongAction.KeepOffline -> {
+                    val state = keptRow?.state
+                    val icon = when (state) {
+                        DownloadStatus.Queued, DownloadStatus.Downloading -> OctoIcons.Downloading
+                        DownloadStatus.Done -> OctoIcons.Downloaded
+                        null, DownloadStatus.Failed -> OctoIcons.Download
+                    }
+                    MenuRow(icon, keepOfflineLabel(state, byHand), enabled = keepOfflineEnabled(state, byHand)) {
+                        when (state) {
+                            null -> vm.keepOffline(trackId)
+                            DownloadStatus.Failed -> vm.retryOffline(trackId)
+                            else -> vm.removeOffline(trackId)
+                        }
+                    }
                 }
                 SongAction.Share -> MenuRow(OctoIcons.Share, "Share") {
                     state.close()

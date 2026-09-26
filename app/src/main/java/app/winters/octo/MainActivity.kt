@@ -11,6 +11,7 @@ import app.winters.octo.design.OctoTheme
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.server.QueueSync
+import app.winters.octo.ui.common.ProvideOfflineMarks
 import app.winters.octo.ui.nav.MainShell
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -25,7 +26,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // The app opens on the library; servers are an optional add-on.
-        setContent { OctoTheme { MainShell(library, playback) } }
+        setContent { OctoTheme { ProvideOfflineMarks { MainShell(library, playback) } } }
         // Opened by a voice request; not again when the screen turns.
         if (savedInstanceState == null) playIfAsked(intent)
     }

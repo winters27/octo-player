@@ -11,10 +11,14 @@ import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.SourceTrackEntity
 import app.winters.octo.catalog.isFind
 import app.winters.octo.discovery.asTrack
+import app.winters.octo.offline.OfflineDownloads
+import app.winters.octo.offline.OfflineSettings
 import app.winters.octo.player.StreamPrefs
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,6 +34,8 @@ class PlayableSongs @Inject constructor(
     private val sources: SourceDao,
     private val streams: Streams,
     private val online: OnlineDao,
+    private val offline: OfflineDownloads,
+    private val offlineSettings: OfflineSettings,
 ) {
     // In the order asked for, dropping any the app no longer knows.
     suspend fun items(ids: List<String>): List<MediaItem> {
@@ -47,7 +53,7 @@ class PlayableSongs @Inject constructor(
 
     private fun findItem(find: OnlineSongEntity, prefs: StreamPrefs): MediaItem {
         val bitrate = find.bitrate?.times(1000)
-        return find.asTrack().toMediaItem(streams.uriFor(find.nativeId, find.mimeType, bitrate), streams.mimeTypeFor(find.mimeType, bitrate, prefs))
+        return find.asTrack().toMediaItem(streams.uriFor(find.sourceId, find.nativeId, find.mimeType, bitrate), streams.mimeTypeFor(find.mimeType, bitrate, prefs))
     }
 
     private suspend fun libraryItems(ids: List<String>): List<MediaItem> {
@@ -62,9 +68,16 @@ class PlayableSongs @Inject constructor(
         // Phone files that could be swapped for a stream, checked in case one is gone.
         val missing = if (reachable) missingPhoneFiles(onServer.flatten().filterNot { it.isServerCopy }) else emptySet()
         val prefs = streams.prefs()
+        // Downloads play first, unless streaming on Wi-Fi is preferred and the phone is on it.
+        val downloads = if (onServer.isEmpty()) emptyMap() else offline.playableCopies(onServer.map { it.first().mergedId })
+        val streamInstead = downloads.isNotEmpty() && offlineSettings.prefs.first().streamOnWifi && streams.onWifi()
         return tracks.map { track ->
             val all = copies[track.id].orEmpty()
-            val copy = chooseCopy(all, prefs.copies, reachable) { it.uri in missing }
+            val download = downloads[track.id]?.let { row ->
+                val server = all.firstOrNull { it.sourceId == row.sourceId && it.nativeId == row.serverId } ?: all.firstOrNull { it.isServerCopy }
+                server?.let { downloadedCopy(it, File(row.path).toUri().toString(), row.format, row.sizeBytes) }
+            }
+            val copy = chooseCopy(all, download, streamInstead, prefs.copies, reachable) { it.uri in missing }
             val loudness = storedLoudness(copy, all)
             when {
                 copy == null -> track.toMediaItem(track.uri, track.mimeType, loudness)

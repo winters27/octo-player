@@ -183,6 +183,8 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
 
         StreamingCard(Modifier.padding(top = 16.dp))
 
+        OfflineCard(Modifier.padding(top = 16.dp))
+
         Card("About", Modifier.padding(top = 16.dp)) {
             Line("Octo", BuildConfig.VERSION_NAME)
         }

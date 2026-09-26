@@ -41,6 +41,41 @@ fun chooseCopy(
     }
 }
 
+// The copy to play when the song may also be downloaded. A download plays
+// like a file on the phone, ahead of any stream, unless streaming is
+// preferred right now (`streamInstead`) and the server can be reached.
+fun chooseCopy(
+    copies: List<SourceTrackEntity>,
+    download: SourceTrackEntity?,
+    streamInstead: Boolean,
+    preference: CopyPreference,
+    serverReachable: Boolean,
+    phoneFileMissing: (SourceTrackEntity) -> Boolean = { false },
+): SourceTrackEntity? {
+    if (download == null || (streamInstead && serverReachable)) return chooseCopy(copies, preference, serverReachable, phoneFileMissing)
+    return chooseCopy(copies.filterNot { it.isServerCopy } + download, preference, serverReachable = false, phoneFileMissing)
+}
+
+// Where downloads sit among a song's copies.
+const val DOWNLOAD_SOURCE = "download"
+
+// A downloaded file of a server copy, as one more copy of the song: the
+// server's copy, but in the file, and as big as the file is. A download made
+// smaller than the server's file keeps only what is still true of it.
+fun downloadedCopy(server: SourceTrackEntity, uri: String, format: String?, sizeBytes: Long): SourceTrackEntity {
+    val same = format == null || format == server.mimeType
+    return server.copy(
+        id = "$DOWNLOAD_SOURCE:${server.id}",
+        sourceId = DOWNLOAD_SOURCE,
+        uri = uri,
+        mimeType = format ?: server.mimeType,
+        sizeBytes = sizeBytes.takeIf { it > 0 } ?: server.sizeBytes,
+        bitrate = if (same) server.bitrate else null,
+        sampleRate = if (same) server.sampleRate else null,
+        bitDepth = if (same) server.bitDepth else null,
+    )
+}
+
 // Above zero when `a` sounds better than `b`: lossless beats lossy, then the
 // higher sample rate, the deeper bits, and last the higher bitrate. A fact
 // only one of them has is skipped.

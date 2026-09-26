@@ -102,7 +102,12 @@ fun AlbumScreen(
                         onArtist = { onOpen(ArtistRoute(a.artistId)) },
                         onPlay = { vm.play(0) },
                         onShuffle = vm::shuffle,
-                        more = { AlbumShareButton(id, a.title) },
+                        more = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                AlbumShareButton(id, a.title)
+                                AlbumDownloadButton(tracks)
+                            }
+                        },
                     )
                 }
             }

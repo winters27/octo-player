@@ -35,4 +35,8 @@ class CatalogMerge @Inject constructor(
         user.showPhoneRatings()
         merged
     }
+
+    // Runs `block` between rebuilds, never during one, so it sees song ids
+    // and everything that follows them already in step.
+    suspend fun <T> betweenRebuilds(block: suspend () -> T): T = lock.withLock { block() }
 }

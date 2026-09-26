@@ -58,6 +58,7 @@ fun LikedScreen(onBack: () -> Unit, vm: LikedViewModel = hiltViewModel()) {
                         onShuffle = vm::shuffle,
                     ) { modifier, shape -> LikedCover(240.dp, modifier, shape) }
                 }
+                item(key = "keep") { KeepLikedDownloaded(list) }
                 if (list.isEmpty()) {
                     item(key = "empty") { EmptyNote("Songs you like show up here. Tap the heart in the player, or long press any song.") }
                 }
