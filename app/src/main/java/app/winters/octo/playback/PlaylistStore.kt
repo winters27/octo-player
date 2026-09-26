@@ -31,8 +31,9 @@ class PlaylistStore @Inject constructor(
     val playlists: Flow<List<PlaylistSummary>> =
         combine(userDao.playlists(), userDao.playlistEntries(), ::summarize)
 
-    // Makes a playlist, with the songs in it if any are given.
-    fun create(name: String, trackIds: List<String> = emptyList()) {
+    // Makes a playlist, with the songs in it if any are given, and gives
+    // back the id it will have.
+    fun create(name: String, trackIds: List<String> = emptyList()): String {
         val id = UUID.randomUUID().toString()
         scope.launch {
             val now = System.currentTimeMillis()
@@ -40,6 +41,7 @@ class PlaylistStore @Inject constructor(
             if (trackIds.isNotEmpty()) userDao.addToPlaylist(id, catalog.tracksByIds(trackIds), now)
             sync.created(id)
         }
+        return id
     }
 
     fun rename(id: String, name: String) {

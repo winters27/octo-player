@@ -8,6 +8,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.math.BigDecimal
 import javax.inject.Inject
@@ -45,7 +46,9 @@ private val Context.lyricsData by preferencesDataStore("lyrics")
 
 private val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
 
-private fun offsetKey(trackId: String) = longPreferencesKey("offset:$trackId")
+private const val OFFSET_PREFIX = "offset:"
+
+private fun offsetKey(trackId: String) = longPreferencesKey("$OFFSET_PREFIX$trackId")
 
 // Each song's lyrics timing, kept only for songs that were moved, and
 // whether the screen stays on while lyrics show.
@@ -63,6 +66,20 @@ class LyricsTiming @Inject constructor(@ApplicationContext private val context: 
 
     suspend fun reset(trackId: String) {
         context.lyricsData.edit { it.remove(offsetKey(trackId)) }
+    }
+
+    // Every song whose timing was moved, by track id, for a backup.
+    suspend fun offsets(): Map<String, Long> = context.lyricsData.data.first().asMap().entries
+        .mapNotNull { (key, value) ->
+            val id = key.name.takeIf { it.startsWith(OFFSET_PREFIX) }?.removePrefix(OFFSET_PREFIX) ?: return@mapNotNull null
+            (value as? Long)?.let { id to it }
+        }
+        .toMap()
+
+    // Puts back one song's timing from a backup.
+    suspend fun setOffset(trackId: String, offsetMs: Long) {
+        val moved = offsetMs.coerceIn(-TIMING_LIMIT_MS, TIMING_LIMIT_MS)
+        context.lyricsData.edit { if (moved == 0L) it.remove(offsetKey(trackId)) else it[offsetKey(trackId)] = moved }
     }
 
     // On unless switched off.

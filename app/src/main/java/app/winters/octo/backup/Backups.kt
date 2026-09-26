@@ -2,11 +2,21 @@ package app.winters.octo.backup
 
 import android.content.Context
 import android.net.Uri
+import app.winters.octo.catalog.AlbumEntity
+import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.FavouritesDao
+import app.winters.octo.catalog.PinKind
 import app.winters.octo.catalog.SongKeyRow
+import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.data.SessionStore
 import app.winters.octo.device.FolderRules
+import app.winters.octo.favourites.FavouriteStore
+import app.winters.octo.favourites.PinKey
+import app.winters.octo.favourites.PinStore
+import app.winters.octo.listening.FavouriteKind
+import app.winters.octo.lyrics.LyricsTiming
 import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.playback.RatingStore
@@ -27,7 +37,7 @@ import javax.inject.Singleton
 // The largest backup read. Even a big library's backup is a few megabytes.
 private const val MAX_BACKUP_BYTES = 32 * 1024 * 1024
 
-// Saves the app's settings, playlists, likes and ratings to a file the
+// Saves the app's settings, playlists, likes, ratings, favourites and pins to a file the
 // listener picks, and puts them back from one. Sign-in secrets are never
 // written: only the server's address and user name, for reference.
 @Singleton
@@ -45,12 +55,20 @@ class Backups @Inject constructor(
     private val playlists: PlaylistStore,
     private val likes: LikeStore,
     private val ratings: RatingStore,
+    private val favouritesDao: FavouritesDao,
+    private val favourites: FavouriteStore,
+    private val pins: PinStore,
+    private val lyrics: LyricsTiming,
 ) {
     // Everything as it is now.
     suspend fun make(now: Long = System.currentTimeMillis()): Backup = withContext(Dispatchers.IO) {
         val (playerPrefs, streamPrefs) = player.snapshot()
         val (perOutput, profiles) = sound.saved()
         val songsByPlaylist = userDao.phonePlaylistSongKeys().groupBy { it.playlistId }
+        val albums = catalog.albums().first().associateBy { it.id }
+        val artists = catalog.artists().first().associateBy { it.id }
+        val playlistNames = userDao.playlists().first().associate { it.id to it.name }
+        val tracks = catalog.tracks().first().associateBy { it.id }
         Backup(
             createdAt = now,
             player = playerPrefs,
@@ -68,6 +86,21 @@ class Backups @Inject constructor(
             },
             likes = userDao.likedSongKeys().map { it.toKey() },
             ratings = userDao.ratedSongKeys().mapNotNull { row -> row.rating?.let { RatedSong(row.toKey(), it) } },
+            favouriteAlbums = favouritesDao.likedAlbumRows().sortedBy { it.likedAt }.map { albumKey(it.relinkKey, albums[it.albumId]) },
+            favouriteArtists = favouritesDao.likedArtistRows().sortedBy { it.likedAt }.map { artistKey(it.relinkKey, artists[it.artistId]) },
+            pins = favouritesDao.pins().mapNotNull { pin ->
+                when (PinKind.of(pin.kind)) {
+                    PinKind.Album -> albumKey(pin.relinkKey, albums[pin.itemId])
+                    PinKind.Artist -> artistKey(pin.relinkKey, artists[pin.itemId])
+                    PinKind.Playlist -> playlistNames[pin.itemId]?.let { HeldKey(name = it) }
+                    null -> null
+                }?.let { PinBackup(pin.kind, it) }
+            },
+            lyrics = LyricsBackup(
+                keepScreenOn = lyrics.keepScreenOn.first(),
+                offsets = lyrics.offsets().mapNotNull { (id, ms) -> tracks[id]?.let { LyricsOffsetBackup(it.toKey(), ms) } }
+                    .sortedBy { it.song.relinkKey },
+            ),
         )
     }
 
@@ -98,7 +131,13 @@ class Backups @Inject constructor(
 
     // What restoring would do with the library as it is now.
     suspend fun plan(backup: Backup): RestorePlan = withContext(Dispatchers.IO) {
-        planRestore(backup, catalog.tracks().first(), userDao.playlists().first().map { it.name })
+        planRestore(
+            backup,
+            catalog.tracks().first(),
+            userDao.playlists().first().map { it.name },
+            albums = catalog.albums().first().map { Named(it.id, it.searchKey, it.title, it.artist) },
+            artists = catalog.artists().first().map { Named(it.id, it.searchKey, it.name) },
+        )
     }
 
     // Puts a backup's settings back, and makes its playlists, likes and
@@ -118,11 +157,33 @@ class Backups @Inject constructor(
             queueSync.setEnabled(library.syncQueue)
             playlistSync.setNewOnServer(library.newPlaylistsOnServer)
         }
-        plan.playlists.filter { it.trackIds.isNotEmpty() || it.total == 0 }.forEach { playlists.create(it.name, it.trackIds) }
+        backup.lyrics?.let { lyrics.setKeepScreenOn(it.keepScreenOn) }
+        plan.lyricsOffsets.forEach { (id, ms) -> lyrics.setOffset(id, ms) }
+        // Playlists by name, with the ones made here, so pins can find them.
+        val playlistIds = userDao.playlists().first().associate { it.name.trim().lowercase() to it.id }.toMutableMap()
+        plan.playlists.filter { it.trackIds.isNotEmpty() || it.total == 0 }.forEach {
+            playlistIds[it.name.trim().lowercase()] = playlists.create(it.name, it.trackIds)
+        }
         plan.likes.forEach { id -> if (!userDao.isLiked(id)) likes.toggle(id) }
         plan.ratings.forEach { (id, stars) -> ratings.rate(id, stars) }
+        val likedAlbums = favouritesDao.likedAlbumRows().mapTo(HashSet()) { it.albumId }
+        plan.favouriteAlbums.filterNot { it in likedAlbums }.forEach { favourites.set(FavouriteKind.Album, it, true) }
+        val likedArtists = favouritesDao.likedArtistRows().mapTo(HashSet()) { it.artistId }
+        plan.favouriteArtists.filterNot { it in likedArtists }.forEach { favourites.set(FavouriteKind.Artist, it, true) }
+        // Added after the pins already here, in the backup's order, while Home has room.
+        plan.pins.forEach { pin ->
+            val id = if (pin.kind == PinKind.Playlist) playlistIds[pin.target.lowercase()] else pin.target
+            if (id != null) pins.pin(PinKey(pin.kind, id))
+        }
     }
 }
+
+private fun albumKey(relinkKey: String, album: AlbumEntity?) =
+    HeldKey(relinkKey = relinkKey, name = album?.title.orEmpty(), artist = album?.artist.orEmpty())
+
+private fun artistKey(relinkKey: String, artist: ArtistEntity?) = HeldKey(relinkKey = relinkKey, name = artist?.name.orEmpty())
+
+private fun TrackEntity.toKey() = SongKey(relinkKey, title, artist, album, durationMs)
 
 private fun SongKeyRow.toKey() = SongKey(
     relinkKey = relinkKey,

@@ -1,5 +1,6 @@
 package app.winters.octo.backup
 
+import app.winters.octo.catalog.PinKind
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.playback.CopyPreference
 import app.winters.octo.playback.StreamQuality
@@ -159,5 +160,94 @@ class BackupTest {
             ),
             describeBackup(full),
         )
+    }
+
+    private val withFavourites = full.copy(
+        favouriteAlbums = listOf(HeldKey("outrun kavinsky", "OutRun", "Kavinsky"), HeldKey("gone", "Cross", "Justice")),
+        favouriteArtists = listOf(HeldKey("kavinsky", "Kavinsky")),
+        pins = listOf(
+            PinBackup("album", HeldKey("outrun kavinsky", "OutRun", "Kavinsky")),
+            PinBackup("playlist", HeldKey(name = "Road trip")),
+            PinBackup("artist", HeldKey("", "Justice")),
+            PinBackup("something-new", HeldKey("x")),
+        ),
+        lyrics = LyricsBackup(keepScreenOn = false, offsets = listOf(LyricsOffsetBackup(SongKey("k1", "Nightcall", "Kavinsky", "OutRun"), 750))),
+    )
+
+    private val albums = listOf(
+        Named("al-outrun", "outrun kavinsky", "OutRun", "Kavinsky"),
+        Named("al-cross", "cross justice", "Cross", "Justice"),
+    )
+    private val artists = listOf(Named("ar-kavinsky", "kavinsky", "Kavinsky"), Named("ar-justice", "justice", "Justice"))
+
+    @Test
+    fun favouritesPinsAndLyricsReadBackTheSame() {
+        val text = encodeBackup(withFavourites)
+        assertEquals(BackupRead.Read(withFavourites), decodeBackup(text))
+        // An app from before favourites reads the rest and leaves them be.
+        val older = decodeBackup("{\"kind\": \"octo-settings\", \"version\": 1}") as BackupRead.Read
+        assertTrue(older.backup.favouriteAlbums.isEmpty() && older.backup.pins.isEmpty())
+        assertEquals(null, older.backup.lyrics)
+    }
+
+    @Test
+    fun albumsAndArtistsAreFoundByRelinkKeyThenByName() {
+        val finder = NameFinder(albums + Named("al-other", "renamed", "Renamed", "Someone"))
+        assertEquals("al-outrun", finder.find(HeldKey("outrun kavinsky", "Something else")))
+        // The key is gone: the same name by the same artist, punctuation aside.
+        assertEquals("al-cross", finder.find(HeldKey("old key", "Cross!", "JUSTICE")))
+        assertEquals(null, finder.find(HeldKey("old key", "Cross", "Someone else")))
+        assertEquals(null, finder.find(HeldKey("")))
+        // Two with the same key: the first by id, every time.
+        val twins = NameFinder(listOf(Named("b", "same", "Same"), Named("a", "same", "Same")))
+        assertEquals("a", twins.find(HeldKey("same")))
+    }
+
+    @Test
+    fun restorePlanFindsFavouritesPinsAndLyrics() {
+        val library = listOf(track("n", "Nightcall", "Kavinsky", "OutRun", relink = "k1"))
+        val plan = planRestore(withFavourites, library, existingPlaylists = emptyList(), albums = albums, artists = artists)
+        assertEquals(listOf("al-outrun", "al-cross"), plan.favouriteAlbums)
+        assertEquals(2, plan.favouriteAlbumsTotal)
+        assertEquals(listOf("ar-kavinsky"), plan.favouriteArtists)
+        // The playlist pin is found by the playlist the restore makes; a pin
+        // of a kind this app does not know is left out.
+        assertEquals(
+            listOf(PinPlan(PinKind.Album, "al-outrun"), PinPlan(PinKind.Playlist, "Road trip"), PinPlan(PinKind.Artist, "ar-justice")),
+            plan.pins,
+        )
+        assertEquals(4, plan.pinsTotal)
+        assertEquals(mapOf("n" to 750L), plan.lyricsOffsets)
+        assertEquals(
+            listOf(
+                "Playlists: 1 of 1 song found",
+                "Likes: 1 of 1 found",
+                "Ratings: 0 of 1 found",
+                "Favourite albums: 2 of 2 found",
+                "Favourite artists: 1 of 1 found",
+                "Pins: 3 of 4 found",
+                "Lyrics timing: 1 of 1 songs found",
+            ),
+            describePlan(plan),
+        )
+    }
+
+    @Test
+    fun aPlaylistPinNeedsItsPlaylist() {
+        val backup = withFavourites.copy(playlists = emptyList())
+        val none = planRestore(backup, emptyList(), existingPlaylists = emptyList(), albums = albums, artists = artists)
+        assertTrue(none.pins.none { it.kind == PinKind.Playlist })
+        val here = planRestore(backup, emptyList(), existingPlaylists = listOf("road TRIP"), albums = albums, artists = artists)
+        assertTrue(PinPlan(PinKind.Playlist, "Road trip") in here.pins)
+    }
+
+    @Test
+    fun describesFavouritesPinsAndLyrics() {
+        val lines = describeBackup(withFavourites)
+        assertEquals("Settings: player, streaming, sound, library, lyrics", lines.first())
+        assertTrue("2 favourite albums" in lines)
+        assertTrue("1 favourite artist" in lines)
+        assertTrue("4 pins on Home" in lines)
+        assertTrue("Lyrics timing for 1 song" in lines)
     }
 }
