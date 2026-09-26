@@ -7,11 +7,15 @@ import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import app.winters.octo.design.OctoTheme
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.server.QueueSync
 import app.winters.octo.ui.nav.MainShell
+import app.winters.octo.widget.EXTRA_OPEN_PLAYER
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -21,18 +25,33 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var playback: PlaybackConnection
     @Inject lateinit var queueSync: QueueSync
 
+    // Counts up each time a home screen widget asks for the full player.
+    private var openPlayer by mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // The app opens on the library; servers are an optional add-on.
-        setContent { OctoTheme { MainShell(library, playback) } }
-        // Opened by a voice request; not again when the screen turns.
-        if (savedInstanceState == null) playIfAsked(intent)
+        setContent { OctoTheme { MainShell(library, playback, openPlayer) } }
+        // Opened by a voice request or a widget; not again when the screen turns.
+        if (savedInstanceState == null) {
+            playIfAsked(intent)
+            openPlayerIfAsked(intent)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         playIfAsked(intent)
+        openPlayerIfAsked(intent)
+    }
+
+    // A widget's artwork or title opens the player. Coming back from recents
+    // hands over the old intent again, which is not a new tap.
+    private fun openPlayerIfAsked(intent: Intent) {
+        if (!intent.getBooleanExtra(EXTRA_OPEN_PLAYER, false)) return
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
+        openPlayer++
     }
 
     // "Play Drake on Octo": the assistant sends what was said.

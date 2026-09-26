@@ -78,9 +78,9 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 
 // The whole app: one back stack per tab, the screens, and the floating
-// bar over them.
+// bar over them. A change in openPlayer brings up the full player.
 @Composable
-fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
+fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, openPlayer: Int = 0) {
     val now by playback.now.collectAsStateWithLifecycle()
     val haze = rememberHazeState()
     // Called once each, always in this order.
@@ -104,6 +104,10 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
             barPlayer = false
             playerOpen = false
         }
+    }
+    // Asked for by a home screen widget. It shows once a song is loaded.
+    LaunchedEffect(openPlayer) {
+        if (openPlayer > 0) playerOpen = true
     }
     val barActions = BarActions(
         onSelect = { index ->

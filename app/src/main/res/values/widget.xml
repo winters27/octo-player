@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The home screen widgets: their glass, and their words. -->
+<resources>
+    <!-- About 72% black with a faint white edge, like the app's glass. -->
+    <color name="widget_glass">#B8000000</color>
+    <color name="widget_edge">#1AFFFFFF</color>
+    <color name="widget_tile">#14FFFFFF</color>
+    <color name="widget_art_empty">#FF1A1A1B</color>
+    <color name="widget_text">#FFFFFFFF</color>
+    <color name="widget_text_secondary">#B3FFFFFF</color>
+    <color name="widget_press">#33FFFFFF</color>
+
+    <!-- Rounded like the launcher's own widgets; Android 12 and later say how much. -->
+    <dimen name="widget_radius">16dp</dimen>
+    <dimen name="widget_inner_radius">10dp</dimen>
+
+    <!-- One square on the quick play widget: an icon over its name. -->
+    <style name="WidgetTile">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:background">@drawable/widget_tile</item>
+        <item name="android:drawablePadding">4dp</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:gravity">center</item>
+        <item name="android:maxLines">2</item>
+        <item name="android:paddingHorizontal">4dp</item>
+        <item name="android:textColor">@color/widget_text</item>
+        <item name="android:textSize">11sp</item>
+    </style>
+
+    <string name="widget_now_playing_description">The song that is on, with play, pause and skip.</string>
+    <string name="widget_quick_play_label">Quick play</string>
+    <string name="widget_quick_play_description">Liked songs, the newest albums, an album mix or the last queue, in one tap.</string>
+    <string name="widget_nothing_playing">Nothing playing</string>
+    <string name="widget_open_player">Open the player</string>
+    <string name="widget_play">Play</string>
+    <string name="widget_pause">Pause</string>
+    <string name="widget_previous">Previous</string>
+    <string name="widget_next">Next</string>
+    <string name="widget_quick_liked">Liked songs</string>
+    <string name="widget_quick_recent">Recently added</string>
+    <string name="widget_quick_mix">Album mix</string>
+    <string name="widget_quick_resume">Resume</string>
+</resources>

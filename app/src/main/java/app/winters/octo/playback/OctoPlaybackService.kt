@@ -27,6 +27,10 @@ import app.winters.octo.sound.AlbumRun
 import app.winters.octo.sound.AudioSession
 import app.winters.octo.sound.OctoRenderersFactory
 import app.winters.octo.sound.SoundEngine
+import app.winters.octo.widget.QuickPicks
+import app.winters.octo.widget.WidgetRemote
+import app.winters.octo.widget.WidgetUpdates
+import app.winters.octo.widget.widgetCommand
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -73,6 +77,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var sound: SoundEngine
     @Inject lateinit var audioSession: AudioSession
     @Inject lateinit var serverQueue: QueueSync
+    @Inject lateinit var quickPicks: QuickPicks
 
     private val scope = MainScope()
     private lateinit var player: OctoPlayer
@@ -83,6 +88,9 @@ class OctoPlaybackService : MediaLibraryService() {
     private var positionSaver: Job? = null
     // Done once last session's queue is back, or there was none.
     private val restored = CompletableDeferred<Unit>()
+    // The home screen widgets: what they show, and what their buttons do.
+    private val widgets by lazy { WidgetUpdates(this, scope) }
+    private val widgetRemote by lazy { WidgetRemote(this, player, quickPicks, playable::items) }
 
     @kotlin.OptIn(FlowPreview::class)
     override fun onCreate() {
@@ -132,6 +140,21 @@ class OctoPlaybackService : MediaLibraryService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
 
+    // A widget button, once any saved queue is back.
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val result = super.onStartCommand(intent, flags, startId)
+        widgetCommand(intent)?.let { command ->
+            // With no app connected yet, the session must be added by hand
+            // for its notification to show once music plays.
+            session?.let { if (!isSessionAdded(it)) addSession(it) }
+            scope.launch {
+                restored.await()
+                widgetRemote.run(command)
+            }
+        }
+        return result
+    }
+
     override fun onTaskRemoved(rootIntent: Intent?) {
         saveQueue()
         super.onTaskRemoved(rootIntent)
@@ -139,6 +162,7 @@ class OctoPlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         saveQueue()
+        widgets.clear()
         tracker.flush()
         sleep.detach()
         session?.release()
@@ -202,6 +226,7 @@ class OctoPlaybackService : MediaLibraryService() {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             currentId.value = mediaItem?.mediaId
             saveQueue()
+            widgets.show(player)
             serverQueue.changed(snapshot())
         }
 
@@ -236,6 +261,7 @@ class OctoPlaybackService : MediaLibraryService() {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             positionSaver?.cancel()
+            widgets.show(player)
             if (isPlaying) {
                 // Equalizer apps on the phone can attach to the music now.
                 audioSession.open()

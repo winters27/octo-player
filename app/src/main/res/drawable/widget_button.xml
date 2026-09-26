@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A round press mark behind a widget's buttons. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="@color/widget_press">
+    <item android:id="@android:id/mask">
+        <shape android:shape="oval">
+            <solid android:color="@color/widget_text" />
+        </shape>
+    </item>
+</ripple>

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Now playing at 2x1: the cover, the title and play or pause. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_glass"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="8dp">
+
+    <ImageView
+        android:id="@+id/widget_art"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:contentDescription="@string/widget_open_player"
+        android:scaleType="centerCrop"
+        android:src="@drawable/widget_art_empty" />
+
+    <LinearLayout
+        android:id="@+id/widget_text"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:text="@string/widget_nothing_playing"
+            android:textColor="@color/widget_text"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/widget_artist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@color/widget_text_secondary"
+            android:textSize="12sp"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/widget_previous"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:background="@drawable/widget_button"
+        android:contentDescription="@string/widget_previous"
+        android:padding="8dp"
+        android:src="@drawable/sym_fast_rewind"
+        android:visibility="gone" />
+
+    <ImageView
+        android:id="@+id/widget_play"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:background="@drawable/widget_button"
+        android:contentDescription="@string/widget_play"
+        android:padding="8dp"
+        android:src="@drawable/sym_play_arrow" />
+
+    <ImageView
+        android:id="@+id/widget_next"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:background="@drawable/widget_button"
+        android:contentDescription="@string/widget_next"
+        android:padding="8dp"
+        android:src="@drawable/sym_fast_forward"
+        android:visibility="gone" />
+</LinearLayout>
