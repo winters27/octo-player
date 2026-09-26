@@ -1,0 +1,364 @@
+package app.winters.octo.ui.settings
+
+import app.winters.octo.catalog.searchKey
+import kotlinx.serialization.Serializable
+
+// The pages Settings opens, in the order the front page lists them.
+@Serializable
+enum class SettingsPage(val title: String) {
+    Playback("Playback"),
+    Sound("Sound"),
+    Appearance("Appearance"),
+    Library("Library"),
+    Server("Server and sync"),
+    Streaming("Streaming and downloads"),
+    Lyrics("Lyrics"),
+    Scrobbling("Scrobbling"),
+    Backup("Backup and restore"),
+    About("About"),
+}
+
+// One setting as search finds it: the page it is on, the part of the page
+// when there is one, its title, a line about it, and other words people
+// might look for it by. The id marks its row, so search can point at it.
+data class SettingEntry(
+    val id: String,
+    val page: SettingsPage,
+    val title: String,
+    val summary: String = "",
+    val keywords: List<String> = emptyList(),
+    val section: String? = null,
+) {
+    // Where it lives, for a search result: "Appearance · Where it shows".
+    val place: String get() = listOfNotNull(page.title, section).joinToString(" · ")
+}
+
+// Every setting, written down once. The rows take their titles from here,
+// so what search finds is always what the page shows.
+object SettingsIndex {
+    private val registered = mutableListOf<SettingEntry>()
+
+    private fun add(
+        id: String,
+        page: SettingsPage,
+        title: String,
+        summary: String = "",
+        keywords: List<String> = emptyList(),
+        section: String? = null,
+    ): SettingEntry = SettingEntry(id, page, title, summary, keywords, section).also { registered += it }
+
+    // Playback
+    val Crossfade = add(
+        "crossfade", SettingsPage.Playback, "Crossfade", "Each song fades into the next",
+        listOf("fade", "blend", "gapless", "transition", "mix"),
+    )
+    val CrossfadeLength = add(
+        "crossfade_length", SettingsPage.Playback, "Crossfade length", "How many seconds songs blend for",
+        listOf("fade", "seconds", "duration"),
+    )
+    val Speed = add(
+        "speed", SettingsPage.Playback, "Speed", "How fast music plays, and its pitch",
+        listOf("tempo", "pitch", "faster", "slower", "rate", "semitones"),
+    )
+    val SkipSilence = add(
+        "skip_silence", SettingsPage.Playback, "Skip silence", "Quiet stretches inside songs are skipped",
+        listOf("quiet", "gaps", "silent"),
+    )
+    val Autoplay = add(
+        "autoplay", SettingsPage.Playback, "Autoplay", "Similar songs keep playing when the queue ends",
+        listOf("similar", "continue", "endless", "radio", "queue"),
+    )
+    val ResumeWired = add(
+        "resume_wired", SettingsPage.Playback, "Resume when headphones connect", "Plays again when a cable goes back in",
+        listOf("headphones", "cable", "wired", "usb", "plug"), section = "Headphones",
+    )
+    val ResumeBluetooth = add(
+        "resume_bluetooth", SettingsPage.Playback, "Resume when Bluetooth connects", "Plays again when Bluetooth reconnects",
+        listOf("bluetooth", "speaker", "car", "headphones"), section = "Headphones",
+    )
+    val ResumeAlways = add(
+        "resume_always", SettingsPage.Playback, "Always play on connect", "Plays on connect however the music stopped",
+        listOf("headphones", "bluetooth", "connect"), section = "Headphones",
+    )
+
+    // Sound, which has a page of its own
+    val SoundPerOutput = add(
+        "sound_per_output", SettingsPage.Sound, "Sound for each output", "Headphones and speakers keep their own sound",
+        listOf("bluetooth", "speaker", "device", "output"),
+    )
+    val Equalizer = add(
+        "sound_equalizer", SettingsPage.Sound, "Equalizer", "Shape the sound, with presets",
+        listOf("eq", "bass", "treble", "presets", "bands", "filters"),
+    )
+    val Loudness = add(
+        "sound_loudness", SettingsPage.Sound, "Loudness", "Even out the volume between songs",
+        listOf("volume", "levelling", "leveling", "normalize", "replaygain", "preamp"),
+    )
+    val Balance = add(
+        "sound_balance", SettingsPage.Sound, "Balance", "Left and right",
+        listOf("left", "right", "channel", "mono"),
+    )
+    val HeadphoneCorrection = add(
+        "sound_correction", SettingsPage.Sound, "Headphone correction", "A correction for the headphones in use",
+        listOf("headphones", "correction", "profile", "tuning"),
+    )
+
+    // Appearance
+    val Ambient = add(
+        "ambient", SettingsPage.Appearance, "Ambient colour from the artwork", "The artwork's colours glowing behind the pages",
+        listOf("glow", "background", "colours", "colors", "theme", "strength"),
+    )
+    val AmbientHome = add(
+        "ambient_home", SettingsPage.Appearance, "Home", "The glow on the home page",
+        listOf("glow"), section = "Where it shows",
+    )
+    val AmbientLibrary = add(
+        "ambient_library", SettingsPage.Appearance, "Library", "The glow on library lists and pages",
+        listOf("glow"), section = "Where it shows",
+    )
+    val AmbientSearch = add(
+        "ambient_search", SettingsPage.Appearance, "Search", "The glow on the search page",
+        listOf("glow"), section = "Where it shows",
+    )
+    val AmbientSettings = add(
+        "ambient_settings", SettingsPage.Appearance, "Settings", "The glow on these pages",
+        listOf("glow"), section = "Where it shows",
+    )
+    val AmbientBar = add(
+        "ambient_bar", SettingsPage.Appearance, "Mini player and bar", "A trace of the song's colour in the bar",
+        listOf("glow", "bar", "tint"), section = "Where it shows",
+    )
+    val AmbientPageArtwork = add(
+        "ambient_page_artwork", SettingsPage.Appearance, "Album and artist pages use their own artwork",
+        "The glow follows the album or artist on the page",
+        listOf("glow", "album", "artist", "cover"), section = "Where it shows",
+    )
+    val LiveBackground = add(
+        "live_background", SettingsPage.Appearance, "Live background", "Moving colours behind the player",
+        listOf("player", "animated", "moving", "colours", "blur"), section = "Player",
+    )
+
+    // Library
+    val PhoneAccess = add(
+        "phone_access", SettingsPage.Library, "Music access", "Whether Octo may read the music on this phone",
+        listOf("permission", "allow", "storage", "files"), section = "Music on this phone",
+    )
+    val PhoneSongs = add(
+        "phone_songs", SettingsPage.Library, "Songs", "How many songs are on this phone",
+        listOf("count", "library"), section = "Music on this phone",
+    )
+    val Rescan = add(
+        "rescan", SettingsPage.Library, "Rescan", "Look for new music on this phone",
+        listOf("scan", "refresh", "find", "update", "new music"), section = "Music on this phone",
+    )
+    val MusicFolders = add(
+        "music_folders", SettingsPage.Library, "Music folders", "Leave a folder's music out of your library",
+        listOf("folders", "exclude", "hide", "include", "podcasts", "recordings"),
+    )
+
+    // Server and sync
+    val ConnectServer = add(
+        "connect_server", SettingsPage.Server, "Connect a server", "Add the music on your own server",
+        listOf("sign in", "login", "add server", "account"),
+    )
+    val ServerAddress = add(
+        "server_address", SettingsPage.Server, "Address", "Where the server is",
+        listOf("server", "url", "host"), section = "Connection",
+    )
+    val ServerConnection = add(
+        "server_connection", SettingsPage.Server, "Connection", "Whether you are connected at home or away",
+        listOf("home", "away", "network", "local"), section = "Connection",
+    )
+    val ServerUser = add(
+        "server_user", SettingsPage.Server, "User", "Who is signed in",
+        listOf("account", "username", "login"), section = "Connection",
+    )
+    val ServerMusicFolder = add(
+        "server_music_folder", SettingsPage.Server, "Music folder", "Limit the library to one of the server's folders",
+        listOf("server folder", "library folder", "limit"), section = "Connection",
+    )
+    val EditConnection = add(
+        "edit_connection", SettingsPage.Server, "Edit connection", "Change the address or sign-in",
+        listOf("change server", "password", "address", "sign in"), section = "Connection",
+    )
+    val OctoAdmin = add(
+        "octo_admin", SettingsPage.Server, "Octo admin", "What Octo is doing: services, stations and downloads",
+        listOf("admin", "health", "services", "stations"), section = "Connection",
+    )
+    val LastSynced = add(
+        "last_synced", SettingsPage.Server, "Last synced", "When the server's library was last copied",
+        listOf("sync", "updated"), section = "Sync",
+    )
+    val SyncNow = add(
+        "sync_now", SettingsPage.Server, "Sync now", "Copy the server's library again",
+        listOf("sync", "refresh", "update"), section = "Sync",
+    )
+    val QueueSync = add(
+        "queue_sync", SettingsPage.Server, "Sync play queue with the server", "Pick up where another device left off",
+        listOf("queue", "resume", "other device", "continue"), section = "Sync",
+    )
+    val PlaylistsToServer = add(
+        "playlists_to_server", SettingsPage.Server, "Save new playlists to the server", "Playlists you make here are made there too",
+        listOf("playlists", "upload", "sync"), section = "Sync",
+    )
+    val Shares = add(
+        "shares", SettingsPage.Server, "Shared links", "Links to songs and albums you shared",
+        listOf("share", "links"), section = "On the server",
+    )
+    val RadioStations = add(
+        "radio_stations", SettingsPage.Server, "Radio stations", "The server's internet radio stations",
+        listOf("radio", "internet radio", "streams"), section = "On the server",
+    )
+    val ScanServer = add(
+        "scan_server", SettingsPage.Server, "Scan library now", "Ask the server to look for new music",
+        listOf("scan", "refresh", "new music"), section = "On the server",
+    )
+    val ListeningNow = add(
+        "listening_now", SettingsPage.Server, "Listening now", "Who else is playing music from the server",
+        listOf("others", "users", "now playing"),
+    )
+    val Disconnect = add(
+        "disconnect", SettingsPage.Server, "Disconnect", "Remove the server from this phone",
+        listOf("sign out", "log out", "remove server"),
+    )
+
+    // Streaming and downloads
+    val Copies = add(
+        "copies", SettingsPage.Streaming, "When a song is on the phone and the server", "Which copy plays",
+        listOf("phone copy", "best quality", "duplicate", "prefer"), section = "Streaming",
+    )
+    val StreamWifi = add(
+        "stream_wifi", SettingsPage.Streaming, "Streaming on Wi-Fi", "Quality over Wi-Fi",
+        listOf("quality", "bitrate", "kbps"), section = "Streaming",
+    )
+    val StreamMobile = add(
+        "stream_mobile", SettingsPage.Streaming, "Streaming on mobile data", "Quality over mobile data",
+        listOf("quality", "bitrate", "kbps", "cellular", "data saver"), section = "Streaming",
+    )
+    val CacheSize = add(
+        "cache_size", SettingsPage.Streaming, "Cache size", "Room for songs played lately, to play without a connection",
+        listOf("storage", "offline", "space"), section = "Cache",
+    )
+    val FetchWifi = add(
+        "fetch_wifi", SettingsPage.Streaming, "Fetch ahead on Wi-Fi", "Songs ahead in the queue saved while one plays",
+        listOf("prefetch", "preload", "next songs", "offline"), section = "Cache",
+    )
+    val FetchMobile = add(
+        "fetch_mobile", SettingsPage.Streaming, "Fetch ahead on mobile data", "Songs ahead saved on mobile data",
+        listOf("prefetch", "preload", "cellular"), section = "Cache",
+    )
+    val ClearCache = add(
+        "clear_cache", SettingsPage.Streaming, "Clear cache", "Free the room the cache takes",
+        listOf("free space", "storage", "delete"), section = "Cache",
+    )
+    val DownloadQuality = add(
+        "download_quality", SettingsPage.Streaming, "Download quality", "The file downloads come as",
+        listOf("bitrate", "kbps", "offline"), section = "Downloads",
+    )
+    val WifiOnly = add(
+        "wifi_only", SettingsPage.Streaming, "Download on Wi-Fi only", "Downloads wait for Wi-Fi",
+        listOf("mobile data", "cellular"), section = "Downloads",
+    )
+    val KeepLiked = add(
+        "keep_liked", SettingsPage.Streaming, "Keep Liked songs downloaded", "Liked songs follow your likes offline",
+        listOf("offline", "likes", "auto download"), section = "Downloads",
+    )
+    val StreamOnWifi = add(
+        "stream_on_wifi", SettingsPage.Streaming, "Prefer streaming on Wi-Fi", "Stream even when a song is downloaded",
+        listOf("downloaded", "stream"), section = "Downloads",
+    )
+    val DownloadedMusic = add(
+        "downloaded_music", SettingsPage.Streaming, "Downloaded music", "What is downloaded, and how much room it takes",
+        listOf("downloads", "offline", "manage"), section = "Downloads",
+    )
+
+    // Lyrics
+    val LyricsOnline = add(
+        "lyrics_online", SettingsPage.Lyrics, "Find lyrics online", "Look lyrics up when your music has none",
+        listOf("internet", "lookup", "synced", "words"),
+    )
+    val LyricsScreenOn = add(
+        "lyrics_screen_on", SettingsPage.Lyrics, "Keep the screen on", "While lyrics show in the player",
+        listOf("screen", "timeout", "awake", "display"),
+    )
+
+    // Scrobbling
+    val ListenBrainz = add(
+        "listenbrainz", SettingsPage.Scrobbling, "ListenBrainz", "Add the songs you play to your profile",
+        listOf("scrobble", "history", "stats", "profile", "token"),
+    )
+    val SendPlays = add(
+        "send_plays", SettingsPage.Scrobbling, "Send plays of", "All songs, or only songs on this phone",
+        listOf("phone only", "all songs", "counted twice"),
+    )
+    val NowPlaying = add(
+        "now_playing", SettingsPage.Scrobbling, "Show what I'm playing now", "Your profile shows the song while it plays",
+        listOf("now playing", "profile", "status"),
+    )
+    val ScrobblingDisconnect = add(
+        "scrobbling_disconnect", SettingsPage.Scrobbling, "Disconnect", "Stop sending plays and forget the token",
+        listOf("sign out", "remove", "listenbrainz"),
+    )
+
+    // Backup and restore
+    val SaveBackup = add(
+        "save_backup", SettingsPage.Backup, "Save a backup", "Your settings, playlists, likes and favourites in a file",
+        listOf("export", "file", "save settings"),
+    )
+    val RestoreBackup = add(
+        "restore_backup", SettingsPage.Backup, "Restore from a backup", "Put them back from a file",
+        listOf("import", "file", "new phone"),
+    )
+
+    // About
+    val Version = add(
+        "version", SettingsPage.About, "Version", "Which Octo this is",
+        listOf("about", "build", "update"),
+    )
+    val WhatsNew = add(
+        "whats_new", SettingsPage.About, "What's new", "The latest additions, in plain words",
+        listOf("changes", "changelog", "release notes", "updates"),
+    )
+
+    val all: List<SettingEntry> get() = registered
+
+    fun byId(id: String): SettingEntry? = registered.firstOrNull { it.id == id }
+}
+
+// How well a setting matches, best first: the title begins with what was
+// typed, every word is in the title, the title and other words together
+// cover it, or only the line about it does.
+private enum class Match { TitleStart, Title, Keywords, Summary }
+
+// Lowercase, accents and punctuation gone, so "wifi" finds "Wi-Fi".
+internal fun normalized(text: String): String =
+    searchKey(text).filter { it.isLetterOrDigit() || it.isWhitespace() }.replace(Regex("\\s+"), " ").trim()
+
+// A typed word is found in some text when a word there starts with it, or
+// anywhere inside it once it is three letters or more.
+private fun found(word: String, text: String): Boolean {
+    if (text.isEmpty()) return false
+    if (text.startsWith(word) || text.contains(" $word")) return true
+    return word.length >= 3 && text.contains(word)
+}
+
+// The settings that match what was typed, best first. Every typed word must
+// be found somewhere. Ties keep the order the settings are written in.
+fun searchSettings(query: String, entries: List<SettingEntry> = SettingsIndex.all): List<SettingEntry> {
+    val typed = normalized(query)
+    if (typed.isEmpty()) return emptyList()
+    val words = typed.split(' ')
+    return entries.mapNotNull { entry ->
+        val title = normalized(entry.title)
+        val other = normalized((entry.keywords + entry.page.title + listOfNotNull(entry.section)).joinToString(" "))
+        val summary = normalized(entry.summary)
+        val match = when {
+            title.startsWith(typed) -> Match.TitleStart
+            words.all { found(it, title) } -> Match.Title
+            words.all { found(it, title) || found(it, other) } -> Match.Keywords
+            words.all { found(it, title) || found(it, other) || found(it, summary) } -> Match.Summary
+            else -> return@mapNotNull null
+        }
+        entry to match
+    }.sortedBy { it.second }.map { it.first }
+}

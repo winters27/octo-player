@@ -1,14 +1,10 @@
 package app.winters.octo.ui.settings
 
-import android.text.format.DateUtils
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -17,10 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -36,25 +29,36 @@ import app.winters.octo.design.AccentButton
 import app.winters.octo.design.GlassSheet
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
-import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.playlists.PlaylistSync
 import app.winters.octo.server.LastSync
 import app.winters.octo.server.ServerSync
 import app.winters.octo.subsonic.MusicFolder
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.LocalChoiceSheet
-import kotlinx.coroutines.launch
+import app.winters.octo.ui.nav.EditConnectionRoute
+import app.winters.octo.ui.nav.OctoAdminRoute
+import app.winters.octo.ui.nav.SignInRoute
+import app.winters.octo.ui.settings.rows.ActionRow
+import app.winters.octo.ui.settings.rows.ChoiceRow
+import app.winters.octo.ui.settings.rows.InfoRow
+import app.winters.octo.ui.settings.rows.NoteRow
+import app.winters.octo.ui.settings.rows.SettingsGroup
+import app.winters.octo.ui.settings.rows.SettingsPageFrame
+import app.winters.octo.ui.settings.rows.SwitchRow
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class ServerViewModel @Inject constructor(
     private val sessions: SessionRepository,
     private val sync: ServerSync,
+    private val playlists: PlaylistSync,
     chooser: ConnectionChooser,
 ) : ViewModel() {
     val session: StateFlow<SessionState> = sessions.state
@@ -62,6 +66,12 @@ class ServerViewModel @Inject constructor(
     val problem: StateFlow<String?> = sync.problem
     val last: StateFlow<LastSync?> = sync.last.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val place: StateFlow<Place> = chooser.place
+
+    // Whether playlists go to the server, shown while one that keeps them is connected.
+    val playlistsAvailable: StateFlow<Boolean> = playlists.available.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    val newPlaylistsOnServer: StateFlow<Boolean> = playlists.newOnServer.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun setNewPlaylistsOnServer(on: Boolean) = playlists.setNewOnServer(on)
 
     fun syncNow() = sync.syncNow()
 
@@ -79,122 +89,96 @@ class ServerViewModel @Inject constructor(
     fun disconnect() = sync.disconnect()
 }
 
-// The server, if one is connected: where it is, who is signed in, and how
-// fresh the copy of its library is.
+// The server, if one is connected: where it is, who is signed in, how fresh
+// the copy of its library is, and what else it offers.
 @Composable
-internal fun ServerCard(
-    onConnect: () -> Unit,
-    onOpenAdmin: () -> Unit,
-    onEditConnection: () -> Unit,
-    modifier: Modifier = Modifier,
-    onOpen: (NavKey) -> Unit = {},
-    vm: ServerViewModel = hiltViewModel(),
-) {
+fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?, vm: ServerViewModel = hiltViewModel()) {
     val state by vm.session.collectAsStateWithLifecycle()
     val syncing by vm.syncing.collectAsStateWithLifecycle()
     val problem by vm.problem.collectAsStateWithLifecycle()
     val last by vm.last.collectAsStateWithLifecycle()
     val place by vm.place.collectAsStateWithLifecycle()
+    val playlistsAvailable by vm.playlistsAvailable.collectAsStateWithLifecycle()
+    val newPlaylistsOnServer by vm.newPlaylistsOnServer.collectAsStateWithLifecycle()
     val prompt = LocalDisconnectPrompt.current
     val sheet = LocalChoiceSheet.current
     val scope = rememberCoroutineScope()
     var folderProblem by remember { mutableStateOf<String?>(null) }
 
-    Card("Server", modifier) {
+    SettingsPageFrame("Server and sync", onBack, highlight) {
         when (val current = state) {
             SessionState.Loading -> Unit
-            SessionState.SignedOut -> {
-                Text(
-                    "Add the music on your own server. It joins your library here and plays over the network.",
-                    style = OctoType.caption,
-                    color = OctoColors.TextMuted,
-                )
-                AccentButton("Connect a server", onClick = onConnect, modifier = Modifier.padding(top = 8.dp))
+            SessionState.SignedOut -> SettingsGroup(
+                footer = "Add the music on your own server. It joins your library here and plays over the network.",
+            ) {
+                ActionRow(SettingsIndex.ConnectServer, onClick = { onOpen(SignInRoute) })
             }
             is SessionState.SignedIn -> {
                 val client = current.session.client
                 val connection = current.session.connection
                 val copy = last?.takeIf { it.sourceId == current.session.sourceId }
-                Line("Address", client.primaryUrl.toString().removeSuffix("/"))
-                // Which address is in use, when there is a choice.
-                if (connection.home != null) {
-                    Line("Connection", if (place == Place.Home) "Connected at home" else "Connected away")
-                }
-                Line("User", client.username.ifEmpty { "API key" })
-                Line("Last synced", copy?.let { syncedAgo(it.at) } ?: "Not yet")
-                if (copy != null) {
-                    Line("Songs", "%,d".format(copy.songs))
-                    Line("Albums", "%,d".format(copy.albums))
-                }
-                if (syncing) Line("Status", "Syncing…")
-                ValueLine("Music folder", connection.folder?.name ?: "All") {
-                    scope.launch {
-                        val folders = vm.folders()
-                        if (folders == null) {
-                            folderProblem = "Couldn't read the server's music folders."
-                            return@launch
+
+                SettingsGroup(title = "Connection") {
+                    InfoRow(SettingsIndex.ServerAddress, client.primaryUrl.toString().removeSuffix("/"))
+                    // Which address is in use, when there is a choice.
+                    if (connection.home != null) {
+                        InfoRow(SettingsIndex.ServerConnection, if (place == Place.Home) "Connected at home" else "Connected away")
+                    }
+                    InfoRow(SettingsIndex.ServerUser, client.username.ifEmpty { "API key" })
+                    ChoiceRow(SettingsIndex.ServerMusicFolder, value = connection.folder?.name ?: "All", onClick = {
+                        scope.launch {
+                            val folders = vm.folders()
+                            if (folders == null) {
+                                folderProblem = "Couldn't read the server's music folders."
+                                return@launch
+                            }
+                            folderProblem = null
+                            val picked = folders.indexOfFirst { it.id == connection.folder?.id } + 1
+                            sheet.show(
+                                ChoiceRequest(
+                                    SettingsIndex.ServerMusicFolder.title,
+                                    listOf(Choice("All", "Every folder on the server")) + folders.map { Choice(it.name) },
+                                    picked,
+                                ) { index ->
+                                    val folder = folders.getOrNull(index - 1)?.let { FolderChoice(it.id, it.name) }
+                                    if (folder?.id != connection.folder?.id) vm.chooseFolder(folder)
+                                },
+                            )
                         }
-                        folderProblem = null
-                        val picked = folders.indexOfFirst { it.id == connection.folder?.id } + 1
-                        sheet.show(
-                            ChoiceRequest(
-                                "Music folder",
-                                listOf(Choice("All", "Every folder on the server")) + folders.map { Choice(it.name) },
-                                picked,
-                            ) { index ->
-                                val folder = folders.getOrNull(index - 1)?.let { FolderChoice(it.id, it.name) }
-                                if (folder?.id != connection.folder?.id) vm.chooseFolder(folder)
-                            },
+                    })
+                    folderProblem?.let { NoteRow(it, color = OctoColors.Error) }
+                    ActionRow(SettingsIndex.EditConnection, onClick = { onOpen(EditConnectionRoute) })
+                    ActionRow(SettingsIndex.OctoAdmin, onClick = { onOpen(OctoAdminRoute) })
+                }
+
+                SettingsGroup(title = "Sync") {
+                    InfoRow(SettingsIndex.LastSynced, copy?.let { timeAgo(it.at, System.currentTimeMillis()) } ?: "Not yet")
+                    if (copy != null) {
+                        InfoRow(null, "%,d".format(copy.songs), title = "Songs")
+                        InfoRow(null, "%,d".format(copy.albums), title = "Albums")
+                    }
+                    ActionRow(SettingsIndex.SyncNow, onClick = vm::syncNow, busy = syncing, chevron = false)
+                    problem?.let { NoteRow(it, color = OctoColors.Error) }
+                    ServerQueueRow()
+                    if (playlistsAvailable) {
+                        SwitchRow(
+                            SettingsIndex.PlaylistsToServer,
+                            checked = newPlaylistsOnServer,
+                            onChange = vm::setNewPlaylistsOnServer,
+                            helper = "Playlists you make here are made on your server too. Others stay on this phone " +
+                                "until you choose Save to server.",
                         )
                     }
                 }
-                folderProblem?.let { Text(it, style = OctoType.caption, color = OctoColors.Error) }
-                OpenLine("Edit connection", onClick = onEditConnection)
-                OpenLine("Octo admin", onClick = onOpenAdmin)
+
                 ServerExtras(onOpen)
-                problem?.let { Text(it, style = OctoType.caption, color = OctoColors.Error) }
-                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    AccentButton("Sync now", onClick = vm::syncNow, loading = syncing)
-                    GlazeButton("Disconnect", onClick = prompt::show)
+
+                SettingsGroup {
+                    ActionRow(SettingsIndex.Disconnect, onClick = prompt::show, destructive = true, chevron = false)
                 }
             }
         }
     }
-}
-
-// A setting and its current choice; tapping it opens the options.
-@Composable
-private fun ValueLine(label: String, value: String, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onClick),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, style = OctoType.bodySmall, color = OctoColors.TextSecondary, modifier = Modifier.weight(1f))
-        Text(value, style = OctoType.bodySmall, color = OctoColors.TextPrimary, modifier = Modifier.padding(end = 4.dp))
-        Icon(painterResource(OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(18.dp))
-    }
-}
-
-// A line that opens another page.
-@Composable
-private fun OpenLine(label: String, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onClick),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, style = OctoType.bodySmall, color = OctoColors.TextSecondary, modifier = Modifier.weight(1f))
-        Icon(painterResource(OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(18.dp))
-    }
-}
-
-private fun syncedAgo(at: Long): String {
-    val now = System.currentTimeMillis()
-    return if (now - at < DateUtils.MINUTE_IN_MILLIS) "Just now"
-    else DateUtils.getRelativeTimeSpanString(at, now, DateUtils.MINUTE_IN_MILLIS).toString()
 }
 
 // Whether the question before disconnecting is showing. The shell draws

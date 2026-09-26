@@ -91,6 +91,7 @@ import app.winters.octo.ui.server.SharesScreen
 import app.winters.octo.ui.settings.DisconnectPrompt
 import app.winters.octo.ui.settings.DisconnectSheetHost
 import app.winters.octo.ui.settings.LocalDisconnectPrompt
+import app.winters.octo.ui.settings.SettingsPageScreen
 import app.winters.octo.ui.settings.SettingsScreen
 import app.winters.octo.ui.signin.SignInScreen
 import app.winters.octo.ui.sound.SoundScreen
@@ -202,6 +203,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             entry<SearchRoute> { SearchScreen(open) }
                             entry<LibraryRoute> { LibraryScreen(open) }
                             entry<SettingsRoute> { SettingsScreen(open) }
+                            entry<SettingsPageRoute> { SettingsPageScreen(it.page, it.highlight, open, back) }
                             entry<AlbumRoute> { AlbumScreen(it.id, open, back) }
                             entry<ArtistRoute> { ArtistScreen(it.id, open, back) }
                             entry<OnlineAlbumRoute> { OnlineAlbumScreen(it.id, open, back) }

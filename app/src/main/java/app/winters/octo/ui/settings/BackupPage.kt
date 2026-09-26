@@ -3,15 +3,8 @@ package app.winters.octo.ui.settings
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -22,10 +15,10 @@ import app.winters.octo.backup.Backups
 import app.winters.octo.backup.RestorePlan
 import app.winters.octo.backup.describeBackup
 import app.winters.octo.backup.describePlan
-import app.winters.octo.design.AccentButton
-import app.winters.octo.design.GlazeButton
-import app.winters.octo.design.OctoColors
-import app.winters.octo.design.OctoType
+import app.winters.octo.ui.settings.rows.ActionRow
+import app.winters.octo.ui.settings.rows.NoteRow
+import app.winters.octo.ui.settings.rows.SettingsGroup
+import app.winters.octo.ui.settings.rows.SettingsPageFrame
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -88,7 +81,7 @@ class BackupViewModel @Inject constructor(private val backups: Backups) : ViewMo
 // restore first shows what the file holds and how much of it this library
 // has, and waits for the go-ahead.
 @Composable
-internal fun BackupCard(modifier: Modifier = Modifier, vm: BackupViewModel = hiltViewModel()) {
+fun BackupPage(onBack: () -> Unit, highlight: String?, vm: BackupViewModel = hiltViewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     val saveTo = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         uri?.let(vm::save)
@@ -98,53 +91,46 @@ internal fun BackupCard(modifier: Modifier = Modifier, vm: BackupViewModel = hil
     }
     val working = state == BackupState.Working
 
-    Card("Backup", modifier) {
-        Text(
-            "Saves your settings, sound, equalizer presets, playlists, likes and ratings to a file. " +
-                "Passwords, keys and certificates are never saved.",
-            style = OctoType.caption,
-            color = OctoColors.TextMuted,
-        )
+    SettingsPageFrame("Backup and restore", onBack, highlight) {
         when (val now = state) {
             is BackupState.Ready -> {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("In this backup", style = OctoType.label, color = OctoColors.TextSecondary)
-                    (describeBackup(now.backup) + describePlan(now.plan)).forEach { line ->
-                        Text(line, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
-                    }
-                    Text(
-                        "Restoring replaces your settings. Playlists are added, and songs are liked and rated.",
-                        style = OctoType.caption,
-                        color = OctoColors.TextMuted,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
+                SettingsGroup(
+                    title = "In this backup",
+                    footer = "Restoring replaces your settings. Playlists are added, songs are liked and rated, " +
+                        "and albums and artists are added to your favourites and pins.",
+                ) {
+                    (describeBackup(now.backup) + describePlan(now.plan)).forEach { line -> NoteRow(line) }
                 }
-                Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    AccentButton("Restore", onClick = vm::restore)
-                    GlazeButton("Cancel", onClick = vm::cancel)
+                SettingsGroup {
+                    ActionRow(null, title = "Restore", onClick = vm::restore, chevron = false)
+                    ActionRow(null, title = "Cancel", onClick = vm::cancel, chevron = false)
                 }
             }
             else -> {
-                Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    AccentButton(
-                        "Save backup",
-                        onClick = { saveTo.launch("Octo backup ${LocalDate.now()}.json") },
-                        enabled = !working,
-                        loading = working,
-                    )
-                    GlazeButton(
-                        "Restore",
-                        onClick = { openFrom.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
-                        enabled = !working,
-                    )
-                }
                 val note = when (now) {
                     is BackupState.Saved -> if (now.ok) "Backup saved." else "Couldn't write the backup there."
                     is BackupState.Restored -> (listOf("Restored.") + describePlan(now.plan)).joinToString("\n")
                     is BackupState.Problem -> now.message
                     else -> null
                 }
-                note?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
+                SettingsGroup(
+                    footer = "Saves your settings, sound, equalizer presets, playlists, likes, favourites, pins and ratings " +
+                        "to a file. Passwords, keys and certificates are never saved.",
+                ) {
+                    ActionRow(
+                        SettingsIndex.SaveBackup,
+                        onClick = { saveTo.launch("Octo backup ${LocalDate.now()}.json") },
+                        busy = working,
+                        chevron = false,
+                    )
+                    ActionRow(
+                        SettingsIndex.RestoreBackup,
+                        onClick = { openFrom.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
+                        enabled = !working,
+                        chevron = false,
+                    )
+                    note?.let { NoteRow(it) }
+                }
             }
         }
     }

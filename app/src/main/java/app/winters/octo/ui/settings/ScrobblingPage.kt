@@ -1,9 +1,10 @@
 package app.winters.octo.ui.settings
 
 import android.content.Intent
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -15,7 +16,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -27,7 +27,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.GlassInput
-import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.listening.LISTENBRAINZ_TOKEN_PAGE
@@ -38,6 +37,13 @@ import app.winters.octo.listening.TokenCheck
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.LocalChoiceSheet
+import app.winters.octo.ui.settings.rows.ActionRow
+import app.winters.octo.ui.settings.rows.ChoiceRow
+import app.winters.octo.ui.settings.rows.InfoRow
+import app.winters.octo.ui.settings.rows.NoteRow
+import app.winters.octo.ui.settings.rows.SettingsGroup
+import app.winters.octo.ui.settings.rows.SettingsPageFrame
+import app.winters.octo.ui.settings.rows.SwitchRow
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -99,57 +105,61 @@ private val SendPlays.detail: String
 
 // Sending plays to ListenBrainz straight from the phone, with or without a server.
 @Composable
-internal fun ScrobblingCard(modifier: Modifier = Modifier, vm: ScrobblingViewModel = hiltViewModel()) {
+fun ScrobblingPage(onBack: () -> Unit, highlight: String?, vm: ScrobblingViewModel = hiltViewModel()) {
     val prefs by vm.prefs.collectAsStateWithLifecycle()
     val queued by vm.queued.collectAsStateWithLifecycle()
     val sheet = LocalChoiceSheet.current
     val modes = SendPlays.entries
 
-    Card("Scrobbling", modifier) {
-        SwitchLine(
-            label = "ListenBrainz",
-            detail = "Add the songs you play to your ListenBrainz profile.",
-            checked = prefs.enabled,
-            onChange = vm::setEnabled,
-        )
-        if (!prefs.enabled) return@Card
-
-        if (prefs.connected) {
-            if (prefs.needsAttention) {
-                Text(
-                    "ListenBrainz no longer accepts the saved token. Paste a new one to keep sending plays. " +
-                        "Plays wait here until then.",
-                    style = OctoType.caption,
-                    color = OctoColors.Error,
-                )
-            } else {
-                Text("Connected as ${prefs.user}", style = OctoType.caption, color = OctoColors.TextMuted)
+    SettingsPageFrame("Scrobbling", onBack, highlight) {
+        SettingsGroup {
+            SwitchRow(
+                SettingsIndex.ListenBrainz,
+                checked = prefs.enabled,
+                onChange = vm::setEnabled,
+                helper = "Add the songs you play to your ListenBrainz profile.",
+            )
+            if (prefs.enabled && prefs.connected) {
+                if (prefs.needsAttention) {
+                    NoteRow(
+                        "ListenBrainz no longer accepts the saved token. Paste a new one to keep sending plays. " +
+                            "Plays wait here until then.",
+                        color = OctoColors.Error,
+                    )
+                } else {
+                    InfoRow(null, prefs.user.orEmpty(), title = "Connected as")
+                }
+                if (queued > 0) InfoRow(null, "%,d".format(queued), title = "Waiting to send")
             }
-            if (queued > 0) Line("Waiting to send", "%,d".format(queued))
         }
-        if (!prefs.connected || prefs.needsAttention) TokenEntry(vm)
+        if (!prefs.enabled) return@SettingsPageFrame
+
+        if (!prefs.connected || prefs.needsAttention) {
+            SettingsGroup(title = "Connect") { TokenEntry(vm) }
+        }
 
         if (prefs.connected) {
-            ChoiceLine("Send plays of", prefs.sendPlays.label) {
-                sheet.show(
-                    ChoiceRequest("Send plays of", modes.map { Choice(it.label, it.detail) }, modes.indexOf(prefs.sendPlays)) {
-                        vm.setSendPlays(modes[it])
-                    },
+            SettingsGroup(
+                footer = "Choose Only songs on this phone when your server already passes its plays on to ListenBrainz, " +
+                    "so they are not counted twice.",
+            ) {
+                ChoiceRow(SettingsIndex.SendPlays, value = prefs.sendPlays.label, onClick = {
+                    sheet.show(
+                        ChoiceRequest(SettingsIndex.SendPlays.title, modes.map { Choice(it.label, it.detail) }, modes.indexOf(prefs.sendPlays)) {
+                            vm.setSendPlays(modes[it])
+                        },
+                    )
+                })
+                SwitchRow(
+                    SettingsIndex.NowPlaying,
+                    checked = prefs.nowPlaying,
+                    onChange = vm::setNowPlaying,
+                    helper = "Your profile shows the song while it plays.",
                 )
             }
-            Text(
-                "Choose Only songs on this phone when your server already passes its plays on to ListenBrainz, " +
-                    "so they are not counted twice.",
-                style = OctoType.caption,
-                color = OctoColors.TextMuted,
-            )
-            SwitchLine(
-                label = "Show what I'm playing now",
-                detail = "Your profile shows the song while it plays.",
-                checked = prefs.nowPlaying,
-                onChange = vm::setNowPlaying,
-            )
-            GlazeButton("Disconnect", onClick = vm::disconnect, modifier = Modifier.padding(top = 4.dp))
+            SettingsGroup {
+                ActionRow(SettingsIndex.ScrobblingDisconnect, onClick = vm::disconnect, destructive = true, chevron = false)
+            }
         }
     }
 }
@@ -158,31 +168,34 @@ internal fun ScrobblingCard(modifier: Modifier = Modifier, vm: ScrobblingViewMod
 @Composable
 private fun TokenEntry(vm: ScrobblingViewModel) {
     val context = LocalContext.current
-    Text(
-        "Paste your user token from your ListenBrainz settings. It is kept encrypted on this phone " +
-            "and only ever sent to ListenBrainz.",
-        style = OctoType.caption,
-        color = OctoColors.TextMuted,
-    )
-    Text(
-        "Open ListenBrainz settings",
-        style = OctoType.bodySmall,
-        color = OctoColors.Accent,
-        modifier = Modifier.clickable(role = Role.Button) {
-            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, LISTENBRAINZ_TOKEN_PAGE.toUri())) }
-        },
-    )
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        GlassInput(
-            value = vm.token,
-            onValueChange = { vm.token = it.trim() },
-            placeholder = "User token",
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false, imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { vm.connect() }),
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.weight(1f),
+    Column(Modifier.fillMaxWidth()) {
+        NoteRow(
+            "Paste your user token from your ListenBrainz settings. It is kept encrypted on this phone " +
+                "and only ever sent to ListenBrainz.",
         )
-        AccentButton("Connect", onClick = vm::connect, enabled = vm.token.isNotBlank(), loading = vm.checking)
+        ActionRow(
+            null,
+            title = "Open ListenBrainz settings",
+            onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, LISTENBRAINZ_TOKEN_PAGE.toUri())) } },
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            GlassInput(
+                value = vm.token,
+                onValueChange = { vm.token = it.trim() },
+                placeholder = "User token",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { vm.connect() }),
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.weight(1f),
+            )
+            AccentButton("Connect", onClick = vm::connect, enabled = vm.token.isNotBlank(), loading = vm.checking)
+        }
+        vm.problem?.let {
+            Text(it, style = OctoType.caption, color = OctoColors.Error, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp))
+        }
     }
-    vm.problem?.let { Text(it, style = OctoType.caption, color = OctoColors.Error) }
 }

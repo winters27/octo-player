@@ -25,11 +25,13 @@ import app.winters.octo.ui.nav.PlaylistRoute
 import app.winters.octo.ui.nav.PlaylistsRoute
 import app.winters.octo.ui.nav.RadioStationsRoute
 import app.winters.octo.ui.nav.SearchRoute
+import app.winters.octo.ui.nav.SettingsPageRoute
 import app.winters.octo.ui.nav.SettingsRoute
 import app.winters.octo.ui.nav.SharesRoute
 import app.winters.octo.ui.nav.SignInRoute
 import app.winters.octo.ui.nav.SongsRoute
 import app.winters.octo.ui.nav.SoundRoute
+import app.winters.octo.ui.settings.SettingsPage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -129,6 +131,8 @@ class AmbienceTest {
             OnlineAlbumRoute("a") to AmbientArea.Library,
             OnlineArtistRoute("a") to AmbientArea.Library,
             SettingsRoute to AmbientArea.Settings,
+            SettingsPageRoute(SettingsPage.Playback) to AmbientArea.Settings,
+            SettingsPageRoute(SettingsPage.About, "version") to AmbientArea.Settings,
             SoundRoute to AmbientArea.Settings,
             SignInRoute to AmbientArea.Settings,
             EditConnectionRoute to AmbientArea.Settings,
