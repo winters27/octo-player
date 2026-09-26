@@ -97,6 +97,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
 import app.winters.octo.catalog.ArtworkRef
+import app.winters.octo.catalog.isFind
 import app.winters.octo.design.AccentFill
 import app.winters.octo.design.GlassSheet
 import app.winters.octo.design.GlazeInset
@@ -112,6 +113,7 @@ import app.winters.octo.playback.AudioQuality
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.SleepState
 import app.winters.octo.ui.common.Artwork
+import app.winters.octo.ui.common.DownloadButton
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.menu.LocalSongMenu
 import app.winters.octo.ui.common.asClock
@@ -390,23 +392,45 @@ private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit) {
                 color = OctoColors.Accent,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                // A song found online has no artist in the library to open.
                 modifier = Modifier.clickable(
-                    enabled = song.artistId != null,
+                    enabled = !song.artistId.isNullOrEmpty(),
                     interactionSource = null,
                     indication = null,
                     role = Role.Button,
-                ) { song.artistId?.let(onOpenArtist) },
+                ) { song.artistId?.takeIf { it.isNotEmpty() }?.let(onOpenArtist) },
             )
         }
     }
 }
 
 // Beside the song: a heart for Liked songs, glowing while it is in them,
-// and the song's menu.
+// or a download button for a song found online, and the song's menu.
 @Composable
 private fun SongButtons(now: NowPlaying, model: PlayerViewModel) {
-    val liked by model.liked.collectAsStateWithLifecycle()
     val menu = LocalSongMenu.current
+    if (now.trackId != null && isFind(now.trackId)) {
+        val find by model.find.collectAsStateWithLifecycle()
+        // Held back until the find for this song has loaded, not the last one.
+        find?.takeIf { it.id == now.trackId }?.let { DownloadButton(it, size = 44.dp, iconSize = 24.dp) }
+            ?: Spacer(Modifier.size(44.dp))
+    } else {
+        LikeButton(model)
+    }
+    Box(
+        Modifier
+            .size(44.dp)
+            .clickable(interactionSource = null, indication = null, role = Role.Button) { now.trackId?.let(menu::open) }
+            .semantics { contentDescription = "More" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(painterResource(OctoIcons.More), contentDescription = null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(24.dp))
+    }
+}
+
+@Composable
+private fun LikeButton(model: PlayerViewModel) {
+    val liked by model.liked.collectAsStateWithLifecycle()
     Box(
         Modifier
             .size(44.dp)
@@ -423,15 +447,6 @@ private fun SongButtons(now: NowPlaying, model: PlayerViewModel) {
             lit = liked,
             modifier = Modifier.size(24.dp),
         )
-    }
-    Box(
-        Modifier
-            .size(44.dp)
-            .clickable(interactionSource = null, indication = null, role = Role.Button) { now.trackId?.let(menu::open) }
-            .semantics { contentDescription = "More" },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(painterResource(OctoIcons.More), contentDescription = null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(24.dp))
     }
 }
 

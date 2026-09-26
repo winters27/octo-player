@@ -3,6 +3,10 @@ package app.winters.octo.player
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.OnlineDao
+import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.isFind
+import app.winters.octo.discovery.asTrack
 import app.winters.octo.playback.DeviceVolume
 import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.NowPlaying
@@ -31,6 +35,7 @@ class PlayerViewModel @Inject constructor(
     palette: ArtworkPalette,
     private val likes: LikeStore,
     catalog: CatalogDao,
+    online: OnlineDao,
     settings: PlayerSettings,
     private val deviceVolume: DeviceVolume,
     private val sleepTimer: SleepTimer,
@@ -38,12 +43,13 @@ class PlayerViewModel @Inject constructor(
     val now: StateFlow<NowPlaying> = playback.now
     val upNext: StateFlow<List<QueueEntry>> = playback.upNext
 
-    // The album name for the top of the player, or nothing for a single.
+    // The album name for the top of the player, or nothing for a single. A
+    // song found online has no album in the library to count, so it shows none.
     val albumLabel: StateFlow<String?> = playback.now
         .map { Triple(it.albumId, it.album, it.title) }
         .distinctUntilChanged()
         .flatMapLatest { (albumId, album, title) ->
-            if (albumId == null) {
+            if (albumId.isNullOrEmpty()) {
                 flowOf(null)
             } else {
                 catalog.album(albumId).map { albumLabel(album, title, it?.songCount ?: 0) }
@@ -56,8 +62,18 @@ class PlayerViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     fun toggleLike() {
-        playback.now.value.trackId?.let(likes::toggle)
+        playback.now.value.trackId?.takeUnless(::isFind)?.let(likes::toggle)
     }
+
+    // The song on now when it was found online, for the download button
+    // that stands where the heart would be.
+    val find: StateFlow<TrackEntity?> = playback.now
+        .map { it.trackId }
+        .distinctUntilChanged()
+        .flatMapLatest { id ->
+            if (id != null && isFind(id)) online.songFlow(id).map { it?.asTrack() } else flowOf(null)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val prefs: StateFlow<PlayerPrefs> = settings.prefs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerPrefs())
