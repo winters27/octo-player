@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -46,24 +47,33 @@ import app.winters.octo.ambient.PageArtwork
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.artistSongOrder
 import app.winters.octo.catalog.isFind
+import app.winters.octo.design.AccentButton
+import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.discovery.ArtistExtras
 import app.winters.octo.discovery.ArtistExtrasSource
+import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.OnlineArtist
 import app.winters.octo.discovery.SimilarArtist
+import app.winters.octo.listening.PlayHistory
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.sort.SortList
 import app.winters.octo.sort.SortOrder
 import app.winters.octo.sort.Sorted
 import app.winters.octo.sort.SortedLibrary
+import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistCircle
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.DownloadButton
+import app.winters.octo.ui.common.Feedback
+import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.SortBar
@@ -79,14 +89,17 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel(assistedFactory = ArtistViewModel.Factory::class)
@@ -94,8 +107,11 @@ class ArtistViewModel @AssistedInject constructor(
     @Assisted id: String,
     dao: CatalogDao,
     extrasSource: ArtistExtrasSource,
+    history: PlayHistory,
     private val sorted: SortedLibrary,
     private val playback: PlaybackConnection,
+    private val discovery: Discovery,
+    private val feedback: Feedback,
 ) : ViewModel() {
     val artist: StateFlow<ArtistEntity?> =
         dao.artist(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -126,6 +142,46 @@ class ArtistViewModel @AssistedInject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    // Their songs in the library, the most played first once any have been
+    // played, otherwise album by album.
+    val songs: StateFlow<List<TrackEntity>> =
+        combine(dao.artistTracks(id), history.tracks) { tracks, played -> artistSongOrder(tracks, played) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // Whether a server is signed in, so there can be a radio.
+    val radio: StateFlow<Boolean> =
+        discovery.available.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    // Plays all their songs in the order shown, or shuffled.
+    fun play(shuffle: Boolean) {
+        playback.playTracks(songs.value.map { it.id }, 0, shuffle)
+    }
+
+    fun playSong(index: Int) {
+        playback.playTracks(songs.value.map { it.id }, index)
+    }
+
+    // Plays their most played song, then songs like it from the server.
+    // When the server cannot answer, nothing changes.
+    fun startRadio() {
+        val seed = songs.value.firstOrNull() ?: return
+        viewModelScope.launch {
+            val found = try {
+                withContext(Dispatchers.IO) { discovery.radio(seed) }
+            } catch (e: SubsonicException) {
+                Log.w("Octo", "artist radio failed: ${e.javaClass.simpleName}")
+                feedback.show("Could not start a radio for this artist")
+                return@launch
+            }
+            // Only the song itself back means the server found nothing like it.
+            if (found.size > 1) {
+                playback.playTracks(found.map { it.id }, 0)
+            } else {
+                feedback.show("No similar songs found")
+            }
+        }
+    }
+
     // Plays the top songs from one of them.
     fun playTop(index: Int) {
         val songs = extras.value?.topSongs ?: return
@@ -152,17 +208,47 @@ fun ArtistScreen(
     val top = extras?.topSongs.orEmpty()
     val about = extras?.about
     val similar = extras?.similar.orEmpty()
+    val ownSongs by vm.songs.collectAsStateWithLifecycle()
+    val radio by vm.radio.collectAsStateWithLifecycle()
+    var allSongs by rememberSaveable { mutableStateOf(false) }
     PageArtwork(ArtistRoute(id), artist?.artwork)
     val grid = rememberLazyGridState()
-    // A new order scrolls back to the albums' own line, below the header and
-    // any top songs.
-    sortedAlbums?.let { TopOnNewOrder(it.order, grid, top = (if (artist != null) 1 else 0) + (if (top.isNotEmpty()) 1 else 0)) }
+    // A new order scrolls back to the albums' own line, below the header,
+    // the buttons, the songs and any top songs.
+    val above = listOf(artist != null, ownSongs.isNotEmpty(), ownSongs.isNotEmpty(), top.isNotEmpty()).count { it }
+    sortedAlbums?.let { TopOnNewOrder(it.order, grid, top = above) }
 
     Box(Modifier.fillMaxSize()) {
         ArtistGrid(grid) {
             artist?.let { a ->
                 item(key = "header", span = { GridItemSpan(maxLineSpan) }) {
                     ArtistHeader(a.artwork, a.name, "${albums(a.albumCount)} • ${songs(a.songCount)}")
+                }
+            }
+            if (ownSongs.isNotEmpty()) {
+                wide("buttons") {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                    ) {
+                        AccentButton("Play", onClick = { vm.play(shuffle = false) })
+                        GlazeButton("Shuffle", onClick = { vm.play(shuffle = true) })
+                        // A radio needs the server, to find songs like these.
+                        if (radio) GlazeButton("Radio", onClick = vm::startRadio)
+                    }
+                }
+                wide("songs") {
+                    Column {
+                        val more = ownSongs.size > ARTIST_SONGS
+                        Row(Modifier.fillMaxWidth().padding(end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            SectionTitle("Songs", Modifier.weight(1f))
+                            if (more) QuietButton(if (allSongs) "Show fewer" else "See all") { allSongs = !allSongs }
+                        }
+                        val shown = if (allSongs) ownSongs else ownSongs.take(ARTIST_SONGS)
+                        shown.forEachIndexed { index, track ->
+                            SongRow(track, subtitle = track.album) { vm.playSong(index) }
+                        }
+                    }
                 }
             }
             if (top.isNotEmpty()) {
@@ -180,7 +266,7 @@ fun ArtistScreen(
             }
             // Once songs come first, the albums need a name of their own.
             // With more than one album, the line carries their sort button.
-            val albumsTitle = if (top.isNotEmpty()) "Albums" else null
+            val albumsTitle = if (top.isNotEmpty() || ownSongs.isNotEmpty()) "Albums" else null
             val order = sortedAlbums?.order
             if (order != null && albumList.size > 1) {
                 wide("albums:title") {
@@ -212,6 +298,9 @@ fun ArtistScreen(
         BackButton(onBack)
     }
 }
+
+// How many songs an artist page shows before "See all".
+private const val ARTIST_SONGS = 10
 
 // Artists like this one, in a row. A library artist opens in the library;
 // any other opens as the server has them.

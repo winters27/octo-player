@@ -69,6 +69,28 @@ interface CatalogDao {
     @Query("SELECT * FROM artist WHERE id = :id")
     fun artist(id: String): Flow<ArtistEntity?>
 
+    // An artist's songs, album by album, newest album first, each in its
+    // own order.
+    @Query(
+        """
+        SELECT t.* FROM track t LEFT JOIN album a ON a.id = t.albumId
+        WHERE t.artistId = :artistId
+        ORDER BY COALESCE(a.year, 0) DESC, a.sortKey, t.albumId, t.albumOrder
+        """,
+    )
+    fun artistTracks(artistId: String): Flow<List<TrackEntity>>
+
+    // Every song's album and artist, album by album in the same order, for
+    // playing whole lists of albums or artists.
+    @Query(
+        """
+        SELECT t.id AS id, t.albumId AS albumId, t.artistId AS artistId
+        FROM track t LEFT JOIN album a ON a.id = t.albumId
+        ORDER BY COALESCE(a.year, 0) DESC, a.sortKey, t.albumId, t.albumOrder
+        """,
+    )
+    suspend fun trackPlaces(): List<TrackPlace>
+
     @Query("SELECT * FROM album WHERE artistId = :artistId ORDER BY year DESC, sortKey")
     fun artistAlbums(artistId: String): Flow<List<AlbumEntity>>
 

@@ -33,3 +33,15 @@ fun byPlayCount(tracks: List<PlayedTrack>, limit: Int): List<TrackEntity> =
         )
         .take(limit)
         .map { it.track }
+
+// An artist's songs, given album by album. Once any of them has been
+// played, the most played come first (of two played as often, the one
+// played last), and the rest follow in the order given.
+fun artistSongOrder(tracks: List<TrackEntity>, played: List<PlayedTrack>): List<TrackEntity> {
+    val plays = played.associateBy { it.track.id }
+    val (heard, rest) = tracks.partition { it.id in plays }
+    if (heard.isEmpty()) return tracks
+    return heard.sortedWith(
+        compareByDescending<TrackEntity> { plays.getValue(it.id).plays }.thenByDescending { plays.getValue(it.id).lastPlayedAt },
+    ) + rest
+}

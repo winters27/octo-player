@@ -6,6 +6,8 @@ import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.TrackPlace
+import app.winters.octo.catalog.songsInGroupOrder
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.sort.SongScope
 import app.winters.octo.sort.SortList
@@ -21,7 +23,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
-    dao: CatalogDao,
+    private val dao: CatalogDao,
     private val sorted: SortedLibrary,
     private val playback: PlaybackConnection,
 ) : ViewModel() {
@@ -41,6 +43,36 @@ class LibraryViewModel @Inject constructor(
     fun setOrder(list: SortList, order: SortOrder) {
         viewModelScope.launch { sorted.setOrder(list, order) }
     }
+
+    // Plays every song, in the order shown, or shuffled.
+    fun playSongs(shuffle: Boolean) {
+        val all = songs.value?.items ?: return
+        playback.playTracks(all.map { it.id }, 0, shuffle)
+    }
+
+    // Plays every album in the order shown, each from its first song, or
+    // every song shuffled.
+    fun playAlbums(shuffle: Boolean) {
+        val order = albums.value?.items?.map { it.id } ?: return
+        playGroups(order, shuffle) { it.albumId }
+    }
+
+    // Plays every artist in the order shown, album by album, or every song
+    // shuffled.
+    fun playArtists(shuffle: Boolean) {
+        val order = artists.value?.items?.map { it.id } ?: return
+        playGroups(order, shuffle) { it.artistId }
+    }
+
+    private fun playGroups(order: List<String>, shuffle: Boolean, groupOf: (TrackPlace) -> String) {
+        viewModelScope.launch {
+            val ids = if (shuffle) dao.allTrackIds() else songsInGroupOrder(dao.trackPlaces(), groupOf, order)
+            playback.playTracks(ids, 0, shuffle)
+        }
+    }
+
+    // Any one album, for "Random album".
+    fun randomAlbum(): AlbumEntity? = albums.value?.items?.randomOrNull()
 
     // Plays the whole song list, in the order shown, from the one tapped.
     fun playSong(track: TrackEntity) {

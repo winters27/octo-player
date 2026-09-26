@@ -36,6 +36,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
+import app.winters.octo.design.AccentButton
+import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -47,6 +49,7 @@ import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.EmptyLibraryNote
 import app.winters.octo.ui.common.LetterRail
+import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.RAIL_MIN_ITEMS
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
@@ -149,6 +152,10 @@ fun AlbumsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: LibraryViewMo
     val albums by vm.albums.collectAsStateWithLifecycle()
     LibraryPage("Albums", onBack, action = {
         albums?.let { SortButton(SortList.Albums, it.order, onChange = { order -> vm.setOrder(SortList.Albums, order) }) }
+    }, buttons = {
+        PlayButtons(albums, vm::playAlbums) {
+            QuietButton("Random album") { vm.randomAlbum()?.let { onOpen(AlbumRoute(it.id)) } }
+        }
     }) {
         Loaded(albums) { sorted ->
             val grid = rememberLazyGridState()
@@ -181,7 +188,7 @@ fun ArtistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: LibraryViewM
     val artists by vm.artists.collectAsStateWithLifecycle()
     LibraryPage("Artists", onBack, action = {
         artists?.let { SortButton(SortList.Artists, it.order, onChange = { order -> vm.setOrder(SortList.Artists, order) }) }
-    }) {
+    }, buttons = { PlayButtons(artists, vm::playArtists) }) {
         Loaded(artists) { sorted ->
             SortedList(sorted, key = { it.id }) { artist ->
                 ArtistRow(artist) { onOpen(ArtistRoute(artist.id)) }
@@ -196,7 +203,7 @@ fun SongsScreen(onBack: () -> Unit, vm: LibraryViewModel = hiltViewModel()) {
     val songs by vm.songs.collectAsStateWithLifecycle()
     LibraryPage("Songs", onBack, action = {
         songs?.let { SortButton(SortList.Songs, it.order, onChange = { order -> vm.setOrder(SortList.Songs, order) }) }
-    }) {
+    }, buttons = { PlayButtons(songs, vm::playSongs) }) {
         Loaded(songs) { sorted ->
             SortedList(sorted, key = { it.id }) { track -> SongRow(track) { vm.playSong(track) } }
         }
@@ -235,9 +242,15 @@ private fun <T> SortedList(sorted: Sorted<T>, key: (T) -> Any, row: @Composable 
 }
 
 // A page inside the library: the back button, a title with the list's sort
-// button beside it, then the list.
+// button beside it, the buttons that play the list, then the list.
 @Composable
-private fun LibraryPage(title: String, onBack: () -> Unit, action: @Composable () -> Unit, content: @Composable () -> Unit) {
+private fun LibraryPage(
+    title: String,
+    onBack: () -> Unit,
+    action: @Composable () -> Unit,
+    buttons: @Composable () -> Unit = {},
+    content: @Composable () -> Unit,
+) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Spacer(Modifier.height(DetailTopGap))
@@ -245,9 +258,27 @@ private fun LibraryPage(title: String, onBack: () -> Unit, action: @Composable (
                 ScreenTitle(title, Modifier.weight(1f))
                 Box(Modifier.padding(end = 10.dp, top = 8.dp, bottom = 16.dp)) { action() }
             }
+            buttons()
             content()
         }
         BackButton(onBack)
+    }
+}
+
+// Play and Shuffle for the whole list, once it has something in it, with
+// room at the end for one quieter action.
+@Composable
+private fun PlayButtons(list: Sorted<*>?, onPlay: (shuffle: Boolean) -> Unit, extra: @Composable () -> Unit = {}) {
+    if (list == null || list.items.isEmpty()) return
+    Row(
+        Modifier.fillMaxWidth().padding(start = 20.dp, end = 10.dp, bottom = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AccentButton("Play", onClick = { onPlay(false) })
+        GlazeButton("Shuffle", onClick = { onPlay(true) })
+        Spacer(Modifier.weight(1f))
+        extra()
     }
 }
 
