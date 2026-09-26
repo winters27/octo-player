@@ -40,6 +40,7 @@ import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.screenPadding
+import app.winters.octo.ui.nav.OctoAdminRoute
 import app.winters.octo.ui.nav.SignInRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -126,7 +127,11 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
             }
         }
 
-        ServerCard(onConnect = { onOpen(SignInRoute) }, Modifier.padding(top = 16.dp))
+        ServerCard(
+            onConnect = { onOpen(SignInRoute) },
+            onOpenAdmin = { onOpen(OctoAdminRoute) },
+            modifier = Modifier.padding(top = 16.dp),
+        )
 
         Card("Player", Modifier.padding(top = 16.dp)) {
             SwitchLine(

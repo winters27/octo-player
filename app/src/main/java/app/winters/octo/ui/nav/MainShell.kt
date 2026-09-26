@@ -36,6 +36,7 @@ import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.player.PlayerArtCorner
 import app.winters.octo.player.PlayerOverlay
+import app.winters.octo.ui.admin.OctoAdminScreen
 import app.winters.octo.ui.album.AlbumScreen
 import app.winters.octo.ui.artist.ArtistScreen
 import app.winters.octo.ui.common.ChoiceSheet
@@ -167,6 +168,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                         entry<LikedRoute> { LikedScreen(back) }
                         entry<PlaylistRoute> { PlaylistScreen(it.id, back) }
                         entry<SignInRoute> { SignInScreen(back) }
+                        entry<OctoAdminRoute> { OctoAdminScreen(back) }
                     },
                 )
                 // Back from the top of another tab goes Home rather than out.

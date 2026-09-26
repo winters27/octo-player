@@ -1,18 +1,24 @@
 package app.winters.octo.ui.settings
 
 import android.text.format.DateUtils
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -24,6 +30,7 @@ import app.winters.octo.design.AccentButton
 import app.winters.octo.design.GlassSheet
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.server.LastSync
 import app.winters.octo.server.ServerSync
@@ -52,7 +59,12 @@ class ServerViewModel @Inject constructor(
 // The server, if one is connected: where it is, who is signed in, and how
 // fresh the copy of its library is.
 @Composable
-internal fun ServerCard(onConnect: () -> Unit, modifier: Modifier = Modifier, vm: ServerViewModel = hiltViewModel()) {
+internal fun ServerCard(
+    onConnect: () -> Unit,
+    onOpenAdmin: () -> Unit,
+    modifier: Modifier = Modifier,
+    vm: ServerViewModel = hiltViewModel(),
+) {
     val state by vm.session.collectAsStateWithLifecycle()
     val syncing by vm.syncing.collectAsStateWithLifecycle()
     val problem by vm.problem.collectAsStateWithLifecycle()
@@ -81,6 +93,7 @@ internal fun ServerCard(onConnect: () -> Unit, modifier: Modifier = Modifier, vm
                     Line("Albums", "%,d".format(copy.albums))
                 }
                 if (syncing) Line("Status", "Syncing…")
+                OpenLine("Octo admin", onClick = onOpenAdmin)
                 problem?.let { Text(it, style = OctoType.caption, color = OctoColors.Error) }
                 Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     AccentButton("Sync now", onClick = vm::syncNow, loading = syncing)
@@ -88,6 +101,20 @@ internal fun ServerCard(onConnect: () -> Unit, modifier: Modifier = Modifier, vm
                 }
             }
         }
+    }
+}
+
+// A line that opens another page.
+@Composable
+private fun OpenLine(label: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.Button, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = OctoType.bodySmall, color = OctoColors.TextSecondary, modifier = Modifier.weight(1f))
+        Icon(painterResource(OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(18.dp))
     }
 }
 
