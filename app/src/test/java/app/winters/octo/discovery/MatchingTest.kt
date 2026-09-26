@@ -1,5 +1,6 @@
 package app.winters.octo.discovery
 
+import app.winters.octo.admin.DownloadRecord
 import app.winters.octo.catalog.OnlineSongEntity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.subsonic.Song
@@ -89,6 +90,15 @@ class MatchingTest {
         assertEquals("", t.artistId)
         assertFalse(t.onPhone)
         assertEquals("server:server:x|e1", t.artwork)
+    }
+
+    @Test
+    fun aFinishedDownloadIsKnownByTitleAndArtist() {
+        val find = OnlineSongEntity("find:e1", "s", "e1", "Genesis", "Justice", "", null, null, 0, null, null, null, 0)
+        assertTrue(downloadMatches(find, DownloadRecord(artist = "Justice", title = "Genesis")))
+        assertTrue(downloadMatches(find, DownloadRecord(artist = "Justice feat. Someone", title = "Genesis [Remastered]")))
+        assertFalse(downloadMatches(find, DownloadRecord(artist = "Justice", title = "Genesis (Live)")))
+        assertFalse(downloadMatches(find, DownloadRecord(artist = "Phil Collins", title = "Genesis")))
     }
 
     @Test

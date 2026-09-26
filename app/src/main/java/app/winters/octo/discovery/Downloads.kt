@@ -1,5 +1,8 @@
 package app.winters.octo.discovery
 
+import app.winters.octo.admin.AdminUnavailable
+import app.winters.octo.admin.DownloadRecord
+import app.winters.octo.admin.OctoAdmin
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.FIND_PREFIX
 import app.winters.octo.catalog.LikedTrackEntity
@@ -26,16 +29,24 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// When to look for downloads in the library after asking for one. The
-// server does not say when a download is done, so the library is copied
-// again a little later, and once more after that for slow ones.
+// When to look for downloads in the library after asking for one, away
+// from home: the server does not say when a download is done, so the
+// library is copied again a little later, and once more for slow ones.
 private val CHECK_AFTER_MS = listOf(2 * 60_000L, 8 * 60_000L)
 
 // After this long a download that never arrived can be asked for again.
 private const val GIVE_UP_MS = 24 * 60 * 60_000L
+
+// On the home network, how often to look at what Octo has finished, for how
+// long, and how many times to copy the library for one finished song while
+// the server takes it in.
+private const val WATCH_EVERY_MS = 20_000L
+private const val WATCH_FOR_MS = 30 * 60_000L
+private const val SYNCS_PER_SONG = 3
 
 // Finds that have not come up for this long are let go.
 private const val FORGET_MS = 30L * 24 * 60 * 60_000L
@@ -53,6 +64,7 @@ class Downloads @Inject constructor(
     private val user: UserDao,
     private val listening: ListeningSync,
     private val sync: Lazy<ServerSync>,
+    private val admin: OctoAdmin,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var checks: Job? = null
@@ -112,23 +124,56 @@ class Downloads @Inject constructor(
         }
     }
 
-    // Copies the library again later, to pick up what has downloaded by then.
+    // Copies the library again once downloads are done: as soon as Octo
+    // lists one as finished when its admin pages can be reached, otherwise a
+    // little later, and once more after that for slow ones.
     private fun checkLater() {
         synchronized(this) {
             checks?.cancel()
             checks = scope.launch {
-                var waited = 0L
-                for (at in CHECK_AFTER_MS) {
-                    delay(at - waited)
-                    waited = at
-                    sync.get().syncNow()
-                }
+                val base = admin.locate()
+                if (base != null) watch(base) else checkOnTimer()
+            }
+        }
+    }
+
+    private suspend fun checkOnTimer() {
+        var waited = 0L
+        for (at in CHECK_AFTER_MS) {
+            delay(at - waited)
+            waited = at
+            sync.get().syncNow()
+        }
+    }
+
+    // Until every download asked for has arrived, or for half an hour.
+    private suspend fun watch(base: HttpUrl) {
+        val syncs = HashMap<String, Int>()
+        val until = System.currentTimeMillis() + WATCH_FOR_MS
+        while (System.currentTimeMillis() < until) {
+            delay(WATCH_EVERY_MS)
+            val waiting = online.waiting().ifEmpty { return }
+            val finished = try {
+                admin.downloads(base)
+            } catch (e: AdminUnavailable) {
+                continue
+            }
+            val due = waiting.filter { find -> finished.any { downloadMatches(find, it) } }
+                .filter { (syncs[it.id] ?: 0) < SYNCS_PER_SONG }
+            if (due.isNotEmpty()) {
+                due.forEach { syncs[it.id] = (syncs[it.id] ?: 0) + 1 }
+                sync.get().syncNow()
             }
         }
     }
 
     private fun client() = (sessions.state.value as? SessionState.SignedIn)?.session?.client
 }
+
+// Whether a song Octo finished downloading is the one asked for.
+fun downloadMatches(find: OnlineSongEntity, record: DownloadRecord): Boolean =
+    matchKey(record.title) == matchKey(find.title) && versionOf(record.title) == versionOf(find.title) &&
+        sameArtist(record.artist, find.artist)
 
 fun stateOf(row: OnlineSongEntity, now: Long): DownloadState = when {
     row.adoptedId.isNotEmpty() -> DownloadState.Done
