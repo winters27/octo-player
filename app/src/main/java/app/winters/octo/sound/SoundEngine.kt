@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -88,6 +89,24 @@ class SoundEngine @Inject constructor(@ApplicationContext private val context: C
     // output from the shared set.
     fun setPerOutput(on: Boolean) {
         scope.launch { context.soundData.edit { it[PER_OUTPUT] = on } }
+    }
+
+    // Every saved set by output key, and whether each output keeps its own,
+    // for a backup.
+    suspend fun saved(): Pair<Boolean, Map<String, SoundSettings>> {
+        val p = context.soundData.data.first()
+        val all = p[PROFILES]?.let { runCatching { json.decodeFromString(mapSerializer, it) }.getOrNull() }.orEmpty()
+        return (p[PER_OUTPUT] ?: false) to all
+    }
+
+    // Puts back the sets from a backup. Outputs the backup does not name
+    // keep what they have.
+    suspend fun restore(perOutput: Boolean, profiles: Map<String, SoundSettings>) {
+        context.soundData.edit { p ->
+            val all = p[PROFILES]?.let { runCatching { json.decodeFromString(mapSerializer, it) }.getOrNull() }.orEmpty()
+            p[PROFILES] = json.encodeToString(mapSerializer, all + profiles)
+            p[PER_OUTPUT] = perOutput
+        }
     }
 
     private fun keyFor(perOutput: Boolean, output: AudioOutput) = if (perOutput) output.key else SHARED

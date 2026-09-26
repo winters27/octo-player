@@ -11,6 +11,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.ForwardingSimpleBasePlayer
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.RenderersFactory
@@ -85,11 +86,22 @@ class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : Forwa
 
     private val fader = Crossfader(this, spare).also(::addListener)
 
+    // Both decks, whichever is playing, so speed and skipping silence can be
+    // set on each and a crossfade hands over at the same pace.
+    private val decks = listOf(initial, spare)
+
     // How long a crossfade is, or 0 for none.
     var crossfadeMs: Long
         get() = fader.fadeMs
         set(value) {
             fader.fadeMs = value
+        }
+
+    // Skips quiet stretches inside songs, on both decks.
+    var skipSilence: Boolean
+        get() = deck.skipSilenceEnabled
+        set(value) {
+            decks.forEach { it.skipSilenceEnabled = value }
         }
 
     override var sleepFade = 1f
@@ -177,6 +189,13 @@ class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : Forwa
     override fun handleSetRepeatMode(repeatMode: Int): ListenableFuture<*> {
         fader.interrupt()
         return super.handleSetRepeatMode(repeatMode)
+    }
+
+    // Speed and pitch go to both decks, so the next song in a crossfade
+    // starts at the same pace as the one playing out.
+    override fun handleSetPlaybackParameters(playbackParameters: PlaybackParameters): ListenableFuture<*> {
+        decks.forEach { it.playbackParameters = playbackParameters }
+        return Futures.immediateVoidFuture()
     }
 
     override fun handleStop(): ListenableFuture<*> {

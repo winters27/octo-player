@@ -1,5 +1,6 @@
 package app.winters.octo.player
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -9,9 +10,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,6 +26,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -31,8 +36,10 @@ import app.winters.octo.design.AccentButton
 import app.winters.octo.design.GlassInput
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.playback.SleepState
+import app.winters.octo.playback.speedLabel
 import app.winters.octo.ui.common.asClock
 
 // The lengths offered, in minutes.
@@ -43,10 +50,12 @@ private const val MAX_SLEEP_MINUTES = 720
 
 // The sleep timer, inside a GlassSheet: how long until the music stops, or
 // the end of the song, and the time left once one is set. Starting or
-// cancelling a timer calls onDone so the sheet can close.
+// cancelling a timer calls onDone so the sheet can close. Playback speed,
+// the other setting about time, opens from its foot.
 @Composable
-fun SleepSheet(model: PlayerViewModel, onDone: () -> Unit) {
+fun SleepSheet(model: PlayerViewModel, onDone: () -> Unit, onOpenSpeed: () -> Unit) {
     val sleep by model.sleep.collectAsStateWithLifecycle()
+    val prefs by model.prefs.collectAsStateWithLifecycle()
     var custom by remember { mutableStateOf(false) }
 
     Column(
@@ -105,6 +114,33 @@ fun SleepSheet(model: PlayerViewModel, onDone: () -> Unit) {
                 onDone()
             })
         }
+        Spacer(Modifier.height(16.dp))
+        SpeedLine(prefs.speed, onOpenSpeed)
+    }
+}
+
+// "Playback speed" and what it is now, opening the speed sheet.
+@Composable
+private fun SpeedLine(speed: Float, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Playback speed", style = OctoType.bodySmall, color = OctoColors.TextPrimary, modifier = Modifier.weight(1f))
+        Text(
+            speedLabel(speed),
+            style = OctoType.bodySmall.copy(fontFeatureSettings = "tnum"),
+            color = if (speed == 1f) OctoColors.TextMuted else OctoColors.TextPrimary,
+        )
+        Icon(
+            painterResource(OctoIcons.Chevron),
+            contentDescription = null,
+            tint = OctoColors.TextMuted,
+            modifier = Modifier.padding(start = 6.dp).size(20.dp),
+        )
     }
 }
 

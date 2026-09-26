@@ -171,6 +171,7 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
                 onChange = vm::setCrossfade,
             )
             if (player.crossfade) CrossfadeLength(player.crossfadeSeconds, vm::setCrossfadeSeconds)
+            PlaybackLines()
             Text("Lyrics", style = OctoType.label, color = OctoColors.TextSecondary, modifier = Modifier.padding(top = 8.dp))
             SwitchLine(
                 label = "Find lyrics online",
@@ -184,6 +185,7 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
         StreamingCard(Modifier.padding(top = 16.dp))
 
         OfflineCard(Modifier.padding(top = 16.dp))
+        BackupCard(Modifier.padding(top = 16.dp))
 
         Card("About", Modifier.padding(top = 16.dp)) {
             Line("Octo", BuildConfig.VERSION_NAME)

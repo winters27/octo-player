@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -54,6 +55,20 @@ class UserPresets @Inject constructor(@ApplicationContext private val context: C
             context.presetData.edit { p ->
                 p[PRESETS] = json.encodeToString(listSerializer, read(p[PRESETS]).filterNot { it.name == name })
             }
+        }
+    }
+
+    // Every saved preset, read fresh, for a backup.
+    suspend fun saved(): List<EqPreset> = read(context.presetData.data.first()[PRESETS]).map { EqPreset(it.name, it.gains) }
+
+    // Adds presets from a backup, each replacing one of the same name.
+    suspend fun restore(presets: List<EqPreset>) {
+        val clean = presets.filter { it.name.isNotBlank() && it.gains.size == GraphicBands.size }
+        if (clean.isEmpty()) return
+        context.presetData.edit { p ->
+            val names = clean.mapTo(HashSet()) { it.name.trim().lowercase() }
+            val others = read(p[PRESETS]).filterNot { it.name.trim().lowercase() in names }
+            p[PRESETS] = json.encodeToString(listSerializer, others + clean.map { SavedPreset(it.name.trim(), it.gains) })
         }
     }
 

@@ -7,6 +7,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSourceBitmapLoader
@@ -22,6 +23,7 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import app.winters.octo.MainActivity
 import app.winters.octo.offline.Prefetcher
+import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.server.QueueSync
 import app.winters.octo.sound.AlbumRun
@@ -43,8 +45,12 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.CompletableDeferred
@@ -84,6 +90,7 @@ class OctoPlaybackService : MediaLibraryService() {
     private val scope = MainScope()
     private lateinit var player: OctoPlayer
     private lateinit var tracker: PlayTracker
+    private lateinit var headsets: HeadsetResume
     private var session: MediaLibrarySession? = null
     private val currentId = MutableStateFlow<String?>(null)
     private val queueChanged = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -135,8 +142,23 @@ class OctoPlaybackService : MediaLibraryService() {
         }
         // The heart follows both the song and the likes list.
         scope.launch { combine(currentId, likes.liked) { id, liked -> id != null && id in liked }.collect(::showLike) }
-        // Crossfade follows its setting.
-        scope.launch { playerSettings.prefs.collect { player.crossfadeMs = it.crossfadeMs } }
+        // Crossfade, speed and pitch, and skipping silence follow their
+        // settings, each only when it changes, so a blend is not cut short.
+        val prefs = playerSettings.prefs.stateIn(scope, SharingStarted.Eagerly, PlayerPrefs())
+        scope.launch { prefs.map { it.crossfadeMs }.distinctUntilChanged().collect { player.crossfadeMs = it } }
+        scope.launch {
+            prefs.map { it.pace }.distinctUntilChanged().collect { player.setPlaybackParameters(PlaybackParameters(it.speed, it.pitch)) }
+        }
+        scope.launch { prefs.map { it.skipSilence }.distinctUntilChanged().collect { player.skipSilence = it } }
+        // Headphones connecting can start the music again. With that on, the
+        // service stays in the foreground for the whole 30 minutes it waits
+        // after a pause, since Android may refuse to bring it back later.
+        headsets = HeadsetResume(this, player) { prefs.value }.also { it.start() }
+        scope.launch {
+            prefs.map { it.resumeWired || it.resumeBluetooth }.distinctUntilChanged().collect { on ->
+                setForegroundServiceTimeoutMs(if (on) RESUME_WINDOW_MS else DEFAULT_FOREGROUND_SERVICE_TIMEOUT_MS)
+            }
+        }
         // Editing the queue saves it once things settle.
         scope.launch { queueChanged.debounce(500).collect { saveQueue() } }
     }
@@ -167,6 +189,7 @@ class OctoPlaybackService : MediaLibraryService() {
         saveQueue()
         widgets.clear()
         tracker.flush()
+        headsets.stop()
         sleep.detach()
         prefetch.detach()
         session?.release()

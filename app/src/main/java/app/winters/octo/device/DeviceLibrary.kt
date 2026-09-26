@@ -85,6 +85,12 @@ class DeviceLibrary @Inject constructor(
     private val _paths = MutableStateFlow<Map<Long, List<String>>?>(null)
     val paths: StateFlow<Map<Long, List<String>>?> = _paths
 
+    // Each phone song's file as a path from the top of its storage, like
+    // "Music/Kavinsky/Nightcall/01 Nightcall.mp3", by media id. For reading
+    // and writing playlist files. Also from the last scan; null until then.
+    private val _files = MutableStateFlow<Map<Long, String>?>(null)
+    val files: StateFlow<Map<Long, String>?> = _files
+
     suspend fun setFolderIncluded(folder: String, included: Boolean) = rules.setIncluded(folder, included)
 
     @OptIn(FlowPreview::class)
@@ -152,6 +158,7 @@ class DeviceLibrary @Inject constructor(
                 )
                 val library = merge.rebuild()
                 _paths.value = included.folderPaths()
+                _files.value = included.associate { it.id to relativeFile(it.folder, it.fileName) }
                 // Counts only, so the library can be checked against the phone.
                 Log.i(
                     "Octo",

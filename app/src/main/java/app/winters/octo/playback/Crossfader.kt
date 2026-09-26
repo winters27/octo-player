@@ -94,7 +94,8 @@ internal class Crossfader(private val player: OctoPlayer, private var spare: Exo
             schedule(FAR_CHECK_MS)
             return
         }
-        val remaining = lengthOf(deck) - deck.currentPosition
+        // In real time: at 1.5x speed the song's last 6 seconds pass in 4.
+        val remaining = ((lengthOf(deck) - deck.currentPosition) / deck.playbackParameters.speed).toLong()
         if (loadedFor != next && remaining <= length + LOAD_AHEAD_MS) load(next)
         if (loadedFor == next && remaining <= length && spare.playbackState == Player.STATE_READY) {
             // Late (after a seek near the end, say): blend over what is left.
@@ -134,6 +135,9 @@ internal class Crossfader(private val player: OctoPlayer, private var spare: Exo
         spare.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(shuffleOrderOf(deck), System.nanoTime()))
         spare.shuffleModeEnabled = deck.shuffleModeEnabled
         spare.repeatMode = deck.repeatMode
+        // The same pace, so the blend does not jump in speed or pitch.
+        spare.playbackParameters = deck.playbackParameters
+        spare.skipSilenceEnabled = deck.skipSilenceEnabled
         spare.volume = 0f
         spare.playWhenReady = false
         spare.prepare()
