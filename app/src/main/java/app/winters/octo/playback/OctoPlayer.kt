@@ -13,16 +13,19 @@ import androidx.media3.common.ForwardingSimpleBasePlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.RenderersFactory
 import androidx.media3.exoplayer.source.MediaSource
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 
 // One engine that plays audio. Crossfade runs two of these; audio focus is
 // handled above them, so each deck ignores it. `sources` opens both phone
-// files and streams.
+// files and streams, `renderers` puts Octo's sound shaping in the audio
+// path, and both decks play in one audio session, so an equalizer app
+// attached to it hears both.
 @OptIn(UnstableApi::class)
-fun buildDeck(context: Context, sources: MediaSource.Factory): ExoPlayer =
-    ExoPlayer.Builder(context, sources)
+fun buildDeck(context: Context, sources: MediaSource.Factory, renderers: RenderersFactory, audioSessionId: Int): ExoPlayer =
+    ExoPlayer.Builder(context, renderers, sources)
         .setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
@@ -33,6 +36,7 @@ fun buildDeck(context: Context, sources: MediaSource.Factory): ExoPlayer =
         .setHandleAudioBecomingNoisy(true)
         .setWakeMode(C.WAKE_MODE_LOCAL)
         .build()
+        .also { if (audioSessionId != C.AUDIO_SESSION_ID_UNSET) it.audioSessionId = audioSessionId }
 
 // Asks the phone for the right to play, and hears when a call, a
 // navigation prompt or another app wants it back.

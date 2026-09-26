@@ -22,6 +22,10 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import app.winters.octo.MainActivity
 import app.winters.octo.player.PlayerSettings
+import app.winters.octo.sound.AlbumRun
+import app.winters.octo.sound.AudioSession
+import app.winters.octo.sound.OctoRenderersFactory
+import app.winters.octo.sound.SoundEngine
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -65,6 +69,8 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var sleep: SleepTimer
     @Inject lateinit var playerSettings: PlayerSettings
     @Inject lateinit var car: CarLibrary
+    @Inject lateinit var sound: SoundEngine
+    @Inject lateinit var audioSession: AudioSession
 
     private val scope = MainScope()
     private lateinit var player: OctoPlayer
@@ -79,7 +85,17 @@ class OctoPlaybackService : MediaLibraryService() {
     @kotlin.OptIn(FlowPreview::class)
     override fun onCreate() {
         super.onCreate()
-        player = OctoPlayer(this, buildDeck(this, streams.mediaSourceFactory()), buildDeck(this, streams.mediaSourceFactory()))
+        // Both decks shape their sound from the same settings, and share one
+        // memory of the last album for Smart ReplayGain, since a crossfade
+        // hands the next song to the other deck.
+        val albums = AlbumRun()
+        fun deck() = buildDeck(
+            this,
+            streams.mediaSourceFactory(),
+            OctoRenderersFactory(this, { sound.current.value }, albums),
+            audioSession.id,
+        )
+        player = OctoPlayer(this, deck(), deck())
         tracker = PlayTracker(plays) { player.isPlaying }
         player.addListener(tracker)
         player.addListener(Watcher())
@@ -125,6 +141,7 @@ class OctoPlaybackService : MediaLibraryService() {
         sleep.detach()
         session?.release()
         player.release()
+        audioSession.close()
         session = null
         scope.cancel()
         super.onDestroy()
@@ -199,6 +216,8 @@ class OctoPlaybackService : MediaLibraryService() {
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_READY) failedInARow = 0
+            // Equalizer apps let go once the music has stopped, not at a pause.
+            if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) audioSession.close()
         }
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
@@ -208,6 +227,8 @@ class OctoPlaybackService : MediaLibraryService() {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             positionSaver?.cancel()
             if (isPlaying) {
+                // Equalizer apps on the phone can attach to the music now.
+                audioSession.open()
                 // Where in the song we are, every 15 seconds, in case the phone kills the app.
                 positionSaver = scope.launch {
                     while (isActive) {
