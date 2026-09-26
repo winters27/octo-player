@@ -52,6 +52,8 @@ data class DownloadRow(
     val state: DownloadStatus,
     val progress: Float,
     val reason: String,
+    // When it was asked for, for ordering the list.
+    val addedAt: Long = 0,
 )
 
 // A playlist song, for keeping playlists downloaded.
@@ -67,7 +69,8 @@ interface DownloadDao {
 
     @Query(
         """
-        SELECT d.trackId, d.sourceId, d.serverId, d.title, d.artist, t.artwork, d.sizeBytes, d.state, d.progress, d.reason
+        SELECT d.trackId, d.sourceId, d.serverId, d.title, d.artist, t.artwork, d.sizeBytes, d.state, d.progress, d.reason,
+            d.addedAt
         FROM download d LEFT JOIN track t ON t.id = d.trackId
         ORDER BY CASE d.state WHEN 'Downloading' THEN 0 WHEN 'Queued' THEN 1 WHEN 'Failed' THEN 2 ELSE 3 END, d.addedAt DESC, d.title
         """,

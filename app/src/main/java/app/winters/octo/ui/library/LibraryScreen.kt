@@ -16,21 +16,22 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -38,15 +39,24 @@ import androidx.navigation3.runtime.NavKey
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.sort.SortList
+import app.winters.octo.sort.Sorted
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistRow
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
+import app.winters.octo.ui.common.LetterRail
+import app.winters.octo.ui.common.RAIL_MIN_ITEMS
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.SongRow
-import app.winters.octo.ui.common.indexLetter
+import app.winters.octo.ui.common.SortButton
+import app.winters.octo.ui.common.TopOnNewOrder
+import app.winters.octo.ui.common.letterRuns
+import app.winters.octo.ui.common.letteredRows
+import app.winters.octo.ui.common.railStops
 import app.winters.octo.ui.common.screenPadding
+import app.winters.octo.ui.common.sortedRows
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.AlbumsRoute
 import app.winters.octo.ui.nav.ArtistRoute
@@ -132,50 +142,62 @@ private fun Separator() {
     )
 }
 
-// Every album, as a grid of covers.
+// Every album, as a grid of covers, in the chosen order.
 @Composable
 fun AlbumsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: LibraryViewModel = hiltViewModel()) {
     val albums by vm.albums.collectAsStateWithLifecycle()
-    LibraryPage("Albums", onBack) {
-        Loaded(albums) { list ->
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(150.dp),
-                contentPadding = ListPadding,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                items(list, key = { it.id }) { album ->
-                    AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, width = null)
+    LibraryPage("Albums", onBack, action = {
+        albums?.let { SortButton(SortList.Albums, it.order, onChange = { order -> vm.setOrder(SortList.Albums, order) }) }
+    }) {
+        Loaded(albums) { sorted ->
+            val grid = rememberLazyGridState()
+            TopOnNewOrder(sorted.order, grid)
+            Box(Modifier.fillMaxSize()) {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(150.dp),
+                    state = grid,
+                    contentPadding = ListPadding,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    items(sorted.items, key = { it.id }) { album ->
+                        AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, modifier = Modifier.animateItem(), width = null)
+                    }
+                }
+                val names = sorted.headings
+                if (names != null && sorted.items.size >= RAIL_MIN_ITEMS) {
+                    val stops = remember(names) { railStops(letterRuns(names), headed = false) }
+                    LetterRail(stops, onJump = { grid.requestScrollToItem(it) }, modifier = Modifier.fillMaxSize().padding(RailPadding))
                 }
             }
         }
     }
 }
 
-// Every artist, A to Z.
+// Every artist, in the chosen order: under letters when by name.
 @Composable
 fun ArtistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: LibraryViewModel = hiltViewModel()) {
     val artists by vm.artists.collectAsStateWithLifecycle()
-    LibraryPage("Artists", onBack) {
-        Loaded(artists) { list ->
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = RowsPadding) {
-                lettered(list, { it.sortKey }, { it.id }) { artist ->
-                    ArtistRow(artist) { onOpen(ArtistRoute(artist.id)) }
-                }
+    LibraryPage("Artists", onBack, action = {
+        artists?.let { SortButton(SortList.Artists, it.order, onChange = { order -> vm.setOrder(SortList.Artists, order) }) }
+    }) {
+        Loaded(artists) { sorted ->
+            SortedList(sorted, key = { it.id }) { artist ->
+                ArtistRow(artist) { onOpen(ArtistRoute(artist.id)) }
             }
         }
     }
 }
 
-// Every song, A to Z. A tap plays the list from that song.
+// Every song, in the chosen order. A tap plays the list from that song.
 @Composable
 fun SongsScreen(onBack: () -> Unit, vm: LibraryViewModel = hiltViewModel()) {
     val songs by vm.songs.collectAsStateWithLifecycle()
-    LibraryPage("Songs", onBack) {
-        Loaded(songs) { list ->
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = RowsPadding) {
-                lettered(list, { it.sortKey }, { it.id }) { track -> SongRow(track) { vm.playSong(track) } }
-            }
+    LibraryPage("Songs", onBack, action = {
+        songs?.let { SortButton(SortList.Songs, it.order, onChange = { order -> vm.setOrder(SortList.Songs, order) }) }
+    }) {
+        Loaded(songs) { sorted ->
+            SortedList(sorted, key = { it.id }) { track -> SongRow(track) { vm.playSong(track) } }
         }
     }
 }
@@ -185,13 +207,43 @@ fun SongsScreen(onBack: () -> Unit, vm: LibraryViewModel = hiltViewModel()) {
 private val ListPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 140.dp)
 private val RowsPadding = PaddingValues(top = 4.dp, bottom = 140.dp)
 
-// A page inside the library: the back button, a title, then its list.
+// The letter rail runs beside the rows, clear of the floating bar.
+private val RailPadding = PaddingValues(top = 8.dp, bottom = 132.dp)
+
+// A long list of rows in its order: under letter headings with the letter
+// rail when the order is by name, plain rows otherwise.
 @Composable
-private fun LibraryPage(title: String, onBack: () -> Unit, content: @Composable () -> Unit) {
+private fun <T> SortedList(sorted: Sorted<T>, key: (T) -> Any, row: @Composable (T) -> Unit) {
+    val state = rememberLazyListState()
+    TopOnNewOrder(sorted.order, state)
+    val names = sorted.headings
+    val runs = remember(names) { names?.let(::letterRuns) }
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = RowsPadding) {
+            if (runs != null) {
+                letteredRows(sorted.items, runs, key) { row(it) }
+            } else {
+                sortedRows(sorted.items, key) { row(it) }
+            }
+        }
+        if (runs != null && sorted.items.size >= RAIL_MIN_ITEMS) {
+            val stops = remember(runs) { railStops(runs, headed = true) }
+            LetterRail(stops, onJump = { state.requestScrollToItem(it) }, modifier = Modifier.fillMaxSize().padding(RailPadding))
+        }
+    }
+}
+
+// A page inside the library: the back button, a title with the list's sort
+// button beside it, then the list.
+@Composable
+private fun LibraryPage(title: String, onBack: () -> Unit, action: @Composable () -> Unit, content: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Spacer(Modifier.height(DetailTopGap))
-            ScreenTitle(title)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ScreenTitle(title, Modifier.weight(1f))
+                Box(Modifier.padding(end = 10.dp, top = 8.dp, bottom = 16.dp)) { action() }
+            }
             content()
         }
         BackButton(onBack)
@@ -201,40 +253,17 @@ private fun LibraryPage(title: String, onBack: () -> Unit, content: @Composable 
 // Shows a spinner until the first read, a note if there is nothing, and
 // the list otherwise.
 @Composable
-private fun <T> Loaded(items: List<T>?, content: @Composable (List<T>) -> Unit) {
+private fun <T> Loaded(sorted: Sorted<T>?, content: @Composable (Sorted<T>) -> Unit) {
     when {
-        items == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        sorted == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = OctoColors.Accent, modifier = Modifier.size(28.dp))
         }
-        items.isEmpty() -> Text(
+        sorted.items.isEmpty() -> Text(
             "Nothing here yet",
             style = OctoType.bodySmall,
             color = OctoColors.TextMuted,
             modifier = Modifier.padding(20.dp),
         )
-        else -> content(items)
-    }
-}
-
-// A list broken up under sticky letter headings.
-private fun <T> LazyListScope.lettered(
-    list: List<T>,
-    sortKey: (T) -> String,
-    key: (T) -> String,
-    row: @Composable (T) -> Unit,
-) {
-    list.groupBy { indexLetter(sortKey(it)) }.forEach { (letter, group) ->
-        stickyHeader(key = "letter:$letter") {
-            Text(
-                letter.toString(),
-                style = OctoType.caption.copy(fontWeight = FontWeight.Bold),
-                color = OctoColors.TextMuted,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(OctoColors.Background)
-                    .padding(horizontal = 20.dp, vertical = 6.dp),
-            )
-        }
-        items(group, key = key) { row(it) }
+        else -> content(sorted)
     }
 }

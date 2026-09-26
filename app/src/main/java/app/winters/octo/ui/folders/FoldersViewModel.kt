@@ -17,6 +17,9 @@ import app.winters.octo.folders.ServerName
 import app.winters.octo.folders.buildFolderTree
 import app.winters.octo.folders.collapsed
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.sort.SortList
+import app.winters.octo.sort.SortOrder
+import app.winters.octo.sort.SortSettings
 import app.winters.octo.ui.common.LoadState
 import app.winters.octo.ui.online.loadOnline
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -76,7 +79,16 @@ class FoldersViewModel @Inject constructor(
     library: DeviceLibrary,
     private val server: ServerFolders,
     private val playback: PlaybackConnection,
+    private val sorting: SortSettings,
 ) : ViewModel() {
+    // How a folder's own songs are ordered, the same for every folder.
+    val order: StateFlow<SortOrder> =
+        sorting.order(SortList.FolderSongs).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SortList.FolderSongs.default)
+
+    fun setOrder(order: SortOrder) {
+        viewModelScope.launch { sorting.set(SortList.FolderSongs, order) }
+    }
+
     private val phone = combine(catalog.tracks(), library.paths, library.access) { tracks, paths, access ->
         val onPhone = tracks.filter { it.id.startsWith("$DEVICE:") }
         when {

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
@@ -47,28 +48,40 @@ import app.winters.octo.offline.DownloadStatus
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.offline.Reasons
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.sort.SortList
+import app.winters.octo.sort.SortOrder
+import app.winters.octo.sort.SortSettings
+import app.winters.octo.sort.Sorted
+import app.winters.octo.sort.sortDownloads
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.RemoveBackground
 import app.winters.octo.ui.common.ScreenTitle
+import app.winters.octo.ui.common.SortButton
+import app.winters.octo.ui.common.TopOnNewOrder
 import app.winters.octo.ui.common.songs
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class OfflineDownloadsViewModel @Inject constructor(
     private val offline: OfflineDownloads,
     private val playback: PlaybackConnection,
+    private val sorting: SortSettings,
     userDao: UserDao,
 ) : ViewModel() {
-    // Null until first read.
-    val rows: StateFlow<List<DownloadRow>?> =
-        offline.rows.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    // In the chosen order, the ones on their way always first. Null until
+    // first read.
+    val rows: StateFlow<Sorted<DownloadRow>?> =
+        combine(offline.rows, sorting.order(SortList.Downloads)) { rows, order -> Sorted(sortDownloads(rows, order), order, null) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     // Playlist names, for saying which playlist keeps a song.
     val playlistNames: StateFlow<Map<String, String>> = userDao.playlists()
@@ -79,9 +92,13 @@ class OfflineDownloadsViewModel @Inject constructor(
     fun removeAll() = offline.removeAll()
     fun retry(trackId: String) = offline.retry(trackId)
 
-    // Plays the finished downloads from this one.
+    fun setOrder(order: SortOrder) {
+        viewModelScope.launch { sorting.set(SortList.Downloads, order) }
+    }
+
+    // Plays the finished downloads, in the order shown, from this one.
     fun play(row: DownloadRow) {
-        val done = rows.value.orEmpty().filter { it.state == DownloadStatus.Done }.map { it.trackId }
+        val done = rows.value?.items.orEmpty().filter { it.state == DownloadStatus.Done }.map { it.trackId }
         playback.playTracks(done, done.indexOf(row.trackId).coerceAtLeast(0))
     }
 }
@@ -120,13 +137,22 @@ fun DownloadsScreen(onBack: () -> Unit, vm: OfflineDownloadsViewModel = hiltView
     val names by vm.playlistNames.collectAsStateWithLifecycle()
     var confirming by remember { mutableStateOf(false) }
 
+    val state = rememberLazyListState()
+
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Spacer(Modifier.height(DetailTopGap))
-            ScreenTitle("Downloads")
-            val list = rows
-            if (list != null) {
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 4.dp, bottom = 140.dp)) {
+            val sorted = rows
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ScreenTitle("Downloads", Modifier.weight(1f))
+                if (sorted != null && sorted.items.isNotEmpty()) {
+                    SortButton(SortList.Downloads, sorted.order, vm::setOrder, Modifier.padding(end = 10.dp, top = 8.dp, bottom = 16.dp))
+                }
+            }
+            if (sorted != null) {
+                val list = sorted.items
+                TopOnNewOrder(sorted.order, state)
+                LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = 4.dp, bottom = 140.dp)) {
                     item(key = "summary") {
                         Summary(list, confirming, onRemoveAll = { confirming = true }, onConfirm = {
                             confirming = false
@@ -148,7 +174,13 @@ fun DownloadsScreen(onBack: () -> Unit, vm: OfflineDownloadsViewModel = hiltView
                         val byHand = Reasons.MANUAL in Reasons.parse(row.reason)
                         // A download a rule still keeps comes back from a swipe as it was.
                         key(row.reason) {
-                            DownloadLine(row, downloadDetail(row, names), removable = byHand, onRemove = { vm.remove(row.trackId) }) {
+                            DownloadLine(
+                                row,
+                                downloadDetail(row, names),
+                                removable = byHand,
+                                onRemove = { vm.remove(row.trackId) },
+                                modifier = Modifier.animateItem(),
+                            ) {
                                 when (row.state) {
                                     DownloadStatus.Failed -> vm.retry(row.trackId)
                                     DownloadStatus.Done -> vm.play(row)
@@ -194,11 +226,19 @@ private fun Summary(rows: List<DownloadRow>, confirming: Boolean, onRemoveAll: (
 }
 
 @Composable
-private fun DownloadLine(row: DownloadRow, detail: String, removable: Boolean, onRemove: () -> Unit, onClick: () -> Unit) {
+private fun DownloadLine(
+    row: DownloadRow,
+    detail: String,
+    removable: Boolean,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
     val haptics = LocalHapticFeedback.current
     val swipe = rememberSwipeToDismissBoxState()
     SwipeToDismissBox(
         state = swipe,
+        modifier = modifier,
         enableDismissFromStartToEnd = false,
         enableDismissFromEndToStart = removable,
         onDismiss = { onRemove() },
