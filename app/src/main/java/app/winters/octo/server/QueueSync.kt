@@ -129,14 +129,14 @@ fun serverTime(text: String?): Long? {
         ?: runCatching { OffsetDateTime.parse(text).toInstant().toEpochMilli() }.getOrNull()
 }
 
-// Whether to offer picking up a queue from the server: it has songs, it was
-// saved after this phone last saved (or last answered an offer), and by an
-// app that says who it is and is not this one.
-fun shouldOfferResume(remote: RemoteQueue?, lastSavedAt: Long, answeredUpTo: Long, ourClient: String): Boolean {
+// Whether to offer picking up a queue from the server: it has songs, it is
+// not the one this phone saved last (known by the server's own time stamp
+// for that save, so another phone running this app still counts as another
+// device), and it was saved after this phone last saved or answered an offer.
+fun shouldOfferResume(remote: RemoteQueue?, lastSavedAt: Long, answeredUpTo: Long, ownStamp: Long?): Boolean {
     if (remote == null || remote.current == null) return false
     val changedAt = remote.changedAt ?: return false
-    val by = remote.changedBy?.trim().orEmpty()
-    if (by.isEmpty() || by.equals(ourClient, ignoreCase = true)) return false
+    if (changedAt == ownStamp) return false
     return changedAt > maxOf(lastSavedAt, answeredUpTo)
 }
 
@@ -271,9 +271,10 @@ class QueueSync @Inject constructor(
         val prefs = context.queueData.data.first()
         val savedAt = prefs[savedKey(session.sourceId)] ?: 0L
         val answeredAt = prefs[answeredKey(session.sourceId)] ?: 0L
+        val ownStamp = prefs[stampKey(session.sourceId)]
         val current = remote?.current
-        _offer.value = if (current != null && shouldOfferResume(remote, savedAt, answeredAt, OUR_CLIENT_NAME)) {
-            ResumeOffer(remote.changedBy.orEmpty().trim(), current.title, current.displayArtist ?: current.artist, remote)
+        _offer.value = if (current != null && shouldOfferResume(remote, savedAt, answeredAt, ownStamp)) {
+            ResumeOffer(remote.changedBy.orEmpty().trim().ifEmpty { "another device" }, current.title, current.displayArtist ?: current.artist, remote)
         } else {
             null
         }
@@ -295,7 +296,16 @@ class QueueSync @Inject constructor(
                 session.client.savePlayQueue(queue.ids, queue.index, queue.positionMs)
             }
             lastSent = session.sourceId to queue
-            context.queueData.edit { it[savedKey(session.sourceId)] = System.currentTimeMillis() }
+            // The server's time for this save is how this phone knows its own
+            // queue later, whatever name other phones running it give.
+            val stamp = runCatching {
+                if (session.hasExtension(INDEX_BASED_QUEUE)) session.client.playQueueByIndex()?.let(::remoteQueueOf)
+                else session.client.playQueue()?.let(::remoteQueueOf)
+            }.getOrNull()?.changedAt
+            context.queueData.edit {
+                it[savedKey(session.sourceId)] = System.currentTimeMillis()
+                if (stamp != null) it[stampKey(session.sourceId)] = stamp
+            }
         } catch (e: SubsonicException) {
             Log.w("Octo", "queue save failed: ${e.javaClass.simpleName}")
         }
@@ -325,5 +335,6 @@ class QueueSync @Inject constructor(
         val SYNC_ON = booleanPreferencesKey("sync_on")
         fun savedKey(sourceId: String) = longPreferencesKey("saved_at:$sourceId")
         fun answeredKey(sourceId: String) = longPreferencesKey("answered_at:$sourceId")
+        fun stampKey(sourceId: String) = longPreferencesKey("own_stamp:$sourceId")
     }
 }

@@ -122,35 +122,36 @@ class QueueSyncTest {
         RemoteQueue(songs, 0, 0, changedAt, by)
 
     @Test
-    fun offersAQueueSavedLaterByAnotherApp() {
-        assertTrue(shouldOfferResume(remote(2_000, "Desktop"), lastSavedAt = 1_000, answeredUpTo = 0, ourClient = "Octo"))
+    fun offersAQueueSavedLaterElsewhere() {
+        assertTrue(shouldOfferResume(remote(2_000, "Desktop"), lastSavedAt = 1_000, answeredUpTo = 0, ownStamp = 500))
+        // Another phone running this app has the same name, and still counts.
+        assertTrue(shouldOfferResume(remote(2_000, "Octo"), 1_000, 0, ownStamp = 500))
+        // A saver with no name is still offered.
+        assertTrue(shouldOfferResume(remote(2_000, null), 1_000, 0, ownStamp = null))
     }
 
     @Test
     fun doesNotOfferOurOwnQueue() {
-        assertFalse(shouldOfferResume(remote(2_000, "Octo"), 1_000, 0, "Octo"))
-        assertFalse(shouldOfferResume(remote(2_000, "octo"), 1_000, 0, "Octo"))
+        assertFalse(shouldOfferResume(remote(2_000, "Octo"), 1_000, 0, ownStamp = 2_000))
     }
 
     @Test
     fun doesNotOfferAQueueOlderThanOurLastSave() {
-        assertFalse(shouldOfferResume(remote(1_000, "Desktop"), 2_000, 0, "Octo"))
-        assertFalse(shouldOfferResume(remote(1_000, "Desktop"), 1_000, 0, "Octo"))
+        assertFalse(shouldOfferResume(remote(1_000, "Desktop"), 2_000, 0, null))
+        assertFalse(shouldOfferResume(remote(1_000, "Desktop"), 1_000, 0, null))
     }
 
     @Test
     fun doesNotOfferAQueueAlreadyAnswered() {
-        assertFalse(shouldOfferResume(remote(2_000, "Desktop"), 1_000, answeredUpTo = 2_000, ourClient = "Octo"))
+        assertFalse(shouldOfferResume(remote(2_000, "Desktop"), 1_000, answeredUpTo = 2_000, ownStamp = null))
         // A newer one from the same device is offered again.
-        assertTrue(shouldOfferResume(remote(3_000, "Desktop"), 1_000, answeredUpTo = 2_000, ourClient = "Octo"))
+        assertTrue(shouldOfferResume(remote(3_000, "Desktop"), 1_000, answeredUpTo = 2_000, ownStamp = null))
     }
 
     @Test
     fun doesNotOfferWhatCannotBeToldApart() {
-        assertFalse(shouldOfferResume(null, 0, 0, "Octo"))
-        assertFalse(shouldOfferResume(remote(null, "Desktop"), 0, 0, "Octo"))
-        assertFalse(shouldOfferResume(remote(2_000, null), 0, 0, "Octo"))
-        assertFalse(shouldOfferResume(remote(2_000, " "), 0, 0, "Octo"))
-        assertFalse(shouldOfferResume(remote(2_000, "Desktop", songs = emptyList()), 0, 0, "Octo"))
+        assertFalse(shouldOfferResume(null, 0, 0, null))
+        assertFalse(shouldOfferResume(remote(null, "Desktop"), 0, 0, null))
+        assertFalse(shouldOfferResume(remote(2_000, "Desktop", songs = emptyList()), 0, 0, null))
     }
 }
