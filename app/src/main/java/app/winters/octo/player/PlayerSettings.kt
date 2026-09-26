@@ -7,6 +7,9 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import app.winters.octo.ambient.AmbientArea
+import app.winters.octo.ambient.AmbientPrefs
+import app.winters.octo.ambient.AmbientStrength
 import app.winters.octo.playback.CopyPreference
 import app.winters.octo.playback.PITCH_RANGE_SEMITONES
 import app.winters.octo.playback.Pace
@@ -45,6 +48,8 @@ data class PlayerPrefs(
     val resumeWired: Boolean = false,
     val resumeBluetooth: Boolean = false,
     val resumeAlways: Boolean = false,
+    // The artwork's colours glowing behind the rest of the app.
+    val ambient: AmbientPrefs = AmbientPrefs(),
 ) {
     // What the player uses: the blend length, or 0 for none.
     val crossfadeMs: Long get() = if (crossfade) crossfadeSeconds * 1_000L else 0
@@ -83,6 +88,13 @@ private val RESUME_WIRED = booleanPreferencesKey("resume_wired")
 private val RESUME_BLUETOOTH = booleanPreferencesKey("resume_bluetooth")
 private val RESUME_ALWAYS = booleanPreferencesKey("resume_always")
 private val COPIES = stringPreferencesKey("copies")
+private val AMBIENT_STRENGTH = stringPreferencesKey("ambient_strength")
+private val AMBIENT_HOME = booleanPreferencesKey("ambient_home")
+private val AMBIENT_LIBRARY = booleanPreferencesKey("ambient_library")
+private val AMBIENT_SEARCH = booleanPreferencesKey("ambient_search")
+private val AMBIENT_SETTINGS = booleanPreferencesKey("ambient_settings")
+private val AMBIENT_BAR = booleanPreferencesKey("ambient_bar")
+private val AMBIENT_PAGE_ARTWORK = booleanPreferencesKey("ambient_page_artwork")
 private val STREAM_WIFI = stringPreferencesKey("stream_wifi")
 private val STREAM_MOBILE = stringPreferencesKey("stream_mobile")
 
@@ -107,6 +119,15 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             resumeWired = stored[RESUME_WIRED] ?: defaults.resumeWired,
             resumeBluetooth = stored[RESUME_BLUETOOTH] ?: defaults.resumeBluetooth,
             resumeAlways = stored[RESUME_ALWAYS] ?: defaults.resumeAlways,
+            ambient = AmbientPrefs(
+                strength = choice(stored[AMBIENT_STRENGTH], defaults.ambient.strength),
+                home = stored[AMBIENT_HOME] ?: defaults.ambient.home,
+                library = stored[AMBIENT_LIBRARY] ?: defaults.ambient.library,
+                search = stored[AMBIENT_SEARCH] ?: defaults.ambient.search,
+                settings = stored[AMBIENT_SETTINGS] ?: defaults.ambient.settings,
+                bar = stored[AMBIENT_BAR] ?: defaults.ambient.bar,
+                pageArtwork = stored[AMBIENT_PAGE_ARTWORK] ?: defaults.ambient.pageArtwork,
+            ),
         )
     }
 
@@ -172,6 +193,28 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
         context.playerPrefs.edit { it[RESUME_ALWAYS] = on }
     }
 
+    suspend fun setAmbientStrength(strength: AmbientStrength) {
+        context.playerPrefs.edit { it[AMBIENT_STRENGTH] = strength.name }
+    }
+
+    suspend fun setAmbientArea(area: AmbientArea, on: Boolean) {
+        val key = when (area) {
+            AmbientArea.Home -> AMBIENT_HOME
+            AmbientArea.Library -> AMBIENT_LIBRARY
+            AmbientArea.Search -> AMBIENT_SEARCH
+            AmbientArea.Settings -> AMBIENT_SETTINGS
+        }
+        context.playerPrefs.edit { it[key] = on }
+    }
+
+    suspend fun setAmbientBar(on: Boolean) {
+        context.playerPrefs.edit { it[AMBIENT_BAR] = on }
+    }
+
+    suspend fun setAmbientPageArtwork(on: Boolean) {
+        context.playerPrefs.edit { it[AMBIENT_PAGE_ARTWORK] = on }
+    }
+
     // Everything at once, for a backup.
     suspend fun snapshot(): Pair<PlayerPrefs, StreamPrefs> = prefs.first() to streamPrefs.first()
 
@@ -189,6 +232,13 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             it[RESUME_WIRED] = player.resumeWired
             it[RESUME_BLUETOOTH] = player.resumeBluetooth
             it[RESUME_ALWAYS] = player.resumeAlways
+            it[AMBIENT_STRENGTH] = player.ambient.strength.name
+            it[AMBIENT_HOME] = player.ambient.home
+            it[AMBIENT_LIBRARY] = player.ambient.library
+            it[AMBIENT_SEARCH] = player.ambient.search
+            it[AMBIENT_SETTINGS] = player.ambient.settings
+            it[AMBIENT_BAR] = player.ambient.bar
+            it[AMBIENT_PAGE_ARTWORK] = player.ambient.pageArtwork
             it[COPIES] = stream.copies.name
             it[STREAM_WIFI] = stream.wifi.name
             it[STREAM_MOBILE] = stream.mobile.name

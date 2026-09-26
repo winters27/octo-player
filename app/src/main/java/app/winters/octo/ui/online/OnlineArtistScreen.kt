@@ -12,6 +12,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
+import app.winters.octo.ambient.PageArtwork
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.OnlineArtistPage
 import app.winters.octo.ui.artist.ArtistGrid
@@ -22,6 +23,7 @@ import app.winters.octo.ui.common.LoadState
 import app.winters.octo.ui.common.LoadStateContent
 import app.winters.octo.ui.common.albums
 import app.winters.octo.ui.nav.OnlineAlbumRoute
+import app.winters.octo.ui.nav.OnlineArtistRoute
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -66,6 +68,7 @@ fun OnlineArtistScreen(
 
     Box(Modifier.fillMaxSize()) {
         LoadStateContent(page, onRetry = vm::reload) { found ->
+            PageArtwork(OnlineArtistRoute(id), found.artist.artwork)
             ArtistGrid {
                 item(key = "header", span = { GridItemSpan(maxLineSpan) }) {
                     ArtistHeader(found.artist.artwork, found.artist.name, albums(found.albums.size))

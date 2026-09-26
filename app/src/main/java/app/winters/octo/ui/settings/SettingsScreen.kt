@@ -182,6 +182,8 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
             )
         }
 
+        AppearanceCard(Modifier.padding(top = 16.dp))
+
         StreamingCard(Modifier.padding(top = 16.dp))
 
         OfflineCard(Modifier.padding(top = 16.dp))

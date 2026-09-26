@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -54,6 +55,7 @@ import androidx.compose.ui.unit.sp
 import app.winters.octo.R
 import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.GlazeSelected
+import app.winters.octo.design.GlazeTint
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -101,6 +103,8 @@ fun BottomBar(
     artModifier: Modifier,
     artShape: Shape,
     modifier: Modifier = Modifier,
+    // The glass's film, which can carry a trace of the song's colour.
+    film: Color = GlazeTint,
 ) {
     val grown by animateFloatAsState(if (playerShown) 1f else 0f, spring(0.75f, 200f), label = "bar shape")
     val position = rememberPositionMs(now, positionMs)
@@ -116,13 +120,14 @@ fun BottomBar(
     ) {
         val fullTabs = maxWidth - BarHeight - Gap
         val tabsWidth = lerp(fullTabs, BarHeight, grown)
-        TabBar(haze, selected, grown, playerShown, fullTabs, Modifier.width(tabsWidth), actions)
+        TabBar(haze, selected, grown, playerShown, fullTabs, Modifier.width(tabsWidth), actions, film)
         FloatingGlaze(
             haze,
             Modifier
                 .offset(x = tabsWidth + Gap)
                 .width(maxWidth - tabsWidth - Gap)
                 .fillMaxHeight(),
+            film = film,
         ) {
             if (grown < 1f) {
                 Box(
@@ -168,6 +173,7 @@ private fun TabBar(
     fullWidth: Dp,
     modifier: Modifier,
     actions: BarActions,
+    film: Color,
 ) {
     FloatingGlaze(
         haze,
@@ -180,6 +186,7 @@ private fun TabBar(
                 role = Role.Button,
                 onClick = actions.onShowTabs,
             ),
+        film = film,
     ) {
         val column = (fullWidth - 12.dp) / tabs.size
         val capsuleWidth = 62.dp

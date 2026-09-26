@@ -31,6 +31,10 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
+import app.winters.octo.ambient.AmbientBackdrop
+import app.winters.octo.ambient.LocalPageArtworks
+import app.winters.octo.ambient.PageArtworks
+import app.winters.octo.ambient.rememberBarFilm
 import app.winters.octo.design.OctoColors
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.playback.PlaybackConnection
@@ -143,6 +147,10 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
     val disconnectPrompt = remember { DisconnectPrompt() }
     val choiceSheet = remember { ChoiceSheet() }
     val shareSheet = remember { ShareSheetState() }
+    // The covers of open album and artist pages, and the bar's film, for the
+    // artwork's glow.
+    val pageArtworks = remember { PageArtworks() }
+    val barFilm = rememberBarFilm(now)
     // Going to a page from the song menu also closes the player.
     val openFromMenu: (NavKey) -> Unit = { key ->
         playerOpen = false
@@ -157,44 +165,50 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         LocalChoiceSheet provides choiceSheet,
         LocalShareSheet provides shareSheet,
         LocalFeedback provides feedback,
+        LocalPageArtworks provides pageArtworks,
     ) {
         SharedTransitionLayout {
             Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
-                NavDisplay(
-                    backStack = stack,
-                    onBack = { stack.removeLastOrNull() },
-                    entryDecorators = listOf(
-                        rememberSaveableStateHolderNavEntryDecorator(),
-                        rememberViewModelStoreNavEntryDecorator(),
-                    ),
-                    modifier = Modifier.fillMaxSize().hazeSource(haze),
-                    entryProvider = entryProvider {
-                        entry<HomeRoute> { HomeScreen(open) }
-                        entry<SearchRoute> { SearchScreen(open) }
-                        entry<LibraryRoute> { LibraryScreen(open) }
-                        entry<SettingsRoute> { SettingsScreen(open) }
-                        entry<AlbumRoute> { AlbumScreen(it.id, open, back) }
-                        entry<ArtistRoute> { ArtistScreen(it.id, open, back) }
-                        entry<OnlineAlbumRoute> { OnlineAlbumScreen(it.id, open, back) }
-                        entry<OnlineArtistRoute> { OnlineArtistScreen(it.id, open, back) }
-                        entry<AlbumsRoute> { AlbumsScreen(open, back) }
-                        entry<ArtistsRoute> { ArtistsScreen(open, back) }
-                        entry<SongsRoute> { SongsScreen(back) }
-                        entry<GenresRoute> { GenresScreen(open, back) }
-                        entry<GenreRoute> { GenreScreen(it.name, open, back) }
-                        entry<FoldersRoute> { FoldersScreen(back) }
-                        entry<PlaylistsRoute> { PlaylistsScreen(open, back) }
-                        entry<LikedRoute> { LikedScreen(back) }
-                        entry<DownloadsRoute> { DownloadsScreen(back) }
-                        entry<PlaylistRoute> { PlaylistScreen(it.id, back) }
-                        entry<SignInRoute> { SignInScreen(back) }
-                        entry<EditConnectionRoute> { SignInScreen(back, editing = true) }
-                        entry<OctoAdminRoute> { OctoAdminScreen(back) }
-                        entry<SoundRoute> { SoundScreen(back) }
-                        entry<SharesRoute> { SharesScreen(back) }
-                        entry<RadioStationsRoute> { RadioStationsScreen(back) }
-                    },
-                )
+                // The glow sits under the pages and is part of what the bar
+                // frosts. It rests while the full player covers it.
+                Box(Modifier.fillMaxSize().hazeSource(haze)) {
+                    AmbientBackdrop(stack.lastOrNull(), now, pageArtworks, awake = !playerOpen)
+                    NavDisplay(
+                        backStack = stack,
+                        onBack = { stack.removeLastOrNull() },
+                        entryDecorators = listOf(
+                            rememberSaveableStateHolderNavEntryDecorator(),
+                            rememberViewModelStoreNavEntryDecorator(),
+                        ),
+                        modifier = Modifier.fillMaxSize(),
+                        entryProvider = entryProvider {
+                            entry<HomeRoute> { HomeScreen(open) }
+                            entry<SearchRoute> { SearchScreen(open) }
+                            entry<LibraryRoute> { LibraryScreen(open) }
+                            entry<SettingsRoute> { SettingsScreen(open) }
+                            entry<AlbumRoute> { AlbumScreen(it.id, open, back) }
+                            entry<ArtistRoute> { ArtistScreen(it.id, open, back) }
+                            entry<OnlineAlbumRoute> { OnlineAlbumScreen(it.id, open, back) }
+                            entry<OnlineArtistRoute> { OnlineArtistScreen(it.id, open, back) }
+                            entry<AlbumsRoute> { AlbumsScreen(open, back) }
+                            entry<ArtistsRoute> { ArtistsScreen(open, back) }
+                            entry<SongsRoute> { SongsScreen(back) }
+                            entry<GenresRoute> { GenresScreen(open, back) }
+                            entry<GenreRoute> { GenreScreen(it.name, open, back) }
+                            entry<FoldersRoute> { FoldersScreen(back) }
+                            entry<PlaylistsRoute> { PlaylistsScreen(open, back) }
+                            entry<LikedRoute> { LikedScreen(back) }
+                            entry<DownloadsRoute> { DownloadsScreen(back) }
+                            entry<PlaylistRoute> { PlaylistScreen(it.id, back) }
+                            entry<SignInRoute> { SignInScreen(back) }
+                            entry<EditConnectionRoute> { SignInScreen(back, editing = true) }
+                            entry<OctoAdminRoute> { OctoAdminScreen(back) }
+                            entry<SoundRoute> { SoundScreen(back) }
+                            entry<SharesRoute> { SharesScreen(back) }
+                            entry<RadioStationsRoute> { RadioStationsScreen(back) }
+                        },
+                    )
+                }
                 // Back from the top of another tab goes Home rather than out.
                 BackHandler(enabled = selected != 0 && stack.size == 1) { selected = 0 }
 
@@ -220,6 +234,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                         actions = barActions,
                         artModifier = Modifier.sharedElement(rememberSharedContentState(ArtKey), this),
                         artShape = RoundedCornerShape(percent = corner),
+                        film = barFilm.value,
                     )
                 }
                 AnimatedVisibility(

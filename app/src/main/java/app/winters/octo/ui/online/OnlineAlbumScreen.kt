@@ -14,6 +14,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
+import app.winters.octo.ambient.PageArtwork
 import app.winters.octo.catalog.isFind
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.discovery.Discovery
@@ -32,6 +33,7 @@ import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.asLength
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.common.songs
+import app.winters.octo.ui.nav.OnlineAlbumRoute
 import app.winters.octo.ui.nav.OnlineArtistRoute
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
@@ -111,6 +113,7 @@ fun OnlineAlbumScreen(
     Box(Modifier.fillMaxSize()) {
         LoadStateContent(page, onRetry = vm::reload) { found ->
             val album = found.album
+            PageArtwork(OnlineAlbumRoute(id), album.artwork)
             // The length only adds up when every song's length is known.
             val length = found.songs.takeIf { songs -> songs.isNotEmpty() && songs.all { it.durationMs > 0 } }
                 ?.let { songs -> (songs.sumOf { it.durationMs } / 1000).toInt().asLength() }
