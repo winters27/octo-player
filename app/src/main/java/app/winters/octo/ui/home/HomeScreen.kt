@@ -68,6 +68,7 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding()) {
             item { ScreenTitle("Home") }
             item(key = "resume") { ResumeCard() }
+            item(key = "whats-new") { WhatsNewCard() }
             when {
                 access != Access.Granted -> item { AccessCard(access, vm) }
                 count == 0 -> item { EmptyCard() }
