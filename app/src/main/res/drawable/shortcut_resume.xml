@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher shortcut, Resume. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/shortcut_background" />
+    <foreground>
+        <inset
+            android:drawable="@drawable/sym_play_arrow"
+            android:inset="31%" />
+    </foreground>
+</adaptive-icon>

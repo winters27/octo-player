@@ -15,6 +15,8 @@ import app.winters.octo.design.OctoTheme
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.server.QueueSync
+import app.winters.octo.system.SystemEntries
+import app.winters.octo.system.publishShortcuts
 import app.winters.octo.ui.common.ProvideOfflineMarks
 import app.winters.octo.ui.nav.MainShell
 import app.winters.octo.widget.EXTRA_OPEN_PLAYER
@@ -27,6 +29,8 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var playback: PlaybackConnection
     @Inject lateinit var queueSync: QueueSync
     @Inject lateinit var feedback: Feedback
+    // Launcher shortcuts and "Open with Octo".
+    @Inject lateinit var systemEntries: SystemEntries
 
     // Counts up each time a home screen widget asks for the full player.
     private var openPlayer by mutableIntStateOf(0)
@@ -36,10 +40,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         // The app opens on the library; servers are an optional add-on.
         setContent { OctoTheme { ProvideOfflineMarks { MainShell(library, playback, feedback, openPlayer) } } }
+        publishShortcuts(this)
         // Opened by a voice request or a widget; not again when the screen turns.
         if (savedInstanceState == null) {
             playIfAsked(intent)
             openPlayerIfAsked(intent)
+            systemEntries.handle(this, intent) { openPlayer++ }
         }
     }
 
@@ -47,6 +53,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         playIfAsked(intent)
         openPlayerIfAsked(intent)
+        systemEntries.handle(this, intent) { openPlayer++ }
     }
 
     // A widget's artwork or title opens the player. Coming back from recents

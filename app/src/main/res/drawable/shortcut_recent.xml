@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher shortcut, Recently added. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/shortcut_background" />
+    <foreground>
+        <inset
+            android:drawable="@drawable/sym_album"
+            android:inset="31%" />
+    </foreground>
+</adaptive-icon>
