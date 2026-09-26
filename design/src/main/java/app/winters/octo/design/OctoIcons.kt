@@ -66,4 +66,10 @@ object OctoIcons {
 
     // Takes a song off a playlist.
     val RemoveFromPlaylist = R.drawable.sym_playlist_remove
+
+    // A song's own file, passed on to another app.
+    val ShareFile = R.drawable.sym_audio_file
+
+    // The phone's ringtone and other sounds.
+    val Ringtone = R.drawable.sym_ring_volume
 }

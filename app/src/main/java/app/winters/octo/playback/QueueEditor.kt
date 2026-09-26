@@ -45,6 +45,11 @@ fun removalRuns(positions: Collection<Int>): List<IntRange> {
     return runs.reversed()
 }
 
+// Where these songs sit in the queue, by the queue's song ids, every time
+// each one is there.
+fun queuePositionsOf(queueTrackIds: List<String>, songs: Set<String>): List<Int> =
+    queueTrackIds.indices.filter { queueTrackIds[it] in songs }
+
 // Edits to the queue that the app offers to undo: taking out one song,
 // clearing all but the song that is on, and taking out the songs already
 // played. It works on the service's player, which attaches while it runs,
@@ -68,6 +73,12 @@ class QueueEditor @Inject constructor() {
 
     // Takes out everything but the song that is on.
     fun clear(): QueueUndo? = edit { keys -> keys.indices.filter { it != currentMediaItemIndex } }
+
+    // Takes these songs out wherever they are, for files about to be
+    // deleted. When the song that is on goes, the next one plays.
+    fun removeSongs(trackIds: Set<String>): QueueUndo? = edit {
+        queuePositionsOf(List(mediaItemCount) { getMediaItemAt(it).mediaId }, trackIds)
+    }
 
     // Takes out the songs played before the one that is on.
     fun removePlayed(): QueueUndo? = edit { keys ->

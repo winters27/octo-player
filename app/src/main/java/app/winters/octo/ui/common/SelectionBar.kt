@@ -46,6 +46,7 @@ import app.winters.octo.design.OctoType
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.ui.menu.PhoneFileActions
 import app.winters.octo.ui.playlist.LocalPlaylistSheets
 import app.winters.octo.ui.playlist.PlaylistSheet
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -77,9 +78,10 @@ class SelectionBarViewModel @Inject constructor(
 
 // The bar that acts on picked songs, in place of the bottom bar while a
 // list is picking. Back, the close button, or taking the last song off ends
-// the picking; so does any action.
+// the picking; so does any action. `phoneFiles` acts on the songs' files
+// on the phone.
 @Composable
-fun SelectionBarHost(bar: SelectionBarState, vm: SelectionBarViewModel = hiltViewModel()) {
+fun SelectionBarHost(bar: SelectionBarState, phoneFiles: PhoneFileActions, vm: SelectionBarViewModel = hiltViewModel()) {
     val target = bar.selecting
     BackHandler(enabled = target != null) { target?.selection?.clear() }
     // Keeps the last list drawn while the bar slides away.
@@ -92,13 +94,13 @@ fun SelectionBarHost(bar: SelectionBarState, vm: SelectionBarViewModel = hiltVie
             exit = fadeOut() + slideOutVertically { it / 2 },
         ) {
             val shown = last ?: return@AnimatedVisibility
-            SelectionBar(shown, vm)
+            SelectionBar(shown, phoneFiles, vm)
         }
     }
 }
 
 @Composable
-private fun SelectionBar(target: SelectionTarget, vm: SelectionBarViewModel) {
+private fun SelectionBar(target: SelectionTarget, phoneFiles: PhoneFileActions, vm: SelectionBarViewModel) {
     val liked by vm.liked.collectAsStateWithLifecycle()
     val sheets = LocalPlaylistSheets.current
     val picked = target.picked()
@@ -106,6 +108,8 @@ private fun SelectionBar(target: SelectionTarget, vm: SelectionBarViewModel) {
     val library = ids.filterNot(::isFind)
     val allLiked = library.isNotEmpty() && library.all { it in liked }
     val canDownload = picked.any { !it.track.onPhone && !isFind(it.track.id) }
+    // Files are shared or deleted only when every picked song has one.
+    val allOnPhone = picked.isNotEmpty() && picked.all { it.track.onPhone && !isFind(it.track.id) }
     val remove = target.remove
     // Every action ends the picking once done.
     val act = { action: () -> Unit ->
@@ -131,6 +135,11 @@ private fun SelectionBar(target: SelectionTarget, vm: SelectionBarViewModel) {
                     color = OctoColors.TextPrimary,
                     modifier = Modifier.weight(1f).padding(start = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
                 )
+                // Beside the count, where there is room, for songs on the phone.
+                if (allOnPhone) {
+                    BarButton(OctoIcons.ShareFile, if (picked.size == 1) "Share file" else "Share files", Modifier.size(44.dp)) { act { phoneFiles.share(ids) } }
+                    BarButton(OctoIcons.Delete, "Delete from phone", Modifier.size(44.dp)) { act { phoneFiles.delete(ids) } }
+                }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 val each = Modifier.weight(1f)

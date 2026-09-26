@@ -180,8 +180,8 @@ val LocalSongMenu = staticCompositionLocalOf<SongMenuState> { error("No song men
 
 // The choices in a song's menu, in the order shown.
 enum class SongAction {
-    PlayNext, AddToQueue, StartRadio, Download, AddToPlaylist, RemoveFromPlaylist, Select, KeepOffline, Share, Like, Rate,
-    GoToAlbum, GoToArtist, Info,
+    PlayNext, AddToQueue, StartRadio, Download, AddToPlaylist, RemoveFromPlaylist, Select, KeepOffline, ShareFile, Share, Like,
+    Rate, GoToAlbum, GoToArtist, SetAsSound, DeleteFromPhone, Info,
 }
 
 // Where the menu was opened, as the choices care about it.
@@ -208,13 +208,15 @@ fun menuPlace(context: SongMenuContext, albumId: String, artistId: String): Menu
 // the library and cannot be liked, rated or put in a playlist yet, so it
 // offers a download instead. Radio needs a server signed in; sharing needs
 // a copy of the song on a server that shares. A library song only on a
-// server (`offline`) can be downloaded to the phone.
+// server (`offline`) can be downloaded to the phone. One with a file on the
+// phone (`phone`) can send that file, ring with it, or delete it.
 fun songActions(
     find: Boolean,
     radio: Boolean,
     share: Boolean = false,
     offline: Boolean = false,
     place: MenuPlace = MenuPlace(),
+    phone: Boolean = false,
 ): List<SongAction> = buildList {
     add(SongAction.PlayNext)
     add(SongAction.AddToQueue)
@@ -228,11 +230,16 @@ fun songActions(
         if (place.inPlaylist) add(SongAction.RemoveFromPlaylist)
         if (place.selectable) add(SongAction.Select)
         if (offline) add(SongAction.KeepOffline)
+        if (phone) add(SongAction.ShareFile)
         if (share) add(SongAction.Share)
         add(SongAction.Like)
         add(SongAction.Rate)
         if (!place.onAlbumPage) add(SongAction.GoToAlbum)
         if (!place.onArtistPage) add(SongAction.GoToArtist)
+        if (phone) {
+            add(SongAction.SetAsSound)
+            add(SongAction.DeleteFromPhone)
+        }
     }
     add(SongAction.Info)
 }
@@ -359,8 +366,9 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
         }
         onDispose { state.quick = null }
     }
+    val phoneFiles = rememberPhoneFiles()
     // Over the bottom bar and under every sheet, as the bar it stands in for.
-    SelectionBarHost(state.selectionBar)
+    SelectionBarHost(state.selectionBar, phoneFiles)
     GlassSheet(visible = state.trackId != null, onDismiss = state::close) {
         val trackId = state.lastTrackId ?: return@GlassSheet
         val context = state.lastContext
@@ -382,7 +390,9 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
         SongHeader(song)
         Spacer(Modifier.height(8.dp))
         val place = menuPlace(context, song.albumId, song.artistId)
-        for (action in songActions(isFind(trackId), radio, share = shareId != null, offline = !song.onPhone || keptRow != null, place = place)) {
+        val phone = song.onPhone && !isFind(trackId)
+        val actions = songActions(isFind(trackId), radio, share = shareId != null, offline = !song.onPhone || keptRow != null, place = place, phone = phone)
+        for (action in actions) {
             when (action) {
                 SongAction.PlayNext -> MenuRow(OctoIcons.PlayNext, "Play next") {
                     vm.playNext(trackId)
@@ -436,7 +446,11 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
                         }
                     }
                 }
-                SongAction.Share -> MenuRow(OctoIcons.Share, "Share") {
+                SongAction.ShareFile -> MenuRow(OctoIcons.ShareFile, "Share file") {
+                    state.close()
+                    phoneFiles.share(listOf(trackId))
+                }
+                SongAction.Share -> MenuRow(OctoIcons.Share, "Share link") {
                     state.close()
                     shareId?.let { shareSheet.show(ShareRequest(listOf(it), song.title)) }
                 }
@@ -456,6 +470,14 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
                 SongAction.GoToArtist -> MenuRow(OctoIcons.Artist, "Go to artist") {
                     state.close()
                     onOpen(ArtistRoute(song.artistId))
+                }
+                SongAction.SetAsSound -> MenuRow(OctoIcons.Ringtone, "Set as ringtone") {
+                    state.close()
+                    phoneFiles.setSound(trackId)
+                }
+                SongAction.DeleteFromPhone -> MenuRow(OctoIcons.Delete, "Delete from phone") {
+                    state.close()
+                    phoneFiles.delete(listOf(trackId))
                 }
                 SongAction.Info -> MenuRow(OctoIcons.Info, "Song info") {
                     state.openInfo(trackId)
