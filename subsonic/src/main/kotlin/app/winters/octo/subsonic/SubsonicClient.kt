@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
@@ -119,6 +120,45 @@ class SubsonicClient(
             serializer = MusicFolders.serializer(),
             default = MusicFolders(),
         ).musicFolder
+
+    // The server's folders from the top, limited to one library folder when
+    // given. Servers that file by tags make these folders up from the tags.
+    suspend fun indexes(musicFolderId: String? = this.musicFolderId): FolderIndex {
+        val wire = get(
+            "getIndexes",
+            emptyMap<String, String>().inFolder(musicFolderId),
+            "indexes",
+            IndexesWire.serializer(),
+            IndexesWire(),
+        )
+        val loose = children(wire.child)
+        return FolderIndex(wire.index.flatMap { it.artist } + loose.first, loose.second)
+    }
+
+    // One folder on the server and what it holds.
+    suspend fun musicDirectory(id: String): MusicDirectory {
+        val wire = get("getMusicDirectory", mapOf("id" to id), "directory", DirectoryWire.serializer())
+        val (folders, songs) = children(wire.child)
+        return MusicDirectory(wire.id, wire.name, folders, songs)
+    }
+
+    // Splits a folder's children into folders and songs. A folder is named
+    // by its title, or its name on servers that send that instead.
+    private fun children(list: List<kotlinx.serialization.json.JsonObject>): Pair<List<DirectoryRef>, List<Song>> {
+        val folders = mutableListOf<DirectoryRef>()
+        val songs = mutableListOf<Song>()
+        for (child in list) {
+            val isDir = child["isDir"]?.jsonPrimitive?.booleanOrNull ?: false
+            val id = child["id"]?.jsonPrimitive?.contentOrNull ?: continue
+            if (isDir) {
+                val name = child["title"]?.jsonPrimitive?.contentOrNull ?: child["name"]?.jsonPrimitive?.contentOrNull
+                folders += DirectoryRef(id, name.orEmpty())
+            } else {
+                songs += json.decodeFromJsonElement(Song.serializer(), child)
+            }
+        }
+        return folders to songs
+    }
 
     // Who an API key belongs to. Only servers that take API keys answer.
     suspend fun tokenInfo(): String? =

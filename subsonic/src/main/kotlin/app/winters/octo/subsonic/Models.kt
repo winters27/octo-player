@@ -305,3 +305,34 @@ data class Cue(
 // The older lyrics call's answer: one block of plain text.
 @Serializable
 data class PlainLyrics(val artist: String? = null, val title: String? = null, val value: String? = null)
+
+// A folder on the server, as its folder listings name it. Older servers
+// send ids as numbers, so they are read as either and kept as text.
+@Serializable
+data class DirectoryRef(@Serializable(with = LooseString::class) val id: String, val name: String = "")
+
+// The top of the server's folders: the folders at its root and any songs
+// sitting loose there.
+data class FolderIndex(val folders: List<DirectoryRef>, val songs: List<Song>)
+
+// One folder on the server: its folders, then its songs, in the order the
+// server sent them.
+data class MusicDirectory(val id: String, val name: String, val folders: List<DirectoryRef>, val songs: List<Song>)
+
+// The folder calls as they come over the wire. The root's folders arrive
+// grouped by first letter; a folder's children mix folders and songs.
+@Serializable
+internal data class IndexesWire(
+    val index: List<IndexGroupWire> = emptyList(),
+    val child: List<kotlinx.serialization.json.JsonObject> = emptyList(),
+)
+
+@Serializable
+internal data class IndexGroupWire(val name: String = "", val artist: List<DirectoryRef> = emptyList())
+
+@Serializable
+internal data class DirectoryWire(
+    @Serializable(with = LooseString::class) val id: String,
+    val name: String = "",
+    val child: List<kotlinx.serialization.json.JsonObject> = emptyList(),
+)
