@@ -3,6 +3,8 @@ package app.winters.octo.catalog
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.RawQuery
+import androidx.room.RoomRawQuery
 import androidx.room.Transaction
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
@@ -18,14 +20,30 @@ interface CatalogDao {
     @Query("SELECT * FROM artist ORDER BY RANDOM() LIMIT :limit")
     suspend fun randomArtists(limit: Int): List<ArtistEntity>
 
+    @Query("SELECT * FROM track ORDER BY sortKey")
+    fun tracks(): Flow<List<TrackEntity>>
+
     @Query("SELECT * FROM album ORDER BY sortKey")
     fun albums(): Flow<List<AlbumEntity>>
 
     @Query("SELECT * FROM artist ORDER BY sortKey")
     fun artists(): Flow<List<ArtistEntity>>
 
-    @Query("SELECT * FROM track ORDER BY sortKey")
-    fun tracks(): Flow<List<TrackEntity>>
+    // Lists in the order the listener chose. The queries are built in
+    // sort/SortQueries.kt from fixed pieces only. A query that reads likes
+    // also watches them, so the others do not run again on every like.
+
+    @RawQuery(observedEntities = [TrackEntity::class, AlbumEntity::class, ArtistEntity::class])
+    fun sortedTracks(query: RoomRawQuery): Flow<List<SortedTrack>>
+
+    @RawQuery(observedEntities = [TrackEntity::class, AlbumEntity::class, ArtistEntity::class, LikedTrackEntity::class])
+    fun sortedTracksWithLikes(query: RoomRawQuery): Flow<List<SortedTrack>>
+
+    @RawQuery(observedEntities = [AlbumEntity::class, ArtistEntity::class])
+    fun sortedAlbums(query: RoomRawQuery): Flow<List<SortedAlbum>>
+
+    @RawQuery(observedEntities = [ArtistEntity::class, TrackEntity::class])
+    fun sortedArtists(query: RoomRawQuery): Flow<List<SortedArtist>>
 
     @Query("SELECT * FROM album WHERE id = :id")
     fun album(id: String): Flow<AlbumEntity?>
@@ -61,9 +79,6 @@ interface CatalogDao {
             "GROUP BY genre COLLATE NOCASE ORDER BY genre COLLATE NOCASE",
     )
     fun genres(): Flow<List<GenreSummary>>
-
-    @Query("SELECT * FROM track WHERE genre = :name COLLATE NOCASE ORDER BY sortKey")
-    fun genreTracks(name: String): Flow<List<TrackEntity>>
 
     @Query(
         "SELECT * FROM album WHERE id IN (SELECT albumId FROM track WHERE genre = :name COLLATE NOCASE) " +

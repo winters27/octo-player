@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -25,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -40,6 +42,9 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.folders.ServerLevel
+import app.winters.octo.sort.SortList
+import app.winters.octo.sort.SortOrder
+import app.winters.octo.sort.sortFolderSongs
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.EmptyLibraryNote
@@ -47,6 +52,8 @@ import app.winters.octo.ui.common.LoadState
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.SongRow
+import app.winters.octo.ui.common.SortBar
+import app.winters.octo.ui.common.TopOnNewOrder
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.common.songs
 
@@ -60,6 +67,7 @@ fun FoldersScreen(onBack: () -> Unit, vm: FoldersViewModel = hiltViewModel()) {
     val levels by vm.levels.collectAsStateWithLifecycle()
     val gathering by vm.gathering.collectAsStateWithLifecycle()
     val note by vm.note.collectAsStateWithLifecycle()
+    val order by vm.order.collectAsStateWithLifecycle()
 
     BackHandler(enabled = trail.isNotEmpty()) { vm.up() }
 
@@ -78,17 +86,28 @@ fun FoldersScreen(onBack: () -> Unit, vm: FoldersViewModel = hiltViewModel()) {
                 val stops = listOf(top) + trail
                 val here = stops.last()
                 val names = stops.map { known.label(it) }
+                // This folder's own songs and how many rows come before them.
+                val level = (here as? FolderStop.Server)?.let { levels[it.id.orEmpty()] }
+                val (songs, songsAt) = when (here) {
+                    FolderStop.Top -> null to 0
+                    is FolderStop.Phone -> known.phone?.root?.at(here.path)?.let { it.songs to 2 + it.folders.size } ?: (null to 0)
+                    is FolderStop.Server -> (level as? LoadState.Ready)?.data?.let { it.songs to 2 + it.folders.size } ?: (null to 0)
+                }
+                val sortedSongs = remember(songs, order) { songs?.let { sortFolderSongs(it, order) }.orEmpty() }
                 // A fresh list for each folder, so each one opens at its top.
                 key(here) {
-                    LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
+                    val state = rememberLazyListState()
+                    TopOnNewOrder(order, state, top = songsAt)
+                    LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding(extraTop = DetailTopGap)) {
                         item(key = "header") {
                             Header(names, onCrumb = { vm.goTo(it - 1) })
                         }
                         when (here) {
                             FolderStop.Top -> topLevel(known, vm::open)
                             is FolderStop.Phone -> phoneLevel(known, here, vm)
-                            is FolderStop.Server -> serverLevel(here, levels[here.id.orEmpty()], gathering, note, vm)
+                            is FolderStop.Server -> serverLevel(here, level, gathering, note, vm)
                         }
+                        songRows(sortedSongs, order, vm)
                     }
                 }
                 if (here is FolderStop.Server) LaunchedEffect(here.id) { vm.load(here.id) }
@@ -147,7 +166,6 @@ private fun LazyListScope.phoneLevel(sources: FolderSources, here: FolderStop.Ph
             FolderRow(folder.name, songs(folder.songCount)) { vm.open(FolderStop.Phone(here.path + folder.name)) }
         }
     }
-    songRows(node.songs, vm)
 }
 
 private fun LazyListScope.serverLevel(
@@ -192,17 +210,18 @@ private fun LazyListScope.serverLevel(
                     }
                 }
             }
-            songRows(level.songs, vm)
         }
     }
 }
 
-// A folder's own songs. A tap plays them from that song; a long press
-// opens the song's menu.
-private fun LazyListScope.songRows(list: List<TrackEntity>, vm: FoldersViewModel) {
+// A folder's own songs, in the chosen order. A tap plays them from that
+// song; a long press opens the song's menu.
+private fun LazyListScope.songRows(list: List<TrackEntity>, order: SortOrder, vm: FoldersViewModel) {
     if (list.isEmpty()) return
-    item(key = "songs") { SectionTitle("Songs", Modifier.padding(top = 12.dp)) }
-    items(list, key = { "song:${it.id}" }) { track -> SongRow(track) { vm.playFrom(list, track) } }
+    item(key = "songs") { SortBar(SortList.FolderSongs, order, vm::setOrder, Modifier.padding(top = 12.dp), title = "Songs") }
+    items(list, key = { "song:${it.id}" }) { track ->
+        Box(Modifier.animateItem()) { SongRow(track) { vm.playFrom(list, track) } }
+    }
 }
 
 // The folder's name, the path to it, and its details.

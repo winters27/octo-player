@@ -1,6 +1,7 @@
 package app.winters.octo.catalog
 
 import androidx.room.ColumnInfo
+import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -105,3 +106,11 @@ data class FileTagsEntity(
 // A genre on the Genres page: its name, how many songs, and a cover from
 // one of its albums.
 data class GenreSummary(val name: String, val songCount: Int, val artwork: String?)
+
+// A row of a list in a chosen order, with the name it files under when the
+// order is by name (null otherwise).
+data class SortedTrack(@Embedded val track: TrackEntity, val heading: String?)
+
+data class SortedAlbum(@Embedded val album: AlbumEntity, val heading: String?)
+
+data class SortedArtist(@Embedded val artist: ArtistEntity, val heading: String?)

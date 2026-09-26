@@ -124,8 +124,16 @@ class PlaylistsTest {
         )
         assertEquals(
             listOf(
-                PlaylistSummary("new", "Empty", songCount = 0, durationMs = 0, covers = emptyList()),
-                PlaylistSummary("p", "Road", songCount = 2, durationMs = 3_000, covers = listOf("cover:a", "cover:b")),
+                PlaylistSummary("new", "Empty", songCount = 0, durationMs = 0, covers = emptyList(), createdAt = 2, updatedAt = 2),
+                PlaylistSummary(
+                    "p",
+                    "Road",
+                    songCount = 2,
+                    durationMs = 3_000,
+                    covers = listOf("cover:a", "cover:b"),
+                    createdAt = 1,
+                    updatedAt = 1,
+                ),
             ),
             summarize(playlists, entries),
         )

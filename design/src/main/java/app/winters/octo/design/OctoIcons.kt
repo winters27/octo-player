@@ -48,4 +48,9 @@ object OctoIcons {
 
     // A folder, for browsing music the way it is filed.
     val Folder = R.drawable.sym_folder
+
+    // How a list is ordered, and which way it runs.
+    val Sort = R.drawable.sym_sort
+    val Ascending = R.drawable.sym_arrow_upward
+    val Descending = R.drawable.sym_arrow_downward
 }

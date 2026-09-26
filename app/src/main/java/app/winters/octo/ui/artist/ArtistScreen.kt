@@ -15,8 +15,10 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridScope
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
@@ -52,6 +54,10 @@ import app.winters.octo.discovery.ArtistExtrasSource
 import app.winters.octo.discovery.OnlineArtist
 import app.winters.octo.discovery.SimilarArtist
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.sort.SortList
+import app.winters.octo.sort.SortOrder
+import app.winters.octo.sort.Sorted
+import app.winters.octo.sort.SortedLibrary
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistCircle
 import app.winters.octo.ui.common.Artwork
@@ -60,6 +66,8 @@ import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.DownloadButton
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.SongRow
+import app.winters.octo.ui.common.SortBar
+import app.winters.octo.ui.common.TopOnNewOrder
 import app.winters.octo.ui.common.albums
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.common.songs
@@ -78,6 +86,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel(assistedFactory = ArtistViewModel.Factory::class)
@@ -85,12 +94,20 @@ class ArtistViewModel @AssistedInject constructor(
     @Assisted id: String,
     dao: CatalogDao,
     extrasSource: ArtistExtrasSource,
+    private val sorted: SortedLibrary,
     private val playback: PlaybackConnection,
 ) : ViewModel() {
     val artist: StateFlow<ArtistEntity?> =
         dao.artist(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-    val albums: StateFlow<List<AlbumEntity>> =
-        dao.artistAlbums(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // Their albums in the chosen order, newest first to begin with. One
+    // order for every artist's page.
+    val albums: StateFlow<Sorted<AlbumEntity>?> =
+        sorted.albums(SortList.ArtistAlbums, artistId = id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun setOrder(order: SortOrder) {
+        viewModelScope.launch { sorted.setOrder(SortList.ArtistAlbums, order) }
+    }
 
     // What the server adds: top songs, a biography and similar artists.
     // Nothing until it answers, and nothing at all without a server.
@@ -129,15 +146,20 @@ fun ArtistScreen(
     vm: ArtistViewModel = hiltViewModel<ArtistViewModel, ArtistViewModel.Factory> { it.create(id) },
 ) {
     val artist by vm.artist.collectAsStateWithLifecycle()
-    val albumList by vm.albums.collectAsStateWithLifecycle()
+    val sortedAlbums by vm.albums.collectAsStateWithLifecycle()
+    val albumList = sortedAlbums?.items.orEmpty()
     val extras by vm.extras.collectAsStateWithLifecycle()
     val top = extras?.topSongs.orEmpty()
     val about = extras?.about
     val similar = extras?.similar.orEmpty()
     PageArtwork(ArtistRoute(id), artist?.artwork)
+    val grid = rememberLazyGridState()
+    // A new order scrolls back to the albums' own line, below the header and
+    // any top songs.
+    sortedAlbums?.let { TopOnNewOrder(it.order, grid, top = (if (artist != null) 1 else 0) + (if (top.isNotEmpty()) 1 else 0)) }
 
     Box(Modifier.fillMaxSize()) {
-        ArtistGrid {
+        ArtistGrid(grid) {
             artist?.let { a ->
                 item(key = "header", span = { GridItemSpan(maxLineSpan) }) {
                     ArtistHeader(a.artwork, a.name, "${albums(a.albumCount)} • ${songs(a.songCount)}")
@@ -155,11 +177,20 @@ fun ArtistScreen(
                         }
                     }
                 }
-                // Once songs come first, the albums need a name of their own.
-                if (albumList.isNotEmpty()) wide("albums:title") { SectionTitle("Albums", Modifier.padding(top = 8.dp)) }
+            }
+            // Once songs come first, the albums need a name of their own.
+            // With more than one album, the line carries their sort button.
+            val albumsTitle = if (top.isNotEmpty()) "Albums" else null
+            val order = sortedAlbums?.order
+            if (order != null && albumList.size > 1) {
+                wide("albums:title") {
+                    SortBar(SortList.ArtistAlbums, order, vm::setOrder, Modifier.padding(top = 8.dp), title = albumsTitle)
+                }
+            } else if (albumsTitle != null && albumList.isNotEmpty()) {
+                wide("albums:title") { SectionTitle(albumsTitle, Modifier.padding(top = 8.dp)) }
             }
             items(albumList, key = { it.id }) { album ->
-                AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, width = null)
+                AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, modifier = Modifier.animateItem(), width = null)
             }
             about?.let { text ->
                 wide("about") {
@@ -203,10 +234,11 @@ private val GridSideMargin = 20.dp
 
 // An artist page's grid: the header across the top, then albums in columns.
 @Composable
-fun ArtistGrid(content: LazyGridScope.() -> Unit) {
+fun ArtistGrid(state: LazyGridState = rememberLazyGridState(), content: LazyGridScope.() -> Unit) {
     val padding = screenPadding(extraTop = DetailTopGap)
     LazyVerticalGrid(
         columns = GridCells.Adaptive(150.dp),
+        state = state,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = GridSideMargin,
