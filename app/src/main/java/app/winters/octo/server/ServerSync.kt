@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import app.winters.octo.catalog.CatalogMerge
+import app.winters.octo.listening.FavouriteSync
 import app.winters.octo.listening.ListeningSync
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.data.SessionRepository
@@ -54,6 +55,7 @@ class ServerSync @Inject constructor(
     private val sources: SourceDao,
     private val merge: CatalogMerge,
     private val listening: ListeningSync,
+    private val favourites: FavouriteSync,
     private val downloads: Downloads,
     private val playlists: PlaylistSync,
     private val offline: OfflineDownloads,
@@ -108,6 +110,14 @@ class ServerSync @Inject constructor(
         }
     }
 
+    // Starts a copy unless one is already running, and waits for it to end.
+    // Answers why it failed, in words, or null when it worked.
+    suspend fun syncNowAndWait(): String? {
+        syncNow()
+        synchronized(this) { job }?.join()
+        return _problem.value
+    }
+
     // Copies the library afresh, stopping a copy already running: for when
     // what the copy should hold has changed, like the chosen music folder.
     fun syncAgain() {
@@ -139,6 +149,8 @@ class ServerSync @Inject constructor(
             val library = merge.rebuild()
             // Brings likes and stars together, and sends any plays still waiting.
             listening.afterSync()
+            // The same for favourite albums and artists.
+            favourites.afterSync()
             // Songs downloaded since the last copy join the library as liked.
             downloads.afterSync()
             // Brings the server's playlists and the phone's copies together.

@@ -52,6 +52,11 @@ class ArtistExtrasSource @Inject constructor(
     private val cache = ConcurrentHashMap<String, ArtistExtras>()
     private val extensions = ConcurrentHashMap<String, Set<String>>()
 
+    // Drops what was kept for one artist, so the next read asks the server again.
+    fun forget(artistId: String) {
+        cache.keys.removeAll { it.endsWith("|$artistId") }
+    }
+
     suspend fun forArtist(artist: ArtistEntity): ArtistExtras? {
         val client = (sessions.state.value as? SessionState.SignedIn)?.session?.client ?: return null
         val sourceId = serverSourceId(client.baseUrl)

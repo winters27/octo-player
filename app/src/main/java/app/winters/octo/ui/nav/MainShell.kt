@@ -60,6 +60,7 @@ import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.LocalNowPlayingId
 import app.winters.octo.ui.common.LocalOpenPage
 import app.winters.octo.ui.common.NowMark
+import app.winters.octo.ui.favourites.FavouritesScreen
 import app.winters.octo.ui.folders.FoldersScreen
 import app.winters.octo.ui.genre.GenreScreen
 import app.winters.octo.ui.genre.GenresScreen
@@ -213,6 +214,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             entry<FoldersRoute> { FoldersScreen(back) }
                             entry<PlaylistsRoute> { PlaylistsScreen(open, back) }
                             entry<LikedRoute> { LikedScreen(back) }
+                            entry<FavouritesRoute> { FavouritesScreen(open, back) }
                             entry<DownloadsRoute> { DownloadsScreen(back) }
                             entry<PlaylistRoute> { PlaylistScreen(it.id, back) }
                             entry<SignInRoute> { SignInScreen(back) }

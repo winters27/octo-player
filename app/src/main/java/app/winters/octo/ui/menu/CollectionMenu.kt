@@ -27,6 +27,8 @@ import androidx.navigation3.runtime.NavKey
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.PIN_LIMIT
+import app.winters.octo.catalog.PinKind
 import app.winters.octo.catalog.PlaylistSummary
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
@@ -36,6 +38,10 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.discovery.Discovery
+import app.winters.octo.favourites.FavouriteStore
+import app.winters.octo.favourites.PinKey
+import app.winters.octo.favourites.PinStore
+import app.winters.octo.listening.FavouriteKind
 import app.winters.octo.listening.PlayHistory
 import app.winters.octo.offline.DownloadEntity
 import app.winters.octo.offline.OfflineDownloads
@@ -88,30 +94,63 @@ class CollectionMenuState {
 }
 
 // The choices in a collection's menu, in the order shown.
-enum class CollectionAction { Play, Shuffle, PlayNext, AddToQueue, AddToPlaylist, Download, StartRadio, GoToArtist, Rename, Delete }
+enum class CollectionAction {
+    Play, Shuffle, PlayNext, AddToQueue, AddToPlaylist, Download, StartRadio,
+    AddToFavourites, RemoveFromFavourites, PinToHome, Unpin, MoveToFront,
+    GoToArtist, Rename, Delete,
+}
+
+// Where a collection stands on Home: not pinned, pinned, or pinned first.
+enum class PinSpot { None, Pinned, First }
 
 private val Playing = listOf(CollectionAction.Play, CollectionAction.Shuffle, CollectionAction.PlayNext, CollectionAction.AddToQueue)
 
+// Adding to or removing from favourites.
+private fun MutableList<CollectionAction>.favourite(favourite: Boolean) =
+    add(if (favourite) CollectionAction.RemoveFromFavourites else CollectionAction.AddToFavourites)
+
+// Pinning to Home, or for a pin, taking it off or moving it to the front.
+private fun MutableList<CollectionAction>.pin(spot: PinSpot) {
+    if (spot == PinSpot.None) {
+        add(CollectionAction.PinToHome)
+        return
+    }
+    add(CollectionAction.Unpin)
+    if (spot == PinSpot.Pinned) add(CollectionAction.MoveToFront)
+}
+
 // An album can be downloaded when some of its songs are only on a server
 // and not downloaded yet.
-fun albumActions(canDownload: Boolean): List<CollectionAction> = buildList {
+fun albumActions(canDownload: Boolean, favourite: Boolean = false, pin: PinSpot = PinSpot.None): List<CollectionAction> = buildList {
     addAll(Playing)
     add(CollectionAction.AddToPlaylist)
     if (canDownload) add(CollectionAction.Download)
+    favourite(favourite)
+    pin(pin)
     add(CollectionAction.GoToArtist)
 }
 
 // A radio needs a server signed in.
-fun artistActions(radio: Boolean): List<CollectionAction> = buildList {
+fun artistActions(radio: Boolean, favourite: Boolean = false, pin: PinSpot = PinSpot.None): List<CollectionAction> = buildList {
     addAll(Playing)
     if (radio) add(CollectionAction.StartRadio)
+    favourite(favourite)
+    pin(pin)
 }
 
-// An empty playlist has nothing to play, only itself to rename or delete.
-fun playlistActions(empty: Boolean): List<CollectionAction> = buildList {
+// An empty playlist has nothing to play, only itself to pin, rename or delete.
+fun playlistActions(empty: Boolean, pin: PinSpot = PinSpot.None): List<CollectionAction> = buildList {
     if (!empty) addAll(Playing)
+    pin(pin)
     add(CollectionAction.Rename)
     add(CollectionAction.Delete)
+}
+
+// Where a pin is in the row Home shows.
+fun pinSpot(shown: List<PinKey>, key: PinKey): PinSpot = when (shown.indexOf(key)) {
+    -1 -> PinSpot.None
+    0 -> PinSpot.First
+    else -> PinSpot.Pinned
 }
 
 @HiltViewModel
@@ -124,7 +163,32 @@ class CollectionMenuViewModel @Inject constructor(
     private val offline: OfflineDownloads,
     private val history: PlayHistory,
     private val feedback: Feedback,
+    private val favourites: FavouriteStore,
+    private val pins: PinStore,
 ) : ViewModel() {
+    val favouriteAlbums: StateFlow<Set<String>> = favourites.albums
+    val favouriteArtists: StateFlow<Set<String>> = favourites.artists
+
+    // The pins Home shows, in row order.
+    val pinned: StateFlow<List<PinKey>> = pins.shown
+
+    fun setFavourite(kind: FavouriteKind, id: String, favourite: Boolean) = favourites.set(kind, id, favourite)
+
+    // Pins to the end of the row on Home. A full row is said, since the pin was asked for.
+    fun pin(key: PinKey) {
+        viewModelScope.launch {
+            if (!pins.pin(key)) feedback.show("Home holds up to $PIN_LIMIT pins. Unpin one first.")
+        }
+    }
+
+    fun unpin(key: PinKey) {
+        viewModelScope.launch { pins.unpin(key) }
+    }
+
+    fun moveToFront(key: PinKey) {
+        viewModelScope.launch { pins.moveToFront(key) }
+    }
+
     // Whether an artist can start a radio: only with a server signed in.
     val radio: StateFlow<Boolean> = discovery.available
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
@@ -201,15 +265,19 @@ private fun AlbumMenu(target: CollectionTarget.Album, state: CollectionMenuState
     val album by remember(target) { vm.album(target.id) }.collectAsStateWithLifecycle(null)
     val tracks by remember(target) { vm.albumTracks(target.id) }.collectAsStateWithLifecycle(emptyList())
     val kept by vm.kept.collectAsStateWithLifecycle()
+    val favourites by vm.favouriteAlbums.collectAsStateWithLifecycle()
+    val pinned by vm.pinned.collectAsStateWithLifecycle()
     val shown = album ?: return
     val waiting = tracks.filter { !it.onPhone && it.id !in kept }.map { it.id }
+    val pin = PinKey(PinKind.Album, target.id)
+    val actions = albumActions(canDownload = waiting.isNotEmpty(), favourite = target.id in favourites, pin = pinSpot(pinned, pin))
     CollectionHeader(shown.title, shown.artist) { Artwork(shown.artwork, 48.dp, shape = RoundedCornerShape(6.dp)) }
     Spacer(Modifier.height(8.dp))
-    CollectionRows(target, albumActions(canDownload = waiting.isNotEmpty()), state, vm) { action ->
+    CollectionRows(target, actions, state, vm) { action ->
         when (action) {
             CollectionAction.Download -> vm.download(waiting)
             CollectionAction.GoToArtist -> onOpen(ArtistRoute(shown.artistId))
-            else -> Unit
+            else -> favouriteOrPin(action, vm, FavouriteKind.Album, pin)
         }
     }
 }
@@ -218,27 +286,46 @@ private fun AlbumMenu(target: CollectionTarget.Album, state: CollectionMenuState
 private fun ArtistMenu(target: CollectionTarget.Artist, state: CollectionMenuState, vm: CollectionMenuViewModel) {
     val artist by remember(target) { vm.artist(target.id) }.collectAsStateWithLifecycle(null)
     val radio by vm.radio.collectAsStateWithLifecycle()
+    val favourites by vm.favouriteArtists.collectAsStateWithLifecycle()
+    val pinned by vm.pinned.collectAsStateWithLifecycle()
     val shown = artist ?: return
+    val pin = PinKey(PinKind.Artist, target.id)
+    val actions = artistActions(radio, favourite = target.id in favourites, pin = pinSpot(pinned, pin))
     CollectionHeader(shown.name, albums(shown.albumCount)) { Artwork(shown.artwork, 48.dp, shape = CircleShape) }
     Spacer(Modifier.height(8.dp))
-    CollectionRows(target, artistActions(radio), state, vm) { action ->
-        if (action == CollectionAction.StartRadio) vm.startRadio(target.id)
+    CollectionRows(target, actions, state, vm) { action ->
+        if (action == CollectionAction.StartRadio) vm.startRadio(target.id) else favouriteOrPin(action, vm, FavouriteKind.Artist, pin)
     }
 }
 
 @Composable
 private fun PlaylistMenu(target: CollectionTarget.Playlist, state: CollectionMenuState, vm: CollectionMenuViewModel) {
     val playlist by remember(target) { vm.playlist(target.id) }.collectAsStateWithLifecycle(null)
+    val pinned by vm.pinned.collectAsStateWithLifecycle()
     val sheets = LocalPlaylistSheets.current
     val shown = playlist ?: return
+    val pin = PinKey(PinKind.Playlist, target.id)
     CollectionHeader(shown.name, songs(shown.songCount)) { PlaylistCover(shown.covers, 48.dp, shape = RoundedCornerShape(6.dp)) }
     Spacer(Modifier.height(8.dp))
-    CollectionRows(target, playlistActions(empty = shown.songCount == 0), state, vm) { action ->
+    CollectionRows(target, playlistActions(empty = shown.songCount == 0, pin = pinSpot(pinned, pin)), state, vm) { action ->
         when (action) {
             CollectionAction.Rename -> sheets.show(PlaylistSheet.Rename(shown.id, shown.name))
             CollectionAction.Delete -> sheets.show(PlaylistSheet.Delete(shown.id, shown.name, shown.onServer))
-            else -> Unit
+            else -> favouriteOrPin(action, vm, null, pin)
         }
+    }
+}
+
+// The favourite and pin choices, the same for every kind. `kind` is null
+// for a playlist, which cannot be a favourite.
+private fun favouriteOrPin(action: CollectionAction, vm: CollectionMenuViewModel, kind: FavouriteKind?, pin: PinKey) {
+    when (action) {
+        CollectionAction.AddToFavourites -> kind?.let { vm.setFavourite(it, pin.id, favourite = true) }
+        CollectionAction.RemoveFromFavourites -> kind?.let { vm.setFavourite(it, pin.id, favourite = false) }
+        CollectionAction.PinToHome -> vm.pin(pin)
+        CollectionAction.Unpin -> vm.unpin(pin)
+        CollectionAction.MoveToFront -> vm.moveToFront(pin)
+        else -> Unit
     }
 }
 
@@ -262,6 +349,11 @@ private fun CollectionRows(
             CollectionAction.AddToPlaylist -> OctoIcons.AddToPlaylist to "Add to playlist"
             CollectionAction.Download -> OctoIcons.Download to "Download"
             CollectionAction.StartRadio -> OctoIcons.Radio to "Start radio"
+            CollectionAction.AddToFavourites -> OctoIcons.Like to "Add to favourites"
+            CollectionAction.RemoveFromFavourites -> OctoIcons.Liked to "Remove from favourites"
+            CollectionAction.PinToHome -> OctoIcons.Pin to "Pin to Home"
+            CollectionAction.Unpin -> OctoIcons.Pin to "Unpin"
+            CollectionAction.MoveToFront -> OctoIcons.Pin to "Move to front"
             CollectionAction.GoToArtist -> OctoIcons.Artist to "Go to artist"
             CollectionAction.Rename -> OctoIcons.Rename to "Rename"
             CollectionAction.Delete -> OctoIcons.Delete to "Delete"

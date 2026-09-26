@@ -36,11 +36,14 @@ import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.elevation3
+import app.winters.octo.listening.FavouriteKind
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
+import app.winters.octo.ui.common.FavouriteHeart
 import app.winters.octo.ui.common.Pickable
+import app.winters.octo.ui.common.Refreshable
 import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.SongLead
 import app.winters.octo.ui.common.SongRow
@@ -97,7 +100,7 @@ fun AlbumScreen(
     // Its songs' menus leave out the way back to this page.
     val menuContext = remember(id) { SongMenuContext(albumId = id) }
 
-    Box(Modifier.fillMaxSize()) {
+    Refreshable {
         SelectableSongs(pickable) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
                 album?.let { a ->
@@ -114,6 +117,8 @@ fun AlbumScreen(
                             onArtist = { onOpen(ArtistRoute(a.artistId)) },
                             onPlay = { vm.play(0) },
                             onShuffle = vm::shuffle,
+                            // Favourites: the heart beside the buttons.
+                            heart = { FavouriteHeart(FavouriteKind.Album, id) },
                             more = {
                                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     AlbumShareButton(id, a.title)
@@ -148,8 +153,8 @@ fun AlbumScreen(
 }
 
 // The top of an album page: cover, title, artist, details, and the buttons
-// that play it. The artist opens only when there is somewhere to go; `more`
-// sits under the buttons, for an extra action.
+// that play it. The artist opens only when there is somewhere to go; `heart`
+// sits beside the buttons and `more` under them, for extra actions.
 @Composable
 fun AlbumHeader(
     artwork: String?,
@@ -159,6 +164,7 @@ fun AlbumHeader(
     onArtist: (() -> Unit)?,
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
+    heart: (@Composable () -> Unit)? = null,
     more: (@Composable () -> Unit)? = null,
 ) {
     Column(
@@ -182,9 +188,10 @@ fun AlbumHeader(
             color = OctoColors.TextMuted,
             modifier = Modifier.padding(top = 4.dp),
         )
-        Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             AccentButton("Play", onClick = onPlay)
             GlazeButton("Shuffle", onClick = onShuffle)
+            heart?.invoke()
         }
         more?.invoke()
     }

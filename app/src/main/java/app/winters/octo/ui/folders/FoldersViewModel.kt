@@ -171,6 +171,11 @@ class FoldersViewModel @Inject constructor(
         }
     }
 
+    // A pull on the page: every server folder read so far is read again.
+    fun reloadServer() {
+        _levels.value.keys.forEach { load(it.ifEmpty { null }, again = true) }
+    }
+
     // Plays every song under a phone folder.
     fun playPhone(node: FolderNode<TrackEntity>, shuffle: Boolean) =
         playback.playTracks(node.allSongs().map { it.id }, 0, shuffle)

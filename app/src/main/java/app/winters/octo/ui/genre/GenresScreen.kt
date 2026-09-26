@@ -2,7 +2,6 @@ package app.winters.octo.ui.genre
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +30,7 @@ import app.winters.octo.design.OctoType
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
+import app.winters.octo.ui.common.Refreshable
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.common.songs
@@ -53,7 +53,7 @@ class GenresViewModel @Inject constructor(dao: CatalogDao) : ViewModel() {
 fun GenresScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: GenresViewModel = hiltViewModel()) {
     val genres by vm.genres.collectAsStateWithLifecycle()
 
-    Box(Modifier.fillMaxSize()) {
+    Refreshable {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
             item(key = "title") { ScreenTitle("Genres") }
             genres?.let { list ->

@@ -53,6 +53,7 @@ import app.winters.octo.ui.common.Pickable
 import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.RAIL_MIN_ITEMS
+import app.winters.octo.ui.common.Refreshable
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.SongRow
@@ -68,6 +69,7 @@ import app.winters.octo.ui.nav.AlbumsRoute
 import app.winters.octo.ui.nav.ArtistRoute
 import app.winters.octo.ui.nav.ArtistsRoute
 import app.winters.octo.ui.nav.DownloadsRoute
+import app.winters.octo.ui.nav.FavouritesRoute
 import app.winters.octo.ui.nav.FoldersRoute
 import app.winters.octo.ui.nav.GenresRoute
 import app.winters.octo.ui.nav.HistoryRoute
@@ -79,6 +81,7 @@ private class Section(@DrawableRes val icon: Int, val label: String, val route: 
 
 private val sections = listOf(
     Section(OctoIcons.Playlists, "Playlists", PlaylistsRoute),
+    Section(OctoIcons.Like, "Favourites", FavouritesRoute),
     Section(OctoIcons.Artist, "Artists", ArtistsRoute),
     Section(OctoIcons.Album, "Albums", AlbumsRoute),
     Section(OctoIcons.Songs, "Songs", SongsRoute),
@@ -94,28 +97,30 @@ private val sections = listOf(
 @Composable
 fun LibraryScreen(onOpen: (NavKey) -> Unit, vm: LibraryViewModel = hiltViewModel()) {
     val recent by vm.recent.collectAsStateWithLifecycle()
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding()) {
-        item { ScreenTitle("Library") }
-        sections.forEachIndexed { index, section ->
-            item(key = section.label) {
-                Column {
-                    if (index > 0) Separator()
-                    SectionRow(section) { onOpen(section.route) }
+    Refreshable {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding()) {
+            item { ScreenTitle("Library") }
+            sections.forEachIndexed { index, section ->
+                item(key = section.label) {
+                    Column {
+                        if (index > 0) Separator()
+                        SectionRow(section) { onOpen(section.route) }
+                    }
                 }
             }
-        }
-        if (recent.isNotEmpty()) {
-            item { SectionTitle("Recently added", Modifier.padding(top = 24.dp)) }
-            items(recent.chunked(2), key = { pair -> pair.first().id }) { pair ->
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 9.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    pair.forEach { album ->
-                        AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, modifier = Modifier.weight(1f), width = null)
+            if (recent.isNotEmpty()) {
+                item { SectionTitle("Recently added", Modifier.padding(top = 24.dp)) }
+                items(recent.chunked(2), key = { pair -> pair.first().id }) { pair ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 9.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        pair.forEach { album ->
+                            AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, modifier = Modifier.weight(1f), width = null)
+                        }
+                        // An odd last album keeps its half width.
+                        if (pair.size == 1) Spacer(Modifier.weight(1f))
                     }
-                    // An odd last album keeps its half width.
-                    if (pair.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         }
@@ -259,7 +264,7 @@ private fun LibraryPage(
     buttons: @Composable () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
-    Box(Modifier.fillMaxSize()) {
+    Refreshable {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Spacer(Modifier.height(DetailTopGap))
             Row(verticalAlignment = Alignment.CenterVertically) {

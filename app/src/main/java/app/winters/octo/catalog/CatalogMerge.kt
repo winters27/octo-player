@@ -16,6 +16,7 @@ class CatalogMerge @Inject constructor(
     private val sources: SourceDao,
     private val catalog: CatalogDao,
     private val user: UserDao,
+    private val favourites: FavouritesDao,
 ) {
     private val lock = Mutex()
 
@@ -31,6 +32,8 @@ class CatalogMerge @Inject constructor(
         copies.chunked(500).forEach { sources.insertTracks(it) }
         // Likes, plays and playlists follow songs whose ids changed.
         user.relinkAll()
+        // So do favourite albums and artists, and pins on Home.
+        favourites.relinkAll()
         // Songs with no rating on a server show the one made on the phone.
         user.showPhoneRatings()
         merged
