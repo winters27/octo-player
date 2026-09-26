@@ -23,6 +23,9 @@ import kotlinx.serialization.Serializable
 @Serializable data object LikedRoute : NavKey
 @Serializable data class PlaylistRoute(val id: String) : NavKey
 @Serializable data object SignInRoute : NavKey
+
+// The sign-in form, starting from the saved connection to change it.
+@Serializable data object EditConnectionRoute : NavKey
 @Serializable data object OctoAdminRoute : NavKey
 
 // The equalizer and everything else that shapes the sound.

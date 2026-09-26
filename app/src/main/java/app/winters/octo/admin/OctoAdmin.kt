@@ -119,7 +119,7 @@ class OctoAdmin @Inject constructor(
         suspend fun first(candidates: List<HttpUrl>): HttpUrl? =
             candidates.map(::root).filter(tried::add).firstOrNull { answers(it) }
         // The station addresses cost a server call, so they are only asked for last.
-        val found = first(listOfNotNull(client.baseUrl, lastFound.first()))
+        val found = first(listOfNotNull(client.baseUrl, client.primaryUrl, lastFound.first()))
             ?: first(stationHosts(client))
             ?: return null
         context.adminData.edit { it[ADDRESS] = found.toString() }

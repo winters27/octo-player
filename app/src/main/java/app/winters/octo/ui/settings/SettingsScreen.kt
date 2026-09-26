@@ -42,6 +42,7 @@ import app.winters.octo.sound.SoundEngine
 import app.winters.octo.sound.SoundSettings
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.screenPadding
+import app.winters.octo.ui.nav.EditConnectionRoute
 import app.winters.octo.ui.nav.OctoAdminRoute
 import app.winters.octo.ui.nav.SignInRoute
 import app.winters.octo.ui.nav.SoundRoute
@@ -139,6 +140,7 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
         ServerCard(
             onConnect = { onOpen(SignInRoute) },
             onOpenAdmin = { onOpen(OctoAdminRoute) },
+            onEditConnection = { onOpen(EditConnectionRoute) },
             modifier = Modifier.padding(top = 16.dp),
         )
 

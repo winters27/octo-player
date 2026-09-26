@@ -124,7 +124,7 @@ class ListeningSync @Inject constructor(
     // The client for the signed-in server, if there is one.
     private suspend fun signedIn(): SubsonicClient? {
         val client = (sessions.state.value as? SessionState.SignedIn)?.session?.client ?: return null
-        store.useServer("${client.username}@${client.baseUrl}")
+        store.useServer("${client.username}@${client.primaryUrl}")
         return client
     }
 

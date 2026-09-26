@@ -20,12 +20,15 @@ data class StoredSession(
     val isOcto: Boolean,
     val octoAdminReachable: Boolean,
     val extensions: Set<String>,
+    // How the server is reached, as encodeConnection writes it. Its
+    // secrets are sealed inside.
+    val connection: String? = null,
 )
 
 private val Context.sessionData by preferencesDataStore("session")
 
-// The signed-in server, kept between launches. The password is stored
-// only in sealed form.
+// The signed-in server, kept between launches. The password, API key,
+// header values and client certificate name are stored only in sealed form.
 @Singleton
 class SessionStore @Inject constructor(@ApplicationContext private val context: Context) {
     suspend fun read(): StoredSession? {
@@ -39,6 +42,7 @@ class SessionStore @Inject constructor(@ApplicationContext private val context: 
             isOcto = p[IS_OCTO] ?: false,
             octoAdminReachable = p[OCTO_ADMIN_REACHABLE] ?: false,
             extensions = p[EXTENSIONS] ?: emptySet(),
+            connection = p[CONNECTION],
         )
     }
 
@@ -52,6 +56,7 @@ class SessionStore @Inject constructor(@ApplicationContext private val context: 
             p[IS_OCTO] = s.isOcto
             p[OCTO_ADMIN_REACHABLE] = s.octoAdminReachable
             p[EXTENSIONS] = s.extensions
+            if (s.connection != null) p[CONNECTION] = s.connection else p.remove(CONNECTION)
         }
     }
 
@@ -68,5 +73,6 @@ class SessionStore @Inject constructor(@ApplicationContext private val context: 
         val IS_OCTO = booleanPreferencesKey("is_octo")
         val OCTO_ADMIN_REACHABLE = booleanPreferencesKey("octo_admin_reachable")
         val EXTENSIONS = stringSetPreferencesKey("extensions")
+        val CONNECTION = stringPreferencesKey("connection")
     }
 }

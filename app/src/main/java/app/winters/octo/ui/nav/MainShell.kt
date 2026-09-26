@@ -169,6 +169,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                         entry<LikedRoute> { LikedScreen(back) }
                         entry<PlaylistRoute> { PlaylistScreen(it.id, back) }
                         entry<SignInRoute> { SignInScreen(back) }
+                        entry<EditConnectionRoute> { SignInScreen(back, editing = true) }
                         entry<OctoAdminRoute> { OctoAdminScreen(back) }
                         entry<SoundRoute> { SoundScreen(back) }
                     },
