@@ -82,7 +82,7 @@ class ServerSync @Inject constructor(
             sessions.state.collect { state ->
                 when (state) {
                     is SessionState.SignedIn -> {
-                        val sourceId = serverSourceId(state.session.client.baseUrl)
+                        val sourceId = state.session.sourceId
                         dropServers(keep = sourceId)
                         val done = last.first()
                         val stale = done == null || done.sourceId != sourceId ||
@@ -104,6 +104,15 @@ class ServerSync @Inject constructor(
         }
     }
 
+    // Copies the library afresh, stopping a copy already running: for when
+    // what the copy should hold has changed, like the chosen music folder.
+    fun syncAgain() {
+        scope.launch {
+            synchronized(this@ServerSync) { job }?.cancelAndJoin()
+            syncNow()
+        }
+    }
+
     // Signs out and takes the server's music out of the library. Nothing
     // on the server changes.
     fun disconnect() {
@@ -115,8 +124,9 @@ class ServerSync @Inject constructor(
     }
 
     private suspend fun sync() {
-        val client = (sessions.state.value as? SessionState.SignedIn)?.session?.client ?: return
-        val sourceId = serverSourceId(client.baseUrl)
+        val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return
+        val client = session.client
+        val sourceId = session.sourceId
         _syncing.value = true
         try {
             val started = SystemClock.elapsedRealtime()

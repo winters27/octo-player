@@ -28,8 +28,9 @@ class ServerArtworkFetcher(
     override suspend fun fetch(): FetchResult? {
         // Covers asked for while the app is still opening wait for the sign-in.
         val state = sessions.state.first { it !is SessionState.Loading }
-        val client = (state as? SessionState.SignedIn)?.session?.client ?: return null
-        if (serverSourceId(client.baseUrl) != art.sourceId) return null
+        val session = (state as? SessionState.SignedIn)?.session ?: return null
+        val client = session.client
+        if (session.sourceId != art.sourceId) return null
         // With no size given, a middling one.
         val wanted = maxOf(options.size.width.pxOrElse { 0 }, options.size.height.pxOrElse { 0 }).takeIf { it > 0 } ?: 600
         val px = Sizes.firstOrNull { it >= wanted } ?: Sizes.last()

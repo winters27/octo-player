@@ -9,6 +9,9 @@ fun Throwable.userMessage(): String = when (this) {
     is SubsonicException.NotSubsonic ->
         "That address answered, but not like a music server. Check the port."
     is SubsonicException.WrongCredentials -> "Wrong username or password."
+    is SubsonicException.AuthNotSupported ->
+        if (code == 41) "This account can't sign in with a token. Turn on \"Use legacy password\" under Advanced."
+        else "The server doesn't take this way of signing in."
     is SubsonicException.NotFound -> "That isn't on the server any more."
     is SubsonicException.Server -> "The server said: $message"
     else -> "Something went wrong."
@@ -16,5 +19,8 @@ fun Throwable.userMessage(): String = when (this) {
 
 fun SignInError.userMessage(): String = when (this) {
     SignInError.BadAddress -> "That doesn't look like a server address."
+    SignInError.BadHomeAddress -> "The home network address doesn't look like a server address."
+    SignInError.MissingSecret -> "Enter the password or key to sign in this way."
     is SignInError.Failed -> cause.userMessage()
+    is SignInError.Untrusted -> "The server's certificate isn't trusted by this phone."
 }

@@ -39,7 +39,7 @@ fun Cover(
         if (coverId != null) {
             // The address is signed with a new salt every time, so the
             // cache is keyed by what the picture is, not where it came from.
-            val key = "cover:${client.baseUrl.host}:$coverId:$bucket"
+            val key = "cover:${client.primaryUrl.host}:$coverId:$bucket"
             val request = remember(key) {
                 ImageRequest.Builder(context)
                     .data(client.coverArtUrl(coverId, bucket).toString())
