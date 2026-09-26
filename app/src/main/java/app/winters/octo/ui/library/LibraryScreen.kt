@@ -42,6 +42,7 @@ import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistRow
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
+import app.winters.octo.ui.common.EmptyLibraryNote
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.SongRow
@@ -206,12 +207,8 @@ private fun <T> Loaded(items: List<T>?, content: @Composable (List<T>) -> Unit) 
         items == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = OctoColors.Accent, modifier = Modifier.size(28.dp))
         }
-        items.isEmpty() -> Text(
-            "Nothing here yet",
-            style = OctoType.bodySmall,
-            color = OctoColors.TextMuted,
-            modifier = Modifier.padding(20.dp),
-        )
+        // Offers phone access or a server sign-in when either is missing.
+        items.isEmpty() -> EmptyLibraryNote()
         else -> content(items)
     }
 }

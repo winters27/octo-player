@@ -13,17 +13,19 @@ import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.byLatestPlay
 import app.winters.octo.catalog.byPlayCount
-import app.winters.octo.device.DEVICE
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.Station
 import app.winters.octo.listening.PlayHistory
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.server.ServerSync
+import app.winters.octo.ui.common.Feedback
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -39,6 +41,9 @@ class HomeViewModel @Inject constructor(
     private val playback: PlaybackConnection,
     private val discovery: Discovery,
     val library: DeviceLibrary,
+    private val prefs: HomePrefs,
+    private val feedback: Feedback,
+    serverSync: ServerSync,
 ) : ViewModel() {
     // Both follow the play history, here and on the server, so a song that
     // just counted shows up.
@@ -53,10 +58,16 @@ class HomeViewModel @Inject constructor(
     val recent: StateFlow<List<AlbumEntity>?> =
         dao.recentAlbums(20).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val songCount: StateFlow<Int?> =
-        dao.trackCount(DEVICE).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    // Every song in the library, phone and server together. Null until read.
+    val librarySongs: StateFlow<Int?> =
+        dao.libraryTrackCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    // Picked once, then again on a pull or when the library itself changes.
+    // Whether the phone access card was put away with "Not now". Null until read.
+    val accessDismissed: StateFlow<Boolean?> =
+        prefs.accessDismissed.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // Picked once, then again on a pull, when the library changes size, or
+    // after a server copy (which can change the music without changing the count).
     var surprise by mutableStateOf<List<AlbumEntity>>(emptyList())
         private set
     var artists by mutableStateOf<List<ArtistEntity>>(emptyList())
@@ -78,7 +89,11 @@ class HomeViewModel @Inject constructor(
     private var stationsFailed = false
 
     init {
-        viewModelScope.launch { dao.trackCount(DEVICE).distinctUntilChanged().collect { reroll() } }
+        viewModelScope.launch {
+            combine(dao.libraryTrackCount(), serverSync.last.map { it?.at }) { count, syncedAt -> count to syncedAt }
+                .distinctUntilChanged()
+                .collect { reroll() }
+        }
         // A new sign-in starts over; signing out drops the old server's list.
         viewModelScope.launch {
             discovery.available.distinctUntilChanged().collect { available ->
@@ -108,15 +123,22 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val songs = withContext(Dispatchers.IO) { discovery.stationSongs(station.id) }
+                if (songs.isEmpty()) feedback.show("Nothing is playing on ${station.name} right now")
                 playback.playTracks(songs.map { it.id }, 0)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.w("Octo", "station failed to start: ${e.javaClass.simpleName}")
+                feedback.show("Could not start ${station.name}")
             } finally {
                 startingStation = null
             }
         }
+    }
+
+    // "Not now" on the phone access card, kept for next time.
+    fun dismissAccess() {
+        viewModelScope.launch { prefs.dismissAccess() }
     }
 
     // Plays a shelf of songs as shown, starting at the one tapped.

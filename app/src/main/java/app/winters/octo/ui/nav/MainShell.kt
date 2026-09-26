@@ -46,6 +46,7 @@ import app.winters.octo.ui.common.FeedbackHost
 import app.winters.octo.ui.common.LocalFeedback
 import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.LocalOpenPage
 import app.winters.octo.ui.folders.FoldersScreen
 import app.winters.octo.ui.genre.GenreScreen
 import app.winters.octo.ui.genre.GenresScreen
@@ -157,6 +158,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         LocalChoiceSheet provides choiceSheet,
         LocalShareSheet provides shareSheet,
         LocalFeedback provides feedback,
+        LocalOpenPage provides open,
     ) {
         SharedTransitionLayout {
             Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
