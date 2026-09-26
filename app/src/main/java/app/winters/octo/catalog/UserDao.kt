@@ -70,34 +70,151 @@ interface UserDao {
     @Query("SELECT * FROM playlist WHERE id = :id")
     fun playlist(id: String): Flow<PlaylistEntity?>
 
-    // Every playlist song the catalog still has, in play order.
+    // Every playlist song the catalog still has, in play order. A song found
+    // online (from a server's copy of a playlist) counts too.
     @Query(
         """
-        SELECT i.playlistId, t.albumId, t.durationMs, t.artwork
-        FROM playlist_item i JOIN track t ON t.id = i.trackId
-        ORDER BY i.playlistId, i.position
+        SELECT playlistId, albumId, durationMs, artwork FROM (
+            SELECT i.playlistId, i.position, t.albumId, t.durationMs, t.artwork
+            FROM playlist_item i JOIN track t ON t.id = i.trackId
+            UNION ALL
+            SELECT i.playlistId, i.position, COALESCE(o.albumId, ''), o.durationMs,
+                CASE WHEN o.coverId IS NULL THEN NULL ELSE 'server:' || o.sourceId || '|' || o.coverId END
+            FROM playlist_item i JOIN online_song o ON o.id = i.trackId
+        )
+        ORDER BY playlistId, position
         """,
     )
     fun playlistEntries(): Flow<List<PlaylistEntry>>
 
+    // A playlist's songs in play order: library songs, and songs found
+    // online shaped like them, the way asTrack shapes a find.
     @Query(
         """
-        SELECT i.id AS itemId, t.*
-        FROM playlist_item i JOIN track t ON t.id = i.trackId
-        WHERE i.playlistId = :id
-        ORDER BY i.position
+        SELECT itemId, id, sourceId, nativeId, title, searchKey, sortKey, artist, artistId, album, albumId,
+            trackNo, discNo, year, durationMs, addedAt, mimeType, sizeBytes, artwork, uri, albumOrder,
+            relinkKey, genre, onPhone, rating
+        FROM (
+            SELECT i.id AS itemId, i.position AS position, t.id, t.sourceId, t.nativeId, t.title, t.searchKey,
+                t.sortKey, t.artist, t.artistId, t.album, t.albumId, t.trackNo, t.discNo, t.year, t.durationMs,
+                t.addedAt, t.mimeType, t.sizeBytes, t.artwork, t.uri, t.albumOrder, t.relinkKey, t.genre,
+                t.onPhone, t.rating
+            FROM playlist_item i JOIN track t ON t.id = i.trackId
+            WHERE i.playlistId = :id
+            UNION ALL
+            SELECT i.id, i.position, o.id, o.sourceId, o.nativeId, o.title, LOWER(o.title), LOWER(o.title),
+                o.artist, '', o.album, '', NULL, NULL, NULL, o.durationMs, 0, o.mimeType, NULL,
+                CASE WHEN o.coverId IS NULL THEN NULL ELSE 'server:' || o.sourceId || '|' || o.coverId END,
+                NULL, 0, '', '', 0, 0
+            FROM playlist_item i JOIN online_song o ON o.id = i.trackId
+            WHERE i.playlistId = :id
+        )
+        ORDER BY position
         """,
     )
     fun playlistTracks(id: String): Flow<List<PlaylistTrack>>
 
+    // How many songs of a playlist kept with a server have no copy there,
+    // so the server's copy goes without them.
+    @Query(
+        """
+        SELECT COUNT(*) FROM playlist_item i JOIN playlist p ON p.id = i.playlistId
+        WHERE i.playlistId = :id AND p.sourceId IS NOT NULL AND i.serverSongId IS NULL
+          AND i.trackId NOT LIKE 'find:%'
+          AND NOT EXISTS (SELECT 1 FROM source_track s WHERE s.mergedId = i.trackId AND s.sourceId = p.sourceId)
+        """,
+    )
+    fun phoneOnlyCount(id: String): Flow<Int>
+
     @Insert
     suspend fun insertPlaylist(row: PlaylistEntity)
 
-    @Query("UPDATE playlist SET name = :name, updatedAt = :now WHERE id = :id")
+    // A change always moves updatedAt forward, even if the clock went back,
+    // so it is never mistaken for one a server already has.
+    @Query("UPDATE playlist SET name = :name, updatedAt = MAX(:now, updatedAt + 1) WHERE id = :id")
     suspend fun renamePlaylist(id: String, name: String, now: Long)
 
-    @Query("UPDATE playlist SET updatedAt = :now WHERE id = :id")
+    @Query("UPDATE playlist SET updatedAt = MAX(:now, updatedAt + 1) WHERE id = :id")
     suspend fun touchPlaylist(id: String, now: Long)
+
+    // Keeping playlists in step with a server
+
+    @Query("SELECT * FROM playlist WHERE id = :id")
+    suspend fun playlistRow(id: String): PlaylistEntity?
+
+    // Every playlist kept with this server, made there or waiting to be.
+    @Query("SELECT * FROM playlist WHERE sourceId = :sourceId")
+    suspend fun serverPlaylists(sourceId: String): List<PlaylistEntity>
+
+    // Playlists only on the phone.
+    @Query("SELECT * FROM playlist WHERE sourceId IS NULL")
+    suspend fun phonePlaylists(): List<PlaylistEntity>
+
+    // Marks a playlist to be made on this server. It is linked once made.
+    @Query("UPDATE playlist SET sourceId = :sourceId WHERE id = :id AND sourceId IS NULL")
+    suspend fun keepOnServer(id: String, sourceId: String)
+
+    @Query(
+        """
+        UPDATE playlist SET serverId = :serverId, sourceId = :sourceId, syncedAt = :syncedAt,
+            syncedName = :name, serverStamp = :stamp
+        WHERE id = :id
+        """,
+    )
+    suspend fun linkPlaylist(id: String, serverId: String, sourceId: String, syncedAt: Long, name: String, stamp: String)
+
+    // Both sides now agree on what the playlist was at `syncedAt`.
+    @Query("UPDATE playlist SET syncedAt = :syncedAt, syncedName = :name, serverStamp = :stamp WHERE id = :id")
+    suspend fun markSynced(id: String, syncedAt: Long, name: String, stamp: String)
+
+    // Turns a playlist back into one only on the phone.
+    @Query(
+        """
+        UPDATE playlist SET serverId = NULL, sourceId = NULL, syncedAt = NULL, syncedName = NULL, serverStamp = NULL
+        WHERE id = :id
+        """,
+    )
+    suspend fun unlinkPlaylist(id: String)
+
+    // Every playlist kept with another server than this one (all of them
+    // for null) goes back to being only on the phone.
+    @Query(
+        """
+        UPDATE playlist SET serverId = NULL, sourceId = NULL, syncedAt = NULL, syncedName = NULL, serverStamp = NULL
+        WHERE sourceId IS NOT NULL AND (:keep IS NULL OR sourceId != :keep)
+        """,
+    )
+    suspend fun unlinkOtherServers(keep: String?)
+
+    // Deletes a playlist unless it changed since it was read.
+    @Query("DELETE FROM playlist WHERE id = :id AND updatedAt = :updatedAt")
+    suspend fun deleteUnchangedPlaylist(id: String, updatedAt: Long)
+
+    @Query("DELETE FROM playlist_item WHERE playlistId = :id")
+    suspend fun clearPlaylistItems(id: String)
+
+    @Update
+    suspend fun updatePlaylistRow(row: PlaylistEntity)
+
+    // A server playlist's phone copy, with its songs, in one go.
+    @Transaction
+    suspend fun insertServerPlaylist(row: PlaylistEntity, items: List<PlaylistItemEntity>) {
+        insertPlaylist(row)
+        items.chunked(500).forEach { insertPlaylistItems(it) }
+    }
+
+    // Swaps in the server's songs and saves the playlist as `updated`,
+    // unless it changed on the phone since it was read as `expected`.
+    // Answers whether it did.
+    @Transaction
+    suspend fun takeServerSongs(expected: PlaylistEntity, items: List<PlaylistItemEntity>, updated: PlaylistEntity): Boolean {
+        val current = playlistRow(expected.id) ?: return false
+        if (current.updatedAt != expected.updatedAt) return false
+        clearPlaylistItems(expected.id)
+        items.chunked(500).forEach { insertPlaylistItems(it) }
+        updatePlaylistRow(updated)
+        return true
+    }
 
     // Its songs go with it.
     @Query("DELETE FROM playlist WHERE id = :id")

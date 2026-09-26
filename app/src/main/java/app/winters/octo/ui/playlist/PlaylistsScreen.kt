@@ -38,7 +38,7 @@ class PlaylistsViewModel @Inject constructor(store: PlaylistStore, userDao: User
 }
 
 // Every playlist: a way to make a new one, Liked songs pinned first, then
-// the listener's own, the one changed last at the top.
+// the listener's own and the server's, the one changed last at the top.
 @Composable
 fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsViewModel = hiltViewModel()) {
     val playlists by vm.playlists.collectAsStateWithLifecycle()
@@ -53,7 +53,7 @@ fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsV
                 PlaylistLine("Liked songs", songs(likedCount), onClick = { onOpen(LikedRoute) }) { LikedCover(56.dp) }
             }
             items(playlists, key = { it.id }) { playlist ->
-                PlaylistLine(playlist.name, songs(playlist.songCount), onClick = { onOpen(PlaylistRoute(playlist.id)) }) {
+                PlaylistLine(playlist.name, songs(playlist.songCount), onClick = { onOpen(PlaylistRoute(playlist.id)) }, onServer = playlist.onServer) {
                     PlaylistCover(playlist.covers, 56.dp)
                 }
             }

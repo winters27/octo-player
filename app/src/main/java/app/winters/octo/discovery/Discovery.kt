@@ -123,9 +123,30 @@ class Discovery @Inject constructor(
         return resolve(client, sourceId, songs)
     }
 
+    // One id for each song sent, in the same order with repeats kept: the
+    // library song it is, or a find. For lists that must keep every entry,
+    // like a playlist. Nothing when no server is signed in.
+    internal suspend fun idsFromServer(songs: List<Song>): List<String> {
+        val (_, sourceId) = server() ?: return emptyList()
+        return resolveEach(sourceId, songs).map { it.id }
+    }
+
     // Songs from the server as the app shows them, in the order sent: a
     // library song as it is in the library, anything else as a find.
     private suspend fun resolve(client: SubsonicClient, sourceId: String, songs: List<Song>): List<TrackEntity> {
+        if (songs.isEmpty()) return emptyList()
+        val resolved = resolveEach(sourceId, songs)
+        val library = catalog.tracksByIds(resolved.filterIsInstance<Resolved.InLibrary>().map { it.trackId }).associateBy { it.id }
+        return resolved.mapNotNull { r ->
+            when (r) {
+                is Resolved.InLibrary -> library[r.trackId]
+                is Resolved.Found -> r.song.asTrack()
+            }
+        }.distinctBy { it.id }
+    }
+
+    // What each song sent is, in order, with the finds among them kept.
+    private suspend fun resolveEach(sourceId: String, songs: List<Song>): List<Resolved> {
         if (songs.isEmpty()) return emptyList()
         val links = songs.map { it.id }.distinct().chunked(900)
             .flatMap { sources.libraryLinks(sourceId, it) }
@@ -134,13 +155,7 @@ class Discovery @Inject constructor(
         val candidates = unlinked.flatMap { titleKeys(it.title) }.distinct().chunked(900).flatMap { catalog.tracksWithKeys(it) }
         val resolved = resolveSongs(songs, sourceId, links, candidates, System.currentTimeMillis())
         online.keep(resolved.filterIsInstance<Resolved.Found>().map { it.song }.distinctBy { it.id })
-        val library = catalog.tracksByIds(resolved.filterIsInstance<Resolved.InLibrary>().map { it.trackId }).associateBy { it.id }
-        return resolved.mapNotNull { r ->
-            when (r) {
-                is Resolved.InLibrary -> library[r.trackId]
-                is Resolved.Found -> r.song.asTrack()
-            }
-        }.distinctBy { it.id }
+        return resolved
     }
 
     // The server's id for a song: a find's own, a library song's server copy,

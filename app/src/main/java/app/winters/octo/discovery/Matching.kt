@@ -36,6 +36,13 @@ sealed interface Resolved {
     data class Found(val song: OnlineSongEntity) : Resolved
 }
 
+// The id the app knows a resolved song by: the library song's, or the find's.
+val Resolved.id: String
+    get() = when (this) {
+        is Resolved.InLibrary -> trackId
+        is Resolved.Found -> song.id
+    }
+
 // The length the server gave, or zero when it only guessed.
 fun knownLengthMs(song: Song): Long =
     if (song.duration <= 0 || song.duration == GUESSED_SECONDS) 0 else song.duration * 1000L

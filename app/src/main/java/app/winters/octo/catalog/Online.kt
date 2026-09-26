@@ -88,11 +88,12 @@ interface OnlineDao {
     }
 
     // Lets go of finds from other servers, and old ones nothing needs: not
-    // asked for, and not in the saved queue.
+    // asked for, and not in the saved queue or a playlist.
     @Query(
         """
         DELETE FROM online_song WHERE sourceId != :sourceId OR (
             requestedAt = 0 AND seenAt < :before AND id NOT IN (SELECT trackId FROM queue_item)
+            AND id NOT IN (SELECT trackId FROM playlist_item)
         )
         """,
     )

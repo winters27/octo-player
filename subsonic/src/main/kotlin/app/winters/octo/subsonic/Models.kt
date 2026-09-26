@@ -141,6 +141,11 @@ data class Playlist(
     val duration: Int = 0,
     val coverArt: String? = null,
     val changed: String? = null,
+    // A playlist the server makes itself and nobody can edit, like a
+    // station's list of songs, and when a generated one runs out.
+    val readonly: Boolean = false,
+    val created: String? = null,
+    val validUntil: String? = null,
 )
 
 @Serializable
@@ -155,6 +160,13 @@ data class PlaylistWithSongs(
     val duration: Int = 0,
     val coverArt: String? = null,
     val entry: List<Song> = emptyList(),
+    // Who it belongs to, and when it was made and last changed, as the
+    // list of playlists has them.
+    val owner: String? = null,
+    val public: Boolean = false,
+    val created: String? = null,
+    val changed: String? = null,
+    val readonly: Boolean = false,
 )
 
 @Serializable

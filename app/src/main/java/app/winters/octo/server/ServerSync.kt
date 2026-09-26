@@ -15,6 +15,7 @@ import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.data.userMessage
 import app.winters.octo.discovery.Downloads
+import app.winters.octo.playlists.PlaylistSync
 import app.winters.octo.subsonic.readLibrary
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -53,6 +54,7 @@ class ServerSync @Inject constructor(
     private val merge: CatalogMerge,
     private val listening: ListeningSync,
     private val downloads: Downloads,
+    private val playlists: PlaylistSync,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val dropLock = Mutex()
@@ -137,6 +139,8 @@ class ServerSync @Inject constructor(
             listening.afterSync()
             // Songs downloaded since the last copy join the library as liked.
             downloads.afterSync()
+            // Brings the server's playlists and the phone's copies together.
+            playlists.afterSync()
             context.syncData.edit { p ->
                 p[SOURCE_ID] = sourceId
                 p[SYNCED_AT] = System.currentTimeMillis()
@@ -169,6 +173,8 @@ class ServerSync @Inject constructor(
             gone.forEach { sources.deleteSource(it) }
             merge.rebuild()
         }
+        // Playlists kept with a server that is gone stay, only on the phone.
+        playlists.keepOnly(keep)
         if (keep == null) {
             if (last.first() != null) context.syncData.edit { it.clear() }
             _problem.value = null

@@ -32,6 +32,7 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.elevation3
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.PlaylistStore
+import app.winters.octo.playlists.PlaylistSync
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.DragHandle
@@ -64,11 +65,20 @@ class PlaylistViewModel @AssistedInject constructor(
     userDao: UserDao,
     private val store: PlaylistStore,
     private val playback: PlaybackConnection,
+    sync: PlaylistSync,
 ) : ViewModel() {
     // Null until first read.
     val page: StateFlow<PlaylistPage?> =
         combine(userDao.playlist(id), userDao.playlistTracks(id), ::PlaylistPage)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // How many of its songs the server's copy goes without, being only on the phone.
+    val phoneOnly: StateFlow<Int> =
+        userDao.phoneOnlyCount(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    // Whether a server is signed in, so the playlist could be saved there.
+    val serverAvailable: StateFlow<Boolean> =
+        sync.available.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private fun ids() = page.value?.tracks.orEmpty().map { it.track.id }
 
@@ -97,6 +107,8 @@ fun PlaylistScreen(
     vm: PlaylistViewModel = hiltViewModel<PlaylistViewModel, PlaylistViewModel.Factory> { it.create(id) },
 ) {
     val page by vm.page.collectAsStateWithLifecycle()
+    val phoneOnly by vm.phoneOnly.collectAsStateWithLifecycle()
+    val serverAvailable by vm.serverAvailable.collectAsStateWithLifecycle()
     val sheets = LocalPlaylistSheets.current
     // Leaves the page once the playlist is deleted.
     val gone = page?.let { it.playlist == null } ?: false
@@ -128,8 +140,14 @@ fun PlaylistScreen(
                         durationMs = current.durationMs,
                         onPlay = { vm.play(0) },
                         onShuffle = vm::shuffle,
-                        onMore = { sheets.show(PlaylistSheet.Options(playlist.id, playlist.name)) },
+                        onMore = {
+                            val onServer = playlist.sourceId != null
+                            sheets.show(PlaylistSheet.Options(playlist.id, playlist.name, onServer, canSave = serverAvailable && !onServer))
+                        },
                     ) { modifier, shape -> PlaylistCover(current.covers, 240.dp, modifier, shape) }
+                }
+                if (playlist.sourceId != null && phoneOnly > 0) {
+                    item(key = "phone-only") { EmptyNote(phoneOnlyNote(phoneOnly)) }
                 }
                 if (rows.isEmpty()) {
                     item(key = "empty") { EmptyNote("This playlist is empty. Long press any song and choose Add to playlist.") }
@@ -172,3 +190,12 @@ fun PlaylistScreen(
         BackButton(onBack)
     }
 }
+
+// The quiet line on a playlist kept with the server when some of its songs
+// have no copy there.
+internal fun phoneOnlyNote(count: Int): String =
+    if (count == 1) {
+        "1 song is only on this phone and is not in the server's copy"
+    } else {
+        "$count songs are only on this phone and are not in the server's copy"
+    }

@@ -13,6 +13,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -298,6 +299,69 @@ class SubsonicClient(
             PlainLyrics.serializer(),
             PlainLyrics(),
         ).value?.takeIf(String::isNotBlank)
+
+    // Makes a playlist for the signed-in user with these songs in this
+    // order, and answers with it as the server now has it (null from a
+    // server older than API 1.14, which sends nothing back). `formPost`
+    // sends the params in a form body, for a server that lists that
+    // extension; otherwise a long list goes in batches.
+    suspend fun createPlaylist(name: String, songIds: List<String>, formPost: Boolean = false): PlaylistWithSongs? {
+        val (first, rest) = createCalls(name, songIds, formPost)
+        val created = decode(sendCall(first, formPost), null, CreatedPlaylist.serializer(), null).playlist
+        if (rest.isNotEmpty()) {
+            val id = created?.id ?: throw SubsonicException.Server(0, "The server did not say the new playlist's id")
+            addSongsCalls(id, rest).forEach { sendCall(it, formPost) }
+        }
+        return created
+    }
+
+    // Makes a playlist's songs exactly these, in this order: createPlaylist
+    // with the playlist's id replaces its whole list.
+    suspend fun replacePlaylistSongs(id: String, songIds: List<String>, formPost: Boolean = false) {
+        replaceSongsCalls(id, songIds, formPost).forEach { sendCall(it, formPost) }
+    }
+
+    // Changes a playlist's details, takes songs out by their place in the
+    // list (a place may repeat) and adds songs to the end. Only what is
+    // given changes.
+    suspend fun updatePlaylist(
+        id: String,
+        name: String? = null,
+        comment: String? = null,
+        public: Boolean? = null,
+        songIdsToAdd: List<String> = emptyList(),
+        songIndexesToRemove: List<Int> = emptyList(),
+        formPost: Boolean = false,
+    ) {
+        updateCalls(id, name, comment, public, songIdsToAdd, songIndexesToRemove, formPost).forEach { sendCall(it, formPost) }
+    }
+
+    suspend fun deletePlaylist(id: String) = send("deletePlaylist", listOf("id" to id))
+
+    // Runs one playlist call, with its params in the address or in a form
+    // body, and hands back the answer once it is known to be ok.
+    private suspend fun sendCall(call: PlaylistCall, formPost: Boolean): String {
+        val request = if (formPost) {
+            val form = FormBody.Builder().apply { call.params.forEach { (key, value) -> add(key, value) } }.build()
+            Request.Builder().url(url(call.endpoint)).post(form).build()
+        } else {
+            val address = url(call.endpoint).newBuilder().apply { call.params.forEach { (key, value) -> addQueryParameter(key, value) } }.build()
+            Request.Builder().url(address).build()
+        }
+        val body = try {
+            val response = http.newCall(request).await()
+            withContext(Dispatchers.IO) {
+                response.use {
+                    if (!it.isSuccessful) throw SubsonicException.NotSubsonic("HTTP ${it.code} from ${call.endpoint}")
+                    it.body.string()
+                }
+            }
+        } catch (e: IOException) {
+            throw SubsonicException.Unreachable(e)
+        }
+        withContext(Dispatchers.Default) { decode(body, null, ServerInfo.serializer(), null) }
+        return body
+    }
 
     // A call that only answers ok or an error. The params may repeat a name.
     private suspend fun send(endpoint: String, params: List<Pair<String, String>>) {
