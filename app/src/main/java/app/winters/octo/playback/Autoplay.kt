@@ -182,7 +182,7 @@ class Autoplay @Inject constructor(
     }
 
     private suspend fun sameGenre(seed: TrackEntity): List<String> =
-        if (seed.genre.isBlank()) emptyList() else catalog.genreTracks(seed.genre).first().map { it.id }
+        if (seed.genre.isBlank()) emptyList() else catalog.genreTrackIds(seed.genre)
 
     // How long until the song ends, in real time at the current speed.
     private fun OctoPlayer.remainingMs(): Long {

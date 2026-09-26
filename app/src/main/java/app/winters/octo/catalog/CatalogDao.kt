@@ -36,6 +36,10 @@ interface CatalogDao {
     @RawQuery(observedEntities = [TrackEntity::class, AlbumEntity::class, ArtistEntity::class])
     fun sortedTracks(query: RoomRawQuery): Flow<List<SortedTrack>>
 
+    // Every song in one genre, for picking songs to keep playing.
+    @Query("SELECT id FROM track WHERE genre = :name COLLATE NOCASE")
+    suspend fun genreTrackIds(name: String): List<String>
+
     @RawQuery(observedEntities = [TrackEntity::class, AlbumEntity::class, ArtistEntity::class, LikedTrackEntity::class])
     fun sortedTracksWithLikes(query: RoomRawQuery): Flow<List<SortedTrack>>
 
