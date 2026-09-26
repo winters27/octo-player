@@ -1,50 +1,97 @@
 package app.winters.octo.ui.search
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.SoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
+import app.winters.octo.R
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.design.GlassInput
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
+import app.winters.octo.discovery.Discovered
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistCircle
+import app.winters.octo.ui.common.ArtistRow
 import app.winters.octo.ui.common.DownloadButton
+import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
+import app.winters.octo.ui.common.Segmented
 import app.winters.octo.ui.common.SongRow
+import app.winters.octo.ui.common.songs
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
 import app.winters.octo.ui.nav.OnlineAlbumRoute
 import app.winters.octo.ui.nav.OnlineArtistRoute
+import app.winters.octo.ui.nav.PlaylistRoute
+import app.winters.octo.ui.playlist.PlaylistCover
+import app.winters.octo.ui.playlist.PlaylistLine
 
 @Composable
 fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()) {
     val results by vm.results.collectAsStateWithLifecycle()
     val signedIn by vm.signedIn.collectAsStateWithLifecycle()
     val discover by vm.discover.collectAsStateWithLifecycle()
+    val recent by vm.recent.collectAsStateWithLifecycle()
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 120.dp
+    val keyboard = LocalSoftwareKeyboardController.current
+    val list = rememberLazyListState()
+    val hider = rememberKeyboardHider(keyboard)
+    // Opening a result keeps the search among the recent ones.
+    val open: (NavKey) -> Unit = { key ->
+        vm.keepSearch()
+        onOpen(key)
+    }
+    val filter = vm.filter
+    val pick: (SearchFilter) -> Unit = {
+        vm.filter = it
+        list.requestScrollToItem(0)
+    }
 
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(top = 8.dp)) {
         ScreenTitle("Search")
@@ -53,57 +100,227 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
             onValueChange = { vm.text = it },
             placeholder = "Songs, albums, artists",
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
             modifier = Modifier.padding(horizontal = 20.dp),
+            trailing = if (vm.text.isEmpty()) null else ({ ClearButton { vm.text = "" } }),
+        )
+        Segmented(
+            options = SearchFilter.entries.map { it.label },
+            selected = filter.ordinal,
+            onSelect = { pick(SearchFilter.entries[it]) },
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp),
         )
         val found = results
-        val online = discover
+        // What the server found, of the kinds the filter shows.
+        val online = discover.only(filter)
         // Nothing to show online: not looking, or looked and found nothing.
         val nothingOnline = online is DiscoverState.Idle || (online is DiscoverState.Done && online.found.isEmpty)
         when {
+            vm.text.isBlank() && recent.isNotEmpty() -> RecentList(
+                recent,
+                hider,
+                onSearch = {
+                    keyboard?.hide()
+                    vm.searchAgain(it)
+                },
+                onForget = vm::forget,
+                onForgetAll = vm::forgetAll,
+            )
             found == null -> Hint(if (signedIn) "Search your music and discover more" else "Search the music on your phone")
             found.isEmpty && nothingOnline -> Hint("No results for \"${vm.text.trim()}\"")
             else -> LazyColumn(
-                Modifier.fillMaxSize(),
+                Modifier.fillMaxSize().nestedScroll(hider),
+                state = list,
                 contentPadding = PaddingValues(top = 12.dp, bottom = bottom),
             ) {
-                if (found.artists.isNotEmpty()) {
-                    item { SectionTitle("Artists") }
-                    item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 20.dp),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        ) {
-                            items(found.artists, key = { it.id }) { artist ->
-                                ArtistCircle(artist) { onOpen(ArtistRoute(artist.id)) }
-                            }
-                        }
-                    }
-                }
-                if (found.albums.isNotEmpty()) {
-                    item { SectionTitle("Albums", Modifier.padding(top = 12.dp)) }
-                    item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 20.dp),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        ) {
-                            items(found.albums, key = { it.id }) { album ->
-                                AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) })
-                            }
-                        }
-                    }
-                }
-                if (found.songs.isNotEmpty()) {
-                    item { SectionTitle("Songs", Modifier.padding(top = 12.dp)) }
-                    items(found.songs, key = { it.id }) { track -> SongRow(track) { vm.playSong(track) } }
+                if (filter == SearchFilter.All) {
+                    everything(found, open, pick, vm::playSong)
+                } else {
+                    oneKind(found, open, vm::playSong)
                 }
                 // The server could not be asked, so say the library has none.
                 if (found.isEmpty && online is DiscoverState.Failed) {
                     item { Hint("No results for \"${vm.text.trim()}\"") }
                 }
-                if (!nothingOnline) discoverSection(online, onOpen, onPlay = vm::playFound, top = !found.isEmpty)
+                if (!nothingOnline) discoverSection(online, open, onPlay = vm::playFound, top = !found.isEmpty)
             }
         }
     }
+}
+
+// A few of every kind, each kind with "See all" when it has more.
+private fun LazyListScope.everything(
+    found: SearchResults,
+    onOpen: (NavKey) -> Unit,
+    onSeeAll: (SearchFilter) -> Unit,
+    onPlay: (TrackEntity) -> Unit,
+) {
+    var first = true
+    fun title(text: String, more: Boolean, kind: SearchFilter) {
+        val top = !first
+        first = false
+        item(key = "title:$text") {
+            KindTitle(text, top, onSeeAll = if (more) ({ onSeeAll(kind) }) else null)
+        }
+    }
+    if (found.artists.isNotEmpty()) {
+        title("Artists", found.moreArtists, SearchFilter.Artists)
+        item(key = "artists") {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                items(found.artists, key = { it.id }) { artist ->
+                    ArtistCircle(artist) { onOpen(ArtistRoute(artist.id)) }
+                }
+            }
+        }
+    }
+    if (found.albums.isNotEmpty()) {
+        title("Albums", found.moreAlbums, SearchFilter.Albums)
+        item(key = "albums") {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                items(found.albums, key = { it.id }) { album ->
+                    AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) })
+                }
+            }
+        }
+    }
+    if (found.playlists.isNotEmpty()) {
+        title("Playlists", found.morePlaylists, SearchFilter.Playlists)
+        playlistRows(found, onOpen)
+    }
+    if (found.songs.isNotEmpty()) {
+        title("Songs", found.moreSongs, SearchFilter.Songs)
+        items(found.songs, key = { it.id }) { track -> SongRow(track) { onPlay(track) } }
+    }
+}
+
+// All of one kind, as a list: rows for songs, artists and playlists, and
+// covers two to a row for albums.
+private fun LazyListScope.oneKind(found: SearchResults, onOpen: (NavKey) -> Unit, onPlay: (TrackEntity) -> Unit) {
+    items(found.artists, key = { it.id }) { artist -> ArtistRow(artist) { onOpen(ArtistRoute(artist.id)) } }
+    items(found.albums.chunked(2), key = { pair -> pair.first().id }) { pair ->
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            pair.forEach { album ->
+                AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, modifier = Modifier.weight(1f), width = null)
+            }
+            if (pair.size == 1) Spacer(Modifier.weight(1f))
+        }
+    }
+    playlistRows(found, onOpen)
+    items(found.songs, key = { it.id }) { track -> SongRow(track) { onPlay(track) } }
+}
+
+private fun LazyListScope.playlistRows(found: SearchResults, onOpen: (NavKey) -> Unit) {
+    items(found.playlists, key = { "playlist:${it.id}" }) { playlist ->
+        PlaylistLine(playlist.name, songs(playlist.songCount), onClick = { onOpen(PlaylistRoute(playlist.id)) }, onServer = playlist.onServer) {
+            PlaylistCover(playlist.covers, 56.dp)
+        }
+    }
+}
+
+// A kind's name over its results, with "See all" when there are more.
+@Composable
+private fun KindTitle(text: String, spaced: Boolean, onSeeAll: (() -> Unit)?) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = if (spaced) 12.dp else 0.dp, end = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SectionTitle(text, Modifier.weight(1f))
+        if (onSeeAll != null) QuietButton("See all", onSeeAll)
+    }
+}
+
+// The last searches, while the field is empty: a tap searches again, the
+// cross forgets one.
+@Composable
+private fun RecentList(
+    recent: List<String>,
+    hider: NestedScrollConnection,
+    onSearch: (String) -> Unit,
+    onForget: (String) -> Unit,
+    onForgetAll: () -> Unit,
+) {
+    LazyColumn(Modifier.fillMaxSize().nestedScroll(hider), contentPadding = PaddingValues(top = 12.dp, bottom = 140.dp)) {
+        item(key = "recent:title") {
+            Row(Modifier.fillMaxWidth().padding(end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                SectionTitle("Recent searches", Modifier.weight(1f))
+                QuietButton("Clear all", onForgetAll)
+            }
+        }
+        items(recent, key = { "recent:$it" }) { query ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(role = Role.Button, onClickLabel = "Search again") { onSearch(query) }
+                    .height(48.dp)
+                    .padding(start = 20.dp, end = 8.dp)
+                    .animateItem(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    query,
+                    style = OctoType.body,
+                    color = OctoColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                CrossButton("Remove $query") { onForget(query) }
+            }
+        }
+    }
+}
+
+// Empties the field.
+@Composable
+private fun ClearButton(onClick: () -> Unit) = CrossButton("Clear search", onClick)
+
+@Composable
+private fun CrossButton(description: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(painterResource(R.drawable.sym_close), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(20.dp))
+    }
+}
+
+// Puts the keyboard away as soon as a list is dragged.
+@Composable
+private fun rememberKeyboardHider(keyboard: SoftwareKeyboardController?): NestedScrollConnection = remember(keyboard) {
+    object : NestedScrollConnection {
+        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+            if (source == NestedScrollSource.UserInput && available.y != 0f) keyboard?.hide()
+            return Offset.Zero
+        }
+    }
+}
+
+// The server's finds of the kinds a filter shows. Playlists are only ever
+// the listener's own, so that filter shows none.
+private fun DiscoverState.only(filter: SearchFilter): DiscoverState {
+    if (filter == SearchFilter.Playlists) return DiscoverState.Idle
+    if (this !is DiscoverState.Done || filter == SearchFilter.All) return this
+    val found = found
+    return DiscoverState.Done(
+        Discovered(
+            songs = if (filter == SearchFilter.Songs) found.songs else emptyList(),
+            albums = if (filter == SearchFilter.Albums) found.albums else emptyList(),
+            artists = if (filter == SearchFilter.Artists) found.artists else emptyList(),
+        ),
+    )
 }
 
 // What the server has beyond the library: songs, then albums, then artists.
