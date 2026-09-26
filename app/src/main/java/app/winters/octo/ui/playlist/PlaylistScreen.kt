@@ -17,6 +17,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
@@ -176,11 +177,20 @@ fun PlaylistScreen(
                             },
                             backgroundContent = { RemoveBackground(swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart, RowShape) },
                         ) {
-                            // Solid under the row, so it hides what it passes over.
+                            // Solid under the row while it moves, so it hides what it
+                            // passes over; clear at rest, so the page's glow shows.
+                            val swiping = swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart
                             Box(
                                 Modifier
                                     .then(if (dragging) Modifier.elevation3(RowShape) else Modifier)
-                                    .background(if (dragging) OctoColors.BackgroundTertiary else OctoColors.Background, RowShape),
+                                    .background(
+                                        when {
+                                            dragging -> OctoColors.BackgroundTertiary
+                                            swiping -> OctoColors.Background
+                                            else -> Color.Transparent
+                                        },
+                                        RowShape,
+                                    ),
                             ) {
                                 SongRow(
                                     entry.track,

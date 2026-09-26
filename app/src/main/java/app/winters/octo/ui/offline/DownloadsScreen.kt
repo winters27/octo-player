@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
@@ -204,9 +205,11 @@ private fun DownloadLine(row: DownloadRow, detail: String, removable: Boolean, o
         onDismiss = { onRemove() },
         backgroundContent = { RemoveBackground(swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart, RowShape) },
     ) {
+        // Solid only while swiped, to hide the red behind; clear at rest.
+        val swiping = swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart
         Column(
             Modifier
-                .background(OctoColors.Background, RowShape)
+                .background(if (swiping) OctoColors.Background else Color.Transparent, RowShape)
                 .combinedClickable(
                     onClick = onClick,
                     onLongClick = if (removable) {
