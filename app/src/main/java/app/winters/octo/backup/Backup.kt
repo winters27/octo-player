@@ -5,6 +5,10 @@ import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.matchKey
 import app.winters.octo.discovery.sameArtist
 import app.winters.octo.discovery.titleKeys
+import app.winters.octo.listening.SendPlays
+import app.winters.octo.offline.CacheSize
+import app.winters.octo.offline.OfflinePrefs
+import app.winters.octo.playback.StreamQuality
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.StreamPrefs
 import app.winters.octo.playlists.BYTE_ORDER_MARK
@@ -73,6 +77,57 @@ data class LyricsOffsetBackup(val song: SongKey, val offsetMs: Long)
 @Serializable
 data class LyricsBackup(val keepScreenOn: Boolean = true, val offsets: List<LyricsOffsetBackup> = emptyList())
 
+private val offlineDefaults = OfflinePrefs()
+
+// What is kept on the phone for playing without a connection. Playlists
+// kept downloaded are named by their name, since restored playlists get
+// new ids.
+@Serializable
+data class OfflineBackup(
+    val cacheSize: CacheSize = offlineDefaults.cacheSize,
+    val prefetchWifi: Int = offlineDefaults.prefetchWifi,
+    val prefetchMobile: Int = offlineDefaults.prefetchMobile,
+    val downloadQuality: StreamQuality = offlineDefaults.downloadQuality,
+    val wifiOnly: Boolean = offlineDefaults.wifiOnly,
+    val streamOnWifi: Boolean = offlineDefaults.streamOnWifi,
+    val keepLiked: Boolean = offlineDefaults.keepLiked,
+    val keptPlaylists: List<String> = emptyList(),
+) {
+    // The settings as the app keeps them, with the kept playlists by id.
+    fun toPrefs(keptPlaylistIds: Set<String> = emptySet()) = OfflinePrefs(
+        cacheSize = cacheSize,
+        prefetchWifi = prefetchWifi,
+        prefetchMobile = prefetchMobile,
+        downloadQuality = downloadQuality,
+        wifiOnly = wifiOnly,
+        streamOnWifi = streamOnWifi,
+        keepLiked = keepLiked,
+        keptPlaylists = keptPlaylistIds,
+    )
+}
+
+// The offline settings as a backup keeps them, each kept playlist by its
+// name. A kept playlist that is no longer here is left out.
+fun OfflinePrefs.toBackup(playlistNames: Map<String, String>) = OfflineBackup(
+    cacheSize = cacheSize,
+    prefetchWifi = prefetchWifi,
+    prefetchMobile = prefetchMobile,
+    downloadQuality = downloadQuality,
+    wifiOnly = wifiOnly,
+    streamOnWifi = streamOnWifi,
+    keepLiked = keepLiked,
+    keptPlaylists = keptPlaylists.mapNotNull(playlistNames::get).sorted(),
+)
+
+// The ListenBrainz choices. Who was connected, and how, is never in a
+// backup, so connecting again is needed.
+@Serializable
+data class ListenBrainzBackup(
+    val enabled: Boolean = false,
+    val sendPlays: SendPlays = SendPlays.All,
+    val nowPlaying: Boolean = true,
+)
+
 // The server signed in to, for reference: its address and user name only.
 // Passwords, keys, header values and certificates are never in a backup,
 // so signing in again is needed.
@@ -99,6 +154,11 @@ data class Backup(
     val favouriteArtists: List<HeldKey> = emptyList(),
     val pins: List<PinBackup> = emptyList(),
     val lyrics: LyricsBackup? = null,
+    val offline: OfflineBackup? = null,
+    val listenBrainz: ListenBrainzBackup? = null,
+    // The order each list was left in, by the list's name, as "<order>:asc"
+    // or "<order>:desc". Lists never reordered are not named.
+    val sortOrders: Map<String, String> = emptyMap(),
 )
 
 private val BackupJson = Json {
@@ -216,6 +276,9 @@ data class RestorePlan(
     val pinsTotal: Int = 0,
     val lyricsOffsets: Map<String, Long> = emptyMap(),
     val lyricsOffsetsTotal: Int = 0,
+    // Playlists to keep downloaded, by name, and how many the backup named.
+    val keptPlaylists: List<String> = emptyList(),
+    val keptPlaylistsTotal: Int = 0,
 ) {
     val playlistSongs: Int get() = playlists.sumOf { it.trackIds.size }
     val playlistSongsTotal: Int get() = playlists.sumOf { it.total }
@@ -263,6 +326,10 @@ fun planRestore(
             .mapNotNull { moved -> finder.find(moved.song)?.let { it to moved.offsetMs } }
             .toMap(),
         lyricsOffsetsTotal = backup.lyrics?.offsets?.size ?: 0,
+        keptPlaylists = backup.offline?.keptPlaylists.orEmpty().map { it.trim() }
+            .filter { it.lowercase() in playlistNames }
+            .distinctBy { it.lowercase() },
+        keptPlaylistsTotal = backup.offline?.keptPlaylists?.size ?: 0,
     )
 }
 
@@ -274,6 +341,9 @@ fun describeBackup(backup: Backup): List<String> = buildList {
         "sound".takeIf { backup.sound != null },
         "library".takeIf { backup.library != null },
         "lyrics".takeIf { backup.lyrics != null },
+        "cache and downloads".takeIf { backup.offline != null },
+        "scrobbling".takeIf { backup.listenBrainz != null },
+        "sort orders".takeIf { backup.sortOrders.isNotEmpty() },
     )
     if (settings.isNotEmpty()) add("Settings: ${settings.joinToString(", ")}")
     backup.sound?.let { sound ->
@@ -290,6 +360,10 @@ fun describeBackup(backup: Backup): List<String> = buildList {
     if (backup.favouriteArtists.isNotEmpty()) add(plural(backup.favouriteArtists.size, "favourite artist", "favourite artists"))
     if (backup.pins.isNotEmpty()) add(plural(backup.pins.size, "pin on Home", "pins on Home"))
     backup.lyrics?.offsets?.takeIf { it.isNotEmpty() }?.let { add("Lyrics timing for " + plural(it.size, "song", "songs")) }
+    backup.offline?.keptPlaylists?.takeIf { it.isNotEmpty() }?.let {
+        add(plural(it.size, "playlist kept downloaded", "playlists kept downloaded"))
+    }
+    if (backup.listenBrainz?.enabled == true) add("ListenBrainz: connect again to send plays.")
     backup.server?.let { add("Server: ${it.address} as ${it.username}. Sign in again to use it.") }
 }
 
@@ -313,6 +387,9 @@ fun describePlan(plan: RestorePlan): List<String> = buildList {
     if (plan.pinsTotal > 0) add("Pins: ${plan.pins.size.grouped()} of ${plan.pinsTotal.grouped()} found")
     if (plan.lyricsOffsetsTotal > 0) {
         add("Lyrics timing: ${plan.lyricsOffsets.size.grouped()} of ${plan.lyricsOffsetsTotal.grouped()} songs found")
+    }
+    if (plan.keptPlaylistsTotal > 0) {
+        add("Kept downloaded: ${plan.keptPlaylists.size.grouped()} of ${plural(plan.keptPlaylistsTotal, "playlist", "playlists")} found")
     }
 }
 

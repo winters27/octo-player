@@ -2,6 +2,9 @@ package app.winters.octo.backup
 
 import app.winters.octo.catalog.PinKind
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.listening.SendPlays
+import app.winters.octo.offline.CacheSize
+import app.winters.octo.offline.OfflinePrefs
 import app.winters.octo.playback.CopyPreference
 import app.winters.octo.playback.StreamQuality
 import app.winters.octo.player.PlayerPrefs
@@ -249,5 +252,89 @@ class BackupTest {
         assertTrue("1 favourite artist" in lines)
         assertTrue("4 pins on Home" in lines)
         assertTrue("Lyrics timing for 1 song" in lines)
+    }
+
+    private val withEverything = full.copy(
+        offline = OfflineBackup(
+            cacheSize = CacheSize.Gb10,
+            prefetchWifi = 5,
+            prefetchMobile = 0,
+            downloadQuality = StreamQuality.Kbps320,
+            wifiOnly = false,
+            streamOnWifi = true,
+            keepLiked = true,
+            keptPlaylists = listOf("Road trip", "Gone"),
+        ),
+        listenBrainz = ListenBrainzBackup(enabled = true, sendPlays = SendPlays.PhoneOnly, nowPlaying = false),
+        sortOrders = mapOf("songs" to "RecentlyAdded:desc", "albums" to "Year:asc"),
+    )
+
+    @Test
+    fun offlineScrobblingAndSortOrdersReadBackTheSame() {
+        val text = encodeBackup(withEverything)
+        assertEquals(BackupRead.Read(withEverything), decodeBackup(text))
+        assertTrue(text.contains("\"version\": 1"))
+    }
+
+    @Test
+    fun aBackupFromBeforeTheseSettingsLeavesThemAlone() {
+        val older = (decodeBackup(encodeBackup(full)) as BackupRead.Read).backup
+        assertEquals(null, older.offline)
+        assertEquals(null, older.listenBrainz)
+        assertTrue(older.sortOrders.isEmpty())
+        // A part with only some fields gets the defaults for the rest.
+        val partial = decodeBackup(
+            "{\"kind\": \"octo-settings\", \"version\": 1, \"offline\": {\"keepLiked\": true, \"cacheSize\": \"Gb500\"}, " +
+                "\"listenBrainz\": {\"sendPlays\": \"Sometimes\"}}",
+        ) as BackupRead.Read
+        assertEquals(OfflineBackup(keepLiked = true), partial.backup.offline)
+        assertEquals(ListenBrainzBackup(), partial.backup.listenBrainz)
+    }
+
+    @Test
+    fun offlineSettingsGoThroughTheBackupAndBack() {
+        val prefs = OfflinePrefs(
+            cacheSize = CacheSize.Off,
+            prefetchWifi = 7,
+            prefetchMobile = 2,
+            downloadQuality = StreamQuality.Kbps128,
+            wifiOnly = false,
+            streamOnWifi = true,
+            keepLiked = true,
+            keptPlaylists = setOf("p1", "p2", "gone"),
+        )
+        // Kept playlists travel by name; one no longer here is left out.
+        val saved = prefs.toBackup(mapOf("p1" to "Road trip", "p2" to "Gym"))
+        assertEquals(listOf("Gym", "Road trip"), saved.keptPlaylists)
+        assertEquals(prefs.copy(keptPlaylists = setOf("n1", "n2")), saved.toPrefs(setOf("n1", "n2")))
+        // A new install's settings read back as a new install's settings.
+        assertEquals(OfflinePrefs(), OfflinePrefs().toBackup(emptyMap()).toPrefs())
+    }
+
+    @Test
+    fun neverHoldsTheListenBrainzConnection() {
+        val text = encodeBackup(withEverything).lowercase()
+        listOf("token", "user\"", "sealed", "attention").forEach { assertFalse("$it is in the backup", text.contains(it)) }
+    }
+
+    @Test
+    fun keptPlaylistsAreFoundByName() {
+        val plan = planRestore(withEverything, emptyList(), existingPlaylists = listOf(" old one "))
+        // "Road trip" is made by the restore; "Gone" is nowhere.
+        assertEquals(listOf("Road trip"), plan.keptPlaylists)
+        assertEquals(2, plan.keptPlaylistsTotal)
+        assertTrue("Kept downloaded: 1 of 2 playlists found" in describePlan(plan))
+        val here = planRestore(withEverything.copy(playlists = emptyList()), emptyList(), existingPlaylists = listOf("GONE"))
+        assertEquals(listOf("Gone"), here.keptPlaylists)
+    }
+
+    @Test
+    fun describesOfflineScrobblingAndSortOrders() {
+        val lines = describeBackup(withEverything)
+        assertEquals("Settings: player, streaming, sound, library, cache and downloads, scrobbling, sort orders", lines.first())
+        assertTrue("2 playlists kept downloaded" in lines)
+        assertTrue("ListenBrainz: connect again to send plays." in lines)
+        val off = describeBackup(withEverything.copy(listenBrainz = ListenBrainzBackup(enabled = false)))
+        assertTrue(off.none { it.startsWith("ListenBrainz") })
     }
 }

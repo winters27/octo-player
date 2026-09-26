@@ -112,6 +112,15 @@ class ListenBrainzStore @Inject constructor(@ApplicationContext private val cont
 
     suspend fun setNowPlaying(on: Boolean) = context.listenBrainzData.edit { it[NOW_PLAYING] = on }
 
+    // Puts back the choices from a backup in one go. Who is connected is
+    // left as it is.
+    suspend fun restoreChoices(enabled: Boolean, sendPlays: SendPlays, nowPlaying: Boolean) =
+        context.listenBrainzData.edit { p ->
+            p[ENABLED] = enabled
+            p[SEND_PLAYS] = sendPlays.name
+            p[NOW_PLAYING] = nowPlaying
+        }
+
     suspend fun queue(): List<Listen> = queueLock.withLock { load() }
 
     suspend fun addListen(listen: Listen) = updateQueue { it.plusListen(listen) }

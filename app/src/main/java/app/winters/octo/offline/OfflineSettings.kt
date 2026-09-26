@@ -116,4 +116,19 @@ class OfflineSettings @Inject constructor(@ApplicationContext private val contex
             p[KEPT_PLAYLISTS] = emptySet()
         }
     }
+
+    // Puts back the settings from a backup in one go. Its kept playlists
+    // join the ones already kept here.
+    suspend fun restore(prefs: OfflinePrefs) {
+        context.offlinePrefs.edit { p ->
+            p[CACHE_SIZE] = prefs.cacheSize.name
+            p[PREFETCH_WIFI] = prefs.prefetchWifi.coerceIn(PrefetchRange)
+            p[PREFETCH_MOBILE] = prefs.prefetchMobile.coerceIn(PrefetchRange)
+            p[DOWNLOAD_QUALITY] = prefs.downloadQuality.name
+            p[WIFI_ONLY] = prefs.wifiOnly
+            p[STREAM_ON_WIFI] = prefs.streamOnWifi
+            p[KEEP_LIKED] = prefs.keepLiked
+            p[KEPT_PLAYLISTS] = p[KEPT_PLAYLISTS].orEmpty() + prefs.keptPlaylists
+        }
+    }
 }

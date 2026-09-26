@@ -16,13 +16,16 @@ import app.winters.octo.favourites.FavouriteStore
 import app.winters.octo.favourites.PinKey
 import app.winters.octo.favourites.PinStore
 import app.winters.octo.listening.FavouriteKind
+import app.winters.octo.listening.ListenBrainzStore
 import app.winters.octo.lyrics.LyricsTiming
+import app.winters.octo.offline.OfflineSettings
 import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.playback.RatingStore
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.playlists.PlaylistSyncStore
 import app.winters.octo.server.QueueSync
+import app.winters.octo.sort.SortSettings
 import app.winters.octo.sound.EqPreset
 import app.winters.octo.sound.SoundEngine
 import app.winters.octo.sound.UserPresets
@@ -37,9 +40,10 @@ import javax.inject.Singleton
 // The largest backup read. Even a big library's backup is a few megabytes.
 private const val MAX_BACKUP_BYTES = 32 * 1024 * 1024
 
-// Saves the app's settings, playlists, likes, ratings, favourites and pins to a file the
-// listener picks, and puts them back from one. Sign-in secrets are never
-// written: only the server's address and user name, for reference.
+// Saves the app's settings, playlists, likes, ratings, favourites and pins
+// to a file the listener picks, and puts them back from one. Sign-in
+// secrets are never written: only the server's address and user name, for
+// reference, and no ListenBrainz token at all.
 @Singleton
 class Backups @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -59,6 +63,9 @@ class Backups @Inject constructor(
     private val favourites: FavouriteStore,
     private val pins: PinStore,
     private val lyrics: LyricsTiming,
+    private val offline: OfflineSettings,
+    private val listenBrainz: ListenBrainzStore,
+    private val sorts: SortSettings,
 ) {
     // Everything as it is now.
     suspend fun make(now: Long = System.currentTimeMillis()): Backup = withContext(Dispatchers.IO) {
@@ -101,6 +108,9 @@ class Backups @Inject constructor(
                 offsets = lyrics.offsets().mapNotNull { (id, ms) -> tracks[id]?.let { LyricsOffsetBackup(it.toKey(), ms) } }
                     .sortedBy { it.song.relinkKey },
             ),
+            offline = offline.prefs.first().toBackup(playlistNames),
+            listenBrainz = listenBrainz.current().let { ListenBrainzBackup(it.enabled, it.sendPlays, it.nowPlaying) },
+            sortOrders = sorts.saved(),
         )
     }
 
@@ -157,6 +167,8 @@ class Backups @Inject constructor(
             queueSync.setEnabled(library.syncQueue)
             playlistSync.setNewOnServer(library.newPlaylistsOnServer)
         }
+        backup.listenBrainz?.let { listenBrainz.restoreChoices(it.enabled, it.sendPlays, it.nowPlaying) }
+        sorts.restore(backup.sortOrders)
         backup.lyrics?.let { lyrics.setKeepScreenOn(it.keepScreenOn) }
         plan.lyricsOffsets.forEach { (id, ms) -> lyrics.setOffset(id, ms) }
         // Playlists by name, with the ones made here, so pins can find them.
@@ -170,6 +182,11 @@ class Backups @Inject constructor(
         plan.favouriteAlbums.filterNot { it in likedAlbums }.forEach { favourites.set(FavouriteKind.Album, it, true) }
         val likedArtists = favouritesDao.likedArtistRows().mapTo(HashSet()) { it.artistId }
         plan.favouriteArtists.filterNot { it in likedArtists }.forEach { favourites.set(FavouriteKind.Artist, it, true) }
+        // After the playlists, so the ones kept downloaded can be found by name.
+        backup.offline?.let { saved ->
+            val kept = plan.keptPlaylists.mapNotNullTo(HashSet()) { playlistIds[it.lowercase()] }
+            offline.restore(saved.toPrefs(kept))
+        }
         // Added after the pins already here, in the backup's order, while Home has room.
         plan.pins.forEach { pin ->
             val id = if (pin.kind == PinKind.Playlist) playlistIds[pin.target.lowercase()] else pin.target
