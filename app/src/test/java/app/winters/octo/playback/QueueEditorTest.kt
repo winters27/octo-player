@@ -67,4 +67,15 @@ class QueueEditorTest {
         // Nothing was taken out.
         assertNull(putBackRuns(before, before))
     }
+
+    @Test
+    fun songsAboutToBeDeletedLeaveTheQueueEveryTimeTheyAreInIt() {
+        val queue = listOf("a", "b", "c", "b", "d")
+        assertEquals(listOf(1, 3), queuePositionsOf(queue, setOf("b")))
+        assertEquals(listOf(0, 1, 3, 4), queuePositionsOf(queue, setOf("a", "b", "d")))
+        assertEquals(emptyList<Int>(), queuePositionsOf(queue, setOf("z")))
+        // Taken out as runs, the rest keep their order.
+        assertEquals(listOf("a", "c", "d"), remove(queue, queuePositionsOf(queue, setOf("b"))))
+        assertEquals(listOf("c"), remove(queue, queuePositionsOf(queue, setOf("a", "b", "d"))))
+    }
 }

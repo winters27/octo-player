@@ -134,6 +134,12 @@ class DeviceLibrary @Inject constructor(
         }
     }
 
+    // Octo just changed the phone's files, such as deleting some: scans now,
+    // without waiting for the phone's media library to say so.
+    fun filesChanged() {
+        scope.launch { rescan() }
+    }
+
     suspend fun rescan() {
         if (!granted()) return
         scanLock.withLock {

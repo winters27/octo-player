@@ -4,6 +4,7 @@ import app.winters.octo.discovery.DownloadState
 import app.winters.octo.offline.DownloadStatus
 import app.winters.octo.ui.menu.SongAction.AddToPlaylist
 import app.winters.octo.ui.menu.SongAction.AddToQueue
+import app.winters.octo.ui.menu.SongAction.DeleteFromPhone
 import app.winters.octo.ui.menu.SongAction.Download
 import app.winters.octo.ui.menu.SongAction.GoToAlbum
 import app.winters.octo.ui.menu.SongAction.GoToArtist
@@ -12,7 +13,9 @@ import app.winters.octo.ui.menu.SongAction.KeepOffline
 import app.winters.octo.ui.menu.SongAction.Like
 import app.winters.octo.ui.menu.SongAction.PlayNext
 import app.winters.octo.ui.menu.SongAction.Rate
+import app.winters.octo.ui.menu.SongAction.SetAsSound
 import app.winters.octo.ui.menu.SongAction.Share
+import app.winters.octo.ui.menu.SongAction.ShareFile
 import app.winters.octo.ui.menu.SongAction.StartRadio
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -42,6 +45,32 @@ class SongActionsTest {
         )
         // A find is never shared: it is not in the server's library.
         assertEquals(listOf(PlayNext, AddToQueue, StartRadio, Download, Info), songActions(find = true, radio = true, share = true))
+    }
+
+    @Test
+    fun aSongWithAPhoneFileCanShareRingOrDeleteIt() {
+        assertEquals(
+            listOf(PlayNext, AddToQueue, StartRadio, AddToPlaylist, ShareFile, Like, Rate, GoToAlbum, GoToArtist, SetAsSound, DeleteFromPhone, Info),
+            songActions(find = false, radio = true, phone = true),
+        )
+        // With a server copy that shares too, both shares are offered: the file and the link.
+        assertEquals(
+            listOf(PlayNext, AddToQueue, AddToPlaylist, ShareFile, Share, Like, Rate, GoToAlbum, GoToArtist, SetAsSound, DeleteFromPhone, Info),
+            songActions(find = false, radio = false, share = true, phone = true),
+        )
+    }
+
+    @Test
+    fun aSongOnlyOnAServerHasNoFileToShareRingOrDelete() {
+        assertEquals(
+            listOf(PlayNext, AddToQueue, AddToPlaylist, KeepOffline, Share, Like, Rate, GoToAlbum, GoToArtist, Info),
+            songActions(find = false, radio = false, share = true, offline = true, phone = false),
+        )
+    }
+
+    @Test
+    fun aFindHasNoPhoneFile() {
+        assertEquals(listOf(PlayNext, AddToQueue, Download, Info), songActions(find = true, radio = false, phone = true))
     }
 
     @Test

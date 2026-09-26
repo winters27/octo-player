@@ -50,12 +50,18 @@ import app.winters.octo.ui.common.songs
 import app.winters.octo.ui.menu.SongMenuContext
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
+import app.winters.octo.ui.nav.GenreRoute
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 @HiltViewModel(assistedFactory = AlbumViewModel.Factory::class)
@@ -68,6 +74,15 @@ class AlbumViewModel @AssistedInject constructor(
         dao.album(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val tracks: StateFlow<List<TrackEntity>> =
         dao.albumTracks(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // The artist's other albums, for the foot of the page.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val moreByArtist: StateFlow<List<AlbumEntity>> = dao.album(id)
+        .map { it?.artistId }
+        .distinctUntilChanged()
+        .flatMapLatest { artistId -> if (artistId == null) flowOf(emptyList()) else dao.artistAlbums(artistId) }
+        .map { albums -> albums.filter { it.id != id } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     // Plays the album from one of its songs.
     fun play(index: Int) = playback.playTracks(tracks.value.map { it.id }, index)
@@ -91,6 +106,7 @@ fun AlbumScreen(
 ) {
     val album by vm.album.collectAsStateWithLifecycle()
     val tracks by vm.tracks.collectAsStateWithLifecycle()
+    val moreByArtist by vm.moreByArtist.collectAsStateWithLifecycle()
     PageArtwork(AlbumRoute(id), album?.artwork)
 
     val pickable = remember(tracks) { tracks.map { Pickable(it.id, it) } }
@@ -123,6 +139,12 @@ fun AlbumScreen(
                         )
                     }
                 }
+                // The genre and the songs' average rating, when known.
+                val genre = albumGenre(tracks)
+                val average = averageRating(tracks)
+                if (album != null && (genre != null || average != null)) {
+                    item(key = "about") { AlbumAbout(genre, average) { onOpen(GenreRoute(it)) } }
+                }
                 val discs = tracks.groupBy { it.discNo ?: 1 }
                 discs.forEach { (disc, onDisc) ->
                     if (discs.size > 1) {
@@ -139,6 +161,11 @@ fun AlbumScreen(
                         // Only say who is singing when it is not the album's artist.
                         val subtitle = track.artist.takeIf { it != album?.artist }
                         SongRow(track, SongLead.Number(track.trackNo), subtitle, menuContext = menuContext) { vm.play(tracks.indexOf(track)) }
+                    }
+                }
+                album?.let { a ->
+                    if (moreByArtist.isNotEmpty()) {
+                        item(key = "more-by-artist") { MoreByArtist(a.artist, moreByArtist, onOpen) }
                     }
                 }
             }
