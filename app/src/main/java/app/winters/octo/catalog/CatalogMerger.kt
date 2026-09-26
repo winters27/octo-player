@@ -34,7 +34,7 @@ private const val SAME_LENGTH_MS = 3_000L
 // - The first source to have something gives it its id, so give the phone
 //   first: its songs keep their ids, and likes and playlists keep working.
 // - A merged song or album takes the best of its copies: a track number,
-//   year or genre that one copy lacks comes from another.
+//   year, genre or server rating that one copy lacks comes from another.
 // - Anything only one source has is passed through exactly as it was.
 fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
     // Artists and albums match only across sources: two a source keeps
@@ -191,6 +191,7 @@ private class MergingSong(
     var discNo = base.discNo
     var year = base.year
     var genre = base.genre
+    var rating = base.rating?.takeIf { it in 1..5 }
 
     fun add(copy: SourceTrackEntity, source: SourceCatalog) {
         sources += source.sourceId
@@ -199,6 +200,7 @@ private class MergingSong(
         discNo = discNo ?: copy.discNo
         year = year ?: copy.year
         if (genre.isEmpty()) genre = copy.genre
+        rating = rating ?: copy.rating?.takeIf { it in 1..5 }
     }
 
     fun toTrack(order: Int) = TrackEntity(
@@ -225,6 +227,7 @@ private class MergingSong(
         relinkKey = base.relinkKey,
         genre = genre,
         onPhone = onPhone,
+        rating = rating ?: 0,
     )
 }
 

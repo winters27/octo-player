@@ -21,3 +21,7 @@ data class ServerPlayedTrack(
     val serverPlays: Int,
     val serverLastPlayedAt: Long?,
 )
+
+// A server's copy of a library song and the listener's rating of it there,
+// 0 for none.
+data class RatingCopy(val trackId: String, val serverId: String, val rating: Int)

@@ -34,6 +34,20 @@ interface SourceDao {
         """,
     )
     suspend fun serverCopies(): List<ServerCopy>
+
+    // Every server copy already merged into a library song, with its rating there.
+    @Query(
+        """
+        SELECT mergedId AS trackId, nativeId AS serverId, COALESCE(rating, 0) AS rating
+        FROM source_track WHERE sourceId LIKE 'server:%' AND mergedId != ''
+        """,
+    )
+    suspend fun serverRatings(): List<RatingCopy>
+
+    // Notes a rating on a library song's server copies, as sent or about to be.
+    @Query("UPDATE source_track SET rating = :rating WHERE mergedId = :trackId AND sourceId LIKE 'server:%'")
+    suspend fun setServerRating(trackId: String, rating: Int)
+
     // Every copy of many library songs at once, in no particular order.
     @Query("SELECT * FROM source_track WHERE mergedId IN (:trackIds)")
     suspend fun copiesOf(trackIds: List<String>): List<SourceTrackEntity>

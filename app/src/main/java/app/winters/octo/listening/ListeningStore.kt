@@ -18,10 +18,11 @@ private val SERVER = stringPreferencesKey("server")
 private val SYNCED = stringSetPreferencesKey("synced_stars")
 private val PENDING = stringSetPreferencesKey("pending_plays")
 private val SENT = stringSetPreferencesKey("sent_plays")
+private val RATINGS = stringSetPreferencesKey("synced_ratings")
 
 // What keeping in step with a server remembers between launches: the stars
-// both sides last agreed on, plays waiting to be sent, and plays already
-// sent. All of it belongs to one server and user.
+// and ratings both sides last agreed on, plays waiting to be sent, and plays
+// already sent. All of it belongs to one server and user.
 @Singleton
 class ListeningStore @Inject constructor(@ApplicationContext private val context: Context) {
     val sent: Flow<Map<String, SentPlays>> =
@@ -42,6 +43,12 @@ class ListeningStore @Inject constructor(@ApplicationContext private val context
 
     suspend fun updateSynced(change: (Set<String>) -> Set<String>) {
         context.listeningData.edit { it[SYNCED] = change(it[SYNCED].orEmpty()) }
+    }
+
+    suspend fun syncedRatings(): Map<String, Int> = decodeRatings(context.listeningData.data.first()[RATINGS].orEmpty())
+
+    suspend fun updateSyncedRatings(change: (Map<String, Int>) -> Map<String, Int>) {
+        context.listeningData.edit { it[RATINGS] = encodeRatings(change(decodeRatings(it[RATINGS].orEmpty()))) }
     }
 
     suspend fun pending(): List<PendingPlay> = decodePending(context.listeningData.data.first()[PENDING].orEmpty())

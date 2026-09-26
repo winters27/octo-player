@@ -37,4 +37,7 @@ object OctoIcons {
     val Radio = R.drawable.sym_radio
     // Three sliders, drawn to match the rounded set: the sound settings.
     val Sound = R.drawable.sym_tune
+    // A five-point star with rounded points, drawn to match: a rating.
+    val Star = R.drawable.sym_star
+    val StarFilled = R.drawable.sym_star_filled
 }

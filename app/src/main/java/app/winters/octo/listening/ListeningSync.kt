@@ -5,6 +5,7 @@ import app.winters.octo.catalog.FIND_PREFIX
 import app.winters.octo.catalog.LikedTrackEntity
 import app.winters.octo.catalog.ServerCopy
 import app.winters.octo.catalog.SourceDao
+import app.winters.octo.catalog.TrackRatingEntity
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.isFind
 import app.winters.octo.data.SessionRepository
@@ -26,8 +27,8 @@ import javax.inject.Singleton
 private const val STAR_BATCH = 50
 
 // Keeps what the listener does in step with the signed-in server: a heart
-// stars the song's server copy, plays count on the server, and stars made
-// elsewhere come back as likes. None of it ever holds up playback or shows an
+// stars the song's server copy, a rating rates it, plays count on the
+// server, and stars and ratings made elsewhere come back. None of it ever holds up playback or shows an
 // error; what fails is tried again later.
 @Singleton
 class ListeningSync @Inject constructor(
@@ -40,6 +41,7 @@ class ListeningSync @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val stars = Mutex()
     private val plays = Mutex()
+    private val ratings = Mutex()
 
     // Runs after each sync of the server's library: brings likes and stars
     // together, notes which sent plays the server now counts, and sends plays
@@ -49,6 +51,7 @@ class ListeningSync @Inject constructor(
         val copies = sources.serverCopies()
         if (copies.isEmpty()) return
         reconcile(client, copies)
+        syncRatings(client)
         store.updateSent { it.foldedInto(copies.associate { copy -> copy.serverId to copy.lastPlayedAt }) }
         sendPending(client)
     }
@@ -62,6 +65,22 @@ class ListeningSync @Inject constructor(
             stars.withLock {
                 val failure = failureOf { if (liked) client.star(ids) else client.unstar(ids) }
                 if (failure == null) store.updateSynced { if (liked) it + ids else it - ids }
+            }
+        }
+    }
+
+    // A rating changed on the phone. The song's server copies follow; when
+    // the server cannot take it now, the next sync sends it.
+    fun ratingChanged(trackId: String) {
+        if (isFind(trackId)) return
+        scope.launch {
+            val client = signedIn() ?: return@launch
+            val ids = serverIds(trackId).ifEmpty { return@launch }
+            ratings.withLock {
+                // The rating as it is now, so quick changes end on the last one.
+                val rating = cleanRating(user.rating(trackId))
+                val sent = ids.all { failureOf { client.setRating(it, rating) } == null }
+                if (sent) store.updateSyncedRatings { if (rating > 0) it + ids.associateWith { rating } else it - ids.toSet() }
             }
         }
     }
@@ -105,6 +124,24 @@ class ListeningSync @Inject constructor(
         )
         plan.unlike.forEach { user.unlike(it) }
         store.updateSynced { plan.settled(starFailed, unstarFailed) }
+    }
+
+    private suspend fun syncRatings(client: SubsonicClient) = ratings.withLock {
+        val before = store.syncedRatings()
+        val local = user.ratings().associate { it.trackId to cleanRating(it.rating) }
+        val plan = reconcileRatings(sources.serverRatings(), local, before)
+        val failed = plan.send.filter { (_, send) ->
+            send.serverIds.any { failureOf { client.setRating(it, send.rating) } != null }
+        }.keys
+        plan.send.forEach { (song, send) -> if (song !in failed) sources.setServerRating(song, send.rating) }
+        val now = System.currentTimeMillis()
+        val tracks = catalog.tracksByIds(plan.adopt.keys.toList()).associateBy { it.id }
+        plan.adopt.forEach { (song, rating) ->
+            if (rating == 0) user.unrate(song) else tracks[song]?.let { user.rate(TrackRatingEntity(song, it.relinkKey, rating, now)) }
+        }
+        // The library shows the rating both sides now have, or will once sent.
+        (plan.send.mapValues { it.value.rating } + plan.adopt).forEach { (song, rating) -> user.showRating(song, rating) }
+        store.updateSyncedRatings { plan.settled(failed, before) }
     }
 
     // Sends the waiting plays oldest first, and stops at the first one the

@@ -34,6 +34,34 @@ interface UserDao {
     @Query("SELECT COUNT(*) FROM liked_track l JOIN track t ON t.id = l.trackId")
     fun likedCount(): Flow<Int>
 
+    // Ratings made on the phone
+
+    @Query("SELECT * FROM track_rating")
+    suspend fun ratings(): List<TrackRatingEntity>
+
+    @Query("SELECT rating FROM track_rating WHERE trackId = :trackId")
+    suspend fun rating(trackId: String): Int?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun rate(row: TrackRatingEntity)
+
+    @Query("DELETE FROM track_rating WHERE trackId = :trackId")
+    suspend fun unrate(trackId: String)
+
+    // The rating the library shows for one song.
+    @Query("UPDATE track SET rating = :rating WHERE id = :trackId")
+    suspend fun showRating(trackId: String, rating: Int)
+
+    // After the library is rebuilt: songs no server rated show the rating
+    // made on the phone.
+    @Query(
+        """
+        UPDATE track SET rating = (SELECT r.rating FROM track_rating r WHERE r.trackId = track.id)
+        WHERE rating = 0 AND id IN (SELECT trackId FROM track_rating)
+        """,
+    )
+    suspend fun showPhoneRatings()
+
     // Playlists, the one changed last first
 
     @Query("SELECT * FROM playlist ORDER BY updatedAt DESC")
@@ -212,11 +240,22 @@ interface UserDao {
     )
     suspend fun relinkPlaylists()
 
+    @Query(
+        """
+        UPDATE OR IGNORE track_rating
+        SET trackId = (SELECT t.id FROM track t WHERE t.relinkKey = track_rating.relinkKey LIMIT 1)
+        WHERE trackId NOT IN (SELECT id FROM track)
+          AND EXISTS (SELECT 1 FROM track t WHERE t.relinkKey = track_rating.relinkKey AND t.relinkKey != '')
+        """,
+    )
+    suspend fun relinkRatings()
+
     @Transaction
     suspend fun relinkAll() {
         relinkLikes()
         relinkPlays()
         relinkPlaylists()
+        relinkRatings()
     }
 }
 
