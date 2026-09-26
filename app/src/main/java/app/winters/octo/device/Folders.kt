@@ -71,4 +71,9 @@ class FolderRules @Inject constructor(@ApplicationContext private val context: C
             prefs[EXCLUDED] = if (included) now - folder else now + folder
         }
     }
+
+    // Replaces the whole list, as when restoring a backup.
+    suspend fun setExcluded(folders: Set<String>) {
+        context.libraryPrefs.edit { it[EXCLUDED] = folders }
+    }
 }

@@ -62,6 +62,39 @@ interface UserDao {
     )
     suspend fun showPhoneRatings()
 
+    // For a backup: likes, ratings and the songs of playlists only on the
+    // phone, each with what is known of the song, in order.
+
+    @Query(
+        """
+        SELECT NULL AS playlistId, l.relinkKey, t.title, t.artist, t.album, t.durationMs, NULL AS rating
+        FROM liked_track l LEFT JOIN track t ON t.id = l.trackId
+        ORDER BY l.likedAt
+        """,
+    )
+    suspend fun likedSongKeys(): List<SongKeyRow>
+
+    @Query(
+        """
+        SELECT NULL AS playlistId, r.relinkKey, t.title, t.artist, t.album, t.durationMs, r.rating
+        FROM track_rating r LEFT JOIN track t ON t.id = r.trackId
+        ORDER BY r.ratedAt
+        """,
+    )
+    suspend fun ratedSongKeys(): List<SongKeyRow>
+
+    @Query(
+        """
+        SELECT i.playlistId, i.relinkKey, COALESCE(t.title, o.title) AS title, COALESCE(t.artist, o.artist) AS artist,
+            COALESCE(t.album, o.album) AS album, COALESCE(t.durationMs, o.durationMs) AS durationMs, NULL AS rating
+        FROM playlist_item i JOIN playlist p ON p.id = i.playlistId
+            LEFT JOIN track t ON t.id = i.trackId LEFT JOIN online_song o ON o.id = i.trackId
+        WHERE p.sourceId IS NULL
+        ORDER BY i.playlistId, i.position
+        """,
+    )
+    suspend fun phonePlaylistSongKeys(): List<SongKeyRow>
+
     // Playlists, the one changed last first
 
     @Query("SELECT * FROM playlist ORDER BY updatedAt DESC")
