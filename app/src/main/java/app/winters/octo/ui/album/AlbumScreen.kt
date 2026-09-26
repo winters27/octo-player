@@ -90,7 +90,19 @@ fun AlbumScreen(
         LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
             album?.let { a ->
                 item(key = "header") {
-                    Header(a, onArtist = { onOpen(ArtistRoute(a.artistId)) }, onPlay = { vm.play(0) }, onShuffle = vm::shuffle)
+                    AlbumHeader(
+                        artwork = a.artwork,
+                        title = a.title,
+                        artist = a.artist,
+                        details = listOfNotNull(
+                            a.year?.toString(),
+                            songs(a.songCount),
+                            (a.durationMs / 1000).toInt().asLength(),
+                        ).joinToString(" • "),
+                        onArtist = { onOpen(ArtistRoute(a.artistId)) },
+                        onPlay = { vm.play(0) },
+                        onShuffle = vm::shuffle,
+                    )
                 }
             }
             val discs = tracks.groupBy { it.discNo ?: 1 }
@@ -116,27 +128,37 @@ fun AlbumScreen(
     }
 }
 
+// The top of an album page: cover, title, artist, details, and the buttons
+// that play it. The artist opens only when there is somewhere to go; `more`
+// sits under the buttons, for an extra action.
 @Composable
-private fun Header(album: AlbumEntity, onArtist: () -> Unit, onPlay: () -> Unit, onShuffle: () -> Unit) {
+fun AlbumHeader(
+    artwork: String?,
+    title: String,
+    artist: String,
+    details: String,
+    onArtist: (() -> Unit)?,
+    onPlay: () -> Unit,
+    onShuffle: () -> Unit,
+    more: (@Composable () -> Unit)? = null,
+) {
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Artwork(album.artwork, 240.dp, Modifier.elevation3(CoverShape), shape = CoverShape)
+        Artwork(artwork, 240.dp, Modifier.elevation3(CoverShape), shape = CoverShape)
         Spacer(Modifier.height(20.dp))
-        Text(album.title, style = OctoType.title, color = OctoColors.TextPrimary, textAlign = TextAlign.Center)
+        Text(title, style = OctoType.title, color = OctoColors.TextPrimary, textAlign = TextAlign.Center)
         Text(
-            album.artist,
+            artist,
             style = OctoType.body,
-            color = OctoColors.Accent,
-            modifier = Modifier.padding(top = 4.dp).clickable(onClick = onArtist),
+            color = if (onArtist != null) OctoColors.Accent else OctoColors.TextSecondary,
+            modifier = Modifier
+                .padding(top = 4.dp)
+                .then(if (onArtist != null) Modifier.clickable(onClick = onArtist) else Modifier),
         )
         Text(
-            listOfNotNull(
-                album.year?.toString(),
-                songs(album.songCount),
-                (album.durationMs / 1000).toInt().asLength(),
-            ).joinToString(" • "),
+            details,
             style = OctoType.caption,
             color = OctoColors.TextMuted,
             modifier = Modifier.padding(top = 4.dp),
@@ -145,5 +167,6 @@ private fun Header(album: AlbumEntity, onArtist: () -> Unit, onPlay: () -> Unit,
             AccentButton("Play", onClick = onPlay)
             GlazeButton("Shuffle", onClick = onShuffle)
         }
+        more?.invoke()
     }
 }

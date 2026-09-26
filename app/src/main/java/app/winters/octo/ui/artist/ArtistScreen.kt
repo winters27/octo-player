@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
@@ -72,37 +73,12 @@ fun ArtistScreen(
 ) {
     val artist by vm.artist.collectAsStateWithLifecycle()
     val albumList by vm.albums.collectAsStateWithLifecycle()
-    val padding = screenPadding(extraTop = DetailTopGap)
 
     Box(Modifier.fillMaxSize()) {
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(150.dp),
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 20.dp,
-                end = 20.dp,
-                top = padding.calculateTopPadding(),
-                bottom = padding.calculateBottomPadding(),
-            ),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
+        ArtistGrid {
             artist?.let { a ->
                 item(key = "header", span = { GridItemSpan(maxLineSpan) }) {
-                    Column(
-                        Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Artwork(a.artwork, 160.dp, shape = CircleShape)
-                        Spacer(Modifier.height(16.dp))
-                        Text(a.name, style = OctoType.title, color = OctoColors.TextPrimary, textAlign = TextAlign.Center)
-                        Text(
-                            "${albums(a.albumCount)} • ${songs(a.songCount)}",
-                            style = OctoType.caption,
-                            color = OctoColors.TextMuted,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
+                    ArtistHeader(a.artwork, a.name, "${albums(a.albumCount)} • ${songs(a.songCount)}")
                 }
             }
             items(albumList, key = { it.id }) { album ->
@@ -110,5 +86,43 @@ fun ArtistScreen(
             }
         }
         BackButton(onBack)
+    }
+}
+
+// An artist page's grid: the header across the top, then albums in columns.
+@Composable
+fun ArtistGrid(content: LazyGridScope.() -> Unit) {
+    val padding = screenPadding(extraTop = DetailTopGap)
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(150.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 20.dp,
+            end = 20.dp,
+            top = padding.calculateTopPadding(),
+            bottom = padding.calculateBottomPadding(),
+        ),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+        content = content,
+    )
+}
+
+// The top of an artist page: round picture, name, and what they have.
+@Composable
+fun ArtistHeader(artwork: String?, name: String, details: String) {
+    Column(
+        Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Artwork(artwork, 160.dp, shape = CircleShape)
+        Spacer(Modifier.height(16.dp))
+        Text(name, style = OctoType.title, color = OctoColors.TextPrimary, textAlign = TextAlign.Center)
+        Text(
+            details,
+            style = OctoType.caption,
+            color = OctoColors.TextMuted,
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
 }

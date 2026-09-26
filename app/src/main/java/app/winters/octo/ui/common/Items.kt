@@ -29,30 +29,42 @@ import androidx.compose.ui.unit.dp
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.isFind
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.discovery.OnlineAlbum
+import app.winters.octo.discovery.OnlineArtist
 import app.winters.octo.ui.menu.LocalSongMenu
 
 // An album as a picture with its name and artist under it. No card
 // outline: the picture carries the edge.
 @Composable
-fun AlbumCard(album: AlbumEntity, onClick: () -> Unit, modifier: Modifier = Modifier, width: Dp? = 150.dp) {
+fun AlbumCard(album: AlbumEntity, onClick: () -> Unit, modifier: Modifier = Modifier, width: Dp? = 150.dp) =
+    AlbumCard(album.artwork, album.title, album.artist, onClick, modifier, width)
+
+// An album on the server, not in the library, drawn the same way.
+@Composable
+fun AlbumCard(album: OnlineAlbum, onClick: () -> Unit, modifier: Modifier = Modifier, width: Dp? = 150.dp) =
+    AlbumCard(album.artwork, album.title, album.artist, onClick, modifier, width)
+
+@Composable
+private fun AlbumCard(artwork: String?, title: String, artist: String, onClick: () -> Unit, modifier: Modifier, width: Dp?) {
     Column(
         (if (width != null) modifier.width(width) else modifier.fillMaxWidth())
             .clickable(onClick = onClick),
     ) {
-        ArtworkFill(album.artwork)
+        ArtworkFill(artwork)
         Spacer(Modifier.height(8.dp))
         Text(
-            album.title,
+            title,
             style = OctoType.bodySmall.copy(fontWeight = FontWeight.SemiBold),
             color = OctoColors.TextPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            album.artist,
+            artist,
             style = OctoType.caption,
             color = OctoColors.TextMuted,
             maxLines = 1,
@@ -124,7 +136,7 @@ sealed interface SongLead {
 fun SongRow(
     track: TrackEntity,
     lead: SongLead = SongLead.Artwork,
-    subtitle: String? = "${track.artist} • ${track.album}",
+    subtitle: String? = listOf(track.artist, track.album).filter { it.isNotEmpty() }.joinToString(" • "),
     trailing: (@Composable () -> Unit)? = null,
     onClick: (() -> Unit)? = null,
 ) {
@@ -163,8 +175,12 @@ fun SongRow(
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (!track.onPhone) CloudMark()
-            Text((track.durationMs / 1000).toInt().asClock(), style = OctoType.caption, color = OctoColors.TextMuted)
+            // A song found online carries a download button instead, and
+            // often has no known length.
+            if (!track.onPhone && !isFind(track.id)) CloudMark()
+            if (track.durationMs > 0) {
+                Text((track.durationMs / 1000).toInt().asClock(), style = OctoType.caption, color = OctoColors.TextMuted)
+            }
         }
         trailing?.invoke()
     }
@@ -192,15 +208,22 @@ fun ArtistRow(artist: ArtistEntity, onClick: () -> Unit) {
 
 // An artist as a round picture with the name under it, for rows.
 @Composable
-fun ArtistCircle(artist: ArtistEntity, onClick: () -> Unit) {
+fun ArtistCircle(artist: ArtistEntity, onClick: () -> Unit) = ArtistCircle(artist.artwork, artist.name, onClick)
+
+// An artist on the server, not in the library, drawn the same way.
+@Composable
+fun ArtistCircle(artist: OnlineArtist, onClick: () -> Unit) = ArtistCircle(artist.artwork, artist.name, onClick)
+
+@Composable
+private fun ArtistCircle(artwork: String?, name: String, onClick: () -> Unit) {
     Column(
         Modifier.width(96.dp).clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Artwork(artist.artwork, 96.dp, shape = CircleShape)
+        Artwork(artwork, 96.dp, shape = CircleShape)
         Spacer(Modifier.height(8.dp))
         Text(
-            artist.name,
+            name,
             style = OctoType.caption,
             color = OctoColors.TextPrimary,
             maxLines = 1,
