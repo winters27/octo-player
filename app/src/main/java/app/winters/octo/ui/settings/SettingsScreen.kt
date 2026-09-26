@@ -171,6 +171,7 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
                 onChange = vm::setCrossfade,
             )
             if (player.crossfade) CrossfadeLength(player.crossfadeSeconds, vm::setCrossfadeSeconds)
+            PlaybackLines()
             Text("Lyrics", style = OctoType.label, color = OctoColors.TextSecondary, modifier = Modifier.padding(top = 8.dp))
             SwitchLine(
                 label = "Find lyrics online",

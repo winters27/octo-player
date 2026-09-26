@@ -112,6 +112,7 @@ import app.winters.octo.design.elevation3
 import app.winters.octo.playback.AudioQuality
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.SleepState
+import app.winters.octo.playback.speedLabel
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.DownloadButton
 import app.winters.octo.ui.common.LocalHaze
@@ -146,6 +147,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     val backdrop = rememberHazeState()
     var showQueue by remember { mutableStateOf(false) }
     var showSleep by remember { mutableStateOf(false) }
+    var showSpeed by remember { mutableStateOf(false) }
 
     BackHandler(onBack = onClose)
     LightOnDarkBars()
@@ -226,6 +228,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
                     onOpenQueue = { showQueue = true },
                     onOpenSleep = { showSleep = true },
                     onOpenSound = onOpenSound,
+                    onOpenSpeed = { showSpeed = true },
                 )
             }
         }
@@ -234,7 +237,13 @@ fun AnimatedVisibilityScope.PlayerOverlay(
             QueueSheet(upNext, now.shuffle, model::moveInQueue, model::removeFromQueue, model::playAt)
         }
         GlassSheet(visible = showSleep, onDismiss = { showSleep = false }) {
-            SleepSheet(model, onDone = { showSleep = false })
+            SleepSheet(model, onDone = { showSleep = false }, onOpenSpeed = {
+                showSleep = false
+                showSpeed = true
+            })
+        }
+        GlassSheet(visible = showSpeed, onDismiss = { showSpeed = false }) {
+            SpeedSheet()
         }
     }
 }
@@ -264,6 +273,7 @@ private fun AnimatedVisibilityScope.PlayerContent(
     onOpenQueue: () -> Unit,
     onOpenSleep: () -> Unit,
     onOpenSound: () -> Unit,
+    onOpenSpeed: () -> Unit,
 ) {
     val density = LocalDensity.current
     Column(
@@ -340,7 +350,7 @@ private fun AnimatedVisibilityScope.PlayerContent(
             val rating by model.rating.collectAsStateWithLifecycle()
             RatingStars(rating, Modifier.padding(top = 2.dp), size = 12.dp)
             Spacer(Modifier.height(12.dp))
-            Progress(now, model)
+            Progress(now, model, onOpenSpeed)
             Spacer(Modifier.height(12.dp))
             Transport(now, model)
             Spacer(Modifier.height(8.dp))
@@ -499,7 +509,8 @@ private fun LikeButton(model: PlayerViewModel) {
 }
 
 @Composable
-private fun Progress(now: NowPlaying, model: PlayerViewModel) {
+private fun Progress(now: NowPlaying, model: PlayerViewModel, onOpenSpeed: () -> Unit) {
+    val prefs by model.prefs.collectAsStateWithLifecycle()
     val position = rememberPositionMs(now, model::positionMs)
     val duration = now.durationMs.coerceAtLeast(0)
     // The line moves every frame, but the times only change once a second,
@@ -518,7 +529,15 @@ private fun Progress(now: NowPlaying, model: PlayerViewModel) {
     )
     Box(Modifier.fillMaxWidth().offset(y = (-8).dp)) {
         Text(playedSeconds.asClock(), style = times, color = OctoColors.TextMuted, modifier = Modifier.align(Alignment.CenterStart))
-        now.quality?.let { QualityBadge(it, Modifier.align(Alignment.Center)) }
+        Row(
+            Modifier.align(Alignment.Center),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            now.quality?.let { QualityBadge(it, Modifier) }
+            // The speed, only while it is not normal. A tap opens its sheet.
+            if (prefs.speed != 1f) SpeedMark(prefs.speed, onOpenSpeed)
+        }
         Text(
             "-" + ((duration / 1000).toInt() - playedSeconds).coerceAtLeast(0).asClock(),
             style = times,
@@ -569,6 +588,21 @@ private fun QualityBadge(quality: AudioQuality, modifier: Modifier) {
             )
         }
     }
+}
+
+// A small "1.25x" beside the quality label while music plays at another speed.
+@Composable
+private fun SpeedMark(speed: Float, onClick: () -> Unit) {
+    Text(
+        speedLabel(speed),
+        style = BadgeLabel.copy(fontFeatureSettings = "tnum", letterSpacing = 0.sp),
+        color = OctoColors.TextPrimary,
+        maxLines = 1,
+        modifier = Modifier
+            .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 4.dp)
+            .semantics { contentDescription = "Playback speed ${speedLabel(speed)}" },
+    )
 }
 
 private val BadgeLabel = OctoType.caption.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp)
