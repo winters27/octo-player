@@ -17,6 +17,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resumeWithException
 
 const val API_VERSION = "1.16.1"
@@ -28,6 +29,10 @@ class SubsonicClient(
     private val clientName: String = "Octo",
 ) {
     val username: String get() = credentials.username
+
+    // For the one call that can take minutes: Octo builds the stations the
+    // first time they are asked for after it starts.
+    private val patient: OkHttpClient by lazy { http.newBuilder().readTimeout(3, TimeUnit.MINUTES).build() }
 
     // A signed address for an endpoint. Every call gets a fresh salt, so
     // never use one of these as a cache key.
@@ -107,6 +112,7 @@ class SubsonicClient(
             key = "internetRadioStations",
             serializer = RadioStations.serializer(),
             default = RadioStations(),
+            http = patient,
         ).internetRadioStation
 
     suspend fun search(query: String, artists: Int = 10, albums: Int = 20, songs: Int = 30): SearchResult =
@@ -170,13 +176,14 @@ class SubsonicClient(
         key: String?,
         serializer: KSerializer<T>,
         default: T? = null,
+        http: OkHttpClient = this.http,
     ): T {
-        val body = fetch(url(endpoint, params), endpoint)
+        val body = fetch(url(endpoint, params), endpoint, http)
         // Big answers (all artists is ~260 KB) must not parse on the main thread.
         return withContext(Dispatchers.Default) { decode(body, key, serializer, default) }
     }
 
-    private suspend fun fetch(url: HttpUrl, endpoint: String): String {
+    private suspend fun fetch(url: HttpUrl, endpoint: String, http: OkHttpClient = this.http): String {
         val request = Request.Builder().url(url).build()
         return try {
             val response = http.newCall(request).await()

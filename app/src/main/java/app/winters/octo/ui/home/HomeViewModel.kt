@@ -19,11 +19,9 @@ import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.Station
 import app.winters.octo.listening.PlayHistory
 import app.winters.octo.playback.PlaybackConnection
-import app.winters.octo.subsonic.SubsonicException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -138,21 +136,15 @@ class HomeViewModel @Inject constructor(
     private fun loadStations() {
         if (stationsJob?.isActive == true) return
         stationsJob = viewModelScope.launch {
-            var failures = 0
-            while (true) {
-                try {
-                    stations = withContext(Dispatchers.IO) { discovery.stations() }
-                    stationsLoadedAt = SystemClock.elapsedRealtime()
-                    stationsFailed = false
-                    return@launch
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    stationsFailed = true
-                    failures++
-                    Log.w("Octo", "stations failed to load: ${e.javaClass.simpleName}")
-                    delay(stationsRetryDelay(e is SubsonicException.Unreachable, failures) ?: return@launch)
-                }
+            try {
+                stations = withContext(Dispatchers.IO) { discovery.stations() }
+                stationsLoadedAt = SystemClock.elapsedRealtime()
+                stationsFailed = false
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                stationsFailed = true
+                Log.w("Octo", "stations failed to load: ${e.javaClass.simpleName}")
             }
         }
     }

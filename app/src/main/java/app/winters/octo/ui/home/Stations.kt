@@ -23,12 +23,6 @@ import app.winters.octo.ui.common.ArtworkFill
 // when Home comes back.
 internal const val STATIONS_STALE_MS = 10 * 60 * 1000L
 
-// The first list after the server restarts can take a couple of minutes,
-// longer than the phone waits for one answer, so a load that timed out
-// tries again a few times.
-internal const val STATIONS_RETRIES = 4
-internal const val STATIONS_RETRY_MS = 15_000L
-
 // Whether Home should ask for the stations again: never while a load is
 // running, always after one failed, otherwise once the list is stale.
 internal fun stationsDue(now: Long, loadedAt: Long?, failed: Boolean, loading: Boolean): Boolean = when {
@@ -36,11 +30,6 @@ internal fun stationsDue(now: Long, loadedAt: Long?, failed: Boolean, loading: B
     failed || loadedAt == null -> true
     else -> now - loadedAt >= STATIONS_STALE_MS
 }
-
-// How long to wait before trying a failed load again, or null to stop. Only
-// a server that did not answer in time is worth waiting for.
-internal fun stationsRetryDelay(unreachable: Boolean, failures: Int): Long? =
-    if (unreachable && failures <= STATIONS_RETRIES) STATIONS_RETRY_MS else null
 
 // A station as its cover with its name under it, sized like an album card.
 // It dims while its songs are on the way.
