@@ -26,8 +26,9 @@ import androidx.lifecycle.repeatOnLifecycle
 // Four soft pools of colour that drift around the corners. Each pixel takes
 // a blend of the four, the nearer pools counting for more, so the colours
 // flow into each other with no edges. A slight ripple bends the blend, and
-// a touch of grain keeps smooth gradients from banding.
-private const val MESH = """
+// a touch of grain keeps smooth gradients from banding. The ambient glow
+// behind the rest of the app draws the same mesh, slower and fainter.
+internal const val MESH = """
 uniform float2 size;
 uniform float time;
 layout(color) uniform half4 c0;

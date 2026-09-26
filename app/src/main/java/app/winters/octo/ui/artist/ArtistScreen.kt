@@ -40,6 +40,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
+import app.winters.octo.ambient.PageArtwork
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
@@ -133,6 +134,7 @@ fun ArtistScreen(
     val top = extras?.topSongs.orEmpty()
     val about = extras?.about
     val similar = extras?.similar.orEmpty()
+    PageArtwork(ArtistRoute(id), artist?.artwork)
 
     Box(Modifier.fillMaxSize()) {
         ArtistGrid {

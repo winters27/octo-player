@@ -58,8 +58,9 @@ fun mix(from: Color, to: Color, amount: Float) = Color(
 
 // The film: clear glass with the faintest dim, so whatever is behind (the
 // page, or a song's colours) shows through in its own colour without
-// glaring when it is bright.
-private val GlazeTint = Color.Black.copy(alpha = 0.16f)
+// glaring when it is bright. The bar can lay a trace of the song's colour
+// over it.
+val GlazeTint = Color.Black.copy(alpha = 0.16f)
 
 // The film for glass over one smooth field of colour, like the player's
 // background: none at all. With no detail behind to blur, a dim reads as a
@@ -159,6 +160,7 @@ fun FloatingGlaze(
     backdrop: HazeState,
     modifier: Modifier = Modifier,
     shape: Shape = CircleShape,
+    film: Color = GlazeTint,
     content: @Composable BoxScope.() -> Unit,
 ) {
     Box(modifier) {
@@ -173,7 +175,7 @@ fun FloatingGlaze(
                     Shadow(radius = shadowBlur(24f), color = Color.Black.copy(alpha = 0.45f), offset = DpOffset(0.dp, 8.dp)),
                 ),
         )
-        Glaze(Modifier.matchParentSize(), shape = shape, backdrop = backdrop)
+        Glaze(Modifier.matchParentSize(), shape = shape, backdrop = backdrop, film = film)
         content()
     }
 }

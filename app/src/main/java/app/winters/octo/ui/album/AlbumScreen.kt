@@ -26,6 +26,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
+import app.winters.octo.ambient.PageArtwork
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.TrackEntity
@@ -43,6 +44,7 @@ import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.asLength
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.common.songs
+import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
@@ -85,6 +87,7 @@ fun AlbumScreen(
 ) {
     val album by vm.album.collectAsStateWithLifecycle()
     val tracks by vm.tracks.collectAsStateWithLifecycle()
+    PageArtwork(AlbumRoute(id), album?.artwork)
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
