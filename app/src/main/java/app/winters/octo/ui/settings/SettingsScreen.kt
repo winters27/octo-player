@@ -22,7 +22,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
-import app.winters.octo.BuildConfig
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.LineSlider
@@ -180,6 +179,7 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
                 checked = player.lyricsOnline,
                 onChange = vm::setLyricsOnline,
             )
+            LyricsScreenLine()
         }
 
         AppearanceCard(Modifier.padding(top = 16.dp))
@@ -189,9 +189,7 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
         OfflineCard(Modifier.padding(top = 16.dp))
         BackupCard(Modifier.padding(top = 16.dp))
 
-        Card("About", Modifier.padding(top = 16.dp)) {
-            Line("Octo", BuildConfig.VERSION_NAME)
-        }
+        AboutCard(Modifier.padding(top = 16.dp))
     }
 }
 

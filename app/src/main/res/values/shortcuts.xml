@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher's shortcuts, on a long press of Octo's icon. The other
+     three share their names with the quick play widget. -->
+<resources>
+    <!-- The dark glass behind each shortcut's glyph. -->
+    <color name="shortcut_background">#FF1A1A1B</color>
+    <string name="shortcut_shuffle_all">Shuffle all</string>
+</resources>

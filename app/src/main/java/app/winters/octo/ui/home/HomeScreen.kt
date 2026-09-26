@@ -69,6 +69,7 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
             item { ScreenTitle("Home") }
             if (layout.askAccess) item(key = "access") { AccessCard(access, vm) }
             item(key = "resume") { ResumeCard() }
+            item(key = "whats-new") { WhatsNewCard() }
             when {
                 layout.empty -> item(key = "empty") { EmptyCard(offerAccess = !layout.askAccess) }
                 layout.shelves -> {

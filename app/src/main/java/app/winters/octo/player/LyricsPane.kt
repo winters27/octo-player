@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.LongState
 import androidx.compose.runtime.derivedStateOf
@@ -57,7 +58,11 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -68,20 +73,37 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
+import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.lyrics.LyricLine
 import app.winters.octo.lyrics.LyricWord
 import app.winters.octo.lyrics.Lyrics
+import app.winters.octo.lyrics.LyricsTiming
+import app.winters.octo.lyrics.TIMING_LIMIT_MS
 import app.winters.octo.lyrics.endOf
+import app.winters.octo.lyrics.heardAt
 import app.winters.octo.lyrics.lineAt
+import app.winters.octo.lyrics.lyricsClock
 import app.winters.octo.lyrics.shownLines
+import app.winters.octo.lyrics.timingLabel
 import app.winters.octo.playback.NowPlaying
+import app.winters.octo.ui.common.FloatingSheet
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
@@ -110,10 +132,27 @@ private val LyricStyle = TextStyle(fontWeight = FontWeight.Bold, lineHeight = 1.
 // How lines move as the song reaches them.
 private fun <T> lineSpring() = spring<T>(dampingRatio = 0.7f, stiffness = 80f)
 
+// Each song's lyrics timing, and whether the screen stays on for lyrics.
+@HiltViewModel
+class LyricsTimingViewModel @Inject constructor(private val timing: LyricsTiming) : ViewModel() {
+    val keepScreenOn: StateFlow<Boolean> = timing.keepScreenOn.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    fun offsetFor(trackId: String): Flow<Long> = timing.offsetFor(trackId)
+
+    fun step(trackId: String, steps: Int) {
+        viewModelScope.launch { timing.step(trackId, steps) }
+    }
+
+    fun reset(trackId: String) {
+        viewModelScope.launch { timing.reset(trackId) }
+    }
+}
+
 // The lyrics, in place of the artwork. Synced lyrics follow the song with
 // the line being sung in the middle; a tap on a line or word plays from
 // there. Plain lyrics are text to scroll. Where they came from shows
-// quietly underneath.
+// quietly underneath, beside a way to fix synced lyrics that run early or
+// late for this one song.
 @Composable
 fun LyricsPane(
     state: LyricsState,
@@ -121,27 +160,94 @@ fun LyricsPane(
     positionMs: () -> Long,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    timing: LyricsTimingViewModel = hiltViewModel(),
 ) {
+    // The screen stays on while the words are there to read, unless that
+    // is switched off in Settings.
+    val keepOn by timing.keepScreenOn.collectAsStateWithLifecycle()
+    if (keepOn && state is LyricsState.Found) KeepScreenOn()
+
     Crossfade(targetState = state, animationSpec = tween(300), modifier = modifier, label = "lyrics") { shown ->
         when (shown) {
-            is LyricsState.Found -> Column(Modifier.fillMaxSize()) {
-                Box(Modifier.weight(1f).fillMaxWidth().fadedEdges()) {
-                    val lyrics = shown.lyrics
-                    when {
-                        lyrics.instrumental -> Quiet("Instrumental")
-                        lyrics.synced -> SyncedLyrics(lyrics, now, positionMs, onSeek)
-                        else -> PlainLyrics(lyrics)
+            is LyricsState.Found -> {
+                val lyrics = shown.lyrics
+                val offset by remember(shown.trackId) { timing.offsetFor(shown.trackId) }.collectAsStateWithLifecycle(0L)
+                var adjusting by remember { mutableStateOf(false) }
+                Column(Modifier.fillMaxSize()) {
+                    Box(Modifier.weight(1f).fillMaxWidth().fadedEdges()) {
+                        when {
+                            lyrics.instrumental -> Quiet("Instrumental")
+                            lyrics.synced -> SyncedLyrics(lyrics, now, positionMs, onSeek, offset)
+                            else -> PlainLyrics(lyrics)
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            lyrics.source.label,
+                            style = OctoType.caption,
+                            color = OctoColors.TextMuted,
+                            modifier = Modifier.weight(1f),
+                        )
+                        // A quiet way to move the words when they run early or late.
+                        if (lyrics.synced && !lyrics.instrumental) {
+                            Text(
+                                if (offset == 0L) "Timing" else timingLabel(offset),
+                                style = OctoType.caption,
+                                color = OctoColors.TextMuted,
+                                modifier = Modifier
+                                    .clickable(role = Role.Button, onClickLabel = "Change the lyrics timing") { adjusting = true }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                            )
+                        }
                     }
                 }
-                Text(
-                    shown.lyrics.source.label,
-                    style = OctoType.caption,
-                    color = OctoColors.TextMuted,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
+                FloatingSheet(visible = adjusting, onDismiss = { adjusting = false }) {
+                    TimingSheet(
+                        offset,
+                        onStep = { steps -> timing.step(shown.trackId, steps) },
+                        onReset = { timing.reset(shown.trackId) },
+                    )
+                }
             }
             LyricsState.None -> Quiet("No lyrics for this song")
             LyricsState.Loading, LyricsState.Hidden -> Box(Modifier.fillMaxSize())
+        }
+    }
+}
+
+// Holds the screen on for as long as this is shown.
+@Composable
+private fun KeepScreenOn() {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
+}
+
+// Moves one song's lyrics earlier or later, a quarter second at a time.
+@Composable
+private fun TimingSheet(offsetMs: Long, onStep: (Int) -> Unit, onReset: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
+        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Lyrics timing", style = OctoType.section, color = OctoColors.TextPrimary, modifier = Modifier.weight(1f))
+            if (offsetMs != 0L) GlazeButton("Reset", onClick = onReset)
+        }
+        Text(
+            timingLabel(offsetMs),
+            style = OctoType.headline.copy(fontFeatureSettings = "tnum"),
+            color = OctoColors.TextPrimary,
+            modifier = Modifier.padding(top = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+        )
+        Text(
+            "For this song only. If the words light up late, move them earlier; if early, move them later.",
+            style = OctoType.caption,
+            color = OctoColors.TextMuted,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            GlazeButton("Earlier", onClick = { onStep(-1) }, modifier = Modifier.weight(1f), enabled = offsetMs > -TIMING_LIMIT_MS)
+            GlazeButton("Later", onClick = { onStep(1) }, modifier = Modifier.weight(1f), enabled = offsetMs < TIMING_LIMIT_MS)
         }
     }
 }
@@ -193,9 +299,13 @@ private fun PlainLyrics(lyrics: Lyrics) {
 }
 
 @Composable
-private fun SyncedLyrics(lyrics: Lyrics, now: NowPlaying, positionMs: () -> Long, onSeek: (Long) -> Unit) {
+private fun SyncedLyrics(lyrics: Lyrics, now: NowPlaying, positionMs: () -> Long, onSeek: (Long) -> Unit, offsetMs: Long) {
     val lines = remember(lyrics) { lyrics.shownLines() }
-    val position = rememberPositionMs(now, positionMs)
+    // Everything here runs on the lyrics' own clock, which the song's
+    // timing offset moves.
+    val offset by rememberUpdatedState(offsetMs)
+    val clock = remember(positionMs) { { lyricsClock(positionMs(), offset) } }
+    val position = rememberPositionMs(now, clock)
     val current by remember(lines) { derivedStateOf { lines.lineAt(position.longValue) } }
     val list = rememberLazyListState()
     var following by remember { mutableStateOf(true) }
@@ -205,7 +315,7 @@ private fun SyncedLyrics(lyrics: Lyrics, now: NowPlaying, positionMs: () -> Long
     LaunchedEffect(now.isPlaying) {
         while (!now.isPlaying) {
             delay(300)
-            position.longValue = positionMs()
+            position.longValue = clock()
         }
     }
 
@@ -242,10 +352,11 @@ private fun SyncedLyrics(lyrics: Lyrics, now: NowPlaying, positionMs: () -> Long
             }
     }
 
+    // A tap plays from where the line is heard, not where it is written.
     val seek: (Long) -> Unit = { at ->
         position.longValue = at
         following = true
-        onSeek(at)
+        onSeek(heardAt(at, offset))
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val half = maxHeight / 2
