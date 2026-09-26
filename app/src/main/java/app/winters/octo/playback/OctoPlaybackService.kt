@@ -22,6 +22,7 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import app.winters.octo.MainActivity
 import app.winters.octo.player.PlayerSettings
+import app.winters.octo.server.QueueSync
 import app.winters.octo.sound.AlbumRun
 import app.winters.octo.sound.AudioSession
 import app.winters.octo.sound.OctoRenderersFactory
@@ -71,6 +72,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var car: CarLibrary
     @Inject lateinit var sound: SoundEngine
     @Inject lateinit var audioSession: AudioSession
+    @Inject lateinit var serverQueue: QueueSync
 
     private val scope = MainScope()
     private lateinit var player: OctoPlayer
@@ -171,6 +173,7 @@ class OctoPlaybackService : MediaLibraryService() {
         }
         player.shuffleModeEnabled = saved.shuffle
         player.prepare()
+        serverQueue.restored(snapshot())
     }
 
     private fun saveQueue() {
@@ -199,6 +202,7 @@ class OctoPlaybackService : MediaLibraryService() {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             currentId.value = mediaItem?.mediaId
             saveQueue()
+            serverQueue.changed(snapshot())
         }
 
         // While music plays, a song that cannot, like a stream with no
@@ -222,6 +226,12 @@ class OctoPlaybackService : MediaLibraryService() {
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
             queueChanged.tryEmit(Unit)
+            serverQueue.changed(snapshot())
+        }
+
+        // A pause keeps the server's copy of the queue exact.
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (!playWhenReady) serverQueue.paused(snapshot())
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {

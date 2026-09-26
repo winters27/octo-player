@@ -62,6 +62,11 @@ import app.winters.octo.ui.playlist.PlaylistSheets
 import app.winters.octo.ui.playlist.PlaylistSheetsHost
 import app.winters.octo.ui.playlist.PlaylistsScreen
 import app.winters.octo.ui.search.SearchScreen
+import app.winters.octo.ui.server.LocalShareSheet
+import app.winters.octo.ui.server.RadioStationsScreen
+import app.winters.octo.ui.server.ShareSheetHost
+import app.winters.octo.ui.server.ShareSheetState
+import app.winters.octo.ui.server.SharesScreen
 import app.winters.octo.ui.settings.DisconnectPrompt
 import app.winters.octo.ui.settings.DisconnectSheetHost
 import app.winters.octo.ui.settings.LocalDisconnectPrompt
@@ -128,6 +133,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
     val playlistSheets = remember { PlaylistSheets() }
     val disconnectPrompt = remember { DisconnectPrompt() }
     val choiceSheet = remember { ChoiceSheet() }
+    val shareSheet = remember { ShareSheetState() }
     // Going to a page from the song menu also closes the player.
     val openFromMenu: (NavKey) -> Unit = { key ->
         playerOpen = false
@@ -140,6 +146,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
         LocalPlaylistSheets provides playlistSheets,
         LocalDisconnectPrompt provides disconnectPrompt,
         LocalChoiceSheet provides choiceSheet,
+        LocalShareSheet provides shareSheet,
     ) {
         SharedTransitionLayout {
             Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
@@ -172,6 +179,8 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                         entry<EditConnectionRoute> { SignInScreen(back, editing = true) }
                         entry<OctoAdminRoute> { OctoAdminScreen(back) }
                         entry<SoundRoute> { SoundScreen(back) }
+                        entry<SharesRoute> { SharesScreen(back) }
+                        entry<RadioStationsRoute> { RadioStationsScreen(back) }
                     },
                 )
                 // Back from the top of another tab goes Home rather than out.
@@ -223,6 +232,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                 PlaylistSheetsHost(playlistSheets)
                 DisconnectSheetHost(disconnectPrompt)
                 ChoiceSheetHost(choiceSheet)
+                ShareSheetHost(shareSheet)
             }
         }
     }

@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -52,7 +53,10 @@ import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
 import app.winters.octo.ui.playlist.LocalPlaylistSheets
 import app.winters.octo.ui.playlist.PlaylistSheet
+import app.winters.octo.server.ServerControls
 import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.ui.server.LocalShareSheet
+import app.winters.octo.ui.server.ShareRequest
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -106,12 +110,13 @@ class SongMenuState {
 val LocalSongMenu = staticCompositionLocalOf<SongMenuState> { error("No song menu") }
 
 // The choices in a song's menu, in the order shown.
-enum class SongAction { PlayNext, AddToQueue, StartRadio, Download, AddToPlaylist, Like, Rate, GoToAlbum, GoToArtist }
+enum class SongAction { PlayNext, AddToQueue, StartRadio, Download, AddToPlaylist, Share, Like, Rate, GoToAlbum, GoToArtist }
 
 // What a song's menu offers. A song found online has no album or artist in
 // the library and cannot be liked, rated or put in a playlist yet, so it
-// offers a download instead. Radio needs a server signed in.
-fun songActions(find: Boolean, radio: Boolean): List<SongAction> = buildList {
+// offers a download instead. Radio needs a server signed in; sharing needs
+// a copy of the song on a server that shares.
+fun songActions(find: Boolean, radio: Boolean, share: Boolean = false): List<SongAction> = buildList {
     add(SongAction.PlayNext)
     add(SongAction.AddToQueue)
     if (radio) add(SongAction.StartRadio)
@@ -119,6 +124,7 @@ fun songActions(find: Boolean, radio: Boolean): List<SongAction> = buildList {
         add(SongAction.Download)
     } else {
         add(SongAction.AddToPlaylist)
+        if (share) add(SongAction.Share)
         add(SongAction.Like)
         add(SongAction.Rate)
         add(SongAction.GoToAlbum)
@@ -142,6 +148,7 @@ class SongMenuViewModel @Inject constructor(
     private val discovery: Discovery,
     private val downloads: Downloads,
     private val ratings: RatingStore,
+    private val controls: ServerControls,
 ) : ViewModel() {
     val liked: StateFlow<Set<String>> = likes.liked
     val downloadStates: StateFlow<Map<String, DownloadState>> = downloads.states
@@ -149,6 +156,12 @@ class SongMenuViewModel @Inject constructor(
     // Whether songs can start a radio: only with a server signed in.
     val radio: StateFlow<Boolean> = discovery.available
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    // Whether the signed-in server can make shared links.
+    val sharing: StateFlow<Boolean> = controls.sharing
+
+    // The server's id for a song, when it has a copy there to share.
+    suspend fun shareId(trackId: String): String? = if (isFind(trackId)) null else controls.serverSongId(trackId)
 
     // A library song, or a song found online shaped like one.
     fun track(id: String): Flow<TrackEntity?> =
@@ -193,13 +206,16 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
         val liked by vm.liked.collectAsStateWithLifecycle()
         val downloads by vm.downloadStates.collectAsStateWithLifecycle()
         val radio by vm.radio.collectAsStateWithLifecycle()
+        val sharing by vm.sharing.collectAsStateWithLifecycle()
+        val shareId by produceState<String?>(null, trackId, sharing) { value = if (sharing) vm.shareId(trackId) else null }
+        val shareSheet = LocalShareSheet.current
         val song = track ?: return@GlassSheet
         val isLiked = trackId in liked
         val playlistSheets = LocalPlaylistSheets.current
 
         SongHeader(song)
         Spacer(Modifier.height(8.dp))
-        for (action in songActions(isFind(trackId), radio)) {
+        for (action in songActions(isFind(trackId), radio, share = shareId != null)) {
             when (action) {
                 SongAction.PlayNext -> MenuRow(OctoIcons.PlayNext, "Play next") {
                     vm.playNext(trackId)
@@ -227,6 +243,10 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
                 SongAction.AddToPlaylist -> MenuRow(OctoIcons.AddToPlaylist, "Add to playlist") {
                     state.close()
                     playlistSheets.show(PlaylistSheet.Pick(trackId))
+                }
+                SongAction.Share -> MenuRow(OctoIcons.Share, "Share") {
+                    state.close()
+                    shareId?.let { shareSheet.show(ShareRequest(listOf(it), song.title)) }
                 }
                 SongAction.Like -> MenuRow(
                     if (isLiked) OctoIcons.Liked else OctoIcons.Like,

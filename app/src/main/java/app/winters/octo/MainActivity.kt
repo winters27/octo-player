@@ -10,6 +10,7 @@ import androidx.activity.enableEdgeToEdge
 import app.winters.octo.design.OctoTheme
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.server.QueueSync
 import app.winters.octo.ui.nav.MainShell
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -18,6 +19,7 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
     @Inject lateinit var library: DeviceLibrary
     @Inject lateinit var playback: PlaybackConnection
+    @Inject lateinit var queueSync: QueueSync
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,6 +44,8 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         playback.connect()
+        // A queue left on another device may be waiting on the server.
+        queueSync.check()
     }
 
     // Letting go lets the service stop itself when nothing is playing.
