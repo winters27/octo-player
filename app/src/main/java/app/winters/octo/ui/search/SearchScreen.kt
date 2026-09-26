@@ -120,13 +120,14 @@ private fun LazyListScope.discoverSection(
         DiscoverState.Failed -> item(key = "discover:failed") { QuietLine("Could not reach your server") }
         is DiscoverState.Done -> {
             val found = online.found
+            if (found.songs.isNotEmpty()) item(key = "discover:songs:title") { SubTitle("Songs") }
             items(found.songs, key = { "discover:${it.id}" }) { track ->
                 SongRow(track, trailing = { DownloadButton(track, size = 40.dp, iconSize = 22.dp) }) { onPlay(track) }
             }
             if (found.albums.isNotEmpty()) {
+                item(key = "discover:albums:title") { SubTitle("Albums") }
                 item(key = "discover:albums") {
                     LazyRow(
-                        Modifier.padding(top = if (found.songs.isEmpty()) 0.dp else 12.dp),
                         contentPadding = PaddingValues(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
@@ -137,9 +138,9 @@ private fun LazyListScope.discoverSection(
                 }
             }
             if (found.artists.isNotEmpty()) {
+                item(key = "discover:artists:title") { SubTitle("Artists") }
                 item(key = "discover:artists") {
                     LazyRow(
-                        Modifier.padding(top = if (found.songs.isEmpty() && found.albums.isEmpty()) 0.dp else 18.dp),
                         contentPadding = PaddingValues(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
@@ -152,6 +153,17 @@ private fun LazyListScope.discoverSection(
         }
         DiscoverState.Idle -> Unit
     }
+}
+
+// Names each kind of find under Discover, quieter than a section title.
+@Composable
+private fun SubTitle(text: String) {
+    Text(
+        text,
+        style = OctoType.bodySmall,
+        color = OctoColors.TextMuted,
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp),
+    )
 }
 
 @Composable

@@ -58,6 +58,15 @@ class MatchingTest {
     }
 
     @Test
+    fun aRemixIsNotTheOriginalEvenWithoutALength() {
+        val lib = track("p1", "Nightcall", "Kavinsky", ms = 179_000)
+        assertFalse(sameSong("Nightcall (Breakbot Remix)", "Kavinsky", 0, lib))
+        assertFalse(sameSong("Nightcall - Live", "Kavinsky", 0, lib))
+        assertTrue(sameSong("Nightcall [Remastered]", "Kavinsky", 0, lib))
+        assertTrue(sameSong("Nightcall (Breakbot remix)", "Kavinsky", 0, track("p2", "Nightcall (Breakbot Remix)", "Kavinsky")))
+    }
+
+    @Test
     fun knownLengthsThatDifferAreDifferentRecordings() {
         val lib = track("p1", "Around the World", "Daft Punk", ms = 429_000)
         assertFalse(sameSong("Around the World", "Daft Punk", 238_000, lib))

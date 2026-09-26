@@ -17,6 +17,15 @@ private const val GUESSED_SECONDS = 180
 private const val SAME_LENGTH_MS = 10_000L
 
 private val Extras = Regex("""\s*[(\[][^)\]]*[)\]]""")
+
+// Words that make a title a different recording of a song, not the same
+// one with extras: "Nightcall (Breakbot Remix)" is not "Nightcall".
+private val VersionWords = setOf(
+    "remix", "mix", "rmx", "live", "edit", "acoustic", "instrumental", "demo", "version", "rework",
+    "bootleg", "vip", "cover", "karaoke", "extended", "dub", "slowed", "sped", "reverb", "unplugged",
+)
+private val Words = Regex("""[\p{L}\p{N}]+""")
+
 private val Featuring = Regex("""\s*(,|&|\bfeat\.?|\bft\.?|\bx\b|\bwith\b)\s+.*$""", RegexOption.IGNORE_CASE)
 
 // What one song from the server is to the app: a song already in the
@@ -44,9 +53,15 @@ fun sameArtist(a: String, b: String): Boolean {
     return lead.isNotEmpty() && (lead == leadArtist(b) || matchKey(a) == matchKey(b))
 }
 
-// The same song by the same artist. Lengths only count when both are known.
+// Which kind of recording a title names, from its version words.
+internal fun versionOf(title: String): Set<String> =
+    Words.findAll(title.lowercase()).map { it.value }.filterTo(HashSet()) { it in VersionWords }
+
+// The same song by the same artist, and the same kind of recording. Lengths
+// only count when both are known.
 fun sameSong(title: String, artist: String, lengthMs: Long, track: TrackEntity): Boolean {
     if (matchKey(title) != matchKey(track.title)) return false
+    if (versionOf(title) != versionOf(track.title)) return false
     if (!sameArtist(artist, track.artist)) return false
     return lengthMs <= 0 || track.durationMs <= 0 || kotlin.math.abs(lengthMs - track.durationMs) <= SAME_LENGTH_MS
 }
