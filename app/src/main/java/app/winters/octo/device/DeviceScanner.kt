@@ -20,6 +20,7 @@ class DeviceScanner @Inject constructor(@ApplicationContext private val context:
             add(MediaStore.Audio.Media._ID)
             add(MediaStore.Audio.Media.DISPLAY_NAME)
             add(MediaStore.Audio.Media.RELATIVE_PATH)
+            add(MediaStore.Audio.Media.VOLUME_NAME)
             add(MediaStore.Audio.Media.DATE_MODIFIED)
             add(MediaStore.Audio.Media.SIZE)
             add(MediaStore.Audio.Media.DURATION)
@@ -71,6 +72,7 @@ class DeviceScanner @Inject constructor(@ApplicationContext private val context:
                         year = c.int(MediaStore.Audio.Media.YEAR)?.takeIf { it > 0 },
                         genres = parseGenres(listOfNotNull(c.string(MediaStore.Audio.Media.GENRE))),
                     ),
+                    volume = c.string(MediaStore.Audio.Media.VOLUME_NAME),
                 )
             }
         }

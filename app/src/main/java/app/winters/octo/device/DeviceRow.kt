@@ -14,6 +14,8 @@ data class DeviceFile(
     val addedAtSeconds: Long,
     val mimeType: String?,
     val fallback: FileTags,
+    // Which storage it is on, like "external_primary" or an SD card's id.
+    val volume: String? = null,
 )
 
 // One file ready to be grouped: the file plus the best tags known for it.

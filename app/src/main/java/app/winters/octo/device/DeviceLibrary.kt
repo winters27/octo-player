@@ -79,6 +79,12 @@ class DeviceLibrary @Inject constructor(
     private val _folders = MutableStateFlow<List<MusicFolder>>(emptyList())
     val folders: StateFlow<List<MusicFolder>> = _folders
 
+    // Where each song in the library from the phone sits, as folder names,
+    // by media id. Kept in memory from the last scan, which runs each time
+    // the app starts; null until then.
+    private val _paths = MutableStateFlow<Map<Long, List<String>>?>(null)
+    val paths: StateFlow<Map<Long, List<String>>?> = _paths
+
     suspend fun setFolderIncluded(folder: String, included: Boolean) = rules.setIncluded(folder, included)
 
     @OptIn(FlowPreview::class)
@@ -134,7 +140,8 @@ class DeviceLibrary @Inject constructor(
                 val tags = refreshTags(files)
                 val excluded = rules.excluded.first()
                 _folders.value = files.folders(excluded)
-                val catalog = buildDeviceCatalog(files.withoutFolders(excluded).map { it.toRow(tags[it.id]) })
+                val included = files.withoutFolders(excluded)
+                val catalog = buildDeviceCatalog(included.map { it.toRow(tags[it.id]) })
                 // The phone's own copy, then the library rebuilt with any
                 // server's music merged in.
                 sources.replaceSource(
@@ -144,6 +151,7 @@ class DeviceLibrary @Inject constructor(
                     catalog.artists.map { it.toSource() },
                 )
                 val library = merge.rebuild()
+                _paths.value = included.folderPaths()
                 // Counts only, so the library can be checked against the phone.
                 Log.i(
                     "Octo",

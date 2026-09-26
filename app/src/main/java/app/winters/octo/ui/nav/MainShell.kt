@@ -43,6 +43,7 @@ import app.winters.octo.ui.common.ChoiceSheet
 import app.winters.octo.ui.common.ChoiceSheetHost
 import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.folders.FoldersScreen
 import app.winters.octo.ui.genre.GenreScreen
 import app.winters.octo.ui.genre.GenresScreen
 import app.winters.octo.ui.home.HomeScreen
@@ -165,6 +166,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection) {
                         entry<SongsRoute> { SongsScreen(back) }
                         entry<GenresRoute> { GenresScreen(open, back) }
                         entry<GenreRoute> { GenreScreen(it.name, open, back) }
+                        entry<FoldersRoute> { FoldersScreen(back) }
                         entry<PlaylistsRoute> { PlaylistsScreen(open, back) }
                         entry<LikedRoute> { LikedScreen(back) }
                         entry<PlaylistRoute> { PlaylistScreen(it.id, back) }

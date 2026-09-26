@@ -43,4 +43,7 @@ object OctoIcons {
 
     // Lyrics.
     val Lyrics = R.drawable.sym_lyrics
+
+    // A folder, for browsing music the way it is filed.
+    val Folder = R.drawable.sym_folder
 }

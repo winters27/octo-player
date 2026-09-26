@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import app.winters.octo.folders.pathNames
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -28,6 +29,29 @@ fun List<DeviceFile>.folders(excluded: Set<String>): List<MusicFolder> =
     groupingBy { topFolder(it.folder) }.eachCount()
         .map { (name, count) -> MusicFolder(name, count, name !in excluded) }
         .sortedByDescending { it.songs }
+
+// The phone's main storage, as the media library names it.
+private const val MAIN_STORAGE = "external_primary"
+
+// Where each file sits, as folder names, by media id. The storage it is on
+// leads the path only when music is on more than one, so a phone with no
+// SD card starts at "Music" rather than "Internal storage".
+fun List<DeviceFile>.folderPaths(): Map<Long, List<String>> {
+    val volumes = mapTo(HashSet()) { it.volume ?: MAIN_STORAGE }
+    val cards = volumes - MAIN_STORAGE
+    return associate { file ->
+        val names = pathNames(file.folder)
+        file.id to if (volumes.size > 1) listOf(storageName(file.volume, cards.size)) + names else names
+    }
+}
+
+// What to call a storage: the phone's own, or an SD card, told apart by its
+// id when there is more than one card.
+fun storageName(volume: String?, cardCount: Int): String = when {
+    volume == null || volume == MAIN_STORAGE -> "Internal storage"
+    cardCount <= 1 -> "SD card"
+    else -> "SD card ${volume.uppercase()}"
+}
 
 private val Context.libraryPrefs by preferencesDataStore("library")
 private val EXCLUDED = stringSetPreferencesKey("excluded_folders")

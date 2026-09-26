@@ -51,6 +51,7 @@ import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.AlbumsRoute
 import app.winters.octo.ui.nav.ArtistRoute
 import app.winters.octo.ui.nav.ArtistsRoute
+import app.winters.octo.ui.nav.FoldersRoute
 import app.winters.octo.ui.nav.GenresRoute
 import app.winters.octo.ui.nav.PlaylistsRoute
 import app.winters.octo.ui.nav.SongsRoute
@@ -64,6 +65,7 @@ private val sections = listOf(
     Section(OctoIcons.Album, "Albums", AlbumsRoute),
     Section(OctoIcons.Songs, "Songs", SongsRoute),
     Section(OctoIcons.Genres, "Genres", GenresRoute),
+    Section(OctoIcons.Folder, "Folders", FoldersRoute),
 )
 
 // The library's front page: a menu of ways in, then the newest albums,
