@@ -75,6 +75,10 @@ data class Song(
     val created: String? = null,
     val played: String? = null,
     val playCount: Long? = null,
+    // How loud the song is, from an OpenSubsonic server, and the signed-in
+    // user's rating of it from 1 to 5.
+    val replayGain: SongReplayGain? = null,
+    val userRating: Int? = null,
 )
 
 @Serializable
@@ -170,6 +174,34 @@ enum class AlbumListType(val wire: String) {
 
 @Serializable
 data class SongList(val song: List<Song> = emptyList())
+
+// A song's loudness as an OpenSubsonic server sends it: gains in decibels,
+// peaks where 1 is full scale. The base gain is one the file already applies
+// (an Opus header's, say); the fallback is what the server suggests for a
+// song with no gain of its own. Any of them can be missing.
+@Serializable
+data class SongReplayGain(
+    val trackGain: Float? = null,
+    val albumGain: Float? = null,
+    val trackPeak: Float? = null,
+    val albumPeak: Float? = null,
+    val baseGain: Float? = null,
+    val fallbackGain: Float? = null,
+)
+
+// What a server knows about an artist beyond their music: a biography (HTML,
+// often ending in a link to where it came from), pictures, and artists like
+// them.
+@Serializable
+data class ArtistInfo(
+    val biography: String? = null,
+    val musicBrainzId: String? = null,
+    val lastFmUrl: String? = null,
+    val smallImageUrl: String? = null,
+    val mediumImageUrl: String? = null,
+    val largeImageUrl: String? = null,
+    val similarArtist: List<Artist> = emptyList(),
+)
 
 @Serializable
 data class RadioStation(
