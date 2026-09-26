@@ -79,6 +79,10 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { player.setCrossfadeSeconds(seconds) }
     }
 
+    fun setLyricsOnline(on: Boolean) {
+        viewModelScope.launch { player.setLyricsOnline(on) }
+    }
+
     val songCount: StateFlow<Int> =
         dao.trackCount(DEVICE).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
@@ -164,6 +168,14 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
                 onChange = vm::setCrossfade,
             )
             if (player.crossfade) CrossfadeLength(player.crossfadeSeconds, vm::setCrossfadeSeconds)
+            Text("Lyrics", style = OctoType.label, color = OctoColors.TextSecondary, modifier = Modifier.padding(top = 8.dp))
+            SwitchLine(
+                label = "Find lyrics online",
+                detail = "When your server and the song's files have none, look them up on LRCLIB. " +
+                    "Only the title, artist, album and length are sent.",
+                checked = player.lyricsOnline,
+                onChange = vm::setLyricsOnline,
+            )
         }
 
         StreamingCard(Modifier.padding(top = 16.dp))

@@ -21,6 +21,8 @@ data class PlayerPrefs(
     // Songs blending into each other, and over how many seconds.
     val crossfade: Boolean = false,
     val crossfadeSeconds: Int = 6,
+    // Looking lyrics up online when the server and the song's files have none.
+    val lyricsOnline: Boolean = true,
 ) {
     // What the player uses: the blend length, or 0 for none.
     val crossfadeMs: Long get() = if (crossfade) crossfadeSeconds * 1_000L else 0
@@ -43,6 +45,7 @@ private val Context.playerPrefs by preferencesDataStore("player")
 private val LIVE_BACKGROUND = booleanPreferencesKey("live_background")
 private val CROSSFADE = booleanPreferencesKey("crossfade")
 private val CROSSFADE_SECONDS = intPreferencesKey("crossfade_seconds")
+private val LYRICS_ONLINE = booleanPreferencesKey("lyrics_online")
 private val COPIES = stringPreferencesKey("copies")
 private val STREAM_WIFI = stringPreferencesKey("stream_wifi")
 private val STREAM_MOBILE = stringPreferencesKey("stream_mobile")
@@ -59,6 +62,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             liveBackground = stored[LIVE_BACKGROUND] ?: defaults.liveBackground,
             crossfade = stored[CROSSFADE] ?: defaults.crossfade,
             crossfadeSeconds = (stored[CROSSFADE_SECONDS] ?: defaults.crossfadeSeconds).coerceIn(CrossfadeSecondsRange),
+            lyricsOnline = stored[LYRICS_ONLINE] ?: defaults.lyricsOnline,
         )
     }
 
@@ -81,6 +85,10 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
 
     suspend fun setCrossfadeSeconds(seconds: Int) {
         context.playerPrefs.edit { it[CROSSFADE_SECONDS] = seconds.coerceIn(CrossfadeSecondsRange) }
+    }
+
+    suspend fun setLyricsOnline(on: Boolean) {
+        context.playerPrefs.edit { it[LYRICS_ONLINE] = on }
     }
 
     suspend fun setCopies(preference: CopyPreference) {

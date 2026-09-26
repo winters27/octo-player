@@ -241,3 +241,67 @@ internal object LooseString : KSerializer<String> {
 
     override fun serialize(encoder: Encoder, value: String) = encoder.encodeString(value)
 }
+
+// Lyrics a server keeps for a song (OpenSubsonic songLyrics). There can be
+// several: synced and plain, other languages, and with version 2 a
+// translation or pronunciation beside the main one.
+@Serializable
+data class LyricsList(val structuredLyrics: List<StructuredLyrics> = emptyList())
+
+@Serializable
+data class StructuredLyrics(
+    val lang: String = "und",
+    val synced: Boolean = false,
+    val line: List<LyricsLine> = emptyList(),
+    val displayArtist: String? = null,
+    val displayTitle: String? = null,
+    // Milliseconds to move every time by. It follows the LRC offset tag:
+    // above zero, the words come sooner.
+    val offset: Double = 0.0,
+    // "main", "translation" or "pronunciation". Missing means main.
+    val kind: String? = null,
+    // Who sings, when the lines are split between voices.
+    val agents: List<LyricsAgent> = emptyList(),
+    // Word timings, one or more per line, matched to a line by its index.
+    val cueLine: List<CueLine> = emptyList(),
+)
+
+@Serializable
+data class LyricsLine(
+    // Milliseconds from the start of the song; missing when not synced.
+    val start: Long? = null,
+    val value: String = "",
+)
+
+@Serializable
+data class LyricsAgent(
+    val id: String = "",
+    // "main", "voice" (another singer), "bg" (backing vocals) or "group".
+    val role: String = "main",
+    val name: String? = null,
+)
+
+@Serializable
+data class CueLine(
+    val index: Int = 0,
+    val agentId: String? = null,
+    val start: Long? = null,
+    val end: Long? = null,
+    val value: String = "",
+    val cue: List<Cue> = emptyList(),
+)
+
+// One timed word or syllable. Its place in the cue line's value is given in
+// UTF-8 bytes, both ends included, not in characters.
+@Serializable
+data class Cue(
+    val start: Long = 0,
+    val end: Long? = null,
+    val value: String = "",
+    val byteStart: Int = 0,
+    val byteEnd: Int = 0,
+)
+
+// The older lyrics call's answer: one block of plain text.
+@Serializable
+data class PlainLyrics(val artist: String? = null, val title: String? = null, val value: String? = null)

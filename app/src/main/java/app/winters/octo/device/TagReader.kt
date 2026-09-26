@@ -18,4 +18,12 @@ class TagReader @Inject constructor(@ApplicationContext private val context: Con
                 ?.let(::parseTags)
         }
     }.getOrNull()
+
+    // Every tag the file has, as the tag library names them, for the ones
+    // Octo only reads when it needs them, like lyrics.
+    fun allTags(uri: Uri): Map<String, Array<String>>? = runCatching {
+        context.contentResolver.openFileDescriptor(uri, "r")?.use { file ->
+            TagLib.getMetadata(file.dup().detachFd(), readPictures = false)?.propertyMap
+        }
+    }.getOrNull()
 }

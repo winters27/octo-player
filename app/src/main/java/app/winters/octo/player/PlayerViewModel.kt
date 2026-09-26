@@ -7,6 +7,9 @@ import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
 import app.winters.octo.discovery.asTrack
+import app.winters.octo.lyrics.Lyrics
+import app.winters.octo.lyrics.LyricsRepository
+import app.winters.octo.lyrics.LyricsSong
 import app.winters.octo.playback.DeviceVolume
 import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.NowPlaying
@@ -17,6 +20,7 @@ import app.winters.octo.playback.SleepTimer
 import app.winters.octo.sound.SoundEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -26,6 +30,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import javax.inject.Inject
 
 // Everything the full player shows, and what its buttons do.
@@ -41,6 +46,7 @@ class PlayerViewModel @Inject constructor(
     private val deviceVolume: DeviceVolume,
     private val sleepTimer: SleepTimer,
     sound: SoundEngine,
+    private val lyricsRepository: LyricsRepository,
 ) : ViewModel() {
     val now: StateFlow<NowPlaying> = playback.now
     val upNext: StateFlow<List<QueueEntry>> = playback.upNext
@@ -119,4 +125,36 @@ class PlayerViewModel @Inject constructor(
             if (id == null || isFind(id)) flowOf(0) else catalog.trackFlow(id).map { it?.rating ?: 0 }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    // Whether the lyrics show in place of the artwork. They are only looked
+    // up while they show, and follow the song while they do.
+    private val lyricsShown = MutableStateFlow(false)
+    val lyricsOpen: StateFlow<Boolean> = lyricsShown
+    fun toggleLyrics() {
+        lyricsShown.value = !lyricsShown.value
+    }
+
+    val lyrics: StateFlow<LyricsState> = combine(playback.now.map { it.trackId }.distinctUntilChanged(), lyricsShown) { id, open ->
+        id.takeIf { open }
+    }
+        .distinctUntilChanged()
+        .transformLatest { id ->
+            if (id == null) {
+                emit(LyricsState.Hidden)
+                return@transformLatest
+            }
+            emit(LyricsState.Loading)
+            val now = playback.now.value
+            val song = LyricsSong(id, now.title.orEmpty(), now.artist.orEmpty(), now.album.orEmpty(), now.durationMs)
+            emit(lyricsRepository.lyricsFor(song)?.let { LyricsState.Found(id, it) } ?: LyricsState.None)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LyricsState.Hidden)
+}
+
+// What the lyrics view shows.
+sealed interface LyricsState {
+    data object Hidden : LyricsState
+    data object Loading : LyricsState
+    data object None : LyricsState
+    data class Found(val trackId: String, val lyrics: Lyrics) : LyricsState
 }
