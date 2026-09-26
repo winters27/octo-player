@@ -64,9 +64,9 @@ object OctoIcons {
     val Close = R.drawable.sym_close
     val History = R.drawable.sym_history
 
-    // Takes a song off a playlist.
-    val RemoveFromPlaylist = R.drawable.sym_playlist_remove
-
     // Keeps an album, artist or playlist at the front of Home.
     val Pin = R.drawable.sym_keep
+
+    // Takes a song off a playlist.
+    val RemoveFromPlaylist = R.drawable.sym_playlist_remove
 }
