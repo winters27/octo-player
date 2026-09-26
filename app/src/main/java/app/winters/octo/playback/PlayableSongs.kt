@@ -61,11 +61,13 @@ class PlayableSongs @Inject constructor(
         val missing = if (reachable) missingPhoneFiles(onServer.flatten().filterNot { it.isServerCopy }) else emptySet()
         val prefs = streams.prefs()
         return tracks.map { track ->
-            val copy = chooseCopy(copies[track.id].orEmpty(), prefs.copies, reachable) { it.uri in missing }
+            val all = copies[track.id].orEmpty()
+            val copy = chooseCopy(all, prefs.copies, reachable) { it.uri in missing }
+            val loudness = storedLoudness(copy, all)
             when {
-                copy == null -> track.toMediaItem()
-                copy.isServerCopy -> track.toMediaItem(streams.uriFor(copy), streams.mimeTypeFor(copy, prefs))
-                else -> track.toMediaItem(copy.uri, copy.mimeType)
+                copy == null -> track.toMediaItem(track.uri, track.mimeType, loudness)
+                copy.isServerCopy -> track.toMediaItem(streams.uriFor(copy), streams.mimeTypeFor(copy, prefs), loudness)
+                else -> track.toMediaItem(copy.uri, copy.mimeType, loudness)
             }
         }
     }

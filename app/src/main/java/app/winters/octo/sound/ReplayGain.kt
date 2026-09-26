@@ -156,3 +156,21 @@ class AlbumRun {
         return lastAnswer
     }
 }
+
+// The loudness a song plays at: its own tags when the sound carries them,
+// otherwise the values its source keeps, such as a server's for a stream
+// made smaller on the way, which loses its tags. Peaks alone say nothing
+// about how loud to play, so stored gains win over a stream with only those.
+fun chooseReplayGain(stream: ReplayGainInfo?, stored: ReplayGainInfo?): ReplayGainInfo? = when {
+    stream?.hasGain == true -> stream
+    stored?.hasGain == true -> stored
+    else -> stream
+}
+
+// Loudness values a source kept, checked the way tags are: a gain past the
+// limit or a peak that is not above zero is left out. Nothing without a gain.
+fun storedReplayGain(trackGain: Float?, trackPeak: Float?, albumGain: Float?, albumPeak: Float?): ReplayGainInfo? {
+    fun gain(value: Float?) = value?.takeIf { it.isFinite() && abs(it) <= LARGEST_GAIN_DB }
+    fun peak(value: Float?) = value?.takeIf { it.isFinite() && it > 0f }
+    return ReplayGainInfo(gain(trackGain), peak(trackPeak), gain(albumGain), peak(albumPeak)).takeIf { it.hasGain }
+}

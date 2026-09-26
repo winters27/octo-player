@@ -1,6 +1,8 @@
 package app.winters.octo.playback
 
 import app.winters.octo.catalog.SourceTrackEntity
+import app.winters.octo.sound.ReplayGainInfo
+import app.winters.octo.sound.storedReplayGain
 
 // Which copy plays when a song is both on the phone and on a server.
 enum class CopyPreference { PhoneFirst, BestQuality }
@@ -90,3 +92,11 @@ fun streamRequest(mimeType: String?, bitrate: Int?, quality: StreamQuality): Str
     if (!isLossless(mimeType) && bitrate != null && bitrate / 1000 <= cap) return StreamRequest(null)
     return StreamRequest(cap)
 }
+
+// The loudness a copy's source keeps for it, if any.
+fun SourceTrackEntity.storedLoudness(): ReplayGainInfo? = storedReplayGain(trackGain, trackPeak, albumGain, albumPeak)
+
+// The stored loudness to play a song at: the playing copy's, or failing that
+// another copy's of the same song, since each copy is the same recording.
+fun storedLoudness(playing: SourceTrackEntity?, copies: List<SourceTrackEntity>): ReplayGainInfo? =
+    playing?.storedLoudness() ?: copies.firstNotNullOfOrNull { it.storedLoudness() }

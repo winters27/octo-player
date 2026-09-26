@@ -8,6 +8,7 @@ import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Artist
 import app.winters.octo.subsonic.Library
 import app.winters.octo.subsonic.Song
+import app.winters.octo.subsonic.SongReplayGain
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -179,5 +180,26 @@ class ServerCatalogTest {
         assertEquals(1_790_150_400_000, epochMs("2026-09-23T08:00:00"))
         assertNull(epochMs("yesterday"))
         assertNull(epochMs(null))
+    }
+
+    @Test
+    fun keepsTheServersLoudnessAndRating() {
+        val rated = song.copy(
+            replayGain = SongReplayGain(trackGain = -8.4f, albumGain = -7.9f, trackPeak = 0.98f, albumPeak = 0f, baseGain = 0f, fallbackGain = -6f),
+            userRating = 4,
+        )
+        val row = buildServerCatalog(source, Library(listOf(rated), listOf(album), emptyList())).tracks.single()
+        assertEquals(-8.4f, row.trackGain)
+        assertEquals(-7.9f, row.albumGain)
+        assertEquals(0.98f, row.trackPeak)
+        // A peak of nothing is no peak.
+        assertNull(row.albumPeak)
+        assertEquals(0f, row.baseGain)
+        assertEquals(-6f, row.fallbackGain)
+        assertEquals(4, row.rating)
+
+        val plain = buildServerCatalog(source, Library(listOf(song), listOf(album), emptyList())).tracks.single()
+        assertNull(plain.trackGain)
+        assertNull(plain.rating)
     }
 }

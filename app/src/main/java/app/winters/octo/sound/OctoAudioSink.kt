@@ -6,10 +6,13 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import app.winters.octo.playback.EXTRA_ALBUM_ID
+import app.winters.octo.playback.storedLoudness
 
 // The player's audio output with Octo's shaping in it. Each time a song is
 // set up, it reads the song's loudness tags and album and hands them to the
-// shaping, which takes them up once the song before has played out.
+// shaping, which takes them up once the song before has played out. A song
+// whose sound carries no loudness tags, such as a stream the server made
+// smaller, uses the loudness it was queued with instead.
 @UnstableApi
 class OctoAudioSink(
     sink: AudioSink,
@@ -18,7 +21,7 @@ class OctoAudioSink(
 ) : ForwardingAudioSink(sink) {
     override fun configure(config: AudioSink.AudioSinkConfig) {
         val item = songOf(config)
-        val info = ReplayGain.read(config.format.metadata)
+        val info = chooseReplayGain(ReplayGain.read(config.format.metadata), item?.mediaMetadata?.storedLoudness())
         val album = item?.let(::albumOf)
         val id = item?.mediaId?.ifEmpty { null }
         shaping.setNextSong(SongLoudness(info, albums.follows(id, album)))
