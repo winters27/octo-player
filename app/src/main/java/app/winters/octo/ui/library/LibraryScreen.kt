@@ -86,7 +86,7 @@ private val sections = listOf(
     Section(OctoIcons.Folder, "Folders", FoldersRoute),
     Section(OctoIcons.Downloaded, "Downloads", DownloadsRoute),
     // Stands in until the history symbol joins the icon set.
-    Section(OctoIcons.Lossless, "History", HistoryRoute()),
+    Section(OctoIcons.History, "History", HistoryRoute()),
 )
 
 // The library's front page: a menu of ways in, then the newest albums,

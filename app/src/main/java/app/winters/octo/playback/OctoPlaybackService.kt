@@ -22,7 +22,6 @@ import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import app.winters.octo.MainActivity
-import app.winters.octo.R
 import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.isFind
 import app.winters.octo.design.OctoIcons
@@ -256,7 +255,7 @@ class OctoPlaybackService : MediaLibraryService() {
             }
             add(
                 CommandButton.Builder(CommandButton.ICON_UNDEFINED)
-                    .setCustomIconResId(R.drawable.sym_close)
+                    .setCustomIconResId(OctoIcons.Close)
                     .setDisplayName("Close")
                     .setSessionCommand(CLOSE)
                     .setSlots(CommandButton.SLOT_BACK_SECONDARY, CommandButton.SLOT_OVERFLOW)

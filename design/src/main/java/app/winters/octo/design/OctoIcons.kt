@@ -62,6 +62,7 @@ object OctoIcons {
 
     // Closes a bar or a panel.
     val Close = R.drawable.sym_close
+    val History = R.drawable.sym_history
 
     // Takes a song off a playlist.
     val RemoveFromPlaylist = R.drawable.sym_playlist_remove

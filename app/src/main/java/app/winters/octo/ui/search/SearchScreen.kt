@@ -48,12 +48,14 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
-import app.winters.octo.R
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.design.GlassInput
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.discovery.Discovered
+import app.winters.octo.ui.common.SelectableSongs
+import app.winters.octo.ui.common.Pickable
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistCircle
 import app.winters.octo.ui.common.ArtistRow
@@ -128,21 +130,24 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
             )
             found == null -> Hint(if (signedIn) "Search your music and discover more" else "Search the music on your phone")
             found.isEmpty && nothingOnline -> Hint("No results for \"${vm.text.trim()}\"")
-            else -> LazyColumn(
-                Modifier.fillMaxSize().nestedScroll(hider),
-                state = list,
-                contentPadding = PaddingValues(top = 12.dp, bottom = bottom),
-            ) {
-                if (filter == SearchFilter.All) {
-                    everything(found, open, pick, vm::playSong)
-                } else {
-                    oneKind(found, open, vm::playSong)
+            // Songs from the library and from the server can be picked together.
+            else -> SelectableSongs(pickableResults(found, online)) {
+                LazyColumn(
+                    Modifier.fillMaxSize().nestedScroll(hider),
+                    state = list,
+                    contentPadding = PaddingValues(top = 12.dp, bottom = bottom),
+                ) {
+                    if (filter == SearchFilter.All) {
+                        everything(found, open, pick, vm::playSong)
+                    } else {
+                        oneKind(found, open, vm::playSong)
+                    }
+                    // The server could not be asked, so say the library has none.
+                    if (found.isEmpty && online is DiscoverState.Failed) {
+                        item { Hint("No results for \"${vm.text.trim()}\"") }
+                    }
+                    if (!nothingOnline) discoverSection(online, open, onPlay = vm::playFound, top = !found.isEmpty)
                 }
-                // The server could not be asked, so say the library has none.
-                if (found.isEmpty && online is DiscoverState.Failed) {
-                    item { Hint("No results for \"${vm.text.trim()}\"") }
-                }
-                if (!nothingOnline) discoverSection(online, open, onPlay = vm::playFound, top = !found.isEmpty)
             }
         }
     }
@@ -293,7 +298,7 @@ private fun CrossButton(description: String, onClick: () -> Unit) {
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(R.drawable.sym_close), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(20.dp))
+        Icon(painterResource(OctoIcons.Close), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -401,4 +406,13 @@ private fun Hint(text: String) {
         color = OctoColors.TextMuted,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
     )
+}
+
+// Every song shown, library ones first, each once, for picking several.
+@Composable
+private fun pickableResults(found: SearchResults, online: DiscoverState): List<Pickable> {
+    val discovered = (online as? DiscoverState.Done)?.found?.songs.orEmpty()
+    return remember(found, discovered) {
+        (found.songs + discovered).distinctBy { it.id }.map { Pickable(it.id, it) }
+    }
 }
