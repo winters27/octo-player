@@ -1,21 +1,16 @@
 package app.winters.octo.lyrics
 
 import app.winters.octo.lyrics.engine.LyricMapper
-import app.winters.octo.subsonic.Cue
-import app.winters.octo.subsonic.CueLine
-import app.winters.octo.subsonic.LyricsLine
 import app.winters.octo.subsonic.LyricsList
-import app.winters.octo.subsonic.StructuredLyrics
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 // The server's word cues, exactly as an Octo server sends them, through to
-// the words the flowing view lights one by one.
-class ServerCuesTest {
+// the kind of lyrics the chooser names them.
+class ServerCueKindsTest {
     // "Café " is bytes 0..5 (é is two); "日本語" is 0..8, three bytes a letter.
     private val answer = """
         {"subsonic-response":{"status":"ok","version":"1.16.1","lyricsList":{"structuredLyrics":[
@@ -61,27 +56,6 @@ class ServerCuesTest {
     }
 
     @Test
-    fun theFlowingViewLightsEachWord() {
-        val lines = LyricMapper.map(parsed()).filterNot { it.isInterlude }
-        val cafe = lines[0]
-        assertFalse(cafe.isLineTimed)
-        assertEquals(listOf("Café", "au", "lait"), cafe.words.map { it.text })
-        assertEquals(listOf(1.0, 1.5, 2.5), cafe.words.map { it.start })
-        assertEquals(listOf(1.5, 2.5, 3.5), cafe.words.map { it.end })
-        assertEquals(listOf(true, true, true), cafe.words.map { it.trailingSpace })
-
-        // No spaces between the words of a Japanese line, so none are drawn.
-        val song = lines[1]
-        assertFalse(song.isLineTimed)
-        assertEquals(listOf("日本語", "の", "歌"), song.words.map { it.text })
-        assertEquals(listOf(false, false, true), song.words.map { it.trailingSpace })
-
-        val plain = lines[2]
-        assertTrue(plain.isLineTimed)
-        assertEquals("Plain line", plain.text)
-    }
-
-    @Test
     fun lineOnlyLyricsStillWork() {
         // The same answer without its cue lines.
         val lineOnly = answer.substringBefore("\"cueLine\"").trimEnd().removeSuffix(",") + "}]}}}"
@@ -92,33 +66,5 @@ class ServerCuesTest {
         val lines = LyricMapper.map(lyrics).filterNot { it.isInterlude }
         assertEquals(listOf("Café au lait", "日本語の歌", "Plain line"), lines.map { it.text })
         assertTrue(lines.all { it.isLineTimed })
-    }
-
-    @Test
-    fun spacesACueLineStartsWithDoNotMoveItsWords() {
-        val line = CueLine(
-            index = 0,
-            start = 0,
-            value = "  Café noir",
-            cue = listOf(
-                Cue(0, 500, "  Café ", 0, 7),
-                Cue(500, 900, "noir", 8, 11),
-            ),
-        )
-        val lyrics = requireNotNull(
-            serverLyrics(
-                listOf(
-                    StructuredLyrics(
-                        synced = true,
-                        line = listOf(LyricsLine(0, "  Café noir")),
-                        cueLine = listOf(line),
-                    ),
-                ),
-                null,
-            ),
-        )
-        val only = lyrics.lines.single()
-        assertEquals("Café noir", only.text)
-        assertEquals(listOf("Café ", "noir"), only.words.map { only.text.substring(it.from, it.to) })
     }
 }

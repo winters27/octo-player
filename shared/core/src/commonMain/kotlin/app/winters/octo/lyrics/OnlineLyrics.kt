@@ -10,7 +10,6 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
-import javax.inject.Inject
 import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.catalog.SongMatchOptions
 import app.winters.octo.catalog.SongQuery
@@ -45,7 +44,8 @@ private val json = Json { ignoreUnknownKeys = true }
 // Looks a song up in the online lyrics library by its title, artist, album
 // and length, which is all that is sent.
 class OnlineLyrics(private val http: OkHttpClient, private val base: HttpUrl) {
-    @Inject constructor(http: OkHttpClient) : this(http, LIBRARY_ADDRESS.toHttpUrl())
+    // The app provides it with this constructor (LyricsModule in its di package).
+    constructor(http: OkHttpClient) : this(http, LIBRARY_ADDRESS.toHttpUrl())
 
     // The song's lyrics, or null when the library does not have them.
     // Throws IOException when the library cannot be reached.

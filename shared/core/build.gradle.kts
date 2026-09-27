@@ -5,6 +5,9 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.kotlin.multiplatform.library)
     alias(libs.plugins.kotlin.serialization)
+    // The lyrics engine keeps its state in Compose snapshot state; the
+    // compiler plugin gives the app the same stability information as before.
+    alias(libs.plugins.compose.compiler)
 }
 
 kotlin {
@@ -26,6 +29,10 @@ kotlin {
         commonMain.dependencies {
             api(project(":subsonic"))
             api(libs.okhttp)
+            // The same Compose release as the app's BOM (1.12.1), which the
+            // desktop's Compose Multiplatform 1.12.1 also uses.
+            api(project.dependencies.platform(libs.compose.bom))
+            api(libs.compose.runtime)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.coroutines.core)
         }

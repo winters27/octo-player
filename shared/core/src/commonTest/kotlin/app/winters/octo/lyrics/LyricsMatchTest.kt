@@ -1,16 +1,12 @@
 package app.winters.octo.lyrics
 
-import app.winters.octo.admin.DownloadRecord
-import app.winters.octo.catalog.OnlineSongEntity
 import app.winters.octo.catalog.SongQuery
-import app.winters.octo.discovery.downloadMatches
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -72,13 +68,6 @@ class LyricsMatchTest {
         // Other versions still never stand in.
         assertNull(found(copy("Movie Star (Remix)", "Jack Harlow"), "Movie Star", "Jack Harlow"))
         assertNull(found(copy("Movie Star (Live)", "Jack Harlow"), "Movie Star (Clean)", "Jack Harlow"))
-    }
-
-    @Test
-    fun aCleanEditIsStillAnotherDownload() {
-        val find = OnlineSongEntity("find:e1", "s", "e1", "Movie Star", "Jack Harlow", "", null, null, 0, null, null, null, 0)
-        assertFalse(downloadMatches(find, DownloadRecord(artist = "Jack Harlow", title = "Movie Star (Clean)")))
-        assertTrue(downloadMatches(find, DownloadRecord(artist = "Jack Harlow", title = "Movie Star (Explicit)")))
     }
 
     @Test
