@@ -14,8 +14,11 @@ android {
         applicationId = "app.winters.octo"
         minSdk = 29
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        // A test build passes its number (-PoctoBuild=N), so each one it
+        // installs counts as newer than the last and reads as 0.2.0.N.
+        val testBuild = (project.findProperty("octoBuild") as String?)?.toIntOrNull()
+        versionCode = testBuild ?: 2
+        versionName = if (testBuild != null) "0.2.0.$testBuild" else "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
