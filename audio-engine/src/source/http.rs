@@ -33,6 +33,8 @@ pub struct HttpOptions {
     pub headers: Vec<(String, String)>,
     /// Set while the reader is waiting on the network.
     pub starved: Option<Arc<AtomicBool>>,
+    /// Set by the owner to make a waiting read give up at once.
+    pub cancel: Option<Arc<AtomicBool>>,
 }
 
 impl Default for HttpOptions {
@@ -44,6 +46,7 @@ impl Default for HttpOptions {
             max_retries: 6,
             headers: Vec::new(),
             starved: None,
+            cancel: None,
         }
     }
 }
@@ -183,7 +186,8 @@ impl Read for HttpSource {
         let shared = self.shared.clone();
         let mut state = shared.lock();
         loop {
-            if state.closed {
+            let cancelled = shared.opts.cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed));
+            if state.closed || cancelled {
                 return Err(io::Error::other("stream closed"));
             }
             let end = state.buf_end();

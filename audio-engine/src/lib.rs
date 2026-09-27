@@ -3,9 +3,11 @@
 uniffi::setup_scaffolding!();
 
 pub mod crossfade;
+pub mod deck;
 pub mod decode;
 pub mod error;
 pub mod fifo;
+pub mod lane;
 #[cfg(feature = "opus")]
 pub mod opus;
 pub mod pace;
