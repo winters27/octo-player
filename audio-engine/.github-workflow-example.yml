@@ -1,0 +1,66 @@
+# An example CI workflow for the audio engine, kept here until the repo's
+# Kotlin Multiplatform layout settles. To use it, copy it to
+# .github/workflows/audio-engine.yml.
+name: audio-engine
+
+on:
+  push:
+    paths: ["audio-engine/**"]
+  pull_request:
+    paths: ["audio-engine/**"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            library: octo_audio.dll
+          - os: macos-latest
+            library: libocto_audio.dylib
+          - os: ubuntu-latest
+            library: libocto_audio.so
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: audio-engine
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Linux build packages
+        if: runner.os == 'Linux'
+        # ALSA headers for cpal; PipeWire and PulseAudio are reached through ALSA.
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+
+      - name: Rust
+        run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: audio-engine
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        # No sound device is needed: the tests use the silent output.
+        run: cargo test
+
+      - name: Release library
+        run: cargo build --release --lib
+
+      - name: Kotlin bindings
+        if: runner.os == 'Linux'
+        # The committed bindings must match the code.
+        run: |
+          sh scripts/gen-kotlin.sh
+          git diff --exit-code -- bindings/kotlin
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: octo-audio-${{ runner.os }}
+          path: audio-engine/target/release/${{ matrix.library }}

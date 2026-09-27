@@ -1,0 +1,5 @@
+*.mp3 binary
+*.opus binary
+*.flac binary
+*.wav binary
+*.sh text eol=lf

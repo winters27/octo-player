@@ -1,0 +1,48 @@
+[package]
+name = "octo-audio"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "The audio engine for the Octo desktop app: decoding, gapless, crossfade, sound shaping and output."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "octo_audio"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+# Writes the Kotlin bindings from the built library.
+name = "uniffi-bindgen"
+path = "tools/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+default = ["opus"]
+# Opus through a pure Rust decoder.
+opus = ["dep:opus-decoder", "dep:symphonia-core"]
+# Only for the binding generator.
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+symphonia = { version = "0.6.1", default-features = false, features = [
+    "flac", "mp3", "aac", "isomp4", "alac", "vorbis", "ogg", "wav", "aiff", "pcm", "opt-simd",
+] }
+opus-decoder = { version = "0.1.1", optional = true }
+# Named directly for the codec registration macro.
+symphonia-core = { version = "0.6.1", optional = true }
+cpal = { version = "0.18.2", features = ["realtime"] }
+rubato = "5.0.0"
+rtrb = "0.4.0"
+ureq = { version = "3.4.2", default-features = false, features = ["rustls", "platform-verifier"] }
+crossbeam-channel = "0.5.17"
+thiserror = "2.0.21"
+log = "0.4.34"
+uniffi = "0.32.2"
+
+[dev-dependencies]
+flacenc = "0.5.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
