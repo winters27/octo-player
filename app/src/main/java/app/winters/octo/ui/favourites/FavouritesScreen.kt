@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -48,9 +47,9 @@ import app.winters.octo.ui.common.ArtistRow
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.Refreshable
-import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.Segmented
 import app.winters.octo.ui.common.SortButton
+import app.winters.octo.ui.common.TitleWithSort
 import app.winters.octo.ui.common.TopOnNewOrder
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
@@ -100,9 +99,8 @@ fun FavouritesScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: Favourite
     Refreshable {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Spacer(Modifier.height(DetailTopGap))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ScreenTitle("Favourites", Modifier.weight(1f))
-                order?.let { SortButton(SortList.Favourites, it, vm::setOrder, Modifier.padding(end = 10.dp, top = 8.dp, bottom = 16.dp)) }
+            TitleWithSort("Favourites") {
+                order?.let { SortButton(SortList.Favourites, it, vm::setOrder) }
             }
             Segmented(Segments, segment, { segment = it }, Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp))
             if (segment == 0) FavouriteAlbums(albums, onOpen) else FavouriteArtists(artists, onOpen)

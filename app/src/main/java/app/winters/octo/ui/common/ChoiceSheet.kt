@@ -11,7 +11,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
@@ -168,36 +167,6 @@ private fun Choices(request: ChoiceRequest, close: () -> Unit) {
             request.selected,
             onPick = { index ->
                 request.onPick(index)
-                close()
-            },
-            modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
-        )
-    }
-}
-
-// The direction on top, then the options. Flipping the direction reorders
-// the list behind at once and keeps this open; picking an option closes it.
-@Composable
-private fun SortChoices(request: SortRequest, close: () -> Unit) {
-    var descending by remember(request) { mutableStateOf(request.order.descending) }
-    Column(Modifier.width(248.dp).padding(6.dp)) {
-        Segmented(
-            options = listOf("Ascending", "Descending"),
-            selected = if (descending) 1 else 0,
-            onSelect = { index ->
-                if ((index == 1) != descending) {
-                    descending = index == 1
-                    request.onChange(request.order.copy(descending = descending))
-                }
-            },
-            modifier = Modifier.padding(bottom = 6.dp),
-        )
-        GlassMenuOptions(
-            request.options.map { Choice(it.label) },
-            selected = request.options.indexOf(request.order.by),
-            onPick = { index ->
-                val option = request.options[index]
-                if (option != request.order.by) request.onChange(request.order.picking(option))
                 close()
             },
             modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
