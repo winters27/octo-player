@@ -858,8 +858,10 @@ impl Player {
     fn on_transition(&mut self, key: u64, transition: Transition, rate: u64) {
         let previous = self.heard;
         match transition {
-            Transition::Seek => return,
-            Transition::Start => {
+            Transition::Seek if previous == Some(key) => return,
+            // A seek before the song was first heard (its start was never
+            // heard, or never mixed) is where it starts being heard.
+            Transition::Start | Transition::Seek => {
                 if let Some(p) = previous {
                     self.emit_ended(p, self.end_reason);
                 }

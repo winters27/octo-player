@@ -80,10 +80,16 @@ impl Timeline {
     pub fn at(&self, frame: Option<f64>) -> Option<Moment> {
         let mut inner = self.lock();
         if let Some((from, moment)) = inner.hold {
-            match frame {
-                Some(f) if f >= from as f64 => inner.hold = None,
-                _ => return Some(moment),
+            // Released once the new sound itself is heard: reaching the
+            // cut is not enough while the song is still opening or seeking,
+            // or the old song's last marker would answer for a moment.
+            let heard_new = frame.is_some_and(|f| {
+                f >= from as f64 && inner.markers.iter().any(|m| m.frame >= from && m.frame as f64 <= f)
+            });
+            if !heard_new {
+                return Some(moment);
             }
+            inner.hold = None;
         }
         let frame = frame?;
         let marker = *inner.markers.iter().rev().find(|m| (m.frame as f64) <= frame)?;
@@ -139,5 +145,17 @@ mod tests {
         assert_eq!(t.at(Some(5_000.0)).unwrap().secs, 42.0);
         t.push(&[marker(10_000, 1, 42.0)]);
         assert!((t.at(Some(10_480.0)).unwrap().secs - 42.01).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_hold_outlasts_the_cut_until_new_sound_is_heard() {
+        let t = Timeline::new();
+        t.push(&[marker(0, 1, 0.0)]);
+        t.hold(10_000, Moment { key: 1, secs: 98.5 });
+        // The cut is reached, but the song is still seeking: no new sound.
+        assert_eq!(t.at(Some(10_200.0)).unwrap().secs, 98.5);
+        t.push(&[marker(10_200, 1, 98.5)]);
+        assert_eq!(t.at(Some(10_100.0)).unwrap().secs, 98.5);
+        assert!((t.at(Some(10_680.0)).unwrap().secs - 98.51).abs() < 1e-9);
     }
 }

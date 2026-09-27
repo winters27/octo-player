@@ -235,6 +235,30 @@ fn an_album_in_order_stays_gapless_with_crossfade_on() {
 }
 
 #[test]
+fn a_seek_before_the_song_is_heard_still_starts_it() {
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 3, 0.3));
+    write_wav(&b, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize, 0.3));
+    let (engine, events, _) = engine(4.0);
+    engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
+    // Straight after the load, before anything is heard.
+    engine.seek(2_500).unwrap();
+    events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
+    let all = events.all();
+    let names: Vec<String> = all
+        .iter()
+        .filter_map(|e| match e {
+            EngineEvent::TrackStarted { item_id, .. } => Some(format!("start {item_id}")),
+            EngineEvent::TrackEnded { item_id, reason } => Some(format!("end {item_id} {reason:?}")),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(names, ["start a", "end a Finished", "start b", "end b Finished"], "{all:?}");
+    engine.shutdown();
+}
+
+#[test]
 fn a_missing_song_is_reported_and_skipped() {
     let dir = temp_dir();
     let b = dir.join("b.wav");
