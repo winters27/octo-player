@@ -7,6 +7,24 @@ import androidx.media3.common.util.UnstableApi
 import javax.inject.Inject
 import javax.inject.Singleton
 
+// A player whose queue takes the edits the app offers: the phone's own
+// player, or the one standing in while music plays on another device.
+interface EditableQueue : Player {
+    // Songs right after the current one, in the play order too.
+    fun addNext(items: List<MediaItem>)
+
+    // Sets the play order for shuffle, as saved or as it was before an edit.
+    fun setPlayOrder(order: IntArray)
+
+    // Puts songs back exactly where they were, for an undo. `runs` are
+    // queue positions and the songs that go there, lowest first; `order`
+    // is the play order once they are all back.
+    fun putBack(runs: List<Pair<Int, List<MediaItem>>>, order: IntArray)
+
+    // Takes out runs of songs, last run first.
+    fun removeRuns(runs: List<IntRange>)
+}
+
 // A queue edit that can be taken back: the queue as it was, its play order
 // under shuffle, and the entries left once the edit was made.
 class QueueUndo internal constructor(
@@ -57,9 +75,9 @@ fun queuePositionsOf(queueTrackIds: List<String>, songs: Set<String>): List<Int>
 @OptIn(UnstableApi::class)
 @Singleton
 class QueueEditor @Inject constructor() {
-    private var player: OctoPlayer? = null
+    private var player: EditableQueue? = null
 
-    fun attach(player: OctoPlayer) {
+    fun attach(player: EditableQueue) {
         this.player = player
     }
 
@@ -108,7 +126,7 @@ class QueueEditor @Inject constructor() {
         return true
     }
 
-    private fun edit(pick: OctoPlayer.(List<String>) -> List<Int>): QueueUndo? {
+    private fun edit(pick: EditableQueue.(List<String>) -> List<Int>): QueueUndo? {
         val player = player ?: return null
         val keys = keysOf(player)
         val positions = player.pick(keys)

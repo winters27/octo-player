@@ -178,4 +178,17 @@ class UpnpTest {
         assertFalse(hasAction(scpd, "Record"))
         assertFalse(hasAction("junk", "Play"))
     }
+
+    @Test
+    fun theLoudestVolumeComesFromTheRenderersList() {
+        val scpd = """<scpd><serviceStateTable>
+            <stateVariable><name>Mute</name><dataType>boolean</dataType></stateVariable>
+            <stateVariable><name>Volume</name><dataType>ui2</dataType>
+              <allowedValueRange><minimum>0</minimum><maximum>60</maximum><step>1</step></allowedValueRange></stateVariable>
+            </serviceStateTable></scpd>"""
+        assertEquals(60, volumeMaximum(scpd))
+        // Not said, or not readable: out of 100.
+        assertEquals(100, volumeMaximum("<scpd/>"))
+        assertEquals(100, volumeMaximum(null))
+    }
 }

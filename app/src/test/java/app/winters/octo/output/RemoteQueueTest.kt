@@ -120,4 +120,15 @@ class RemoteQueueTest {
         assertEquals(true, playsOnReturn(wasPlaying = true, chosen = false, keepPlaying = true))
         assertEquals(false, playsOnReturn(wasPlaying = false, chosen = false, keepPlaying = true))
     }
+
+    @Test
+    fun anUndoPutsSongsBackExactlyWithTheirOrder() {
+        val remote = RemoteQueue(QueueState(listOf("a", "c", "e"), index = 1, positionMs = 0, playing = true, shuffle = true, order = listOf(2, 0, 1)))
+        remote.insertAt(1, listOf("b"))
+        remote.insertAt(3, listOf("d"))
+        remote.setOrder(listOf(4, 0, 1, 2, 3))
+        assertEquals(listOf("a", "b", "c", "d", "e"), remote.items)
+        assertEquals("c", remote.current)
+        assertEquals(listOf(4, 0, 1, 2, 3), remote.order)
+    }
 }

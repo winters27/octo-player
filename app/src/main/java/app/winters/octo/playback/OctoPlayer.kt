@@ -72,7 +72,7 @@ private const val DUCKED_VOLUME = 0.2f
 // deck that is playing, and hands over to the other deck for a crossfade
 // without anything outside noticing. It also owns audio focus.
 @OptIn(UnstableApi::class)
-class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : ForwardingSimpleBasePlayer(initial), SleepTarget {
+class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : ForwardingSimpleBasePlayer(initial), SleepTarget, EditableQueue {
     var deck: ExoPlayer = initial
         private set
 
@@ -206,7 +206,7 @@ class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : Forwa
     // to queue", since both add at the end while the last song is on.
     private var playingNext = false
 
-    fun addNext(items: List<MediaItem>) {
+    override fun addNext(items: List<MediaItem>) {
         if (items.isEmpty()) return
         playingNext = true
         try {
@@ -217,21 +217,21 @@ class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : Forwa
     }
 
     // Sets the play order for shuffle, as saved or as it was before an edit.
-    internal fun setPlayOrder(order: IntArray) {
+    override fun setPlayOrder(order: IntArray) {
         if (order.size == deck.mediaItemCount) deck.setShuffleOrder(QueueShuffleOrder(order))
     }
 
     // Puts songs back where they were, exactly, entry ids and all, for an
     // undo. `runs` are queue positions and the songs that go there, lowest
     // first; `order` is the play order once they are all back.
-    internal fun putBack(runs: List<Pair<Int, List<MediaItem>>>, order: IntArray) {
+    override fun putBack(runs: List<Pair<Int, List<MediaItem>>>, order: IntArray) {
         fader.interrupt()
         runs.forEach { (at, items) -> deck.addMediaItems(at, items) }
         setPlayOrder(order)
     }
 
     // Takes out runs of songs, last run first. The rest keep their play order.
-    internal fun removeRuns(runs: List<IntRange>) {
+    override fun removeRuns(runs: List<IntRange>) {
         fader.interrupt()
         runs.forEach { deck.removeMediaItems(it.first, it.last + 1) }
     }

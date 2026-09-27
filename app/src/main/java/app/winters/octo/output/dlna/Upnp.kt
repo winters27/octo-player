@@ -70,6 +70,15 @@ fun hasAction(actionsXml: String, action: String): Boolean {
     return doc.documentElement?.descendants("action")?.any { it.child("name")?.text() == action } == true
 }
 
+// The loudest a renderer's volume goes, from its RenderingControl list of
+// actions and values; 100 when it does not say.
+fun volumeMaximum(actionsXml: String?): Int {
+    val doc = actionsXml?.let(::parseXml) ?: return 100
+    val volume = doc.documentElement?.descendants("stateVariable")?.firstOrNull { it.child("name")?.text() == "Volume" }
+    val max = volume?.descendants("maximum")?.firstOrNull()?.text()?.toIntOrNull()
+    return max?.takeIf { it > 0 } ?: 100
+}
+
 // A request to a renderer's service, as the body of an HTTP POST.
 fun soapRequest(serviceType: String, action: String, args: List<Pair<String, String>>): String = buildString {
     append("<?xml version=\"1.0\" encoding=\"utf-8\"?>")
@@ -139,7 +148,7 @@ fun xmlEscape(text: String): String = buildString(text.length) {
             '"' -> append("&quot;")
             '\'' -> append("&apos;")
             '\t', '\n', '\r' -> append(c)
-            else -> if (c >= ' ' && c != '￾' && c != '￿') append(c)
+            else -> if (c >= ' ' && c.code != 0xFFFE && c.code != 0xFFFF) append(c)
         }
     }
 }
@@ -150,6 +159,9 @@ internal fun resolveUrl(base: String, relative: String): String = try {
     relative.trim()
 }
 
+// Some devices start their text with this invisible mark.
+private val BYTE_ORDER_MARK = Char(0xFEFF)
+
 // Parsed without fetching anything the text points at, since it comes from
 // devices on the network.
 internal fun parseXml(xml: String): Document? = try {
@@ -159,7 +171,7 @@ internal fun parseXml(xml: String): Document? = try {
     runCatching { factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
     runCatching { factory.setFeature("http://xml.org/sax/features/external-general-entities", false) }
     runCatching { factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
-    factory.newDocumentBuilder().parse(InputSource(StringReader(xml.trim().removePrefix("﻿"))))
+    factory.newDocumentBuilder().parse(InputSource(StringReader(xml.trim().trimStart(BYTE_ORDER_MARK))))
 } catch (e: Exception) {
     null
 }

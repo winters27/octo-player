@@ -110,6 +110,16 @@ class RemoteQueue<T>(state: QueueState<T>, private val isAutoplay: (T) -> Boolea
         return place
     }
 
+    // Songs put back exactly at `at`, as for an undo; the play order is
+    // set right afterwards with setOrder.
+    fun insertAt(at: Int, items: List<T>) {
+        if (items.isEmpty()) return
+        val place = at.coerceIn(0, songs.size)
+        playOrder = insertIntoShuffle(playOrder.toIntArray(), place, items.size, playOrder.size).toList()
+        songs.addAll(place, items)
+        if (songs.size > items.size && index >= place) index += items.size
+    }
+
     // Takes out queue positions `from` until `to`. When the current song
     // goes, the next one still there in play order is on, as on the phone.
     fun remove(from: Int, to: Int): Removal {

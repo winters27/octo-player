@@ -75,6 +75,12 @@ class ConnectionSecurity @Inject constructor(@ApplicationContext context: Contex
         rejected.clear()
     }
 
+    // Whether another device on the network could fetch from the server by
+    // itself: not when the server needs extra headers, a client certificate,
+    // or a certificate only this phone was told to trust.
+    fun reachableByOtherDevices(): Boolean =
+        current?.let { it.headers.isEmpty() && it.clientCert == null && it.pins.isEmpty() } ?: true
+
     // The certificate a host last showed that was not trusted, taken once.
     fun takeRejected(host: String): X509Certificate? = rejected.remove(pinKey(host))
 
