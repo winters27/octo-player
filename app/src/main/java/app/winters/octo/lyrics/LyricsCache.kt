@@ -26,7 +26,16 @@ data class CachedLyrics(
     // Which online lookup gave this answer; older ones are asked again when
     // they found no synced lyrics.
     val lookupVersion: Int = 0,
+    // The listener's pick these lyrics came from (see LyricsChoices), or
+    // null when the usual order found them.
+    val pick: String? = null,
 ) {
+    // Whether this answer stands for a song whose pick is `current`: picked
+    // lyrics stand while they are the ones picked; the usual answer stands
+    // only while nothing is picked, and as long as `stillGood` says.
+    fun standsFor(current: String?, now: Long, onlineAllowed: Boolean): Boolean =
+        if (current != null) pick == current && lyrics != null else pick == null && stillGood(now, onlineAllowed)
+
     // Whether the answer still stands. "None" lasts a day. An answer found
     // without asking online (it was off, or only plain lyrics were found)
     // is asked again once online lookups are allowed, in case synced ones

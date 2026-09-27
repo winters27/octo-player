@@ -62,4 +62,13 @@ class LyricsTimingTest {
         assertEquals("1.75 s earlier", timingLabel(-1_750))
         assertEquals("10 s later", timingLabel(10_000))
     }
+
+    @Test
+    fun theTimingControlShowsASignedOffset() {
+        assertEquals("0 s", signedTiming(0))
+        assertEquals("+0.75 s", signedTiming(750))
+        assertEquals("-0.25 s", signedTiming(-250))
+        assertEquals("+1 s", signedTiming(1_000))
+        assertEquals("-10 s", signedTiming(-TIMING_LIMIT_MS))
+    }
 }

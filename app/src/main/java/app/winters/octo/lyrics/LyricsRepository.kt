@@ -20,6 +20,8 @@ import app.winters.octo.subsonic.SubsonicException
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -72,9 +74,14 @@ suspend fun searchInOrder(steps: List<LyricsStep>): LyricsSearch {
     return LyricsSearch(plain, complete, askedOnline)
 }
 
-// Finds a song's lyrics: from the server, then the song file, then an .lrc
-// file beside it, then (when allowed) the online library. Answers are kept
-// per song, in memory and in the cache folder.
+// Every set of lyrics found for a song to choose from, the sources that
+// could not be reached, and whether the online library may be asked.
+data class CandidateSearch(val found: List<LyricsCandidate>, val missed: Set<LyricsSource>, val onlineAllowed: Boolean)
+
+// Finds a song's lyrics: the ones the listener picked, if any, or else from
+// the server, then the song file, then an .lrc file beside it, then (when
+// allowed) the online library. Answers are kept per song, in memory and in
+// the cache folder.
 @Singleton
 class LyricsRepository @Inject constructor(
     @ApplicationContext context: Context,
@@ -86,18 +93,26 @@ class LyricsRepository @Inject constructor(
     private val files: LyricsFiles,
     private val online: OnlineLyrics,
     private val settings: PlayerSettings,
+    private val choices: LyricsChoices,
 ) {
     private val cache = LyricsCache(File(context.cacheDir, "lyrics"))
     private val recent = object : LinkedHashMap<String, CachedLyrics>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedLyrics>) = size > 32
     }
 
-    // The song's lyrics, or null when none were found.
+    // The song's lyrics, or null when none were found or the listener hid
+    // them. Lyrics the listener picked come first, while their source still
+    // has them; when it does not (the file is gone, or the library cannot be
+    // reached), the usual order stands in and the pick is tried again next
+    // time.
     suspend fun lyricsFor(song: LyricsSong): Lyrics? {
+        val choice = choices.current(song.id)
+        if (choice.hidden) return null
+        val picked = choice.pick?.encoded()
         val onlineAllowed = settings.prefs.first().lyricsOnline
         val now = System.currentTimeMillis()
         val known = synchronized(recent) { recent[song.id] } ?: withContext(Dispatchers.IO) { cache.read(song.id) }
-        if (known != null && known.stillGood(now, onlineAllowed)) {
+        if (known != null && known.standsFor(picked, now, onlineAllowed)) {
             synchronized(recent) { recent[song.id] = known }
             return known.lyrics
         }
@@ -105,6 +120,19 @@ class LyricsRepository @Inject constructor(
         val facts = described(song)
         val copies = if (isFind(song.id)) emptyList() else sources.copies(song.id)
         val phone = copies.firstOrNull { it.sourceId == DEVICE && !it.uri.isNullOrEmpty() }?.uri?.toUri()
+        choice.pick?.let { pick ->
+            val found = try {
+                fetchPick(pick, facts, copies, phone, onlineAllowed)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+            if (found != null && !found.isEmpty) {
+                keep(song.id, CachedLyrics(now, found, askedOnline = true, lookupVersion = ONLINE_LOOKUP_VERSION, pick = picked))
+                return found
+            }
+        }
         val steps = buildList {
             add(LyricsStep(LyricsSource.Server) { fromServer(facts, copies) })
             if (phone != null) {
@@ -122,6 +150,88 @@ class LyricsRepository @Inject constructor(
         if (search.complete || search.lyrics != null) synchronized(recent) { recent[song.id] = entry }
         if (search.complete) withContext(Dispatchers.IO) { cache.write(song.id, entry) }
         return search.lyrics
+    }
+
+    // Uses these lyrics for the song from now on. They are kept as the
+    // song's answer before the pick is saved, so the lyrics view, which
+    // follows the pick, finds them at once.
+    suspend fun choose(songId: String, candidate: LyricsCandidate) {
+        val entry = CachedLyrics(
+            System.currentTimeMillis(),
+            candidate.lyrics,
+            askedOnline = true,
+            lookupVersion = ONLINE_LOOKUP_VERSION,
+            pick = candidate.pick.encoded(),
+        )
+        keep(songId, entry)
+        choices.pick(songId, candidate.pick)
+    }
+
+    // Every set of lyrics that can be found for the song, for the listener
+    // to choose from: the server's, the song file's, the .lrc file's, and
+    // (when allowed) the online library's match and the copies its search
+    // holds with the same title and artist. All are asked at once. A source
+    // that cannot be reached is named in the answer and left out.
+    suspend fun candidatesFor(song: LyricsSong): CandidateSearch = coroutineScope {
+        val onlineAllowed = settings.prefs.first().lyricsOnline
+        val facts = described(song)
+        val copies = if (isFind(song.id)) emptyList() else sources.copies(song.id)
+        val phone = copies.firstOrNull { it.sourceId == DEVICE && !it.uri.isNullOrEmpty() }?.uri?.toUri()
+        val missed = mutableSetOf<LyricsSource>()
+        suspend fun <T> attempt(source: LyricsSource, fetch: suspend () -> T?): T? = try {
+            fetch()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            synchronized(missed) { missed += source }
+            null
+        }
+        val askOnline = onlineAllowed && facts.title.isNotBlank() && facts.artist.isNotBlank()
+        val server = async { attempt(LyricsSource.Server) { fromServer(facts, copies) } }
+        val songFile = async { phone?.let { attempt(LyricsSource.SongFile) { fromSongFile(it) } } }
+        val lyricsFile = async { phone?.let { attempt(LyricsSource.LyricsFile) { fromLyricsFile(it) } } }
+        val match = async {
+            if (askOnline) attempt(LyricsSource.Online) { online.exact(facts.title, facts.artist, facts.album, facts.durationMs) } else null
+        }
+        val search = async {
+            if (askOnline) attempt(LyricsSource.Online) { online.copiesOf(facts.title, facts.artist, facts.album, facts.durationMs) } else null
+        }
+        val found = buildList {
+            server.await()?.let { add(LyricsCandidate(LyricsPick.Own(LyricsSource.Server), CandidateOrigin.Server, it)) }
+            songFile.await()?.let { add(LyricsCandidate(LyricsPick.Own(LyricsSource.SongFile), CandidateOrigin.SongFile, it)) }
+            lyricsFile.await()?.let { add(LyricsCandidate(LyricsPick.Own(LyricsSource.LyricsFile), CandidateOrigin.LyricsFile, it)) }
+            match.await()?.let { add(it.asCandidate(CandidateOrigin.OnlineMatch)) }
+            search.await().orEmpty().forEach { add(it.asCandidate(CandidateOrigin.OnlineSearch)) }
+        }
+        CandidateSearch(found, synchronized(missed) { missed.toSet() }, onlineAllowed)
+    }
+
+    // What the online library finds for words the listener typed. Throws
+    // IOException when it cannot be reached.
+    suspend fun searchOnline(query: String): List<LyricsCandidate> =
+        online.search(query).map { it.asCandidate(CandidateOrigin.OnlineSearch) }
+
+    // The lyrics a pick names, fetched from its source again.
+    private suspend fun fetchPick(
+        pick: LyricsPick,
+        facts: LyricsSong,
+        copies: List<SourceTrackEntity>,
+        phone: Uri?,
+        onlineAllowed: Boolean,
+    ): Lyrics? = when (pick) {
+        is LyricsPick.Online -> if (onlineAllowed) online.byId(pick.id) else null
+        is LyricsPick.Own -> when (pick.source) {
+            LyricsSource.Server -> fromServer(facts, copies)
+            LyricsSource.SongFile -> phone?.let { fromSongFile(it) }
+            LyricsSource.LyricsFile -> phone?.let { fromLyricsFile(it) }
+            LyricsSource.Online -> null
+        }
+    }
+
+    // Keeps an answer in memory and in the cache folder.
+    private suspend fun keep(songId: String, entry: CachedLyrics) {
+        synchronized(recent) { recent[songId] = entry }
+        withContext(Dispatchers.IO) { cache.write(songId, entry) }
     }
 
     private suspend fun fromSongFile(file: Uri): Lyrics? = withContext(Dispatchers.IO) {
