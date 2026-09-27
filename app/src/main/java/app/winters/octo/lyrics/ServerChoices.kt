@@ -56,8 +56,9 @@ fun serverLyricsCall(extensions: Set<String>): ServerLyricsCall {
 // The sources a song's lyrics are looked for in, in order. When the song is
 // on a server that keeps lyrics choices (`serverDecides`), its answer is
 // final and the online library is only asked when the server could not be
-// reached (see the rules above). A source that is null is not there for
-// this song.
+// reached (see the rules above). Such a server looks lyrics up itself and
+// answers "none" when its few seconds run out, so its "none" is unsure. A
+// source that is null is not there for this song.
 fun lyricsSteps(
     server: suspend () -> Lyrics?,
     serverDecides: Boolean,
@@ -67,7 +68,7 @@ fun lyricsSteps(
 ): List<LyricsStep> {
     var serverAnswered = false
     return buildList {
-        add(LyricsStep(LyricsSource.Server, final = serverDecides) { server().also { serverAnswered = true } })
+        add(LyricsStep(LyricsSource.Server, final = serverDecides, unsure = serverDecides) { server().also { serverAnswered = true } })
         songFile?.let { add(LyricsStep(LyricsSource.SongFile, fetch = it)) }
         lyricsFile?.let { add(LyricsStep(LyricsSource.LyricsFile, fetch = it)) }
         online?.let { fetch ->

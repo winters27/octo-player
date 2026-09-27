@@ -234,6 +234,12 @@ fun LyricsPane(
                 }
             }
             LyricsState.None -> Quiet("No lyrics for this song")
+            // Not "no lyrics": the lookup could not finish. It is tried again
+            // on its own when the network comes back, or here with a tap.
+            is LyricsState.Failed -> {
+                val retry: LyricsRetryViewModel = hiltViewModel()
+                Quiet("Couldn't load lyrics, tap to retry", onTap = { retry.retry(shown.trackId) })
+            }
             LyricsState.HiddenForSong -> Quiet("Lyrics are hidden for this song")
             LyricsState.Loading, LyricsState.Hidden -> Box(Modifier.fillMaxSize())
         }
@@ -251,9 +257,14 @@ private fun KeepScreenOn() {
 }
 
 @Composable
-private fun Quiet(text: String) {
+private fun Quiet(text: String, onTap: (() -> Unit)? = null) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text, style = OctoType.body, color = OctoColors.TextMuted, textAlign = TextAlign.Center)
+        val tappable = if (onTap == null) {
+            Modifier
+        } else {
+            Modifier.clickable(interactionSource = null, indication = null, role = Role.Button, onClick = onTap).padding(24.dp)
+        }
+        Text(text, tappable, style = OctoType.body, color = OctoColors.TextMuted, textAlign = TextAlign.Center)
     }
 }
 

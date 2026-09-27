@@ -26,6 +26,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -57,36 +59,59 @@ data class LyricsSong(
 )
 
 // One place lyrics can come from, tried in order. What a `final` source
-// finds is used even when it is plain: it has already chosen.
-class LyricsStep(val source: LyricsSource, val final: Boolean = false, val fetch: suspend () -> Lyrics?)
+// finds is used even when it is plain: it has already chosen. An `unsure`
+// source may answer "none" when it only ran out of time.
+class LyricsStep(
+    val source: LyricsSource,
+    val final: Boolean = false,
+    val unsure: Boolean = false,
+    val fetch: suspend () -> Lyrics?,
+)
 
 // What a search found, and whether every source answered. An answer with a
 // source that could not be reached is not saved, so it is asked again.
-data class LyricsSearch(val lyrics: Lyrics?, val complete: Boolean, val askedOnline: Boolean)
+// `unsure` is set when a source that may have run out of time said "none";
+// `pick` names the listener's pick the lyrics came from.
+data class LyricsSearch(
+    val lyrics: Lyrics?,
+    val complete: Boolean,
+    val askedOnline: Boolean,
+    val unsure: Boolean = false,
+    val pick: String? = null,
+)
 
 // Asks each source in order. The first synced lyrics, or any a final
 // source finds, win at once; plain lyrics are kept while the rest are
-// asked for synced ones, and win if none have them. A source that fails is
-// skipped.
+// asked for synced ones, and win if none have them. A source that fails,
+// or is cut off by a time limit of its own, is skipped, and the search is
+// then not complete.
 suspend fun searchInOrder(steps: List<LyricsStep>): LyricsSearch {
     var plain: Lyrics? = null
     var complete = true
     var askedOnline = false
+    var unsure = false
     for (step in steps) {
         if (step.source == LyricsSource.Online) askedOnline = true
         val found = try {
             step.fetch()
         } catch (e: CancellationException) {
-            throw e
+            // The whole search was stopped: that goes on. Otherwise the
+            // source ran out of its own time.
+            currentCoroutineContext().ensureActive()
+            complete = false
+            null
         } catch (_: Exception) {
             complete = false
             null
         }
-        if (found == null || found.isEmpty) continue
+        if (found == null || found.isEmpty) {
+            if (step.unsure) unsure = true
+            continue
+        }
         if (found.synced || step.final) return LyricsSearch(found, complete, askedOnline)
         if (plain == null) plain = found
     }
-    return LyricsSearch(plain, complete, askedOnline)
+    return LyricsSearch(plain, complete, askedOnline, unsure)
 }
 
 // Every set of lyrics found for a song to choose from, the sources that
@@ -122,10 +147,7 @@ class LyricsRepository @Inject constructor(
     private val settings: PlayerSettings,
     private val choices: LyricsChoices,
 ) {
-    private val cache = LyricsCache(File(context.cacheDir, "lyrics"))
-    private val recent = object : LinkedHashMap<String, CachedLyrics>(32, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedLyrics>) = size > 32
-    }
+    private val answers = LyricsAnswers(LyricsCache(File(context.cacheDir, "lyrics")))
 
     // The copy the server has pinned for a song, by song, as far as this
     // phone has heard, so its lyrics can say where they are from.
@@ -140,42 +162,48 @@ class LyricsRepository @Inject constructor(
 
     fun revisionOf(songId: String): Flow<Int> = revisions.map { it[songId] ?: 0 }.distinctUntilChanged()
 
-    // The song's lyrics, or null when none were found or the listener hid
-    // them. Lyrics the listener picked come first, while their source still
-    // has them; when it does not (the file is gone, or the library cannot be
-    // reached), the usual order stands in and the pick is tried again next
-    // time.
-    suspend fun lyricsFor(song: LyricsSong): Lyrics? {
-        val choice = choices.current(song.id)
-        if (choice.hidden) return null
-        val picked = choice.pick?.encoded()
-        val onlineAllowed = settings.prefs.first().lyricsOnline
-        val now = System.currentTimeMillis()
-        val known = synchronized(recent) { recent[song.id] } ?: withContext(Dispatchers.IO) { cache.read(song.id) }
-        if (known != null && known.standsFor(picked, now, onlineAllowed)) {
-            synchronized(recent) { recent[song.id] = known }
-            return known.lyrics
+    // The song's lyrics, None when every source answered without any (or
+    // the listener hid them), or Failed when the lookup could not finish.
+    // Only a finished lookup is saved (see LyricsAnswers). Lyrics the
+    // listener picked come first, while their source still has them; when
+    // it does not (the file is gone, or the library cannot be reached), the
+    // usual order stands in and the pick is tried again next time.
+    // `resumed` and `away` are for the lyrics view coming back on screen and
+    // being off it (see LyricsAnswers.answer).
+    suspend fun answerFor(song: LyricsSong, resumed: Boolean = false, away: () -> Boolean = { false }): LyricsAnswer {
+        val (choice, onlineAllowed) = try {
+            choices.current(song.id) to settings.prefs.first().lyricsOnline
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return LyricsAnswer.Failed
         }
+        if (choice.hidden) return LyricsAnswer.None
+        val picked = choice.pick?.encoded()
+        return answers.answer(song.id, picked, onlineAllowed, resumed, away) { search(song, choice.pick, picked, onlineAllowed) }
+    }
 
+    // Asks the sources for the song's lyrics: the listener's pick first,
+    // then the usual order.
+    private suspend fun search(song: LyricsSong, pick: LyricsPick?, picked: String?, onlineAllowed: Boolean): LyricsSearch {
         val facts = described(song)
         val copies = if (isFind(song.id)) emptyList() else sources.copies(song.id)
         val phone = copies.firstOrNull { it.sourceId == DEVICE && !it.uri.isNullOrEmpty() }?.uri?.toUri()
-        choice.pick?.let { pick ->
+        pick?.let {
             val found = try {
-                fetchPick(pick, facts, copies, phone, onlineAllowed)
+                fetchPick(it, facts, copies, phone, onlineAllowed)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
                 null
             }
             if (found != null && !found.isEmpty) {
-                keep(song.id, CachedLyrics(now, found, askedOnline = true, lookupVersion = ONLINE_LOOKUP_VERSION, pick = picked))
-                return found
+                return LyricsSearch(found, complete = true, askedOnline = true, pick = picked)
             }
         }
         val serverDecides = serverSong(song.id, copies)?.let { keepsChoices(it.session) } == true
         val steps = lyricsSteps(
-            server = { fromServer(facts, copies) },
+            server = { fromServer(facts, copies, forLookup = true) },
             serverDecides = serverDecides,
             songFile = phone?.let { file -> suspend { fromSongFile(file) } },
             lyricsFile = phone?.let { file -> suspend { fromLyricsFile(file) } },
@@ -185,14 +213,11 @@ class LyricsRepository @Inject constructor(
                 null
             },
         )
-        val search = searchInOrder(steps)
-        val entry = CachedLyrics(now, search.lyrics, search.askedOnline, ONLINE_LOOKUP_VERSION)
-        // A "none" from a search that could not reach a source is not kept
-        // at all, so opening the lyrics again tries again.
-        if (search.complete || search.lyrics != null) synchronized(recent) { recent[song.id] = entry }
-        if (search.complete) withContext(Dispatchers.IO) { cache.write(song.id, entry) }
-        return search.lyrics
+        return searchInOrder(steps)
     }
+
+    // Asks for the song's lyrics again, for the lyrics view's "tap to retry".
+    fun retry(songId: String) = refresh(songId)
 
     // Uses these lyrics for the song from now on, on this phone. They are
     // kept as the song's answer before the pick is saved, so the lyrics
@@ -313,7 +338,7 @@ class LyricsRepository @Inject constructor(
         if (listed != null) {
             notePin(songId, choice)
             // Changed from another app or device since this phone saved it.
-            val saved = synchronized(recent) { recent[songId] } ?: withContext(Dispatchers.IO) { cache.read(songId) }
+            val saved = answers.saved(songId)
             if (servedStale(saved, choice)) {
                 forget(songId)
                 refresh(songId)
@@ -414,16 +439,10 @@ class LyricsRepository @Inject constructor(
     }
 
     // Keeps an answer in memory and in the cache folder.
-    private suspend fun keep(songId: String, entry: CachedLyrics) {
-        synchronized(recent) { recent[songId] = entry }
-        withContext(Dispatchers.IO) { cache.write(songId, entry) }
-    }
+    private suspend fun keep(songId: String, entry: CachedLyrics) = answers.keep(songId, entry)
 
     // Forgets a song's answer, in memory and in the cache folder.
-    private suspend fun forget(songId: String) {
-        synchronized(recent) { recent.remove(songId) }
-        withContext(Dispatchers.IO) { cache.drop(songId) }
-    }
+    private suspend fun forget(songId: String) = answers.forget(songId)
 
     // Tells whoever shows the song's lyrics to fetch them again.
     private fun refresh(songId: String) {
@@ -480,9 +499,11 @@ class LyricsRepository @Inject constructor(
         )
     }
 
-    // The song on the signed-in server, or null when it is not there.
-    private suspend fun serverSong(songId: String, copies: List<SourceTrackEntity>): ServerSong? {
-        val session = session() ?: return null
+    // The song on the signed-in server, or null when it is not there. For
+    // a lookup, a sign-in that has not come back yet throws IOException, so
+    // it is not taken for "not on the server".
+    private suspend fun serverSong(songId: String, copies: List<SourceTrackEntity>, forLookup: Boolean = false): ServerSong? {
+        val session = session(forLookup) ?: return null
         val sourceId = serverSourceId(session.client.baseUrl)
         val copy = copies.firstOrNull { it.sourceId == sourceId }
         val serverId = if (isFind(songId)) songId.removePrefix(FIND_PREFIX) else copy?.nativeId ?: return null
@@ -493,8 +514,8 @@ class LyricsRepository @Inject constructor(
     // A server with the songLyrics extension is asked by song id (version 2
     // adds word timings); an older one by artist and title. Lyrics from a
     // copy the server has pinned say which.
-    private suspend fun fromServer(song: LyricsSong, copies: List<SourceTrackEntity>): Lyrics? {
-        val server = serverSong(song.id, copies) ?: return null
+    private suspend fun fromServer(song: LyricsSong, copies: List<SourceTrackEntity>, forLookup: Boolean = false): Lyrics? {
+        val server = serverSong(song.id, copies, forLookup) ?: return null
         val client = server.session.client
         val found = try {
             when (val call = serverLyricsCall(server.session.extensions)) {
@@ -511,8 +532,9 @@ class LyricsRepository @Inject constructor(
         return if (pinned != null) found?.copy(serverPick = pinned) else found
     }
 
-    private suspend fun session(): Session? {
+    private suspend fun session(forLookup: Boolean = false): Session? {
         val state = withTimeoutOrNull(SESSION_WAIT_MS) { sessions.state.first { it !is SessionState.Loading } }
+        if (state == null && forLookup) throw IOException("The saved sign-in is not back yet")
         return (state as? SessionState.SignedIn)?.session
     }
 }

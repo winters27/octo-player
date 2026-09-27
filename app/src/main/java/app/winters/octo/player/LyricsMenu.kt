@@ -290,6 +290,7 @@ private fun sourceLine(state: LyricsState): String = when (state) {
     is LyricsState.Found -> state.lyrics.sourceLine()
     LyricsState.HiddenForSong -> "Lyrics are hidden for this song"
     LyricsState.None -> "No lyrics found for this song"
+    is LyricsState.Failed -> "Couldn't load lyrics"
     LyricsState.Loading, LyricsState.Hidden -> "Looking for lyrics"
 }
 

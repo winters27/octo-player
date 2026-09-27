@@ -50,11 +50,18 @@ class OnlineLyrics(private val http: OkHttpClient, private val base: HttpUrl) {
     // Throws IOException when the library cannot be reached.
     // The exact lookup comes first. When it finds nothing timed, the
     // library's search is asked too: it often holds a timed copy of the same
-    // recording under a slightly different album or title.
+    // recording under a slightly different album or title. A search that
+    // cannot be reached still leaves plain lyrics found; with none, it is a
+    // failure, never "the library has none".
     suspend fun find(title: String, artist: String, album: String, durationMs: Long): Lyrics? = withContext(Dispatchers.IO) {
         val exact = fetch(lookupUrl(base, title, artist, album, durationMs))?.let(::libraryLyrics)
         if (exact != null && (exact.synced || exact.instrumental)) return@withContext exact
-        val found = runCatching { fetch(searchUrl(base, title, artist)) }.getOrNull()
+        val found = try {
+            fetch(searchUrl(base, title, artist))
+        } catch (e: IOException) {
+            if (exact == null) throw e
+            null
+        }
         found?.let { bestSearchMatch(it, title, artist, album, durationMs) } ?: exact
     }
 

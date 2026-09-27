@@ -8,6 +8,11 @@ import java.security.MessageDigest
 // How long "no lyrics" is believed before the sources are asked again.
 const val NONE_FOUND_FOR_MS = 24 * 60 * 60 * 1000L
 
+// How long a "none" that may be wrong is believed: one from a server that
+// looks lyrics up itself and answers "none" when its time runs out, or one
+// found while nobody was looking at the lyrics.
+const val SHORT_NONE_FOR_MS = 10 * 60 * 1000L
+
 // Raised when the online lookup learns a new way to find synced lyrics, so
 // songs that only got plain ones are asked again once.
 const val ONLINE_LOOKUP_VERSION = 3
@@ -29,6 +34,11 @@ data class CachedLyrics(
     // The listener's pick these lyrics came from (see LyricsChoices), or
     // null when the usual order found them.
     val pick: String? = null,
+    // A "none" from a server whose lookup may have run out of time.
+    val unsure: Boolean = false,
+    // Saved while the app was in the background or the lyrics were not on
+    // screen, so a "none" is asked again once they are.
+    val away: Boolean = false,
 ) {
     // Whether this answer stands for a song whose pick is `current`: picked
     // lyrics stand while they are the ones picked; the usual answer stands
@@ -36,7 +46,12 @@ data class CachedLyrics(
     fun standsFor(current: String?, now: Long, onlineAllowed: Boolean): Boolean =
         if (current != null) pick == current && lyrics != null else pick == null && stillGood(now, onlineAllowed)
 
-    // Whether the answer still stands. "None" lasts a day. An answer found
+    // Whether a "none" should be asked again now that the lyrics are back
+    // on screen: it was found while they were not.
+    fun recheckOnReturn(): Boolean = lyrics == null && away
+
+    // Whether the answer still stands. "None" lasts a day, or a few minutes
+    // when it may be wrong (see SHORT_NONE_FOR_MS). An answer found
     // without asking online (it was off, or only plain lyrics were found)
     // is asked again once online lookups are allowed, in case synced ones
     // are there.
@@ -44,7 +59,7 @@ data class CachedLyrics(
         if (onlineAllowed && !askedOnline && lyrics?.synced != true) return false
         if (onlineAllowed && lyrics != null && !lyrics.synced && lookupVersion < ONLINE_LOOKUP_VERSION) return false
         if (onlineAllowed && lyrics?.source == LyricsSource.Online && lookupVersion == LOOSE_SEARCH_VERSION) return false
-        return lyrics != null || now - savedAt < NONE_FOUND_FOR_MS
+        return lyrics != null || now - savedAt < if (unsure || away) SHORT_NONE_FOR_MS else NONE_FOUND_FOR_MS
     }
 }
 

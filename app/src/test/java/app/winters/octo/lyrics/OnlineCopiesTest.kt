@@ -10,6 +10,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.IOException
 
 // The copies the lyrics menu offers from the online library, always
 // against a local stand-in, never the real one.
@@ -48,6 +49,22 @@ class OnlineCopiesTest {
         assertEquals("Album", copy.album)
         assertTrue(copy.lyrics.synced)
         assertEquals("/api/get", server.takeRequest().url.encodedPath)
+    }
+
+    @Test
+    fun aSearchThatFailsIsNotTakenForNoLyrics() = runTest {
+        answer("""{"code":404}""", code = 404)
+        answer("busy", code = 503)
+        val failed = runCatching { library().find("Song", "Artist", "Album", 201_000) }.exceptionOrNull()
+        assertTrue(failed is IOException)
+    }
+
+    @Test
+    fun plainLyricsStandWhenTheSearchFails() = runTest {
+        answer("""{"id":9,"trackName":"Song","artistName":"Artist","plainLyrics":"Plain words"}""")
+        answer("busy", code = 503)
+        val found = library().find("Song", "Artist", "Album", 201_000)
+        assertEquals("Plain words", found?.lines?.single()?.text)
     }
 
     @Test
