@@ -12,6 +12,7 @@ import app.winters.octo.catalog.isFind
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.asTrack
+import app.winters.octo.output.OutputSwitch
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.CoroutineScope
@@ -76,7 +77,7 @@ class Autoplay @Inject constructor(
     private val user: UserDao,
     private val playable: PlayableSongs,
 ) {
-    private var player: OctoPlayer? = null
+    private var player: OutputSwitch? = null
     private var scope: CoroutineScope? = null
     private var enabled = false
     private var settingsJob: Job? = null
@@ -88,7 +89,7 @@ class Autoplay @Inject constructor(
     // The last song Autoplay added after, so it tries once per song.
     private var doneFor: String? = null
 
-    fun attach(player: OctoPlayer, scope: CoroutineScope) {
+    fun attach(player: OutputSwitch, scope: CoroutineScope) {
         this.player = player
         this.scope = scope
         settingsJob = scope.launch {
@@ -130,7 +131,7 @@ class Autoplay @Inject constructor(
         watching = null
     }
 
-    private suspend fun watchAndAdd(player: OctoPlayer, key: String, seedId: String) {
+    private suspend fun watchAndAdd(player: OutputSwitch, key: String, seedId: String) {
         val lead = maxOf(LEAD_MS, player.crossfadeMs + LOAD_AHEAD_MS)
         while (!autoplayDue(enabled, player.repeatMode, player.hasNextMediaItem(), player.remainingMs(), lead)) {
             delay(WATCH_EVERY_MS)
@@ -185,7 +186,7 @@ class Autoplay @Inject constructor(
         if (seed.genre.isBlank()) emptyList() else catalog.genreTrackIds(seed.genre)
 
     // How long until the song ends, in real time at the current speed.
-    private fun OctoPlayer.remainingMs(): Long {
+    private fun OutputSwitch.remainingMs(): Long {
         val length = duration.takeIf { it > 0 } ?: currentMediaItem?.mediaMetadata?.durationMs ?: return 0
         return ((length - currentPosition).coerceAtLeast(0) / playbackParameters.speed).toLong()
     }

@@ -21,6 +21,7 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.PauseGlyph
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.ui.common.Artwork
+import app.winters.octo.ui.output.CastingMark
 
 // The face of the round button at the end of the bar: the song's artwork
 // behind a play or pause sign, with a thin ring showing how far through the
@@ -39,6 +40,8 @@ fun NowPlayingFace(now: NowPlaying, progress: () -> Float, size: Dp = BarHeight)
             Icon(painterResource(OctoIcons.Play), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(22.dp))
         }
         if (now.trackId != null) ProgressRing(progress, Modifier.matchParentSize().padding(3.dp))
+        // Playing on a TV or speaker.
+        if (now.casting) CastingMark(Modifier.align(Alignment.BottomEnd).padding(2.dp))
     }
 }
 

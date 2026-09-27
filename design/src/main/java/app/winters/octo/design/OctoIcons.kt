@@ -89,4 +89,14 @@ object OctoIcons {
 
     // The phone itself, as a place music is kept.
     val Phone = R.drawable.sym_smartphone
+
+    // Playing on another device: the button, and the button while it is.
+    val Cast = R.drawable.sym_cast
+    val CastConnected = R.drawable.sym_cast_connected
+
+    // The kinds of device music can play on.
+    val Tv = R.drawable.sym_tv
+    val Speaker = R.drawable.sym_speaker
+    val SpeakerGroup = R.drawable.sym_speaker_group
+    val Headphones = R.drawable.sym_headphones
 }

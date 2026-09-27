@@ -42,6 +42,8 @@ class PlaybackViewModel @Inject constructor(private val settings: PlayerSettings
     fun setResumeWired(on: Boolean) = change { setResumeWired(on) }
     fun setResumeBluetooth(on: Boolean) = change { setResumeBluetooth(on) }
     fun setResumeAlways(on: Boolean) = change { setResumeAlways(on) }
+    fun setCastRenderers(on: Boolean) = change { setCastRenderers(on) }
+    fun setCastKeepPlaying(on: Boolean) = change { setCastKeepPlaying(on) }
 }
 
 // The speed as its row shows it: "1x", or "1.25x, voices keep their pitch".
@@ -51,8 +53,8 @@ private fun paceLabel(prefs: PlayerPrefs): String = buildString {
     if (prefs.pitchSemitones != 0) append(", shifted ${prefs.pitchSemitones} st")
 }
 
-// How songs play: blending, speed, skipping silence, Autoplay, and music
-// coming back when headphones connect.
+// How songs play: blending, speed, skipping silence, Autoplay, music
+// coming back when headphones connect, and casting to TVs and speakers.
 @Composable
 fun PlaybackPage(onBack: () -> Unit, highlight: String?, vm: PlaybackViewModel = hiltViewModel()) {
     val prefs by vm.prefs.collectAsStateWithLifecycle()
@@ -110,6 +112,20 @@ fun PlaybackPage(onBack: () -> Unit, highlight: String?, vm: PlaybackViewModel =
                     helper = "Plays on connect even when the music was paused some other way, or longer ago.",
                 )
             }
+        }
+        SettingsGroup(title = "Casting") {
+            SwitchRow(
+                SettingsIndex.CastRenderers,
+                checked = prefs.castRenderers,
+                onChange = vm::setCastRenderers,
+                helper = "Smart TVs, AV receivers and hi-fi streamers on the same Wi-Fi show up beside Cast devices when you cast.",
+            )
+            SwitchRow(
+                SettingsIndex.CastKeepPlaying,
+                checked = prefs.castKeepPlaying,
+                onChange = vm::setCastKeepPlaying,
+                helper = "When a TV or speaker goes away, or is stopped from somewhere else, the music carries on here. Off, it pauses.",
+            )
         }
     }
     // The same speed controls as the player's, kept for every song.

@@ -28,6 +28,10 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.asTrack
 import app.winters.octo.offline.Prefetcher
+import app.winters.octo.output.Casting
+import app.winters.octo.output.DeviceMedia
+import app.winters.octo.output.OutputSwitch
+import app.winters.octo.output.Outputs
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.server.QueueSync
@@ -35,6 +39,7 @@ import app.winters.octo.sound.AlbumRun
 import app.winters.octo.sound.AudioSession
 import app.winters.octo.sound.OctoRenderersFactory
 import app.winters.octo.sound.SoundEngine
+import app.winters.octo.ui.common.Feedback
 import app.winters.octo.widget.QuickPicks
 import app.winters.octo.widget.WidgetRemote
 import app.winters.octo.widget.WidgetUpdates
@@ -104,9 +109,17 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var autoplay: Autoplay
     @Inject lateinit var downloads: Downloads
     @Inject lateinit var online: OnlineDao
+    @Inject lateinit var outputs: Outputs
+    @Inject lateinit var deviceMedia: DeviceMedia
+    @Inject lateinit var feedback: Feedback
 
     private val scope = MainScope()
-    private lateinit var player: OctoPlayer
+    // The phone's own player (two decks for crossfade), and the player the
+    // session holds, which is the phone's or, while casting, the one that
+    // drives the TV or speaker.
+    private lateinit var local: OctoPlayer
+    private lateinit var player: OutputSwitch
+    private lateinit var casting: Casting
     private lateinit var tracker: PlayTracker
     private lateinit var headsets: HeadsetResume
     private var session: MediaLibrarySession? = null
@@ -134,14 +147,20 @@ class OctoPlaybackService : MediaLibraryService() {
             OctoRenderersFactory(this, { sound.current.value }, albums),
             audioSession.id,
         )
-        player = OctoPlayer(this, deck(), deck())
+        local = OctoPlayer(this, deck(), deck())
+        player = OutputSwitch(local)
         tracker = PlayTracker(plays) { player.isPlaying }
         player.addListener(tracker)
         player.addListener(Watcher())
         sleep.attach(player)
-        prefetch.attach(player)
+        // Saving songs ahead is for the phone's own playing.
+        prefetch.attach(local)
         editor.attach(player)
         autoplay.attach(player, scope)
+        // Casting to a TV or speaker swaps the session's player to one that
+        // drives the device, and back.
+        casting = Casting(this, player, local, deviceMedia, feedback, scope)
+        outputs.attach(casting)
 
         session = MediaLibrarySession.Builder(this, player, Callback())
             .setBitmapLoader(CacheBitmapLoader(OctoArtLoader(this, DataSourceBitmapLoader.Builder(this).build())))
@@ -170,15 +189,17 @@ class OctoPlaybackService : MediaLibraryService() {
         // Crossfade, speed and pitch, and skipping silence follow their
         // settings, each only when it changes, so a blend is not cut short.
         val prefs = playerSettings.prefs.stateIn(scope, SharingStarted.Eagerly, PlayerPrefs())
-        scope.launch { prefs.map { it.crossfadeMs }.distinctUntilChanged().collect { player.crossfadeMs = it } }
+        // These belong to the phone's own player, and wait there while casting.
+        scope.launch { prefs.map { it.crossfadeMs }.distinctUntilChanged().collect { local.crossfadeMs = it } }
         scope.launch {
-            prefs.map { it.pace }.distinctUntilChanged().collect { player.setPlaybackParameters(PlaybackParameters(it.speed, it.pitch)) }
+            prefs.map { it.pace }.distinctUntilChanged().collect { local.setPlaybackParameters(PlaybackParameters(it.speed, it.pitch)) }
         }
-        scope.launch { prefs.map { it.skipSilence }.distinctUntilChanged().collect { player.skipSilence = it } }
+        scope.launch { prefs.map { it.skipSilence }.distinctUntilChanged().collect { local.skipSilence = it } }
         // Headphones connecting can start the music again. With that on, the
         // service stays in the foreground for the whole 30 minutes it waits
         // after a pause, since Android may refuse to bring it back later.
-        headsets = HeadsetResume(this, player) { prefs.value }.also { it.start() }
+        // It is the phone's player that headphones bring back, never a TV.
+        headsets = HeadsetResume(this, local) { prefs.value }.also { it.start() }
         scope.launch {
             prefs.map { it.resumeWired || it.resumeBluetooth }.distinctUntilChanged().collect { on ->
                 setForegroundServiceTimeoutMs(if (on) RESUME_WINDOW_MS else DEFAULT_FOREGROUND_SERVICE_TIMEOUT_MS)
@@ -219,6 +240,8 @@ class OctoPlaybackService : MediaLibraryService() {
         prefetch.detach()
         editor.detach()
         autoplay.detach()
+        outputs.detach(casting)
+        casting.release()
         session?.release()
         player.release()
         audioSession.close()
@@ -270,6 +293,8 @@ class OctoPlaybackService : MediaLibraryService() {
     private fun close() {
         saveQueue()
         sleep.cancel()
+        // Casting ends too, with the music stopped.
+        if (player.isRemote) outputs.stopCasting()
         closed = true
         // A stopped player normally keeps its notification; this one goes.
         setShowNotificationForIdlePlayer(SHOW_NOTIFICATION_FOR_IDLE_PLAYER_NEVER)
@@ -356,7 +381,7 @@ class OctoPlaybackService : MediaLibraryService() {
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_READY) failedInARow = 0
             // Equalizer apps let go once the music has stopped, not at a pause.
-            if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) audioSession.close()
+            if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED || player.isRemote) audioSession.close()
             // Playing again after Close: a stop keeps its notification again.
             if (closed && playbackState != Player.STATE_IDLE) {
                 closed = false
@@ -381,8 +406,9 @@ class OctoPlaybackService : MediaLibraryService() {
             widgets.show(player)
             autoplay.check()
             if (isPlaying) {
-                // Equalizer apps on the phone can attach to the music now.
-                audioSession.open()
+                // Equalizer apps on the phone can attach to the music now,
+                // unless it is playing on another device.
+                if (!player.isRemote) audioSession.open()
                 // Where in the song we are, every 15 seconds, in case the phone kills the app.
                 positionSaver = scope.launch {
                     while (isActive) {

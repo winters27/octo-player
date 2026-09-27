@@ -156,6 +156,19 @@ class Streams @Inject constructor(
         return ref.copy(sourceId = source).pin(request)
     }
 
+    // What another device on the Wi-Fi is sent for a server song: the
+    // pinned request, or the one for streaming on Wi-Fi, since casting
+    // always is.
+    fun deviceRequest(ref: StreamRef): StreamRequest = ref.pinned ?: streamRequest(ref.mimeType, ref.bitrate, current.value.wifi)
+
+    // A signed address for another device on the network to fetch a
+    // server song from itself, at the address the phone is using now (the
+    // home one while at home). Null with no server signed in.
+    suspend fun deviceAddress(ref: StreamRef, request: StreamRequest): String? {
+        val client = client() ?: return null
+        return client.url("stream", mapOf("id" to ref.serverId) + request.params).toString()
+    }
+
     // The name a song is saved under, or null when no server is known for it.
     fun cacheKey(ref: StreamRef): String? {
         val source = ref.sourceId ?: currentSourceId() ?: return null

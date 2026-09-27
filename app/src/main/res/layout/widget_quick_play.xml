@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Quick play at 2x2: four squares that each start music. Also the
-     widget's preview in the picker. -->
+     widget's preview in the picker. The launcher draws widgets with the
+     platform's own views, so AppCompat's drawable attributes do not apply. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@android:id/background"
+    tools:ignore="UseCompatTextViewDrawableXml"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/widget_glass"
