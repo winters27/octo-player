@@ -18,6 +18,10 @@ import app.winters.octo.data.userMessage
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playlists.PlaylistSync
+import app.winters.octo.subsonic.Album
+import app.winters.octo.subsonic.AlbumWithSongs
+import app.winters.octo.subsonic.Library
+import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.readLibrary
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -144,6 +148,43 @@ class ServerSync @Inject constructor(
         }
     }
 
+    // Puts one song from the server into the library at once, with the rest
+    // of its album as the server has it now, ahead of the next full copy:
+    // for a download that just finished. Answers the library song it
+    // became, or null when the server could not give it.
+    suspend fun takeInSong(serverId: String): String? {
+        val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return null
+        val client = session.client
+        val sourceId = session.sourceId
+        val song = try {
+            client.song(serverId)
+        } catch (e: SubsonicException) {
+            return null
+        }
+        val album = song.albumId?.takeIf(String::isNotEmpty)?.let { id ->
+            try {
+                client.album(id)
+            } catch (e: SubsonicException) {
+                null
+            }
+        }
+        val songs = (album?.song.orEmpty() + song).distinctBy { it.id }
+        val rows = buildServerCatalog(sourceId, Library(songs, listOfNotNull(album?.listed()), emptyList()))
+        // Only what the library does not have yet goes in; the next full
+        // copy puts everything right.
+        val have = sources.libraryLinks(sourceId, songs.map { it.id }).mapTo(HashSet()) { it.serverId }
+        val tracks = rows.tracks.filter { it.nativeId !in have }
+        if (tracks.isNotEmpty()) {
+            val albums = sources.knownAlbums(sourceId, rows.albums.map { it.nativeId }).toSet()
+            val artists = sources.knownArtists(rows.artists.map { it.id }).toSet()
+            sources.insertArtists(rows.artists.filter { it.id !in artists })
+            sources.insertAlbums(rows.albums.filter { it.nativeId !in albums })
+            sources.insertTracks(tracks)
+            merge.rebuild()
+        }
+        return sources.libraryLinks(sourceId, listOf(serverId)).firstOrNull()?.trackId
+    }
+
     private suspend fun sync() {
         val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return
         val client = session.client
@@ -204,6 +245,20 @@ class ServerSync @Inject constructor(
             _problem.value = null
         }
     }
+
+    // An album with its songs, as the album list would have listed it.
+    private fun AlbumWithSongs.listed() = Album(
+        id = id,
+        name = name,
+        artist = artist,
+        artistId = artistId,
+        displayArtist = displayArtist,
+        coverArt = coverArt,
+        songCount = songCount,
+        duration = duration,
+        year = year,
+        genre = genre,
+    )
 
     private companion object {
         val SOURCE_ID = stringPreferencesKey("source_id")

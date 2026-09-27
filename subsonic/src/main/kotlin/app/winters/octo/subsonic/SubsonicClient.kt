@@ -83,6 +83,24 @@ class SubsonicClient(
             default = emptyList(),
         )
 
+    // Whether the server lists an extension at this version. A server that
+    // cannot say which extensions it has lists none.
+    suspend fun supports(name: String, version: Int = 1): Boolean =
+        try {
+            extensions().lists(name, version)
+        } catch (e: SubsonicException) {
+            false
+        }
+
+    // The downloads Octo is doing for the signed-in user, and the ones it
+    // finished lately. Only for servers that list the octoAcquisitions
+    // extension; others answer with an error.
+    suspend fun acquisitions(): List<Acquisition> =
+        get("getAcquisitions", key = "acquisitions", serializer = Acquisitions.serializer(), default = Acquisitions()).acquisition
+
+    // One song, by its id on the server.
+    suspend fun song(id: String): Song = get("getSong", mapOf("id" to id), "song", Song.serializer())
+
     suspend fun user(username: String): User =
         get("getUser", mapOf("username" to username), "user", User.serializer())
 

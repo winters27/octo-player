@@ -1,10 +1,11 @@
 package app.winters.octo.ui.common
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -17,30 +18,63 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.design.GlowIcon
 import app.winters.octo.design.OctoIcons
-import app.winters.octo.discovery.DownloadState
+import app.winters.octo.discovery.DownloadPhase
 import app.winters.octo.discovery.Downloads
+import app.winters.octo.player.PlayerSettings
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import kotlin.math.roundToInt
 
 @HiltViewModel
-class DownloadsViewModel @Inject constructor(private val downloads: Downloads) : ViewModel() {
-    val states: StateFlow<Map<String, DownloadState>> = downloads.states
+class DownloadsViewModel @Inject constructor(
+    private val downloads: Downloads,
+    private val feedback: Feedback,
+    player: PlayerSettings,
+) : ViewModel() {
+    val phases: StateFlow<Map<String, DownloadPhase>> = downloads.phases
+
+    // Octo's own Reduce motion, beside the phone's.
+    val reduceMotion: StateFlow<Boolean> = player.prefs
+        .map { it.reduceMotion }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     fun request(track: TrackEntity) {
         viewModelScope.launch { downloads.request(track) }
     }
+
+    fun showing(trackId: String): () -> Unit = downloads.showing(trackId)
+
+    // Why a download failed, asked for with a long press.
+    fun explain(reason: String) = feedback.show("Could not download: $reason")
+}
+
+// What TalkBack says a find's download button is doing.
+fun downloadStateText(phase: DownloadPhase): String = when (phase) {
+    DownloadPhase.None -> "Not in your library"
+    DownloadPhase.Queued -> "Queued"
+    is DownloadPhase.Downloading -> phase.progress?.let { "Downloading, ${(it * 100).roundToInt()} percent" } ?: "Downloading"
+    DownloadPhase.Adding -> "Adding to your library"
+    DownloadPhase.Done -> "In your library"
+    is DownloadPhase.Failed -> "Could not download"
 }
 
 // Where a heart would be for a song found online: tapping it has the server
-// download the song into the library. It shows when the download is on its
-// way, and when the song has arrived.
+// download the song into the library. A ring shows the download on its way
+// and turns into a check once the song is in the library. A failed one
+// shows an alert: a tap tries again, a long press says why.
 @Composable
 fun DownloadButton(
     track: TrackEntity,
@@ -49,38 +83,47 @@ fun DownloadButton(
     iconSize: Dp = 24.dp,
     vm: DownloadsViewModel = hiltViewModel(),
 ) {
-    val states by vm.states.collectAsStateWithLifecycle()
-    val state = states[track.id] ?: DownloadState.None
+    val phases by vm.phases.collectAsStateWithLifecycle()
+    val phase = phases[track.id] ?: DownloadPhase.None
+    val appCalm by vm.reduceMotion.collectAsStateWithLifecycle()
+    val calm = appCalm || rememberSystemReduceMotion()
+    // Progress is asked for more often while this button is on screen.
+    LifecycleStartEffect(track.id) {
+        val release = vm.showing(track.id)
+        onStopOrDispose { release() }
+    }
+    val failed = phase as? DownloadPhase.Failed
     Box(
         modifier
             .size(size)
-            .clickable(
+            .combinedClickable(
                 interactionSource = null,
                 indication = null,
-                enabled = state == DownloadState.None,
+                enabled = phase == DownloadPhase.None || failed != null,
                 role = Role.Button,
+                onClickLabel = if (failed != null) "Try again" else null,
+                onLongClickLabel = if (failed != null) "Why" else null,
+                onLongClick = failed?.let { { vm.explain(it.reason) } },
             ) { vm.request(track) }
             .semantics {
                 contentDescription = "Download"
-                stateDescription = when (state) {
-                    DownloadState.None -> "Not in your library"
-                    DownloadState.Requested -> "Downloading"
-                    DownloadState.Done -> "In your library"
-                }
+                stateDescription = downloadStateText(phase)
             },
         contentAlignment = Alignment.Center,
     ) {
-        GlowIcon(
-            painterResource(
-                when (state) {
-                    DownloadState.None -> OctoIcons.Download
-                    DownloadState.Requested -> OctoIcons.Downloading
-                    DownloadState.Done -> OctoIcons.Downloaded
-                },
-            ),
-            tint = if (state == DownloadState.None) Color.White.copy(alpha = 0.6f) else Color.White,
-            lit = state != DownloadState.None,
-            modifier = Modifier.size(iconSize),
-        )
+        // Keyed by song, so a button that moves on to another song (as the
+        // player's does) starts its ring afresh.
+        key(track.id) {
+            when (phase) {
+                DownloadPhase.None -> GlowIcon(
+                    painterResource(OctoIcons.Download),
+                    tint = Color.White.copy(alpha = 0.6f),
+                    lit = false,
+                    modifier = Modifier.size(iconSize),
+                )
+                is DownloadPhase.Failed -> DownloadAlert(Modifier.size(iconSize))
+                else -> DownloadRing(phase, calm, Modifier.size(iconSize))
+            }
+        }
     }
 }
