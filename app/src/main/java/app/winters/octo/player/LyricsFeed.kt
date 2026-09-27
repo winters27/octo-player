@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import app.winters.octo.lyrics.LyricsAnswer
 import app.winters.octo.lyrics.LyricsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.currentCoroutineContext
@@ -21,6 +22,11 @@ import javax.inject.Inject
 // open, whether the listener hid its lyrics, and anything that means they
 // must be fetched again when it changes (the listener's pick, a retry).
 data class LyricsWanted(val id: String, val hidden: Boolean = false, val version: Any? = null)
+
+// How many times, and how far apart, a failed lookup is asked again before
+// it shows as failed.
+const val QUIET_RETRIES = 2
+const val QUIET_RETRY_MS = 4_000L
 
 // What the lyrics view shows, following the song while lyrics are open.
 // Lyrics are only looked up while the view is on screen (`watched`). A song
@@ -78,6 +84,15 @@ fun lyricsStates(
                             show(LyricsState.Loading)
                         }
                         var answer = safeLookUp(song.id, resumed)
+                        // The server may still be looking (it keeps going after telling
+                        // us "not yet"), so ask again quietly a couple of times before
+                        // saying anything failed.
+                        var quietTries = 0
+                        while (answer == LyricsAnswer.Failed && quietTries < QUIET_RETRIES) {
+                            quietTries++
+                            delay(QUIET_RETRY_MS)
+                            answer = safeLookUp(song.id, false)
+                        }
                         if (answer == LyricsAnswer.Failed) {
                             show(LyricsState.Failed(song.id))
                             networkBack()

@@ -9,6 +9,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
@@ -102,12 +103,34 @@ class LyricsFeedTest {
         assertEquals(LyricsState.None, feed.shown)
     }
 
+    // Lets the quiet retries after a failure run out.
+    private fun TestScope.passQuietRetries() {
+        advanceTimeBy(QUIET_RETRIES * QUIET_RETRY_MS + 1)
+        runCurrent()
+    }
+
+    @Test
+    fun aFailureIsAskedAgainQuietlyBeforeItShows() = runTest {
+        val sources = Sources()
+        sources.answers["a"] = LyricsAnswer.Failed
+        val feed = Feed(this, sources, "a", watching = true)
+        runCurrent()
+        // Still loading while the server may be finishing its lookup.
+        assertEquals(LyricsState.Loading, feed.shown)
+        sources.answers["a"] = LyricsAnswer.Found(words("a"))
+        advanceTimeBy(QUIET_RETRY_MS + 1)
+        runCurrent()
+        assertEquals(LyricsState.Found("a", words("a")), feed.shown)
+        assertFalse(feed.states.any { it is LyricsState.Failed })
+    }
+
     @Test
     fun aFailureShowsAsFailedAndResumingLooksUpAgain() = runTest {
         val sources = Sources()
         sources.answers["a"] = LyricsAnswer.Failed
         val feed = Feed(this, sources, "a", watching = true)
         runCurrent()
+        passQuietRetries()
         assertEquals(LyricsState.Failed("a"), feed.shown)
         assertFalse(feed.states.contains(LyricsState.None))
 
@@ -128,13 +151,14 @@ class LyricsFeedTest {
         sources.answers["a"] = LyricsAnswer.Failed
         val feed = Feed(this, sources, "a", watching = true)
         runCurrent()
+        passQuietRetries()
         assertEquals(LyricsState.Failed("a"), feed.shown)
-        assertEquals(1, sources.asked.size)
+        assertEquals(1 + QUIET_RETRIES, sources.asked.size)
 
         sources.network.complete(Unit)
         runCurrent()
         // Tried once more, failed again, and left there.
-        assertEquals(2, sources.asked.size)
+        assertEquals(2 + QUIET_RETRIES, sources.asked.size)
         assertEquals(1, sources.networkWaits)
         assertEquals(LyricsState.Failed("a"), feed.shown)
     }
@@ -145,6 +169,7 @@ class LyricsFeedTest {
         sources.answers["a"] = LyricsAnswer.Failed
         val feed = Feed(this, sources, "a", watching = true)
         runCurrent()
+        passQuietRetries()
         sources.answers["a"] = LyricsAnswer.Found(words("a"))
         sources.network.complete(Unit)
         runCurrent()
@@ -176,6 +201,7 @@ class LyricsFeedTest {
         val sources = Sources()
         val feed = Feed(this, sources, "missing", watching = true)
         runCurrent()
+        passQuietRetries()
         assertEquals(LyricsState.Failed("missing"), feed.shown)
     }
 
