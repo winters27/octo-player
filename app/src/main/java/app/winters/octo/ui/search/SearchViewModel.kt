@@ -25,6 +25,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -34,6 +35,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transformLatest
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -72,9 +74,25 @@ class SearchResults(
     val moreAlbums: Boolean = false,
     val moreSongs: Boolean = false,
     val morePlaylists: Boolean = false,
+    // Songs found online whose library song is among these songs, as the
+    // library knew when they were looked up. Those are left out of the
+    // songs not in the library, so no song is listed twice.
+    val listedFinds: Set<String> = emptySet(),
 ) {
     val isEmpty get() = artists.isEmpty() && albums.isEmpty() && songs.isEmpty() && playlists.isEmpty()
 }
+
+// The finds whose library song is among the songs a search listed.
+fun listedFinds(adoptions: Map<String, String>, songs: List<TrackEntity>): Set<String> {
+    if (adoptions.isEmpty()) return emptySet()
+    val ids = songs.mapTo(HashSet()) { it.id }
+    return adoptions.filterValues { it in ids }.keys
+}
+
+// The songs found online a search shows: all but those already listed as
+// library songs.
+fun Discovered.without(listed: Set<String>): Discovered =
+    if (listed.isEmpty() || songs.none { it.id in listed }) this else Discovered(songs.filterNot { it.id in listed }, albums, artists)
 
 // What searching the server has come to.
 sealed interface DiscoverState {
@@ -92,21 +110,26 @@ class SearchViewModel @Inject constructor(
     private val playback: PlaybackConnection,
     private val recents: RecentSearches,
     playlists: PlaylistStore,
-    downloads: Downloads,
+    private val downloads: Downloads,
     private val hint: AddHint,
 ) : ViewModel() {
     var text by mutableStateOf("")
     var filter by mutableStateOf(SearchFilter.All)
 
+    // Goes up each time the server is asked anew, so the library is too.
+    private val rounds = MutableStateFlow(0)
+
     // Null until at least two characters are typed. One more than shown is
-    // asked for, to know whether there are more. Asked again when a
-    // download joins the library, so the song shows up among the results.
+    // asked for, to know whether there are more. A song that joins the
+    // library while the results are shown stays where it is, among the songs
+    // not in the library, until the next search, rather than moving under
+    // the listener's finger.
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     val results: StateFlow<SearchResults?> = combine(
         snapshotFlow { text }.debounce(150).map { searchKey(it) }.distinctUntilChanged(),
         snapshotFlow { filter },
         playlists.playlists,
-        downloads.arrived,
+        rounds,
     ) { q, filter, lists, _ -> Triple(q, filter, lists) }
         .mapLatest { (q, filter, lists) ->
             if (q.length < 2) {
@@ -117,15 +140,17 @@ class SearchViewModel @Inject constructor(
                 val albums = if (caps.albums > 0) dao.searchAlbums(q, caps.albums + 1) else emptyList()
                 val songs = if (caps.songs > 0) dao.searchTracks(q, caps.songs + 1) else emptyList()
                 val named = if (caps.playlists > 0) lists.filter { searchKey(it.name).contains(q) } else emptyList()
+                val shown = songs.take(caps.songs)
                 SearchResults(
                     artists.take(caps.artists),
                     albums.take(caps.albums),
-                    songs.take(caps.songs),
+                    shown,
                     named.take(caps.playlists),
                     moreArtists = artists.size > caps.artists,
                     moreAlbums = albums.size > caps.albums,
                     moreSongs = songs.size > caps.songs,
                     morePlaylists = named.size > caps.playlists,
+                    listedFinds = listedFinds(downloads.adoptions.value.orEmpty(), shown),
                 )
             }
         }
@@ -153,6 +178,7 @@ class SearchViewModel @Inject constructor(
                 }
                 emit(DiscoverState.Loading)
                 delay(DISCOVER_AFTER_MS)
+                rounds.update { it + 1 }
                 emit(
                     when (val state = load { discovery.search(q) }) {
                         is LoadState.Ready -> state.data?.let { DiscoverState.Done(it) } ?: DiscoverState.Idle
