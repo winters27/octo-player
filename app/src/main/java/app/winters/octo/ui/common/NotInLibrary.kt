@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -22,8 +23,10 @@ import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.isFind
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.OctoIcons
+import app.winters.octo.discovery.AdoptedSongs
 import app.winters.octo.discovery.DownloadPhase
 import app.winters.octo.discovery.Downloads
+import app.winters.octo.player.PlayerSettings
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -40,19 +43,46 @@ const val NotInLibraryText = "Not in your library"
 // their artwork goes back to clean before the list around them refreshes.
 val LocalAdoptedFinds = compositionLocalOf<Set<String>> { emptySet() }
 
+// The same finds, each with the library song it became, so a find's row
+// can turn into that song. Null until known.
+val LocalAdoptions = compositionLocalOf<Map<String, String>?> { null }
+
+// Where a find's row follows the library song it became.
+val LocalAdoptedSongs = staticCompositionLocalOf<AdoptedSongs?> { null }
+
 @HiltViewModel
-class AdoptedFindsViewModel @Inject constructor(downloads: Downloads) : ViewModel() {
+class AdoptedFindsViewModel @Inject constructor(
+    downloads: Downloads,
+    player: PlayerSettings,
+    val songs: AdoptedSongs,
+) : ViewModel() {
     val adopted: StateFlow<Set<String>> = downloads.phases
         .map(::adoptedFinds)
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    val adoptions: StateFlow<Map<String, String>?> = downloads.adoptions
+
+    // Octo's own Reduce motion, beside the phone's.
+    val reduceMotion: StateFlow<Boolean> = player.prefs
+        .map { it.reduceMotion }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 }
 
 // Gives everything inside the songs found online that are now in the library.
 @Composable
 fun ProvideAdoptedFinds(vm: AdoptedFindsViewModel = hiltViewModel(), content: @Composable () -> Unit) {
     val adopted by vm.adopted.collectAsStateWithLifecycle()
-    CompositionLocalProvider(LocalAdoptedFinds provides adopted, content = content)
+    val adoptions by vm.adoptions.collectAsStateWithLifecycle()
+    val appCalm by vm.reduceMotion.collectAsStateWithLifecycle()
+    CompositionLocalProvider(
+        LocalAdoptedFinds provides adopted,
+        LocalAdoptions provides adoptions,
+        LocalAdoptedSongs provides vm.songs,
+        LocalReduceMotion provides (appCalm || rememberSystemReduceMotion()),
+        content = content,
+    )
 }
 
 // The finds whose download has arrived in the library.
@@ -72,7 +102,7 @@ fun isOutsideLibrary(trackId: String?): Boolean = isOutsideLibrary(trackId, Loca
 enum class AddSign { Button, Mark, None }
 
 // In a list that offers the button, a find keeps it after it is added, so
-// the check has its moment before the page swaps in the library song.
+// the check has its moment before the row turns into the library song.
 // Elsewhere a find gets the mark until it is in the library.
 fun rowAddSign(trackId: String, adopted: Set<String>, offersAdd: Boolean): AddSign = when {
     !isFind(trackId) -> AddSign.None

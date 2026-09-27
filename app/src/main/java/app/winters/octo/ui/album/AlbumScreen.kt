@@ -162,8 +162,12 @@ fun AlbumScreen(
                     }
                     items(onDisc, key = { it.id }) { track ->
                         // Only say who is singing when it is not the album's artist.
-                        val subtitle = track.artist.takeIf { it != album?.artist }
-                        SongRow(track, SongLead.Number(track.trackNo), subtitle, menuContext = menuContext) { vm.play(tracks.indexOf(track)) }
+                        SongRow(
+                            track,
+                            SongLead.Number(track.trackNo),
+                            subtitle = { it.artist.takeIf { artist -> artist != album?.artist } },
+                            menuContext = menuContext,
+                        ) { vm.play(tracks.indexOf(track)) }
                     }
                 }
                 album?.let { a ->

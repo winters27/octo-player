@@ -149,7 +149,7 @@ private fun RecentlyPlayed(vm: HistoryViewModel) {
                     item(key = "day:${day.label}:${day.plays.first().at}") { SectionTitle(day.label, Modifier.padding(top = 8.dp)) }
                     items(day.plays, key = { "${it.at}:${it.track.id}" }) { play ->
                         val time = Instant.ofEpochMilli(play.at).atZone(zone).format(clock)
-                        SongRow(play.track, subtitle = listOf(play.track.artist, time).filter { it.isNotEmpty() }.joinToString(" • ")) {
+                        SongRow(play.track, subtitle = { song -> listOf(song.artist, time).filter { it.isNotEmpty() }.joinToString(" • ") }) {
                             vm.play(songs, play.track)
                         }
                     }
@@ -186,7 +186,7 @@ private fun MostPlayed(vm: HistoryViewModel) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 140.dp)) {
                 itemsIndexed(shown, key = { _, it -> it.track.id }) { _, played ->
                     val count = if (played.plays == 1) "1 play" else "${played.plays} plays"
-                    SongRow(played.track, subtitle = listOf(played.track.artist, count).filter { it.isNotEmpty() }.joinToString(" • ")) {
+                    SongRow(played.track, subtitle = { song -> listOf(song.artist, count).filter { it.isNotEmpty() }.joinToString(" • ") }) {
                         vm.play(songs, played.track)
                     }
                 }
