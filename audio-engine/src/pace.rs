@@ -382,6 +382,11 @@ impl PaceStage {
         s_pending + (v_pending + out_frames * v_out_ratio) * s_ratio
     }
 
+    /// Hands out what is inside as it is, at the end of the sound.
+    pub fn drain(&mut self) {
+        self.flush_inside();
+    }
+
     /// Forgets everything inside, after a jump to another place.
     pub fn clear(&mut self) {
         if let Some(s) = &mut self.stretch {

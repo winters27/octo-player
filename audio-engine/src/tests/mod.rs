@@ -2,3 +2,4 @@
 
 mod decode;
 mod lane;
+mod mixer;
