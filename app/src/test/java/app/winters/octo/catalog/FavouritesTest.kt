@@ -47,6 +47,54 @@ class FavouritesTest {
         assertEquals(listOf(Relink("old:a", "new:1")), relinks(held, setOf("new:1"), mapOf("k" to listOf("new:1"))))
     }
 
+    // Following an album that merged into another
+
+    @Test
+    fun aFavouriteFollowsTheAlbumItsSongsMergedIntoWhateverTheKeys() {
+        // Favourited while only on the server as "Simon & Garfunkel"; the
+        // phone's copy is tagged "Simon and Garfunkel", so the two merge but
+        // their search keys differ and the key alone finds nothing.
+        val held = listOf(Held("server:x:al1", "bookends simon & garfunkel"))
+        val byKey = mapOf("bookends simon and garfunkel" to listOf("device:album:7"))
+        val merged = mapOf("server:x:al1" to "device:album:7")
+        assertEquals(listOf(Relink("server:x:al1", "device:album:7")), relinks(held, setOf("device:album:7"), byKey, merged))
+    }
+
+    @Test
+    fun theMergeIsFollowedBeforeTheKey() {
+        // Two albums share the key; the one the songs went into is the right one.
+        val held = listOf(Held("server:x:al1", "k"))
+        val byKey = mapOf("k" to listOf("device:album:1", "device:album:2"))
+        val merged = mapOf("server:x:al1" to "device:album:2")
+        assertEquals(
+            listOf(Relink("server:x:al1", "device:album:2")),
+            relinks(held, setOf("device:album:1", "device:album:2"), byKey, merged),
+        )
+    }
+
+    @Test
+    fun aMergeOntoSomethingAlreadyHeldLeavesTheRowAsItWas() {
+        val held = listOf(Held("server:x:al1", "k"), Held("device:album:7", "k"))
+        val merged = mapOf("server:x:al1" to "device:album:7")
+        assertTrue(relinks(held, setOf("device:album:7"), emptyMap(), merged).isEmpty())
+    }
+
+    @Test
+    fun aVanishedAlbumWentWhereMostOfItsSongsWent() {
+        // A deluxe edition: 12 songs joined the phone's album, 3 bonus songs
+        // an album of their own. Ties go to the first id, the same every time.
+        val counts = listOf(
+            CopyCount("server:x:deluxe", "device:album:1", 12),
+            CopyCount("server:x:deluxe", "server:x:bonus", 3),
+            CopyCount("server:x:ep", "device:album:9", 2),
+            CopyCount("server:x:ep", "device:album:4", 2),
+        )
+        assertEquals(
+            mapOf("server:x:deluxe" to "device:album:1", "server:x:ep" to "device:album:4"),
+            mergedInto(counts),
+        )
+    }
+
     // Pins
 
     private fun pin(id: String, position: Int, kind: PinKind = PinKind.Album) = PinnedItemEntity(kind.id, id, id, position)
