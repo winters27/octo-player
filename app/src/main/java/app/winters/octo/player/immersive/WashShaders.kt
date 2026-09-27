@@ -10,6 +10,10 @@ const val BlurStrength = 30f
 const val BlurStepAcross = 0.03f * BlurStrength
 const val BlurStepDown = 0.04f * BlurStrength
 
+// Softer than the taps alone give: on a phone the wash read as too sharp, so
+// the platform blur is widened by this much.
+const val WashBlurBoost = 2.5f
+
 // The taps add up to a little under 1, so each of the four passes dims the
 // picture by that much.
 val BlurPassGain: Float get() = BlurTaps[0] + 2f * BlurTaps.drop(1).sum()

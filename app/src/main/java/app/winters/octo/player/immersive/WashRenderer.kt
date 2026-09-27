@@ -29,8 +29,8 @@ class WashRenderer {
         setPosition(0, 0, WashSize, WashSize)
         setRenderEffect(
             RenderEffect.createBlurEffect(
-                blurRadiusFor(blurSigmaTexels(BlurStepAcross)),
-                blurRadiusFor(blurSigmaTexels(BlurStepDown)),
+                blurRadiusFor(blurSigmaTexels(BlurStepAcross)) * WashBlurBoost,
+                blurRadiusFor(blurSigmaTexels(BlurStepDown)) * WashBlurBoost,
                 Shader.TileMode.MIRROR,
             ),
         )
