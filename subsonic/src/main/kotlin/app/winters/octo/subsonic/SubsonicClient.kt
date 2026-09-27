@@ -314,6 +314,25 @@ class SubsonicClient(
             LyricsList(),
         ).structuredLyrics
 
+    // Every copy of a song's lyrics the server's sources hold, and what the
+    // song is set to. Only for servers that list the octoLyrics extension.
+    // A title or artist given searches for those instead of the song's tags.
+    suspend fun lyricsCandidates(id: String, title: String? = null, artist: String? = null): LyricsCandidates =
+        get("getLyricsCandidates", lyricsCandidatesParams(id, title, artist), "lyricsCandidates", LyricsCandidates.serializer())
+
+    // Sets a song's lyrics on the server to one copy from lyricsCandidates,
+    // to LYRICS_NONE to hide them, or to LYRICS_AUTO to let the server find
+    // them again. It holds for every app and user on the server. Answers
+    // with what the song is set to now.
+    suspend fun setLyricsChoice(id: String, candidate: String): String =
+        get(
+            "setLyricsChoice",
+            mapOf("id" to id, "candidate" to candidate),
+            "lyricsChoice",
+            LyricsChoiceAnswer.serializer(),
+            LyricsChoiceAnswer(id, candidate),
+        ).choice
+
     // The older lyrics call, found by artist and title: plain text, or null
     // when the server has none.
     suspend fun lyrics(artist: String, title: String): String? =
