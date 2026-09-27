@@ -121,6 +121,7 @@ import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.AxisDrag
 import app.winters.octo.ui.common.SwipeSkip
 import app.winters.octo.ui.common.detectAxisDrags
+import app.winters.octo.ui.common.rememberSystemReduceMotion
 import app.winters.octo.ui.common.swipeSkip
 import app.winters.octo.ui.common.DownloadButton
 import app.winters.octo.ui.common.LocalHaze
@@ -151,6 +152,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     val colors by model.colors.collectAsStateWithLifecycle()
     val prefs by model.prefs.collectAsStateWithLifecycle()
     val base by animateColorAsState(colors.base, tween(600), label = "player base")
+    val phoneCalm = rememberSystemReduceMotion()
     val close by rememberUpdatedState(onClose)
     val scope = rememberCoroutineScope()
     // How far the player has been pulled down, in pixels.
@@ -224,7 +226,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
             // bar frosts the page.
             Box(Modifier.fillMaxSize().hazeSource(backdrop)) {
                 if (prefs.liveBackground && LiveBackgroundSupported) {
-                    MeshBackground(colors, now.isPlaying)
+                    MeshBackground(colors, now.isPlaying && !prefs.reduceMotion && !phoneCalm)
                 } else {
                     BlurredArtwork(now.artwork)
                 }
@@ -447,6 +449,8 @@ private fun AnimatedVisibilityScope.ArtStage(
                     .fillMaxSize()
                     .padding(vertical = 8.dp)
                     .graphicsLayer { alpha = lyricsShown },
+                // Out to the screen's margins, past the player's side padding.
+                edgeBleed = 24.dp,
             )
         }
     }

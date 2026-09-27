@@ -6,6 +6,7 @@ import app.winters.octo.catalog.matchKey
 import app.winters.octo.discovery.sameArtist
 import app.winters.octo.discovery.titleKeys
 import app.winters.octo.listening.SendPlays
+import app.winters.octo.lyrics.LyricsLook
 import app.winters.octo.offline.CacheSize
 import app.winters.octo.offline.OfflinePrefs
 import app.winters.octo.playback.StreamQuality
@@ -73,9 +74,14 @@ data class PinBackup(val kind: String, val item: HeldKey)
 @Serializable
 data class LyricsOffsetBackup(val song: SongKey, val offsetMs: Long)
 
-// Whether the screen stays on while lyrics show, and each song's timing.
+// Whether the screen stays on while lyrics show, each song's timing, and
+// how synced lyrics look (missing from older backups).
 @Serializable
-data class LyricsBackup(val keepScreenOn: Boolean = true, val offsets: List<LyricsOffsetBackup> = emptyList())
+data class LyricsBackup(
+    val keepScreenOn: Boolean = true,
+    val offsets: List<LyricsOffsetBackup> = emptyList(),
+    val look: LyricsLook? = null,
+)
 
 private val offlineDefaults = OfflinePrefs()
 

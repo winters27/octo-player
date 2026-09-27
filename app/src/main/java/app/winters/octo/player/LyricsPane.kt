@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -69,6 +70,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -83,6 +85,9 @@ import app.winters.octo.design.OctoType
 import app.winters.octo.lyrics.LyricLine
 import app.winters.octo.lyrics.LyricWord
 import app.winters.octo.lyrics.Lyrics
+import app.winters.octo.lyrics.LyricsLook
+import app.winters.octo.lyrics.LyricsLookSettings
+import app.winters.octo.lyrics.LyricsStyle
 import app.winters.octo.lyrics.LyricsTiming
 import app.winters.octo.lyrics.TIMING_LIMIT_MS
 import app.winters.octo.lyrics.endOf
@@ -92,6 +97,7 @@ import app.winters.octo.lyrics.lyricsClock
 import app.winters.octo.lyrics.shownLines
 import app.winters.octo.lyrics.timingLabel
 import app.winters.octo.playback.NowPlaying
+import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.ui.common.FloatingSheet
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -100,7 +106,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -132,10 +140,28 @@ private val LyricStyle = TextStyle(fontWeight = FontWeight.Bold, lineHeight = 1.
 // How lines move as the song reaches them.
 private fun <T> lineSpring() = spring<T>(dampingRatio = 0.7f, stiffness = 80f)
 
-// Each song's lyrics timing, and whether the screen stays on for lyrics.
+// Each song's lyrics timing, whether the screen stays on for lyrics, how
+// they look, and the player's clock for the flowing style.
 @HiltViewModel
-class LyricsTimingViewModel @Inject constructor(private val timing: LyricsTiming) : ViewModel() {
+class LyricsTimingViewModel @Inject constructor(
+    private val timing: LyricsTiming,
+    lookSettings: LyricsLookSettings,
+    player: PlayerSettings,
+    private val playback: PlaybackConnection,
+) : ViewModel() {
     val keepScreenOn: StateFlow<Boolean> = timing.keepScreenOn.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    // Null until read, so the chosen style shows from the first frame.
+    val look: StateFlow<LyricsLook?> = lookSettings.look.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val reduceMotion: StateFlow<Boolean> = player.prefs
+        .map { it.reduceMotion }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val timeEvents: Flow<Int> = playback.timeEvents
+
+    fun speed(): Float = playback.speed()
 
     fun offsetFor(trackId: String): Flow<Long> = timing.offsetFor(trackId)
 
@@ -148,11 +174,12 @@ class LyricsTimingViewModel @Inject constructor(private val timing: LyricsTiming
     }
 }
 
-// The lyrics, in place of the artwork. Synced lyrics follow the song with
-// the line being sung in the middle; a tap on a line or word plays from
-// there. Plain lyrics are text to scroll. Where they came from shows
-// quietly underneath, beside a way to fix synced lyrics that run early or
-// late for this one song.
+// The lyrics, in place of the artwork. Synced lyrics follow the song in
+// the chosen style: flowing, or the classic view with the line being sung
+// in the middle; a tap on a line plays from there. Plain lyrics are text to
+// scroll. Where they came from shows quietly underneath, beside a way to
+// fix synced lyrics that run early or late for this one song. The flowing
+// lyrics reach `edgeBleed` past the sides, to the screen's own margins.
 @Composable
 fun LyricsPane(
     state: LyricsState,
@@ -160,6 +187,7 @@ fun LyricsPane(
     positionMs: () -> Long,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    edgeBleed: Dp = 0.dp,
     timing: LyricsTimingViewModel = hiltViewModel(),
 ) {
     // The screen stays on while the words are there to read, unless that
@@ -172,11 +200,28 @@ fun LyricsPane(
             is LyricsState.Found -> {
                 val lyrics = shown.lyrics
                 val offset by remember(shown.trackId) { timing.offsetFor(shown.trackId) }.collectAsStateWithLifecycle(0L)
+                val look by timing.look.collectAsStateWithLifecycle()
+                val calm by timing.reduceMotion.collectAsStateWithLifecycle()
                 var adjusting by remember { mutableStateOf(false) }
+                val flowing = lyrics.synced && !lyrics.instrumental && look?.style == LyricsStyle.Flowing
                 Column(Modifier.fillMaxSize()) {
-                    Box(Modifier.weight(1f).fillMaxWidth().fadedEdges()) {
+                    Box(Modifier.weight(1f).fillMaxWidth().bleed(if (flowing) edgeBleed else 0.dp).fadedEdges()) {
+                        val chosen = look
                         when {
                             lyrics.instrumental -> Quiet("Instrumental")
+                            // The style is not known yet: nothing, for a moment.
+                            lyrics.synced && chosen == null -> Unit
+                            lyrics.synced && chosen != null && flowing -> FlowingLyrics(
+                                lyrics,
+                                now,
+                                positionMs,
+                                timing::speed,
+                                timing.timeEvents,
+                                offset,
+                                chosen,
+                                calm,
+                                onSeek,
+                            )
                             lyrics.synced -> SyncedLyrics(lyrics, now, positionMs, onSeek, offset)
                             else -> PlainLyrics(lyrics)
                         }
@@ -256,6 +301,23 @@ private fun TimingSheet(offsetMs: Long, onStep: (Int) -> Unit, onReset: () -> Un
 private fun Quiet(text: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(text, style = OctoType.body, color = OctoColors.TextMuted, textAlign = TextAlign.Center)
+    }
+}
+
+// Reaches `horizontal` past each side of the space it is given.
+private fun Modifier.bleed(horizontal: Dp): Modifier = if (horizontal <= 0.dp) {
+    this
+} else {
+    layout { measurable, constraints ->
+        val extra = horizontal.roundToPx() * 2
+        val wider = if (constraints.hasBoundedWidth) {
+            constraints.copy(minWidth = constraints.minWidth + extra, maxWidth = constraints.maxWidth + extra)
+        } else {
+            constraints
+        }
+        val placeable = measurable.measure(wider)
+        val width = if (constraints.hasBoundedWidth) placeable.width - extra else placeable.width
+        layout(width, placeable.height) { placeable.place(-(placeable.width - width) / 2, 0) }
     }
 }
 

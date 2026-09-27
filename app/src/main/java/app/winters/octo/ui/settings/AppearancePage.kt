@@ -44,10 +44,14 @@ class LiveBackgroundViewModel @Inject constructor(private val settings: PlayerSe
     fun setLiveBackground(on: Boolean) {
         viewModelScope.launch { settings.setLiveBackground(on) }
     }
+
+    fun setReduceMotion(on: Boolean) {
+        viewModelScope.launch { settings.setReduceMotion(on) }
+    }
 }
 
 // How the app looks: the artwork's colours glowing behind the pages, how
-// strongly and where, and the player's moving background.
+// strongly and where, the player's moving background, and how much moves.
 @Composable
 fun AppearancePage(
     onBack: () -> Unit,
@@ -102,6 +106,15 @@ fun AppearancePage(
                 } else {
                     "Needs Android 13 or newer. The blurred artwork is used instead."
                 },
+            )
+        }
+        SettingsGroup(title = "Motion") {
+            SwitchRow(
+                SettingsIndex.ReduceMotion,
+                checked = player.reduceMotion,
+                onChange = live::setReduceMotion,
+                helper = "The backgrounds stop drifting, and synced lyrics jump into place without ripple, bloom or " +
+                    "bouncing dots; words still fill as they are sung. Also on when the phone's animations are off.",
             )
         }
     }

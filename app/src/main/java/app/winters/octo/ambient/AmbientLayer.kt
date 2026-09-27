@@ -1,9 +1,7 @@
 package app.winters.octo.ambient
 
-import android.content.ContentResolver
 import android.graphics.RuntimeShader
 import android.os.Build
-import android.provider.Settings
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -43,13 +41,11 @@ import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
@@ -64,6 +60,7 @@ import app.winters.octo.player.ArtworkPalette
 import app.winters.octo.player.MESH
 import app.winters.octo.player.PlayerColors
 import app.winters.octo.player.PlayerSettings
+import app.winters.octo.ui.common.rememberSystemReduceMotion
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
@@ -104,6 +101,12 @@ class AmbienceViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val now: StateFlow<NowPlaying> = playback.now
+
+    // Octo's own Reduce motion, beside the phone's.
+    val reduceMotion: StateFlow<Boolean> = settings.prefs
+        .map { it.reduceMotion }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     // The same colours the full player uses, from the same cache.
     suspend fun colorsFor(artwork: String?): PlayerColors = palette.colorsFor(artwork)
@@ -171,7 +174,8 @@ fun AmbientBackdrop(
         }
     }
     val strength = if (source == AmbientSource.None) 0f else ambientAlpha(prefs?.strength ?: AmbientStrength.Off)
-    val reduceMotion = rememberReduceMotion()
+    val appCalm by vm.reduceMotion.collectAsStateWithLifecycle()
+    val reduceMotion = rememberSystemReduceMotion() || appCalm
     AmbientField(colors, strength, moving = awake && now.isPlaying && !reduceMotion)
 }
 
@@ -303,19 +307,3 @@ private class GradientPainter : FieldPainter {
         drawRect(Brush.linearGradient(listOf(c0, c1, c2, c3)), alpha = alpha)
     }
 }
-
-// Whether the phone's animations are switched off in its settings. Read again
-// each time the app comes back, since it may have changed meanwhile.
-@Composable
-private fun rememberReduceMotion(): Boolean {
-    val resolver = LocalContext.current.contentResolver
-    var off by remember { mutableStateOf(animationsOff(resolver)) }
-    LifecycleResumeEffect(resolver) {
-        off = animationsOff(resolver)
-        onPauseOrDispose { }
-    }
-    return off
-}
-
-private fun animationsOff(resolver: ContentResolver): Boolean =
-    Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
