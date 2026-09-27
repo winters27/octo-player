@@ -15,6 +15,7 @@ import app.winters.octo.catalog.matchKey
 import app.winters.octo.discovery.sameArtist
 import app.winters.octo.discovery.versionOf
 import kotlin.math.abs
+import kotlin.math.roundToLong
 
 // The free, open lyrics library used when nothing else has a song's lyrics.
 // It needs no key; the shared client already names the app in every request.
@@ -23,6 +24,8 @@ private const val LIBRARY_ADDRESS = "https://lrclib.net"
 // What the lyrics library answers for one song.
 @Serializable
 internal data class LibrarySong(
+    // The library's number for this copy.
+    val id: Long? = null,
     val instrumental: Boolean = false,
     val plainLyrics: String? = null,
     val syncedLyrics: String? = null,
@@ -53,6 +56,33 @@ class OnlineLyrics(private val http: OkHttpClient, private val base: HttpUrl) {
         if (exact != null && (exact.synced || exact.instrumental)) return@withContext exact
         val found = runCatching { fetch(searchUrl(base, title, artist)) }.getOrNull()
         found?.let { bestSearchMatch(it, title, artist, album, durationMs) } ?: exact
+    }
+
+    // The library's own match for the song, or null when it has none.
+    // Throws IOException when the library cannot be reached.
+    suspend fun exact(title: String, artist: String, album: String, durationMs: Long): OnlineCopy? = withContext(Dispatchers.IO) {
+        fetch(lookupUrl(base, title, artist, album, durationMs))?.let(::librarySong)?.toCopy()
+    }
+
+    // Every copy in the library's search with the song's title and artist,
+    // for the listener to choose from. Looser than `find`: live takes and
+    // remixes stay in the list, named, since the listener picks.
+    suspend fun copiesOf(title: String, artist: String, album: String, durationMs: Long): List<OnlineCopy> =
+        withContext(Dispatchers.IO) {
+            val body = fetch(searchUrl(base, title, artist)) ?: return@withContext emptyList()
+            rankCopies(songCopies(body).filter { sameTitleAndArtist(it, title, artist) }, album, durationMs)
+        }
+
+    // Whatever the library finds for words the listener typed, as it
+    // answers them: for a song whose tags are wrong, nothing is filtered.
+    suspend fun search(query: String): List<OnlineCopy> = withContext(Dispatchers.IO) {
+        fetch(freeSearchUrl(base, query))?.let(::songCopies).orEmpty()
+    }
+
+    // One copy by its number, for lyrics the listener picked before; null
+    // when the library no longer has it.
+    suspend fun byId(id: Long): Lyrics? = withContext(Dispatchers.IO) {
+        fetch(recordUrl(base, id))?.let(::libraryLyrics)
     }
 
     // The answer's body, or null when the library has nothing for it.
@@ -98,7 +128,72 @@ internal fun bestSearchMatch(body: String, title: String, artist: String, album:
             compareBy<LibrarySong> { !it.albumName.equals(album, ignoreCase = true) }
                 .thenBy { if (durationMs > 0 && it.duration != null) abs(it.duration - seconds) else 0.0 },
         )
-        .firstNotNullOfOrNull { song -> song.syncedLyrics?.let { parseLyricsText(it, LyricsSource.Online) }?.takeIf { it.synced } }
+        .firstNotNullOfOrNull { song ->
+            song.syncedLyrics?.let { parseLyricsText(it, LyricsSource.Online) }?.takeIf { it.synced }?.copy(onlineId = song.id)
+        }
+}
+
+// A search for words the listener typed, matched against any field.
+internal fun freeSearchUrl(base: HttpUrl, query: String): HttpUrl =
+    base.newBuilder()
+        .addPathSegments("api/search")
+        .addQueryParameter("q", query.trim())
+        .build()
+
+// One copy by the library's number for it.
+internal fun recordUrl(base: HttpUrl, id: Long): HttpUrl =
+    base.newBuilder()
+        .addPathSegments("api/get")
+        .addPathSegment(id.toString())
+        .build()
+
+// One copy of a song's lyrics in the online library: its number, what the
+// library calls it, and its lyrics.
+data class OnlineCopy(
+    val id: Long,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val durationMs: Long,
+    val lyrics: Lyrics,
+)
+
+// The same song as the one playing: the same title, ignoring case,
+// punctuation and bracketed extras, and the same artist.
+internal fun sameTitleAndArtist(copy: OnlineCopy, title: String, artist: String): Boolean =
+    matchKey(copy.title).isNotEmpty() && matchKey(copy.title) == matchKey(title) && sameArtist(artist, copy.artist)
+
+// Copies in the order they are offered: timed ones first, then the same
+// album, then the nearest length.
+internal fun rankCopies(copies: List<OnlineCopy>, album: String, durationMs: Long): List<OnlineCopy> =
+    copies.sortedWith(
+        compareBy<OnlineCopy> { !it.lyrics.synced }
+            .thenBy { !(album.isNotBlank() && it.album.equals(album, ignoreCase = true)) }
+            .thenBy { if (durationMs > 0 && it.durationMs > 0) abs(it.durationMs - durationMs) else Long.MAX_VALUE },
+    )
+
+// Every copy in a search answer that has lyrics.
+internal fun songCopies(body: String): List<OnlineCopy> =
+    runCatching { json.decodeFromString(ListSerializer(LibrarySong.serializer()), body) }.getOrNull().orEmpty().mapNotNull { it.toCopy() }
+
+private fun librarySong(body: String): LibrarySong? =
+    runCatching { json.decodeFromString(LibrarySong.serializer(), body) }.getOrNull()
+
+// A copy with its lyrics, or null when it has no number or no words.
+internal fun LibrarySong.toCopy(): OnlineCopy? {
+    val number = id ?: return null
+    val words = asLyrics() ?: return null
+    val length = duration?.let { (it * 1000).roundToLong() } ?: 0L
+    return OnlineCopy(number, trackName.orEmpty(), artistName.orEmpty(), albumName.orEmpty(), length, words)
+}
+
+// Synced lyrics when the copy has them, plain if not, and an instrumental
+// marked as one.
+private fun LibrarySong.asLyrics(): Lyrics? {
+    if (instrumental) return Lyrics(synced = false, lines = emptyList(), source = LyricsSource.Online, instrumental = true, onlineId = id)
+    val words = syncedLyrics?.let { parseLyricsText(it, LyricsSource.Online) }?.takeIf { it.synced }
+        ?: plainLyrics?.let { parseLyricsText(it, LyricsSource.Online) }
+    return words?.copy(onlineId = id)
 }
 
 // The lookup for one song. The library matches the length to within a
@@ -117,9 +212,4 @@ internal fun lookupUrl(base: HttpUrl, title: String, artist: String, album: Stri
 
 // The library's answer as lyrics: synced when it has them, plain if not,
 // and an instrumental marked as one.
-internal fun libraryLyrics(body: String): Lyrics? {
-    val song = runCatching { json.decodeFromString(LibrarySong.serializer(), body) }.getOrNull() ?: return null
-    if (song.instrumental) return Lyrics(synced = false, lines = emptyList(), source = LyricsSource.Online, instrumental = true)
-    return song.syncedLyrics?.let { parseLyricsText(it, LyricsSource.Online) }?.takeIf { it.synced }
-        ?: song.plainLyrics?.let { parseLyricsText(it, LyricsSource.Online) }
-}
+internal fun libraryLyrics(body: String): Lyrics? = librarySong(body)?.asLyrics()

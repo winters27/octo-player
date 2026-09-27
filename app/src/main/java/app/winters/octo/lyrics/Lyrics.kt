@@ -2,12 +2,12 @@ package app.winters.octo.lyrics
 
 import kotlinx.serialization.Serializable
 
-// Where a song's lyrics came from, shown quietly under them.
+// Where a song's lyrics came from, in the words the lyrics menu uses.
 @Serializable
 enum class LyricsSource(val label: String) {
-    Server("Lyrics from your server"),
+    Server("From your server"),
     SongFile("From the song file"),
-    LyricsFile("From a lyrics file beside the song"),
+    LyricsFile("From a .lrc file beside the song"),
     Online("From LRCLIB"),
 }
 
@@ -20,6 +20,10 @@ data class Lyrics(
     val source: LyricsSource,
     // Known to have no words at all.
     val instrumental: Boolean = false,
+    // The online library's number for this copy, so a pick of it can be
+    // fetched again. Null for other sources, and for answers saved before
+    // it was kept.
+    val onlineId: Long? = null,
 ) {
     val isEmpty: Boolean get() = !instrumental && lines.none { it.text.isNotBlank() }
 }

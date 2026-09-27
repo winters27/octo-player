@@ -42,6 +42,14 @@ fun timingLabel(offsetMs: Long): String {
     return if (offsetMs > 0) "$seconds s later" else "$seconds s earlier"
 }
 
+// The offset as a signed number of seconds, for the timing control:
+// "0 s", "+0.75 s", "-1.5 s".
+fun signedTiming(offsetMs: Long): String {
+    if (offsetMs == 0L) return "0 s"
+    val seconds = BigDecimal.valueOf(abs(offsetMs), 3).stripTrailingZeros().toPlainString()
+    return if (offsetMs > 0) "+$seconds s" else "-$seconds s"
+}
+
 // Lyrics settings: timing, the screen, and how the lyrics look.
 internal val Context.lyricsData by preferencesDataStore("lyrics")
 
