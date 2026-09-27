@@ -364,9 +364,6 @@ class OctoPlaybackService : MediaLibraryService() {
         )
     }
 
-    // Turns song ids into playable songs, in order, skipping any that are gone.
-    private suspend fun resolve(items: List<MediaItem>): List<MediaItem> = playable.items(items.map { it.mediaId })
-
     private inner class Watcher : Player.Listener {
         // Songs that failed one after another, back to 0 once one plays.
         private var failedInARow = 0
@@ -512,14 +509,13 @@ class OctoPlaybackService : MediaLibraryService() {
             }
             // An album, playlist, or a song inside one, chosen in a car.
             single?.let { car.playFor(it.mediaId) }?.let { (ids, start) ->
-                val songs = playable.items(ids)
-                val index = startIndex(songs.map { it.mediaId }, ids.getOrNull(start))
-                return@future MediaItemsWithStartPosition(songs, index, 0)
+                val each = playable.itemsEach(ids)
+                return@future MediaItemsWithStartPosition(each.filterNotNull(), chosenStart(each, start), 0)
             }
-            val resolved = resolve(mediaItems)
+            val each = playable.itemsEach(mediaItems.map { it.mediaId })
+            val resolved = each.filterNotNull()
             // Keep starting on the chosen song even if some before it are gone.
-            val wanted = mediaItems.getOrNull(startIndex)?.mediaId
-            val index = if (startIndex == C.INDEX_UNSET) C.INDEX_UNSET else resolved.indexOfFirst { it.mediaId == wanted }.coerceAtLeast(0)
+            val index = if (startIndex == C.INDEX_UNSET) C.INDEX_UNSET else chosenStart(each, startIndex)
             MediaItemsWithStartPosition(resolved, index, startPositionMs)
         }
 
