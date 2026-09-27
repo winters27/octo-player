@@ -10,7 +10,11 @@ const val NONE_FOUND_FOR_MS = 24 * 60 * 60 * 1000L
 
 // Raised when the online lookup learns a new way to find synced lyrics, so
 // songs that only got plain ones are asked again once.
-const val ONLINE_LOOKUP_VERSION = 2
+const val ONLINE_LOOKUP_VERSION = 3
+
+// The online lookup that could take another song's lyrics: it matched a
+// search result by length alone. What it found is asked again once.
+private const val LOOSE_SEARCH_VERSION = 2
 
 // One song's saved answer: its lyrics, or none, when that was found, and
 // whether the online library was asked.
@@ -30,6 +34,7 @@ data class CachedLyrics(
     fun stillGood(now: Long, onlineAllowed: Boolean): Boolean {
         if (onlineAllowed && !askedOnline && lyrics?.synced != true) return false
         if (onlineAllowed && lyrics != null && !lyrics.synced && lookupVersion < ONLINE_LOOKUP_VERSION) return false
+        if (onlineAllowed && lyrics?.source == LyricsSource.Online && lookupVersion == LOOSE_SEARCH_VERSION) return false
         return lyrics != null || now - savedAt < NONE_FOUND_FOR_MS
     }
 }

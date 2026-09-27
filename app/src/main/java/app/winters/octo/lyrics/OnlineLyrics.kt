@@ -11,6 +11,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
 import javax.inject.Inject
+import app.winters.octo.catalog.matchKey
+import app.winters.octo.discovery.sameArtist
+import app.winters.octo.discovery.versionOf
 import kotlin.math.abs
 
 // The free, open lyrics library used when nothing else has a song's lyrics.
@@ -26,6 +29,8 @@ internal data class LibrarySong(
     // Seconds; only search answers carry it.
     val duration: Double? = null,
     val albumName: String? = null,
+    val trackName: String? = null,
+    val artistName: String? = null,
 )
 
 // How far apart two lengths may be and still be the same recording.
@@ -47,7 +52,7 @@ class OnlineLyrics(private val http: OkHttpClient, private val base: HttpUrl) {
         val exact = fetch(lookupUrl(base, title, artist, album, durationMs))?.let(::libraryLyrics)
         if (exact != null && (exact.synced || exact.instrumental)) return@withContext exact
         val found = runCatching { fetch(searchUrl(base, title, artist)) }.getOrNull()
-        found?.let { bestSearchMatch(it, album, durationMs) } ?: exact
+        found?.let { bestSearchMatch(it, title, artist, album, durationMs) } ?: exact
     }
 
     // The answer's body, or null when the library has nothing for it.
@@ -71,14 +76,23 @@ internal fun searchUrl(base: HttpUrl, title: String, artist: String): HttpUrl =
         .addQueryParameter("artist_name", artist)
         .build()
 
-// The timed copy in a search answer that is the same recording: its length
-// within a few seconds of the song's (when the song's is known), the same
-// album preferred. Null when none is timed.
-internal fun bestSearchMatch(body: String, album: String, durationMs: Long): Lyrics? {
+// The timed copy in a search answer that is the same song: the same title
+// (ignoring case, punctuation and bracketed extras, but not the kind of
+// recording, so a remix never stands in for the original), the same
+// artist, and a length within a few seconds when the song's is known, the
+// same album preferred. The search is loose and returns other songs by the
+// artist too; a length alone once let one of those stand in. Null when no
+// timed copy of this song is there.
+internal fun bestSearchMatch(body: String, title: String, artist: String, album: String, durationMs: Long): Lyrics? {
     val songs = runCatching { json.decodeFromString(ListSerializer(LibrarySong.serializer()), body) }.getOrNull() ?: return null
     val seconds = durationMs / 1000.0
     return songs
         .filter { !it.syncedLyrics.isNullOrBlank() }
+        .filter { song ->
+            val name = song.trackName.orEmpty()
+            matchKey(name).isNotEmpty() && matchKey(name) == matchKey(title) && versionOf(name) == versionOf(title) &&
+                sameArtist(artist, song.artistName.orEmpty())
+        }
         .filter { durationMs <= 0 || (it.duration != null && abs(it.duration - seconds) <= SAME_LENGTH_S) }
         .sortedWith(
             compareBy<LibrarySong> { !it.albumName.equals(album, ignoreCase = true) }

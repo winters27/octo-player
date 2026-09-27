@@ -125,21 +125,46 @@ class LyricsTest {
         val oldPlain = CachedLyrics(savedAt = 0, lyrics = lyrics.copy(synced = false), askedOnline = true)
         assertFalse(oldPlain.stillGood(now = 1, onlineAllowed = true))
         assertTrue(oldPlain.copy(lookupVersion = ONLINE_LOOKUP_VERSION).stillGood(now = 1, onlineAllowed = true))
+
+        // Online lyrics from the lookup that matched by length alone are asked
+        // again once, even when timed, since they may be another song's.
+        val looseOnline = CachedLyrics(savedAt = 0, lyrics = lyrics.copy(source = LyricsSource.Online), askedOnline = true, lookupVersion = 2)
+        assertFalse(looseOnline.stillGood(now = 1, onlineAllowed = true))
+        assertTrue(looseOnline.copy(lookupVersion = ONLINE_LOOKUP_VERSION).stillGood(now = 1, onlineAllowed = true))
+        // Lyrics from the song file are never asked again for this.
+        assertTrue(looseOnline.copy(lyrics = lyrics).stillGood(now = 1, onlineAllowed = true))
     }
 
     @Test
     fun searchFindsATimedCopyOfTheSameRecording() {
         val body = """[
-            {"albumName":"Other","duration":201.0,"plainLyrics":"Hi","syncedLyrics":null},
-            {"albumName":"Live","duration":260.0,"syncedLyrics":"[00:01.00] Live take"},
-            {"albumName":"Other","duration":202.5,"syncedLyrics":"[00:01.00] Close"},
-            {"albumName":"Album","duration":203.9,"syncedLyrics":"[00:01.00] Same album"}
+            {"trackName":"Song","artistName":"Artist","albumName":"Other","duration":201.0,"plainLyrics":"Hi","syncedLyrics":null},
+            {"trackName":"Song","artistName":"Artist","albumName":"Live","duration":260.0,"syncedLyrics":"[00:01.00] Live take"},
+            {"trackName":"Song","artistName":"Artist","albumName":"Other","duration":202.5,"syncedLyrics":"[00:01.00] Close"},
+            {"trackName":"song!","artistName":"ARTIST","albumName":"Album","duration":203.9,"syncedLyrics":"[00:01.00] Same album"}
         ]"""
         // Same album wins among copies of the right length; the live one is too long.
-        assertEquals("Same album", bestSearchMatch(body, "Album", 201_600)!!.lines.first().text)
-        assertEquals("Close", bestSearchMatch(body, "Nothing like it", 201_600)!!.lines.first().text)
-        assertNull(bestSearchMatch("""[{"duration":201.0,"plainLyrics":"Hi"}]""", "", 201_000))
-        assertNull(bestSearchMatch("not json", "", 0))
+        assertEquals("Same album", bestSearchMatch(body, "Song", "Artist", "Album", 201_600)!!.lines.first().text)
+        assertEquals("Close", bestSearchMatch(body, "Song", "Artist", "Nothing like it", 201_600)!!.lines.first().text)
+        assertNull(bestSearchMatch("""[{"trackName":"Song","artistName":"Artist","duration":201.0,"plainLyrics":"Hi"}]""", "Song", "Artist", "", 201_000))
+        assertNull(bestSearchMatch("not json", "Song", "Artist", "", 0))
+    }
+
+    @Test
+    fun searchNeverTakesAnotherSongOfTheSameLength() {
+        // What the library answered for "$UICIDE": other songs by the same
+        // artist, one of them within a second of its length.
+        val body = """[
+            {"trackName":"Ultimate ${'$'}uicide","artistName":"${'$'}uicideboy${'$'}","albumName":"High Tide","duration":170.0,"syncedLyrics":"[00:01.00] Wrong song"},
+            {"trackName":"Black ${'$'}uicide","artistName":"${'$'}uicideboy${'$'}","albumName":"Black ${'$'}uicide","duration":170.0,"syncedLyrics":"[00:01.00] Also wrong"}
+        ]"""
+        assertNull(bestSearchMatch(body, "${'$'}UICIDE", "${'$'}uicideboy${'$'}", "Sing Me a Lullaby", 169_000))
+        // Another artist's song of the same name is not it either.
+        val other = """[{"trackName":"Song","artistName":"Someone Else","duration":200.0,"syncedLyrics":"[00:01.00] Theirs"}]"""
+        assertNull(bestSearchMatch(other, "Song", "Artist", "", 200_000))
+        // Nor a remix of it.
+        val remix = """[{"trackName":"Song (Club Remix)","artistName":"Artist","duration":200.0,"syncedLyrics":"[00:01.00] Remix"}]"""
+        assertNull(bestSearchMatch(remix, "Song", "Artist", "", 200_000))
     }
 
     @Test
