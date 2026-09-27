@@ -189,8 +189,12 @@ fun OnlineAlbumScreen(
                 // numbered by where it sits on the album.
                 itemsIndexed(found.songs, key = { _, track -> track.id }) { index, track ->
                     // Only say who is singing when it is not the album's artist.
-                    val subtitle = track.artist.takeIf { it != album.artist }
-                    SongRow(track, SongLead.Number(index + 1), subtitle, offerAdd = true) { vm.play(index) }
+                    SongRow(
+                        track,
+                        SongLead.Number(index + 1),
+                        subtitle = { it.artist.takeIf { artist -> artist != album.artist } },
+                        offerAdd = true,
+                    ) { vm.play(index) }
                 }
             }
         }

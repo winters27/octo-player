@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -291,7 +292,7 @@ fun ArtistScreen(
                         }
                         val shown = if (allSongs) ownSongs else ownSongs.take(ARTIST_SONGS)
                         shown.forEachIndexed { index, track ->
-                            SongRow(track, subtitle = track.album) { vm.playSong(index) }
+                            SongRow(track, subtitle = { it.album }) { vm.playSong(index) }
                         }
                     }
                 }
@@ -300,11 +301,16 @@ fun ArtistScreen(
                 wide("top") {
                     Column {
                         SectionTitle("Top songs")
-                        val offerAdd = top.any { isFind(it.id) }
+                        // Once offered here, kept while the page is open, so the
+                        // lengths do not shift when the last find turns into a
+                        // library song.
+                        var offered by rememberSaveable(id) { mutableStateOf(false) }
+                        val offerAdd = offered || top.any { isFind(it.id) }
+                        SideEffect { offered = offerAdd }
                         top.forEachIndexed { index, track ->
                             // A song found online can be added from here; with none
                             // among them, library rows need no space kept for the button.
-                            SongRow(track, subtitle = rowAlbum(track), menuContext = SongMenuContext(artistId = id), offerAdd = offerAdd) { vm.playTop(index) }
+                            SongRow(track, subtitle = ::rowAlbum, menuContext = SongMenuContext(artistId = id), offerAdd = offerAdd) { vm.playTop(index) }
                         }
                     }
                 }

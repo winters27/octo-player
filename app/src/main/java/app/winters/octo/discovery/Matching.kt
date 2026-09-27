@@ -43,6 +43,12 @@ val Resolved.id: String
         is Resolved.Found -> song.id
     }
 
+// A find already downloaded into the library is the library song it became,
+// while the library still has it, so a list built from then on shows it
+// once, as the library song.
+fun asAdopted(resolved: Resolved, library: Set<String>): Resolved =
+    if (resolved is Resolved.Found && resolved.song.adoptedId in library) Resolved.InLibrary(resolved.song.adoptedId) else resolved
+
 // The length the server gave, or zero when it only guessed.
 fun knownLengthMs(song: Song): Long =
     if (song.duration <= 0 || song.duration == GUESSED_SECONDS) 0 else song.duration * 1000L

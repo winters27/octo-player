@@ -115,8 +115,9 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp),
         )
         val found = results
-        // What the server found, of the kinds the filter shows.
-        val online = discover.only(filter)
+        // What the server found, of the kinds the filter shows, less any
+        // song the library results already list.
+        val online = discover.only(filter).without(found?.listedFinds.orEmpty())
         // Nothing to show online: not looking, or looked and found nothing.
         val nothingOnline = online is DiscoverState.Idle || (online is DiscoverState.Done && online.found.isEmpty)
         when {
@@ -331,6 +332,10 @@ private fun DiscoverState.only(filter: SearchFilter): DiscoverState {
         ),
     )
 }
+
+// The server's finds, less the songs the library results already list.
+private fun DiscoverState.without(listed: Set<String>): DiscoverState =
+    if (this is DiscoverState.Done && listed.isNotEmpty()) DiscoverState.Done(found.without(listed)) else this
 
 // What the server has beyond the library: songs, then albums, then artists,
 // under a title that says so. The first few times, a quiet line under it

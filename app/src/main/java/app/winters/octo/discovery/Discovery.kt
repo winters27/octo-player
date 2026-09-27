@@ -133,11 +133,14 @@ class Discovery @Inject constructor(
     }
 
     // Songs from the server as the app shows them, in the order sent: a
-    // library song as it is in the library, anything else as a find.
+    // library song as it is in the library, anything else as a find. A find
+    // already downloaded is the library song it became.
     private suspend fun resolve(client: SubsonicClient, sourceId: String, songs: List<Song>): List<TrackEntity> {
         if (songs.isEmpty()) return emptyList()
-        val resolved = resolveEach(sourceId, songs)
-        val library = catalog.tracksByIds(resolved.filterIsInstance<Resolved.InLibrary>().map { it.trackId }).associateBy { it.id }
+        val each = resolveEach(sourceId, songs)
+        val adopted = each.filterIsInstance<Resolved.Found>().mapNotNull { it.song.adoptedId.ifEmpty { null } }
+        val library = catalog.tracksByIds(each.filterIsInstance<Resolved.InLibrary>().map { it.trackId } + adopted).associateBy { it.id }
+        val resolved = each.map { asAdopted(it, library.keys) }
         return resolved.mapNotNull { r ->
             when (r) {
                 is Resolved.InLibrary -> library[r.trackId]

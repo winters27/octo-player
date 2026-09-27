@@ -49,9 +49,9 @@ private const val CHECK_MS = 300
 private const val GLOW_HOLD_MS = 500L
 private const val GLOW_FADE_MS = 700
 
-// How long pages wait after a download lands before they swap its row for
-// the library song, so the check has its moment first.
-internal const val CHECK_SETTLE_MS = 1_500L
+// How long pages wait after a download lands before they load the library
+// song in its place: until the row has had its check and turned into it.
+internal const val CHECK_SETTLE_MS = CHECK_HOLD_MS + SWAP_FADE_MS
 
 // How much of the circle the waiting arc covers.
 private const val WAITING_SWEEP = 90f
