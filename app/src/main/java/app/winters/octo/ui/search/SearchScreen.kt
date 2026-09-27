@@ -358,7 +358,9 @@ private fun LazyListScope.discoverSection(
             if (hint && found.songs.isNotEmpty()) item(key = "discover:hint") { AddHintLine(onHintSeen) }
             if (found.songs.isNotEmpty()) item(key = "discover:songs:title") { SubTitle("Songs") }
             items(found.songs, key = { "discover:${it.id}" }) { track ->
-                SongRow(track, offerAdd = true) { onPlay(track) }
+                // A find that turns into its library song ends like the
+                // library songs listed above, at its length.
+                SongRow(track, offerAdd = true, librarySpace = false) { onPlay(track) }
             }
             if (found.albums.isNotEmpty()) {
                 item(key = "discover:albums:title") { SubTitle("Albums") }

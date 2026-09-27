@@ -202,8 +202,9 @@ private val AddIconSize = 22.dp
 // does nothing else (`swipeToPlayNext`).
 // A song found online that is not in the library carries a small plus on
 // its artwork. In a list that offers adding (`offerAdd`), it gets the add
-// button at the end instead, and the row says it once. Every other row in
-// such a list keeps that space empty, so the lengths line up.
+// button at the end instead, and the row says it once. A library song in
+// such a list keeps that space empty, so the lengths line up, unless the
+// list's library songs end at their length (`librarySpace` false).
 // Once a find is in the library, its row becomes the library song's row in
 // place: after the check has its moment when that happens in view, or
 // straight away when it already had. The swipe and the menu are then the
@@ -218,6 +219,7 @@ fun SongRow(
     selectKey: String = track.id,
     swipeToPlayNext: Boolean = true,
     offerAdd: Boolean = false,
+    librarySpace: Boolean = offerAdd,
     onClick: (() -> Unit)? = null,
 ) {
     val swap = if (isFind(track.id)) rememberFindSwap(track.id, offerAdd, LocalReduceMotion.current) else null
@@ -226,7 +228,7 @@ fun SongRow(
     val nowId = LocalNowPlayingId.current.trackId
     val isNow = nowId == track.id || nowId == song.id
     val face: @Composable (TrackEntity) -> Unit = { shown ->
-        SongFace(shown, lead, subtitle(shown), trailing, offerAdd, selectKey, isNow)
+        SongFace(shown, lead, subtitle(shown), trailing, offerAdd, librarySpace, selectKey, isNow)
     }
     if (swipeToPlayNext) {
         val menu = LocalSongMenu.current
@@ -319,14 +321,15 @@ private fun SongFace(
     subtitle: String?,
     trailing: (@Composable () -> Unit)?,
     offerAdd: Boolean,
+    librarySpace: Boolean,
     selectKey: String,
     isNow: Boolean,
 ) {
     val sign = rowAddSign(track.id, LocalAdoptedFinds.current, offerAdd)
-    val end: (@Composable () -> Unit)? = when {
-        sign == AddSign.Button -> ({ AddToLibraryButton(track, size = AddButtonSize, iconSize = AddIconSize) })
-        trailing == null && rowKeepsAddSpace(sign, offerAdd) -> ({ Spacer(Modifier.width(AddButtonSize)) })
-        else -> trailing
+    val end: (@Composable () -> Unit)? = when (rowEnd(sign, librarySpace, hasTrailing = trailing != null)) {
+        RowEnd.AddButton -> ({ AddToLibraryButton(track, size = AddButtonSize, iconSize = AddIconSize) })
+        RowEnd.AddSpace -> ({ Spacer(Modifier.width(AddButtonSize)) })
+        RowEnd.Trailing -> trailing
     }
     val picked = LocalSongSelection.current?.isPicked(selectKey) == true
     val playing = LocalNowPlayingId.current.playing

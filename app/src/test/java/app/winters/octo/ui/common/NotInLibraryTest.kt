@@ -59,11 +59,35 @@ class NotInLibraryTest {
     fun rowsBesideAddButtonsKeepTheirSpace() {
         // In a list offering the button, a library song leaves the space
         // empty so every length sits in one column.
-        assertTrue(rowKeepsAddSpace(AddSign.None, offersAdd = true))
-        assertFalse(rowKeepsAddSpace(AddSign.Button, offersAdd = true))
+        assertTrue(rowKeepsAddSpace(AddSign.None, librarySpace = true))
+        assertFalse(rowKeepsAddSpace(AddSign.Button, librarySpace = true))
         // Elsewhere nothing is kept.
-        assertFalse(rowKeepsAddSpace(AddSign.None, offersAdd = false))
-        assertFalse(rowKeepsAddSpace(AddSign.Mark, offersAdd = false))
+        assertFalse(rowKeepsAddSpace(AddSign.None, librarySpace = false))
+        assertFalse(rowKeepsAddSpace(AddSign.Mark, librarySpace = false))
+    }
+
+    // How a row for this song ends in a list, as the row draws it.
+    private fun end(trackId: String, offersAdd: Boolean, librarySpace: Boolean = offersAdd, hasTrailing: Boolean = false) =
+        rowEnd(rowAddSign(trackId, setOf("find:e1"), offersAdd), librarySpace, hasTrailing)
+
+    @Test
+    fun aFindThatBecameALibrarySongEndsLikeTheListsLibrarySongs() {
+        // Once turned, the row is drawn for the library song "t-42".
+        // Search: the library results end at their length, and so does a
+        // find among the songs not in the library once it has turned, while
+        // the finds beside it keep their button.
+        assertEquals(end("t-42", offersAdd = false), end("t-42", offersAdd = true, librarySpace = false))
+        assertEquals(RowEnd.Trailing, end("t-42", offersAdd = true, librarySpace = false))
+        assertEquals(RowEnd.AddButton, end("find:e2", offersAdd = true, librarySpace = false))
+        // The find itself keeps its button through the check.
+        assertEquals(RowEnd.AddButton, end("find:e1", offersAdd = true, librarySpace = false))
+        // A list mixing library songs with finds, like an artist's top songs:
+        // every library song keeps the space, the turned one too.
+        assertEquals(RowEnd.AddSpace, end("t-42", offersAdd = true))
+        // A list with its own end, like a playlist's drag handle, gives the
+        // turned row that end, as it does its library songs.
+        assertEquals(RowEnd.Trailing, end("t-42", offersAdd = false, hasTrailing = true))
+        assertEquals(RowEnd.Trailing, end("t-42", offersAdd = true, hasTrailing = true))
     }
 
     @Test

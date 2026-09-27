@@ -22,6 +22,17 @@ import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
+// The song a find plays as: the library song it became once downloaded,
+// while the library has it, or else the find itself, streamed.
+fun playsAs(find: OnlineSongEntity, library: Set<String>): String = find.adoptedId.takeIf { it in library } ?: find.id
+
+// Where a list asked for starts once its songs are turned into playable
+// ones (`played`, one for each asked, null for any gone): the song chosen,
+// found by its place, since a find plays under its library song's id and a
+// list may hold a song twice. The first song when the chosen one is gone.
+fun chosenStart(played: List<Any?>, startIndex: Int): Int =
+    if (played.getOrNull(startIndex) == null) 0 else played.take(startIndex).count { it != null }
+
 // Turns song ids into songs the player can play. Each library song plays
 // from one of its copies, chosen now by the settings and by what can play:
 // the phone's file, or a stream from the server. A song found online
@@ -53,7 +64,7 @@ class PlayableSongs @Inject constructor(
             // So does a file opened from another app, while Octo may read it.
             if (isOpenedFile(id)) return@map openedFileItem(context, id)
             val find = finds[id] ?: return@map library[id]
-            library[find.adoptedId] ?: findItem(find, prefs)
+            library[playsAs(find, library.keys)] ?: findItem(find, prefs)
         }
     }
 
