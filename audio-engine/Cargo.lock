@@ -966,6 +966,7 @@ dependencies = [
  "rtrb",
  "rubato",
  "symphonia",
+ "symphonia-core",
  "thiserror 2.0.21",
  "uniffi",
  "ureq",
