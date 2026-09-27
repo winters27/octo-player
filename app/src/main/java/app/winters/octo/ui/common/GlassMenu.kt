@@ -1,10 +1,12 @@
 package app.winters.octo.ui.common
 
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,9 +14,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,6 +32,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.GlazeSelected
 import app.winters.octo.design.OctoColors
@@ -47,6 +59,10 @@ fun menuRowLooks(count: Int, selected: Int): List<MenuRowLook> = List(count) { i
 private val OptionShape = RoundedCornerShape(14.dp)
 
 private val LineColour = OctoColors.TextPrimary.copy(alpha = 0.08f)
+
+// How wide a glass menu is, so its pages line up as it turns from one to
+// the next.
+val MenuWidth = 288.dp
 
 // The options of a menu, one above the other with hairlines between, the
 // chosen one in the darker pill with a white check. `selected` below zero
@@ -120,4 +136,153 @@ private fun MenuOption(option: Choice, selected: Boolean, pickable: Boolean, onC
             }
         }
     }
+}
+
+// A page of a glass menu: a heading that stays put, then the rest, which
+// scrolls when it is taller than the menu may be.
+@Composable
+fun GlassMenuPage(
+    modifier: Modifier = Modifier,
+    width: Dp = MenuWidth,
+    header: @Composable ColumnScope.() -> Unit = {},
+    body: @Composable ColumnScope.() -> Unit,
+) {
+    Column(modifier.width(width).padding(6.dp)) {
+        header()
+        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), content = body)
+    }
+}
+
+// Groups of rows, a hairline between one group and the next and none
+// inside a group. Empty groups are left out.
+@Composable
+fun <T> GlassMenuGroups(groups: List<List<T>>, row: @Composable (T) -> Unit) {
+    groups.filter { it.isNotEmpty() }.forEachIndexed { index, group ->
+        if (index > 0) GlassMenuSeparator()
+        group.forEach { row(it) }
+    }
+}
+
+// The hairline between two groups of a menu.
+@Composable
+fun GlassMenuSeparator() {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 4.dp)
+            .height(1.dp)
+            .background(LineColour),
+    )
+}
+
+// One action in a glass menu: a white icon, what it does, and a line about
+// it when there is one. One that cannot be chosen right now is dimmed. One
+// that `opensPage` shows a small chevron, since it leads on.
+@Composable
+fun GlassMenuAction(
+    @DrawableRes icon: Int?,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    detail: String? = null,
+    enabled: Boolean = true,
+    opensPage: Boolean = false,
+) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = 46.dp)
+            .clip(OptionShape)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        if (icon != null) {
+            Icon(
+                painterResource(icon),
+                contentDescription = null,
+                tint = if (enabled) Color.White else OctoColors.TextMuted,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Column(Modifier.weight(1f)) {
+            Text(label, style = OctoType.bodySmall, color = if (enabled) OctoColors.TextPrimary else OctoColors.TextMuted)
+            detail?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
+        }
+        if (opensPage) {
+            Icon(painterResource(OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+// What a menu is about, at its top: a small picture, a name, and a line
+// under it.
+@Composable
+fun GlassMenuHeader(title: String, subtitle: String?, picture: @Composable () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        picture()
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = OctoType.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                color = OctoColors.TextPrimary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(subtitle, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+// The top of a page opened from a menu: a small back chevron and the
+// page's name. The chevron goes back to the page before.
+@Composable
+fun GlassMenuBack(title: String, onBack: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .clip(OptionShape)
+            .clickable(role = Role.Button, onClickLabel = "Back", onClick = onBack)
+            .padding(start = 6.dp, end = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+        Text(
+            title,
+            style = OctoType.label,
+            color = OctoColors.TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).semantics { heading() },
+        )
+    }
+    GlassMenuSeparator()
+}
+
+// A heading for a menu page that has nothing to go back to.
+@Composable
+fun GlassMenuHeading(title: String) {
+    Text(
+        title,
+        style = OctoType.label,
+        color = OctoColors.TextPrimary,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 6.dp).semantics { heading() },
+    )
+}
+
+// A quiet line of words inside a menu, for a note or an empty list.
+@Composable
+fun GlassMenuNote(text: String, modifier: Modifier = Modifier, color: Color = OctoColors.TextMuted) {
+    Text(text, style = OctoType.caption, color = color, modifier = modifier.padding(horizontal = 14.dp, vertical = 8.dp))
 }
