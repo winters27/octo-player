@@ -59,12 +59,12 @@ impl From<Failure> for std::io::Error {
 /// The error the app sees from engine calls.
 #[derive(Clone, Debug, thiserror::Error, uniffi::Error)]
 pub enum EngineError {
-    #[error("{kind:?}: {message}")]
-    Failed { kind: ErrorKind, message: String },
+    #[error("{kind:?}: {detail}")]
+    Failed { kind: ErrorKind, detail: String },
 }
 
 impl From<Failure> for EngineError {
     fn from(f: Failure) -> Self {
-        EngineError::Failed { kind: f.kind, message: f.message }
+        EngineError::Failed { kind: f.kind, detail: f.message }
     }
 }

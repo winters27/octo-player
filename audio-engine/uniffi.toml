@@ -1,0 +1,7 @@
+[bindings.kotlin]
+# The Kotlin package the bindings land in.
+package_name = "app.winters.octo.audio"
+# The native library's base name: octo_audio.dll, libocto_audio.so, libocto_audio.dylib.
+cdylib_name = "octo_audio"
+# Records as `val`s, which suits Compose state.
+generate_immutable_records = true

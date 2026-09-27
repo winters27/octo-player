@@ -411,7 +411,7 @@ impl Engine {
     fn send(&self, command: Command) -> Result<(), EngineError> {
         self.commands.send(command).map_err(|_| EngineError::Failed {
             kind: ErrorKind::Other,
-            message: "the engine has shut down".into(),
+            detail: "the engine has shut down".into(),
         })?;
         self.shared.wake();
         Ok(())
@@ -425,7 +425,7 @@ impl Drop for Engine {
 }
 
 fn invalid(message: &str) -> EngineError {
-    EngineError::Failed { kind: ErrorKind::InvalidArgument, message: message.into() }
+    EngineError::Failed { kind: ErrorKind::InvalidArgument, detail: message.into() }
 }
 
 /// The built-in equalizer curves, the same as the Android app's.
