@@ -27,9 +27,6 @@ import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// How many songs Autoplay adds at a time. When they run out, it adds more.
-const val AUTOPLAY_BATCH = 10
-
 // Songs played this recently are not picked again.
 private const val RECENT_PLAYS = 50
 
@@ -40,22 +37,6 @@ private const val LOAD_AHEAD_MS = 15_000L
 
 // How often to look at how far into the last song the player is.
 private const val WATCH_EVERY_MS = 1_000L
-
-// What Autoplay adds: the server's songs like the last one, in its order,
-// when it has any not excluded; otherwise songs by the same artist, then in
-// the same genre, as given (the caller shuffles each). Songs in `exclude`
-// (the queue, and the last 50 played) are never picked, nor is any twice.
-fun autoplayPicks(
-    similar: List<String>,
-    sameArtist: List<String>,
-    sameGenre: List<String>,
-    exclude: Set<String>,
-    limit: Int = AUTOPLAY_BATCH,
-): List<String> {
-    val fromServer = similar.filter { it !in exclude }.distinct()
-    if (fromServer.isNotEmpty()) return fromServer.take(limit)
-    return (sameArtist + sameGenre).filter { it !in exclude }.distinct().take(limit)
-}
 
 // Whether it is time to add songs: Autoplay is on, repeat is off, nothing
 // comes after the song that is on, and it is within `leadMs` of its end.

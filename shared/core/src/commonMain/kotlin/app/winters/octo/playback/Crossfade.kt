@@ -9,12 +9,12 @@ import kotlin.math.sin
 data class FadeSong(val albumId: String?, val albumOrder: Int?, val durationMs: Long)
 
 // The shortest blend worth doing; anything shorter just sounds like a cut.
-internal const val SHORTEST_FADE_MS = 500L
+const val SHORTEST_FADE_MS = 500L
 
 // How long the next song should fade in over the end of this one, or 0 for
 // no crossfade. The fade shrinks to half of either song, so a short song is
 // never mostly fade.
-internal fun crossfadeLength(
+fun crossfadeLength(
     current: FadeSong,
     next: FadeSong?,
     fadeMs: Long,
@@ -36,6 +36,6 @@ internal fun crossfadeLength(
 
 // Equal-power fade: the two volumes' squares always add up to one, so the
 // blend never dips or swells in loudness. `progress` runs from 0 to 1.
-internal fun fadeOutVolume(progress: Float): Float = cos(progress.coerceIn(0f, 1f) * PI.toFloat() / 2)
+fun fadeOutVolume(progress: Float): Float = cos(progress.coerceIn(0f, 1f) * PI.toFloat() / 2)
 
-internal fun fadeInVolume(progress: Float): Float = sin(progress.coerceIn(0f, 1f) * PI.toFloat() / 2)
+fun fadeInVolume(progress: Float): Float = sin(progress.coerceIn(0f, 1f) * PI.toFloat() / 2)
