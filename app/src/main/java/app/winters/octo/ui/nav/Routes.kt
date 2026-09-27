@@ -28,8 +28,9 @@ import kotlinx.serialization.Serializable
 @Serializable data object PlaylistsRoute : NavKey
 @Serializable data object LikedRoute : NavKey
 
-// Favourite albums and artists.
-@Serializable data object FavouritesRoute : NavKey
+// Liked songs, favourite albums and favourite artists. From the Favourite
+// albums shelf it opens on the albums.
+@Serializable data class FavouritesRoute(val albums: Boolean = false) : NavKey
 @Serializable data object DownloadsRoute : NavKey
 @Serializable data class PlaylistRoute(val id: String) : NavKey
 @Serializable data object SignInRoute : NavKey

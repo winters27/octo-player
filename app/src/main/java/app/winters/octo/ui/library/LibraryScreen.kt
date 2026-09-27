@@ -81,7 +81,7 @@ private class Section(@DrawableRes val icon: Int, val label: String, val route: 
 
 private val sections = listOf(
     Section(OctoIcons.Playlists, "Playlists", PlaylistsRoute),
-    Section(OctoIcons.Like, "Favourites", FavouritesRoute),
+    Section(OctoIcons.Like, "Favourites", FavouritesRoute()),
     Section(OctoIcons.Artist, "Artists", ArtistsRoute),
     Section(OctoIcons.Album, "Albums", AlbumsRoute),
     Section(OctoIcons.Songs, "Songs", SongsRoute),

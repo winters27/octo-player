@@ -224,7 +224,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             entry<FoldersRoute> { FoldersScreen(back) }
                             entry<PlaylistsRoute> { PlaylistsScreen(open, back) }
                             entry<LikedRoute> { LikedScreen(back) }
-                            entry<FavouritesRoute> { FavouritesScreen(open, back) }
+                            entry<FavouritesRoute> { FavouritesScreen(open, back, openOnAlbums = it.albums) }
                             entry<DownloadsRoute> { DownloadsScreen(back) }
                             entry<PlaylistRoute> { PlaylistScreen(it.id, back) }
                             entry<SignInRoute> { SignInScreen(back) }

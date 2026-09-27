@@ -7,6 +7,9 @@ import androidx.room.Query
 import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
+// How many ids go in one lookup, well under what one query can take.
+private const val LOOKUP_CHUNK = 500
+
 // Favourite albums and artists, and pins on Home.
 @Dao
 interface FavouritesDao {
@@ -88,6 +91,30 @@ interface FavouritesDao {
     )
     suspend fun serverArtistCounts(sourceId: String): List<CopyCount>
 
+    // Which library album the songs of these source albums went into, and
+    // how many, from any source: for following an album that merged into
+    // another.
+    @Query(
+        """
+        SELECT st.albumId AS serverRowId, t.albumId AS libraryId, COUNT(*) AS songs
+        FROM source_track st JOIN track t ON t.id = st.mergedId
+        WHERE st.albumId IN (:ids)
+        GROUP BY st.albumId, t.albumId
+        """,
+    )
+    suspend fun albumCopyCounts(ids: List<String>): List<CopyCount>
+
+    // The same for source artists.
+    @Query(
+        """
+        SELECT st.artistId AS serverRowId, t.artistId AS libraryId, COUNT(*) AS songs
+        FROM source_track st JOIN track t ON t.id = st.mergedId
+        WHERE st.artistId IN (:ids)
+        GROUP BY st.artistId, t.artistId
+        """,
+    )
+    suspend fun artistCopyCounts(ids: List<String>): List<CopyCount>
+
     // Pins
 
     @Query("SELECT * FROM pinned_item ORDER BY position")
@@ -154,7 +181,8 @@ interface FavouritesDao {
     suspend fun movePin(kind: String, from: String, to: String)
 
     // After the library is rebuilt: favourites and pins whose album or
-    // artist id vanished follow the one now filed under the same key.
+    // artist id vanished follow the one their songs merged into, or failing
+    // that the one now filed under the same key.
     @Transaction
     suspend fun relinkAll() {
         val pins = pins()
@@ -168,13 +196,20 @@ interface FavouritesDao {
         val artistIds = artists.mapTo(HashSet()) { it.id }
         val artistsByKey = artists.groupBy({ it.searchKey }, { it.id })
 
-        relinks(likedAlbums.map { Held(it.albumId, it.relinkKey) }, albumIds, albumsByKey)
-            .forEach { moveLikedAlbum(it.from, it.to) }
-        relinks(likedArtists.map { Held(it.artistId, it.relinkKey) }, artistIds, artistsByKey)
-            .forEach { moveLikedArtist(it.from, it.to) }
-
         fun held(kind: PinKind) = pins.filter { it.kind == kind.id }.map { Held(it.itemId, it.relinkKey) }
-        relinks(held(PinKind.Album), albumIds, albumsByKey).forEach { movePin(PinKind.Album.id, it.from, it.to) }
-        relinks(held(PinKind.Artist), artistIds, artistsByKey).forEach { movePin(PinKind.Artist.id, it.from, it.to) }
+        val heldAlbums = likedAlbums.map { Held(it.albumId, it.relinkKey) }
+        val heldArtists = likedArtists.map { Held(it.artistId, it.relinkKey) }
+        val pinnedAlbums = held(PinKind.Album)
+        val pinnedArtists = held(PinKind.Artist)
+
+        // Only the vanished ones are looked up, a few at a time.
+        fun vanished(rows: List<Held>, present: Set<String>) = rows.map { it.id }.filter { it !in present }.distinct()
+        val albumsMerged = mergedInto(vanished(heldAlbums + pinnedAlbums, albumIds).chunked(LOOKUP_CHUNK).flatMap { albumCopyCounts(it) })
+        val artistsMerged = mergedInto(vanished(heldArtists + pinnedArtists, artistIds).chunked(LOOKUP_CHUNK).flatMap { artistCopyCounts(it) })
+
+        relinks(heldAlbums, albumIds, albumsByKey, albumsMerged).forEach { moveLikedAlbum(it.from, it.to) }
+        relinks(heldArtists, artistIds, artistsByKey, artistsMerged).forEach { moveLikedArtist(it.from, it.to) }
+        relinks(pinnedAlbums, albumIds, albumsByKey, albumsMerged).forEach { movePin(PinKind.Album.id, it.from, it.to) }
+        relinks(pinnedArtists, artistIds, artistsByKey, artistsMerged).forEach { movePin(PinKind.Artist.id, it.from, it.to) }
     }
 }

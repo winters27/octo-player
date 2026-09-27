@@ -53,8 +53,9 @@ data class LikedArtist(@Embedded val artist: ArtistEntity, val likedAt: Long)
 // A library album or artist id and its search key, for finding one again.
 data class KeyedId(val id: String, val searchKey: String)
 
-// How many songs of one server album (or artist) row went into one library
-// album (or artist) when the library was merged.
+// How many songs of one source album (or artist) row went into one library
+// album (or artist) when the library was merged. The row is a server's for
+// stars, any source's for following a merge.
 data class CopyCount(val serverRowId: String, val libraryId: String, val songs: Int)
 
 // Home holds at most this many pins.
@@ -63,25 +64,45 @@ const val PIN_LIMIT = 12
 // A favourite or pin that points at something by id, with its relink key.
 data class Held(val id: String, val relinkKey: String)
 
-// A held id that moves to the library id now filed under the same key.
+// A held id that moves to the library id it now lives under.
 data class Relink(val from: String, val to: String)
 
-// Which held ids should move after a rebuild, the way liked songs follow
-// their relink key: only ids the library no longer has move, only to an id
-// with the same key, and never onto an id already held (that one stays as
-// it was). When several ids share the key, the first by id wins, so the
-// choice is the same every time.
-fun relinks(held: List<Held>, present: Set<String>, byKey: Map<String, List<String>>): List<Relink> {
+// Which held ids should move after a rebuild, the way liked songs do: only
+// ids the library no longer has move, and never onto an id already held
+// (that one stays as it was). An album or artist that merged into another
+// follows it (`merged`, from mergedInto), since that is certain whatever
+// the two copies are called. Failing that, it moves to the id with the same
+// relink key; when several share it, the first by id wins, so the choice is
+// the same every time.
+fun relinks(
+    held: List<Held>,
+    present: Set<String>,
+    byKey: Map<String, List<String>>,
+    merged: Map<String, String> = emptyMap(),
+): List<Relink> {
     val taken = held.mapTo(HashSet()) { it.id }
     val moves = ArrayList<Relink>()
     for (row in held.sortedBy { it.id }) {
-        if (row.id in present || row.relinkKey.isEmpty()) continue
-        val to = byKey[row.relinkKey].orEmpty().sorted().firstOrNull { it !in taken } ?: continue
+        if (row.id in present) continue
+        val followed = merged[row.id]?.takeIf { it in present }
+        val to = when {
+            followed != null -> followed.takeIf { it !in taken }
+            row.relinkKey.isEmpty() -> null
+            else -> byKey[row.relinkKey].orEmpty().sorted().firstOrNull { it !in taken }
+        } ?: continue
         taken += to
         moves += Relink(row.id, to)
     }
     return moves
 }
+
+// Where each album (or artist) the library no longer has under its own id
+// went when the sources were merged: the library one that took most of its
+// songs, the first by id on a tie. The counts come from the source rows.
+fun mergedInto(counts: List<CopyCount>): Map<String, String> =
+    counts.groupBy { it.serverRowId }.mapValues { (_, links) ->
+        links.sortedWith(compareByDescending<CopyCount> { it.songs }.thenBy { it.libraryId }).first().libraryId
+    }
 
 // Pins in row order, numbered again from 0.
 private fun List<PinnedItemEntity>.renumbered(): List<PinnedItemEntity> =

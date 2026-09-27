@@ -47,7 +47,7 @@ fun areaOf(route: NavKey?): AmbientArea? = when (route) {
     HomeRoute -> AmbientArea.Home
     SearchRoute -> AmbientArea.Search
     LibraryRoute, AlbumsRoute, ArtistsRoute, SongsRoute, GenresRoute, FoldersRoute,
-    PlaylistsRoute, LikedRoute, DownloadsRoute, FavouritesRoute,
+    PlaylistsRoute, LikedRoute, DownloadsRoute, is FavouritesRoute,
     is AlbumRoute, is ArtistRoute, is OnlineAlbumRoute, is OnlineArtistRoute,
     is GenreRoute, is PlaylistRoute,
     -> AmbientArea.Library
