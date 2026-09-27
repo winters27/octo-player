@@ -8,6 +8,7 @@ import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
 import app.winters.octo.catalog.matchKey
+import app.winters.octo.catalog.onlineArtwork
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
@@ -102,7 +103,7 @@ class Discovery @Inject constructor(
         val album = client.album(id)
         val info = OnlineAlbum(
             album.id, album.name, album.artist, album.artistId, album.year, album.songCount,
-            album.coverArt?.let { ArtworkRef.Server(sourceId, it).encode() },
+            onlineArtwork(sourceId, album.coverArt),
         )
         return OnlineAlbumPage(info, resolve(client, sourceId, album.song))
     }
@@ -111,7 +112,7 @@ class Discovery @Inject constructor(
         val (client, sourceId) = server() ?: return null
         val artist = client.artist(id)
         return OnlineArtistPage(
-            OnlineArtist(artist.id, artist.name, artist.albumCount, artist.coverArt?.let { ArtworkRef.Server(sourceId, it).encode() }),
+            OnlineArtist(artist.id, artist.name, artist.albumCount, onlineArtwork(sourceId, artist.coverArt)),
             artist.album.map { it.toOnline(sourceId) },
         )
     }
@@ -187,11 +188,11 @@ class Discovery @Inject constructor(
         val named = catalog.artistsWithKeys(found.artist.map { searchKey(it.name) }).mapTo(HashSet()) { matchKey(it.name) }
         return found.artist
             .filter { "$sourceId:${it.id}" !in known && matchKey(it.name) !in named }
-            .map { OnlineArtist(it.id, it.name, it.albumCount, it.coverArt?.let { cover -> ArtworkRef.Server(sourceId, cover).encode() }) }
+            .map { OnlineArtist(it.id, it.name, it.albumCount, onlineArtwork(sourceId, it.coverArt)) }
     }
 
     private fun Album.toOnline(sourceId: String) = OnlineAlbum(
-        id, name, artist, artistId, year, songCount, coverArt?.let { ArtworkRef.Server(sourceId, it).encode() },
+        id, name, artist, artistId, year, songCount, onlineArtwork(sourceId, coverArt),
     )
 
     private fun server(): Pair<SubsonicClient, String>? {

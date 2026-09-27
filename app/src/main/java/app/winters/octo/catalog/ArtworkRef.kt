@@ -8,11 +8,13 @@ sealed interface ArtworkRef {
 
     // A cover on a server, by the server's own id for it. The address to
     // fetch it is signed only when it is drawn, so none is ever stored.
-    data class Server(val sourceId: String, val coverId: String) : ArtworkRef
+    // `online` is for a song, album or artist the server found online
+    // rather than one in the library, so its cover is cached apart.
+    data class Server(val sourceId: String, val coverId: String, val online: Boolean = false) : ArtworkRef
 
     fun encode(): String = when (this) {
         is Device -> "device:$key|$uri"
-        is Server -> "server:$sourceId|$coverId"
+        is Server -> "${if (online) "online" else "server"}:$sourceId|$coverId"
     }
 
     companion object {
@@ -23,8 +25,14 @@ sealed interface ArtworkRef {
             return when (kind) {
                 "device" -> Device(rest.substringBefore('|'), rest.substringAfter('|'))
                 "server" -> Server(rest.substringBefore('|'), rest.substringAfter('|'))
+                "online" -> Server(rest.substringBefore('|'), rest.substringAfter('|'), online = true)
                 else -> null
             }
         }
     }
 }
+
+// The cover of something the server found online, as stored. The playlist
+// queries in UserDao write the same form in SQL.
+fun onlineArtwork(sourceId: String, coverId: String?): String? =
+    coverId?.takeIf(String::isNotEmpty)?.let { ArtworkRef.Server(sourceId, it, online = true).encode() }

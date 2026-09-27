@@ -89,7 +89,8 @@ class MatchingTest {
         assertEquals("", t.albumId)
         assertEquals("", t.artistId)
         assertFalse(t.onPhone)
-        assertEquals("server:server:x|e1", t.artwork)
+        // Its cover is kept apart from library covers.
+        assertEquals("online:server:x|e1", t.artwork)
     }
 
     @Test

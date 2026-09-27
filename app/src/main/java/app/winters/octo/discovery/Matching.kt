@@ -1,10 +1,10 @@
 package app.winters.octo.discovery
 
-import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.catalog.OnlineSongEntity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.findId
 import app.winters.octo.catalog.matchKey
+import app.winters.octo.catalog.onlineArtwork
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.catalog.sortKey
 import app.winters.octo.subsonic.Song
@@ -120,7 +120,7 @@ fun OnlineSongEntity.asTrack() = TrackEntity(
     addedAt = 0,
     mimeType = mimeType,
     sizeBytes = null,
-    artwork = coverId?.let { ArtworkRef.Server(sourceId, it).encode() },
+    artwork = onlineArtwork(sourceId, coverId),
     uri = null,
     onPhone = false,
 )
