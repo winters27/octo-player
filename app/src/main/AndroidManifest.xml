@@ -13,6 +13,12 @@
     <!-- Playing music with the screen off. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Keeping the phone awake while it plays, or while it drives a TV or
+         speaker it is casting to. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Hearing TVs and speakers answer on the Wi-Fi while looking for them. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Setting a song as the ringtone, notification sound or alarm. Android
          grants it only through its own switch, which Octo opens when asked. -->
     <uses-permission
@@ -109,6 +115,12 @@
             android:authorities="${applicationId}.art"
             android:exported="false"
             android:grantUriPermissions="true" />
+
+        <!-- How Octo uses Google Cast: the standard receiver, no framework
+             notification. -->
+        <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="app.winters.octo.cast.CastSetup" />
 
         <!-- Lets Android Auto show Octo as a music app. -->
         <meta-data
