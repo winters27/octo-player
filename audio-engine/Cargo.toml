@@ -2,7 +2,7 @@
 name = "octo-audio"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.88"
 description = "The audio engine for the Octo desktop app: decoding, gapless, crossfade, sound shaping and output."
 license = "GPL-3.0-or-later"
 publish = false

@@ -2,4 +2,7 @@
 
 uniffi::setup_scaffolding!();
 
+pub mod crossfade;
+pub mod fifo;
+pub mod pace;
 pub mod sound;
