@@ -44,6 +44,8 @@ data class LyricLine(
     val duet: Boolean = false,
     // The line in the phone's language, when the source has it.
     val translation: String? = null,
+    // How the line sounds, written in Latin letters, when the source has it.
+    val romanization: String? = null,
 ) {
     val isGap: Boolean get() = text.isBlank() && backingText.isBlank()
 }

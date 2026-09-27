@@ -42,7 +42,8 @@ fun timingLabel(offsetMs: Long): String {
     return if (offsetMs > 0) "$seconds s later" else "$seconds s earlier"
 }
 
-private val Context.lyricsData by preferencesDataStore("lyrics")
+// Lyrics settings: timing, the screen, and how the lyrics look.
+internal val Context.lyricsData by preferencesDataStore("lyrics")
 
 private val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
 
