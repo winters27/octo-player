@@ -156,7 +156,7 @@ fun BottomBar(
                     Modifier
                         .size(BarHeight)
                         .then(swipe.follow)
-                        .alpha(1f - grown)
+                        .alpha(1f - grown.coerceIn(0f, 1f))
                         .clickable(
                             enabled = !playerShown,
                             interactionSource = remember { MutableInteractionSource() },
@@ -177,7 +177,7 @@ fun BottomBar(
                     artModifier = artModifier,
                     artShape = artShape,
                     actions = actions,
-                    modifier = Modifier.matchParentSize().clip(CircleShape).alpha(grown),
+                    modifier = Modifier.matchParentSize().clip(CircleShape).alpha(grown.coerceIn(0f, 1f)),
                     follow = swipe.follow,
                 )
             }
@@ -232,7 +232,7 @@ private fun TabBar(
                         .align(Alignment.CenterStart)
                         .offset { IntOffset(glazeX.roundToPx(), 0) }
                         .size(width = pillWidth, height = lerp(44.dp, BarHeight, folded))
-                        .alpha(1f - folded),
+                        .alpha(1f - folded.coerceIn(0f, 1f)),
                 )
             }
             if (folded < 1f) {
@@ -244,14 +244,17 @@ private fun TabBar(
                         .width(fullWidth)
                         .fillMaxHeight()
                         .padding(horizontal = 6.dp)
-                        .alpha(1f - folded),
+                        .alpha(1f - folded.coerceIn(0f, 1f)),
                 ) {
                     tabs.forEachIndexed { index, tab ->
                         TabButton(
                             tab,
                             selected = index == selected,
                             // While folding, the selected icon rides the glaze instead.
-                            showIcon = folded == 0f || index != selected,
+                            // The spring overshoots a little past open (below 0), so
+                            // "open" is anything at or under 0; testing for exactly 0
+                            // hid both copies of the icon for that moment.
+                            showIcon = folded <= 0f || index != selected,
                             enabled = !isFolded,
                             modifier = Modifier.weight(1f),
                         ) { actions.onSelect(index) }
@@ -264,7 +267,7 @@ private fun TabBar(
                     contentDescription = "Show tabs",
                     // The selected tab's accent, turning white as it folds into
                     // a plain glaze circle like the round button.
-                    tint = lerp(OctoColors.Accent, OctoColors.TextPrimary, folded),
+                    tint = lerp(OctoColors.Accent, OctoColors.TextPrimary, folded.coerceIn(0f, 1f)),
                     modifier = Modifier
                         .align(Alignment.CenterStart)
                         .offset { IntOffset((glazeX + (pillWidth - TabIconSize) / 2).roundToPx(), 0) }
