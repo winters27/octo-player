@@ -11,10 +11,12 @@ import androidx.media3.session.MediaConstants
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.byLatestPlay
 import app.winters.octo.catalog.byPlayCount
+import app.winters.octo.catalog.matchKey
 import app.winters.octo.catalog.summarize
 import app.winters.octo.listening.PlayHistory
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -83,14 +85,15 @@ class CarLibrary @Inject constructor(
     }
 
     // A spoken request, like "play Nothing Was the Same". An album or artist
-    // named exactly wins, then songs that match; saying nothing in particular
-    // shuffles everything.
+    // named exactly (case, accents and punctuation aside) wins, then songs
+    // that match; saying nothing in particular shuffles everything.
     suspend fun forVoice(query: String): Pair<List<String>, Boolean> {
         val q = query.trim()
         if (q.isEmpty()) return catalog.allTrackIds() to true
-        val album = catalog.searchAlbums(q, 5).firstOrNull { it.title.equals(q, ignoreCase = true) }
+        val name = matchKey(q)
+        val album = catalog.searchAlbums(q, 5).firstOrNull { name.isNotEmpty() && matchKey(it.title) == name }
         if (album != null) return catalog.albumTrackIds(album.id) to false
-        val artist = catalog.searchArtists(q, 5).firstOrNull { it.name.equals(q, ignoreCase = true) }
+        val artist = catalog.searchArtists(q, 5).firstOrNull { SongIdentity.sameArtistName(it.name, q) }
         if (artist != null) {
             val ids = catalog.artistAlbums(artist.id).first().flatMap { catalog.albumTrackIds(it.id) }
             return ids to true

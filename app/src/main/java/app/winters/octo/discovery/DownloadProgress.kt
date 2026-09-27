@@ -2,7 +2,7 @@ package app.winters.octo.discovery
 
 import app.winters.octo.catalog.FIND_PREFIX
 import app.winters.octo.catalog.OnlineSongEntity
-import app.winters.octo.catalog.matchKey
+import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.subsonic.Acquisition
 import app.winters.octo.subsonic.AcquisitionStage
 import kotlinx.coroutines.CancellationException
@@ -84,13 +84,14 @@ fun pollDelayMs(downloadingOnScreen: Boolean, foreground: Boolean): Long = when 
 
 // The server's entry for a find: the one starred with its id, or else one
 // with the same title and artist, as songs of an album asked for at once
-// may carry the album's id. The newest wins when there are several.
+// may carry the album's id. An entry without an artist is matched by its
+// title and kind of recording alone. The newest wins when there are several.
 fun acquisitionFor(find: OnlineSongEntity, list: List<Acquisition>): Acquisition? {
     val byId = list.filter { it.id.isNotEmpty() && FIND_PREFIX + it.id == find.id }
     val candidates = byId.ifEmpty {
         list.filter {
-            it.title.isNotBlank() && matchKey(it.title) == matchKey(find.title) && versionOf(it.title) == versionOf(find.title) &&
-                (it.artist.isBlank() || sameArtist(it.artist, find.artist))
+            it.title.isNotBlank() &&
+                if (it.artist.isBlank()) SongIdentity.sameTitle(it.title, find.title).isSame else sameRecording(it.title, it.artist, find.title, find.artist)
         }
     }
     return candidates.maxByOrNull { it.startedAt.orEmpty() }

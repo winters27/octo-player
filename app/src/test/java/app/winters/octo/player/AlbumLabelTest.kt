@@ -24,6 +24,13 @@ class AlbumLabelTest {
     }
 
     @Test
+    fun punctuationAndAccentsDoNotMakeAnotherName() {
+        assertNull(albumLabel("Don’t Stop Me Now", "Dont Stop Me Now", 3))
+        assertNull(albumLabel("Déjà Vu - EP", "Deja Vu", 4))
+        assertEquals("Déjà Vu", albumLabel("Déjà Vu", "Deja Vu Again", 4))
+    }
+
+    @Test
     fun aSingleSuffixAlwaysHides() {
         assertNull(albumLabel("Summer Songs - Single", "Other Title", 2))
     }

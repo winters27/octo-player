@@ -1,9 +1,12 @@
 package app.winters.octo.discovery
 
 import app.winters.octo.catalog.OnlineSongEntity
+import app.winters.octo.catalog.SongIdentity
+import app.winters.octo.catalog.SongMatchOptions
+import app.winters.octo.catalog.SongRef
+import app.winters.octo.catalog.SongVerdict
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.findId
-import app.winters.octo.catalog.matchKey
 import app.winters.octo.catalog.onlineArtwork
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.catalog.sortKey
@@ -13,20 +16,14 @@ import app.winters.octo.subsonic.Song
 // does not know the real length yet.
 private const val GUESSED_SECONDS = 180
 
-// Lengths further apart than this are different recordings.
-private const val SAME_LENGTH_MS = 10_000L
+// Lengths further apart than this are different recordings. Looser than
+// the lyrics match, since a library copy and a server's copy of one
+// recording can be cut a little differently.
+private const val SAME_LENGTH_S = 10
+
+private val WithinTenSeconds = SongMatchOptions(lengthToleranceSeconds = SAME_LENGTH_S)
 
 private val Extras = Regex("""\s*[(\[][^)\]]*[)\]]""")
-
-// Words that make a title a different recording of a song, not the same
-// one with extras: "Nightcall (Breakbot Remix)" is not "Nightcall".
-private val VersionWords = setOf(
-    "remix", "mix", "rmx", "live", "edit", "acoustic", "instrumental", "demo", "version", "rework",
-    "bootleg", "vip", "cover", "karaoke", "extended", "dub", "slowed", "sped", "reverb", "unplugged",
-)
-private val Words = Regex("""[\p{L}\p{N}]+""")
-
-private val Featuring = Regex("""\s*(,|&|\bfeat\.?|\bft\.?|\bx\b|\bwith\b)\s+.*$""", RegexOption.IGNORE_CASE)
 
 // What one song from the server is to the app: a song already in the
 // library, or one found online.
@@ -53,30 +50,58 @@ fun asAdopted(resolved: Resolved, library: Set<String>): Resolved =
 fun knownLengthMs(song: Song): Long =
     if (song.duration <= 0 || song.duration == GUESSED_SECONDS) 0 else song.duration * 1000L
 
-// The keys a title is looked up by: as written, and without bracketed extras
-// like "(feat. X)" or "[Remastered]".
+// The keys a title is looked up by in the library's search keys: as
+// written, without bracketed extras like "(feat. X)" or "[Remastered]", and
+// as the title a person would say ("Song" for "01 - Song - Remastered").
+// Only a first pass: whatever they find is still compared song by song.
 fun titleKeys(title: String): List<String> =
-    listOf(searchKey(title), searchKey(title.replace(Extras, "").trim())).filter { it.isNotEmpty() }.distinct()
+    listOf(searchKey(title), searchKey(title.replace(Extras, "").trim()), searchKey(SongIdentity.parseTitle(title).core))
+        .filter { it.isNotEmpty() }.distinct()
 
-// The first-named artist, so "Drake feat. Rihanna" and "Drake" agree.
-internal fun leadArtist(name: String): String = matchKey(name.replace(Featuring, ""))
+// The two credits share an artist and do not disagree about the guests:
+// "Drake feat. Rihanna" is "Drake", and "Ye (侃爷)" is "Kanye West", but "A
+// feat. B" is not "A feat. C".
+fun sameArtist(a: String, b: String): Boolean = SongIdentity.artistsAgree(a, b)
 
-fun sameArtist(a: String, b: String): Boolean {
-    val lead = leadArtist(a)
-    return lead.isNotEmpty() && (lead == leadArtist(b) || matchKey(a) == matchKey(b))
-}
-
-// Which kind of recording a title names, from its version words.
-internal fun versionOf(title: String): Set<String> =
-    Words.findAll(title.lowercase()).map { it.value }.filterTo(HashSet()) { it in VersionWords }
+// Which kind of recording a title names: its version markers that make
+// another recording ("live", "remix"), not the ones that never do
+// ("remaster", "explicit").
+internal fun versionOf(title: String): Set<String> = SongIdentity.distinctVersions(SongIdentity.parseTitle(title))
 
 // The same song by the same artist, and the same kind of recording. Lengths
 // only count when both are known.
-fun sameSong(title: String, artist: String, lengthMs: Long, track: TrackEntity): Boolean {
-    if (matchKey(title) != matchKey(track.title)) return false
-    if (versionOf(title) != versionOf(track.title)) return false
-    if (!sameArtist(artist, track.artist)) return false
-    return lengthMs <= 0 || track.durationMs <= 0 || kotlin.math.abs(lengthMs - track.durationMs) <= SAME_LENGTH_MS
+fun sameSong(title: String, artist: String, lengthMs: Long, track: TrackEntity): Boolean =
+    SongIdentity.same(
+        SongRef(title, artist, secondsOf(lengthMs)),
+        SongRef(track.title, track.artist, secondsOf(track.durationMs)),
+        WithinTenSeconds,
+    ).isSame
+
+// The same recording by the same artist, lengths not compared.
+fun sameRecording(titleA: String, artistA: String, titleB: String, artistB: String): Boolean =
+    SongIdentity.same(titleA, artistA, titleB, artistB, SongMatchOptions.AnyLength).isSame
+
+// The same song by the same artist in any version: a live take or a remix
+// counts too.
+fun sameSongAnyVersion(titleA: String, artistA: String, titleB: String, artistB: String): Boolean =
+    SongIdentity.same(titleA, artistA, titleB, artistB, SongMatchOptions.AnyLength).verdict != SongVerdict.Different
+
+private fun secondsOf(ms: Long): Double? = if (ms > 0) ms / 1000.0 else null
+
+// Songs by every key their titles can agree on, so a song is only compared
+// with the few whose titles might be its own. What it finds keeps the
+// list's order.
+class TitleIndex<T>(private val items: List<T>, title: (T) -> String, artist: (T) -> String) {
+    private val byKey = HashMap<String, MutableList<Int>>()
+
+    init {
+        items.forEachIndexed { index, item ->
+            SongIdentity.titleLookupKeys(title(item), artist(item)).forEach { byKey.getOrPut(it) { mutableListOf() } += index }
+        }
+    }
+
+    fun candidates(title: String, artist: String): List<T> =
+        SongIdentity.titleLookupKeys(title, artist).flatMap { byKey[it].orEmpty() }.distinct().sorted().map(items::get)
 }
 
 // What the player receives for a server song, from its type or its file ending.
@@ -142,11 +167,11 @@ fun resolveSongs(
     library: List<TrackEntity>,
     now: Long,
 ): List<Resolved> {
-    val byTitle = library.groupBy { matchKey(it.title) }
+    val byTitle = TitleIndex(library, { it.title }, { it.artist })
     return songs.map { song ->
         links[song.id]?.let { return@map Resolved.InLibrary(it) }
         val length = knownLengthMs(song)
-        val same = byTitle[matchKey(song.title)]?.firstOrNull { sameSong(song.title, song.artist.orEmpty(), length, it) }
+        val same = byTitle.candidates(song.title, song.artist.orEmpty()).firstOrNull { sameSong(song.title, song.artist.orEmpty(), length, it) }
         if (same != null) Resolved.InLibrary(same.id) else Resolved.Found(song.toFind(sourceId, now))
     }
 }

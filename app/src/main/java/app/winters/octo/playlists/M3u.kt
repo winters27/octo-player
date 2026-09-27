@@ -1,7 +1,7 @@
 package app.winters.octo.playlists
 
+import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.catalog.TrackEntity
-import app.winters.octo.catalog.matchKey
 import app.winters.octo.discovery.sameArtist
 import app.winters.octo.discovery.titleKeys
 import app.winters.octo.discovery.versionOf
@@ -168,11 +168,12 @@ private fun sharedEnding(a: List<String>, b: List<String>): Int {
 // about this length when it is known. Without an artist, a title only
 // counts when it points at one song, or one of the right length.
 private fun byTitleAndArtist(title: String, artist: String?, lengthMs: Long, byTitle: Map<String, List<TrackEntity>>): String? {
+    val versions = versionOf(title)
     val candidates = titleKeys(title).flatMap { byTitle[it].orEmpty() }.distinctBy { it.id }
-        .filter { versionOf(title) == versionOf(it.title) }
+        .filter { versionOf(it.title) == versions }
         .filter { lengthMs <= 0 || it.durationMs <= 0 || abs(lengthMs - it.durationMs) <= SAME_LENGTH_MS }
     if (!artist.isNullOrBlank()) {
-        return candidates.firstOrNull { sameArtist(artist, it.artist) && matchKey(title) == matchKey(it.title) }?.id
+        return candidates.firstOrNull { sameArtist(artist, it.artist) && SongIdentity.sameTitle(title, it.title).isSame }?.id
             ?: candidates.firstOrNull { sameArtist(artist, it.artist) }?.id
     }
     return candidates.singleOrNull()?.id

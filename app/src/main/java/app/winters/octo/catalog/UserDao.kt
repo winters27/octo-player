@@ -463,8 +463,58 @@ interface UserDao {
     )
     suspend fun relinkRatings()
 
+    // After a rebuild, points rows at the library song a vanished song is
+    // now a copy of: a song liked while it was only on the server follows it
+    // once the phone's copy of it takes its place, whatever the two copies'
+    // tags say. OR IGNORE skips a like that would duplicate one.
+    @Query(
+        """
+        UPDATE OR IGNORE liked_track
+        SET trackId = (SELECT s.mergedId FROM source_track s WHERE s.id = liked_track.trackId)
+        WHERE trackId NOT IN (SELECT id FROM track)
+          AND EXISTS (SELECT 1 FROM source_track s JOIN track t ON t.id = s.mergedId WHERE s.id = liked_track.trackId)
+        """,
+    )
+    suspend fun followMergedLikes()
+
+    @Query(
+        """
+        UPDATE play_event
+        SET trackId = (SELECT s.mergedId FROM source_track s WHERE s.id = play_event.trackId)
+        WHERE trackId NOT IN (SELECT id FROM track)
+          AND EXISTS (SELECT 1 FROM source_track s JOIN track t ON t.id = s.mergedId WHERE s.id = play_event.trackId)
+        """,
+    )
+    suspend fun followMergedPlays()
+
+    @Query(
+        """
+        UPDATE playlist_item
+        SET trackId = (SELECT s.mergedId FROM source_track s WHERE s.id = playlist_item.trackId)
+        WHERE trackId NOT IN (SELECT id FROM track)
+          AND EXISTS (SELECT 1 FROM source_track s JOIN track t ON t.id = s.mergedId WHERE s.id = playlist_item.trackId)
+        """,
+    )
+    suspend fun followMergedPlaylists()
+
+    @Query(
+        """
+        UPDATE OR IGNORE track_rating
+        SET trackId = (SELECT s.mergedId FROM source_track s WHERE s.id = track_rating.trackId)
+        WHERE trackId NOT IN (SELECT id FROM track)
+          AND EXISTS (SELECT 1 FROM source_track s JOIN track t ON t.id = s.mergedId WHERE s.id = track_rating.trackId)
+        """,
+    )
+    suspend fun followMergedRatings()
+
+    // A merged copy is followed first, since it is certain; the relink key
+    // catches the rest.
     @Transaction
     suspend fun relinkAll() {
+        followMergedLikes()
+        followMergedPlays()
+        followMergedPlaylists()
+        followMergedRatings()
         relinkLikes()
         relinkPlays()
         relinkPlaylists()

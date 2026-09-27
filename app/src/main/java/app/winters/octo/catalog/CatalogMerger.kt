@@ -30,7 +30,8 @@ private const val SAME_LENGTH_MS = 3_000L
 //
 // - Artists match by name, albums by album artist and title, and songs by
 //   title and length within an album. Track numbers are not needed, since
-//   phone files often lack them.
+//   phone files often lack them. A song's title is read by SongIdentity, so
+//   "Song - Remastered 2011" is "Song", but "Song (Live)" stays apart.
 // - The first source to have something gives it its id, so give the phone
 //   first: its songs keep their ids, and likes and playlists keep working.
 // - A merged song or album takes the best of its copies. Copies are asked
@@ -64,19 +65,26 @@ fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
     // Every song so far by title and artist, for the second chance below.
     val everywhere = HashMap<String, MutableList<MergingSong>>()
     val mergedIds = HashMap<String, String>()
+    // Each copy's keys, read once, and once for copies tagged alike.
+    val keys = HashMap<String, SongKeys>()
+    val tagged = HashMap<Pair<String, String>, SongKeys>()
+    fun keysOf(track: SourceTrackEntity) = keys.getOrPut(track.id) {
+        tagged.getOrPut(track.artist to track.title) { SongIdentity.songKeys(track.artist, track.title) }
+    }
     for (source in sources) {
         // A song matches at most one copy from each source.
         val taken = HashSet<String>()
         for (track in source.tracks.sortedBy { it.albumOrder }) {
             val albumId = albumIdFor[track.albumId] ?: track.albumId
+            val trackKeys = keysOf(track)
             fun fits(song: MergingSong) = song.id !in taken && song.sources.none { it == source.sourceId } &&
-                matchKey(song.base.title) == matchKey(track.title) &&
+                keysOf(song.base).title == trackKeys.title &&
                 abs(song.base.durationMs - track.durationMs) <= SAME_LENGTH_MS
             // First within the matched album. Failing that, the same song by
             // the same artist anywhere: sources often file an album under a
             // different album artist or edition name.
             val match = inAlbum[albumId]?.firstOrNull(::fits)
-                ?: everywhere[songKey(track)]?.firstOrNull(::fits)
+                ?: everywhere[trackKeys.matchKey]?.firstOrNull(::fits)
             if (match != null) {
                 match.add(track, source)
                 taken += match.id
@@ -84,7 +92,7 @@ fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
             } else {
                 val song = MergingSong(track, source, albumId, artistIdFor[track.artistId] ?: track.artistId)
                 inAlbum.getOrPut(albumId) { mutableListOf() } += song
-                everywhere.getOrPut(songKey(track)) { mutableListOf() } += song
+                everywhere.getOrPut(trackKeys.matchKey) { mutableListOf() } += song
                 mergedIds[track.id] = song.id
             }
         }
@@ -260,13 +268,11 @@ private class MergingSong(
 // The earliest of some times added, leaving out unknown ones (0 or less).
 internal fun earliestAdded(times: List<Long>): Long = times.filter { it > 0 }.minOrNull() ?: 0
 
-// A song's title and artist, for matching it outside its album.
-private fun songKey(track: SourceTrackEntity) = matchKey(track.title) + "|" + matchKey(track.artist)
+private val Bracketed = Regex("""\s*[(\[][^)\]]*[)\]]""")
 
-// A name for matching across sources: case, punctuation, spacing and
-// bracketed extras such as "(feat. someone)" or "[Remastered]" are
-// ignored.
-internal fun matchKey(name: String): String =
-    name.lowercase()
-        .replace(Regex("""\s*[(\[][^)\]]*[)\]]"""), "")
-        .filter(Char::isLetterOrDigit)
+// A name for matching across sources as a whole, such as an album or an
+// artist: case, accents, punctuation, spacing, lookalike letters and
+// bracketed extras such as "(Deluxe)" or "[Remastered]" are ignored, and
+// "&" reads as "and". Songs are matched by SongIdentity instead, which also
+// knows versions and guests.
+internal fun matchKey(name: String): String = SongIdentity.key(name.replace(Bracketed, " "))

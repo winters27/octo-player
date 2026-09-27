@@ -11,9 +11,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
 import javax.inject.Inject
-import app.winters.octo.catalog.matchKey
-import app.winters.octo.discovery.sameArtist
-import app.winters.octo.discovery.versionOf
+import app.winters.octo.catalog.SongIdentity
+import app.winters.octo.catalog.SongMatchOptions
+import app.winters.octo.catalog.SongQuery
+import app.winters.octo.catalog.SongVerdict
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
@@ -50,19 +51,23 @@ class OnlineLyrics(private val http: OkHttpClient, private val base: HttpUrl) {
     // Throws IOException when the library cannot be reached.
     // The exact lookup comes first. When it finds nothing timed, the
     // library's search is asked too: it often holds a timed copy of the same
-    // recording under a slightly different album or title. A search that
-    // cannot be reached still leaves plain lyrics found; with none, it is a
-    // failure, never "the library has none".
+    // recording under a slightly different album or title. The search is
+    // asked with each of the song's search queries in turn, until one answer
+    // holds a timed copy. A search that cannot be reached still leaves plain
+    // lyrics found; with none, it is a failure, never "the library has none".
     suspend fun find(title: String, artist: String, album: String, durationMs: Long): Lyrics? = withContext(Dispatchers.IO) {
         val exact = fetch(lookupUrl(base, title, artist, album, durationMs))?.let(::libraryLyrics)
         if (exact != null && (exact.synced || exact.instrumental)) return@withContext exact
-        val found = try {
-            fetch(searchUrl(base, title, artist))
-        } catch (e: IOException) {
-            if (exact == null) throw e
-            null
+        for (query in lyricsSearches(title, artist)) {
+            val found = try {
+                fetch(searchUrl(base, query.title, query.artist))
+            } catch (e: IOException) {
+                if (exact == null) throw e
+                break
+            } ?: continue
+            bestSearchMatch(found, title, artist, album, durationMs)?.let { return@withContext it }
         }
-        found?.let { bestSearchMatch(it, title, artist, album, durationMs) } ?: exact
+        exact
     }
 
     // The library's own match for the song, or null when it has none.
@@ -73,11 +78,18 @@ class OnlineLyrics(private val http: OkHttpClient, private val base: HttpUrl) {
 
     // Every copy in the library's search with the song's title and artist,
     // for the listener to choose from. Looser than `find`: live takes and
-    // remixes stay in the list, named, since the listener picks.
+    // remixes stay in the list, named, since the listener picks. The search
+    // queries are asked in turn until one finds copies; only the first
+    // request's failure is thrown.
     suspend fun copiesOf(title: String, artist: String, album: String, durationMs: Long): List<OnlineCopy> =
         withContext(Dispatchers.IO) {
-            val body = fetch(searchUrl(base, title, artist)) ?: return@withContext emptyList()
-            rankCopies(songCopies(body).filter { sameTitleAndArtist(it, title, artist) }, album, durationMs)
+            for ((index, query) in lyricsSearches(title, artist).withIndex()) {
+                val url = searchUrl(base, query.title, query.artist)
+                val body = if (index == 0) fetch(url) else runCatching { fetch(url) }.getOrElse { break }
+                val copies = songCopies(body ?: continue).filter { sameTitleAndArtist(it, title, artist) }
+                if (copies.isNotEmpty()) return@withContext rankCopies(copies, album, durationMs)
+            }
+            emptyList()
         }
 
     // Whatever the library finds for words the listener typed, as it
@@ -113,23 +125,41 @@ internal fun searchUrl(base: HttpUrl, title: String, artist: String): HttpUrl =
         .addQueryParameter("artist_name", artist)
         .build()
 
-// The timed copy in a search answer that is the same song: the same title
-// (ignoring case, punctuation and bracketed extras, but not the kind of
-// recording, so a remix never stands in for the original), the same
-// artist, and a length within a few seconds when the song's is known, the
-// same album preferred. The search is loose and returns other songs by the
-// artist too; a length alone once let one of those stand in. Null when no
-// timed copy of this song is there.
+// How many searches a song may cost when the first finds nothing.
+private const val MAX_SEARCHES = 3
+
+// Lyrics compare lengths on their own, since not every copy knows one. A
+// clean edit counts as the song here: its lyrics are the same words at the
+// same times, with a few bleeped. Downloads and the library stay strict.
+private val LyricsTitles = SongMatchOptions(lengthToleranceSeconds = null, alsoNeutral = setOf("clean"))
+
+// Whether a copy is the song asked for, as lyrics read it: the same title
+// whole (case, accents, punctuation, stylized characters, guests and upload
+// noise ignored), the same kind of recording, and the same artist.
+internal fun sameLyricsSong(wantTitle: String, wantArtist: String, gotTitle: String?, gotArtist: String?): Boolean =
+    !gotTitle.isNullOrBlank() && wantArtist.isNotBlank() && SongIdentity.same(wantTitle, wantArtist, gotTitle, gotArtist, LyricsTitles).isSame
+
+// The searches to ask for a song, from SongIdentity's query variants: as
+// tagged, cleaned, with stylized characters read as letters, and by the
+// primary artist alone. Each keeps an artist, since a search by title alone
+// returns every song of that name, and there are at most three. Whatever
+// they find is still held to the song as asked.
+internal fun lyricsSearches(title: String, artist: String): List<SongQuery> =
+    SongIdentity.queryVariants(title, artist).filter { it.artist.isNotEmpty() }.take(MAX_SEARCHES)
+        .ifEmpty { listOf(SongQuery(title, artist)) }
+
+// The timed copy in a search answer that is the same song (see
+// sameLyricsSong: a remix never stands in for the original), with a length
+// within a few seconds when the song's is known, the same album preferred.
+// The search is loose and returns other songs by the artist too; a length
+// alone once let one of those stand in. Null when no timed copy of this
+// song is there.
 internal fun bestSearchMatch(body: String, title: String, artist: String, album: String, durationMs: Long): Lyrics? {
     val songs = runCatching { json.decodeFromString(ListSerializer(LibrarySong.serializer()), body) }.getOrNull() ?: return null
     val seconds = durationMs / 1000.0
     return songs
         .filter { !it.syncedLyrics.isNullOrBlank() }
-        .filter { song ->
-            val name = song.trackName.orEmpty()
-            matchKey(name).isNotEmpty() && matchKey(name) == matchKey(title) && versionOf(name) == versionOf(title) &&
-                sameArtist(artist, song.artistName.orEmpty())
-        }
+        .filter { song -> sameLyricsSong(title, artist, song.trackName, song.artistName) }
         .filter { durationMs <= 0 || (it.duration != null && abs(it.duration - seconds) <= SAME_LENGTH_S) }
         .sortedWith(
             compareBy<LibrarySong> { !it.albumName.equals(album, ignoreCase = true) }
@@ -165,10 +195,12 @@ data class OnlineCopy(
     val lyrics: Lyrics,
 )
 
-// The same song as the one playing: the same title, ignoring case,
-// punctuation and bracketed extras, and the same artist.
+// The same song as the one playing, in any version: the same title and the
+// same artist, as lyrics read them. A live take or a remix stays, since the
+// listener picks.
 internal fun sameTitleAndArtist(copy: OnlineCopy, title: String, artist: String): Boolean =
-    matchKey(copy.title).isNotEmpty() && matchKey(copy.title) == matchKey(title) && sameArtist(artist, copy.artist)
+    copy.title.isNotBlank() && artist.isNotBlank() &&
+        SongIdentity.same(title, artist, copy.title, copy.artist, LyricsTitles).verdict != SongVerdict.Different
 
 // Copies in the order they are offered: timed ones first, then the same
 // album, then the nearest length.
