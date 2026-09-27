@@ -9,17 +9,14 @@ import app.winters.octo.admin.DownloadRecord
 import app.winters.octo.admin.OctoAdmin
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.FIND_PREFIX
-import app.winters.octo.catalog.LikedTrackEntity
 import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.OnlineSongEntity
 import app.winters.octo.catalog.TrackEntity
-import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.isFind
 import app.winters.octo.catalog.matchKey
 import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
-import app.winters.octo.listening.ListeningSync
 import app.winters.octo.server.ServerSync
 import app.winters.octo.server.serverSourceId
 import app.winters.octo.subsonic.Acquisition
@@ -73,7 +70,7 @@ enum class DownloadState { None, Requested, Done }
 
 // Downloading songs found online into the library. On Octo, starring a find
 // makes the server download it. Once a later copy of the library shows the
-// song, it is liked, which stars the downloaded file too. A server that says
+// song, the find is linked to it (not liked). A server that says
 // how its downloads are going is asked every few seconds while any is on
 // its way; others are checked on the admin pages or on a timer.
 @Singleton
@@ -82,8 +79,6 @@ class Downloads @Inject constructor(
     private val sessions: SessionRepository,
     private val online: OnlineDao,
     private val catalog: CatalogDao,
-    private val user: UserDao,
-    private val listening: ListeningSync,
     private val sync: Lazy<ServerSync>,
     private val admin: OctoAdmin,
     private val feedback: Feedback,
@@ -126,7 +121,7 @@ class Downloads @Inject constructor(
                 val find = online.song(findId) ?: return
                 if (find.adoptedId.isNotEmpty()) return
                 val track = catalog.tracksByIdsUnordered(listOf(trackId)).firstOrNull() ?: return
-                adoptAs(find.id, track, System.currentTimeMillis())
+                adoptAs(find.id, track)
             }
 
             override suspend fun syncAndWait() {
@@ -216,7 +211,7 @@ class Downloads @Inject constructor(
     }
 
     // Runs after each copy of the server's library: a download that has
-    // arrived becomes a liked library song, and old finds are let go.
+    // arrived is linked to its library song, and old finds are let go.
     suspend fun afterSync() {
         val client = client() ?: return
         val now = System.currentTimeMillis()
@@ -226,16 +221,13 @@ class Downloads @Inject constructor(
         val byTitle = candidates.filter { !isFind(it.id) }.groupBy { matchKey(it.title) }
         for (find in waiting) {
             val track = byTitle[matchKey(find.title)]?.firstOrNull { sameSong(find.title, find.artist, find.durationMs, it) } ?: continue
-            adoptAs(find.id, track, now)
+            adoptAs(find.id, track)
         }
     }
 
-    // A find became this library song: it is liked, and linked to it.
-    private suspend fun adoptAs(findId: String, track: TrackEntity, now: Long) {
-        if (!user.isLiked(track.id)) {
-            user.like(LikedTrackEntity(track.id, track.relinkKey, now))
-            listening.likeChanged(track.id, liked = true)
-        }
+    // A find became this library song: the two are linked. Downloading is
+    // not liking, so the song is not hearted; that stays the listener's call.
+    private suspend fun adoptAs(findId: String, track: TrackEntity) {
         online.adopt(findId, track.id)
     }
 
@@ -308,7 +300,7 @@ class Downloads @Inject constructor(
             val landed = if (before == null) emptySet() else adopted - before
             if (landed.isEmpty()) return@collect
             _arrived.update { it + 1 }
-            landed.forEach { id -> arrivals.landed(id)?.let(feedback::show) }
+            landed.forEach { id -> arrivals.landed(id)?.let(feedback::done) }
         }
     }
 

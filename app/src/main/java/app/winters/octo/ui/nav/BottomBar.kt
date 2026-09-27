@@ -91,6 +91,9 @@ private val tabs = listOf(
 )
 
 val BarHeight = 56.dp
+
+// The space between the bar and the bottom of the screen.
+val BarBottomGap = 14.dp
 private val TabIconSize = 25.dp
 private val Gap = 10.dp
 
@@ -130,7 +133,7 @@ fun BottomBar(
     BoxWithConstraints(
         modifier
             .navigationBarsPadding()
-            .padding(start = 20.dp, end = 20.dp, bottom = 14.dp)
+            .padding(start = 20.dp, end = 20.dp, bottom = BarBottomGap)
             .widthIn(max = 520.dp)
             .fillMaxWidth()
             .height(BarHeight),
