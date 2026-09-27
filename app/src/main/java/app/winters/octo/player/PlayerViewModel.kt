@@ -8,9 +8,11 @@ import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
 import app.winters.octo.discovery.asTrack
 import app.winters.octo.lyrics.Lyrics
+import app.winters.octo.lyrics.LyricsAnswer
 import app.winters.octo.lyrics.LyricsChoices
 import app.winters.octo.lyrics.LyricsRepository
 import app.winters.octo.lyrics.LyricsSong
+import app.winters.octo.lyrics.NetworkWatch
 import app.winters.octo.playback.DeviceVolume
 import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.NowPlaying
@@ -25,12 +27,13 @@ import app.winters.octo.player.immersive.over
 import app.winters.octo.sound.SoundEngine
 import app.winters.octo.ui.common.Feedback
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -38,6 +41,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
@@ -58,6 +62,7 @@ class PlayerViewModel @Inject constructor(
     sound: SoundEngine,
     private val lyricsRepository: LyricsRepository,
     private val lyricsChoices: LyricsChoices,
+    private val networkWatch: NetworkWatch,
     private val editor: QueueEditor,
     private val playlists: PlaylistStore,
     private val feedback: Feedback,
@@ -189,40 +194,62 @@ class PlayerViewModel @Inject constructor(
         lyricsShown.value = !lyricsShown.value
     }
 
-    // They follow the listener's choice for the song too: picking other
-    // lyrics shows them at once, and hiding them shows that they are hidden.
-    // A choice sent to the server fetches them again at once.
-    val lyrics: StateFlow<LyricsState> = combine(playback.now.map { it.trackId }.distinctUntilChanged(), lyricsShown) { id, open ->
-        id.takeIf { open }
-    }
-        .distinctUntilChanged()
-        .flatMapLatest { id ->
-            if (id == null) flowOf(null) else combine(lyricsChoices.choiceFor(id), lyricsRepository.revisionOf(id)) { choice, _ -> id to choice }
-        }
-        .transformLatest { shown ->
-            if (shown == null) {
-                emit(LyricsState.Hidden)
-                return@transformLatest
-            }
-            val (id, choice) = shown
-            if (choice.hidden) {
-                emit(LyricsState.HiddenForSong)
-                return@transformLatest
-            }
-            emit(LyricsState.Loading)
-            val now = playback.now.value
-            val song = LyricsSong(id, now.title.orEmpty(), now.artist.orEmpty(), now.album.orEmpty(), now.durationMs)
-            emit(lyricsRepository.lyricsFor(song)?.let { LyricsState.Found(id, it) } ?: LyricsState.None)
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LyricsState.Hidden)
+    // What the lyrics view shows. They follow the listener's choice for the
+    // song too: picking other lyrics shows them at once, and hiding them
+    // shows that they are hidden. A choice sent to the server, or a retry,
+    // fetches them again at once. See lyricsStates for when they are
+    // looked up.
+    private val lyricsState = MutableStateFlow<LyricsState>(LyricsState.Hidden)
+    val lyrics: StateFlow<LyricsState> = lyricsState.asStateFlow()
 
-    // While lyrics show, the songs either side of this one have theirs
-    // looked up once the song has settled, so skipping shows them at once.
-    // A skip before then starts the wait again, so skipping quickly through
-    // the queue asks for nothing.
+    // Whether the lyrics view is on screen: something shows this model's
+    // lyrics. A short gap (turning the phone) does not count as leaving.
+    private val lyricsWatched: Flow<Boolean> = lyricsState.subscriptionCount
+        .map { it > 0 }
+        .distinctUntilChanged()
+        .transformLatest { on ->
+            if (!on) delay(LYRICS_LEAVE_AFTER_MS)
+            emit(on)
+        }
+        .onStart { emit(false) }
+        .distinctUntilChanged()
+
+    // Whether nothing shows the lyrics right now, for what a lookup saves.
+    private fun lyricsAway() = lyricsState.subscriptionCount.value == 0
+
+    // The song on now while lyrics are open.
+    private val lyricsSong: Flow<String?> =
+        combine(playback.now.map { it.trackId }.distinctUntilChanged(), lyricsShown) { id, open -> id.takeIf { open } }
+            .distinctUntilChanged()
+
     init {
         viewModelScope.launch {
-            combine(playback.now.map { it.trackId }.distinctUntilChanged(), lyricsShown) { id, open -> id.takeIf { open } }
+            val wanted = lyricsSong.flatMapLatest { id ->
+                if (id == null) {
+                    flowOf(null)
+                } else {
+                    combine(lyricsChoices.choiceFor(id), lyricsRepository.revisionOf(id)) { choice, revision ->
+                        LyricsWanted(id, choice.hidden, choice.pick to revision)
+                    }
+                }
+            }
+            lyricsStates(wanted, lyricsWatched, ::lookUpLyrics, networkWatch::awaitChange).collect { lyricsState.value = it }
+        }
+    }
+
+    private suspend fun lookUpLyrics(id: String, resumed: Boolean): LyricsAnswer {
+        val now = playback.now.value.takeIf { it.trackId == id }
+        val song = LyricsSong(id, now?.title.orEmpty(), now?.artist.orEmpty(), now?.album.orEmpty(), now?.durationMs ?: 0L)
+        return lyricsRepository.answerFor(song, resumed, ::lyricsAway)
+    }
+
+    // While lyrics show on screen, the songs either side of this one have
+    // theirs looked up once the song has settled, so skipping shows them at
+    // once. A skip before then starts the wait again, so skipping quickly
+    // through the queue asks for nothing.
+    init {
+        viewModelScope.launch {
+            combine(lyricsSong, lyricsWatched) { id, on -> id.takeIf { on } }
                 .distinctUntilChanged()
                 .collectLatest { id ->
                     if (id == null) return@collectLatest
@@ -230,18 +257,20 @@ class PlayerViewModel @Inject constructor(
                     listOfNotNull(upNext.value.getOrNull(1), played.value.lastOrNull())
                         .filterNot { isRadio(it.trackId) || it.trackId == id }
                         .forEach { entry ->
-                            try {
-                                lyricsRepository.lyricsFor(LyricsSong(entry.trackId, entry.title, entry.artist, "", entry.durationMs))
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (_: Exception) {
-                                // A neighbour's lyrics are only a head start; it is asked again when it plays.
-                            }
+                            // A neighbour's lyrics are only a head start; a lookup that
+                            // fails saves nothing, and it is asked again when it plays.
+                            lyricsRepository.answerFor(
+                                LyricsSong(entry.trackId, entry.title, entry.artist, "", entry.durationMs),
+                                away = ::lyricsAway,
+                            )
                         }
                 }
         }
     }
 }
+
+// How long the lyrics view may be gone before it counts as off screen.
+private const val LYRICS_LEAVE_AFTER_MS = 5_000L
 
 // How long a song must stay on before its neighbours' lyrics are looked up.
 private const val LYRICS_PREFETCH_SETTLE_MS = 1_200L
@@ -253,5 +282,8 @@ sealed interface LyricsState {
     data object HiddenForSong : LyricsState
     data object Loading : LyricsState
     data object None : LyricsState
+    // The lookup could not finish (no network, the server did not answer):
+    // not "no lyrics", and worth another try.
+    data class Failed(val trackId: String) : LyricsState
     data class Found(val trackId: String, val lyrics: Lyrics) : LyricsState
 }

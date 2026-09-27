@@ -1,6 +1,12 @@
 package app.winters.octo.lyrics
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -94,5 +100,37 @@ class LyricsSearchTest {
         val search = searchInOrder(steps.list)
         assertNull(search.lyrics)
         assertFalse(search.complete)
+    }
+
+    @Test
+    fun aSourceCutOffByItsOwnTimeLimitMakesTheSearchIncomplete() = runTest {
+        val steps = Steps(
+            LyricsSource.Server to { null },
+            LyricsSource.SongFile to { null },
+        )
+        val slow = LyricsStep(LyricsSource.Online) { withTimeout(4_000) { awaitCancellation() } }
+        val search = searchInOrder(steps.list + slow)
+        assertNull(search.lyrics)
+        assertFalse(search.complete)
+    }
+
+    @Test
+    fun aStoppedSearchStops() = runTest {
+        val gate = CompletableDeferred<Lyrics?>()
+        val search = async { searchInOrder(listOf(LyricsStep(LyricsSource.Server) { gate.await() })) }
+        runCurrent()
+        search.cancel()
+        assertTrue(runCatching { search.await() }.exceptionOrNull() is CancellationException)
+    }
+
+    @Test
+    fun aNoneFromAServerThatLooksLyricsUpItselfIsUnsure() = runTest {
+        val unsure = searchInOrder(lyricsSteps({ null }, serverDecides = true, songFile = null, lyricsFile = null, online = null))
+        assertNull(unsure.lyrics)
+        assertTrue(unsure.complete)
+        assertTrue(unsure.unsure)
+
+        val sure = searchInOrder(lyricsSteps({ null }, serverDecides = false, songFile = null, lyricsFile = null, online = null))
+        assertFalse(sure.unsure)
     }
 }
