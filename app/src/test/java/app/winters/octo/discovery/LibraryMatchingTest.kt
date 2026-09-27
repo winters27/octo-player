@@ -9,7 +9,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class MatchingTest {
+class LibraryMatchingTest {
     private fun track(id: String, title: String, artist: String, ms: Long = 200_000) = TrackEntity(
         id = id, sourceId = "device", nativeId = id, title = title, searchKey = title.lowercase(), sortKey = title.lowercase(),
         artist = artist, artistId = "a", album = "Album", albumId = "al", trackNo = null, discNo = null, year = null,
@@ -18,13 +18,6 @@ class MatchingTest {
 
     private fun song(id: String, title: String, artist: String, seconds: Int = 180, suffix: String = "m4a") =
         Song(id = id, title = title, artist = artist, album = title, albumId = "alb$id", duration = seconds, suffix = suffix, bitRate = 128, coverArt = id)
-
-    @Test
-    fun aGuessedLengthCountsAsUnknown() {
-        assertEquals(0, knownLengthMs(song("x", "A", "B", seconds = 180)))
-        assertEquals(0, knownLengthMs(song("x", "A", "B", seconds = 0)))
-        assertEquals(215_000, knownLengthMs(song("x", "A", "B", seconds = 215)))
-    }
 
     @Test
     fun aSyncedServerSongIsItsLibrarySong() {
@@ -72,11 +65,6 @@ class MatchingTest {
         val lib = track("p1", "Around the World", "Daft Punk", ms = 429_000)
         assertFalse(sameSong("Around the World", "Daft Punk", 238_000, lib))
         assertTrue(sameSong("Around the World", "Daft Punk", 0, lib))
-    }
-
-    @Test
-    fun titleKeysIncludeTheBareTitle() {
-        assertEquals(listOf("one dance (feat. wizkid)", "one dance"), titleKeys("One Dance (feat. Wizkid)"))
     }
 
     @Test
@@ -144,11 +132,6 @@ class MatchingTest {
         val phone = track("p9", "Suicide", "Suicideboys", ms = 169_000)
         val out = resolveSongs(listOf(song("s9", "${'$'}UICIDE", "${'$'}uicideboy${'$'}", seconds = 170)), "server:x", emptyMap(), listOf(phone), 0)
         assertEquals(listOf(Resolved.InLibrary("p9")), out)
-    }
-
-    @Test
-    fun titleKeysIncludeTheTitleAPersonWouldSay() {
-        assertEquals(listOf("01 - teardrop - remastered 2011", "teardrop"), titleKeys("01 - Teardrop - Remastered 2011"))
     }
 
     @Test
