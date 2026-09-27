@@ -30,7 +30,6 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,7 +42,6 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.artworkRim
 import app.winters.octo.design.elevation3
-import app.winters.octo.design.mix
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.CloudMark
 import app.winters.octo.ui.common.PlayRow
@@ -51,9 +49,6 @@ import app.winters.octo.ui.common.QuietIconAction
 import app.winters.octo.ui.common.asLength
 import app.winters.octo.ui.common.songs
 import coil3.compose.AsyncImage
-
-// The Liked songs picture: a heart on a wash of the accent.
-private val LikedFill = mix(OctoColors.BackgroundTertiary, OctoColors.Accent, 0.3f)
 
 private val HeaderShape = RoundedCornerShape(10.dp)
 
@@ -80,7 +75,7 @@ fun PlaylistCover(covers: List<String>, size: Dp, modifier: Modifier = Modifier,
     }
 }
 
-// A picture made of one icon on a flat fill, for Liked songs and New playlist.
+// A picture made of one icon on a flat fill, for New playlist and Import.
 @Composable
 fun IconTile(icon: Painter, fill: Color, size: Dp, modifier: Modifier = Modifier, shape: Shape = ArtworkShape) {
     Box(modifier.size(size).clip(shape).background(fill), contentAlignment = Alignment.Center) {
@@ -88,10 +83,6 @@ fun IconTile(icon: Painter, fill: Color, size: Dp, modifier: Modifier = Modifier
         Box(Modifier.matchParentSize().artworkRim(shape))
     }
 }
-
-@Composable
-fun LikedCover(size: Dp, modifier: Modifier = Modifier, shape: Shape = ArtworkShape) =
-    IconTile(painterResource(OctoIcons.Liked), LikedFill, size, modifier, shape)
 
 // A line in a list of playlists: picture, name, and a line under it, with
 // the cloud mark when the playlist is kept on the server too. `onLongClick`

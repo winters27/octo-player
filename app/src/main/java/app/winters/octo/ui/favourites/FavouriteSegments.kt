@@ -1,5 +1,9 @@
 package app.winters.octo.ui.favourites
 
+import androidx.navigation3.runtime.NavKey
+import app.winters.octo.ui.nav.FavouritesRoute
+import app.winters.octo.ui.nav.LikedRoute
+
 // The parts of the Favourites page, in the order they show.
 enum class FavouriteSegment(val label: String) {
     Songs("Songs"),
@@ -18,3 +22,12 @@ fun firstSegment(songs: Int, albums: Int, artists: Int): FavouriteSegment =
         artists > 0 -> FavouriteSegment.Artists
         else -> FavouriteSegment.Songs
     }
+
+// The part a way in asks the page to open on. Hearted songs live on the
+// Favourites page, so Liked songs opens it on the songs; the Favourite
+// albums shelf opens it on the albums. Null leaves it to firstSegment.
+fun openingSegment(route: NavKey): FavouriteSegment? = when (route) {
+    LikedRoute -> FavouriteSegment.Songs
+    is FavouritesRoute -> if (route.albums) FavouriteSegment.Albums else null
+    else -> null
+}

@@ -10,7 +10,7 @@ A big update: a new **equalizer**, **sorting** for every list, **favourites**, *
 ## Library
 
 - **Sort any list**, and each list remembers its order.
-- **Favourite** albums and artists, with their own page and a shelf on Home.
+- **Favourites** in one place: your liked songs, albums and artists, with a shelf on Home.
 - **Pin** albums, artists and playlists to the top of Home.
 - Browse your music **by folder**, on the phone or your server.
 - **History** shows what you played lately and what you play most.

@@ -16,7 +16,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
 import app.winters.octo.catalog.PlaylistSummary
-import app.winters.octo.catalog.UserDao
 import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.playlists.PlaylistFiles
 import app.winters.octo.sort.SortList
@@ -35,7 +34,6 @@ import app.winters.octo.ui.common.sortedRows
 import app.winters.octo.ui.common.songs
 import app.winters.octo.ui.menu.CollectionTarget
 import app.winters.octo.ui.menu.LocalSongMenu
-import app.winters.octo.ui.nav.LikedRoute
 import app.winters.octo.ui.nav.PlaylistRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,7 +47,6 @@ import javax.inject.Inject
 @HiltViewModel
 class PlaylistsViewModel @Inject constructor(
     store: PlaylistStore,
-    userDao: UserDao,
     private val files: PlaylistFiles,
     private val sorting: SortSettings,
 ) : ViewModel() {
@@ -57,8 +54,6 @@ class PlaylistsViewModel @Inject constructor(
     val playlists: StateFlow<Sorted<PlaylistSummary>?> =
         combine(store.playlists, sorting.order(SortList.Playlists)) { list, order -> Sorted(sortPlaylists(list, order), order, null) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-    val likedCount: StateFlow<Int> =
-        userDao.likedCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     // How the last playlist file import went, shown until the page closes.
     private val _importState = MutableStateFlow<ImportState?>(null)
@@ -76,13 +71,25 @@ class PlaylistsViewModel @Inject constructor(
     }
 }
 
-// Every playlist: a way to make a new one, Liked songs pinned first, then
-// the listener's own and the server's in the chosen order, the one changed
-// last at the top to begin with.
+// The lines above the playlists, in order.
+enum class PlaylistsLead(val key: String) {
+    New("new"),
+    Import("import"),
+    ImportNote("import-note"),
+}
+
+// The lead lines to show: making and importing, then how the last import
+// went while there is one. Liked songs is not here; hearted songs live on
+// the Favourites page.
+fun playlistsLead(importNote: Boolean): List<PlaylistsLead> =
+    PlaylistsLead.entries.filter { it != PlaylistsLead.ImportNote || importNote }
+
+// Every playlist: ways to make or import one, then the listener's own and
+// the server's in the chosen order, the one changed last at the top to
+// begin with.
 @Composable
 fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsViewModel = hiltViewModel()) {
     val playlists by vm.playlists.collectAsStateWithLifecycle()
-    val likedCount by vm.likedCount.collectAsStateWithLifecycle()
     val importState by vm.importState.collectAsStateWithLifecycle()
     val sheets = LocalPlaylistSheets.current
     val menus = LocalSongMenu.current.collections
@@ -98,11 +105,14 @@ fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsV
                     playlists?.let { sorted -> SortButton(SortList.Playlists, sorted.order, vm::setOrder) }
                 }
             }
-            item(key = "new") { NewPlaylistLine { sheets.show(PlaylistSheet.Create()) } }
-            item(key = "import") { ImportPlaylistLine { pickFile.launch(PlaylistFileTypes) } }
-            importState?.let { state -> item(key = "import-note") { ImportNote(state) } }
-            item(key = "liked") {
-                PlaylistLine("Liked songs", songs(likedCount), onClick = { onOpen(LikedRoute) }) { LikedCover(56.dp) }
+            playlistsLead(importNote = importState != null).forEach { lead ->
+                item(key = lead.key) {
+                    when (lead) {
+                        PlaylistsLead.New -> NewPlaylistLine { sheets.show(PlaylistSheet.Create()) }
+                        PlaylistsLead.Import -> ImportPlaylistLine { pickFile.launch(PlaylistFileTypes) }
+                        PlaylistsLead.ImportNote -> importState?.let { ImportNote(it) }
+                    }
+                }
             }
             sortedRows(playlists?.items.orEmpty(), key = { it.id }) { playlist ->
                 PlaylistLine(

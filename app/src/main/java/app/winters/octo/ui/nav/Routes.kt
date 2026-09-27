@@ -26,6 +26,10 @@ import kotlinx.serialization.Serializable
 @Serializable data class GenreRoute(val name: String) : NavKey
 @Serializable data object FoldersRoute : NavKey
 @Serializable data object PlaylistsRoute : NavKey
+
+// Liked songs: the Favourites page, opened on its songs. The way in for
+// anything that means hearted songs, and what a back stack saved when this
+// was a page of its own still lands on.
 @Serializable data object LikedRoute : NavKey
 
 // Liked songs, favourite albums and favourite artists. From the Favourite
