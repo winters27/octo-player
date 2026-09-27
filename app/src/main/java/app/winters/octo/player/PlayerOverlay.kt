@@ -54,6 +54,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -69,8 +70,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -78,7 +77,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
@@ -100,7 +98,6 @@ import androidx.core.view.WindowCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
-import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.catalog.isFind
 import app.winters.octo.design.AccentFill
 import app.winters.octo.design.GlassSheet
@@ -109,7 +106,6 @@ import app.winters.octo.design.GlazeClearFilm
 import app.winters.octo.design.GlowIcon
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.LineSlider
-import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.elevation3
@@ -117,6 +113,12 @@ import app.winters.octo.playback.AudioQuality
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.SleepState
 import app.winters.octo.playback.speedLabel
+import app.winters.octo.player.immersive.CoverFadeMs
+import app.winters.octo.player.immersive.PlayerBackground
+import app.winters.octo.player.immersive.accentInk
+import app.winters.octo.player.immersive.backgroundDolly
+import app.winters.octo.player.immersive.isDarkInk
+import app.winters.octo.player.immersive.mutedInk
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.AxisDrag
 import app.winters.octo.ui.common.SwipeSkip
@@ -127,7 +129,6 @@ import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.RatingStars
 import app.winters.octo.ui.menu.LocalSongMenu
 import app.winters.octo.ui.common.asClock
-import coil3.compose.AsyncImage
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
@@ -151,6 +152,8 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     val colors by model.colors.collectAsStateWithLifecycle()
     val prefs by model.prefs.collectAsStateWithLifecycle()
     val base by animateColorAsState(colors.base, tween(600), label = "player base")
+    val ink by animateColorAsState(colors.content, tween(CoverFadeMs.toInt()), label = "player ink")
+    val dolly = backgroundDolly()
     val close by rememberUpdatedState(onClose)
     val scope = rememberCoroutineScope()
     // How far the player has been pulled down, in pixels.
@@ -161,7 +164,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     var showSpeed by remember { mutableStateOf(false) }
 
     BackHandler(onBack = onClose)
-    LightOnDarkBars()
+    LightOnDarkBars(darkIcons = colors.content.isDarkInk)
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val cap = constraints.maxHeight * 0.45f
@@ -223,13 +226,10 @@ fun AnimatedVisibilityScope.PlayerOverlay(
             // The background is what the player's glass frosts, the way the
             // bar frosts the page.
             Box(Modifier.fillMaxSize().hazeSource(backdrop)) {
-                if (prefs.liveBackground && LiveBackgroundSupported) {
-                    MeshBackground(colors, now.isPlaying)
-                } else {
-                    BlurredArtwork(now.artwork)
-                }
+                PlayerBackground(prefs, colors, now, dolly = { dolly.value })
             }
-            CompositionLocalProvider(LocalHaze provides backdrop) {
+            // The words and icons take the colour the background asks for.
+            CompositionLocalProvider(LocalHaze provides backdrop, LocalContentColor provides ink) {
                 PlayerContent(
                     now,
                     model,
@@ -254,21 +254,6 @@ fun AnimatedVisibilityScope.PlayerOverlay(
         GlassSheet(visible = showSpeed, onDismiss = { showSpeed = false }) {
             SpeedSheet()
         }
-    }
-}
-
-// The song's own artwork, blurred into a wash of its colours: the
-// background when the live one is off or the phone cannot draw it.
-@Composable
-private fun BlurredArtwork(ref: String?) {
-    val picture = remember(ref) { ArtworkRef.decode(ref) }
-    if (picture != null) {
-        AsyncImage(
-            model = picture,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize().blur(80.dp).alpha(0.6f),
-        )
     }
 }
 
@@ -354,7 +339,7 @@ private fun TopLine(
             Text(
                 it,
                 style = OctoType.caption,
-                color = OctoColors.TextMuted,
+                color = mutedInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
@@ -596,14 +581,14 @@ private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit) {
             Text(
                 song.title.orEmpty(),
                 style = OctoType.title.copy(fontWeight = FontWeight.Bold),
-                color = OctoColors.TextPrimary,
+                color = LocalContentColor.current,
                 maxLines = 1,
                 modifier = Modifier.basicMarquee(),
             )
             Text(
                 song.artist.orEmpty(),
                 style = OctoType.body,
-                color = OctoColors.Accent,
+                color = accentInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 // A song found online has no artist in the library to open.
@@ -638,7 +623,7 @@ private fun SongButtons(now: NowPlaying, model: PlayerViewModel) {
             .semantics { contentDescription = "More" },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(OctoIcons.More), contentDescription = null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(24.dp))
+        Icon(painterResource(OctoIcons.More), contentDescription = null, tint = LocalContentColor.current.copy(alpha = 0.6f), modifier = Modifier.size(24.dp))
     }
 }
 
@@ -657,7 +642,7 @@ private fun LikeButton(model: PlayerViewModel) {
     ) {
         GlowIcon(
             painterResource(if (liked) OctoIcons.Liked else OctoIcons.Like),
-            tint = if (liked) Color.White else Color.White.copy(alpha = 0.6f),
+            tint = if (liked) LocalContentColor.current else LocalContentColor.current.copy(alpha = 0.6f),
             lit = liked,
             modifier = Modifier.size(24.dp),
         )
@@ -682,9 +667,11 @@ private fun Progress(now: NowPlaying, model: PlayerViewModel, onOpenSpeed: () ->
             position.longValue = target
             model.seekTo(target)
         },
+        color = LocalContentColor.current,
+        trackColor = LocalContentColor.current.copy(alpha = 0.24f),
     )
     Box(Modifier.fillMaxWidth().offset(y = (-8).dp)) {
-        Text(playedSeconds.asClock(), style = times, color = OctoColors.TextMuted, modifier = Modifier.align(Alignment.CenterStart))
+        Text(playedSeconds.asClock(), style = times, color = mutedInk, modifier = Modifier.align(Alignment.CenterStart))
         Row(
             Modifier.align(Alignment.Center),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -697,7 +684,7 @@ private fun Progress(now: NowPlaying, model: PlayerViewModel, onOpenSpeed: () ->
         Text(
             "-" + ((duration / 1000).toInt() - playedSeconds).coerceAtLeast(0).asClock(),
             style = times,
-            color = OctoColors.TextMuted,
+            color = mutedInk,
             modifier = Modifier.align(Alignment.CenterEnd),
         )
     }
@@ -732,14 +719,14 @@ private fun QualityBadge(quality: AudioQuality, modifier: Modifier) {
                 Icon(
                     painterResource(OctoIcons.Lossless),
                     contentDescription = null,
-                    tint = OctoColors.TextPrimary,
+                    tint = LocalContentColor.current,
                     modifier = Modifier.padding(end = 5.dp).size(13.dp),
                 )
             }
             Text(
                 if (open) quality.full else quality.label.uppercase(),
                 style = if (open) BadgeDetail else BadgeLabel,
-                color = OctoColors.TextPrimary,
+                color = LocalContentColor.current,
                 maxLines = 1,
             )
         }
@@ -752,7 +739,7 @@ private fun SpeedMark(speed: Float, onClick: () -> Unit) {
     Text(
         speedLabel(speed),
         style = BadgeLabel.copy(fontFeatureSettings = "tnum", letterSpacing = 0.sp),
-        color = OctoColors.TextPrimary,
+        color = LocalContentColor.current,
         maxLines = 1,
         modifier = Modifier
             .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = onClick)
@@ -788,7 +775,7 @@ private fun Transport(now: NowPlaying, model: PlayerViewModel) {
 private fun Volume(model: PlayerViewModel) {
     val volume by model.volume.collectAsStateWithLifecycle()
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Icon(painterResource(OctoIcons.VolumeDown), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(20.dp))
+        Icon(painterResource(OctoIcons.VolumeDown), contentDescription = null, tint = mutedInk, modifier = Modifier.size(20.dp))
         LineSlider(
             fraction = { volume },
             onSeek = model::setVolume,
@@ -797,9 +784,10 @@ private fun Volume(model: PlayerViewModel) {
                 .weight(1f)
                 .padding(horizontal = 10.dp)
                 .semantics { contentDescription = "Volume" },
-            color = OctoColors.TextPrimary.copy(alpha = 0.85f),
+            color = LocalContentColor.current.copy(alpha = 0.85f),
+            trackColor = LocalContentColor.current.copy(alpha = 0.24f),
         )
-        Icon(painterResource(OctoIcons.VolumeUp), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(20.dp))
+        Icon(painterResource(OctoIcons.VolumeUp), contentDescription = null, tint = mutedInk, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -845,7 +833,7 @@ private fun TransportButton(
             Icon(
                 painterResource(shown),
                 contentDescription = null,
-                tint = OctoColors.TextPrimary,
+                tint = LocalContentColor.current,
                 modifier = Modifier
                     .size(iconSize)
                     .graphicsLayer {
@@ -869,7 +857,7 @@ private fun CloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
         backdrop = LocalHaze.current,
         film = GlazeClearFilm,
     ) {
-        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(26.dp))
+        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = LocalContentColor.current, modifier = Modifier.size(26.dp))
     }
 }
 
@@ -896,7 +884,7 @@ private fun ActionButton(
     ) {
         GlowIcon(
             painterResource(icon),
-            tint = if (on) Color.White else Color.White.copy(alpha = 0.45f),
+            tint = if (on) LocalContentColor.current else LocalContentColor.current.copy(alpha = 0.45f),
             lit = on,
             modifier = Modifier.size(22.dp),
         )
@@ -920,7 +908,7 @@ private fun SoundButton(model: PlayerViewModel, onClick: () -> Unit, modifier: M
     ) {
         GlowIcon(
             painterResource(OctoIcons.Sound),
-            tint = if (on) Color.White else Color.White.copy(alpha = 0.45f),
+            tint = if (on) LocalContentColor.current else LocalContentColor.current.copy(alpha = 0.45f),
             lit = on,
             modifier = Modifier.size(22.dp),
         )
@@ -963,22 +951,27 @@ private fun SleepCircle(model: PlayerViewModel, onClick: () -> Unit) {
     }
 }
 
-// Light status and navigation icons while the player is open, whatever the
-// rest of the app uses, put back as they were when it closes.
+// Light status and navigation icons while the player is open (dark ones
+// over a light background), whatever the rest of the app uses, put back
+// as they were when it closes.
 @Composable
-private fun LightOnDarkBars() {
+private fun LightOnDarkBars(darkIcons: Boolean) {
     val view = LocalView.current
     DisposableEffect(view) {
         val window = view.context.findActivity()?.window ?: return@DisposableEffect onDispose { }
         val bars = WindowCompat.getInsetsController(window, view)
         val status = bars.isAppearanceLightStatusBars
         val navigation = bars.isAppearanceLightNavigationBars
-        bars.isAppearanceLightStatusBars = false
-        bars.isAppearanceLightNavigationBars = false
         onDispose {
             bars.isAppearanceLightStatusBars = status
             bars.isAppearanceLightNavigationBars = navigation
         }
+    }
+    LaunchedEffect(view, darkIcons) {
+        val window = view.context.findActivity()?.window ?: return@LaunchedEffect
+        val bars = WindowCompat.getInsetsController(window, view)
+        bars.isAppearanceLightStatusBars = darkIcons
+        bars.isAppearanceLightNavigationBars = darkIcons
     }
 }
 

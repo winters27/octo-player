@@ -307,7 +307,7 @@ private class GradientPainter : FieldPainter {
 // Whether the phone's animations are switched off in its settings. Read again
 // each time the app comes back, since it may have changed meanwhile.
 @Composable
-private fun rememberReduceMotion(): Boolean {
+internal fun rememberReduceMotion(): Boolean {
     val resolver = LocalContext.current.contentResolver
     var off by remember { mutableStateOf(animationsOff(resolver)) }
     LifecycleResumeEffect(resolver) {

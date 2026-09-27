@@ -13,8 +13,15 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 // The colours the player paints behind a song: four for the moving
-// background, and a base that sits under everything.
-data class PlayerColors(val mesh: List<Color>, val base: Color) {
+// background, a base that sits under everything, the artwork's main colour
+// as it came, and the colour for the player's words and icons over the
+// background (white, or dark over a light one).
+data class PlayerColors(
+    val mesh: List<Color>,
+    val base: Color,
+    val dominant: Color? = null,
+    val content: Color = Color.White,
+) {
     companion object {
         // Before artwork loads, or for music without any: quiet shades of the
         // app's own accent, so the player never flashes a stranger's colours.
@@ -53,6 +60,7 @@ class ArtworkPalette @Inject constructor(@ApplicationContext private val context
         return PlayerColors(
             mesh = listOf(Color(main), Color(bright), Color(deep), Color(0xFF0A0B0F)),
             base = Color(base),
+            dominant = palette.dominantSwatch?.rgb?.let { Color(it) },
         )
     }
 

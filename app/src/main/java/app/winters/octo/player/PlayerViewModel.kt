@@ -20,6 +20,7 @@ import app.winters.octo.playback.QueueEntry
 import app.winters.octo.playback.SleepState
 import app.winters.octo.playback.SleepTimer
 import app.winters.octo.playback.isRadio
+import app.winters.octo.player.immersive.over
 import app.winters.octo.sound.SoundEngine
 import app.winters.octo.ui.common.Feedback
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -95,11 +96,13 @@ class PlayerViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerPrefs())
 
     // Colours follow the artwork, not the song, so an album plays through
-    // without the background flickering.
+    // without the background flickering. `content` is the colour for the
+    // player's words and icons over the chosen background.
     val colors: StateFlow<PlayerColors> = playback.now
         .map { it.artwork }
         .distinctUntilChanged()
         .mapLatest(palette::colorsFor)
+        .combine(settings.prefs.map { it.background }.distinctUntilChanged()) { colors, background -> colors.over(background) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerColors.Quiet)
 
     fun positionMs() = playback.positionMs()

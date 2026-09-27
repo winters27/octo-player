@@ -1,6 +1,7 @@
 package app.winters.octo.player
 
 import android.content.Context
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
@@ -16,6 +17,7 @@ import app.winters.octo.playback.Pace
 import app.winters.octo.playback.StreamQuality
 import app.winters.octo.playback.paceOf
 import app.winters.octo.playback.snapSpeed
+import app.winters.octo.player.immersive.BackgroundPrefs
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -28,8 +30,11 @@ import javax.inject.Singleton
 // gets. A backup saves all of it.
 @Serializable
 data class PlayerPrefs(
-    // The moving colour background, on phones that can draw it.
+    // Whether the player's background moves, on phones that can draw it
+    // moving. Off holds it still.
     val liveBackground: Boolean = true,
+    // What the player's background is, and how it is drawn.
+    val background: BackgroundPrefs = BackgroundPrefs(),
     // Songs blending into each other, and over how many seconds.
     val crossfade: Boolean = false,
     val crossfadeSeconds: Int = 6,
@@ -100,6 +105,12 @@ private val AMBIENT_BAR = booleanPreferencesKey("ambient_bar")
 private val AMBIENT_PAGE_ARTWORK = booleanPreferencesKey("ambient_page_artwork")
 private val STREAM_WIFI = stringPreferencesKey("stream_wifi")
 private val STREAM_MOBILE = stringPreferencesKey("stream_mobile")
+private val BACKGROUND_MODE = stringPreferencesKey("immersive_background")
+private val BACKGROUND_BRIGHTNESS_CAP = intPreferencesKey("immersive_bg_brightness_cap")
+private val BACKGROUND_SATURATION = intPreferencesKey("immersive_bg_saturation")
+private val BACKGROUND_CONTRAST = floatPreferencesKey("immersive_bg_contrast")
+private val BACKGROUND_USE_BPM = booleanPreferencesKey("immersive_bg_use_bpm")
+private val BACKGROUND_FPS = intPreferencesKey("immersive_bg_fps")
 
 // A saved choice, or the default when nothing (or something unknown) is saved.
 private inline fun <reified T : Enum<T>> choice(name: String?, default: T): T =
@@ -111,6 +122,14 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
         val defaults = PlayerPrefs()
         PlayerPrefs(
             liveBackground = stored[LIVE_BACKGROUND] ?: defaults.liveBackground,
+            background = BackgroundPrefs(
+                mode = choice(stored[BACKGROUND_MODE], defaults.background.mode),
+                brightnessCap = stored[BACKGROUND_BRIGHTNESS_CAP] ?: defaults.background.brightnessCap,
+                saturation = stored[BACKGROUND_SATURATION] ?: defaults.background.saturation,
+                contrast = stored[BACKGROUND_CONTRAST] ?: defaults.background.contrast,
+                useBpm = stored[BACKGROUND_USE_BPM] ?: defaults.background.useBpm,
+                fps = stored[BACKGROUND_FPS] ?: defaults.background.fps,
+            ).sane(),
             crossfade = stored[CROSSFADE] ?: defaults.crossfade,
             crossfadeSeconds = (stored[CROSSFADE_SECONDS] ?: defaults.crossfadeSeconds).coerceIn(CrossfadeSecondsRange),
             lyricsOnline = stored[LYRICS_ONLINE] ?: defaults.lyricsOnline,
@@ -146,6 +165,11 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
 
     suspend fun setLiveBackground(on: Boolean) {
         context.playerPrefs.edit { it[LIVE_BACKGROUND] = on }
+    }
+
+    // The player's background settings, all at once.
+    suspend fun setBackground(prefs: BackgroundPrefs) {
+        context.playerPrefs.edit { it.putBackground(prefs.sane()) }
     }
 
     suspend fun setCrossfade(on: Boolean) {
@@ -230,6 +254,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
     suspend fun restore(player: PlayerPrefs, stream: StreamPrefs) {
         context.playerPrefs.edit {
             it[LIVE_BACKGROUND] = player.liveBackground
+            it.putBackground(player.background.sane())
             it[CROSSFADE] = player.crossfade
             it[CROSSFADE_SECONDS] = player.crossfadeSeconds.coerceIn(CrossfadeSecondsRange)
             it[LYRICS_ONLINE] = player.lyricsOnline
@@ -265,4 +290,13 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
     suspend fun setStreamMobile(quality: StreamQuality) {
         context.playerPrefs.edit { it[STREAM_MOBILE] = quality.name }
     }
+}
+
+private fun MutablePreferences.putBackground(prefs: BackgroundPrefs) {
+    this[BACKGROUND_MODE] = prefs.mode.name
+    this[BACKGROUND_BRIGHTNESS_CAP] = prefs.brightnessCap
+    this[BACKGROUND_SATURATION] = prefs.saturation
+    this[BACKGROUND_CONTRAST] = prefs.contrast
+    this[BACKGROUND_USE_BPM] = prefs.useBpm
+    this[BACKGROUND_FPS] = prefs.fps
 }
