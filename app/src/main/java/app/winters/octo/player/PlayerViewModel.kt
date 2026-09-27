@@ -116,8 +116,11 @@ class PlayerViewModel @Inject constructor(
     fun previous() = playback.previous()
     fun toggleShuffle() = playback.toggleShuffle()
     fun cycleRepeat() = playback.cycleRepeat()
-    val volume: StateFlow<Float> = deviceVolume.level
-    fun setVolume(fraction: Float) = deviceVolume.set(fraction)
+    // The phone's volume, or while casting the TV or speaker's.
+    val volume: StateFlow<Float> = combine(deviceVolume.level, playback.now) { phone, now -> now.deviceVolume ?: phone }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), deviceVolume.level.value)
+
+    fun setVolume(fraction: Float) = if (playback.now.value.casting) playback.setDeviceVolume(fraction) else deviceVolume.set(fraction)
     fun moveInQueue(from: Int, to: Int) = playback.moveInQueue(from, to)
     fun playAt(index: Int) = playback.playAt(index)
 

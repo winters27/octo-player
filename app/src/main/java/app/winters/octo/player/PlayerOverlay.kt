@@ -128,6 +128,7 @@ import app.winters.octo.ui.common.DownloadButton
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.RatingStars
 import app.winters.octo.ui.menu.LocalSongMenu
+import app.winters.octo.ui.output.CastButton
 import app.winters.octo.ui.common.asClock
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
@@ -316,8 +317,8 @@ private fun AnimatedVisibilityScope.PlayerContent(
     }
 }
 
-// The line across the top: close, the album's name, and Sound. The album
-// opens like the artist does, closing the player on the way.
+// The line across the top: close, the album's name, Cast and Sound. The
+// album opens like the artist does, closing the player on the way.
 @Composable
 private fun TopLine(
     now: NowPlaying,
@@ -344,7 +345,7 @@ private fun TopLine(
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
-                    .padding(horizontal = 60.dp)
+                    .padding(horizontal = 104.dp)
                     .clickable(
                         enabled = albumId != null,
                         interactionSource = null,
@@ -355,7 +356,10 @@ private fun TopLine(
                     .padding(vertical = 8.dp),
             )
         }
-        SoundButton(model, onOpenSound, Modifier.align(Alignment.CenterEnd))
+        Row(Modifier.align(Alignment.CenterEnd)) {
+            CastButton()
+            SoundButton(model, onOpenSound)
+        }
     }
 }
 

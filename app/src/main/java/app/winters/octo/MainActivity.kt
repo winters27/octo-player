@@ -4,6 +4,7 @@ import android.app.SearchManager
 import android.content.Intent
 import android.os.Bundle
 import android.provider.MediaStore
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -69,6 +70,19 @@ class MainActivity : ComponentActivity() {
         if (intent.action != MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH) return
         playback.playFromSearch(intent.getStringExtra(SearchManager.QUERY).orEmpty())
     }
+
+    // While casting, the volume buttons turn the TV or speaker up and down.
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (isVolumeKey(keyCode) && playback.stepDeviceVolume(up = keyCode == KeyEvent.KEYCODE_VOLUME_UP)) return true
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (isVolumeKey(keyCode) && playback.now.value.casting) return true
+        return super.onKeyUp(keyCode, event)
+    }
+
+    private fun isVolumeKey(keyCode: Int) = keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
 
     override fun onStart() {
         super.onStart()

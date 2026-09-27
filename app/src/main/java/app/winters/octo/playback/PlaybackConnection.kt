@@ -3,6 +3,7 @@ package app.winters.octo.playback
 import android.content.ComponentName
 import android.content.Context
 import androidx.core.content.ContextCompat
+import androidx.media3.common.DeviceInfo
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -31,6 +32,9 @@ data class NowPlaying(
     val durationMs: Long = 0,
     val shuffle: Boolean = false,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
+    // Playing on a TV or speaker, and that device's volume from 0 to 1.
+    val casting: Boolean = false,
+    val deviceVolume: Float? = null,
 )
 
 // The app's line to the playback service. Screens ask it to play things and
@@ -166,6 +170,21 @@ class PlaybackConnection @Inject constructor(
 
     fun seekTo(positionMs: Long) = withController { it.seekTo(positionMs.coerceAtLeast(0)) }
 
+    // The volume of the TV or speaker music is cast to, from 0 to 1.
+    fun setDeviceVolume(fraction: Float) = withController { c ->
+        val max = c.deviceInfo.maxVolume.coerceAtLeast(1)
+        c.setDeviceVolume(Math.round(fraction.coerceIn(0f, 1f) * max), 0)
+    }
+
+    // A volume button pressed while casting: the device goes up or down a
+    // step. Answers whether it was taken, which it is only while casting.
+    fun stepDeviceVolume(up: Boolean): Boolean {
+        val c = controller ?: return false
+        if (!_now.value.casting) return false
+        if (up) c.increaseDeviceVolume(0) else c.decreaseDeviceVolume(0)
+        return true
+    }
+
     fun toggleShuffle() = withController { it.shuffleModeEnabled = !it.shuffleModeEnabled }
 
     // Off, then the whole queue, then just this song.
@@ -247,7 +266,16 @@ class PlaybackConnection @Inject constructor(
             durationMs = player.duration.takeIf { it > 0 } ?: meta?.durationMs ?: 0,
             shuffle = player.shuffleModeEnabled,
             repeatMode = player.repeatMode,
+            casting = player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE,
+            deviceVolume = deviceVolumeOf(player),
         )
+    }
+
+    private fun deviceVolumeOf(player: Player): Float? {
+        val info = player.deviceInfo
+        if (info.playbackType != DeviceInfo.PLAYBACK_TYPE_REMOTE || !player.isCommandAvailable(Player.COMMAND_GET_DEVICE_VOLUME)) return null
+        val span = (info.maxVolume - info.minVolume).coerceAtLeast(1)
+        return ((player.deviceVolume - info.minVolume).toFloat() / span).coerceIn(0f, 1f)
     }
 
     private fun publishQueue(player: Player) {
