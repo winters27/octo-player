@@ -29,8 +29,6 @@ import androidx.navigation3.runtime.NavKey
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.TrackEntity
-import app.winters.octo.design.AccentButton
-import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.playback.PlaybackConnection
@@ -43,6 +41,7 @@ import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.Pickable
+import app.winters.octo.ui.common.PlayRow
 import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.SortBar
@@ -153,15 +152,6 @@ private fun Header(name: String, albumCount: Int, songCount: Int, onPlay: () -> 
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(name, style = OctoType.title, color = OctoColors.TextPrimary, textAlign = TextAlign.Center)
-        Text(
-            "${albums(albumCount)} • ${songs(songCount)}",
-            style = OctoType.caption,
-            color = OctoColors.TextMuted,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-        Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            AccentButton("Play", onClick = onPlay)
-            GlazeButton("Shuffle", onClick = onShuffle)
-        }
+        PlayRow("${albums(albumCount)} • ${songs(songCount)}", onPlay, onShuffle, Modifier.padding(top = 14.dp))
     }
 }

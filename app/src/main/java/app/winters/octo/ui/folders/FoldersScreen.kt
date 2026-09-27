@@ -36,7 +36,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.winters.octo.catalog.TrackEntity
-import app.winters.octo.design.AccentButton
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -50,6 +49,7 @@ import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.EmptyLibraryNote
 import app.winters.octo.ui.common.LoadState
 import app.winters.octo.ui.common.Pickable
+import app.winters.octo.ui.common.PlayRow
 import app.winters.octo.ui.common.Refreshable
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
@@ -274,11 +274,7 @@ private fun Buttons(
     note: String? = null,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 12.dp)) {
-        details?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(bottom = 14.dp)) }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            AccentButton("Play", onClick = onPlay, enabled = enabled && !gathering, loading = gathering)
-            GlazeButton("Shuffle", onClick = onShuffle, enabled = enabled && !gathering)
-        }
+        PlayRow(details, onPlay, onShuffle, enabled = enabled, loading = gathering)
         note?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(top = 10.dp)) }
     }
 }

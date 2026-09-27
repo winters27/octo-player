@@ -50,9 +50,8 @@ import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.artistSongOrder
 import app.winters.octo.catalog.isFind
-import app.winters.octo.design.AccentButton
-import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.discovery.ArtistExtras
 import app.winters.octo.discovery.ArtistExtrasSource
@@ -75,6 +74,8 @@ import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.DownloadButton
 import app.winters.octo.ui.common.FavouriteHeart
 import app.winters.octo.ui.common.Feedback
+import app.winters.octo.ui.common.PlayShuffle
+import app.winters.octo.ui.common.QuietAction
 import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.Refreshable
 import app.winters.octo.ui.common.SectionTitle
@@ -241,21 +242,23 @@ fun ArtistScreen(
                     ArtistHeader(a.artwork, a.name, "${albums(a.albumCount)} • ${songs(a.songCount)}")
                 }
             }
-            // The heart always; the buttons that play once there are songs.
+            // The heart always; Shuffle and Play once there are songs, with
+            // the radio as a quiet action on the left.
             if (artist != null) {
                 wide("buttons") {
                     Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                        Modifier.fillMaxWidth().padding(start = 10.dp, end = 20.dp).padding(bottom = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (ownSongs.isNotEmpty()) {
-                            AccentButton("Play", onClick = { vm.play(shuffle = false) })
-                            GlazeButton("Shuffle", onClick = { vm.play(shuffle = true) })
+                        Box(Modifier.weight(1f)) {
                             // A radio needs the server, to find songs like these.
-                            if (radio) GlazeButton("Radio", onClick = vm::startRadio)
+                            if (radio && ownSongs.isNotEmpty()) QuietAction(OctoIcons.Radio, "Radio", onClick = vm::startRadio)
                         }
                         FavouriteHeart(FavouriteKind.Artist, id)
+                        if (ownSongs.isNotEmpty()) {
+                            PlayShuffle(onPlay = { vm.play(shuffle = false) }, onShuffle = { vm.play(shuffle = true) })
+                        }
                     }
                 }
             }

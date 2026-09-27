@@ -32,17 +32,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.winters.octo.catalog.ArtworkRef
-import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ArtworkShape
-import app.winters.octo.design.Glaze
-import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -51,6 +46,8 @@ import app.winters.octo.design.elevation3
 import app.winters.octo.design.mix
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.CloudMark
+import app.winters.octo.ui.common.GlassIconButton
+import app.winters.octo.ui.common.PlayRow
 import app.winters.octo.ui.common.asLength
 import app.winters.octo.ui.common.songs
 import coil3.compose.AsyncImage
@@ -154,9 +151,9 @@ fun NewPlaylistLine(onClick: () -> Unit) {
     }
 }
 
-// The top of a song-list page: its picture, name, size and length, and the
-// Play and Shuffle buttons once there is something to play. `onMore`
-// adds a more button beside them.
+// The top of a song-list page: its picture and name, then a line with its
+// size and length on the left and Shuffle and Play on the right, once there
+// is something to play. `onMore` adds a more button before them.
 @Composable
 fun ListHeader(
     title: String,
@@ -174,31 +171,14 @@ fun ListHeader(
         picture(Modifier.elevation3(HeaderShape), HeaderShape)
         Spacer(Modifier.height(20.dp))
         Text(title, style = OctoType.title, color = OctoColors.TextPrimary, textAlign = TextAlign.Center)
-        Text(
-            if (songCount == 0) songs(0) else "${songs(songCount)} · ${(durationMs / 1000).toInt().asLength()}",
-            style = OctoType.caption,
-            color = OctoColors.TextMuted,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-        Row(
-            Modifier.padding(top = 18.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        PlayRow(
+            details = if (songCount == 0) songs(0) else "${songs(songCount)} · ${(durationMs / 1000).toInt().asLength()}",
+            onPlay = onPlay,
+            onShuffle = onShuffle,
+            modifier = Modifier.padding(top = 14.dp),
+            playable = songCount > 0,
         ) {
-            if (songCount > 0) {
-                AccentButton("Play", onClick = onPlay)
-                GlazeButton("Shuffle", onClick = onShuffle)
-            }
-            if (onMore != null) {
-                Glaze(
-                    Modifier
-                        .size(48.dp)
-                        .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = onMore)
-                        .semantics { contentDescription = "More" },
-                ) {
-                    Icon(painterResource(OctoIcons.More), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(22.dp))
-                }
-            }
+            if (onMore != null) GlassIconButton(OctoIcons.More, "More", onMore)
         }
     }
 }

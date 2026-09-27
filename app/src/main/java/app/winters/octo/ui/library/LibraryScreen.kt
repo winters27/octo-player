@@ -36,8 +36,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
-import app.winters.octo.design.AccentButton
-import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -50,6 +48,7 @@ import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.EmptyLibraryNote
 import app.winters.octo.ui.common.LetterRail
 import app.winters.octo.ui.common.Pickable
+import app.winters.octo.ui.common.PlayRow
 import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.RAIL_MIN_ITEMS
@@ -163,7 +162,7 @@ fun AlbumsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: LibraryViewMo
     LibraryPage("Albums", onBack, action = {
         albums?.let { SortButton(SortList.Albums, it.order, onChange = { order -> vm.setOrder(SortList.Albums, order) }) }
     }, buttons = {
-        PlayButtons(albums, vm::playAlbums) {
+        PlayButtons(albums, "album", vm::playAlbums) {
             QuietButton("Random album") { vm.randomAlbum()?.let { onOpen(AlbumRoute(it.id)) } }
         }
     }) {
@@ -198,7 +197,7 @@ fun ArtistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: LibraryViewM
     val artists by vm.artists.collectAsStateWithLifecycle()
     LibraryPage("Artists", onBack, action = {
         artists?.let { SortButton(SortList.Artists, it.order, onChange = { order -> vm.setOrder(SortList.Artists, order) }) }
-    }, buttons = { PlayButtons(artists, vm::playArtists) }) {
+    }, buttons = { PlayButtons(artists, "artist", vm::playArtists) }) {
         Loaded(artists) { sorted ->
             SortedList(sorted, key = { it.id }) { artist ->
                 ArtistRow(artist) { onOpen(ArtistRoute(artist.id)) }
@@ -213,7 +212,7 @@ fun SongsScreen(onBack: () -> Unit, vm: LibraryViewModel = hiltViewModel()) {
     val songs by vm.songs.collectAsStateWithLifecycle()
     LibraryPage("Songs", onBack, action = {
         songs?.let { SortButton(SortList.Songs, it.order, onChange = { order -> vm.setOrder(SortList.Songs, order) }) }
-    }, buttons = { PlayButtons(songs, vm::playSongs) }) {
+    }, buttons = { PlayButtons(songs, "song", vm::playSongs) }) {
         Loaded(songs) { sorted ->
             val pickable = remember(sorted.items) { sorted.items.map { Pickable(it.id, it) } }
             SelectableSongs(pickable) {
@@ -278,21 +277,18 @@ private fun LibraryPage(
     }
 }
 
-// Play and Shuffle for the whole list, once it has something in it, with
-// room at the end for one quieter action.
+// Play and Shuffle for the whole list, once it has something in it: how
+// many `noun`s it holds on the left, then room for one quieter action.
 @Composable
-private fun PlayButtons(list: Sorted<*>?, onPlay: (shuffle: Boolean) -> Unit, extra: @Composable () -> Unit = {}) {
+private fun PlayButtons(list: Sorted<*>?, noun: String, onPlay: (shuffle: Boolean) -> Unit, extra: @Composable () -> Unit = {}) {
     if (list == null || list.items.isEmpty()) return
-    Row(
-        Modifier.fillMaxWidth().padding(start = 20.dp, end = 10.dp, bottom = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        AccentButton("Play", onClick = { onPlay(false) })
-        GlazeButton("Shuffle", onClick = { onPlay(true) })
-        Spacer(Modifier.weight(1f))
-        extra()
-    }
+    val count = list.items.size
+    PlayRow(
+        details = if (count == 1) "1 $noun" else "$count ${noun}s",
+        onPlay = { onPlay(false) },
+        onShuffle = { onPlay(true) },
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
+    ) { extra() }
 }
 
 // Shows a spinner until the first read, a note if there is nothing, and
