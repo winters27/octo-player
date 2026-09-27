@@ -8,17 +8,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,21 +26,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.winters.octo.design.AccentButton
-import app.winters.octo.design.GlassInput
-import app.winters.octo.design.GlassSheet
+import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoSwitch
@@ -60,6 +50,10 @@ import app.winters.octo.sound.ReplayGainMode
 import app.winters.octo.sound.SoundSettings
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
+import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.PopupNameForm
+import app.winters.octo.ui.common.PopupQuestion
+import app.winters.octo.ui.common.rememberOpenedBeside
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.Segmented
 import app.winters.octo.ui.common.screenPadding
@@ -450,66 +444,46 @@ private fun TextAction(text: String, modifier: Modifier = Modifier, onClick: () 
     )
 }
 
-// Naming a new preset, or asking before one is deleted.
+// Naming a new preset, or asking before one is deleted, in a glass card
+// beside the button that asked.
 @Composable
 private fun SoundSheetHost(sheet: SoundSheet?, last: SoundSheet?, vm: SoundViewModel, onClose: () -> Unit) {
     val focus = LocalFocusManager.current
     LaunchedEffect(sheet) { if (sheet == null) focus.clearFocus() }
-    GlassSheet(visible = sheet != null, onDismiss = onClose) {
+    val open = sheet != null
+    GlassPopup(
+        visible = open,
+        anchor = rememberOpenedBeside(open),
+        onDismiss = onClose,
+        backdrop = LocalHaze.current,
+        title = "Preset",
+    ) {
         when (val shown = last) {
-            SoundSheet.SavePreset -> SavePresetForm(vm) { name ->
-                vm.savePreset(name)
-                onClose()
-            }
-            is SoundSheet.DeletePreset -> Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
-                Text("Delete \"${shown.name}\"?", style = OctoType.section, color = OctoColors.TextPrimary)
-                Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    AccentButton("Delete", onClick = {
-                        vm.deletePreset(shown.name)
-                        onClose()
-                    })
-                    GlazeButton("Cancel", onClick = onClose)
-                }
-            }
+            SoundSheet.SavePreset -> PopupNameForm(
+                "Save as preset",
+                "Preset name",
+                "Save",
+                onBack = null,
+                capitalization = KeyboardCapitalization.Words,
+                ready = { vm.canSaveAs(it) },
+                note = { name -> if (name.isNotBlank() && !vm.canSaveAs(name)) "A built-in preset has that name." else null },
+                onDone = { name ->
+                    vm.savePreset(name)
+                    onClose()
+                },
+            )
+            is SoundSheet.DeletePreset -> PopupQuestion(
+                "Delete \"${shown.name}\"?",
+                null,
+                "Delete",
+                onConfirm = {
+                    vm.deletePreset(shown.name)
+                    onClose()
+                },
+                onCancel = onClose,
+            )
             null -> Unit
         }
     }
 }
 
-@Composable
-private fun SavePresetForm(vm: SoundViewModel, onDone: (String) -> Unit) {
-    var name by remember { mutableStateOf("") }
-    val ready = vm.canSaveAs(name)
-    val taken = name.isNotBlank() && !ready
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { focus.requestFocus() }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .imePadding()
-            .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
-    ) {
-        Text("Save as preset", style = OctoType.section, color = OctoColors.TextPrimary)
-        Spacer(Modifier.height(16.dp))
-        Row {
-            GlassInput(
-                value = name,
-                onValueChange = { name = it },
-                placeholder = "Preset name",
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { if (ready) onDone(name) }),
-                modifier = Modifier.weight(1f).focusRequester(focus),
-            )
-            Spacer(Modifier.width(10.dp))
-            AccentButton("Save", onClick = { onDone(name) }, enabled = ready)
-        }
-        if (taken) {
-            Text(
-                "A built-in preset has that name.",
-                style = OctoType.caption,
-                color = OctoColors.TextMuted,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
-    }
-}

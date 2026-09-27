@@ -30,8 +30,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.data.userMessage
-import app.winters.octo.design.AccentButton
-import app.winters.octo.design.GlassSheet
+import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -42,6 +41,10 @@ import app.winters.octo.subsonic.Share
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.LoadState
+import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.PopupQuestion
+import app.winters.octo.ui.common.rememberLast
+import app.winters.octo.ui.common.rememberOpenedBeside
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.screenPadding
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -135,21 +138,23 @@ fun SharesScreen(onBack: () -> Unit, vm: SharesViewModel = hiltViewModel()) {
             }
         }
         BackButton(onBack)
-        GlassSheet(visible = vm.deleting != null, onDismiss = vm::cancelDelete) {
-            val share = vm.deleting ?: return@GlassSheet
-            Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
-                Text("Delete this link?", style = OctoType.section, color = OctoColors.TextPrimary)
-                Text(
-                    "\"${shareTitle(share)}\" stops working for everyone it was sent to.",
-                    style = OctoType.bodySmall,
-                    color = OctoColors.TextMuted,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-                Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    AccentButton("Delete", onClick = { vm.delete(share) })
-                    GlazeButton("Cancel", onClick = vm::cancelDelete)
-                }
-            }
+        val deleting = vm.deleting != null
+        GlassPopup(
+            visible = deleting,
+            anchor = rememberOpenedBeside(deleting),
+            onDismiss = vm::cancelDelete,
+            backdrop = LocalHaze.current,
+            title = "Delete link",
+        ) {
+            // Kept while the card fades, after the answer.
+            val share = rememberLast(vm.deleting) ?: return@GlassPopup
+            PopupQuestion(
+                "Delete this link?",
+                "\"${shareTitle(share)}\" stops working for everyone it was sent to.",
+                "Delete",
+                onConfirm = { vm.delete(share) },
+                onCancel = vm::cancelDelete,
+            )
         }
     }
 }

@@ -1,11 +1,5 @@
 package app.winters.octo.ui.settings
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -13,8 +7,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -25,11 +17,8 @@ import app.winters.octo.connection.FolderChoice
 import app.winters.octo.connection.Place
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
-import app.winters.octo.design.AccentButton
-import app.winters.octo.design.GlassSheet
-import app.winters.octo.design.GlazeButton
+import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.OctoColors
-import app.winters.octo.design.OctoType
 import app.winters.octo.playlists.PlaylistSync
 import app.winters.octo.server.LastSync
 import app.winters.octo.server.ServerSync
@@ -37,6 +26,9 @@ import app.winters.octo.subsonic.MusicFolder
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.LocalChoiceSheet
+import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.PopupQuestion
+import app.winters.octo.ui.common.rememberOpenedBeside
 import app.winters.octo.ui.nav.EditConnectionRoute
 import app.winters.octo.ui.nav.OctoAdminRoute
 import app.winters.octo.ui.nav.SignInRoute
@@ -201,23 +193,23 @@ val LocalDisconnectPrompt = staticCompositionLocalOf<DisconnectPrompt> { error("
 // Asks before the server is disconnected.
 @Composable
 fun DisconnectSheetHost(prompt: DisconnectPrompt, vm: ServerViewModel = hiltViewModel()) {
-    GlassSheet(visible = prompt.open, onDismiss = prompt::close) {
-        Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
-            Text("Disconnect the server?", style = OctoType.section, color = OctoColors.TextPrimary)
-            Text(
-                "Its music leaves your library on this phone. Nothing on the server changes, " +
-                    "and you can connect again at any time.",
-                style = OctoType.bodySmall,
-                color = OctoColors.TextMuted,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                AccentButton("Disconnect", onClick = {
-                    vm.disconnect()
-                    prompt.close()
-                })
-                GlazeButton("Cancel", onClick = prompt::close)
-            }
-        }
+    GlassPopup(
+        visible = prompt.open,
+        anchor = rememberOpenedBeside(prompt.open),
+        onDismiss = prompt::close,
+        backdrop = LocalHaze.current,
+        title = "Disconnect",
+    ) {
+        PopupQuestion(
+            "Disconnect the server?",
+            "Its music leaves your library on this phone. Nothing on the server changes, " +
+                "and you can connect again at any time.",
+            "Disconnect",
+            onConfirm = {
+                vm.disconnect()
+                prompt.close()
+            },
+            onCancel = prompt::close,
+        )
     }
 }
