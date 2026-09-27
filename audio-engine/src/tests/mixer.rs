@@ -134,6 +134,8 @@ fn markers_follow_speed() {
     mixer.start(lane, Transition::Start);
     let (out, markers) = render_all(&mut mixer);
     let frames = out.len() / 2;
+    // The start is told even though the speed stage blurs the first frame.
+    assert_eq!(markers.iter().filter(|m| m.transition == Some(Transition::Start)).count(), 1);
     // The last few periods inside the speed stage come out unchanged.
     assert!((frames as f64 - 64_000.0).abs() < 600.0, "{frames}");
     // Wherever the clock is read, it tells the song time at 1.5x.

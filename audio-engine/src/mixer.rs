@@ -338,7 +338,10 @@ impl Mixer {
             }
             let offset = ((at - start) / step).round() as u64;
             let secs = mark.secs + (at - mark.frame as f64) / self.rate as f64;
-            let transition = if (mark.frame as f64) >= start - 1e-6 { mark.transition } else { None };
+            // A song start is told exactly once, even when the speed stage
+            // puts the first output frame a little past its mark.
+            let transition = mark.transition;
+            self.marks[i].transition = None;
             let marker =
                 Marker { frame: first_out + offset, key: mark.key, secs, secs_per_frame, transition };
             // Only when it tells the clock something new.
@@ -355,7 +358,7 @@ impl Mixer {
             }
         }
         // Keep only the mark in force from here on.
-        while self.marks.len() > 1 && (self.marks[1].frame as f64) <= end {
+        while self.marks.len() > 1 && (self.marks[1].frame as f64) < end {
             self.marks.pop_front();
         }
     }

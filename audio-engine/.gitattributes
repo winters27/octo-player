@@ -2,3 +2,4 @@
 *.opus binary
 *.flac binary
 *.wav binary
+*.sh text eol=lf

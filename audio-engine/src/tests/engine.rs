@@ -105,6 +105,29 @@ fn plays_a_queue_gaplessly_with_events() {
 }
 
 #[test]
+fn events_arrive_at_other_speeds_too() {
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, 30_000, 0.3));
+    write_wav(&b, RATE, 2, &sine(300.0, RATE, 2, 30_000, 30_000, 0.3));
+    let (engine, events, _) = engine(2.0);
+    engine.set_speed(1.5, 1.0).unwrap();
+    engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
+    events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
+    let all = events.all();
+    let starts: Vec<&str> = all
+        .iter()
+        .filter_map(|e| match e {
+            EngineEvent::TrackStarted { item_id, .. } => Some(item_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(starts, ["a", "b"], "{all:?}");
+    assert!(all.iter().any(|e| matches!(e, EngineEvent::GaplessTransition { .. })));
+    engine.shutdown();
+}
+
+#[test]
 fn clock_is_monotonic_and_tracks_real_time() {
     let dir = temp_dir();
     let a = dir.join("a.wav");
