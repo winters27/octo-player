@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -39,6 +38,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.GlassSheet
 import app.winters.octo.design.GlazeInset
 import app.winters.octo.design.OctoColors
@@ -53,9 +53,14 @@ import app.winters.octo.ui.common.RemoveBackground
 import app.winters.octo.ui.common.asLength
 import app.winters.octo.ui.common.isOutsideLibrary
 import app.winters.octo.ui.common.songs
-import app.winters.octo.ui.menu.MenuRow
+import app.winters.octo.ui.common.GlassMenuAction
+import app.winters.octo.ui.common.GlassMenuHeader
+import app.winters.octo.ui.common.GlassMenuPage
+import app.winters.octo.ui.common.GlassMenuSeparator
+import app.winters.octo.ui.common.rememberOpenedBeside
 import app.winters.octo.ui.playlist.NewPlaylistForm
 import kotlinx.coroutines.launch
+import dev.chrisbanes.haze.HazeState
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
@@ -70,10 +75,11 @@ private val CurrentFill = mix(OctoColors.BackgroundTertiary, OctoColors.Accent, 
 // Songs already played sit above the current one, dimmed.
 private const val PLAYED_ALPHA = 0.5f
 
-// The queue sheet, the menu of one of its songs, and the name form for
-// saving the queue as a playlist, each a sheet over the player.
+// The queue sheet over the player, a long working list, then the menu of
+// one of its songs and the name form for saving the queue as a playlist,
+// each a glass card floating over it. `backdrop` is what the cards frost.
 @Composable
-fun QueueSheets(model: PlayerViewModel, shuffle: Boolean, visible: Boolean, onDismiss: () -> Unit) {
+fun QueueSheets(model: PlayerViewModel, shuffle: Boolean, visible: Boolean, onDismiss: () -> Unit, backdrop: HazeState) {
     // The song whose menu is open, kept after closing so it can slide away.
     var menuOpen by remember { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<QueueMenuFor?>(null) }
@@ -103,11 +109,23 @@ fun QueueSheets(model: PlayerViewModel, shuffle: Boolean, visible: Boolean, onDi
             ),
         )
     }
-    GlassSheet(visible = menuOpen, onDismiss = { menuOpen = false }) {
-        val shown = menuFor ?: return@GlassSheet
+    GlassPopup(
+        visible = menuOpen,
+        anchor = rememberOpenedBeside(menuOpen),
+        onDismiss = { menuOpen = false },
+        backdrop = backdrop,
+        title = "Song in the queue",
+    ) {
+        val shown = menuFor ?: return@GlassPopup
         QueueRowMenu(shown, model, onDone = { menuOpen = false })
     }
-    GlassSheet(visible = saving, onDismiss = { saving = false }) {
+    GlassPopup(
+        visible = saving,
+        anchor = rememberOpenedBeside(saving),
+        onDismiss = { saving = false },
+        backdrop = backdrop,
+        title = "Save as playlist",
+    ) {
         NewPlaylistForm { name ->
             model.saveQueueAsPlaylist(name)
             saving = false
@@ -292,25 +310,34 @@ private fun QueueTool(label: String, enabled: Boolean, onClick: () -> Unit) {
 @Composable
 private fun QueueRowMenu(shown: QueueMenuFor, model: PlayerViewModel, onDone: () -> Unit) {
     val entry = shown.entry
-    SongLine(entry, Modifier.padding(horizontal = 20.dp))
-    Spacer(Modifier.height(8.dp))
-    if (shown.place != QueuePlace.Current) {
-        MenuRow(OctoIcons.PlayNext, "Play next") {
-            model.playNextInQueue(entry)
-            onDone()
+    GlassMenuPage(
+        header = {
+            GlassMenuHeader(entry.title, entry.artist) {
+                Artwork(entry.artwork, 40.dp, shape = RoundedCornerShape(6.dp), outside = isOutsideLibrary(entry.trackId))
+            }
+            GlassMenuSeparator()
+        },
+    ) {
+        if (shown.place != QueuePlace.Current) {
+            GlassMenuAction(OctoIcons.PlayNext, "Play next", onClick = {
+                model.playNextInQueue(entry)
+                onDone()
+            })
         }
-        MenuRow(OctoIcons.Delete, "Remove from queue") {
-            model.removeFromQueue(entry)
-            onDone()
+        if (shown.place != QueuePlace.Played) {
+            GlassMenuAction(OctoIcons.SleepTimer, "Stop after this song", onClick = {
+                model.sleepAfter(entry)
+                onDone()
+            })
+        }
+        if (shown.place != QueuePlace.Current) {
+            GlassMenuSeparator()
+            GlassMenuAction(OctoIcons.Delete, "Remove from queue", onClick = {
+                model.removeFromQueue(entry)
+                onDone()
+            })
         }
     }
-    if (shown.place != QueuePlace.Played) {
-        MenuRow(OctoIcons.SleepTimer, "Stop after this song") {
-            model.sleepAfter(entry)
-            onDone()
-        }
-    }
-    Spacer(Modifier.height(12.dp))
 }
 
 // A song: artwork, title and artist, an "Autoplay" label on a song Autoplay

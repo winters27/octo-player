@@ -24,12 +24,11 @@ import app.winters.octo.BuildConfig
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
-import app.winters.octo.ui.common.FloatingSheet
 import app.winters.octo.ui.settings.rows.ActionRow
 import app.winters.octo.ui.settings.rows.InfoRow
 import app.winters.octo.ui.settings.rows.SettingsGroup
 import app.winters.octo.ui.settings.rows.SettingsPageFrame
-import app.winters.octo.whatsnew.WhatsNewList
+import app.winters.octo.whatsnew.WhatsNewPanel
 
 // The app's version, what is new in it, and who made it.
 @Composable
@@ -43,9 +42,7 @@ fun AboutPage(onBack: () -> Unit, highlight: String?) {
         }
         Credit()
     }
-    FloatingSheet(visible = reading, onDismiss = { reading = false }) {
-        WhatsNewList()
-    }
+    WhatsNewPanel(visible = reading, onDismiss = { reading = false })
 }
 
 // One quiet line.

@@ -59,6 +59,9 @@ import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.LocalNowPlayingId
 import app.winters.octo.ui.common.LocalOpenPage
+import app.winters.octo.ui.common.LocalPressSpot
+import app.winters.octo.ui.common.PressSpot
+import app.winters.octo.ui.common.pressSpot
 import app.winters.octo.ui.common.NowMark
 import app.winters.octo.ui.favourites.FavouritesScreen
 import app.winters.octo.ui.folders.FoldersScreen
@@ -104,6 +107,8 @@ import dev.chrisbanes.haze.rememberHazeState
 fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Feedback, openPlayer: Int = 0) {
     val now by playback.now.collectAsStateWithLifecycle()
     val haze = rememberHazeState()
+    // What the full player frosts, for the menus that open over it.
+    val playerHaze = rememberHazeState()
     // Called once each, always in this order.
     val stacks = listOf(
         rememberNavBackStack(HomeRoute),
@@ -160,6 +165,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
     val disconnectPrompt = remember { DisconnectPrompt() }
     val choiceSheet = remember { ChoiceSheet() }
     val shareSheet = remember { ShareSheetState() }
+    val pressSpot = remember { PressSpot() }
     // The covers of open album and artist pages, and the bar's film, for the
     // artwork's glow.
     val pageArtworks = remember { PageArtworks() }
@@ -172,6 +178,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
 
     CompositionLocalProvider(
         LocalHaze provides haze,
+        LocalPressSpot provides pressSpot,
         LocalSongMenu provides songMenu,
         LocalPlaylistSheets provides playlistSheets,
         LocalDisconnectPrompt provides disconnectPrompt,
@@ -183,7 +190,8 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         LocalNowPlayingId provides NowMark(now.trackId, now.isPlaying),
     ) {
         SharedTransitionLayout {
-            Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
+            // Any press marks where a menu it opens should float.
+            Box(Modifier.fillMaxSize().background(OctoColors.Background).pressSpot(pressSpot, wholeArea = true)) {
                 // The glow sits under the pages and is part of what the bar
                 // frosts. It rests while the full player covers it.
                 Box(Modifier.fillMaxSize().hazeSource(haze)) {
@@ -263,6 +271,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                     exit = fadeOut(tween(300)),
                 ) {
                     PlayerOverlay(
+                        backdrop = playerHaze,
                         artModifier = Modifier.sharedElement(rememberSharedContentState(ArtKey), this),
                         onClose = { playerOpen = false },
                         onOpenArtist = { id ->
@@ -279,7 +288,8 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                         },
                     )
                 }
-                SongMenuHost(songMenu, onOpen = openFromMenu)
+                // Over the player, the menus frost the player rather than the page.
+                SongMenuHost(songMenu, onOpen = openFromMenu, backdrop = if (playerOpen && hasTrack) playerHaze else haze)
                 PlaylistSheetsHost(playlistSheets)
                 DisconnectSheetHost(disconnectPrompt)
                 ChoiceSheetHost(choiceSheet)

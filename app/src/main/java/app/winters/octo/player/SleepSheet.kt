@@ -8,12 +8,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -62,27 +63,30 @@ fun sleepSummary(state: SleepState): String = when (state) {
     is SleepState.AfterSong -> "After ${state.title}"
 }
 
+// How wide the card for time is: room for three buttons in a row.
+internal val TimeCardWidth = 320.dp
+
 // The longest custom timer: twelve hours.
 private const val MAX_SLEEP_MINUTES = 720
 
-// The sleep timer, inside a GlassSheet: how long until the music stops, or
-// after how many songs, and the time left once one is set, with more time
-// to add while it counts down. Starting or cancelling a timer calls onDone
-// so the sheet can close. Playback speed, the other setting about time,
-// opens from its foot.
+// The sleep timer, a page of a glass card beside its button: how long until
+// the music stops, or after how many songs, and the time left once one is
+// set, with more time to add while it counts down. Starting or cancelling
+// a timer calls onDone so the card can close. Playback speed, the other
+// setting about time, opens from its foot as the next page.
 @Composable
-fun SleepSheet(model: PlayerViewModel, onDone: () -> Unit, onOpenSpeed: () -> Unit) {
+fun SleepPage(model: PlayerViewModel, onDone: () -> Unit, onOpenSpeed: () -> Unit) {
     val sleep by model.sleep.collectAsStateWithLifecycle()
     val prefs by model.prefs.collectAsStateWithLifecycle()
     var custom by remember { mutableStateOf(false) }
 
     Column(
         Modifier
-            .fillMaxWidth()
-            .imePadding()
-            .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+            .width(TimeCardWidth)
+            .verticalScroll(rememberScrollState())
+            .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 10.dp),
     ) {
-        Text("Sleep timer", style = OctoType.section, color = OctoColors.TextPrimary)
+        Text("Sleep timer", style = OctoType.body, color = OctoColors.TextPrimary)
         val state = sleep
         if (state != SleepState.Off) {
             Spacer(Modifier.height(12.dp))

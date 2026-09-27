@@ -28,8 +28,7 @@ import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.glassPanel
-import app.winters.octo.ui.common.FloatingSheet
-import app.winters.octo.whatsnew.WhatsNewList
+import app.winters.octo.whatsnew.WhatsNewPanel
 import app.winters.octo.whatsnew.WhatsNewStore
 import app.winters.octo.whatsnew.WhatsNewSummary
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -83,13 +82,11 @@ fun WhatsNewCard(vm: WhatsNewViewModel = hiltViewModel()) {
             }
         }
     }
-    FloatingSheet(
+    WhatsNewPanel(
         visible = reading,
         onDismiss = {
             reading = false
             vm.dismiss()
         },
-    ) {
-        WhatsNewList()
-    }
+    )
 }

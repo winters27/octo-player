@@ -10,12 +10,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -42,7 +43,7 @@ import androidx.lifecycle.viewModelScope
 import app.winters.octo.data.userMessage
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.GlassInput
-import app.winters.octo.design.GlassSheet
+import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -55,6 +56,8 @@ import app.winters.octo.subsonic.RadioStationDetails
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.LoadState
+import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.rememberLast
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.screenPadding
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -237,8 +240,17 @@ fun RadioStationsScreen(onBack: () -> Unit, vm: RadioStationsViewModel = hiltVie
             }
         }
         BackButton(onBack)
-        GlassSheet(visible = vm.draft != null, onDismiss = vm::close) {
-            val draft = vm.draft ?: return@GlassSheet
+        // A glass panel in the middle, since it holds a form; it rises above
+        // the keyboard while one is typed.
+        GlassPopup(
+            visible = vm.draft != null,
+            anchor = null,
+            onDismiss = vm::close,
+            backdrop = LocalHaze.current,
+            title = "Station",
+            maxWidth = 400.dp,
+        ) {
+            val draft = rememberLast(vm.draft) ?: return@GlassPopup
             key(draft.id) { StationForm(draft, vm) }
         }
     }
@@ -278,11 +290,11 @@ private fun StationForm(draft: StationDraft, vm: RadioStationsViewModel) {
     Column(
         Modifier
             .fillMaxWidth()
-            .imePadding()
-            .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(if (draft.id == null) "Add station" else "Edit station", style = OctoType.section, color = OctoColors.TextPrimary)
+        Text(if (draft.id == null) "Add station" else "Edit station", style = OctoType.body, color = OctoColors.TextPrimary)
         GlassInput(
             value = draft.name,
             onValueChange = { vm.change(draft.copy(name = it)) },

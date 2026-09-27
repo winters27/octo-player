@@ -1,7 +1,5 @@
 package app.winters.octo.player
 
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,13 +11,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,6 +54,8 @@ import app.winters.octo.design.GlassInput
 import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.GlazeSelected
+import app.winters.octo.design.PopupPager
+import app.winters.octo.design.rememberPopupPages
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -73,11 +74,13 @@ import app.winters.octo.lyrics.signedTiming
 import app.winters.octo.lyrics.timingLabel
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.ui.common.Choice
+import app.winters.octo.ui.common.GlassMenuBack
 import app.winters.octo.ui.common.GlassMenuOptions
 import app.winters.octo.ui.common.GlassMenuTitle
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.asClock
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -202,26 +205,31 @@ fun LyricsMenu(
     onChooseOther: () -> Unit,
     model: LyricsMenuViewModel = hiltViewModel(),
 ) {
-    var page by remember { mutableStateOf(MenuPage.Options) }
+    val pages = rememberPopupPages(MenuPage.Options)
     LaunchedEffect(visible) {
-        if (visible) page = MenuPage.Options
+        if (visible) pages.reset(MenuPage.Options)
     }
-    GlassPopup(visible = visible, anchor = anchor, onDismiss = onDismiss, backdrop = LocalHaze.current, title = "Lyrics") {
-        Column(Modifier.width(MenuWidth).animateContentSize(spring(0.9f, 500f)).padding(6.dp)) {
-            if (trackId == null) return@Column
-            when (page) {
-                MenuPage.Options -> MenuOptions(
-                    state,
-                    trackId,
-                    model,
-                    onTiming = { page = MenuPage.Timing },
-                    onChooseOther = {
-                        onDismiss()
-                        onChooseOther()
-                    },
-                    onDismiss = onDismiss,
-                )
-                MenuPage.Timing -> TimingControl(trackId, model)
+    GlassPopup(visible = visible, anchor = anchor, onDismiss = onDismiss, backdrop = LocalHaze.current, title = "Lyrics", onBack = pages::back) {
+        if (trackId == null) return@GlassPopup
+        PopupPager(pages) { page, _ ->
+            Column(Modifier.width(MenuWidth).padding(6.dp)) {
+                when (page) {
+                    MenuPage.Options -> MenuOptions(
+                        state,
+                        trackId,
+                        model,
+                        onTiming = { pages.open(MenuPage.Timing) },
+                        onChooseOther = {
+                            onDismiss()
+                            onChooseOther()
+                        },
+                        onDismiss = onDismiss,
+                    )
+                    MenuPage.Timing -> {
+                        GlassMenuBack("Lyrics timing") { pages.back() }
+                        TimingControl(trackId, model)
+                    }
+                }
             }
         }
     }
@@ -279,7 +287,6 @@ private fun MenuOptions(
 @Composable
 private fun TimingControl(trackId: String, model: LyricsMenuViewModel) {
     val offset by remember(trackId) { model.offsetFor(trackId) }.collectAsStateWithLifecycle(0L)
-    GlassMenuTitle("Lyrics timing")
     Text(
         signedTiming(offset),
         style = OctoType.headline.copy(fontFeatureSettings = "tnum"),
@@ -409,8 +416,28 @@ fun ColumnScope.LyricsChooser(now: NowPlaying, state: LyricsState, onDone: () ->
             missedLine(result.search.missed)?.let { QuietLine(it, side) }
         }
     }
-    // Room for the keyboard, so the search stays in view above it.
-    Spacer(Modifier.imePadding().height(8.dp))
+    Spacer(Modifier.height(8.dp))
+}
+
+// The lyrics chooser in a large glass panel in the middle of the screen,
+// since it holds a search and previews. It rises above the keyboard while
+// the search is typed, and the list scrolls within it.
+@Composable
+fun LyricsChooserPanel(visible: Boolean, now: NowPlaying, model: PlayerViewModel, backdrop: HazeState, onDismiss: () -> Unit) {
+    GlassPopup(
+        visible = visible,
+        anchor = null,
+        onDismiss = onDismiss,
+        backdrop = backdrop,
+        title = "Choose lyrics",
+        maxWidth = 440.dp,
+        heightShare = 0.8f,
+    ) {
+        val lyrics by model.lyrics.collectAsStateWithLifecycle()
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(top = 18.dp, bottom = 6.dp)) {
+            LyricsChooser(now, lyrics, onDone = onDismiss)
+        }
+    }
 }
 
 // Which sources could not be reached this time, in plain words.

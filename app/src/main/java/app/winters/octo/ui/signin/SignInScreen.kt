@@ -37,7 +37,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
@@ -47,15 +46,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import app.winters.octo.connection.formatFingerprint
 import app.winters.octo.data.SignInError
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.GlassInput
-import app.winters.octo.design.GlassSheet
+import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -65,6 +61,9 @@ import app.winters.octo.design.glassPanel
 import app.winters.octo.subsonic.normalizeServerUrl
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
+import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.PopupQuestion
+import app.winters.octo.ui.common.rememberLast
 
 private val CardShape = RoundedCornerShape(20.dp)
 
@@ -371,43 +370,38 @@ private fun SwitchRow(label: String, detail: String, checked: Boolean, enabled: 
 
 // Asks before trusting a certificate the phone does not. It shows the
 // host and the certificate's fingerprint, so the user can compare it with
-// the server's own. Nothing is trusted unless they say so. It opens in its
-// own window so it sits above the floating bar.
+// the server's own. Nothing is trusted unless they say so. It floats in
+// the middle of the screen, above the bar.
 @Composable
 private fun TrustSheet(question: SignInError.Untrusted?, onTrust: () -> Unit, onCancel: () -> Unit) {
-    if (question == null) return
-    Dialog(
-        onDismissRequest = onCancel,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    GlassPopup(
+        visible = question != null,
+        anchor = null,
+        onDismiss = onCancel,
+        backdrop = LocalHaze.current,
+        title = "Trust this certificate",
+        maxWidth = 380.dp,
     ) {
-        // The sheet dims the screen itself.
-        (LocalView.current.parent as? DialogWindowProvider)?.window?.setDimAmount(0f)
-        var shown by remember { mutableStateOf(false) }
-        LaunchedEffect(Unit) { shown = true }
-        GlassSheet(visible = shown, onDismiss = onCancel) {
-            Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
-                Text("Trust this certificate?", style = OctoType.section, color = OctoColors.TextPrimary)
-                Text(
-                    "This phone doesn't trust the certificate the server showed. If it's your own server's, " +
-                        "check the fingerprint matches before you trust it. Octo will trust this one " +
-                        "certificate, and only for this host.",
-                    style = OctoType.bodySmall,
-                    color = OctoColors.TextMuted,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-                Text("Host", style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(top = 16.dp))
-                Text(question.host, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
-                Text("SHA-256 fingerprint", style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(top = 12.dp))
-                Text(
-                    formatFingerprint(question.fingerprint),
-                    style = OctoType.caption.copy(fontFamily = FontFamily.Monospace),
-                    color = OctoColors.TextPrimary,
-                )
-                Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    AccentButton("Trust this certificate", onClick = onTrust)
-                    GlazeButton("Cancel", onClick = onCancel)
-                }
-            }
+        val shown = rememberLast(question) ?: return@GlassPopup
+        PopupQuestion(
+            "Trust this certificate?",
+            "This phone doesn't trust the certificate the server showed. If it's your own server's, " +
+                "check the fingerprint matches before you trust it. Octo will trust this one " +
+                "certificate, and only for this host.",
+            "Trust this certificate",
+            onConfirm = onTrust,
+            onCancel = onCancel,
+            modifier = Modifier.verticalScroll(rememberScrollState()),
+            width = 380.dp,
+        ) {
+            Text("Host", style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(top = 16.dp))
+            Text(shown.host, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
+            Text("SHA-256 fingerprint", style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(top = 12.dp))
+            Text(
+                formatFingerprint(shown.fingerprint),
+                style = OctoType.caption.copy(fontFamily = FontFamily.Monospace),
+                color = OctoColors.TextPrimary,
+            )
         }
     }
 }

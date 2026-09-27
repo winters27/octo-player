@@ -106,7 +106,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
 import app.winters.octo.catalog.isFind
 import app.winters.octo.design.AccentFill
-import app.winters.octo.design.GlassSheet
+import app.winters.octo.design.GlassPopup
+import app.winters.octo.design.PopupPager
+import app.winters.octo.design.rememberPopupPages
 import app.winters.octo.design.GlazeInset
 import app.winters.octo.design.GlazeClearFilm
 import app.winters.octo.design.GlowIcon
@@ -132,11 +134,15 @@ import app.winters.octo.ui.common.detectAxisDrags
 import app.winters.octo.ui.common.swipeSkip
 import app.winters.octo.ui.common.AddToLibraryButton
 import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.LocalPressSpot
+import app.winters.octo.ui.common.pressSpot
+import app.winters.octo.ui.common.rememberOpenedBeside
 import app.winters.octo.ui.common.RatingStars
 import app.winters.octo.ui.menu.LocalSongMenu
 import app.winters.octo.ui.output.CastButton
 import app.winters.octo.ui.common.asClock
 import app.winters.octo.ui.common.rememberSystemReduceMotion
+import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
@@ -147,6 +153,8 @@ import kotlin.math.abs
 // The full player. It opens over everything, with the artwork flying in
 // from the bar, and closes on back, on the chevron, or by pulling it down
 // from the top. Turned sideways, the artwork sits beside the controls.
+// `backdrop` is what its glass frosts, given from outside so the menus that
+// open over it can frost it too.
 @Composable
 fun AnimatedVisibilityScope.PlayerOverlay(
     artModifier: Modifier,
@@ -154,6 +162,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     onOpenArtist: (String) -> Unit,
     onOpenAlbum: (String) -> Unit,
     onOpenSound: () -> Unit,
+    backdrop: HazeState = rememberHazeState(),
     model: PlayerViewModel = hiltViewModel(),
 ) {
     val now by model.now.collectAsStateWithLifecycle()
@@ -166,10 +175,11 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     val scope = rememberCoroutineScope()
     // How far the player has been pulled down, in pixels.
     var pull by remember { mutableFloatStateOf(0f) }
-    val backdrop = rememberHazeState()
     var showQueue by remember { mutableStateOf(false) }
-    var showSleep by remember { mutableStateOf(false) }
-    var showSpeed by remember { mutableStateOf(false) }
+    // The sleep timer and the speed share one glass card: speed opens from
+    // the timer as its next page, or on its own from the speed mark.
+    var showTime by remember { mutableStateOf(false) }
+    val timePages = rememberPopupPages(TimePage.Sleep)
     var showLyricsChooser by remember { mutableStateOf(false) }
 
     BackHandler(onBack = onClose)
@@ -247,29 +257,47 @@ fun AnimatedVisibilityScope.PlayerOverlay(
                     onOpenArtist,
                     onOpenAlbum,
                     onOpenQueue = { showQueue = true },
-                    onOpenSleep = { showSleep = true },
+                    onOpenSleep = {
+                        timePages.reset(TimePage.Sleep)
+                        showTime = true
+                    },
                     onOpenSound = onOpenSound,
-                    onOpenSpeed = { showSpeed = true },
+                    onOpenSpeed = {
+                        timePages.reset(TimePage.Speed)
+                        showTime = true
+                    },
                     onChooseLyrics = { showLyricsChooser = true },
                 )
             }
         }
-        QueueSheets(model, now.shuffle, visible = showQueue, onDismiss = { showQueue = false })
-        GlassSheet(visible = showLyricsChooser, onDismiss = { showLyricsChooser = false }) {
-            val lyrics by model.lyrics.collectAsStateWithLifecycle()
-            LyricsChooser(now, lyrics, onDone = { showLyricsChooser = false })
-        }
-        GlassSheet(visible = showSleep, onDismiss = { showSleep = false }) {
-            SleepSheet(model, onDone = { showSleep = false }, onOpenSpeed = {
-                showSleep = false
-                showSpeed = true
-            })
-        }
-        GlassSheet(visible = showSpeed, onDismiss = { showSpeed = false }) {
-            SpeedSheet()
+        QueueSheets(model, now.shuffle, visible = showQueue, onDismiss = { showQueue = false }, backdrop = backdrop)
+        LyricsChooserPanel(
+            visible = showLyricsChooser,
+            now = now,
+            model = model,
+            backdrop = backdrop,
+            onDismiss = { showLyricsChooser = false },
+        )
+        GlassPopup(
+            visible = showTime,
+            anchor = rememberOpenedBeside(showTime),
+            onDismiss = { showTime = false },
+            backdrop = backdrop,
+            title = "Sleep timer and speed",
+            onBack = timePages::back,
+        ) {
+            PopupPager(timePages) { page, canGoBack ->
+                when (page) {
+                    TimePage.Sleep -> SleepPage(model, onDone = { showTime = false }, onOpenSpeed = { timePages.open(TimePage.Speed) })
+                    TimePage.Speed -> SpeedPage(onBack = if (canGoBack) ({ timePages.back() }) else null)
+                }
+            }
         }
     }
 }
+
+// The pages of the card for time: the sleep timer, and the speed.
+private enum class TimePage { Sleep, Speed }
 
 @Composable
 private fun AnimatedVisibilityScope.PlayerContent(
@@ -719,6 +747,8 @@ private fun SongButtons(now: NowPlaying, model: PlayerViewModel) {
     Box(
         Modifier
             .size(44.dp)
+            // The song's menu floats beside this button.
+            .pressSpot(LocalPressSpot.current)
             .clickable(interactionSource = null, indication = null, role = Role.Button) { now.trackId?.let(menu::open) }
             .semantics { contentDescription = "More" },
         contentAlignment = Alignment.Center,
