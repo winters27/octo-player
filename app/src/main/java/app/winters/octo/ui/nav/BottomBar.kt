@@ -75,6 +75,7 @@ import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.AxisDrag
 import app.winters.octo.ui.common.SwipeSkip
 import app.winters.octo.ui.common.detectAxisDrags
+import app.winters.octo.ui.common.isOutsideLibrary
 import app.winters.octo.ui.common.swipeSkip
 import app.winters.octo.ui.common.swipeUp
 import dev.chrisbanes.haze.HazeState
@@ -342,7 +343,7 @@ private fun PlayerCapsule(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-                Artwork(now.artwork, 36.dp, artModifier, shape = artShape)
+                Artwork(now.artwork, 36.dp, artModifier, shape = artShape, outside = isOutsideLibrary(now.trackId))
                 ProgressRing(progress, Modifier.matchParentSize().padding(1.dp))
             }
             Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {

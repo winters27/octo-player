@@ -18,6 +18,7 @@ import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.server.QueueSync
 import app.winters.octo.system.SystemEntries
 import app.winters.octo.system.publishShortcuts
+import app.winters.octo.ui.common.ProvideAdoptedFinds
 import app.winters.octo.ui.common.ProvideOfflineMarks
 import app.winters.octo.ui.nav.MainShell
 import app.winters.octo.widget.EXTRA_OPEN_PLAYER
@@ -40,7 +41,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // The app opens on the library; servers are an optional add-on.
-        setContent { OctoTheme { ProvideOfflineMarks { MainShell(library, playback, feedback, openPlayer) } } }
+        setContent { OctoTheme { ProvideOfflineMarks { ProvideAdoptedFinds { MainShell(library, playback, feedback, openPlayer) } } } }
         publishShortcuts(this)
         // Opened by a voice request or a widget; not again when the screen turns.
         if (savedInstanceState == null) {

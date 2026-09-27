@@ -1,11 +1,11 @@
 package app.winters.octo.discovery
 
 import app.winters.octo.catalog.ArtistEntity
-import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.matchKey
+import app.winters.octo.catalog.onlineArtwork
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
@@ -107,7 +107,7 @@ class ArtistExtrasSource @Inject constructor(
             val known = library[matchKey(other.name)]
             SimilarArtist(
                 name = known?.name ?: other.name,
-                artwork = known?.artwork ?: other.coverArt?.takeIf(String::isNotEmpty)?.let { ArtworkRef.Server(sourceId, it).encode() },
+                artwork = known?.artwork ?: onlineArtwork(sourceId, other.coverArt),
                 libraryId = known?.id,
                 serverId = other.id,
             )

@@ -51,6 +51,7 @@ import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.DragHandle
 import app.winters.octo.ui.common.RemoveBackground
 import app.winters.octo.ui.common.asLength
+import app.winters.octo.ui.common.isOutsideLibrary
 import app.winters.octo.ui.common.songs
 import app.winters.octo.ui.menu.MenuRow
 import app.winters.octo.ui.playlist.NewPlaylistForm
@@ -321,7 +322,7 @@ private fun SongLine(entry: QueueEntry, modifier: Modifier = Modifier, handle: M
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Artwork(entry.artwork, 44.dp, shape = RoundedCornerShape(6.dp))
+        Artwork(entry.artwork, 44.dp, shape = RoundedCornerShape(6.dp), outside = isOutsideLibrary(entry.trackId))
         Column(Modifier.weight(1f)) {
             Text(entry.title, style = OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(entry.artist, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)

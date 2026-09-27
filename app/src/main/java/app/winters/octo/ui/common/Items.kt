@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.isFind
 import app.winters.octo.design.GlazeSelected
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -77,13 +78,14 @@ private fun Modifier.pressOrHold(haptics: HapticFeedback, onClick: () -> Unit, o
 @Composable
 fun AlbumCard(album: AlbumEntity, onClick: () -> Unit, modifier: Modifier = Modifier, width: Dp? = 150.dp) {
     val menus = LocalSongMenu.current.collections
-    AlbumCard(album.artwork, album.title, album.artist, onClick, { menus.open(CollectionTarget.Album(album.id)) }, modifier, width)
+    AlbumCard(album.artwork, album.title, album.artist, onClick, { menus.open(CollectionTarget.Album(album.id)) }, modifier, width, outside = false)
 }
 
-// An album on the server, not in the library, drawn the same way.
+// An album on the server, not in the library, drawn the same way with the
+// not-in-library mark on its cover.
 @Composable
 fun AlbumCard(album: OnlineAlbum, onClick: () -> Unit, modifier: Modifier = Modifier, width: Dp? = 150.dp) =
-    AlbumCard(album.artwork, album.title, album.artist, onClick, null, modifier, width)
+    AlbumCard(album.artwork, album.title, album.artist, onClick, null, modifier, width, outside = true)
 
 @Composable
 private fun AlbumCard(
@@ -94,12 +96,13 @@ private fun AlbumCard(
     onLongClick: (() -> Unit)?,
     modifier: Modifier,
     width: Dp?,
+    outside: Boolean,
 ) {
     Column(
         (if (width != null) modifier.width(width) else modifier.fillMaxWidth())
             .pressOrHold(LocalHapticFeedback.current, onClick, onLongClick),
     ) {
-        ArtworkFill(artwork)
+        ArtworkFill(artwork, outside = outside)
         Spacer(Modifier.height(8.dp))
         Text(
             title,
@@ -119,7 +122,9 @@ private fun AlbumCard(
 }
 
 // A song as a picture with its title and artist under it, for rows of
-// songs. A tap plays; a long press opens the song's menu.
+// songs. A tap plays; a long press opens the song's menu. A song found
+// online carries the not-in-library mark on its picture, and nothing more
+// by its artist.
 @Composable
 fun SongCard(track: TrackEntity, onClick: () -> Unit) {
     val menu = LocalSongMenu.current
@@ -129,7 +134,7 @@ fun SongCard(track: TrackEntity, onClick: () -> Unit) {
             .alpha(if (LocalOfflineMarks.current.isOutOfReach(track)) OutOfReachAlpha else 1f)
             .pressOrHold(LocalHapticFeedback.current, onClick) { menu.open(track.id) },
     ) {
-        ArtworkFill(track.artwork)
+        ArtworkFill(track.artwork, outside = isOutsideLibrary(track.id))
         Spacer(Modifier.height(8.dp))
         Text(
             track.title,
@@ -147,7 +152,7 @@ fun SongCard(track: TrackEntity, onClick: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
             )
-            SourceMark(track, cloudForFinds = true)
+            SourceMark(track)
         }
     }
 }
@@ -175,6 +180,10 @@ sealed interface SongLead {
 // menu. In a list that picks songs, `selectKey` is the row's key; a tap
 // then picks it instead. A swipe right puts it next in the queue, on lists
 // where a swipe does nothing else (`swipeToPlayNext`).
+// A song found online that is not in the library carries the
+// not-in-library mark on its artwork. With `offerDownload`, it gets the
+// download button at the end instead: the button already says the song is
+// not in the library, so the row says it once.
 @Composable
 fun SongRow(
     track: TrackEntity,
@@ -184,17 +193,21 @@ fun SongRow(
     menuContext: SongMenuContext = SongMenuContext(),
     selectKey: String = track.id,
     swipeToPlayNext: Boolean = true,
+    offerDownload: Boolean = false,
     onClick: (() -> Unit)? = null,
 ) {
+    val download = offerDownload && isFind(track.id)
+    val end: (@Composable () -> Unit)? = if (download) ({ DownloadButton(track, size = 40.dp, iconSize = 22.dp) }) else trailing
+    val mark = rowMarksArtwork(track.id, LocalAdoptedFinds.current, offerDownload)
     if (swipeToPlayNext) {
         val menu = LocalSongMenu.current
         // No swiping while the list is picking songs.
         val selecting = LocalSongSelection.current?.active == true
         PlayNextSwipe(enabled = !selecting, onSwiped = { menu.quick?.playNext(track.id) }) {
-            SongLine(track, lead, subtitle, trailing, menuContext, selectKey, onClick)
+            SongLine(track, lead, subtitle, end, mark, menuContext, selectKey, onClick)
         }
     } else {
-        SongLine(track, lead, subtitle, trailing, menuContext, selectKey, onClick)
+        SongLine(track, lead, subtitle, end, mark, menuContext, selectKey, onClick)
     }
 }
 
@@ -204,6 +217,7 @@ private fun SongLine(
     lead: SongLead,
     subtitle: String?,
     trailing: (@Composable () -> Unit)?,
+    outside: Boolean,
     menuContext: SongMenuContext,
     selectKey: String,
     onClick: (() -> Unit)?,
@@ -255,7 +269,7 @@ private fun SongLine(
         ) {
             when (lead) {
                 SongLead.Artwork -> Box(contentAlignment = Alignment.Center) {
-                    Artwork(track.artwork, 44.dp, shape = RoundedCornerShape(6.dp))
+                    Artwork(track.artwork, 44.dp, shape = RoundedCornerShape(6.dp), outside = outside)
                     when {
                         picked -> LeadMark { PickedMark() }
                         isNow -> LeadMark { NowPlayingBars(now.playing, Modifier.size(16.dp)) }
@@ -359,20 +373,22 @@ fun ArtistRow(artist: ArtistEntity, onClick: () -> Unit) {
 @Composable
 fun ArtistCircle(artist: ArtistEntity, onClick: () -> Unit) {
     val menus = LocalSongMenu.current.collections
-    ArtistCircle(artist.artwork, artist.name, onClick) { menus.open(CollectionTarget.Artist(artist.id)) }
+    ArtistCircle(artist.artwork, artist.name, onClick, { menus.open(CollectionTarget.Artist(artist.id)) }, outside = false)
 }
 
-// An artist on the server, not in the library, drawn the same way.
+// An artist on the server, drawn the same way. Not in the library unless
+// said otherwise (`outside`), so with the not-in-library mark.
 @Composable
-fun ArtistCircle(artist: OnlineArtist, onClick: () -> Unit) = ArtistCircle(artist.artwork, artist.name, onClick, null)
+fun ArtistCircle(artist: OnlineArtist, outside: Boolean = true, onClick: () -> Unit) =
+    ArtistCircle(artist.artwork, artist.name, onClick, null, outside = outside)
 
 @Composable
-private fun ArtistCircle(artwork: String?, name: String, onClick: () -> Unit, onLongClick: (() -> Unit)?) {
+private fun ArtistCircle(artwork: String?, name: String, onClick: () -> Unit, onLongClick: (() -> Unit)?, outside: Boolean) {
     Column(
         Modifier.width(96.dp).pressOrHold(LocalHapticFeedback.current, onClick, onLongClick),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Artwork(artwork, 96.dp, shape = CircleShape)
+        Artwork(artwork, 96.dp, shape = CircleShape, outside = outside)
         Spacer(Modifier.height(8.dp))
         Text(
             name,

@@ -108,6 +108,7 @@ interface UserDao {
 
     // Every playlist song the catalog still has, in play order. A song found
     // online (from a server's copy of a playlist) counts too.
+    // Its cover is written the way onlineArtwork writes one.
     @Query(
         """
         SELECT playlistId, albumId, durationMs, artwork FROM (
@@ -115,7 +116,7 @@ interface UserDao {
             FROM playlist_item i JOIN track t ON t.id = i.trackId
             UNION ALL
             SELECT i.playlistId, i.position, COALESCE(o.albumId, ''), o.durationMs,
-                CASE WHEN o.coverId IS NULL THEN NULL ELSE 'server:' || o.sourceId || '|' || o.coverId END
+                CASE WHEN o.coverId IS NULL THEN NULL ELSE 'online:' || o.sourceId || '|' || o.coverId END
             FROM playlist_item i JOIN online_song o ON o.id = i.trackId
         )
         ORDER BY playlistId, position
@@ -140,7 +141,7 @@ interface UserDao {
             UNION ALL
             SELECT i.id, i.position, o.id, o.sourceId, o.nativeId, o.title, LOWER(o.title), LOWER(o.title),
                 o.artist, '', o.album, '', NULL, NULL, NULL, o.durationMs, 0, o.mimeType, NULL,
-                CASE WHEN o.coverId IS NULL THEN NULL ELSE 'server:' || o.sourceId || '|' || o.coverId END,
+                CASE WHEN o.coverId IS NULL THEN NULL ELSE 'online:' || o.sourceId || '|' || o.coverId END,
                 NULL, 0, '', '', 0, 0
             FROM playlist_item i JOIN online_song o ON o.id = i.trackId
             WHERE i.playlistId = :id

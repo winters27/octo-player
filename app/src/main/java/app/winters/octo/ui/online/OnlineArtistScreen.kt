@@ -21,6 +21,7 @@ import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.LoadState
 import app.winters.octo.ui.common.LoadStateContent
+import app.winters.octo.ui.common.NotInLibraryText
 import app.winters.octo.ui.common.albums
 import app.winters.octo.ui.nav.OnlineAlbumRoute
 import app.winters.octo.ui.nav.OnlineArtistRoute
@@ -71,7 +72,8 @@ fun OnlineArtistScreen(
             PageArtwork(OnlineArtistRoute(id), found.artist.artwork)
             ArtistGrid {
                 item(key = "header", span = { GridItemSpan(maxLineSpan) }) {
-                    ArtistHeader(found.artist.artwork, found.artist.name, albums(found.albums.size))
+                    // The picture stays clean; the line under the name says it.
+                    ArtistHeader(found.artist.artwork, found.artist.name, "${albums(found.albums.size)} • $NotInLibraryText")
                 }
                 items(found.albums, key = { it.id }) { album ->
                     AlbumCard(album, onClick = { onOpen(OnlineAlbumRoute(album.id)) }, width = null)

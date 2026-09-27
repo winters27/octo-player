@@ -59,7 +59,6 @@ import app.winters.octo.ui.common.Pickable
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistCircle
 import app.winters.octo.ui.common.ArtistRow
-import app.winters.octo.ui.common.DownloadButton
 import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
@@ -344,7 +343,7 @@ private fun LazyListScope.discoverSection(
             val found = online.found
             if (found.songs.isNotEmpty()) item(key = "discover:songs:title") { SubTitle("Songs") }
             items(found.songs, key = { "discover:${it.id}" }) { track ->
-                SongRow(track, trailing = { DownloadButton(track, size = 40.dp, iconSize = 22.dp) }) { onPlay(track) }
+                SongRow(track, offerDownload = true) { onPlay(track) }
             }
             if (found.albums.isNotEmpty()) {
                 item(key = "discover:albums:title") { SubTitle("Albums") }
