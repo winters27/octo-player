@@ -1,0 +1,10 @@
+{"subsonic-response":{"status":"ok","version":"1.16.1","type":"octo","acquisitions":{"acquisition":[
+{"id":"a1","artist":"Kavinsky","title":"Nightcall","state":"queued"},
+{"id":"a2","title":"Odd Look","state":"SEARCHING","progress":null},
+{"id":"a3","artist":"Kavinsky","title":"Protovision","state":"importing","progress":1.0},
+{"id":"a4","artist":"Kavinsky","title":"Roadgame","state":"done","libraryId":"nd-77"},
+{"id":"a5","artist":"Kavinsky","title":"Blizzard","state":"failed","error":"No source had this song"},
+{"id":"a6","artist":"Kavinsky","title":"Testarossa","state":"teleporting","futureField":{"x":1}},
+{"id":"a7","title":"Rampage","state":"downloading","bytesDone":500,"bytesTotal":1000},
+{"id":"a8","title":"Suburbia","state":"verifying","progress":7.5}
+]}}}
