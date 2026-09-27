@@ -16,8 +16,8 @@ import java.text.BreakIterator
 import kotlin.math.max
 
 // The main line's size: the view's width over 20, kept within these.
-private const val MIN_LINE_SP = 16f
-private const val MAX_LINE_SP = 30f
+private const val MIN_LINE_SP = 22f
+private const val MAX_LINE_SP = 36f
 
 // Everything else is sized from the main line's size (em).
 private const val ROW_HEIGHT_EM = 1.2f
@@ -84,7 +84,8 @@ internal class LyricsSpec(val width: Int, density: Density) {
 
     init {
         val widthDp = width / density.density
-        val size = (widthDp / 20f).coerceIn(MIN_LINE_SP, MAX_LINE_SP)
+        // Large enough to read at arm's length: about 30 sp on a typical phone.
+        val size = (widthDp / 13f).coerceIn(MIN_LINE_SP, MAX_LINE_SP)
         em = size * pxPerSp
         left = (width * 0.06f).coerceIn(24f * density.density, 48f * density.density)
         right = (width * 0.04f).coerceIn(16f * density.density, 56f * density.density)

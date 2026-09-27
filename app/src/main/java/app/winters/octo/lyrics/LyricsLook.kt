@@ -53,7 +53,9 @@ data class LyricsLook(
     // How far apart the lines start moving when the focus moves.
     val cascade: Int = LookDial.Cascade.default,
     // Lines already sung stay faintly on screen.
-    val keepCompleted: Boolean = false,
+    // Sung lines stay above the current one, dimmed, so the lyrics fill the
+    // screen instead of starting halfway down.
+    val keepCompleted: Boolean = true,
     // The lines bend around a drum.
     val arc: Boolean = false,
 ) {
@@ -97,7 +99,7 @@ class LyricsLookSettings @Inject constructor(@ApplicationContext private val con
         LookDial.entries.fold(
             LyricsLook(
                 style = LyricsStyle.entries.firstOrNull { it.name == stored[STYLE] } ?: LyricsStyle.Flowing,
-                keepCompleted = stored[KEEP_COMPLETED] ?: false,
+                keepCompleted = stored[KEEP_COMPLETED] ?: true,
                 arc = stored[ARC] ?: false,
             ),
         ) { look, dial -> look.with(dial, stored[dial.preference()] ?: dial.default) }

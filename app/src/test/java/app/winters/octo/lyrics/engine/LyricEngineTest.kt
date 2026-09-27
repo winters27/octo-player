@@ -22,17 +22,18 @@ class LyricEngineTest {
     private fun LyricEngine.centre(i: Int) = states[i].y.value() + states[i].height / 2
 
     @Test
-    fun theFirstFramePutsTheFocusAt47PercentInOneJump() {
+    fun theFirstFramePutsTheFocusAtItsAnchorInOneJump() {
         val engine = engine()
         engine.frame(0, 4_500, playing = true, rate = 1.0, offsetMs = 0)
         assertEquals(2, engine.focus)
-        assertEquals(0.47 * view, engine.centre(2), 1e-9)
+        assertEquals(FOCUS_AT * view, engine.centre(2), 1e-9)
         assertTrue(engine.states.all { it.y.atRest })
         assertEquals(LineStatus.Active, engine.states[2].status)
         assertEquals(LineStatus.Passed, engine.states[1].status)
         assertEquals(LineStatus.Upcoming, engine.states[3].status)
         assertEquals(1.0, engine.states[2].opacity, 0.0)
-        assertEquals(0.0, engine.states[1].opacity, 0.0)
+        // Sung lines stay visible by default.
+        assertEquals(PASSED_SHOWN_OPACITY, engine.states[1].opacity, 0.0)
         assertEquals(0.55, engine.states[3].opacity, 0.0)
     }
 
@@ -68,7 +69,7 @@ class LyricEngineTest {
         engine.frame(0, 1_000, true, 1.0, 0)
         engine.frame(frame, 13_000, true, 1.0, 0)
         assertEquals(6, engine.focus)
-        assertEquals(0.47 * view, engine.centre(6), 1e-9)
+        assertEquals(FOCUS_AT * view, engine.centre(6), 1e-9)
         assertTrue(engine.states.all { it.y.atRest && !it.y.hasQueued })
     }
 
@@ -88,7 +89,7 @@ class LyricEngineTest {
         engine.frame(0, 3_900, true, 1.0, 0)
         engine.frame(frame * 10, 4_100, true, 1.0, 0)
         assertTrue(engine.states.all { it.y.atRest && !it.y.hasQueued })
-        assertEquals(0.47 * view, engine.centre(2), 1e-9)
+        assertEquals(FOCUS_AT * view, engine.centre(2), 1e-9)
     }
 
     @Test
@@ -96,7 +97,7 @@ class LyricEngineTest {
         val engine = engine()
         engine.look = LyricsLook(keepCompleted = true)
         engine.frame(0, 4_500, true, 1.0, 0)
-        assertEquals(0.3, engine.states[1].opacity, 0.0)
+        assertEquals(PASSED_SHOWN_OPACITY, engine.states[1].opacity, 0.0)
     }
 
     @Test

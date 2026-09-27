@@ -17,8 +17,10 @@ import kotlin.math.sqrt
 
 // ---- Line layout ----
 
-// The focus line's middle sits this far down the view.
-const val FOCUS_AT = 0.47
+// The focus line's middle sits this far down the view. A third of the way
+// down, with the sung lines above it, so the lyrics use the whole screen
+// rather than only its lower half.
+const val FOCUS_AT = 0.33
 
 // Where line `i` goes so the anchor line `a` sits at the focus: every line
 // stacked on the ones above it, shifted so the anchor's middle lands at
@@ -73,8 +75,8 @@ fun cascadeDelays(targets: DoubleArray, focus: Int, viewHeight: Double, stepScal
 enum class LineStatus { Upcoming, Active, Passed }
 
 const val UPCOMING_OPACITY = 0.55
-const val PASSED_SHOWN_OPACITY = 0.3
-const val MAX_BLUR = 5.0
+const val PASSED_SHOWN_OPACITY = 0.45
+const val MAX_BLUR = 3.0
 
 // Opacity and blur settle toward their targets with this time constant.
 const val FADE_TIME_S = 0.12
@@ -87,9 +89,10 @@ fun opacityTarget(status: LineStatus, showPassed: Boolean): Double = when (statu
     LineStatus.Passed -> if (showPassed) PASSED_SHOWN_OPACITY else 0.0
 }
 
-// Sharp for the lines being sung, softer the further a line is from the focus.
+// Sharp for the lines being sung, softer the further a line is from the focus,
+// but gently: the next lines stay readable at a glance.
 fun blurTarget(status: LineStatus, distance: Int): Double =
-    if (status == LineStatus.Active) 0.0 else min(MAX_BLUR, 1.0 + 1.1 * distance)
+    if (status == LineStatus.Active) 0.0 else min(MAX_BLUR, 0.4 + 0.6 * distance)
 
 // One frame of settling toward a target, the same at any frame rate.
 fun settle(current: Double, target: Double, dt: Double, snap: Double): Double {

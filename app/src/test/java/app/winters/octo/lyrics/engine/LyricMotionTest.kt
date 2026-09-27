@@ -14,13 +14,13 @@ class LyricMotionTest {
     // ---- Layout ----
 
     @Test
-    fun theFocusLineIsCentredAt47Percent() {
+    fun theFocusLineIsCentredAtItsAnchor() {
         val heights = doubleArrayOf(50.0, 60.0, 70.0, 80.0)
         val above = heightsAbove(heights)
         val view = 1000.0
         val focus = 2
         val y = DoubleArray(4) { targetY(it, focus, above, heights, view) }
-        assertEquals(470.0, y[focus] + heights[focus] / 2, 1e-9)
+        assertEquals(FOCUS_AT * 1000, y[focus] + heights[focus] / 2, 1e-9)
         // The others stack right against it.
         assertEquals(y[2] - 60.0, y[1], 1e-9)
         assertEquals(y[1] - 50.0, y[0], 1e-9)
@@ -61,10 +61,10 @@ class LyricMotionTest {
         assertEquals(1.0, opacityTarget(LineStatus.Active, false), 0.0)
         assertEquals(0.55, opacityTarget(LineStatus.Upcoming, false), 0.0)
         assertEquals(0.0, opacityTarget(LineStatus.Passed, false), 0.0)
-        assertEquals(0.3, opacityTarget(LineStatus.Passed, true), 0.0)
+        assertEquals(PASSED_SHOWN_OPACITY, opacityTarget(LineStatus.Passed, true), 0.0)
         assertEquals(0.0, blurTarget(LineStatus.Active, 3), 0.0)
-        assertEquals(2.1, blurTarget(LineStatus.Upcoming, 1), 1e-12)
-        assertEquals(5.0, blurTarget(LineStatus.Passed, 9), 0.0)
+        assertEquals(1.0, blurTarget(LineStatus.Upcoming, 1), 1e-12)
+        assertEquals(MAX_BLUR, blurTarget(LineStatus.Passed, 9), 0.0)
     }
 
     @Test
@@ -327,7 +327,7 @@ class LyricMotionTest {
 
     @Test
     fun theFocusSitsForwardAndFlat() {
-        val pose = arcPose(centre = 470.0, viewHeight = 1000.0, side = 1)
+        val pose = arcPose(centre = FOCUS_AT * 1000, viewHeight = 1000.0, side = 1)
         assertEquals(0.0, pose.translationX, 1e-12)
         assertEquals(40.0, pose.z, 1e-12)
         assertEquals(0.0, pose.rotationY, 1e-12)
@@ -337,18 +337,18 @@ class LyricMotionTest {
     @Test
     fun linesAwayFromTheFocusCurveInward() {
         val radius = 0.55 * 1000
-        val half = arcPose(centre = 470.0 + radius / 2, viewHeight = 1000.0, side = 1)
+        val half = arcPose(centre = FOCUS_AT * 1000 + radius / 2, viewHeight = 1000.0, side = 1)
         // r = 0.5, a = 0.75.
         assertEquals(60 * 0.25, half.translationX, 1e-9)
         assertEquals(40 * 0.75, half.z, 1e-9)
         assertEquals(0.09 * 0.5 * 0.75, half.rotationY, 1e-12)
         assertEquals(1400.0 / (1400 - 30), half.scale, 1e-12)
         // Right-aligned lines curve the other way.
-        val right = arcPose(centre = 470.0 + radius / 2, viewHeight = 1000.0, side = -1)
+        val right = arcPose(centre = FOCUS_AT * 1000 + radius / 2, viewHeight = 1000.0, side = -1)
         assertEquals(-half.translationX, right.translationX, 1e-12)
         assertEquals(-half.rotationY, right.rotationY, 1e-12)
         // Far off, flat against the drum's edge.
-        val far = arcPose(centre = 470.0 + 3 * radius, viewHeight = 1000.0, side = 1)
+        val far = arcPose(centre = FOCUS_AT * 1000 + 3 * radius, viewHeight = 1000.0, side = 1)
         assertEquals(60.0, far.translationX, 1e-9)
         assertEquals(0.0, far.z, 1e-12)
         assertEquals(1.0, far.scale, 1e-12)
