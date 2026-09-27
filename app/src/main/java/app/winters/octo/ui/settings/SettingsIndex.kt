@@ -81,6 +81,15 @@ object SettingsIndex {
         listOf("headphones", "bluetooth", "connect"), section = "Headphones",
     )
 
+    val CastRenderers = add(
+        "cast_renderers", SettingsPage.Playback, "Show TVs and speakers (DLNA)", "Smart TVs, receivers and streamers on the Wi-Fi",
+        listOf("cast", "casting", "dlna", "upnp", "renderer", "tv", "speaker", "receiver", "streamer", "devices"), section = "Casting",
+    )
+    val CastKeepPlaying = add(
+        "cast_keep_playing", SettingsPage.Playback, "Keep playing on the phone when casting ends", "Otherwise the music pauses",
+        listOf("cast", "casting", "chromecast", "tv", "speaker", "disconnect", "resume", "phone"), section = "Casting",
+    )
+
     // Sound, which has a page of its own
     val SoundPerOutput = add(
         "sound_per_output", SettingsPage.Sound, "Sound for each output", "Headphones and speakers keep their own sound",

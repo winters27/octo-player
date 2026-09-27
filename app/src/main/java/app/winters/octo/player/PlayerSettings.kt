@@ -60,6 +60,11 @@ data class PlayerPrefs(
     // What moves only for show holds still: the lyrics' ripple and bloom,
     // and the moving backgrounds.
     val reduceMotion: Boolean = false,
+    // Casting: whether TVs and speakers found as media renderers (DLNA)
+    // are offered, and whether music keeps playing on the phone when
+    // casting ends by itself (otherwise it pauses).
+    val castRenderers: Boolean = true,
+    val castKeepPlaying: Boolean = false,
 ) {
     // What the player uses: the blend length, or 0 for none.
     val crossfadeMs: Long get() = if (crossfade) crossfadeSeconds * 1_000L else 0
@@ -116,6 +121,8 @@ private val BACKGROUND_USE_BPM = booleanPreferencesKey("immersive_bg_use_bpm")
 private val BACKGROUND_FPS = intPreferencesKey("immersive_bg_fps")
 private val BACKGROUND_SPEED = intPreferencesKey("immersive_bg_speed")
 private val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
+private val CAST_RENDERERS = booleanPreferencesKey("cast_renderers")
+private val CAST_KEEP_PLAYING = booleanPreferencesKey("cast_keep_playing")
 
 // A saved choice, or the default when nothing (or something unknown) is saved.
 private inline fun <reified T : Enum<T>> choice(name: String?, default: T): T =
@@ -158,6 +165,8 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
                 pageArtwork = stored[AMBIENT_PAGE_ARTWORK] ?: defaults.ambient.pageArtwork,
             ),
             reduceMotion = stored[REDUCE_MOTION] ?: defaults.reduceMotion,
+            castRenderers = stored[CAST_RENDERERS] ?: defaults.castRenderers,
+            castKeepPlaying = stored[CAST_KEEP_PLAYING] ?: defaults.castKeepPlaying,
         )
     }
 
@@ -258,6 +267,14 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
         context.playerPrefs.edit { it[REDUCE_MOTION] = on }
     }
 
+    suspend fun setCastRenderers(on: Boolean) {
+        context.playerPrefs.edit { it[CAST_RENDERERS] = on }
+    }
+
+    suspend fun setCastKeepPlaying(on: Boolean) {
+        context.playerPrefs.edit { it[CAST_KEEP_PLAYING] = on }
+    }
+
     // Everything at once, for a backup.
     suspend fun snapshot(): Pair<PlayerPrefs, StreamPrefs> = prefs.first() to streamPrefs.first()
 
@@ -285,6 +302,8 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             it[AMBIENT_BAR] = player.ambient.bar
             it[AMBIENT_PAGE_ARTWORK] = player.ambient.pageArtwork
             it[REDUCE_MOTION] = player.reduceMotion
+            it[CAST_RENDERERS] = player.castRenderers
+            it[CAST_KEEP_PLAYING] = player.castKeepPlaying
             it[COPIES] = stream.copies.name
             it[STREAM_WIFI] = stream.wifi.name
             it[STREAM_MOBILE] = stream.mobile.name
