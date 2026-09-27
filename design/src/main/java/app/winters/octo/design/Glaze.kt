@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -78,13 +79,18 @@ private val SpecularMask = Brush.horizontalGradient(
     listOf(Color.Transparent, Color.Black, Color.Transparent),
 )
 
-private val GlazeBlur = HazeBlurStyle {
+// The frost the bar and the capsules use, as a CSS blur.
+const val GlazeFrost = 4f
+
+private fun glazeBlur(frost: Float) = HazeBlurStyle {
     backgroundColor(OctoColors.Background)
-    blurRadius(backdropBlur(4f))
+    blurRadius(backdropBlur(frost))
     noiseFactor(0f)
     colorEffects(listOf(HazeColorEffect.colorFilter(saturation(1.1f))))
     fallbackColorEffect(HazeColorEffect.tint(OctoColors.BackgroundTertiary))
 }
+
+private val GlazeBlur = glazeBlur(GlazeFrost)
 
 private fun saturation(amount: Float) =
     ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(amount) })
@@ -94,6 +100,8 @@ private fun accent(alpha: Float) = OctoColors.Accent.copy(alpha = alpha)
 // The glaze: a lit glass capsule. Pass a backdrop when it floats over varied
 // content, so it frosts what is behind it. Leave it null when it sits on an
 // already-frosted or solid surface; blurring that again changes nothing.
+// `frost` is how hard the backdrop blurs, as a CSS blur: text behind a menu
+// needs more than the page behind the bar.
 @Composable
 fun Glaze(
     modifier: Modifier = Modifier,
@@ -101,8 +109,10 @@ fun Glaze(
     light: GlazeLight = GlazeLight.Rest,
     backdrop: HazeState? = null,
     film: Color = GlazeTint,
+    frost: Float = GlazeFrost,
     content: @Composable BoxScope.() -> Unit = {},
 ) {
+    val blur = remember(frost) { if (frost == GlazeFrost) GlazeBlur else glazeBlur(frost) }
     Box(
         modifier
             // A half-pixel dark contour, so the capsule separates from
@@ -121,7 +131,7 @@ fun Glaze(
                 .clip(shape)
                 .then(
                     if (backdrop != null) {
-                        Modifier.hazeBlur(input = HazeInput.Backdrop(backdrop), style = GlazeBlur)
+                        Modifier.hazeBlur(input = HazeInput.Backdrop(backdrop), style = blur)
                     } else {
                         Modifier
                     },
@@ -161,6 +171,7 @@ fun FloatingGlaze(
     modifier: Modifier = Modifier,
     shape: Shape = CircleShape,
     film: Color = GlazeTint,
+    frost: Float = GlazeFrost,
     content: @Composable BoxScope.() -> Unit,
 ) {
     Box(modifier) {
@@ -175,7 +186,7 @@ fun FloatingGlaze(
                     Shadow(radius = shadowBlur(24f), color = Color.Black.copy(alpha = 0.45f), offset = DpOffset(0.dp, 8.dp)),
                 ),
         )
-        Glaze(Modifier.matchParentSize(), shape = shape, backdrop = backdrop, film = film)
+        Glaze(Modifier.matchParentSize(), shape = shape, backdrop = backdrop, film = film, frost = frost)
         content()
     }
 }

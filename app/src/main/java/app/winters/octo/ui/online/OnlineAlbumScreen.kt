@@ -2,7 +2,6 @@ package app.winters.octo.ui.online
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
@@ -16,7 +15,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
 import app.winters.octo.ambient.PageArtwork
 import app.winters.octo.catalog.isFind
-import app.winters.octo.design.GlazeButton
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.DownloadState
 import app.winters.octo.discovery.Downloads
@@ -28,6 +27,8 @@ import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.DownloadButton
 import app.winters.octo.ui.common.LoadState
 import app.winters.octo.ui.common.LoadStateContent
+import app.winters.octo.ui.common.QuietAction
+import app.winters.octo.ui.common.QuietActions
 import app.winters.octo.ui.common.SongLead
 import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.asLength
@@ -129,12 +130,14 @@ fun OnlineAlbumScreen(
                         onShuffle = vm::shuffle,
                         more = if (found.songs.any { isFind(it.id) }) {
                             {
-                                GlazeButton(
-                                    if (downloading) "Downloading" else "Download album",
-                                    onClick = vm::download,
-                                    modifier = Modifier.padding(top = 12.dp),
-                                    enabled = !downloading,
-                                )
+                                QuietActions {
+                                    QuietAction(
+                                        if (downloading) OctoIcons.Downloading else OctoIcons.Download,
+                                        if (downloading) "Downloading" else "Download album",
+                                        onClick = vm::download,
+                                        enabled = !downloading,
+                                    )
+                                }
                             }
                         } else {
                             null

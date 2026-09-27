@@ -47,6 +47,8 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.glassPanel
+import app.winters.octo.ui.common.LocalChoiceSheet
+import app.winters.octo.ui.common.choiceAnchor
 import app.winters.octo.ui.settings.SettingEntry
 import kotlinx.coroutines.delay
 
@@ -177,7 +179,7 @@ fun SwitchRow(
 }
 
 // A setting with a few answers: its title and the current one. Tapping it
-// opens the choice sheet.
+// pops the answers up beside the row.
 @Composable
 fun ChoiceRow(
     entry: SettingEntry?,
@@ -186,7 +188,8 @@ fun ChoiceRow(
     enabled: Boolean = true,
     title: String = entry?.title.orEmpty(),
 ) {
-    RowFrame(entry, Modifier.clickable(enabled = enabled, role = Role.Button, onClick = onClick)) {
+    val sheet = LocalChoiceSheet.current
+    RowFrame(entry, Modifier.choiceAnchor(sheet).clickable(enabled = enabled, role = Role.Button, onClick = onClick)) {
         Label(title, value, enabled, belowColor = OctoColors.TextSecondary)
     }
 }

@@ -57,6 +57,7 @@ import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.LocalChoiceSheet
+import app.winters.octo.ui.common.choiceAnchor
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.Segmented
@@ -165,7 +166,7 @@ private fun MostPlayed(vm: HistoryViewModel) {
     val sheet = LocalChoiceSheet.current
     Row(Modifier.fillMaxWidth().padding(top = 8.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Spacer(Modifier.weight(1f))
-        RangeButton(range) {
+        RangeButton(range, Modifier.choiceAnchor(sheet)) {
             sheet.show(
                 ChoiceRequest(
                     title = "Most played in",
@@ -197,9 +198,9 @@ private fun MostPlayed(vm: HistoryViewModel) {
 // The stretch of time the list covers, as a quiet line like the sort
 // button. A tap offers the others.
 @Composable
-private fun RangeButton(range: HistoryRange, onClick: () -> Unit) {
+private fun RangeButton(range: HistoryRange, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Row(
-        Modifier
+        modifier
             .clip(CircleShape)
             .clickable(role = Role.Button, onClickLabel = "Change the time range", onClick = onClick)
             .semantics(mergeDescendants = true) { contentDescription = "Most played, ${range.label}" }

@@ -1,41 +1,35 @@
 package app.winters.octo.ui.common
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
+import android.os.SystemClock
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.pointer.PointerEvent
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToDown
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.node.GlobalPositionAwareModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.PointerInputModifierNode
+import androidx.compose.ui.platform.InspectorInfo
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import app.winters.octo.design.GlassSheet
-import app.winters.octo.design.Glaze
-import app.winters.octo.design.GlazeSelected
-import app.winters.octo.design.OctoColors
-import app.winters.octo.design.OctoIcons
-import app.winters.octo.design.OctoType
+import androidx.compose.ui.unit.roundToIntRect
+import app.winters.octo.design.GlassPopup
 import app.winters.octo.sort.SortOption
 import app.winters.octo.sort.SortOrder
 
@@ -61,17 +55,31 @@ class SortRequest(
     val onChange: (SortOrder) -> Unit,
 ) : SheetRequest
 
-// A sheet asking one question, drawn over everything, the bar included,
-// so any page can open one.
+// A question asked over everything, the bar included, so any page can ask
+// one. It pops up as a floating glass list beside the control that asked,
+// or as a card in the middle of the screen when no control did.
 class ChoiceSheet {
     var open by mutableStateOf<SheetRequest?>(null)
         private set
 
-    // The last question shown, kept after closing so it can slide away.
+    // The last question shown, kept after closing so it can fade away.
     var last by mutableStateOf<SheetRequest?>(null)
         private set
 
-    fun show(request: SheetRequest) {
+    // Where the control that asked sits in the window, when known.
+    var anchor by mutableStateOf<IntRect?>(null)
+        private set
+
+    // The control last pressed that can ask a question, and when.
+    private var pressed: IntRect? = null
+    private var pressedAt = 0L
+
+    // `anchor` places the list beside a control. Without one, the control
+    // just pressed is used, if it was marked with `choiceAnchor`.
+    fun show(request: SheetRequest, anchor: IntRect? = null) {
+        val recent = pressed.takeIf { SystemClock.uptimeMillis() - pressedAt < PRESS_MS }
+        this.anchor = anchor ?: recent
+        pressed = null
         open = request
         last = request
     }
@@ -79,119 +87,120 @@ class ChoiceSheet {
     fun close() {
         open = null
     }
+
+    internal fun pressed(bounds: IntRect) {
+        pressed = bounds
+        pressedAt = SystemClock.uptimeMillis()
+    }
 }
+
+// How long a press still counts as the control that asked: long enough for
+// a slow tap, short enough that a question asked later does not open beside it.
+private const val PRESS_MS = 2_000L
 
 val LocalChoiceSheet = staticCompositionLocalOf<ChoiceSheet> { error("No choice sheet") }
 
+// Marks a control that asks a question through the sheet, so the answers
+// pop up beside it rather than in the middle of the screen.
+fun Modifier.choiceAnchor(sheet: ChoiceSheet): Modifier = this.then(ChoiceAnchorElement(sheet))
+
+private data class ChoiceAnchorElement(val sheet: ChoiceSheet) : ModifierNodeElement<ChoiceAnchorNode>() {
+    override fun create() = ChoiceAnchorNode(sheet)
+    override fun update(node: ChoiceAnchorNode) {
+        node.sheet = sheet
+    }
+
+    override fun InspectorInfo.inspectableProperties() {
+        name = "choiceAnchor"
+    }
+}
+
+// Keeps the control's bounds, and hands them to the sheet as a finger lands
+// on it, before the control's own click runs.
+private class ChoiceAnchorNode(var sheet: ChoiceSheet) :
+    Modifier.Node(),
+    GlobalPositionAwareModifierNode,
+    PointerInputModifierNode {
+    private var bounds = Rect.Zero
+
+    override fun onGloballyPositioned(coordinates: LayoutCoordinates) {
+        bounds = coordinates.boundsInWindow()
+    }
+
+    override fun onPointerEvent(pointerEvent: PointerEvent, pass: PointerEventPass, bounds: IntSize) {
+        if (pass == PointerEventPass.Initial && pointerEvent.changes.any { it.changedToDown() }) {
+            sheet.pressed(this.bounds.roundToIntRect())
+        }
+    }
+
+    override fun onCancelPointerInput() = Unit
+}
+
 @Composable
 fun ChoiceSheetHost(sheet: ChoiceSheet) {
-    GlassSheet(visible = sheet.open != null, onDismiss = sheet::close) {
-        when (val request = sheet.last ?: return@GlassSheet) {
+    val request = sheet.last ?: return
+    GlassPopup(
+        visible = sheet.open != null,
+        anchor = sheet.anchor,
+        onDismiss = sheet::close,
+        backdrop = LocalHaze.current,
+        title = when (request) {
+            is ChoiceRequest -> request.title
+            is SortRequest -> "Sort by"
+        },
+    ) {
+        when (request) {
             is ChoiceRequest -> Choices(request, sheet::close)
             is SortRequest -> SortChoices(request, sheet::close)
         }
     }
 }
 
-// The answers as lines, the current one ticked. Picking one closes the sheet.
+// The answers under the question, the current one in the darker pill.
+// Picking one closes the list.
 @Composable
 private fun Choices(request: ChoiceRequest, close: () -> Unit) {
-    SheetTitle(request.title)
-    request.choices.forEachIndexed { index, choice ->
-        ChoiceLine(choice, selected = index == request.selected) {
-            request.onPick(index)
-            close()
-        }
-    }
-    Spacer(Modifier.height(12.dp))
-}
-
-@Composable
-private fun SheetTitle(text: String) {
-    Text(
-        text,
-        style = OctoType.section,
-        color = OctoColors.TextPrimary,
-        modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
-    )
-}
-
-@Composable
-private fun ChoiceLine(choice: Choice, selected: Boolean, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
-            .heightIn(min = 52.dp)
-            .padding(horizontal = 20.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(choice.label, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
-            choice.detail?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
-        }
-        if (selected) {
-            Icon(painterResource(OctoIcons.Check), contentDescription = null, tint = OctoColors.Accent, modifier = Modifier.size(22.dp))
-        }
+    Column(Modifier.widthIn(min = 220.dp, max = 320.dp).width(IntrinsicSize.Max).padding(6.dp)) {
+        GlassMenuTitle(request.title)
+        // Scrolls when the answers are taller than the list may be.
+        GlassMenuOptions(
+            request.choices,
+            request.selected,
+            onPick = { index ->
+                request.onPick(index)
+                close()
+            },
+            modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+        )
     }
 }
 
-private val OptionsShape = RoundedCornerShape(24.dp)
-
-// The pill sits 4dp inside the group, so its corners follow the group's.
-private val OptionShape = RoundedCornerShape(20.dp)
-
-// The direction first, then the options in one glaze with the current one in
-// the darker pill. Flipping the direction reorders the list behind at once
-// and keeps the sheet open; picking another option closes it.
+// The direction on top, then the options. Flipping the direction reorders
+// the list behind at once and keeps this open; picking an option closes it.
 @Composable
-private fun ColumnScope.SortChoices(request: SortRequest, close: () -> Unit) {
+private fun SortChoices(request: SortRequest, close: () -> Unit) {
     var descending by remember(request) { mutableStateOf(request.order.descending) }
-    SheetTitle("Sort by")
-    Segmented(
-        options = listOf("Ascending", "Descending"),
-        selected = if (descending) 1 else 0,
-        onSelect = { index ->
-            if ((index == 1) != descending) {
-                descending = index == 1
-                request.onChange(request.order.copy(descending = descending))
-            }
-        },
-        modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp),
-    )
-    // Scrolls when the options do not all fit on a short screen.
-    Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-        Glaze(Modifier.fillMaxWidth().padding(horizontal = 20.dp), shape = OptionsShape) {
-            Column(Modifier.fillMaxWidth().padding(4.dp).selectableGroup()) {
-                request.options.forEach { option ->
-                    SortLine(option.label, selected = option == request.order.by) {
-                        if (option != request.order.by) request.onChange(request.order.picking(option))
-                        close()
-                    }
+    Column(Modifier.width(248.dp).padding(6.dp)) {
+        Segmented(
+            options = listOf("Ascending", "Descending"),
+            selected = if (descending) 1 else 0,
+            onSelect = { index ->
+                if ((index == 1) != descending) {
+                    descending = index == 1
+                    request.onChange(request.order.copy(descending = descending))
                 }
-            }
-        }
-        Spacer(Modifier.height(16.dp))
-    }
-}
-
-@Composable
-private fun SortLine(label: String, selected: Boolean, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 46.dp)
-            .clip(OptionShape)
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick),
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        if (selected) GlazeSelected(Modifier.matchParentSize(), shape = OptionShape)
-        Text(
-            label,
-            style = OctoType.bodySmall,
-            color = if (selected) OctoColors.Accent else OctoColors.TextPrimary,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            },
+            modifier = Modifier.padding(bottom = 6.dp),
+        )
+        GlassMenuOptions(
+            request.options.map { Choice(it.label) },
+            selected = request.options.indexOf(request.order.by),
+            onPick = { index ->
+                val option = request.options[index]
+                if (option != request.order.by) request.onChange(request.order.picking(option))
+                close()
+            },
+            modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
         )
     }
 }

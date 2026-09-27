@@ -1,10 +1,8 @@
 package app.winters.octo.ui.album
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,8 +29,6 @@ import app.winters.octo.ambient.PageArtwork
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.TrackEntity
-import app.winters.octo.design.AccentButton
-import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.elevation3
@@ -43,6 +39,8 @@ import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.FavouriteHeart
 import app.winters.octo.ui.common.Pickable
+import app.winters.octo.ui.common.PlayRow
+import app.winters.octo.ui.common.QuietActions
 import app.winters.octo.ui.common.Refreshable
 import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.SongLead
@@ -136,7 +134,7 @@ fun AlbumScreen(
                             // Favourites: the heart beside the buttons.
                             heart = { FavouriteHeart(FavouriteKind.Album, id) },
                             more = {
-                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                QuietActions {
                                     AlbumShareButton(id, a.title)
                                     AlbumDownloadButton(tracks)
                                 }
@@ -179,9 +177,10 @@ fun AlbumScreen(
     }
 }
 
-// The top of an album page: cover, title, artist, details, and the buttons
-// that play it. The artist opens only when there is somewhere to go; `heart`
-// sits beside the buttons and `more` under them, for extra actions.
+// The top of an album page: cover, title and artist, then a line with the
+// details on the left and the heart, Shuffle and Play on the right. The
+// artist opens only when there is somewhere to go. `heart` sits beside the
+// buttons and `more` under them, for quieter actions.
 @Composable
 fun AlbumHeader(
     artwork: String?,
@@ -194,31 +193,23 @@ fun AlbumHeader(
     heart: (@Composable () -> Unit)? = null,
     more: (@Composable () -> Unit)? = null,
 ) {
-    Column(
-        Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Artwork(artwork, 240.dp, Modifier.elevation3(CoverShape), shape = CoverShape)
-        Spacer(Modifier.height(20.dp))
-        Text(title, style = OctoType.title, color = OctoColors.TextPrimary, textAlign = TextAlign.Center)
-        Text(
-            artist,
-            style = OctoType.body,
-            color = if (onArtist != null) OctoColors.Accent else OctoColors.TextSecondary,
-            modifier = Modifier
-                .padding(top = 4.dp)
-                .then(if (onArtist != null) Modifier.clickable(onClick = onArtist) else Modifier),
-        )
-        Text(
-            details,
-            style = OctoType.caption,
-            color = OctoColors.TextMuted,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-        Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            AccentButton("Play", onClick = onPlay)
-            GlazeButton("Shuffle", onClick = onShuffle)
-            heart?.invoke()
+    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Artwork(artwork, 240.dp, Modifier.elevation3(CoverShape), shape = CoverShape)
+            Spacer(Modifier.height(20.dp))
+            Text(title, style = OctoType.title, color = OctoColors.TextPrimary, textAlign = TextAlign.Center)
+            Text(
+                artist,
+                style = OctoType.body,
+                color = if (onArtist != null) OctoColors.Accent else OctoColors.TextSecondary,
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .then(if (onArtist != null) Modifier.clickable(onClick = onArtist) else Modifier),
+            )
+            PlayRow(details, onPlay, onShuffle, Modifier.padding(top = 14.dp)) { heart?.invoke() }
         }
         more?.invoke()
     }

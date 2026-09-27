@@ -63,14 +63,15 @@ import app.winters.octo.sort.SortList
 import app.winters.octo.sort.SortOrder
 
 // The order a list is in, as a small line of text at its top: the sort
-// mark, what it goes by, and an arrow for which way it runs. A tap opens the
-// sort sheet.
+// mark, what it goes by, and an arrow for which way it runs. A tap pops the
+// sort list up beside it.
 @Composable
 fun SortButton(list: SortList, order: SortOrder, onChange: (SortOrder) -> Unit, modifier: Modifier = Modifier) {
     val sheet = LocalChoiceSheet.current
     val direction = if (order.descending) "descending" else "ascending"
     Row(
         modifier
+            .choiceAnchor(sheet)
             .clip(CircleShape)
             .clickable(role = Role.Button, onClickLabel = "Change the order") { sheet.show(SortRequest(list.options, order, onChange)) }
             .semantics(mergeDescendants = true) { contentDescription = "Sorted by ${order.by.label}, $direction" }
