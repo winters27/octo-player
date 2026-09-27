@@ -34,6 +34,10 @@ object OctoIcons {
     val Download = R.drawable.sym_download
     val Downloading = R.drawable.sym_downloading
     val Downloaded = R.drawable.sym_download_done
+
+    // The download arrow drawn thinner (Light weight), small on the artwork
+    // of a song, album or artist that is not in the library.
+    val NotInLibrary = R.drawable.sym_download_light
     val Radio = R.drawable.sym_radio
     // A link passed on to someone else.
     val Share = R.drawable.sym_share
