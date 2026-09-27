@@ -3,16 +3,16 @@ package app.winters.octo.ui.common
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -26,33 +26,34 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.Glaze
+import app.winters.octo.design.GlazeLight
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 
-private val PlaySize = 52.dp
-private val ShuffleSize = 44.dp
-
-// Every touch target is at least this big, whatever is drawn.
+// How tall Play and Shuffle's capsules are drawn, and the touch target
+// around each, which is never under 48dp.
+private val CapsuleHeight = 46.dp
 private val TouchSize = 48.dp
 
-// The line under a page's title that plays what the page holds: what it
-// holds on the left, then any quieter controls (`extras`, like the heart),
-// then Shuffle and Play at the end. Every page that plays a whole list uses
-// it, so they all look and behave alike.
+// How far a capsule gives under the finger. Less than the player's round
+// buttons, since a capsule this wide would travel too far at their scale.
+private const val PressScale = 0.96f
+
+// The part of a page's header that plays what the page holds: a quiet line
+// with what it holds on the left (`details`, or `lead` for a lesser action)
+// and any quieter controls on the right (`extras`, like the heart), then
+// Play and Shuffle across the width under it. Every page that plays a whole
+// list uses it, so they all look and behave alike.
 @Composable
 fun PlayRow(
     details: String?,
@@ -62,26 +63,31 @@ fun PlayRow(
     playable: Boolean = true,
     enabled: Boolean = true,
     loading: Boolean = false,
+    lead: @Composable () -> Unit = {},
     extras: @Composable RowScope.() -> Unit = {},
 ) {
-    Row(
-        modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Box(Modifier.weight(1f)) {
-            details?.let {
-                Text(it, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    Column(modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(Modifier.weight(1f)) {
+                details?.let {
+                    Text(it, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                lead()
             }
+            extras()
         }
-        extras()
-        if (playable) PlayShuffle(onPlay, onShuffle, enabled = enabled, loading = loading)
+        if (playable) PlayShuffle(onPlay, onShuffle, Modifier.padding(top = 10.dp), enabled = enabled, loading = loading)
     }
 }
 
-// Shuffle as a small glass disc, and Play as a larger white one beside it.
-// White rather than the accent: the one solid thing in the header, with no
-// colour of its own, so the cover and the glow keep theirs.
+// Play and Shuffle as two glass capsules of equal width, side by side
+// across the header, the same glaze as the bar. Play catches a little more
+// light than Shuffle, so it reads as the one to reach for first, without a
+// solid fill taking the colour from the cover and the page's glow.
 @Composable
 fun PlayShuffle(
     onPlay: () -> Unit,
@@ -90,98 +96,80 @@ fun PlayShuffle(
     enabled: Boolean = true,
     loading: Boolean = false,
 ) {
-    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        ShuffleButton(onShuffle, enabled = enabled && !loading)
-        PlayButton(onPlay, enabled = enabled && !loading, loading = loading)
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        PlayCapsule(OctoIcons.Play, "Play", onPlay, lit = true, enabled = enabled && !loading, loading = loading, modifier = Modifier.weight(1f))
+        PlayCapsule(OctoIcons.Shuffle, "Shuffle", onShuffle, lit = false, enabled = enabled && !loading, modifier = Modifier.weight(1f))
     }
 }
 
-// The white disc with a dark play mark. A spinner takes the mark's place
-// while the songs are gathered.
+// One glass capsule with a white icon and word. A lit one wears the glaze
+// as a control under the finger does; any capsule does while pressed, and
+// gives a little, as the player's buttons do. A spinner takes the icon's
+// place while the songs are gathered, keeping the word where it is.
 @Composable
-fun PlayButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, loading: Boolean = false) {
-    Pressable(onClick, "Play", enabled, modifier.size(PlaySize)) { press ->
-        Box(
+private fun PlayCapsule(
+    @DrawableRes icon: Int,
+    text: String,
+    onClick: () -> Unit,
+    lit: Boolean,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    loading: Boolean = false,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val press by animateFloatAsState(if (pressed) PressScale else 1f, spring(0.45f, 600f), label = "press")
+    Box(
+        modifier
+            .height(TouchSize)
+            .alpha(if (enabled || loading) 1f else 0.4f)
+            .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = text },
+        contentAlignment = Alignment.Center,
+    ) {
+        Glaze(
             Modifier
-                .size(PlaySize)
+                .fillMaxWidth()
+                .height(CapsuleHeight)
                 .graphicsLayer {
                     scaleX = press
                     scaleY = press
-                }
-                .dropShadow(CircleShape, Shadow(radius = 10.dp, color = Color.Black.copy(alpha = 0.35f), offset = DpOffset(0.dp, 3.dp)))
-                .clip(CircleShape)
-                .background(OctoColors.TextPrimary),
-            contentAlignment = Alignment.Center,
+                },
+            light = if (lit || pressed) GlazeLight.Lifted else GlazeLight.Rest,
         ) {
-            if (loading) {
-                CircularProgressIndicator(color = OctoColors.Background, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-            } else {
-                // Nudged right, so the triangle looks centred rather than
-                // measures centred.
-                Icon(
-                    painterResource(OctoIcons.Play),
-                    contentDescription = null,
-                    tint = OctoColors.Background,
-                    modifier = Modifier.offset(x = 1.dp).size(30.dp),
-                )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
+                    if (loading) {
+                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                    } else {
+                        Icon(painterResource(icon), contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                }
+                Text(text, style = OctoType.body, color = OctoColors.TextPrimary, maxLines = 1)
             }
         }
     }
 }
 
-// The small glass disc with the shuffle mark, the same glaze as the player's
-// capsules.
+// A lesser action on the line above Play and Shuffle, like More: a plain
+// white icon with no glass, a step quieter than the capsules below.
 @Composable
-fun ShuffleButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
-    GlassIconButton(OctoIcons.Shuffle, "Shuffle", onClick, modifier, enabled)
-}
-
-// A small round glass button holding one white icon, to sit beside Play.
-@Composable
-fun GlassIconButton(
+fun QuietIconAction(
     @DrawableRes icon: Int,
     description: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    size: Dp = ShuffleSize,
 ) {
-    Pressable(onClick, description, enabled, modifier.size(maxOf(TouchSize, size))) { press ->
-        Glaze(
-            Modifier
-                .size(size)
-                .graphicsLayer {
-                    scaleX = press
-                    scaleY = press
-                },
-        ) {
-            Icon(painterResource(icon), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(20.dp))
-        }
-    }
-}
-
-// A round control that gives a little under the finger and springs back,
-// as the player's transport buttons do. The touch target is the whole box,
-// which is never under 48dp.
-@Composable
-private fun Pressable(
-    onClick: () -> Unit,
-    description: String,
-    enabled: Boolean,
-    modifier: Modifier,
-    content: @Composable (press: Float) -> Unit,
-) {
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val press by animateFloatAsState(if (pressed) 0.9f else 1f, spring(0.45f, 600f), label = "press")
     Box(
         modifier
-            .alpha(if (enabled) 1f else 0.4f)
-            .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+            .size(TouchSize)
+            .clip(CircleShape)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        content(press)
+        Icon(painterResource(icon), contentDescription = null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(22.dp))
     }
 }
 

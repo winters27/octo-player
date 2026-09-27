@@ -46,8 +46,8 @@ import app.winters.octo.design.elevation3
 import app.winters.octo.design.mix
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.CloudMark
-import app.winters.octo.ui.common.GlassIconButton
 import app.winters.octo.ui.common.PlayRow
+import app.winters.octo.ui.common.QuietIconAction
 import app.winters.octo.ui.common.asLength
 import app.winters.octo.ui.common.songs
 import coil3.compose.AsyncImage
@@ -151,9 +151,9 @@ fun NewPlaylistLine(onClick: () -> Unit) {
     }
 }
 
-// The top of a song-list page: its picture and name, then a line with its
-// size and length on the left and Shuffle and Play on the right, once there
-// is something to play. `onMore` adds a more button before them.
+// The top of a song-list page: its picture and name, then a quiet line with
+// its size and length, and Play and Shuffle under it once there is something
+// to play. `onMore` adds a more button at the end of the quiet line.
 @Composable
 fun ListHeader(
     title: String,
@@ -178,7 +178,7 @@ fun ListHeader(
             modifier = Modifier.padding(top = 14.dp),
             playable = songCount > 0,
         ) {
-            if (onMore != null) GlassIconButton(OctoIcons.More, "More", onMore)
+            if (onMore != null) QuietIconAction(OctoIcons.More, "More", onMore)
         }
     }
 }

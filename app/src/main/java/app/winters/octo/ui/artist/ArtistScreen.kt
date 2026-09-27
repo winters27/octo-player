@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -78,7 +79,7 @@ import app.winters.octo.ui.common.CHECK_SETTLE_MS
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.FavouriteHeart
 import app.winters.octo.ui.common.Feedback
-import app.winters.octo.ui.common.PlayShuffle
+import app.winters.octo.ui.common.PlayRow
 import app.winters.octo.ui.common.QuietAction
 import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.Refreshable
@@ -262,24 +263,25 @@ fun ArtistScreen(
                     ArtistHeader(a.artwork, a.name, "${albums(a.albumCount)} • ${songs(a.songCount)}")
                 }
             }
-            // The heart always; Shuffle and Play once there are songs, with
-            // the radio as a quiet action on the left.
+            // The heart always; Play and Shuffle once there are songs, with
+            // the radio as a quiet action on the left of the heart's line.
             if (artist != null) {
                 wide("buttons") {
-                    Row(
-                        Modifier.fillMaxWidth().padding(start = 10.dp, end = 20.dp).padding(bottom = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(Modifier.weight(1f)) {
+                    PlayRow(
+                        details = null,
+                        onPlay = { vm.play(shuffle = false) },
+                        onShuffle = { vm.play(shuffle = true) },
+                        modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 4.dp),
+                        playable = ownSongs.isNotEmpty(),
+                        lead = {
                             // A radio needs the server, to find songs like these.
-                            if (radio && ownSongs.isNotEmpty()) QuietAction(OctoIcons.Radio, "Radio", onClick = vm::startRadio)
-                        }
-                        FavouriteHeart(FavouriteKind.Artist, id)
-                        if (ownSongs.isNotEmpty()) {
-                            PlayShuffle(onPlay = { vm.play(shuffle = false) }, onShuffle = { vm.play(shuffle = true) })
-                        }
-                    }
+                            // Pulled back by its own padding, so its icon starts
+                            // at the page's edge.
+                            if (radio && ownSongs.isNotEmpty()) {
+                                QuietAction(OctoIcons.Radio, "Radio", onClick = vm::startRadio, modifier = Modifier.offset(x = (-10).dp))
+                            }
+                        },
+                    ) { FavouriteHeart(FavouriteKind.Artist, id) }
                 }
             }
             if (ownSongs.isNotEmpty()) {
