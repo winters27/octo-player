@@ -10,4 +10,10 @@ cargo run --release --features bindgen --bin uniffi-bindgen -- `
     generate --library $lib --language kotlin --out-dir bindings/kotlin --no-format
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+# The generator's own comments use long dashes; the repo style has none.
+Get-ChildItem bindings/kotlin -Recurse -Filter *.kt | ForEach-Object {
+    $text = [IO.File]::ReadAllText($_.FullName)
+    [IO.File]::WriteAllText($_.FullName, $text.Replace(" $([char]0x2014) ", ', '))
+}
+
 Write-Output "Kotlin bindings written to bindings/kotlin; native library at $lib"

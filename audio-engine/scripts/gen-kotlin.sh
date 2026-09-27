@@ -15,4 +15,7 @@ esac
 cargo run --release --features bindgen --bin uniffi-bindgen -- \
     generate --library "$lib" --language kotlin --out-dir bindings/kotlin --no-format
 
+# The generator's own comments use long dashes; the repo style has none.
+find bindings/kotlin -name '*.kt' -exec perl -CSD -pi -e 's/ \x{2014} /, /g' {} +
+
 echo "Kotlin bindings written to bindings/kotlin; native library at $lib"

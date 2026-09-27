@@ -102,13 +102,13 @@ internal open class ForeignBytes : Structure() {
 
 // Converter for `&[u8]` / `[ByRef] bytes` arguments.
 //
-// Only `lower` is valid — zero-copy byte buffers only flow foreign -> Rust,
+// Only `lower` is valid, zero-copy byte buffers only flow foreign -> Rust,
 // and only in argument position. `lift`, `read`, `write`, and
 // `allocationSize` have no sound implementation here and all panic at
 // runtime. The `FfiConverter` interface is implemented so that the
 // compiler enforces the full method set (rather than relying on eyeball).
 //
-// The provided `ByteBuffer` MUST be direct — only direct buffers have a
+// The provided `ByteBuffer` MUST be direct, only direct buffers have a
 // stable native address that JNA can expose via `getDirectBufferPointer`.
 // The returned `ForeignBytes.ByValue` is only valid for the duration of
 // the FFI call; the Rust side treats it as a borrow.
