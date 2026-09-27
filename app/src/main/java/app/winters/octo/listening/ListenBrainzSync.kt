@@ -8,6 +8,7 @@ import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.isFind
+import app.winters.octo.catalog.songDetails
 import app.winters.octo.playback.isOpenedFile
 import app.winters.octo.playback.isRadio
 import app.winters.octo.playback.openedFileOf
@@ -202,8 +203,16 @@ class ListenBrainzSync @Inject constructor(
         isOpenedFile(trackId) -> openedFileOf(trackId)?.let { PlayedSong(it.title, it.artist, "", 0, null, reachesServer = false) }
         isFind(trackId) -> online.song(trackId)?.let { PlayedSong(it.title, it.artist, it.album, it.durationMs, null, reachesServer = true) }
         else -> catalog.track(trackId)?.let { track ->
-            val copies = sources.copies(trackId).map { it.sourceId }
-            PlayedSong(track.title, track.artist, track.album, track.durationMs, track.trackNo, playReachesServer(trackId, copies))
+            val copies = sources.copies(trackId)
+            val details = songDetails(copies)
+            PlayedSong(
+                track.title, track.artist, track.album, track.durationMs, track.trackNo,
+                playReachesServer(trackId, copies.map { it.sourceId }),
+                recordingMbid = details.mbRecordingId,
+                releaseMbid = details.mbAlbumId,
+                releaseGroupMbid = details.mbReleaseGroupId,
+                artistMbids = details.mbArtistIds,
+            )
         }
     }
 }

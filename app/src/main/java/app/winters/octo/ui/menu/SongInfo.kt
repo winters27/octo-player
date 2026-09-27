@@ -37,6 +37,7 @@ import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
+import app.winters.octo.catalog.songDetails
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.design.GlassSheet
@@ -106,6 +107,19 @@ data class SongFacts(
     val albumGain: Float? = null,
     val trackPeak: Float? = null,
     val albumPeak: Float? = null,
+    // What the tags or server add, from every copy of the song. The year
+    // above is this edition's; the original is the first release's.
+    val originalYear: Int? = null,
+    val genres: List<String> = emptyList(),
+    val composer: String? = null,
+    val bpm: Int? = null,
+    val comment: String? = null,
+    val explicit: Boolean? = null,
+    val discTitle: String? = null,
+    val mbRecordingId: String? = null,
+    val mbAlbumId: String? = null,
+    val mbReleaseGroupId: String? = null,
+    val mbArtistIds: List<String> = emptyList(),
 )
 
 // One line of the sheet. A copyable one gets a Copy button.
@@ -117,10 +131,19 @@ fun infoLines(facts: SongFacts, zone: ZoneId = ZoneId.systemDefault(), locale: L
     if (facts.artist.isNotBlank()) add(InfoLine("Artist", facts.artist))
     if (facts.album.isNotBlank()) add(InfoLine("Album", facts.album))
     facts.albumArtist?.takeIf { it.isNotBlank() }?.let { add(InfoLine("Album artist", it)) }
-    facts.year?.takeIf { it > 0 }?.let { add(InfoLine("Year", it.toString())) }
-    if (facts.genre.isNotBlank()) add(InfoLine("Genre", facts.genre))
+    facts.composer?.takeIf { it.isNotBlank() }?.let { add(InfoLine("Composer", it)) }
+    val year = facts.year?.takeIf { it > 0 }
+    year?.let { add(InfoLine("Year", it.toString())) }
+    facts.originalYear?.takeIf { it > 0 && it != year }?.let { add(InfoLine("Original year", it.toString())) }
+    val genres = (listOf(facts.genre) + facts.genres).filter(String::isNotBlank).distinctBy(String::lowercase)
+    if (genres.isNotEmpty()) add(InfoLine(if (genres.size == 1) "Genre" else "Genres", genres.joinToString(", ")))
     facts.trackNo?.takeIf { it > 0 }?.let { add(InfoLine("Track", it.toString())) }
-    facts.discNo?.takeIf { it > 0 }?.let { add(InfoLine("Disc", it.toString())) }
+    facts.discNo?.takeIf { it > 0 }?.let { disc ->
+        add(InfoLine("Disc", facts.discTitle?.takeIf(String::isNotBlank)?.let { "$disc · $it" } ?: disc.toString()))
+    }
+    facts.bpm?.takeIf { it > 0 }?.let { add(InfoLine("BPM", it.toString())) }
+    facts.explicit?.let { add(InfoLine("Lyrics", if (it) "Explicit" else "Clean")) }
+    facts.comment?.takeIf { it.isNotBlank() }?.let { add(InfoLine("Comment", it)) }
 
     if (facts.durationMs > 0) add(InfoLine("Length", (facts.durationMs / 1000).toInt().asClock()))
     formatName(facts.mimeType)?.let { add(InfoLine("Format", it)) }
@@ -150,6 +173,14 @@ fun infoLines(facts: SongFacts, zone: ZoneId = ZoneId.systemDefault(), locale: L
     facts.trackPeak?.let { add(InfoLine("Track peak", peakText(it, locale))) }
     facts.albumGain?.let { add(InfoLine("Album gain", gainText(it, locale))) }
     facts.albumPeak?.let { add(InfoLine("Album peak", peakText(it, locale))) }
+
+    // MusicBrainz ids, for looking the song up elsewhere.
+    facts.mbRecordingId?.let { add(InfoLine("Recording MBID", it, copyable = true)) }
+    facts.mbAlbumId?.let { add(InfoLine("Release MBID", it, copyable = true)) }
+    facts.mbReleaseGroupId?.let { add(InfoLine("Release group MBID", it, copyable = true)) }
+    if (facts.mbArtistIds.isNotEmpty()) {
+        add(InfoLine(if (facts.mbArtistIds.size == 1) "Artist MBID" else "Artist MBIDs", facts.mbArtistIds.joinToString("\n"), copyable = true))
+    }
 }
 
 // The codec, from the file's type, and whether it is lossless.
@@ -211,6 +242,7 @@ class SongInfoViewModel @Inject constructor(
         val fromFile = if (onPhone && playing?.bitrate == null) playing?.uri?.let(::fileQuality) else null
         val gains = playing?.takeIf { it.trackGain != null || it.albumGain != null } ?: copies.firstOrNull { it.trackGain != null }
         val played = history.tracks.first().firstOrNull { it.track.id == trackId }
+        val details = songDetails(copies)
         val source = if (onPhone) {
             SongSource.Phone(playing?.uri?.let(::phonePath))
         } else {
@@ -230,6 +262,20 @@ class SongInfoViewModel @Inject constructor(
             albumGain = gains?.albumGain,
             trackPeak = gains?.trackPeak,
             albumPeak = gains?.albumPeak,
+            // The library's year is the original where known; the sheet
+            // shows this edition's year beside it.
+            year = details.year ?: track.year,
+            originalYear = details.originalYear,
+            genres = details.genres,
+            composer = details.composer,
+            bpm = details.bpm,
+            comment = details.comment,
+            explicit = details.explicit,
+            discTitle = details.discTitle,
+            mbRecordingId = details.mbRecordingId,
+            mbAlbumId = details.mbAlbumId,
+            mbReleaseGroupId = details.mbReleaseGroupId,
+            mbArtistIds = details.mbArtistIds,
         )
         return SongInfo(track, facts)
     }

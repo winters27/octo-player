@@ -58,6 +58,26 @@ data class SourceTrackEntity(
     val rating: Int? = null,
     // The library song this copy was merged into.
     @ColumnInfo(defaultValue = "") val mergedId: String = "",
+    // What this copy says beyond the basics, where it says it. `year` above
+    // is this edition's year; the original is the first release's.
+    val originalYear: Int? = null,
+    // Every genre and every credited artist, one per line, main one first.
+    @ColumnInfo(defaultValue = "") val genres: String = "",
+    @ColumnInfo(defaultValue = "") val artists: String = "",
+    val composer: String? = null,
+    // Beats per minute.
+    val bpm: Int? = null,
+    val comment: String? = null,
+    // True when marked explicit, false when marked clean, null when unmarked.
+    val explicit: Boolean? = null,
+    // The name of this song's disc, like "Live at Wembley".
+    val discTitle: String? = null,
+    // MusicBrainz ids: the recording, the release (album), its release
+    // group, and the artists (one per line).
+    val mbRecordingId: String? = null,
+    val mbAlbumId: String? = null,
+    val mbReleaseGroupId: String? = null,
+    @ColumnInfo(defaultValue = "") val mbArtistIds: String = "",
 )
 
 @Entity(tableName = "source_album", indices = [Index("sourceId")])
@@ -87,11 +107,6 @@ data class SourceArtistEntity(
     val albumCount: Int,
     val songCount: Int,
     val artwork: String?,
-)
-
-fun TrackEntity.toSource() = SourceTrackEntity(
-    id, sourceId, nativeId, title, searchKey, sortKey, artist, artistId, album, albumId,
-    trackNo, discNo, year, durationMs, addedAt, mimeType, sizeBytes, artwork, uri, albumOrder, relinkKey, genre,
 )
 
 fun AlbumEntity.toSource() = SourceAlbumEntity(

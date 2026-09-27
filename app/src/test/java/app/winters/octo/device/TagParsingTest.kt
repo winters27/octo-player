@@ -23,8 +23,10 @@ class TagParsingTest {
     }
 
     @Test
-    fun originalDateBeatsDate() {
-        assertEquals(1994, tags("DATE" to listOf("2014-03-01"), "ORIGINALDATE" to listOf("1994")).year)
+    fun theEditionAndOriginalYearsAreKeptApart() {
+        val t = tags("DATE" to listOf("2014-03-01"), "ORIGINALDATE" to listOf("1994"))
+        assertEquals(2014, t.year)
+        assertEquals(1994, t.originalYear)
         assertEquals(2015, tags("DATE" to listOf("20150904")).year)
     }
 
@@ -32,11 +34,16 @@ class TagParsingTest {
     fun multipleArtistValuesAreKept() {
         val t = tags("ARTIST" to listOf("Kavinsky", "Angèle"))
         assertEquals("Kavinsky, Angèle", t.artist)
+        assertEquals(listOf("Kavinsky", "Angèle"), t.artists)
     }
 
     @Test
-    fun artistsTagWinsOverArtist() {
-        assertEquals("A, B", tags("ARTIST" to listOf("A feat. B"), "ARTISTS" to listOf("A", "B")).artist)
+    fun artistsTagGivesTheCreditsAndArtistStaysAsWritten() {
+        val t = tags("ARTIST" to listOf("A feat. B"), "ARTISTS" to listOf("A", "B"))
+        assertEquals("A feat. B", t.artist)
+        assertEquals(listOf("A", "B"), t.artists)
+        // With only ARTISTS, the credits make the name.
+        assertEquals("A, B", tags("ARTISTS" to listOf("A", "B")).artist)
     }
 
     @Test

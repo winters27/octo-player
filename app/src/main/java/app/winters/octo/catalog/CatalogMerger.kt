@@ -33,9 +33,24 @@ private const val SAME_LENGTH_MS = 3_000L
 //   phone files often lack them.
 // - The first source to have something gives it its id, so give the phone
 //   first: its songs keep their ids, and likes and playlists keep working.
-// - A merged song or album takes the best of its copies: a track number,
-//   year, genre or server rating that one copy lacks comes from another.
-// - Anything only one source has is passed through exactly as it was.
+// - A merged song or album takes the best of its copies. Copies are asked
+//   in source order, the phone's first, and for each field:
+//   - added: the earliest real time any copy was added. A server stamps
+//     every song with the day it first scanned it, while the phone's time
+//     comes from the file, so the earliest is the nearest to when the song
+//     was really got. Unknown times (0) are passed over. Albums alike.
+//   - year: the first copy's original release year; failing that, the
+//     first copy's own year. So a remaster shows the year the song came out.
+//   - genre: the first copy's main genre; the song info sheet shows every
+//     copy's genres together (songDetails).
+//   - artist: the fullest credit, the copy naming the most artists (say,
+//     "A, B" over "A"); on equal credits the first copy's stays.
+//   - track and disc numbers and the server rating: the first copy's.
+//   - composer, tempo, MusicBrainz ids and the other details the library
+//     does not keep: read from the copies when needed, by the same order
+//     (songDetails).
+// - Anything only one source has is passed through exactly as it was,
+//   apart from its year, which is its original year when it has one.
 fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
     // Artists and albums match only across sources: two a source keeps
     // apart (say, two albums of the same name) stay apart.
@@ -112,7 +127,7 @@ fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
             year = base.year ?: extras.firstNotNullOfOrNull { it.year },
             songCount = if (recount) albumTracks.size else base.songCount,
             durationMs = if (recount) albumTracks.sumOf { it.durationMs } else base.durationMs,
-            addedAt = base.addedAt,
+            addedAt = earliestAdded(listOf(base.addedAt) + extras.map { it.addedAt }),
             artwork = base.artwork ?: extras.firstNotNullOfOrNull { it.artwork },
         )
     }
@@ -190,8 +205,12 @@ private class MergingSong(
     var trackNo = base.trackNo
     var discNo = base.discNo
     var year = base.year
+    var originalYear = base.originalYear
     var genre = base.genre
     var rating = base.rating?.takeIf { it in 1..5 }
+    var addedAt = base.addedAt
+    var artist = base.artist
+    var credits = splitLines(base.artists).size
 
     fun add(copy: SourceTrackEntity, source: SourceCatalog) {
         sources += source.sourceId
@@ -199,8 +218,15 @@ private class MergingSong(
         trackNo = trackNo ?: copy.trackNo
         discNo = discNo ?: copy.discNo
         year = year ?: copy.year
+        originalYear = originalYear ?: copy.originalYear
         if (genre.isEmpty()) genre = copy.genre
         rating = rating ?: copy.rating?.takeIf { it in 1..5 }
+        addedAt = earliestAdded(listOf(addedAt, copy.addedAt))
+        val copyCredits = splitLines(copy.artists).size
+        if (copyCredits > credits && copy.artist.isNotBlank()) {
+            artist = copy.artist
+            credits = copyCredits
+        }
     }
 
     fun toTrack(order: Int) = TrackEntity(
@@ -210,15 +236,15 @@ private class MergingSong(
         title = base.title,
         searchKey = base.searchKey,
         sortKey = base.sortKey,
-        artist = base.artist,
+        artist = artist,
         artistId = artistId,
         album = base.album,
         albumId = albumId,
         trackNo = trackNo,
         discNo = discNo,
-        year = year,
+        year = originalYear ?: year,
         durationMs = base.durationMs,
-        addedAt = base.addedAt,
+        addedAt = addedAt,
         mimeType = base.mimeType,
         sizeBytes = base.sizeBytes,
         artwork = base.artwork,
@@ -230,6 +256,9 @@ private class MergingSong(
         rating = rating ?: 0,
     )
 }
+
+// The earliest of some times added, leaving out unknown ones (0 or less).
+internal fun earliestAdded(times: List<Long>): Long = times.filter { it > 0 }.minOrNull() ?: 0
 
 // A song's title and artist, for matching it outside its album.
 private fun songKey(track: SourceTrackEntity) = matchKey(track.title) + "|" + matchKey(track.artist)

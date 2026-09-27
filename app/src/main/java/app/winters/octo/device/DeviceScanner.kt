@@ -25,6 +25,7 @@ class DeviceScanner @Inject constructor(@ApplicationContext private val context:
             add(MediaStore.Audio.Media.SIZE)
             add(MediaStore.Audio.Media.DURATION)
             add(MediaStore.Audio.Media.DATE_ADDED)
+            add(MediaStore.Audio.Media.DATE_TAKEN)
             add(MediaStore.Audio.Media.MIME_TYPE)
             add(MediaStore.Audio.Media.TITLE)
             add(MediaStore.Audio.Media.ARTIST)
@@ -39,6 +40,7 @@ class DeviceScanner @Inject constructor(@ApplicationContext private val context:
         }.toTypedArray()
 
         val files = mutableListOf<DeviceFile>()
+        val now = System.currentTimeMillis() / 1000
         context.contentResolver.query(
             collection,
             projection,
@@ -52,15 +54,21 @@ class DeviceScanner @Inject constructor(@ApplicationContext private val context:
                 val packed = c.int(MediaStore.Audio.Media.TRACK)
                 val disc = c.string(MediaStore.Audio.Media.DISC_NUMBER)?.let(::positionNumber)
                     ?: packed?.takeIf { it >= 1000 }?.div(1000)
+                val modified = c.long(MediaStore.Audio.Media.DATE_MODIFIED) ?: 0
                 files += DeviceFile(
                     id = id,
                     uri = ContentUris.withAppendedId(collection, id).toString(),
                     fileName = c.string(MediaStore.Audio.Media.DISPLAY_NAME) ?: "",
                     folder = c.string(MediaStore.Audio.Media.RELATIVE_PATH),
-                    modifiedAt = c.long(MediaStore.Audio.Media.DATE_MODIFIED) ?: 0,
+                    modifiedAt = modified,
                     sizeBytes = c.long(MediaStore.Audio.Media.SIZE) ?: 0,
                     durationMs = c.long(MediaStore.Audio.Media.DURATION) ?: 0,
-                    addedAtSeconds = c.long(MediaStore.Audio.Media.DATE_ADDED) ?: 0,
+                    addedAtSeconds = fileAddedAt(
+                        modifiedSeconds = modified,
+                        addedSeconds = c.long(MediaStore.Audio.Media.DATE_ADDED) ?: 0,
+                        takenMs = c.long(MediaStore.Audio.Media.DATE_TAKEN),
+                        nowSeconds = now,
+                    ),
                     mimeType = c.string(MediaStore.Audio.Media.MIME_TYPE),
                     fallback = FileTags(
                         title = c.string(MediaStore.Audio.Media.TITLE)?.takeIf(String::isNotBlank),

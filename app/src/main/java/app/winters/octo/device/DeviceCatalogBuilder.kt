@@ -3,7 +3,8 @@ package app.winters.octo.device
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.ArtworkRef
-import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.SourceTrackEntity
+import app.winters.octo.catalog.joinLines
 import app.winters.octo.catalog.relinkKey
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.catalog.sortKey
@@ -15,7 +16,7 @@ private const val UNKNOWN_ALBUM = "Unknown album"
 private const val VARIOUS_ARTISTS = "Various Artists"
 
 class DeviceCatalog(
-    val tracks: List<TrackEntity>,
+    val tracks: List<SourceTrackEntity>,
     val albums: List<AlbumEntity>,
     val artists: List<ArtistEntity>,
 )
@@ -37,7 +38,7 @@ fun buildDeviceCatalog(rows: List<DeviceRow>): DeviceCatalog {
         .groupBy { searchKey(albumName(it)) }
         .flatMap { (nameKey, cluster) -> splitCluster(cluster).map { (splitKey, group) -> Triple(nameKey, splitKey, group) } }
 
-    val tracks = mutableListOf<TrackEntity>()
+    val tracks = mutableListOf<SourceTrackEntity>()
     val albums = mutableListOf<AlbumEntity>()
     val genreNames = genreSpellings(rows)
 
@@ -51,13 +52,14 @@ fun buildDeviceCatalog(rows: List<DeviceRow>): DeviceCatalog {
 
         ordered.forEachIndexed { index, (row, number) ->
             val trackTitle = row.title.orNull() ?: row.fileName.substringBeforeLast('.').ifBlank { "Untitled" }
-            tracks += TrackEntity(
+            val tags = row.tags
+            tracks += SourceTrackEntity(
                 id = "$DEVICE:${row.id}",
                 sourceId = DEVICE,
                 nativeId = row.id.toString(),
                 title = trackTitle,
                 searchKey = searchKey(trackTitle),
-                sortKey = sortKey(trackTitle),
+                sortKey = sortKey(tags.sortTitle.orNull() ?: trackTitle),
                 artist = row.artist.orNull() ?: artist,
                 artistId = artistId,
                 album = title,
@@ -74,6 +76,22 @@ fun buildDeviceCatalog(rows: List<DeviceRow>): DeviceCatalog {
                 albumOrder = index,
                 relinkKey = relinkKey(artist, title, row.disc, number, trackTitle, row.durationMs),
                 genre = row.genres.firstOrNull()?.let { genreNames.getValue(genreKey(it)) } ?: "",
+                trackGain = tags.trackGain,
+                albumGain = tags.albumGain,
+                trackPeak = tags.trackPeak,
+                albumPeak = tags.albumPeak,
+                originalYear = tags.originalYear,
+                genres = joinLines(row.genres.map { genreNames.getValue(genreKey(it)) }.distinct()),
+                artists = joinLines(tags.artists),
+                composer = tags.composer,
+                bpm = tags.bpm,
+                comment = tags.comment,
+                explicit = tags.explicit,
+                discTitle = tags.discTitle,
+                mbRecordingId = tags.mbRecordingId,
+                mbAlbumId = row.mbAlbumId,
+                mbReleaseGroupId = tags.mbReleaseGroupId,
+                mbArtistIds = joinLines(tags.mbArtistIds),
             )
         }
 
@@ -83,16 +101,22 @@ fun buildDeviceCatalog(rows: List<DeviceRow>): DeviceCatalog {
             nativeId = stableId("$nameKey|$splitKey"),
             title = title,
             searchKey = searchKey("$title $artist"),
-            sortKey = sortKey(title),
+            sortKey = sortKey(group.firstNotNullOfOrNull { it.tags.sortAlbum.orNull() } ?: title),
             artist = artist,
             artistId = artistId,
-            year = group.mapNotNull { it.year }.maxOrNull(),
+            // The year it shows: the original release year where known.
+            year = group.mapNotNull { it.tags.originalYear ?: it.year }.maxOrNull(),
             songCount = group.size,
             durationMs = group.sumOf { it.durationMs },
             addedAt = group.maxOf { it.addedAtSeconds },
             artwork = artwork,
         )
     }
+
+    // How each album artist is filed, where a file says ("Beatles, The").
+    val artistSorts = groups.mapNotNull { (_, _, group) ->
+        group.firstNotNullOfOrNull { it.tags.sortAlbumArtist.orNull() }?.let { artistIdOf(albumArtistOf(group)) to it }
+    }.toMap()
 
     val artists = albums.groupBy { it.artistId }.map { (id, owned) ->
         val name = mostCommon(owned.map { it.artist })
@@ -101,7 +125,7 @@ fun buildDeviceCatalog(rows: List<DeviceRow>): DeviceCatalog {
             sourceId = DEVICE,
             name = name,
             searchKey = searchKey(name),
-            sortKey = sortKey(name),
+            sortKey = sortKey(artistSorts[id] ?: name),
             albumCount = owned.size,
             songCount = owned.sumOf { it.songCount },
             artwork = owned.maxByOrNull { it.addedAt }?.artwork,

@@ -13,7 +13,6 @@ import androidx.core.content.ContextCompat
 import android.os.SystemClock
 import androidx.core.net.toUri
 import app.winters.octo.catalog.CatalogDao
-import app.winters.octo.catalog.FileTagsEntity
 import app.winters.octo.catalog.CatalogMerge
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.toSource
@@ -43,7 +42,9 @@ private const val READERS = 4
 
 // Raised whenever reading tags learns something new, so every file is
 // read again once. Rows saved before genres were read are version 0.
-private const val TAGS_VERSION = 1
+// Version 2 reads original years, credits, MusicBrainz ids, sort names,
+// loudness and the other details, and more spellings of every tag.
+private const val TAGS_VERSION = 2
 
 // Whether the app may read the phone's music.
 enum class Access { Granted, NotAsked, Denied, DeniedForever }
@@ -158,7 +159,7 @@ class DeviceLibrary @Inject constructor(
                 // server's music merged in.
                 sources.replaceSource(
                     DEVICE,
-                    catalog.tracks.map { it.toSource() },
+                    catalog.tracks,
                     catalog.albums.map { it.toSource() },
                     catalog.artists.map { it.toSource() },
                 )
@@ -203,31 +204,10 @@ class DeviceLibrary @Inject constructor(
 
         return (saved - gone + fresh.associateBy { it.mediaId })
             .filterValues { it.readOk }
-            .mapValues { (_, t) ->
-                FileTags(
-                    t.title, t.artist, t.albumArtist, t.album, t.trackNo, t.discNo, t.year, t.compilation, t.mbAlbumId,
-                    genres = t.genres.lines().filter(String::isNotEmpty),
-                )
-            }
+            .mapValues { (_, t) -> t.toTags() }
     }
 
-    private fun DeviceFile.toSaved(tags: FileTags?) = FileTagsEntity(
-        mediaId = id,
-        modifiedAt = modifiedAt,
-        size = sizeBytes,
-        readOk = tags != null,
-        title = tags?.title,
-        artist = tags?.artist,
-        albumArtist = tags?.albumArtist,
-        album = tags?.album,
-        trackNo = tags?.trackNo,
-        discNo = tags?.discNo,
-        year = tags?.year,
-        compilation = tags?.compilation ?: false,
-        mbAlbumId = tags?.mbAlbumId,
-        genres = tags?.genres.orEmpty().joinToString("\n"),
-        tagsVersion = TAGS_VERSION,
-    )
+    private fun DeviceFile.toSaved(tags: FileTags?) = savedTags(id, modifiedAt, sizeBytes, tags, TAGS_VERSION)
 
     private fun granted() =
         ContextCompat.checkSelfPermission(context, permissionName) == PackageManager.PERMISSION_GRANTED

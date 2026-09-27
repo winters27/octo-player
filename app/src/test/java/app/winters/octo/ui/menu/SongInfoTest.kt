@@ -64,6 +64,52 @@ class SongInfoTest {
     }
 
     @Test
+    fun theTagsAndServerDetailsShowWhenKnown() {
+        val facts = SongFacts(
+            title = "Get Lucky",
+            artist = "Daft Punk",
+            album = "RAM",
+            year = 2013,
+            originalYear = 1979,
+            genre = "Disco",
+            genres = listOf("Disco", "Funk"),
+            composer = "Thomas Bangalter",
+            bpm = 116,
+            comment = "Single edit",
+            explicit = false,
+            discNo = 2,
+            discTitle = "Night Two",
+            mbRecordingId = "rec",
+            mbAlbumId = "rel",
+            mbReleaseGroupId = "grp",
+            mbArtistIds = listOf("a1", "a2"),
+        )
+        val shown = lines(facts)
+        assertEquals("2013", shown["Year"])
+        assertEquals("1979", shown["Original year"])
+        assertEquals("Disco, Funk", shown["Genres"])
+        assertEquals("Thomas Bangalter", shown["Composer"])
+        assertEquals("116", shown["BPM"])
+        assertEquals("Single edit", shown["Comment"])
+        assertEquals("Clean", shown["Lyrics"])
+        assertEquals("2 · Night Two", shown["Disc"])
+        assertEquals("rec", shown["Recording MBID"])
+        assertEquals("rel", shown["Release MBID"])
+        assertEquals("grp", shown["Release group MBID"])
+        assertEquals("a1\na2", shown["Artist MBIDs"])
+        val copyable = infoLines(facts, utc, us).filter { it.copyable }.map { it.label }
+        assertEquals(listOf("Recording MBID", "Release MBID", "Release group MBID", "Artist MBIDs"), copyable)
+    }
+
+    @Test
+    fun anOriginalYearLikeTheYearIsShownOnce() {
+        val shown = lines(SongFacts("t", "a", "b", year = 1979, originalYear = 1979, genre = "Disco", genres = listOf("disco")))
+        assertEquals("1979", shown["Year"])
+        assertNull(shown["Original year"])
+        assertEquals("Disco", shown["Genre"])
+    }
+
+    @Test
     fun whatIsNotKnownIsLeftOut() {
         val shown = lines(SongFacts(title = "Untitled", artist = "", album = ""))
         assertEquals(listOf("Title", "Source", "Plays"), shown.keys.toList())

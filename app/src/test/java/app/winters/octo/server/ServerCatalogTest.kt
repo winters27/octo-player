@@ -6,6 +6,9 @@ import app.winters.octo.catalog.SourceTrackEntity
 import app.winters.octo.catalog.relinkKey
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Artist
+import app.winters.octo.subsonic.ArtistRef
+import app.winters.octo.subsonic.DiscTitle
+import app.winters.octo.subsonic.ItemDate
 import app.winters.octo.subsonic.Library
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SongReplayGain
@@ -91,8 +94,85 @@ class ServerCatalogTest {
             playCount = 4,
             lastPlayedAt = 1_790_084_201_435,
             starredAt = 1_790_150_400_000,
+            // A server that sends one genre still gives the list of genres.
+            genres = "Electro",
         )
         assertEquals(listOf(expected), catalog.tracks)
+    }
+
+    private val rich = song.copy(
+        genre = "Disco",
+        genres = listOf("Disco", "Funk"),
+        artists = listOf(ArtistRef("ar1", "Kavinsky"), ArtistRef("ar2", "Angèle")),
+        musicBrainzId = "B1A9C0E9-D987-4042-AE91-78D6A3267D69",
+        bpm = 116,
+        comment = " Single edit ",
+        displayComposer = "Vincent Belorgey",
+        explicitStatus = "clean",
+        discNumber = 2,
+        year = 2013,
+    )
+
+    private val richAlbum = album.copy(
+        year = 2013,
+        musicBrainzId = "3f0a4f44-1f1b-4b3c-9c62-7a7d7e2c1a10",
+        originalReleaseDate = ItemDate(1979, 5, 1),
+        discTitles = listOf(DiscTitle(1, "Night One"), DiscTitle(2, "Night Two")),
+    )
+
+    private val artists = listOf(
+        Artist("ar1", "Kavinsky", musicBrainzId = "056e4f3e-d505-4dad-8ec1-d04f521cbb56"),
+        Artist("ar2", "Angèle", musicBrainzId = ""),
+    )
+
+    @Test
+    fun theOpenSubsonicDetailsAreKept() {
+        val row = buildServerCatalog(source, Library(listOf(rich), listOf(richAlbum), artists)).tracks.single()
+        assertEquals("Disco", row.genre)
+        assertEquals("Disco\nFunk", row.genres)
+        assertEquals("Kavinsky\nAngèle", row.artists)
+        assertEquals("b1a9c0e9-d987-4042-ae91-78d6a3267d69", row.mbRecordingId)
+        assertEquals("3f0a4f44-1f1b-4b3c-9c62-7a7d7e2c1a10", row.mbAlbumId)
+        // Only the artist the server has an id for.
+        assertEquals("056e4f3e-d505-4dad-8ec1-d04f521cbb56", row.mbArtistIds)
+        assertEquals(116, row.bpm)
+        assertEquals("Single edit", row.comment)
+        assertEquals("Vincent Belorgey", row.composer)
+        assertEquals(false, row.explicit)
+        assertEquals("Night Two", row.discTitle)
+        assertEquals(2013, row.year)
+        assertEquals(1979, row.originalYear)
+    }
+
+    @Test
+    fun anAlbumShowsItsFirstEditionYear() {
+        val row = buildServerCatalog(source, Library(listOf(rich), listOf(richAlbum), artists)).albums.single()
+        assertEquals(1979, row.year)
+        // A first edition said to come after this one is a mistake.
+        val wrong = richAlbum.copy(originalReleaseDate = ItemDate(2020))
+        val catalog = buildServerCatalog(source, Library(listOf(rich), listOf(wrong), artists))
+        assertEquals(2013, catalog.albums.single().year)
+        assertNull(catalog.tracks.single().originalYear)
+    }
+
+    @Test
+    fun blankDetailsAreNotKept() {
+        val blank = song.copy(musicBrainzId = "", comment = "", displayComposer = " ", explicitStatus = "", bpm = 0)
+        val row = buildServerCatalog(source, Library(listOf(blank), listOf(album), emptyList())).tracks.single()
+        assertNull(row.mbRecordingId)
+        assertNull(row.comment)
+        assertNull(row.composer)
+        assertNull(row.explicit)
+        assertNull(row.bpm)
+        assertNull(row.originalYear)
+        assertEquals("", row.mbArtistIds)
+    }
+
+    @Test
+    fun aGenreTextJoiningSeveralGivesEachOne() {
+        val row = buildServerCatalog(source, Library(listOf(song.copy(genre = "Rock; Pop")), listOf(album), emptyList())).tracks.single()
+        assertEquals("Rock", row.genre)
+        assertEquals("Rock\nPop", row.genres)
     }
 
     @Test

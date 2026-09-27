@@ -6,8 +6,16 @@ import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import kotlin.math.roundToInt
 
 // Every field has a default, so a server that leaves one out still parses.
 
@@ -52,7 +60,26 @@ data class Album(
     val playCount: Long = 0,
     val starred: String? = null,
     val isCompilation: Boolean = false,
+    // OpenSubsonic extras: every genre, the release's MusicBrainz id, how
+    // the title is filed, the names of its discs, when this edition and the
+    // first edition came out, and whether it is explicit ("explicit",
+    // "clean" or empty).
+    @Serializable(with = GenreNames::class) val genres: List<String> = emptyList(),
+    val musicBrainzId: String? = null,
+    val sortName: String? = null,
+    val discTitles: List<DiscTitle> = emptyList(),
+    val originalReleaseDate: ItemDate? = null,
+    val releaseDate: ItemDate? = null,
+    val explicitStatus: String? = null,
 )
+
+// A date an OpenSubsonic server sends in parts, any of which can be missing.
+@Serializable
+data class ItemDate(val year: Int? = null, val month: Int? = null, val day: Int? = null)
+
+// The name of one disc of an album, like "Live at Wembley".
+@Serializable
+data class DiscTitle(val disc: Int = 0, val title: String = "")
 
 @Serializable
 data class Song(
@@ -86,6 +113,19 @@ data class Song(
     // user's rating of it from 1 to 5.
     val replayGain: SongReplayGain? = null,
     val userRating: Int? = null,
+    // OpenSubsonic extras: every genre, each credited artist and album
+    // artist, how the title is filed, the recording's MusicBrainz id, beats
+    // per minute, the comment and composers, and whether it is explicit
+    // ("explicit", "clean" or empty).
+    @Serializable(with = GenreNames::class) val genres: List<String> = emptyList(),
+    val artists: List<ArtistRef> = emptyList(),
+    val albumArtists: List<ArtistRef> = emptyList(),
+    val sortName: String? = null,
+    val musicBrainzId: String? = null,
+    @Serializable(with = LooseInt::class) val bpm: Int? = null,
+    val comment: String? = null,
+    val displayComposer: String? = null,
+    val explicitStatus: String? = null,
 )
 
 @Serializable
@@ -110,6 +150,9 @@ data class Artist(
     val coverArt: String? = null,
     val albumCount: Int = 0,
     val starred: String? = null,
+    // OpenSubsonic extras: the artist's MusicBrainz id and how the name is filed.
+    val musicBrainzId: String? = null,
+    val sortName: String? = null,
 )
 
 @Serializable
@@ -252,6 +295,43 @@ internal object LooseString : KSerializer<String> {
         (decoder as? JsonDecoder)?.decodeJsonElement()?.jsonPrimitive?.content ?: decoder.decodeString()
 
     override fun serialize(encoder: Encoder, value: String) = encoder.encodeString(value)
+}
+
+// Genre names, as OpenSubsonic sends them ([{"name": "Rock"}]) or as a
+// plain list of names. Anything else reads as no genres, so one odd field
+// never stops a library from loading.
+internal object GenreNames : KSerializer<List<String>> {
+    override val descriptor = ListSerializer(String.serializer()).descriptor
+
+    override fun deserialize(decoder: Decoder): List<String> {
+        val element = (decoder as? JsonDecoder)?.decodeJsonElement() ?: return emptyList()
+        val items = element as? JsonArray ?: listOf(element)
+        return items.mapNotNull { item ->
+            when (item) {
+                is JsonObject -> (item["name"] as? JsonPrimitive)?.contentOrNull
+                is JsonPrimitive -> item.contentOrNull
+                else -> null
+            }?.trim()?.takeIf(String::isNotEmpty)
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: List<String>) =
+        ListSerializer(String.serializer()).serialize(encoder, value)
+}
+
+// A whole number sent as a number or as text ("120", "120.5"). Anything
+// that is not one reads as 0, which servers use for unknown.
+internal object LooseInt : KSerializer<Int> {
+    override val descriptor = PrimitiveSerialDescriptor("LooseInt", PrimitiveKind.INT)
+
+    override fun deserialize(decoder: Decoder): Int {
+        val primitive = (decoder as? JsonDecoder)?.decodeJsonElement() as? JsonPrimitive ?: return 0
+        return primitive.intOrNull
+            ?: primitive.contentOrNull?.trim()?.toDoubleOrNull()?.takeIf { it.isFinite() }?.roundToInt()
+            ?: 0
+    }
+
+    override fun serialize(encoder: Encoder, value: Int) = encoder.encodeInt(value)
 }
 
 // Lyrics a server keeps for a song (OpenSubsonic songLyrics). There can be
