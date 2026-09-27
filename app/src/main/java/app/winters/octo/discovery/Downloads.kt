@@ -13,7 +13,6 @@ import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.OnlineSongEntity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
-import app.winters.octo.catalog.matchKey
 import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
@@ -228,11 +227,8 @@ class Downloads @Inject constructor(
         online.prune(serverSourceId(client.primaryUrl), now - FORGET_MS)
         val waiting = online.waiting().ifEmpty { return }
         val candidates = waiting.flatMap { titleKeys(it.title) }.distinct().chunked(900).flatMap { catalog.tracksWithKeys(it) }
-        val byTitle = candidates.filter { !isFind(it.id) }.groupBy { matchKey(it.title) }
-        for (find in waiting) {
-            val track = byTitle[matchKey(find.title)]?.firstOrNull { sameSong(find.title, find.artist, find.durationMs, it) } ?: continue
-            adoptAs(find.id, track)
-        }
+        val adopted = adoptions(waiting, candidates.filter { !isFind(it.id) })
+        for (find in waiting) adopted[find.id]?.let { adoptAs(find.id, it) }
     }
 
     // A find became this library song: the two are linked. Downloading is
@@ -382,10 +378,20 @@ class Downloads @Inject constructor(
     }
 }
 
-// Whether a song Octo finished downloading is the one asked for.
+// The library song each find arrived as: the first with the same title, the
+// same kind of recording and the same artist, of about the same length when
+// both are known. Finds not in the library yet are left out.
+fun adoptions(waiting: List<OnlineSongEntity>, library: List<TrackEntity>): Map<String, TrackEntity> {
+    val byTitle = TitleIndex(library, { it.title }, { it.artist })
+    return waiting.mapNotNull { find ->
+        byTitle.candidates(find.title, find.artist).firstOrNull { sameSong(find.title, find.artist, find.durationMs, it) }?.let { find.id to it }
+    }.toMap()
+}
+
+// Whether a song Octo finished downloading is the one asked for: the same
+// recording by the same artist.
 fun downloadMatches(find: OnlineSongEntity, record: DownloadRecord): Boolean =
-    matchKey(record.title) == matchKey(find.title) && versionOf(record.title) == versionOf(find.title) &&
-        sameArtist(record.artist, find.artist)
+    sameRecording(record.title, record.artist, find.title, find.artist)
 
 fun stateOf(row: OnlineSongEntity, now: Long): DownloadState = when {
     row.adoptedId.isNotEmpty() -> DownloadState.Done

@@ -1,10 +1,11 @@
 package app.winters.octo.backup
 
 import app.winters.octo.catalog.PinKind
+import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.matchKey
-import app.winters.octo.discovery.sameArtist
-import app.winters.octo.discovery.titleKeys
+import app.winters.octo.discovery.TitleIndex
+import app.winters.octo.discovery.sameSong
 import app.winters.octo.listening.SendPlays
 import app.winters.octo.lyrics.LyricsLook
 import app.winters.octo.offline.CacheSize
@@ -206,35 +207,29 @@ fun plainAddress(address: String): String {
     return "${uri.scheme ?: "https"}://${uri.host}$port${uri.rawPath.orEmpty()}".trimEnd('/')
 }
 
-// Lengths further apart than this are different recordings.
-private const val SAME_LENGTH_MS = 10_000L
-
 // Finds songs named in a backup in this library: by relink key first, then
-// by title, artist and album, then by title and artist, of about the same
-// length when both lengths are known.
+// by title (with its kind of recording), artist and album, then as the same
+// song by the same artist, of about the same length when both lengths are
+// known.
 class SongFinder(library: List<TrackEntity>) {
     private val byRelink = library.filter { it.relinkKey.isNotEmpty() }.groupBy { it.relinkKey }
     private val byWhole = library.groupBy { wholeKey(it.title, it.artist, it.album) }
-    private val byTitle = HashMap<String, MutableList<TrackEntity>>().apply {
-        library.forEach { track -> titleKeys(track.title).forEach { getOrPut(it) { mutableListOf() } += track } }
-    }
+    private val byTitle = TitleIndex(library, { it.title }, { it.artist })
 
     fun find(song: SongKey): String? {
         if (song.relinkKey.isNotEmpty()) byRelink[song.relinkKey]?.firstOrNull()?.let { return it.id }
         if (song.title.isBlank()) return null
         byWhole[wholeKey(song.title, song.artist, song.album)]?.let { same -> return closest(same, song.durationMs).id }
         if (song.artist.isBlank()) return null
-        val candidates = titleKeys(song.title).flatMap { byTitle[it].orEmpty() }.distinctBy { it.id }
-            .filter { sameArtist(song.artist, it.artist) && sameLength(song.durationMs, it.durationMs) }
+        val candidates = byTitle.candidates(song.title, song.artist).filter { sameSong(song.title, song.artist, song.durationMs, it) }
         return candidates.takeIf { it.isNotEmpty() }?.let { closest(it, song.durationMs).id }
     }
 
-    private fun wholeKey(title: String, artist: String, album: String) = "${matchKey(title)}|${matchKey(artist)}|${matchKey(album)}"
+    private fun wholeKey(title: String, artist: String, album: String) =
+        "${SongIdentity.songKeys(artist, title).title}|${matchKey(artist)}|${matchKey(album)}"
 
     private fun closest(tracks: List<TrackEntity>, durationMs: Long): TrackEntity =
         if (durationMs <= 0) tracks.first() else tracks.minBy { abs(it.durationMs - durationMs) }
-
-    private fun sameLength(a: Long, b: Long) = a <= 0 || b <= 0 || abs(a - b) <= SAME_LENGTH_MS
 }
 
 // A library album or artist as the finder sees it. An artist has no artist.

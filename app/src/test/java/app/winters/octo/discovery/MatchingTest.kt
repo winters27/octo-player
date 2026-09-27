@@ -103,6 +103,78 @@ class MatchingTest {
     }
 
     @Test
+    fun stylizedNamesAreTheSameSong() {
+        val lib = track("p1", "Suicide", "Suicideboys", ms = 169_000)
+        assertTrue(sameSong("${'$'}UICIDE", "${'$'}uicideboy${'$'}", 170_000, lib))
+        assertTrue(sameSong("＄UICIDE", "＄uicideboy＄", 0, lib))
+        // Another song that holds the title is not it.
+        assertFalse(sameSong("Ultimate ${'$'}uicide", "${'$'}uicideboy${'$'}", 170_000, lib))
+    }
+
+    @Test
+    fun aCurlyApostropheIsAnApostrophe() {
+        assertTrue(sameSong("Huntin’ Wabbitz", "${'$'}uicideboy${'$'}", 0, track("p1", "Huntin' Wabbitz", "${'$'}uicideboy${'$'}")))
+    }
+
+    @Test
+    fun creditsJoinedAnyWayAreTheSameArtists() {
+        assertTrue(sameArtist("Kanye West、Ty Dolla ${'$'}ign", "Kanye West"))
+        assertTrue(sameSong("Real Friends (Explicit)", "Kanye West、Ty Dolla ${'$'}ign", 0, track("p1", "Real Friends", "Kanye West")))
+        // An alias, with the name in another script beside it.
+        assertTrue(sameArtist("Ye (侃爷)", "Kanye West"))
+        assertTrue(sameSong("Can't Tell Me Nothing", "Ye (侃爷)", 0, track("p1", "Can’t Tell Me Nothing", "Kanye West")))
+    }
+
+    @Test
+    fun aKnownNameIsNeverSplit() {
+        assertTrue(sameArtist("Tyler, The Creator", "Tyler The Creator"))
+        assertTrue(sameArtist("Tyler, The Creator & Kali Uchis", "Tyler, The Creator"))
+        assertFalse(sameArtist("Tyler, The Creator", "Tyler"))
+        assertFalse(sameSong("EARFQUAKE", "Tyler", 0, track("p1", "EARFQUAKE", "Tyler, The Creator")))
+    }
+
+    @Test
+    fun differentGuestsAreAnotherCollaboration() {
+        assertFalse(sameSong("Song", "A feat. B", 0, track("p1", "Song", "A feat. C")))
+        assertTrue(sameSong("Song", "A feat. B", 0, track("p1", "Song", "A")))
+    }
+
+    @Test
+    fun aServerSongSpelledAnotherWayIsItsLibrarySong() {
+        val phone = track("p9", "Suicide", "Suicideboys", ms = 169_000)
+        val out = resolveSongs(listOf(song("s9", "${'$'}UICIDE", "${'$'}uicideboy${'$'}", seconds = 170)), "server:x", emptyMap(), listOf(phone), 0)
+        assertEquals(listOf(Resolved.InLibrary("p9")), out)
+    }
+
+    @Test
+    fun titleKeysIncludeTheTitleAPersonWouldSay() {
+        assertEquals(listOf("01 - teardrop - remastered 2011", "teardrop"), titleKeys("01 - Teardrop - Remastered 2011"))
+    }
+
+    @Test
+    fun aFindIsAdoptedByTheSameRecordingOnly() {
+        fun find(id: String, title: String, artist: String) = OnlineSongEntity(id, "s", id, title, artist, "", null, null, 0, null, null, null, 0)
+        val library = listOf(
+            track("p1", "Movie Star (Clean)", "Jack Harlow"),
+            track("p2", "Movie Star", "Jack Harlow"),
+            track("p3", "Suicide", "Suicideboys"),
+        )
+        val adopted = adoptions(
+            listOf(find("find:a", "Movie Star", "Jack Harlow"), find("find:b", "${'$'}UICIDE", "${'$'}uicideboy${'$'}"), find("find:c", "Mask Off", "Future")),
+            library,
+        )
+        // The clean edit is another version here, unlike for lyrics.
+        assertEquals(mapOf("find:a" to "p2", "find:b" to "p3"), adopted.mapValues { it.value.id })
+    }
+
+    @Test
+    fun aFinishedDownloadIsKnownThroughAnAlias() {
+        val find = OnlineSongEntity("find:e1", "s", "e1", "Stronger", "Kanye West", "", null, null, 0, null, null, null, 0)
+        assertTrue(downloadMatches(find, DownloadRecord(artist = "Ye (侃爷)", title = "Stronger (Explicit)")))
+        assertFalse(downloadMatches(find, DownloadRecord(artist = "Ye", title = "Stronger (Clean)")))
+    }
+
+    @Test
     fun aDownloadAskedForLongAgoCanBeAskedAgain() {
         val row = OnlineSongEntity("find:e1", "s", "e1", "T", "A", "", null, null, 0, null, null, null, 0, requestedAt = 1_000)
         assertEquals(DownloadState.Requested, stateOf(row, 1_000 + 60_000))

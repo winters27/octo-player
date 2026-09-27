@@ -2,6 +2,7 @@ package app.winters.octo.discovery
 
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.matchKey
@@ -92,15 +93,15 @@ class ArtistExtrasSource @Inject constructor(
     private suspend fun serverArtistId(client: SubsonicClient, sourceId: String, artist: ArtistEntity): String? {
         serverArtistIdOf(artist.id, sourceId)?.let { return it }
         sources.artistsNamed(sourceId, searchKey(artist.name))
-            .firstNotNullOfOrNull { row -> serverArtistIdOf(row.id, sourceId)?.takeIf { matchKey(row.name) == matchKey(artist.name) } }
+            .firstNotNullOfOrNull { row -> serverArtistIdOf(row.id, sourceId)?.takeIf { SongIdentity.sameArtistName(row.name, artist.name) } }
             ?.let { return it }
         val found = answerOf { client.search(artist.name, artists = 5, albums = 0, songs = 0).artist } ?: return null
-        return found.firstOrNull { matchKey(it.name) == matchKey(artist.name) }?.id
+        return found.firstOrNull { SongIdentity.sameArtistName(it.name, artist.name) }?.id
     }
 
     // Artists like this one, each opening in the library when it is there.
     private suspend fun similarArtists(sourceId: String, artist: ArtistEntity, info: ArtistInfo): List<SimilarArtist> {
-        val others = info.similarArtist.filter { it.id.isNotEmpty() && matchKey(it.name) != matchKey(artist.name) }
+        val others = info.similarArtist.filter { it.id.isNotEmpty() && !SongIdentity.sameArtistName(it.name, artist.name) }
         if (others.isEmpty()) return emptyList()
         val library = catalog.artistsWithKeys(others.map { searchKey(it.name) }.distinct()).associateBy { matchKey(it.name) }
         return others.map { other ->

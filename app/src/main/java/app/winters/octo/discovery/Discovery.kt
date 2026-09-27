@@ -164,7 +164,8 @@ class Discovery @Inject constructor(
     }
 
     // The server's id for a song: a find's own, a library song's server copy,
-    // or, for a song only on the phone, the same song as the server knows it.
+    // or, for a song only on the phone, the same song as the server knows it:
+    // the same recording when the server has it, or else another version.
     private suspend fun serverIdOf(client: SubsonicClient, track: TrackEntity): String? {
         if (isFind(track.id)) return track.id.removePrefix(FIND_PREFIX)
         sources.copies(track.id).firstOrNull { it.sourceId.startsWith("server:") }?.let { return it.nativeId }
@@ -173,7 +174,10 @@ class Discovery @Inject constructor(
         } catch (e: SubsonicException) {
             return null
         }
-        return found.firstOrNull { matchKey(it.title) == matchKey(track.title) && sameArtist(it.artist.orEmpty(), track.artist) }?.id
+        return (
+            found.firstOrNull { sameRecording(it.title, it.artist.orEmpty(), track.title, track.artist) }
+                ?: found.firstOrNull { sameSongAnyVersion(it.title, it.artist.orEmpty(), track.title, track.artist) }
+            )?.id
     }
 
     // Albums the library has neither from this server nor by the same name
