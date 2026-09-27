@@ -28,6 +28,20 @@ pub struct SongLoudness {
     pub follows_same_album: bool,
 }
 
+/// What a queued song brings for levelling: the values its source keeps,
+/// and whether it follows a song from the same album.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Loudness {
+    pub stored: Option<ReplayGainInfo>,
+    pub follows_same_album: bool,
+}
+
+impl Loudness {
+    pub fn song(&self, replay_gain: Option<ReplayGainInfo>) -> SongLoudness {
+        SongLoudness { replay_gain, follows_same_album: self.follows_same_album }
+    }
+}
+
 /// The newer loudness tags aim 5 dB quieter than the older ones.
 const R128_TO_REPLAY_GAIN_DB: f32 = 5.0;
 

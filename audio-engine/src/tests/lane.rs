@@ -5,6 +5,8 @@ use std::time::{Duration, Instant};
 
 use crate::deck::Deck;
 use crate::lane::{Lane, LaneState, Span};
+use crate::sound::model::{ReplayGainMode, ReplayGainSettings};
+use crate::sound::replaygain::{Loudness, ReplayGainInfo};
 use crate::source::http::HttpOptions;
 use crate::testing::fixtures::*;
 
@@ -50,8 +52,8 @@ fn gapless_join_is_sample_exact() {
     write_flac(&a, rate, 2, &first, &[]);
     write_wav(&b, rate, 2, &second);
 
-    let mut lane = Lane::new(deck(1, &a), 1.0, rate);
-    lane.set_next(Some(deck(2, &b)), 1.0);
+    let mut lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), rate);
+    lane.set_next(Some(deck(2, &b)), Loudness::default());
     lane.last = true;
     let (out, spans) = play_out(&mut lane);
 
@@ -76,12 +78,12 @@ fn gapless_join_through_the_resampler_is_seamless() {
     write_flac(&b, rate, 2, &second, &[]);
     write_flac(&c, rate, 2, &whole, &[]);
 
-    let mut split = Lane::new(deck(1, &a), 1.0, 48_000);
-    split.set_next(Some(deck(2, &b)), 1.0);
+    let mut split = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), 48_000);
+    split.set_next(Some(deck(2, &b)), Loudness::default());
     split.last = true;
     let (joined, spans) = play_out(&mut split);
 
-    let mut single = Lane::new(deck(3, &c), 1.0, 48_000);
+    let mut single = Lane::new(deck(3, &c), Loudness::default(), &ReplayGainSettings::default(), 48_000);
     single.last = true;
     let (reference, _) = play_out(&mut single);
 
@@ -102,7 +104,7 @@ fn resampler_keeps_pitch_level_and_timing() {
     let path = dir.join("tone.wav");
     let samples = sine(1_000.0, 44_100, 2, 0, 44_100, 0.5);
     write_wav(&path, 44_100, 2, &samples);
-    let mut lane = Lane::new(deck(1, &path), 1.0, 48_000);
+    let mut lane = Lane::new(deck(1, &path), Loudness::default(), &ReplayGainSettings::default(), 48_000);
     lane.last = true;
     let (out, _) = play_out(&mut lane);
     assert_eq!(out.len() / 2, 48_000);
@@ -125,14 +127,23 @@ fn replaygain_applies_per_song() {
     let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
     write_wav(&a, rate, 2, &vec![16_384; 4_000]);
     write_wav(&b, rate, 2, &vec![16_384; 4_000]);
-    let mut lane = Lane::new(deck(1, &a), 0.5, rate);
-    lane.set_next(Some(deck(2, &b)), 2.0);
+    // Song A comes with a stored gain of -6.02 dB (half), song B with
+    // +6.02 dB (double), as a server keeps them.
+    let db = 20.0 * 2f32.log10();
+    let stored = |gain| Loudness {
+        stored: Some(ReplayGainInfo { track_gain: Some(gain), ..Default::default() }),
+        follows_same_album: false,
+    };
+    let settings =
+        ReplayGainSettings { mode: ReplayGainMode::Track, prevent_clipping: false, ..Default::default() };
+    let mut lane = Lane::new(deck(1, &a), stored(-db), &settings, rate);
+    lane.set_next(Some(deck(2, &b)), stored(db));
     lane.last = true;
     let (out, _) = play_out(&mut lane);
-    assert_eq!(out[10], 0.25);
-    // The level changes exactly at the join.
-    assert_eq!(out[1_999 * 2], 0.25);
-    assert_eq!(out[2_000 * 2], 1.0);
+    assert!((out[10] - 0.25).abs() < 1e-6, "{}", out[10]);
+    // The level changes exactly at the join, with no glide.
+    assert!((out[1_999 * 2] - 0.25).abs() < 1e-6);
+    assert!((out[2_000 * 2] - 1.0).abs() < 1e-6);
 }
 
 #[test]
@@ -141,7 +152,7 @@ fn seek_restarts_the_lane_at_the_new_place() {
     let path = dir.join("ramp.wav");
     let samples: Vec<i16> = (0..96_000).flat_map(|n| [(n / 4) as i16, 0]).collect();
     write_wav(&path, 48_000, 2, &samples);
-    let mut lane = Lane::new(deck(1, &path), 1.0, 48_000);
+    let mut lane = Lane::new(deck(1, &path), Loudness::default(), &ReplayGainSettings::default(), 48_000);
     lane.last = true;
     let until = Instant::now() + Duration::from_secs(5);
     while lane.fill(4_800) != LaneState::Ready {

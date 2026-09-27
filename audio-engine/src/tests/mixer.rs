@@ -8,7 +8,9 @@ use crate::deck::Deck;
 use crate::lane::Lane;
 use crate::mixer::{Marker, MixState, Mixer, Transition};
 use crate::pace::Pace;
+use crate::sound::model::ReplayGainSettings;
 use crate::sound::model::SoundSettings;
+use crate::sound::replaygain::Loudness;
 use crate::source::http::HttpOptions;
 use crate::testing::fixtures::*;
 
@@ -65,13 +67,13 @@ fn crossfade_is_equal_power_and_on_time() {
     dc_file(&b, 96_000, 0, 16_384);
     let settings = SoundSettings::default();
     let mut mixer = Mixer::new(RATE, 0, &settings, Pace::default());
-    let mut lane = Lane::new(deck(1, &a), 1.0, RATE);
+    let mut lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), RATE);
     lane.last = true;
     mixer.start(lane, Transition::Start);
     let next = deck(2, &b);
     wait_ready(&next);
     let fade_frames = 24_000u64; // 0.5 s
-    mixer.plan_fade(1, 1.5, fade_frames, next, 1.0);
+    mixer.plan_fade(1, 1.5, fade_frames, next, Loudness::default());
     let (out, markers) = render_all(&mut mixer);
 
     let latency = 72; // the limiter's delay at 48 kHz
@@ -105,8 +107,8 @@ fn gapless_marker_lands_on_the_join() {
     dc_file(&a, 10_000, 1_000, 1_000);
     dc_file(&b, 10_000, 2_000, 2_000);
     let mut mixer = Mixer::new(RATE, 500, &SoundSettings::default(), Pace::default());
-    let mut lane = Lane::new(deck(1, &a), 1.0, RATE);
-    lane.set_next(Some(deck(2, &b)), 1.0);
+    let mut lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.set_next(Some(deck(2, &b)), Loudness::default());
     lane.last = true;
     mixer.start(lane, Transition::Start);
     let (out, markers) = render_all(&mut mixer);
@@ -127,7 +129,7 @@ fn markers_follow_speed() {
     let a = dir.join("a.wav");
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, 96_000, 0.4));
     let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace { speed: 1.5, pitch: 1.0 });
-    let mut lane = Lane::new(deck(1, &a), 1.0, RATE);
+    let mut lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), RATE);
     lane.last = true;
     mixer.start(lane, Transition::Start);
     let (out, markers) = render_all(&mut mixer);
@@ -149,7 +151,7 @@ fn seeking_marks_the_new_place() {
     let a = dir.join("a.wav");
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, 96_000, 0.4));
     let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
-    let mut lane = Lane::new(deck(1, &a), 1.0, RATE);
+    let mut lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), RATE);
     lane.last = true;
     mixer.start(lane, Transition::Start);
     let mut block = vec![0.0; 4_800 * 2];

@@ -11,6 +11,8 @@ use rubato::{Fft, FixedSync, Indexing, Resampler as _};
 use crate::deck::{Deck, DeckStatus};
 use crate::error::Failure;
 use crate::fifo::Fifo;
+use crate::sound::model::ReplayGainSettings;
+use crate::sound::replaygain::{Loudness, choose_replay_gain, replay_gain_factor};
 use crate::sound::shaper::{GLIDE_MS, Glide};
 
 // Frames the resampler takes per step.
@@ -41,8 +43,23 @@ pub enum LaneState {
 // One song feeding the lane.
 struct Feed {
     deck: Deck,
+    loudness: Loudness,
     gain: Glide,
     started: bool,
+}
+
+impl Feed {
+    fn new(deck: Deck, loudness: Loudness) -> Self {
+        Feed { deck, loudness, gain: Glide::new(1.0), started: false }
+    }
+
+    // The song's ReplayGain factor, from its own tags once they are read,
+    // or the values it was queued with.
+    fn factor(&self, settings: &ReplayGainSettings) -> f32 {
+        let tags = self.deck.info().and_then(|i| i.replay_gain);
+        let song = self.loudness.song(choose_replay_gain(tags, self.loudness.stored));
+        replay_gain_factor(settings, Some(&song))
+    }
 }
 
 // Where a song's sound begins in the lane's output.
@@ -64,6 +81,7 @@ pub struct Lane {
     next: Option<Feed>,
     /// No song follows the current one.
     pub last: bool,
+    replay_gain: ReplayGainSettings,
     in_rate: u32,
     resampler: Option<Rate>,
     inbuf: Vec<f32>,
@@ -84,13 +102,14 @@ pub struct Lane {
 }
 
 impl Lane {
-    /// A lane starting with `deck`, at gain `gain` (ReplayGain, as a factor).
-    pub fn new(deck: Deck, gain: f32, out_rate: u32) -> Self {
+    /// A lane starting with `deck`, levelled by `replay_gain`.
+    pub fn new(deck: Deck, loudness: Loudness, replay_gain: &ReplayGainSettings, out_rate: u32) -> Self {
         Lane {
             out_rate,
-            current: Feed { deck, gain: Glide::new(gain), started: false },
+            current: Feed::new(deck, loudness),
             next: None,
             last: false,
+            replay_gain: replay_gain.clone(),
             in_rate: 0,
             resampler: None,
             inbuf: Vec::with_capacity(CHUNK * 4),
@@ -117,8 +136,8 @@ impl Lane {
     }
 
     /// Lines up the song that follows the current one without a gap.
-    pub fn set_next(&mut self, deck: Option<Deck>, gain: f32) {
-        self.next = deck.map(|deck| Feed { deck, gain: Glide::new(gain), started: false });
+    pub fn set_next(&mut self, deck: Option<Deck>, loudness: Loudness) {
+        self.next = deck.map(|deck| Feed::new(deck, loudness));
         if self.next.is_some() {
             self.last = false;
         }
@@ -129,14 +148,20 @@ impl Lane {
         self.next.take().map(|f| f.deck)
     }
 
-    /// Changes the ReplayGain of the current and next songs, gliding.
-    pub fn set_gains(&mut self, current: f32, next: Option<f32>) {
-        let frames = |rate: u32| (rate as f32 * GLIDE_MS / 1_000.0) as usize;
-        let rate = self.in_rate.max(1);
-        self.current.gain.to(current, frames(rate));
-        if let (Some(feed), Some(g)) = (&mut self.next, next) {
-            feed.gain.to(g, 0);
+    /// Takes up new ReplayGain settings; the playing song glides to its
+    /// new level.
+    pub fn set_replay_gain(&mut self, settings: &ReplayGainSettings) {
+        self.replay_gain = settings.clone();
+        if self.current.started {
+            let frames = (self.in_rate.max(1) as f32 * GLIDE_MS / 1_000.0) as usize;
+            let factor = self.current.factor(settings);
+            self.current.gain.to(factor, frames);
         }
+    }
+
+    /// The level the playing song is at, as a factor.
+    pub fn current_gain(&self) -> f32 {
+        self.current.gain.value()
     }
 
     /// Whether the last song has played out of the lane.
@@ -265,6 +290,9 @@ impl Lane {
             if read.frames > 0 {
                 if !self.current.started {
                     self.current.started = true;
+                    // The song's own level, from its first frame.
+                    let factor = self.current.factor(&self.replay_gain);
+                    self.current.gain.to(factor, 0);
                     let in_index = self.epoch_in + (self.inbuf.len() / 2) as u64;
                     let out_frame = self.out_frame_of(in_index);
                     let joined = self.out_made > 0 || !self.inbuf.is_empty();

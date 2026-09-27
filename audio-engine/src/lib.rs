@@ -2,6 +2,7 @@
 
 uniffi::setup_scaffolding!();
 
+pub mod api;
 pub mod crossfade;
 pub mod deck;
 pub mod decode;
@@ -11,9 +12,14 @@ pub mod lane;
 pub mod mixer;
 #[cfg(feature = "opus")]
 pub mod opus;
+pub mod output;
 pub mod pace;
+pub mod player;
 pub mod sound;
 pub mod source;
+pub mod timeline;
+
+pub use api::{Engine, EngineEvent, EngineListener, QueueItem};
 
 #[cfg(test)]
 mod testing;

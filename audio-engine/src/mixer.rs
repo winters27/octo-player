@@ -10,6 +10,7 @@ use crate::error::Failure;
 use crate::lane::{Lane, LaneState, Span};
 use crate::pace::{Pace, PaceStage};
 use crate::sound::model::SoundSettings;
+use crate::sound::replaygain::Loudness;
 use crate::sound::shaper::SoundShaper;
 
 /// Frames mixed per step: about 5 ms.
@@ -64,7 +65,7 @@ struct PlannedFade {
     at_secs: f64,
     frames: u64,
     deck: Deck,
-    gain: f32,
+    loudness: Loudness,
 }
 
 struct Fade {
@@ -187,14 +188,26 @@ impl Mixer {
     pub fn set_sound(&mut self, settings: &SoundSettings) {
         self.settings = settings.clone();
         self.shaper.apply(settings, self.song_gain, false);
+        if let Some(lane) = &mut self.lane {
+            lane.set_replay_gain(&settings.replay_gain);
+        }
+        if let Some(fade) = &mut self.fade {
+            fade.outgoing.set_replay_gain(&settings.replay_gain);
+        }
     }
 
-    /// The ReplayGain of the song playing now, which decides whether the
-    /// limiter needs to run.
-    pub fn set_song_gain(&mut self, gain: f32) {
+    pub fn settings(&self) -> &SoundSettings {
+        &self.settings
+    }
+
+    // The ReplayGain of the song playing now decides whether the limiter
+    // needs to run at all.
+    fn follow_song_gain(&mut self) {
+        let gain = self.lane.as_ref().map(|l| l.current_gain()).unwrap_or(1.0);
         if gain != self.song_gain {
             self.song_gain = gain;
-            self.shaper.apply(&self.settings.clone(), gain, false);
+            let settings = self.settings.clone();
+            self.shaper.apply(&settings, gain, false);
         }
     }
 
@@ -208,8 +221,8 @@ impl Mixer {
 
     /// Lines up a crossfade into `deck`, starting when song `key` reaches
     /// `at_secs` and lasting `frames` mix frames.
-    pub fn plan_fade(&mut self, key: u64, at_secs: f64, frames: u64, deck: Deck, gain: f32) {
-        self.planned = Some(PlannedFade { key, at_secs, frames, deck, gain });
+    pub fn plan_fade(&mut self, key: u64, at_secs: f64, frames: u64, deck: Deck, loudness: Loudness) {
+        self.planned = Some(PlannedFade { key, at_secs, frames, deck, loudness });
     }
 
     /// Drops a planned crossfade, handing its deck back.
@@ -383,6 +396,7 @@ impl Mixer {
             self.mixed += span.frames as u64;
         }
         self.spans = spans;
+        self.follow_song_gain();
         self.block[..frames * 2].copy_from_slice(&self.a[..frames * 2]);
         if let Some(fade) = &mut self.fade {
             let old = fade.outgoing.pull(&mut self.b[..frames * 2], &mut self.spans_b);
@@ -431,14 +445,14 @@ impl Mixer {
         if !plan.deck.is_ready() {
             // Not ready in time: the song ends as usual and the next one
             // follows without a gap.
-            old.set_next(Some(plan.deck), plan.gain);
+            old.set_next(Some(plan.deck), plan.loudness);
             self.lane = Some(old);
             return;
         }
         let from = old.current().key();
-        old.set_next(None, 1.0);
+        old.set_next(None, Loudness::default());
         old.last = true;
-        let incoming = Lane::new(plan.deck, plan.gain, self.rate);
+        let incoming = Lane::new(plan.deck, plan.loudness, &self.settings.replay_gain, self.rate);
         self.lane = Some(incoming);
         self.next_transition = Some(Transition::Crossfade { from, frames: plan.frames });
         self.fade = Some(Fade { outgoing: old, frames: plan.frames, done: 0 });
