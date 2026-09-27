@@ -24,7 +24,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -57,13 +56,16 @@ internal const val CHECK_SETTLE_MS = 1_500L
 // How much of the circle the waiting arc covers.
 private const val WAITING_SWEEP = 90f
 
+// Half the plus inside the ring, as a share of the ring's width.
+private const val PLUS_ARM = 0.18f
+
 private val Stroke2 = 2.dp
 private val Track = Color.White.copy(alpha = 0.2f)
 
-// A download on its way, drawn as a thin ring: turning while it waits,
-// filling as it downloads, full and pulsing while the song is added, then
-// a check once it is in the library. With reduced motion nothing turns,
-// pulses or morphs; only the states change.
+// A song on its way into the library, drawn as a thin ring around a small
+// plus: turning while it waits, filling as it downloads, full and pulsing
+// while the song is added, then a check once it is in the library. With
+// reduced motion nothing turns, pulses or morphs; only the states change.
 @Composable
 internal fun DownloadRing(phase: DownloadPhase, calm: Boolean, modifier: Modifier = Modifier) {
     val done = phase == DownloadPhase.Done
@@ -149,16 +151,12 @@ internal fun DownloadRing(phase: DownloadPhase, calm: Boolean, modifier: Modifie
                     style = Stroke(stroke, cap = StrokeCap.Round),
                 )
             }
-            // The stop square in the middle while it waits or downloads.
-            if (phase == DownloadPhase.Queued || phase is DownloadPhase.Downloading) {
-                val side = size.minDimension * 0.26f
-                drawRoundRect(
-                    Color.White.copy(alpha = fade),
-                    topLeft = center - Offset(side / 2, side / 2),
-                    size = Size(side, side),
-                    cornerRadius = CornerRadius(side * 0.2f),
-                )
-            }
+            // The plus the button showed, small inside the ring, so it is
+            // still the same action on its way. It fades as the check comes.
+            val arm = size.minDimension * PLUS_ARM
+            val plus = Color.White.copy(alpha = fade)
+            drawLine(plus, center - Offset(arm, 0f), center + Offset(arm, 0f), strokeWidth = stroke, cap = StrokeCap.Round)
+            drawLine(plus, center - Offset(0f, arm), center + Offset(0f, arm), strokeWidth = stroke, cap = StrokeCap.Round)
         }
         if (done) DrawnCheck(drawn = { morph.value }, glow = { glow.value }, Modifier.matchParentSize())
     }

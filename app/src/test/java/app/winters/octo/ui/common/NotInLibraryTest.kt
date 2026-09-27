@@ -39,11 +39,31 @@ class NotInLibraryTest {
     }
 
     @Test
-    fun aRowWithTheDownloadButtonSaysItOnce() {
-        assertTrue(rowMarksArtwork("find:e1", emptySet(), offersDownload = false))
-        assertFalse(rowMarksArtwork("find:e1", emptySet(), offersDownload = true))
-        assertFalse(rowMarksArtwork("t-42", emptySet(), offersDownload = false))
-        assertFalse(rowMarksArtwork("find:e1", setOf("find:e1"), offersDownload = false))
+    fun aRowThatOffersAddingShowsTheButtonAndNoMark() {
+        assertEquals(AddSign.Button, rowAddSign("find:e1", emptySet(), offersAdd = true))
+        // Kept once added, so its check shows before the page swaps the row.
+        assertEquals(AddSign.Button, rowAddSign("find:e1", setOf("find:e1"), offersAdd = true))
+        // A library song never gets either.
+        assertEquals(AddSign.None, rowAddSign("t-42", emptySet(), offersAdd = true))
+    }
+
+    @Test
+    fun aRowElsewhereShowsTheMarkUntilTheSongIsAdded() {
+        assertEquals(AddSign.Mark, rowAddSign("find:e1", emptySet(), offersAdd = false))
+        assertEquals(AddSign.None, rowAddSign("find:e1", setOf("find:e1"), offersAdd = false))
+        assertEquals(AddSign.None, rowAddSign("t-42", emptySet(), offersAdd = false))
+        assertEquals(AddSign.None, rowAddSign("server:x:mf-1", emptySet(), offersAdd = false))
+    }
+
+    @Test
+    fun rowsBesideAddButtonsKeepTheirSpace() {
+        // In a list offering the button, a library song leaves the space
+        // empty so every length sits in one column.
+        assertTrue(rowKeepsAddSpace(AddSign.None, offersAdd = true))
+        assertFalse(rowKeepsAddSpace(AddSign.Button, offersAdd = true))
+        // Elsewhere nothing is kept.
+        assertFalse(rowKeepsAddSpace(AddSign.None, offersAdd = false))
+        assertFalse(rowKeepsAddSpace(AddSign.Mark, offersAdd = false))
     }
 
     @Test
@@ -89,7 +109,8 @@ class NotInLibraryTest {
 
     @Test
     fun anAlbumPageSaysHowMuchIsInTheLibrary() {
-        assertEquals("Not in your library", albumLibraryNote(7, 7))
+        // None of it: the add button beside the note already says so.
+        assertNull(albumLibraryNote(7, 7))
         assertEquals("3 of 7 in your library", albumLibraryNote(7, 4))
         assertNull(albumLibraryNote(7, 0))
     }

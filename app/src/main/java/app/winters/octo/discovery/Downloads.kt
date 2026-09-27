@@ -82,6 +82,7 @@ class Downloads @Inject constructor(
     private val sync: Lazy<ServerSync>,
     private val admin: OctoAdmin,
     private val feedback: Feedback,
+    private val hint: AddHint,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var checks: Job? = null
@@ -173,6 +174,7 @@ class Downloads @Inject constructor(
         return try {
             client.star(listOf(track.id.removePrefix(FIND_PREFIX)))
             online.setRequested(track.id, System.currentTimeMillis())
+            hint.added()
             arrivals.askedSong(track.id, track.title)
             tracker.retry(track.id)
             follow()
@@ -191,6 +193,7 @@ class Downloads @Inject constructor(
             val now = System.currentTimeMillis()
             val finds = songs.filter { isFind(it.id) }
             finds.forEach { online.setRequested(it.id, now) }
+            hint.added()
             val coming = finds.filter { state(it.id) != DownloadState.Done }
             arrivals.askedAlbum(title.ifBlank { coming.firstOrNull()?.album.orEmpty() }, coming.map { it.id })
             coming.forEach { tracker.retry(it.id) }

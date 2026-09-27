@@ -43,7 +43,7 @@ fun ProvideOfflineMarks(vm: OfflineMarksViewModel = hiltViewModel(), content: @C
 
 // After a song's artist or length: a filled arrow for a song downloaded to
 // the phone, the cloud for one that streams, nothing for a phone file.
-// A song found online has none: its artwork or download button says it.
+// A song found online has none: its artwork or add button says it.
 @Composable
 fun SourceMark(track: TrackEntity) {
     when {

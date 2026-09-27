@@ -66,11 +66,24 @@ fun isOutsideLibrary(trackId: String?, adopted: Set<String>): Boolean =
 @Composable
 fun isOutsideLibrary(trackId: String?): Boolean = isOutsideLibrary(trackId, LocalAdoptedFinds.current)
 
-// Whether a song row draws the mark on its artwork. A row that offers the
-// download button leaves it off: the button already says it, and a row
-// says a thing once.
-fun rowMarksArtwork(trackId: String, adopted: Set<String>, offersDownload: Boolean): Boolean =
-    !offersDownload && isOutsideLibrary(trackId, adopted)
+// How a song row says a song is not in the library: the add button at its
+// end, the small plus on its artwork, or nothing. A row says it once, so a
+// row with the button has no mark.
+enum class AddSign { Button, Mark, None }
+
+// In a list that offers the button, a find keeps it after it is added, so
+// the check has its moment before the page swaps in the library song.
+// Elsewhere a find gets the mark until it is in the library.
+fun rowAddSign(trackId: String, adopted: Set<String>, offersAdd: Boolean): AddSign = when {
+    !isFind(trackId) -> AddSign.None
+    offersAdd -> AddSign.Button
+    trackId in adopted -> AddSign.None
+    else -> AddSign.Mark
+}
+
+// Whether a row keeps an empty space where the add button would be, so its
+// length lines up with the rows that have one.
+fun rowKeepsAddSpace(sign: AddSign, offersAdd: Boolean): Boolean = offersAdd && sign != AddSign.Button
 
 // What TalkBack says for a picture, with the note for one not in the library.
 fun artworkDescription(description: String?, outside: Boolean): String? = when {
@@ -79,16 +92,16 @@ fun artworkDescription(description: String?, outside: Boolean): String? = when {
     else -> "$description, ${NotInLibraryText.lowercase()}"
 }
 
-// The quiet line on an album page from the server, where the big cover
-// carries no mark: nothing once every song is in the library.
+// The quiet line on an album page from the server, beside its add button,
+// where the big cover carries no mark. Only for an album partly in the
+// library: the button already says the rest is not.
 fun albumLibraryNote(songs: Int, outside: Int): String? = when {
-    outside <= 0 -> null
-    outside >= songs -> NotInLibraryText
+    outside <= 0 || outside >= songs -> null
     else -> "${songs - outside} of $songs in your library"
 }
 
 // How big the mark is for artwork of a given side: an eighth of it, never
-// so small the arrow blurs, nor big enough to crowd a large cover.
+// so small the plus blurs, nor big enough to crowd a large cover.
 private const val MarkShare = 0.125f
 private val MarkMin = 12.dp
 private val MarkMax = 20.dp
@@ -106,12 +119,13 @@ fun notInLibraryMarkInset(art: Dp, mark: Dp, round: Boolean): Dp {
     return centre - mark / 2
 }
 
-// Dark enough under the arrow to read on a white cover; the glass edge is
+// Dark enough under the plus to read on a white cover; the glass edge is
 // what shows it on a dark one.
 private val MarkFilm = Color.Black.copy(alpha = 0.42f)
 
 // A small glass disc in the bottom right of the artwork, holding a thin
-// arrow: the same arrow as the download button, quieter.
+// plus: the same plus as the add button, quieter. It is only a sign; the
+// card opens where the button is.
 @Composable
 internal fun BoxScope.NotInLibraryMark(art: Dp, round: Boolean) {
     val mark = notInLibraryMarkSize(art)

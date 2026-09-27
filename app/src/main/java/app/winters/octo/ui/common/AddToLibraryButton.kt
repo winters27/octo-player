@@ -61,7 +61,10 @@ class DownloadsViewModel @Inject constructor(
     fun explain(reason: String) = feedback.show("Could not download: $reason")
 }
 
-// What TalkBack says a find's download button is doing.
+// What TalkBack says the button is called, before what it is doing.
+const val AddToLibraryText = "Add to your library"
+
+// What TalkBack says the add button is doing.
 fun downloadStateText(phase: DownloadPhase): String = when (phase) {
     DownloadPhase.None -> "Not in your library"
     DownloadPhase.Queued -> "Queued"
@@ -71,12 +74,14 @@ fun downloadStateText(phase: DownloadPhase): String = when (phase) {
     is DownloadPhase.Failed -> "Could not download"
 }
 
-// Where a heart would be for a song found online: tapping it has the server
-// download the song into the library. A ring shows the download on its way
-// and turns into a check once the song is in the library. A failed one
-// shows an alert: a tap tries again, a long press says why.
+// Where a heart would be for a song not in the library: a plus that has the
+// server download the song into the library. The download arrow means
+// something else (saving a library song to the phone), so it is not used
+// here. A ring around the plus shows the song on its way and turns into a
+// check once it is in the library. A failed one shows an alert: a tap tries
+// again, a long press says why.
 @Composable
-fun DownloadButton(
+fun AddToLibraryButton(
     track: TrackEntity,
     modifier: Modifier = Modifier,
     size: Dp = 44.dp,
@@ -106,7 +111,7 @@ fun DownloadButton(
                 onLongClick = failed?.let { { vm.explain(it.reason) } },
             ) { vm.request(track) }
             .semantics {
-                contentDescription = "Download"
+                contentDescription = AddToLibraryText
                 stateDescription = downloadStateText(phase)
             },
         contentAlignment = Alignment.Center,
@@ -116,7 +121,7 @@ fun DownloadButton(
         key(track.id) {
             when (phase) {
                 DownloadPhase.None -> GlowIcon(
-                    painterResource(OctoIcons.Download),
+                    painterResource(OctoIcons.AddToLibrary),
                     tint = Color.White.copy(alpha = 0.6f),
                     lit = false,
                     modifier = Modifier.size(iconSize),

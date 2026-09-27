@@ -4,8 +4,13 @@ import app.winters.octo.discovery.DownloadPhase
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-// What TalkBack says a download button is doing.
-class DownloadButtonTest {
+// What TalkBack says the add button is and is doing.
+class AddToLibraryButtonTest {
+    @Test
+    fun theButtonIsNamedForWhatItDoes() {
+        assertEquals("Add to your library", AddToLibraryText)
+    }
+
     @Test
     fun eachPhaseIsSaidPlainly() {
         assertEquals("Not in your library", downloadStateText(DownloadPhase.None))

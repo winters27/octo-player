@@ -26,6 +26,7 @@ import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.isFind
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.discovery.Downloads
+import app.winters.octo.discovery.FindLengths
 import app.winters.octo.discovery.asTrack
 import app.winters.octo.offline.Prefetcher
 import app.winters.octo.output.Casting
@@ -109,6 +110,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var autoplay: Autoplay
     @Inject lateinit var downloads: Downloads
     @Inject lateinit var online: OnlineDao
+    @Inject lateinit var lengths: FindLengths
     @Inject lateinit var outputs: Outputs
     @Inject lateinit var deviceMedia: DeviceMedia
     @Inject lateinit var feedback: Feedback
@@ -268,8 +270,8 @@ class OctoPlaybackService : MediaLibraryService() {
                 )
                 NotificationHeart.Download -> add(
                     CommandButton.Builder(CommandButton.ICON_UNDEFINED)
-                        .setCustomIconResId(OctoIcons.Download)
-                        .setDisplayName("Download")
+                        .setCustomIconResId(OctoIcons.AddToLibrary)
+                        .setDisplayName("Add to your library")
                         .setSessionCommand(DOWNLOAD)
                         .setSlots(CommandButton.SLOT_FORWARD_SECONDARY, CommandButton.SLOT_OVERFLOW)
                         .build(),
@@ -301,6 +303,22 @@ class OctoPlaybackService : MediaLibraryService() {
         player.pause()
         player.stop()
         pauseAllPlayersAndStopSelf()
+    }
+
+    // A song found online often comes with no length. Once the phone's own
+    // player knows it, it is kept with the song, so its row shows it from
+    // then on. A TV or speaker's idea of the length is not trusted for this.
+    private fun learnLength() {
+        if (player.isRemote || player.isCurrentMediaItemLive) return
+        val id = player.currentMediaItem?.mediaId?.takeIf(::isFind) ?: return
+        val ms = player.duration.takeIf { it != C.TIME_UNSET } ?: return
+        scope.launch {
+            try {
+                lengths.learn(id, ms)
+            } catch (e: Exception) {
+                Log.w("Octo", "could not keep a song's length", e)
+            }
+        }
     }
 
     // Asks the server to download the song found online that is on now.
@@ -359,6 +377,7 @@ class OctoPlaybackService : MediaLibraryService() {
             widgets.show(player)
             serverQueue.changed(snapshot())
             autoplay.check()
+            learnLength()
         }
 
         override fun onRepeatModeChanged(repeatMode: Int) = autoplay.check()
@@ -379,7 +398,10 @@ class OctoPlaybackService : MediaLibraryService() {
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_READY) failedInARow = 0
+            if (playbackState == Player.STATE_READY) {
+                failedInARow = 0
+                learnLength()
+            }
             // Equalizer apps let go once the music has stopped, not at a pause.
             if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED || player.isRemote) audioSession.close()
             // Playing again after Close: a stop keeps its notification again.
@@ -394,6 +416,8 @@ class OctoPlaybackService : MediaLibraryService() {
             queueChanged.tryEmit(Unit)
             serverQueue.changed(snapshot())
             autoplay.check()
+            // The length is known once the song has opened.
+            learnLength()
         }
 
         // A pause keeps the server's copy of the queue exact.
