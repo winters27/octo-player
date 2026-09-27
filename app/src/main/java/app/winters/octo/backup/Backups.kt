@@ -110,6 +110,7 @@ class Backups @Inject constructor(
                 offsets = lyrics.offsets().mapNotNull { (id, ms) -> tracks[id]?.let { LyricsOffsetBackup(it.toKey(), ms) } }
                     .sortedBy { it.song.relinkKey },
                 look = lyricsLook.current(),
+                outputOffsets = lyrics.outputOffsets().toSortedMap(),
             ),
             offline = offline.prefs.first().toBackup(playlistNames),
             listenBrainz = listenBrainz.current().let { ListenBrainzBackup(it.enabled, it.sendPlays, it.nowPlaying) },
@@ -175,6 +176,7 @@ class Backups @Inject constructor(
         backup.lyrics?.let { lyrics.setKeepScreenOn(it.keepScreenOn) }
         backup.lyrics?.look?.let { lyricsLook.restore(it) }
         plan.lyricsOffsets.forEach { (id, ms) -> lyrics.setOffset(id, ms) }
+        backup.lyrics?.outputOffsets?.forEach { (output, ms) -> lyrics.setOutputOffset(output, ms) }
         // Playlists by name, with the ones made here, so pins can find them.
         val playlistIds = userDao.playlists().first().associate { it.name.trim().lowercase() to it.id }.toMutableMap()
         plan.playlists.filter { it.trackIds.isNotEmpty() || it.total == 0 }.forEach {

@@ -74,13 +74,16 @@ data class PinBackup(val kind: String, val item: HeldKey)
 @Serializable
 data class LyricsOffsetBackup(val song: SongKey, val offsetMs: Long)
 
-// Whether the screen stays on while lyrics show, each song's timing, and
-// how synced lyrics look (missing from older backups).
+// Whether the screen stays on while lyrics show, each song's timing, how
+// synced lyrics look (missing from older backups), and each sound output's
+// timing by output key, like "speaker" or "bluetooth:<address>" (missing
+// from older backups too).
 @Serializable
 data class LyricsBackup(
     val keepScreenOn: Boolean = true,
     val offsets: List<LyricsOffsetBackup> = emptyList(),
     val look: LyricsLook? = null,
+    val outputOffsets: Map<String, Long> = emptyMap(),
 )
 
 private val offlineDefaults = OfflinePrefs()
@@ -366,6 +369,7 @@ fun describeBackup(backup: Backup): List<String> = buildList {
     if (backup.favouriteArtists.isNotEmpty()) add(plural(backup.favouriteArtists.size, "favourite artist", "favourite artists"))
     if (backup.pins.isNotEmpty()) add(plural(backup.pins.size, "pin on Home", "pins on Home"))
     backup.lyrics?.offsets?.takeIf { it.isNotEmpty() }?.let { add("Lyrics timing for " + plural(it.size, "song", "songs")) }
+    backup.lyrics?.outputOffsets?.takeIf { it.isNotEmpty() }?.let { add("Lyrics timing for " + plural(it.size, "sound output", "sound outputs")) }
     backup.offline?.keptPlaylists?.takeIf { it.isNotEmpty() }?.let {
         add(plural(it.size, "playlist kept downloaded", "playlists kept downloaded"))
     }

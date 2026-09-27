@@ -245,6 +245,26 @@ class BackupTest {
     }
 
     @Test
+    fun eachOutputsLyricsTimingGoesThroughTheBackupAndBack() {
+        val backup = Backup(
+            lyrics = LyricsBackup(
+                offsets = listOf(LyricsOffsetBackup(SongKey("k1", "Nightcall", "Kavinsky", "OutRun"), 750)),
+                outputOffsets = mapOf("bluetooth:AA:BB:CC:DD:EE:FF" to -150L, "speaker" to 50L),
+            ),
+        )
+        val text = encodeBackup(backup)
+        assertEquals(BackupRead.Read(backup), decodeBackup(text))
+        assertTrue(text.contains("\"version\": 1"))
+        assertTrue("Lyrics timing for 2 sound outputs" in describeBackup(backup))
+        // A backup from before output timing reads with none, and says nothing of it.
+        val older = decodeBackup(
+            "{\"kind\": \"octo-settings\", \"version\": 1, \"lyrics\": {\"keepScreenOn\": false, \"offsets\": []}}",
+        ) as BackupRead.Read
+        assertEquals(emptyMap<String, Long>(), older.backup.lyrics?.outputOffsets)
+        assertTrue(describeBackup(older.backup).none { "sound output" in it })
+    }
+
+    @Test
     fun describesFavouritesPinsAndLyrics() {
         val lines = describeBackup(withFavourites)
         assertEquals("Settings: player, streaming, sound, library, lyrics", lines.first())

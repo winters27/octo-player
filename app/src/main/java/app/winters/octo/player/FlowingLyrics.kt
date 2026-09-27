@@ -75,6 +75,7 @@ import app.winters.octo.lyrics.engine.LineState
 import app.winters.octo.lyrics.engine.LineStatus
 import app.winters.octo.lyrics.engine.LyricEngine
 import app.winters.octo.lyrics.engine.LyricMapper
+import app.winters.octo.lyrics.engine.MaskShape
 import app.winters.octo.lyrics.engine.PRESSED_SCALE
 import app.winters.octo.lyrics.engine.StillDots
 import app.winters.octo.lyrics.engine.SyncLine
@@ -83,14 +84,15 @@ import app.winters.octo.lyrics.engine.arcPose
 import app.winters.octo.lyrics.engine.bobEm
 import app.winters.octo.lyrics.engine.dotsPose
 import app.winters.octo.lyrics.engine.emphasisFor
+import app.winters.octo.lyrics.engine.fillProgress
 import app.winters.octo.lyrics.engine.glyphPose
 import app.winters.octo.lyrics.engine.liftEm
 import app.winters.octo.lyrics.engine.maskLeft
 import app.winters.octo.lyrics.engine.maskShape
 import app.winters.octo.lyrics.engine.onScreen
 import app.winters.octo.lyrics.engine.shownBlur
-import app.winters.octo.lyrics.engine.wordProgress
 import app.winters.octo.lyrics.heardAt
+import app.winters.octo.lyrics.totalOffset
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.ui.common.asClock
 import app.winters.octo.ui.common.rememberSystemReduceMotion
@@ -146,6 +148,7 @@ fun FlowingLyrics(
     speed: () -> Float,
     timeEvents: Flow<Int>,
     offsetMs: Long,
+    outputOffsetMs: Long,
     look: LyricsLook,
     reduceMotion: Boolean,
     onSeek: (Long) -> Unit,
@@ -163,7 +166,10 @@ fun FlowingLyrics(
     }
     val position by rememberUpdatedState(positionMs)
     val rate by rememberUpdatedState(speed)
+    // The song's timing, and the output's, read afresh every frame: a new
+    // output (earbuds put in) moves the words on the next one.
     val offset by rememberUpdatedState(offsetMs)
+    val outputOffset by rememberUpdatedState(outputOffsetMs)
     val playing by rememberUpdatedState(now.isPlaying)
     val seek by rememberUpdatedState(onSeek)
 
@@ -215,6 +221,7 @@ fun FlowingLyrics(
                             playing,
                             rate().toDouble(),
                             offset,
+                            outputOffset,
                             prepare = { shown.prepare(it, lines[it], measurer) },
                             release = shown::release,
                         )
@@ -234,7 +241,9 @@ fun FlowingLyrics(
             val line = lines[index]
             // A line faded right out is not there to tap.
             if (line.isCredit || engine.states[index].opacity < 0.05) return@tap
-            val target = heardAt((line.start * 1000).roundToLong(), offset)
+            // Played from where it is heard, with both timings, so the line
+            // is just starting when the tap lands.
+            val target = heardAt((line.start * 1000).roundToLong(), totalOffset(offset, outputOffset))
             engine.tapped(index, target / 1000.0)
             seek(target)
             said = "Playing from ${clockText(target)}"
@@ -250,7 +259,7 @@ fun FlowingLyrics(
                         LineNode(engine, index, shown, textColor, calm, onTap = tap, onLongPress = { stamp = it })
                     }
                 }
-                stamp?.let { TimeStamp(engine, it, shown, offset) }
+                stamp?.let { TimeStamp(engine, it, shown, totalOffset(offset, outputOffset)) }
                 if (said.isNotEmpty()) {
                     Box(
                         Modifier.size(1.dp).semantics {
@@ -425,7 +434,8 @@ private fun DrawScope.drawWords(engine: LyricEngine, st: LineState, box: LineBox
             cold -> -(if (line.isBackground) BACKGROUND_LIFT_EM else LIFT_EM) * lift
             else -> liftEm(t, word.start, word.end, line.isBackground, lift)
         } * box.em
-        val progress = if (cold) 1.0 else wordProgress(t, word.start, word.end)
+        val shape = maskShape(wb.width.toDouble(), wb.rowHeight.toDouble(), look.fraction(LookDial.Fade))
+        val progress = if (cold) 1.0 else fillProgress(t, word.start, word.end, shape.edge)
         val glyphs = letters?.getOrNull(j)
         val bloom = glyphs?.let {
             emphasisFor(word.end - word.start, it.size, j >= lastGroup, look.fraction(LookDial.Emphasis), look.fraction(LookDial.Glow))
@@ -434,7 +444,7 @@ private fun DrawScope.drawWords(engine: LyricEngine, st: LineState, box: LineBox
         when {
             progress <= 0.0 -> paint(dark)
             progress >= 1.0 -> paint(bright)
-            else -> fillWord(wb, box.em, progress, look.fraction(LookDial.Fade), line.rtl, bright, dark, paint)
+            else -> fillWord(wb, box.em, progress, shape, line.rtl, bright, dark, paint)
         }
     }
 }
@@ -445,7 +455,7 @@ private fun DrawScope.fillWord(
     wb: WordBox,
     em: Float,
     progress: Double,
-    softness: Double,
+    shape: MaskShape,
     rtl: Boolean,
     bright: Float,
     dark: Float,
@@ -454,7 +464,6 @@ private fun DrawScope.fillWord(
     if (wb.width <= 0f) return
     val margin = 0.5f * em
     val area = Rect(wb.x - margin, wb.rowTop - margin, wb.x + wb.width + margin, wb.rowTop + wb.rowHeight + margin)
-    val shape = maskShape(wb.width.toDouble(), wb.rowHeight.toDouble(), softness)
     val left = maskLeft(progress, wb.x.toDouble(), wb.width.toDouble(), shape, rtl).toFloat()
     val right = left + (shape.size * wb.width).toFloat()
     val lit = Color.Black.copy(alpha = bright)

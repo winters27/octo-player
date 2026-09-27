@@ -29,9 +29,12 @@ const val MAX_FRAME_STEP_S = 0.05
 // apart, and tells a seek from ordinary time passing.
 //
 // `latency` is how long sound takes to be heard after the player reports
-// it, taken off the time. All times are in seconds, clock times in
-// nanoseconds.
-class LyricClock(private val latency: Double = 0.0) {
+// it, taken off the time: the output's lyrics timing, where minus shows the
+// words sooner. All times are in seconds, clock times in nanoseconds.
+class LyricClock(latency: Double = 0.0) {
+    var latency: Double = latency
+        private set
+
     private var anchorAt = 0.0
     private var anchorNanos = 0L
     private var anchorRate = 1.0
@@ -74,7 +77,18 @@ class LyricClock(private val latency: Double = 0.0) {
         anchorWanted = true
     }
 
+    // A new output, or its timing moved: the time shifts by the difference
+    // from the next frame, on a fresh anchor, and the shift is not taken for
+    // a seek, so the lines glide to it instead of jumping.
+    fun setLatency(seconds: Double) {
+        if (seconds == latency) return
+        lastTime = lastTime?.let { it - (seconds - latency) }
+        latency = seconds
+        anchorWanted = true
+    }
+
     // After a tap to seek: shows `target` until the player gets there.
+    // `target` is the player's time, so the latency comes off it as off any.
     fun holdSeek(target: Double, nowNanos: Long) {
         holdTarget = target
         holdSince = nowNanos
@@ -115,7 +129,7 @@ class LyricClock(private val latency: Double = 0.0) {
             if (abs(reported - target) <= SEEK_HOLD_NEAR_S || (nowNanos - holdSince) / 1e9 > SEEK_HOLD_MAX_S) {
                 holdTarget = null
             } else {
-                shown = target
+                shown = max(0.0, target - latency)
             }
         }
 

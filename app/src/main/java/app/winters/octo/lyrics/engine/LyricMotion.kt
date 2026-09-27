@@ -160,6 +160,25 @@ fun wordProgress(t: Double, start: Double, end: Double): Double = when {
     else -> (t - start) / (end - start)
 }
 
+// The fill sets off a little before the word, by as long as its soft edge
+// takes to cross half its own width. Without that, the middle of the edge
+// is still half an edge short of the word as it is sung, so the word lights
+// late. With it, the middle of the edge is on the word's first letter as the
+// word starts and the word is mostly lit by the middle of its time. The
+// mask's path and speed stay as they are. Long, narrow words lead by no
+// more than a quarter second. `edge` is the soft edge in word widths.
+const val FILL_LEAD_MAX_S = 0.25
+
+fun fillLead(start: Double, end: Double, edge: Double): Double {
+    val length = end - start
+    if (length <= 0.0 || edge <= 0.0) return 0.0
+    return min(FILL_LEAD_MAX_S, length * edge / (2 * (1 + edge)))
+}
+
+// How much of a word the fill has covered by `t`.
+fun fillProgress(t: Double, start: Double, end: Double, edge: Double): Double =
+    wordProgress(t + fillLead(start, end, edge), start, end)
+
 // ---- Easing ----
 
 // A CSS-style cubic-bezier timing curve from (0,0) to (1,1).
