@@ -21,7 +21,7 @@ class SettingsStoreTest {
             systemTitleBar = true,
             server = SavedServer("http://music.test/", "winters", AuthMode.LegacyPassword, "navidrome", "0.58.0", true, listOf("songLyrics:1")),
             appearance = Appearance(ambientGlow = false, glowStrength = 0.8f),
-            playback = PlaybackPrefs(volume = 0.3f, crossfadeSeconds = 6, gapless = false, replayGain = "album"),
+            playback = PlaybackPrefs(volume = 0.3f, crossfadeSeconds = 6, outputDevice = "usb:dac", speed = 1.25f, pitchSemitones = -2f),
             songSort = "Year:desc",
             sidePanel = "queue",
         )

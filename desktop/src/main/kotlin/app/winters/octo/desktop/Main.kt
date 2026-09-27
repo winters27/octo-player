@@ -24,6 +24,9 @@ import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import app.winters.octo.desktop.audio.CHECK_PLAY
+import app.winters.octo.desktop.audio.checkSound
+import app.winters.octo.desktop.audio.openPlayer
 import app.winters.octo.desktop.library.coverLoader
 import app.winters.octo.desktop.nav.KeyPress
 import app.winters.octo.desktop.nav.shortcutFor
@@ -86,7 +89,23 @@ fun main() {
     val icon = appIcon()
 
     application {
-        val app = remember { AppState(settings, accounts, http, CoroutineScope(SupervisorJob() + Dispatchers.Main), os) }
+        val app = remember {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+            var made: AppState? = null
+            // Server songs are signed with whoever is signed in when they queue.
+            val opened = openPlayer(settings, scope) { made?.connection?.client }
+            AppState(settings, accounts, http, scope, os, opened.player).also {
+                made = it
+                opened.problem?.let { problem -> it.notice = problem }
+            }
+        }
+        System.getProperty(CHECK_PLAY)?.let { path -> LaunchedEffect(Unit) {
+                checkSound(app, File(path)) {
+                    app.player.close()
+                    exitApplication()
+                }
+            }
+        }
         setSingletonImageLoaderFactory { context -> coverLoader(context, http, places.cache) }
         val spot = remember { placeWindow(settings.current.window, screenAreas()) }
         // Windows and Linux get the app's own glass frame unless the

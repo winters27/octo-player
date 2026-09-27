@@ -10,10 +10,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
-// A stand-in player with no sound, until the audio engine is wired in. It
-// keeps the queue exactly as the real player will, and keeps time from a
-// clock as if each song were playing, moving on at the end of each one. It
-// exists so every screen can be built and tested now.
+// A player with no sound, for tests and for a machine where the audio
+// engine cannot load. It keeps the queue exactly as the engine's player
+// does, and keeps time from a clock as if each song were playing, moving
+// on at the end of each one.
 class SilentPlayer(
     // Milliseconds from any fixed point; the tests pass their own.
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
@@ -24,7 +24,7 @@ class SilentPlayer(
 ) : DesktopPlayer {
     private val queue = PlayQueue(random)
     private val lock = Any()
-    private val system = OutputDevice("default", "System default")
+    private val system = OutputDevice(DEFAULT_OUTPUT, "System default")
 
     // Where the song was at `since`, and whether time runs from there.
     private var anchorMs = 0L
@@ -33,6 +33,7 @@ class SilentPlayer(
     private var shuffle = false
     private var repeat = RepeatMode.Off
     private var level = volume.coerceIn(0f, 1f)
+    private var stopAfter = false
 
     private val _state = MutableStateFlow(PlayerState(volume = level, output = system, outputs = listOf(system)))
     override val state: StateFlow<PlayerState> = _state
@@ -61,6 +62,21 @@ class SilentPlayer(
             var over = rawPosition() - duration
             while (running && over >= 0) {
                 val endedAt = clock() - over
+                if (stopAfter) {
+                    // Paused at the start of what would play next, as the
+                    // engine does; at the end of the queue it just ends.
+                    stopAfter = false
+                    val next = if (repeat == RepeatMode.One) queue.current else queue.nextPosition(repeat)
+                    running = false
+                    if (next != null) {
+                        queue.moveTo(next)
+                        anchorMs = 0
+                    } else {
+                        anchorMs = duration
+                    }
+                    publish()
+                    return
+                }
                 if (repeat == RepeatMode.One) {
                     anchorMs = 0
                     since = endedAt
@@ -209,7 +225,14 @@ class SilentPlayer(
     }
 
     override fun selectOutput(id: String) {
-        // One output only, until the engine lists the real ones.
+        // One output only: this player makes no sound.
+    }
+
+    override fun setStopAfterCurrent(on: Boolean) {
+        synchronized(lock) {
+            stopAfter = on
+            publish()
+        }
     }
 
     override fun close() {
@@ -235,6 +258,7 @@ class SilentPlayer(
             durationMs = durationMs(),
             output = system,
             outputs = listOf(system),
+            stopAfterCurrent = stopAfter,
         )
     }
 

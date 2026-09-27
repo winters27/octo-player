@@ -25,7 +25,6 @@ import app.winters.octo.desktop.ui.PageTitle
 import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.rememberListState
 import app.winters.octo.design.GlazeCapsule
-import app.winters.octo.design.GlazeSegments
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoSwitch
@@ -88,7 +87,6 @@ fun SettingsPage(app: AppState, visit: Visit) {
         }
         item(key = "playback") {
             Card("Playback") {
-                Txt("This build plays no sound yet. These are saved now and used once it does.", OctoType.caption, OctoColors.TextMuted, maxLines = 2)
                 Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     Txt("Crossfade", OctoType.bodySmall, modifier = Modifier.width(140.dp))
                     LineSlider(
@@ -98,18 +96,6 @@ fun SettingsPage(app: AppState, visit: Visit) {
                         live = true,
                     )
                     Txt(if (settings.playback.crossfadeSeconds == 0) "Off" else "${settings.playback.crossfadeSeconds} s", OctoType.caption, OctoColors.TextMuted, Modifier.width(44.dp))
-                }
-                Toggle("Gapless", "Songs that run into each other play without a pause.", settings.playback.gapless) { on ->
-                    app.settings.update { it.copy(playback = it.playback.copy(gapless = on)) }
-                }
-                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Txt("Even out loudness", OctoType.bodySmall)
-                        Txt("Uses the loudness your server measured for each song or album.", OctoType.caption, OctoColors.TextMuted, maxLines = 2)
-                    }
-                    GlazeSegments(listOf("off", "track", "album"), settings.playback.replayGain, { gainLabel(it) }, { mode ->
-                        app.settings.update { it.copy(playback = it.playback.copy(replayGain = mode)) }
-                    })
                 }
             }
         }
@@ -125,12 +111,6 @@ fun SettingsPage(app: AppState, visit: Visit) {
             }
         }
     }
-}
-
-private fun gainLabel(mode: String) = when (mode) {
-    "off" -> "Off"
-    "album" -> "By album"
-    else -> "By song"
 }
 
 // A group of settings on a glass card.

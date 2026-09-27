@@ -12,6 +12,7 @@ import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.SEEK_STEP_MS
 import app.winters.octo.desktop.nav.Shortcut
 import app.winters.octo.desktop.nav.VOLUME_STEP
+import app.winters.octo.desktop.player.DEFAULT_OUTPUT
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.desktop.search.Fetches
@@ -143,6 +144,12 @@ class AppState(
     fun setVolume(volume: Float) {
         player.setVolume(volume)
         settings.update { it.copy(playback = it.playback.copy(volume = volume.coerceIn(0f, 1f))) }
+    }
+
+    // Plays to another output, remembered for the next run.
+    fun selectOutput(id: String) {
+        player.selectOutput(id)
+        settings.update { it.copy(playback = it.playback.copy(outputDevice = id.takeUnless { it == DEFAULT_OUTPUT })) }
     }
 
     // Favourites, as server stars.

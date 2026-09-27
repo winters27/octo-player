@@ -62,15 +62,18 @@ data class Appearance(
     val glowStrength: Float = 0.5f,
 )
 
-// Playback settings. The audio engine reads them once it is in; until then
-// they are kept and shown, and the placeholder player keeps only volume.
+// Playback settings, read by the audio engine's player.
 @Serializable
 data class PlaybackPrefs(
     val volume: Float = 0.8f,
+    // 0 to 12 seconds; 0 is off. Albums played in order stay gapless.
     val crossfadeSeconds: Int = 0,
-    val gapless: Boolean = true,
-    // "off", "track" or "album".
-    val replayGain: String = "track",
+    // The device picked in the output menu, or null to follow the system.
+    val outputDevice: String? = null,
+    // Playback speed (0.5 to 2, pitch kept) and a pitch shift on top, in
+    // semitones.
+    val speed: Float = 1f,
+    val pitchSemitones: Float = 0f,
 )
 
 private val json = Json {

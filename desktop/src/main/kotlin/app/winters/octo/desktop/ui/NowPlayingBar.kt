@@ -174,7 +174,7 @@ private fun OutputButton(app: AppState) {
                 val state = app.player.state.value
                 MenuTitle("Play on")
                 state.outputs.forEach { device ->
-                    MenuRow(device.name, { app.player.selectOutput(device.id); close() }, OctoIcons.Speaker, detail = if (device.id == state.output?.id) "In use" else null)
+                    MenuRow(device.name, { app.selectOutput(device.id); close() }, OctoIcons.Speaker, detail = if (device.id == state.output?.id) "In use" else null)
                 }
             }
         }, size = 34.dp, iconSize = 19.dp)

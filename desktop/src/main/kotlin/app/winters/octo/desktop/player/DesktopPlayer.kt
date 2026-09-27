@@ -26,12 +26,22 @@ data class PlayerState(
     val outputs: List<OutputDevice> = emptyList(),
     // Why the last song could not play, in plain words, if it could not.
     val problem: String? = null,
+    // Waiting for sound (the network, or a song opening) while playing.
+    val buffering: Boolean = false,
+    // Pauses once the song playing ends, a single time.
+    val stopAfterCurrent: Boolean = false,
+    // How fast the music plays, 1 for as recorded. Lyrics follow it.
+    val speed: Float = 1f,
+    // The device sound goes to now; while following the system's default,
+    // `output` is the default and this says which device that is.
+    val playingOn: OutputDevice? = null,
 )
 
 // What the desktop app needs from whatever plays its music. The screens
-// only ever talk to this. Phase one is SilentPlayer, which keeps time and
-// the queue with no sound; the Rust audio engine takes its place behind the
-// same calls, and has to pass the same contract tests.
+// only ever talk to this. EnginePlayer (audio/) plays through the Rust
+// audio engine; SilentPlayer keeps time and the queue with no sound, for
+// tests and machines where the engine cannot load. Both pass the same
+// contract tests (DesktopPlayerContract).
 interface DesktopPlayer : AutoCloseable {
     val state: StateFlow<PlayerState>
 
@@ -79,8 +89,16 @@ interface DesktopPlayer : AutoCloseable {
 
     fun setVolume(volume: Float)
 
+    // Plays to one of `outputs`, or follows the system's default with
+    // DEFAULT_OUTPUT.
     fun selectOutput(id: String)
+
+    // Pauses at the end of the song playing, once.
+    fun setStopAfterCurrent(on: Boolean) {}
 }
+
+// The output that follows whatever the system uses.
+const val DEFAULT_OUTPUT = "default"
 
 // How far into a song "Previous" restarts it instead of going back.
 const val RESTART_AFTER_MS = 3_000L

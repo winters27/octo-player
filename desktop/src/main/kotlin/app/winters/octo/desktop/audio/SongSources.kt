@@ -1,0 +1,71 @@
+package app.winters.octo.desktop.audio
+
+import app.winters.octo.audio.HttpHeader
+import app.winters.octo.audio.QueueItem
+import app.winters.octo.audio.ReplayGainInfo
+import app.winters.octo.desktop.player.QueueEntry
+import app.winters.octo.subsonic.Song
+import app.winters.octo.subsonic.SubsonicClient
+
+// Where the engine fetches a song from: a file path, or a signed stream
+// address, with any extra request headers it needs.
+data class SongAddress(val source: String, val headers: Map<String, String> = emptyMap())
+
+// Turns a song into the address the engine plays it from, or null when it
+// cannot be played now (signed out, say).
+fun interface SongSources {
+    fun addressOf(song: Song): SongAddress?
+}
+
+// Songs from the signed-in server, as the phone streams them: the file as
+// it is ("format=raw", the original quality), at an address signed the way
+// every other call is. The engine reuses the address for range requests
+// and reconnects, so it is signed when the song is queued.
+class ServerSongs(private val client: () -> SubsonicClient?) : SongSources {
+    override fun addressOf(song: Song): SongAddress? {
+        val server = client() ?: return null
+        return SongAddress(server.url("stream", mapOf("id" to song.id, "format" to "raw")).toString())
+    }
+}
+
+// Songs whose id starts with this are files on this computer, the rest of
+// the id being the path.
+const val LOCAL_PREFIX = "local:"
+
+// Files on this computer by path, and everything else from the server.
+class LocalOrServer(private val server: SongSources) : SongSources {
+    override fun addressOf(song: Song): SongAddress? =
+        if (song.id.startsWith(LOCAL_PREFIX)) SongAddress(song.id.removePrefix(LOCAL_PREFIX)) else server.addressOf(song)
+}
+
+// The engine's name for a queue entry, handed back in its events.
+fun itemId(key: Long): String = "q:$key"
+
+fun keyOfItem(id: String?): Long? = id?.removePrefix("q:")?.toLongOrNull()
+
+// Disc and track in one number, for telling an album played in order.
+fun albumOrder(song: Song): Int? = song.track?.let { (song.discNumber ?: 1) * 1000 + it }
+
+// A queue entry as the engine takes it. The length always goes along:
+// without it the engine cannot plan a crossfade and joins songs gaplessly
+// instead. A song that cannot be reached gets an address that fails, so
+// the engine reports it and moves on, as it does for any broken file.
+fun queueItem(entry: QueueEntry, sources: SongSources): QueueItem {
+    val song = entry.song
+    val address = sources.addressOf(song)
+    val gain = song.replayGain?.let {
+        if (it.trackGain == null && it.albumGain == null) null else ReplayGainInfo(it.trackGain, it.trackPeak, it.albumGain, it.albumPeak)
+    }
+    return QueueItem(
+        id = itemId(entry.key),
+        source = address?.source ?: UNREACHABLE,
+        albumId = song.albumId,
+        albumOrder = albumOrder(song),
+        durationMs = song.duration.takeIf { it > 0 }?.let { (it * 1000L).toULong() },
+        replayGain = gain,
+        headers = address?.headers.orEmpty().map { (name, value) -> HttpHeader(name, value) },
+    )
+}
+
+// An address no file has, for a song with nowhere to play from.
+private const val UNREACHABLE = "octo-unreachable:"
