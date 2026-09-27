@@ -21,8 +21,8 @@ enum class BackgroundMode {
     Classic,
 }
 
-// The background's settings. The brightness cap and saturation are
-// percentages, the contrast a factor, and the frame rate a limit.
+// The background's settings. The brightness cap, saturation and drift speed
+// are percentages, the contrast a factor, and the frame rate a limit.
 @Serializable
 data class BackgroundPrefs(
     val mode: BackgroundMode = BackgroundMode.Default,
@@ -31,6 +31,9 @@ data class BackgroundPrefs(
     val contrast: Float = 1.3f,
     val useBpm: Boolean = true,
     val fps: Int = 60,
+    // How fast it drifts, as a share of the full pace. Low by default, so it
+    // reads as a slow ambience rather than an animation.
+    val speed: Int = 25,
 ) {
     // Held to the ranges the settings offer, for values read back.
     fun sane(): BackgroundPrefs = copy(
@@ -38,6 +41,7 @@ data class BackgroundPrefs(
         saturation = saturation.coerceIn(SaturationRange),
         contrast = contrast.coerceIn(ContrastRange),
         fps = fps.takeIf { it in FpsChoices } ?: 60,
+        speed = speed.coerceIn(SpeedRange),
     )
 
     val tuning: WashTuning get() = WashTuning(contrast, saturation / 100f, brightnessCap / 100f)
@@ -51,6 +55,7 @@ val BrightnessCapRange = 20..100
 val SaturationRange = 0..300
 val ContrastRange = 0.5f..2f
 val FpsChoices = listOf(30, 60, 90, 120)
+val SpeedRange = 5..100
 
 // The player's colours with the words' colour decided for this background:
 // the light or dark test on the adjusted main colour, or white over the

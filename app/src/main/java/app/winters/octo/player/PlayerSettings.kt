@@ -114,6 +114,7 @@ private val BACKGROUND_SATURATION = intPreferencesKey("immersive_bg_saturation")
 private val BACKGROUND_CONTRAST = floatPreferencesKey("immersive_bg_contrast")
 private val BACKGROUND_USE_BPM = booleanPreferencesKey("immersive_bg_use_bpm")
 private val BACKGROUND_FPS = intPreferencesKey("immersive_bg_fps")
+private val BACKGROUND_SPEED = intPreferencesKey("immersive_bg_speed")
 private val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
 
 // A saved choice, or the default when nothing (or something unknown) is saved.
@@ -133,6 +134,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
                 contrast = stored[BACKGROUND_CONTRAST] ?: defaults.background.contrast,
                 useBpm = stored[BACKGROUND_USE_BPM] ?: defaults.background.useBpm,
                 fps = stored[BACKGROUND_FPS] ?: defaults.background.fps,
+                speed = stored[BACKGROUND_SPEED] ?: defaults.background.speed,
             ).sane(),
             crossfade = stored[CROSSFADE] ?: defaults.crossfade,
             crossfadeSeconds = (stored[CROSSFADE_SECONDS] ?: defaults.crossfadeSeconds).coerceIn(CrossfadeSecondsRange),
@@ -309,4 +311,5 @@ private fun MutablePreferences.putBackground(prefs: BackgroundPrefs) {
     this[BACKGROUND_CONTRAST] = prefs.contrast
     this[BACKGROUND_USE_BPM] = prefs.useBpm
     this[BACKGROUND_FPS] = prefs.fps
+    this[BACKGROUND_SPEED] = prefs.speed
 }

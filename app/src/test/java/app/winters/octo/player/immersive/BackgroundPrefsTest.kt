@@ -17,16 +17,19 @@ class BackgroundPrefsTest {
         assertEquals(1.3f, prefs.contrast)
         assertEquals(true, prefs.useBpm)
         assertEquals(60, prefs.fps)
+        // Slower than the full pace, so it reads as an ambience.
+        assertEquals(25, prefs.speed)
         assertEquals(WashTuning(1.3f, 1.8f, 0.5f), prefs.tuning)
     }
 
     @Test
     fun oddSavedValuesAreHeldToTheRanges() {
-        val odd = BackgroundPrefs(brightnessCap = 5, saturation = 900, contrast = 9f, fps = 45).sane()
+        val odd = BackgroundPrefs(brightnessCap = 5, saturation = 900, contrast = 9f, fps = 45, speed = 0).sane()
         assertEquals(20, odd.brightnessCap)
         assertEquals(300, odd.saturation)
         assertEquals(2f, odd.contrast)
         assertEquals(60, odd.fps)
+        assertEquals(5, odd.speed)
     }
 
     @Test

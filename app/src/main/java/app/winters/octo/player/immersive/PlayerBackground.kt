@@ -110,7 +110,7 @@ fun PlayerBackground(
             val cover by vm.cover.collectAsStateWithLifecycle()
             val bpm by vm.bpm.collectAsStateWithLifecycle()
             val still = !prefs.liveBackground || prefs.reduceMotion || rememberSystemReduceMotion()
-            ImmersiveWash(cover, paceBpm(bpm, background.useBpm), background.fps, moving = !still, dolly = dolly)
+            ImmersiveWash(cover, paceBpm(bpm, background.useBpm), background.fps, background.speed / 100f, moving = !still, dolly = dolly)
         }
         BackgroundMode.Artwork -> {
             val cover by vm.cover.collectAsStateWithLifecycle()

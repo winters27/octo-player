@@ -15,6 +15,7 @@ import app.winters.octo.player.immersive.BackgroundPrefs
 import app.winters.octo.player.immersive.BrightnessCapRange
 import app.winters.octo.player.immersive.ContrastRange
 import app.winters.octo.player.immersive.FpsChoices
+import app.winters.octo.player.immersive.SpeedRange
 import app.winters.octo.player.immersive.SaturationRange
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
@@ -96,6 +97,9 @@ fun PlayerBackgroundSection(vm: PlayerBackgroundViewModel = hiltViewModel()) {
             ContrastSlider(background.contrast) { value -> vm.update { it.copy(contrast = value) } }
         }
         if (background.mode == BackgroundMode.Default && washes) {
+            PercentSlider(SettingsIndex.BackgroundSpeed, background.speed, SpeedRange, step = 5) { value ->
+                vm.update { it.copy(speed = value) }
+            }
             SwitchRow(
                 SettingsIndex.BackgroundUseBpm,
                 checked = background.useBpm,

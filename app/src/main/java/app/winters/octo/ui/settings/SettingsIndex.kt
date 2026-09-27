@@ -157,6 +157,10 @@ object SettingsIndex {
         "immersive_bg_use_bpm", SettingsPage.Appearance, "Move with the beat", "The background drifts at the song's pace",
         listOf("bpm", "beats", "background", "motion"), section = "Player",
     )
+    val BackgroundSpeed = add(
+        "immersive_bg_speed", SettingsPage.Appearance, "Drift speed", "How fast the background moves",
+        listOf("background", "slow", "fast", "motion", "speed", "ambience"), section = "Player",
+    )
     val BackgroundFps = add(
         "immersive_bg_fps", SettingsPage.Appearance, "Frame rate", "How smoothly the background moves",
         listOf("fps", "battery", "smooth", "background"), section = "Player",

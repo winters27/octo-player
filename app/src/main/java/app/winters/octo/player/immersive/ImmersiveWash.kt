@@ -43,9 +43,9 @@ private const val FirstFrameWaitNanos = 1_500_000_000L
 // others. `moving` off freezes the motion (a still wash) while covers
 // still fade into each other.
 @Composable
-fun ImmersiveWash(cover: WashCover?, bpm: Float, fpsLimit: Int, moving: Boolean, dolly: () -> Float) {
+fun ImmersiveWash(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Float, moving: Boolean, dolly: () -> Float) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        WashCanvas(cover, bpm, fpsLimit, moving, dolly)
+        WashCanvas(cover, bpm, fpsLimit, speed, moving, dolly)
     } else {
         StillArtwork(cover, dolly)
     }
@@ -60,7 +60,7 @@ private class WashCovers {
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @Composable
-private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, moving: Boolean, dolly: () -> Float) {
+private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Float, moving: Boolean, dolly: () -> Float) {
     val renderer = remember { WashRenderer() }
     DisposableEffect(renderer) { onDispose { renderer.release() } }
     val motion = remember { WashMotion() }
@@ -103,6 +103,7 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, moving: Boo
         targetFps(if (focused) WashVisibility.Focused else WashVisibility.Unfocused, fpsLimit, powerSave),
     )
     val tempo by rememberUpdatedState(bpm)
+    val pace by rememberUpdatedState(speed)
     val rate = remember { FrameRate(target) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 
@@ -119,7 +120,7 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, moving: Boo
                     if (frameDue(elapsed, rate.limit)) {
                         last = now
                         val limit = rate.ease(target)
-                        if (moving) motion.step(frameFactor(tempo, limit) * framesElapsed(elapsed, limit), tempo, elapsed / 1e9f)
+                        if (moving) motion.step(frameFactor(tempo, limit) * framesElapsed(elapsed, limit) * pace, tempo, elapsed / 1e9f)
                         fade.advance(elapsed / 1e6f)
                         frames.intValue++
                     }
