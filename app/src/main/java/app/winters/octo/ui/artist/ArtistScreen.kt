@@ -56,6 +56,8 @@ import app.winters.octo.design.OctoType
 import app.winters.octo.discovery.ArtistExtras
 import app.winters.octo.discovery.ArtistExtrasSource
 import app.winters.octo.discovery.Discovery
+import app.winters.octo.discovery.DownloadState
+import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.OnlineArtist
 import app.winters.octo.discovery.SimilarArtist
 import app.winters.octo.listening.FavouriteKind
@@ -70,6 +72,7 @@ import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistCircle
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.BackButton
+import app.winters.octo.ui.common.CHECK_SETTLE_MS
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.DownloadButton
 import app.winters.octo.ui.common.FavouriteHeart
@@ -96,11 +99,14 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
@@ -119,6 +125,7 @@ class ArtistViewModel @AssistedInject constructor(
     private val playback: PlaybackConnection,
     private val discovery: Discovery,
     private val feedback: Feedback,
+    downloads: Downloads,
 ) : ViewModel() {
     val artist: StateFlow<ArtistEntity?> =
         dao.artist(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -189,6 +196,18 @@ class ArtistViewModel @AssistedInject constructor(
                 playback.playTracks(found.map { it.id }, 0)
             } else {
                 feedback.show("No similar songs found")
+            }
+        }
+    }
+
+    init {
+        // A top song downloaded from here turns into a library song once
+        // its check has landed.
+        viewModelScope.launch {
+            downloads.arrived.drop(1).collectLatest {
+                delay(CHECK_SETTLE_MS)
+                val top = extras.value?.topSongs.orEmpty()
+                if (top.any { isFind(it.id) && downloads.state(it.id) == DownloadState.Done }) reloadExtras()
             }
         }
     }

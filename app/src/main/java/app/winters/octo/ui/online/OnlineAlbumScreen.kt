@@ -23,6 +23,7 @@ import app.winters.octo.discovery.OnlineAlbumPage
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.ui.album.AlbumHeader
 import app.winters.octo.ui.common.BackButton
+import app.winters.octo.ui.common.CHECK_SETTLE_MS
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.DownloadButton
 import app.winters.octo.ui.common.LoadState
@@ -40,11 +41,14 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -70,11 +74,26 @@ class OnlineAlbumViewModel @AssistedInject constructor(
 
     init {
         reload()
+        // A song from here that joins the library turns into a library song
+        // on the page, once its check has landed.
+        viewModelScope.launch {
+            downloads.arrived.drop(1).collectLatest {
+                delay(CHECK_SETTLE_MS)
+                val songs = (_page.value as? LoadState.Ready)?.data?.songs.orEmpty()
+                if (songs.any { isFind(it.id) && downloads.state(it.id) == DownloadState.Done }) refresh()
+            }
+        }
     }
 
     fun reload() {
         _page.value = LoadState.Loading
         viewModelScope.launch { _page.value = loadOnline { discovery.album(id) } }
+    }
+
+    // Asks the server again, keeping the page as it is if it cannot answer.
+    private suspend fun refresh() {
+        val fresh = loadOnline { discovery.album(id) }
+        if (fresh is LoadState.Ready) _page.value = fresh
     }
 
     // Plays the album from one of its songs.
@@ -84,10 +103,10 @@ class OnlineAlbumViewModel @AssistedInject constructor(
 
     // Has the server download the whole album into the library.
     fun download() {
-        val songs = (page.value as? LoadState.Ready)?.data?.songs ?: return
+        val found = (page.value as? LoadState.Ready)?.data ?: return
         asked.value = true
         viewModelScope.launch {
-            if (!downloads.requestAlbum(id, songs)) asked.value = false
+            if (!downloads.requestAlbum(id, found.songs, found.album.title)) asked.value = false
         }
     }
 

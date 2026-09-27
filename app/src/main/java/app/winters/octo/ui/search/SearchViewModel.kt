@@ -14,6 +14,7 @@ import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.discovery.Discovered
 import app.winters.octo.discovery.Discovery
+import app.winters.octo.discovery.Downloads
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.ui.common.LoadState
@@ -89,18 +90,21 @@ class SearchViewModel @Inject constructor(
     private val playback: PlaybackConnection,
     private val recents: RecentSearches,
     playlists: PlaylistStore,
+    downloads: Downloads,
 ) : ViewModel() {
     var text by mutableStateOf("")
     var filter by mutableStateOf(SearchFilter.All)
 
     // Null until at least two characters are typed. One more than shown is
-    // asked for, to know whether there are more.
+    // asked for, to know whether there are more. Asked again when a
+    // download joins the library, so the song shows up among the results.
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     val results: StateFlow<SearchResults?> = combine(
         snapshotFlow { text }.debounce(150).map { searchKey(it) }.distinctUntilChanged(),
         snapshotFlow { filter },
         playlists.playlists,
-    ) { q, filter, lists -> Triple(q, filter, lists) }
+        downloads.arrived,
+    ) { q, filter, lists, _ -> Triple(q, filter, lists) }
         .mapLatest { (q, filter, lists) ->
             if (q.length < 2) {
                 null
