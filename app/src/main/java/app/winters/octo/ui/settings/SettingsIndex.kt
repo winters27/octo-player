@@ -133,9 +133,33 @@ object SettingsIndex {
         "The glow follows the album or artist on the page",
         listOf("glow", "album", "artist", "cover"), section = "Where it shows",
     )
+    val PlayerBackground = add(
+        "immersive_background", SettingsPage.Appearance, "Player background", "What fills the player behind the lyrics",
+        listOf("immersive", "wash", "artwork", "cover", "colour", "color", "blur", "classic", "mesh"), section = "Player",
+    )
     val LiveBackground = add(
-        "live_background", SettingsPage.Appearance, "Live background", "Moving colours behind the player",
-        listOf("player", "animated", "moving", "colours", "blur"), section = "Player",
+        "live_background", SettingsPage.Appearance, "Live background", "The player's background drifting slowly",
+        listOf("player", "animated", "moving", "motion", "colours", "blur"), section = "Player",
+    )
+    val BackgroundBrightnessCap = add(
+        "immersive_bg_brightness_cap", SettingsPage.Appearance, "Brightness cap", "How bright the background may get, so words stay readable",
+        listOf("background", "dim", "white", "readable"), section = "Player",
+    )
+    val BackgroundSaturation = add(
+        "immersive_bg_saturation", SettingsPage.Appearance, "Saturation", "How vivid the background's colours are",
+        listOf("background", "vivid", "colours", "color"), section = "Player",
+    )
+    val BackgroundContrast = add(
+        "immersive_bg_contrast", SettingsPage.Appearance, "Contrast", "How far the background's light and dark parts are pushed apart",
+        listOf("background"), section = "Player",
+    )
+    val BackgroundUseBpm = add(
+        "immersive_bg_use_bpm", SettingsPage.Appearance, "Move with the beat", "The background drifts at the song's pace",
+        listOf("bpm", "beats", "background", "motion"), section = "Player",
+    )
+    val BackgroundFps = add(
+        "immersive_bg_fps", SettingsPage.Appearance, "Frame rate", "How smoothly the background moves",
+        listOf("fps", "battery", "smooth", "background"), section = "Player",
     )
 
     // Library
