@@ -64,6 +64,7 @@ import app.winters.octo.ui.common.PressSpot
 import app.winters.octo.ui.common.pressSpot
 import app.winters.octo.ui.common.NowMark
 import app.winters.octo.ui.favourites.FavouritesScreen
+import app.winters.octo.ui.favourites.openingSegment
 import app.winters.octo.ui.folders.FoldersScreen
 import app.winters.octo.ui.genre.GenreScreen
 import app.winters.octo.ui.genre.GenresScreen
@@ -79,7 +80,6 @@ import app.winters.octo.ui.menu.SongMenuState
 import app.winters.octo.ui.offline.DownloadsScreen
 import app.winters.octo.ui.online.OnlineAlbumScreen
 import app.winters.octo.ui.online.OnlineArtistScreen
-import app.winters.octo.ui.playlist.LikedScreen
 import app.winters.octo.ui.playlist.LocalPlaylistSheets
 import app.winters.octo.ui.playlist.PlaylistScreen
 import app.winters.octo.ui.playlist.PlaylistSheets
@@ -223,8 +223,9 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             entry<GenreRoute> { GenreScreen(it.name, open, back) }
                             entry<FoldersRoute> { FoldersScreen(back) }
                             entry<PlaylistsRoute> { PlaylistsScreen(open, back) }
-                            entry<LikedRoute> { LikedScreen(back) }
-                            entry<FavouritesRoute> { FavouritesScreen(open, back, openOnAlbums = it.albums) }
+                            // Liked songs and Favourites are one page; the way in picks the part.
+                            entry<LikedRoute> { FavouritesScreen(open, back, openingSegment(it)) }
+                            entry<FavouritesRoute> { FavouritesScreen(open, back, openingSegment(it)) }
                             entry<DownloadsRoute> { DownloadsScreen(back) }
                             entry<PlaylistRoute> { PlaylistScreen(it.id, back) }
                             entry<SignInRoute> { SignInScreen(back) }

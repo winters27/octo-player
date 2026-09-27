@@ -1,5 +1,6 @@
 package app.winters.octo.ui.favourites
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,10 +17,13 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -29,6 +33,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -41,6 +46,7 @@ import app.winters.octo.catalog.FavouritesDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
+import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.sort.SongScope
 import app.winters.octo.sort.SortList
@@ -53,9 +59,12 @@ import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistRow
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
+import app.winters.octo.ui.common.Feedback
+import app.winters.octo.ui.common.LocalSongSelection
 import app.winters.octo.ui.common.Pickable
 import app.winters.octo.ui.common.PlayRow
 import app.winters.octo.ui.common.Refreshable
+import app.winters.octo.ui.common.RemoveBackground
 import app.winters.octo.ui.common.Segmented
 import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.SongRow
@@ -65,6 +74,7 @@ import app.winters.octo.ui.common.TopOnNewOrder
 import app.winters.octo.ui.common.songs
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
+import app.winters.octo.ui.playlist.KeepLikedDownloaded
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -79,9 +89,10 @@ class FavouritesViewModel @Inject constructor(
     private val sorting: SortSettings,
     private val library: SortedLibrary,
     private val playback: PlaybackConnection,
+    private val likes: LikeStore,
+    private val feedback: Feedback,
 ) : ViewModel() {
-    // Liked songs, the same list in the same order as the Liked songs page.
-    // Null until first read.
+    // Liked songs, in the Liked songs order. Null until first read.
     val songs: StateFlow<Sorted<TrackEntity>?> =
         library.songs(SortList.Liked, SongScope.Liked).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
@@ -109,29 +120,46 @@ class FavouritesViewModel @Inject constructor(
         viewModelScope.launch { sorting.set(SortList.Favourites, order) }
     }
 
-    // Songs share the Liked songs page's order, so the two always agree.
+    // Songs keep their own order, the one saved for Liked songs.
     fun setSongOrder(order: SortOrder) {
         viewModelScope.launch { library.setOrder(SortList.Liked, order) }
+    }
+
+    // Unlikes a song, with an Undo that likes it again in the same place.
+    fun unlike(trackId: String) = likes.unlike(trackId) { row ->
+        feedback.undoable("Removed from Liked songs") { likes.restore(row) }
     }
 }
 
 private val Segments = FavouriteSegment.entries.map { it.label }
 
+private val RowShape = RoundedCornerShape(12.dp)
+
+// Where a new song order scrolls back to: the first song, after the play
+// line and the keep-downloaded line.
+private const val FIRST_SONG = 2
+
+// How to heart a song, shown while there are none.
+private const val SONGS_EMPTY =
+    "No liked songs yet. Tap the heart in the player to add the song that is playing, " +
+        "or long press any song and choose Add to Liked songs."
+
 // Liked songs, favourite albums and favourite artists, each under its own
-// segment. Songs keep the Liked songs order; albums and artists share one
-// sort: when they became favourites, or by name. The page opens on liked
-// songs when there are any (firstSegment), or on the albums when asked.
+// segment. This is the one home for hearted songs. Songs keep the Liked
+// songs order; albums and artists share one sort: when they became
+// favourites, or by name. The page opens on the part asked for (`openOn`,
+// see openingSegment), otherwise on liked songs when there are any.
 @Composable
 fun FavouritesScreen(
     onOpen: (NavKey) -> Unit,
     onBack: () -> Unit,
-    openOnAlbums: Boolean = false,
+    openOn: FavouriteSegment? = null,
     vm: FavouritesViewModel = hiltViewModel(),
 ) {
     val songs by vm.songs.collectAsStateWithLifecycle()
     val albums by vm.albums.collectAsStateWithLifecycle()
     val artists by vm.artists.collectAsStateWithLifecycle()
-    var chosen by rememberSaveable { mutableStateOf(if (openOnAlbums) FavouriteSegment.Albums else null) }
+    var chosen by rememberSaveable { mutableStateOf(openOn) }
     // The segment to open on is picked once all three are read, then kept,
     // so the page never jumps while it is open.
     val ready = songs != null && albums != null && artists != null
@@ -162,7 +190,7 @@ fun FavouritesScreen(
                     Modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp),
                 )
                 when (segment) {
-                    FavouriteSegment.Songs -> FavouriteSongs(songs, vm::playSongs, vm::shuffleSongs)
+                    FavouriteSegment.Songs -> FavouriteSongs(songs, vm::playSongs, vm::shuffleSongs, vm::unlike)
                     FavouriteSegment.Albums -> FavouriteAlbums(albums, onOpen)
                     FavouriteSegment.Artists -> FavouriteArtists(artists, onOpen)
                 }
@@ -172,24 +200,63 @@ fun FavouritesScreen(
     }
 }
 
+// Liked songs: play and shuffle, the keep-downloaded switch, then the songs
+// in their order. Swipe a song left to unlike it, with an Undo; long press
+// to pick several.
 @Composable
-private fun FavouriteSongs(list: Sorted<TrackEntity>?, onPlay: (Int) -> Unit, onShuffle: () -> Unit) {
-    Shown(list, "Heart a song in the player, or long press it and choose Add to Liked songs, to keep it here.") { sorted ->
-        val state = rememberLazyListState()
-        TopOnNewOrder(sorted.order, state)
-        val pickable = remember(sorted.items) { sorted.items.map { Pickable(it.id, it) } }
-        SelectableSongs(pickable) {
-            LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = 4.dp, bottom = 140.dp)) {
-                item(key = "play") {
+private fun FavouriteSongs(
+    list: Sorted<TrackEntity>?,
+    onPlay: (Int) -> Unit,
+    onShuffle: () -> Unit,
+    onUnlike: (String) -> Unit,
+) {
+    if (list == null) {
+        Loading()
+        return
+    }
+    val tracks = list.items
+    // The rows as drawn: a swiped one goes at once, the list catches up.
+    var rows by remember(tracks) { mutableStateOf(tracks) }
+    val state = rememberLazyListState()
+    TopOnNewOrder(list.order, state, top = FIRST_SONG)
+    val pickable = remember(rows) { rows.map { Pickable(it.id, it) } }
+    SelectableSongs(pickable) {
+        val selecting = LocalSongSelection.current?.active == true
+        LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = 4.dp, bottom = 140.dp)) {
+            item(key = "play") {
+                if (tracks.isNotEmpty()) {
                     PlayRow(
-                        details = songs(sorted.items.size),
+                        details = songs(tracks.size),
                         onPlay = { onPlay(0) },
                         onShuffle = onShuffle,
                         modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
                     )
                 }
-                itemsIndexed(sorted.items, key = { _, track -> track.id }) { index, track ->
-                    Box(Modifier.animateItem()) { SongRow(track) { onPlay(index) } }
+            }
+            item(key = "keep") { KeepLikedDownloaded(tracks) }
+            if (rows.isEmpty()) {
+                item(key = "empty") { EmptyText(SONGS_EMPTY) }
+            }
+            items(rows, key = { it.id }) { track ->
+                val swipe = rememberSwipeToDismissBoxState()
+                SwipeToDismissBox(
+                    state = swipe,
+                    modifier = Modifier.animateItem(),
+                    enableDismissFromStartToEnd = false,
+                    gesturesEnabled = !selecting,
+                    onDismiss = {
+                        rows = rows - track
+                        onUnlike(track.id)
+                    },
+                    backgroundContent = { RemoveBackground(swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart, RowShape) },
+                ) {
+                    // Solid under the row while it moves, so it hides what it
+                    // passes over; clear at rest, so the page's glow shows.
+                    val swiping = swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart
+                    Box(Modifier.background(if (swiping) OctoColors.Background else Color.Transparent, RowShape)) {
+                        // A swipe left unlikes here, so it does not also play next.
+                        SongRow(track, swipeToPlayNext = false) { onPlay(tracks.indexOf(track)) }
+                    }
                 }
             }
         }
@@ -233,14 +300,20 @@ private fun FavouriteArtists(artists: Sorted<ArtistEntity>?, onOpen: (NavKey) ->
 private fun <T> Shown(sorted: Sorted<T>?, empty: String, content: @Composable (Sorted<T>) -> Unit) {
     when {
         sorted == null -> Loading()
-        sorted.items.isEmpty() -> Text(
-            empty,
-            style = OctoType.bodySmall,
-            color = OctoColors.TextMuted,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-        )
+        sorted.items.isEmpty() -> EmptyText(empty)
         else -> content(sorted)
     }
+}
+
+// The quiet note in place of an empty list, saying how to add to it.
+@Composable
+private fun EmptyText(text: String) {
+    Text(
+        text,
+        style = OctoType.bodySmall,
+        color = OctoColors.TextMuted,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+    )
 }
 
 @Composable
