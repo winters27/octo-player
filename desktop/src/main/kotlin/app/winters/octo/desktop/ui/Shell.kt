@@ -61,6 +61,7 @@ import app.winters.octo.desktop.pages.SearchPage
 import app.winters.octo.desktop.pages.SettingsPage
 import app.winters.octo.desktop.pages.SignInPage
 import app.winters.octo.desktop.pages.SongsPage
+import app.winters.octo.desktop.pages.SoundPage
 import app.winters.octo.desktop.window.Frame
 import app.winters.octo.desktop.window.MacLightsRoom
 import app.winters.octo.desktop.window.ResizeEdges
@@ -221,6 +222,7 @@ private fun PageHost(app: AppState) {
             Page.Favourites -> FavouritesPage(app, visit)
             Page.History -> HistoryPage(app, visit)
             Page.Settings -> SettingsPage(app, visit)
+            Page.Sound -> SoundPage(app, visit)
             is Page.Album -> AlbumPage(app, visit, page.id)
             is Page.Artist -> ArtistPage(app, visit, page.id, page.name)
             is Page.Genre -> GenrePage(app, visit, page.name)

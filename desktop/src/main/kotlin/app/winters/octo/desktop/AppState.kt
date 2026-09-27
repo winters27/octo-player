@@ -6,7 +6,9 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.FocusRequester
+import app.winters.octo.desktop.audio.SoundTarget
 import app.winters.octo.desktop.library.LibraryStore
+import app.winters.octo.desktop.sound.SoundController
 import app.winters.octo.desktop.nav.Navigator
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.SEEK_STEP_MS
@@ -55,6 +57,9 @@ class AppState(
     val os: DesktopOs,
     val player: DesktopPlayer = SilentPlayer(scope = scope, volume = settings.current.playback.volume),
 ) {
+    // The Sound page's settings, kept on the engine; none for the silent player.
+    val sound: SoundController? = (player as? SoundTarget)?.let { SoundController(it, settings, scope) }
+
     val navigator = Navigator()
     val popups = PopupHost()
     val searchFocus = FocusRequester()

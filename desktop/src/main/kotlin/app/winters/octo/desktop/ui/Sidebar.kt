@@ -82,6 +82,7 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
                 }
             }
             Separator(Modifier.padding(vertical = 6.dp))
+            NavRow("Sound", OctoIcons.Sound, lit == SidebarItem.Top(Page.Sound)) { app.navigator.go(Page.Sound) }
             NavRow("Settings", OctoIcons.Settings, lit == SidebarItem.Top(Page.Settings)) { app.navigator.go(Page.Settings) }
         }
     }

@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.settings
 
+import app.winters.octo.sound.SoundSettings
 import app.winters.octo.subsonic.AuthMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,7 +29,25 @@ data class AppSettings(
     val albumSort: String? = null,
     // The panel open on the right: "queue", "lyrics", or none.
     val sidePanel: String? = null,
+    // The equalizer, loudness and the rest of the Sound page.
+    val sound: SoundPrefs = SoundPrefs(),
 )
+
+// The Sound page's settings. With `perOutput` on, every output (a sound
+// card, headphones, a USB DAC) keeps its own set, by its device id, as on
+// the phone; otherwise the shared set under SHARED_SOUND is used everywhere.
+@Serializable
+data class SoundPrefs(
+    val perOutput: Boolean = false,
+    val profiles: Map<String, SoundSettings> = emptyMap(),
+    // Curves for the ten bands the listener saved under a name.
+    val presets: List<SavedCurve> = emptyList(),
+)
+
+@Serializable
+data class SavedCurve(val name: String, val gains: List<Float>)
+
+const val SHARED_SOUND = "all"
 
 // Where the window was and how big, in density-independent pixels, and
 // whether it filled the screen.
@@ -70,10 +89,11 @@ data class PlaybackPrefs(
     val crossfadeSeconds: Int = 0,
     // The device picked in the output menu, or null to follow the system.
     val outputDevice: String? = null,
-    // Playback speed (0.5 to 2, pitch kept) and a pitch shift on top, in
-    // semitones.
+    // How fast music plays (0.5 to 2), whether the voice keeps its pitch at
+    // other speeds, and a pitch shift in semitones on top, as on the phone.
     val speed: Float = 1f,
-    val pitchSemitones: Float = 0f,
+    val keepPitch: Boolean = true,
+    val pitchSemitones: Int = 0,
 )
 
 private val json = Json {

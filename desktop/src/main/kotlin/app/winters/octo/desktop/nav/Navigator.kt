@@ -17,6 +17,7 @@ sealed interface Page {
     data object Favourites : Page
     data object History : Page
     data object Settings : Page
+    data object Sound : Page
     data class Album(val id: String) : Page
     data class Artist(val id: String, val name: String = "") : Page
     data class Genre(val name: String) : Page
@@ -36,7 +37,7 @@ sealed interface SidebarItem {
 // it was opened from.
 fun sidebarItemOf(page: Page): SidebarItem? = when (page) {
     Page.Home, Page.Search, Page.Songs, Page.Albums, Page.Artists, Page.Genres, Page.Folders,
-    Page.Favourites, Page.History, Page.Settings,
+    Page.Favourites, Page.History, Page.Settings, Page.Sound,
     -> SidebarItem.Top(page)
     is Page.Playlist -> SidebarItem.PlaylistItem(page.id)
     is Page.Album, is Page.Artist, is Page.Genre, is Page.Folder -> null

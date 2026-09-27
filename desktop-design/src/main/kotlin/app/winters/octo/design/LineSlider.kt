@@ -20,7 +20,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -31,7 +33,10 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import org.jetbrains.skia.FilterBlurMode
 import org.jetbrains.skia.MaskFilter
 import org.jetbrains.skia.Paint
@@ -43,6 +48,9 @@ import org.jetbrains.skia.PaintStrokeCap
 // pointer. By default the value is only sent when the drag ends, so
 // scrubbing a song does not stutter it; `live` sends it all along, for
 // volume. `wheelStep`, when set, lets the mouse wheel move it by that much.
+// `onRelease` hears when a change is done (a click, a drag let go, a wheel
+// notch). `hoverLabel`, when set, shows what a click would pick, in a small
+// pill above the pointer: the time to seek to, for a song.
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun LineSlider(
@@ -53,13 +61,20 @@ fun LineSlider(
     wheelStep: Float? = null,
     color: Color = Color.White,
     trackColor: Color = Color.White.copy(alpha = 0.22f),
+    onRelease: () -> Unit = {},
+    hoverLabel: ((Float) -> String)? = null,
 ) {
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
+    // Where the pointer is over the line, from 0 to 1, or below 0 when off it.
+    var pointerFraction by remember { mutableFloatStateOf(-1f) }
     val seek by rememberUpdatedState(onSeek)
+    val release by rememberUpdatedState(onRelease)
     val current by rememberUpdatedState(fraction)
+    val label by rememberUpdatedState(hoverLabel)
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
+    val measurer = rememberTextMeasurer()
 
     val thickness by animateDpAsState(if (dragging || hovered) 5.dp else 3.dp, spring(0.6f, 300f), label = "track")
     val thumb = thumbSize(hovered, dragging)
@@ -77,18 +92,28 @@ fun LineSlider(
             .height(24.dp)
             .hoverable(interaction)
             .pointerHoverIcon(PointerIcon.Hand)
+            .onPointerEvent(PointerEventType.Move) { event ->
+                pointerFraction = (event.changes.first().position.x / size.width).coerceIn(0f, 1f)
+            }
+            .onPointerEvent(PointerEventType.Exit) { pointerFraction = -1f }
             .then(
                 if (wheelStep != null) {
                     Modifier.onPointerEvent(PointerEventType.Scroll) { event ->
                         val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
-                        if (delta != 0f) seek((current() - delta * wheelStep).coerceIn(0f, 1f))
+                        if (delta != 0f) {
+                            seek((current() - delta * wheelStep).coerceIn(0f, 1f))
+                            release()
+                        }
                     }
                 } else {
                     Modifier
                 },
             )
             .pointerInput(Unit) {
-                detectTapGestures { seek((it.x / size.width).coerceIn(0f, 1f)) }
+                detectTapGestures {
+                    seek((it.x / size.width).coerceIn(0f, 1f))
+                    release()
+                }
             }
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
@@ -99,10 +124,15 @@ fun LineSlider(
                     onDragEnd = {
                         seek(dragFraction)
                         dragging = false
+                        release()
                     },
-                    onDragCancel = { dragging = false },
+                    onDragCancel = {
+                        dragging = false
+                        release()
+                    },
                 ) { change, _ ->
                     dragFraction = (change.position.x / size.width).coerceIn(0f, 1f)
+                    pointerFraction = dragFraction
                     if (live) seek(dragFraction)
                 }
             }
@@ -126,6 +156,20 @@ fun LineSlider(
                     drawLine(color, Offset(0f, y), Offset(end, y), stroke, StrokeCap.Round)
                 }
                 if (thumb > 0.dp) drawCircle(color, thumb.toPx(), Offset(end, y))
+                // What a click here would pick, above the pointer.
+                val at = if (dragging) dragFraction else pointerFraction
+                val words = label
+                if (words != null && at >= 0f && (hovered || dragging)) {
+                    val text = measurer.measure(words(at), OctoType.caption.copy(fontSize = 11.sp, color = Color.White, fontFeatureSettings = "tnum"))
+                    val padX = 7.dp.toPx()
+                    val padY = 2.dp.toPx()
+                    val w = text.size.width + padX * 2
+                    val h = text.size.height + padY * 2
+                    val left = (size.width * at - w / 2).coerceIn(-w / 2, size.width - w / 2)
+                    val top = y - 10.dp.toPx() - h
+                    drawRoundRect(Color.Black.copy(alpha = 0.72f), Offset(left, top), Size(w, h), CornerRadius(h / 2))
+                    drawText(text, topLeft = Offset(left + padX, top + padY))
+                }
             },
     )
 }
