@@ -6,32 +6,8 @@ import app.winters.octo.catalog.sortKey
 import app.winters.octo.offline.DownloadRow
 import app.winters.octo.offline.DownloadStatus
 
-// Orders for lists that are short, or not in the database at all: the
-// playlists, the downloads, and the songs of one folder. These sort in
-// memory.
-
-// Sorts by one key the chosen way, with items missing it last either way,
-// then by `ties`, which always run the same way. Each key is worked out once.
-private fun <T, K : Comparable<K>> sortedByKey(
-    items: List<T>,
-    descending: Boolean,
-    key: (T) -> K?,
-    ties: Comparator<T>,
-): List<T> {
-    val keys = items.map(key)
-    return items.indices.sortedWith { a, b ->
-        val ka = keys[a]
-        val kb = keys[b]
-        val byKey = when {
-            ka == null && kb == null -> 0
-            ka == null -> 1
-            kb == null -> -1
-            descending -> kb.compareTo(ka)
-            else -> ka.compareTo(kb)
-        }
-        if (byKey != 0) byKey else ties.compare(items[a], items[b])
-    }.map { items[it] }
-}
+// The short lists whose rows come from the catalog's database. The sorting
+// helper, sortedByKey, lives in shared core (ShortLists.kt).
 
 fun sortPlaylists(playlists: List<PlaylistSummary>, order: SortOrder): List<PlaylistSummary> {
     val byName = compareBy<PlaylistSummary>({ sortKey(it.name) }, { it.id })
@@ -74,11 +50,3 @@ fun sortFolderSongs(songs: List<TrackEntity>, order: SortOrder): List<TrackEntit
         else -> if (descending) songs.asReversed().toList() else songs
     }
 }
-
-// Favourite albums or artists: by when they became favourites, or by name
-// (the sort key of an album's title or an artist's name).
-fun <T> sortFavourites(items: List<T>, order: SortOrder, likedAt: (T) -> Long, name: (T) -> String, id: (T) -> String): List<T> =
-    when (order.by) {
-        FavouriteSort.Name -> sortedByKey(items, order.descending, name, compareBy(id))
-        else -> sortedByKey(items, order.descending, likedAt, compareBy(name, id))
-    }

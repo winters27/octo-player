@@ -36,3 +36,7 @@ fun railStops(runs: List<LetterRun>, headed: Boolean, before: Int = 0): List<Rai
         RailStop(run.letter, before + run.start + if (headed) runIndex else 0)
     }
 }
+
+// The first letter a list is grouped under; anything else goes under "#".
+fun indexLetter(sortKey: String): Char =
+    sortKey.firstOrNull()?.uppercaseChar()?.takeIf { it in 'A'..'Z' } ?: '#'

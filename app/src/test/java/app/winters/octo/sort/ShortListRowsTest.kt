@@ -7,7 +7,7 @@ import app.winters.octo.offline.DownloadStatus
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-class ShortListsTest {
+class ShortListRowsTest {
     private fun playlist(id: String, name: String, songs: Int, created: Long, updated: Long) =
         PlaylistSummary(id, name, songCount = songs, durationMs = 0, covers = emptyList(), createdAt = created, updatedAt = updated)
 
