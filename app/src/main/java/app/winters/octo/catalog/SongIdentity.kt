@@ -188,7 +188,13 @@ object SongIdentity {
     // query is sent as.
     fun fold(value: String?): String {
         if (isBlank(value)) return ""
-        val text = Normalizer.normalize(value!!.replace('´', '\''), Normalizer.Form.NFKC)
+        // Plain ASCII has nothing to normalize and no lookalikes: only its
+        // spacing, backticks and underscores change.
+        if (value!!.all { it in ' '..'~' }) {
+            val plain = value.replace('`', '\'').replace('_', ' ')
+            return trimSpace(if ("  " in plain) Whitespace.replace(plain, " ") else plain)
+        }
+        val text = Normalizer.normalize(value.replace('´', '\''), Normalizer.Form.NFKC)
         val sb = StringBuilder(text.length)
         for (ch in text) {
             sb.append(
@@ -298,6 +304,8 @@ object SongIdentity {
     // stripped, "&" and a spaced "+" read as "and".
     private fun lowerFold(folded: String): String {
         if (folded.isEmpty()) return ""
+        // Plain ASCII has no accents to strip.
+        if (folded.all { it < '\u0080' }) return folded.lowercase().replace("&", " and ").replace(" + ", " and ")
         val lower = lowerInvariant(folded)
             .replace("ß", "ss").replace("æ", "ae").replace("œ", "oe").replace("ø", "o")
             .replace("đ", "d").replace("ð", "d").replace("ł", "l").replace("þ", "th").replace("ı", "i")
