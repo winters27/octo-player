@@ -7,6 +7,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -22,6 +25,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.OctoColors
@@ -34,6 +38,9 @@ import app.winters.octo.playback.semitonesLabel
 import app.winters.octo.playback.speedAt
 import app.winters.octo.playback.speedFraction
 import app.winters.octo.playback.speedLabel
+import app.winters.octo.ui.common.GlassMenuBack
+import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.rememberOpenedBeside
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -62,16 +69,42 @@ class SpeedViewModel @Inject constructor(private val settings: PlayerSettings) :
     }
 }
 
-// Playback speed, inside a GlassSheet: a slider from half to double speed
-// that settles on the common speeds, whether voices keep their pitch, and
-// a pitch shift. Every change is heard at once and kept for every song.
+// Playback speed, a page of a glass card: a slider from half to double
+// speed that settles on the common speeds, whether voices keep their pitch,
+// and a pitch shift. Every change is heard at once and kept for every song.
+// `onBack` is there when it opened from the sleep timer.
 @Composable
-fun SpeedSheet(vm: SpeedViewModel = hiltViewModel()) {
+fun SpeedPage(onBack: (() -> Unit)?, vm: SpeedViewModel = hiltViewModel()) {
     val prefs by vm.prefs.collectAsStateWithLifecycle()
 
-    Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
+    Column(Modifier.width(TimeCardWidth).verticalScroll(rememberScrollState())) {
+        if (onBack != null) {
+            Column(Modifier.padding(6.dp)) { GlassMenuBack("Sleep timer", onBack) }
+        }
+        SpeedControls(prefs, vm)
+    }
+}
+
+// The speed card on its own, beside the control that opened it, as from
+// the playback settings.
+@Composable
+fun SpeedPopup(visible: Boolean, onDismiss: () -> Unit) {
+    GlassPopup(
+        visible = visible,
+        anchor = rememberOpenedBeside(visible),
+        onDismiss = onDismiss,
+        backdrop = LocalHaze.current,
+        title = "Speed",
+    ) {
+        SpeedPage(onBack = null)
+    }
+}
+
+@Composable
+private fun SpeedControls(prefs: PlayerPrefs, vm: SpeedViewModel) {
+    Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 18.dp)) {
         Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Speed", style = OctoType.section, color = OctoColors.TextPrimary, modifier = Modifier.weight(1f))
+            Text("Speed", style = OctoType.body, color = OctoColors.TextPrimary, modifier = Modifier.weight(1f))
             if (!prefs.paceIsDefault) GlazeButton("Reset", onClick = vm::reset)
         }
         Spacer(Modifier.height(8.dp))

@@ -4,38 +4,32 @@ import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -45,19 +39,30 @@ import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.PlaylistSummary
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.design.AccentButton
-import app.winters.octo.design.GlassInput
-import app.winters.octo.design.GlassSheet
+import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.PopupPager
+import app.winters.octo.design.PopupPages
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.playlists.PlaylistFiles
 import app.winters.octo.playlists.playlistFileName
+import app.winters.octo.ui.common.CloudMark
 import app.winters.octo.ui.common.Feedback
+import app.winters.octo.ui.common.GlassMenuAction
+import app.winters.octo.ui.common.GlassMenuBack
+import app.winters.octo.ui.common.GlassMenuHeading
+import app.winters.octo.ui.common.GlassMenuPage
+import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.MenuWidth
+import app.winters.octo.ui.common.PopupNameField
+import app.winters.octo.ui.common.PopupNameForm
+import app.winters.octo.ui.common.PopupQuestion
+import app.winters.octo.ui.common.rememberOpenedBeside
 import app.winters.octo.ui.common.songs
-import app.winters.octo.ui.menu.MenuRow
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
@@ -68,11 +73,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-// The sheets for playlists. They are drawn over everything, the bar
-// included, so any page or the song menu can open one.
+// The menus and forms for playlists. They pop up over everything, the bar
+// included, so any page can open one.
 sealed interface PlaylistSheet {
-    // Choose a playlist to add songs to: one song from its menu, or many
-    // picked in a list or from an album's menu.
+    // Choose a playlist to add songs to: many picked in a list, say.
     data class Pick(val trackIds: List<String>) : PlaylistSheet {
         constructor(trackId: String) : this(listOf(trackId))
     }
@@ -98,17 +102,17 @@ class PlaylistSheets {
     var open by mutableStateOf<PlaylistSheet?>(null)
         private set
 
-    // The last sheet shown, kept after closing so it can slide away.
-    var last by mutableStateOf<PlaylistSheet?>(null)
-        private set
+    // What the pop-up shows. One asked for while it is open becomes its next
+    // page, with a way back.
+    val pages = PopupPages<PlaylistSheet>(PlaylistSheet.Create())
 
     // Counts every showing, so a field starts fresh each time.
     var shown by mutableIntStateOf(0)
         private set
 
     fun show(sheet: PlaylistSheet) {
+        if (open == null) pages.reset(sheet) else pages.open(sheet)
         open = sheet
-        last = sheet
         shown++
     }
 
@@ -169,6 +173,7 @@ class PlaylistSheetsViewModel @Inject constructor(
     }
 }
 
+// The playlist pop-up, beside what opened it.
 @Composable
 fun PlaylistSheetsHost(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel = hiltViewModel()) {
     // Closing puts the keyboard away with it.
@@ -182,44 +187,54 @@ fun PlaylistSheetsHost(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel = hil
         if (uri != null && id != null) vm.export(id, uri)
     }
 
-    GlassSheet(visible = sheets.open != null, onDismiss = sheets::close) {
-        val sheet = sheets.last ?: return@GlassSheet
-        key(sheets.shown) {
+    val open = sheets.open != null
+    GlassPopup(
+        visible = open,
+        anchor = rememberOpenedBeside(open),
+        onDismiss = sheets::close,
+        backdrop = LocalHaze.current,
+        title = "Playlist",
+        onBack = sheets.pages::back,
+    ) {
+        PopupPager(sheets.pages) { sheet, canGoBack ->
+            val back: (() -> Unit)? = if (canGoBack) ({ sheets.pages.back() }) else null
             when (sheet) {
-                is PlaylistSheet.Pick -> Picker(sheets, vm, sheet.trackIds)
-                is PlaylistSheet.Create -> NameForm("New playlist", "", "Create") { name ->
+                is PlaylistSheet.Pick -> PlaylistPickerPage(sheet.trackIds, onBack = back, onDone = sheets::close, vm = vm)
+                is PlaylistSheet.Create -> PopupNameForm("New playlist", "Playlist name", "Create", onBack = back, onDone = { name ->
                     vm.create(name, sheet.trackIds)
                     sheets.close()
-                }
-                is PlaylistSheet.Options -> {
-                    SheetTitle(sheet.name, Modifier.padding(horizontal = 20.dp))
-                    Spacer(Modifier.height(8.dp))
-                    MenuRow(OctoIcons.Rename, "Rename") { sheets.show(PlaylistSheet.Rename(sheet.id, sheet.name)) }
+                })
+                is PlaylistSheet.Options -> GlassMenuPage(header = { GlassMenuHeading(sheet.name) }) {
+                    GlassMenuAction(OctoIcons.Rename, "Rename", opensPage = true, onClick = { sheets.show(PlaylistSheet.Rename(sheet.id, sheet.name)) })
                     if (sheet.canSave) {
-                        MenuRow(OctoIcons.Cloud, "Save to server") {
+                        GlassMenuAction(OctoIcons.Cloud, "Save to server", onClick = {
                             vm.saveToServer(sheet.id)
                             sheets.close()
-                        }
+                        })
                     }
                     if (sheet.canDownload) {
-                        MenuRow(OctoIcons.Download, "Download") {
+                        GlassMenuAction(OctoIcons.Download, "Download", onClick = {
                             vm.download(sheet.id)
                             sheets.close()
-                        }
+                        })
                     }
-                    MenuRow(OctoIcons.Share, "Export as M3U") {
+                    GlassMenuAction(OctoIcons.Share, "Export as M3U", onClick = {
                         exporting = sheet.id
                         sheets.close()
                         exportTo.launch(playlistFileName(sheet.name))
-                    }
-                    MenuRow(OctoIcons.Delete, "Delete") { sheets.show(PlaylistSheet.Delete(sheet.id, sheet.name, sheet.onServer)) }
-                    Spacer(Modifier.height(12.dp))
+                    })
+                    GlassMenuAction(
+                        OctoIcons.Delete,
+                        "Delete",
+                        opensPage = true,
+                        onClick = { sheets.show(PlaylistSheet.Delete(sheet.id, sheet.name, sheet.onServer)) },
+                    )
                 }
-                is PlaylistSheet.Rename -> NameForm("Rename playlist", sheet.name, "Save") { name ->
+                is PlaylistSheet.Rename -> PopupNameForm("Rename playlist", "Playlist name", "Save", onBack = back, initial = sheet.name, onDone = { name ->
                     vm.rename(sheet.id, name)
                     sheets.close()
-                }
-                is PlaylistSheet.Delete -> ConfirmDelete(sheet.name, sheet.onServer, onCancel = sheets::close) {
+                })
+                is PlaylistSheet.Delete -> ConfirmDelete(sheet.name, sheet.onServer, onCancel = back ?: sheets::close) {
                     vm.delete(sheet.id)
                     sheets.close()
                 }
@@ -228,21 +243,24 @@ fun PlaylistSheetsHost(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel = hil
     }
 }
 
+// The playlists to add songs to, as a page of a glass menu: "New playlist"
+// first, which turns into a name field in place, then the playlists.
+// Picking one adds the songs and closes; picking one that has some of them
+// already asks first. `onBack` is there when it was opened from a menu.
 @Composable
-private fun SheetTitle(text: String, modifier: Modifier = Modifier) {
-    Text(text, style = OctoType.section, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier)
-}
-
-// "New playlist" first, then the playlists. Picking one adds the songs and
-// closes. Picking one that has some of them already asks first.
-@Composable
-private fun ColumnScope.Picker(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel, trackIds: List<String>) {
+fun PlaylistPickerPage(
+    trackIds: List<String>,
+    onBack: (() -> Unit)?,
+    onDone: () -> Unit,
+    vm: PlaylistSheetsViewModel = hiltViewModel(),
+) {
     val playlists by vm.playlists.collectAsStateWithLifecycle()
     val holdings by remember(trackIds) { vm.holdings(trackIds) }.collectAsStateWithLifecycle(null)
     var asking by remember { mutableStateOf<Pair<PlaylistSummary, AddPlan>?>(null) }
+    var naming by remember { mutableStateOf(false) }
     val add = { playlist: PlaylistSummary, songs: List<String> ->
         vm.add(playlist, songs)
-        sheets.close()
+        onDone()
     }
     asking?.let { (playlist, plan) ->
         ConfirmAgain(
@@ -255,48 +273,54 @@ private fun ColumnScope.Picker(sheets: PlaylistSheets, vm: PlaylistSheetsViewMod
         return
     }
     val title = if (trackIds.size == 1) "Add to playlist" else "Add ${songs(trackIds.size)} to a playlist"
-    SheetTitle(title, Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp))
-    LazyColumn(Modifier.weight(1f, fill = false), contentPadding = PaddingValues(bottom = 12.dp)) {
-        item(key = "new") { NewPlaylistLine { sheets.show(PlaylistSheet.Create(trackIds.distinct())) } }
-        items(playlists, key = { it.id }) { playlist ->
-            PlaylistLine(playlist.name, songs(playlist.songCount), onClick = {
-                val plan = planAdd(trackIds, holdings?.get(playlist.id).orEmpty())
-                if (plan.asks) asking = playlist to plan else add(playlist, plan.songs)
-            }, onServer = playlist.onServer) {
-                PlaylistCover(playlist.covers, 56.dp)
+    Column(Modifier.width(MenuWidth).padding(6.dp)) {
+        if (onBack != null) GlassMenuBack(title, onBack) else GlassMenuHeading(title)
+        LazyColumn(Modifier.weight(1f, fill = false)) {
+            item(key = "new") {
+                if (naming) {
+                    PopupNameField(
+                        "Playlist name",
+                        "Create",
+                        onDone = { name ->
+                            vm.create(name, trackIds.distinct())
+                            onDone()
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                    )
+                } else {
+                    GlassMenuAction(OctoIcons.AddToLibrary, "New playlist", onClick = { naming = true })
+                }
+            }
+            items(playlists, key = { it.id }) { playlist ->
+                PickLine(playlist) {
+                    val plan = planAdd(trackIds, holdings?.get(playlist.id).orEmpty())
+                    if (plan.asks) asking = playlist to plan else add(playlist, plan.songs)
+                }
             }
         }
     }
 }
 
-// A name field with its button. The button waits for a name that is not blank.
+// One playlist to add to: its cover, name and size.
 @Composable
-private fun NameForm(title: String, initial: String, action: String, onDone: (String) -> Unit) {
-    var name by remember { mutableStateOf(initial) }
-    val ready = name.isNotBlank()
-    val focus = remember { FocusRequester() }
-    // Opens the keyboard as the field appears.
-    LaunchedEffect(Unit) { focus.requestFocus() }
-
-    Column(
+private fun PickLine(playlist: PlaylistSummary, onClick: () -> Unit) {
+    Row(
         Modifier
             .fillMaxWidth()
-            .imePadding()
-            .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+            .heightIn(min = 52.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        SheetTitle(title)
-        Spacer(Modifier.height(16.dp))
-        Row {
-            GlassInput(
-                value = name,
-                onValueChange = { name = it },
-                placeholder = "Playlist name",
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { if (ready) onDone(name) }),
-                modifier = Modifier.weight(1f).focusRequester(focus),
-            )
-            Spacer(Modifier.width(10.dp))
-            AccentButton(action, onClick = { onDone(name) }, enabled = ready)
+        PlaylistCover(playlist.covers, 36.dp, shape = RoundedCornerShape(6.dp))
+        Column(Modifier.weight(1f)) {
+            Text(playlist.name, style = OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(songs(playlist.songCount), style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 1)
+                if (playlist.onServer) CloudMark("On your server")
+            }
         }
     }
 }
@@ -305,40 +329,33 @@ private fun NameForm(title: String, initial: String, action: String, onDone: (St
 // ones among them, the choice is all of them or only the new ones.
 @Composable
 private fun ConfirmAgain(question: String, plan: AddPlan, onCancel: () -> Unit, onAddAll: () -> Unit, onAddNew: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
-        Text(question, style = OctoType.section, color = OctoColors.TextPrimary, maxLines = 3, overflow = TextOverflow.Ellipsis)
-        Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (plan.offersNewOnly) {
+    if (plan.offersNewOnly) {
+        Column(Modifier.width(MenuWidth).padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 18.dp)) {
+            Text(question, style = OctoType.body, color = OctoColors.TextPrimary, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 AccentButton("Add new ones", onClick = onAddNew)
                 GlazeButton("Add all", onClick = onAddAll)
-            } else {
-                AccentButton(if (plan.songs.size == 1) "Add" else "Add again", onClick = onAddAll)
-                GlazeButton("Cancel", onClick = onCancel)
             }
         }
+    } else {
+        PopupQuestion(question, null, if (plan.songs.size == 1) "Add" else "Add again", onConfirm = onAddAll, onCancel = onCancel)
     }
 }
 
 // The new playlist name form on its own, for a playlist made from songs
 // chosen somewhere else, such as the queue. `onCreate` gets the name.
 @Composable
-fun NewPlaylistForm(onCreate: (String) -> Unit) = NameForm("New playlist", "", "Create", onCreate)
+fun NewPlaylistForm(onCreate: (String) -> Unit) = PopupNameForm("New playlist", "Playlist name", "Create", onBack = null, onDone = onCreate)
 
 // Asks before a playlist is deleted. Its songs stay in the library. One
 // kept with the server goes from the server too.
 @Composable
-private fun ConfirmDelete(name: String, onServer: Boolean, onCancel: () -> Unit, onDelete: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
-        SheetTitle("Delete \"$name\"?")
-        Text(
-            if (onServer) "It is deleted from your server too. The songs stay in your library." else "The songs stay in your library.",
-            style = OctoType.bodySmall,
-            color = OctoColors.TextMuted,
-            modifier = Modifier.padding(top = 6.dp),
-        )
-        Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            AccentButton("Delete", onClick = onDelete)
-            GlazeButton("Cancel", onClick = onCancel)
-        }
-    }
+internal fun ConfirmDelete(name: String, onServer: Boolean, onCancel: () -> Unit, onDelete: () -> Unit) {
+    PopupQuestion(
+        "Delete \"$name\"?",
+        if (onServer) "It is deleted from your server too. The songs stay in your library." else "The songs stay in your library.",
+        "Delete",
+        onConfirm = onDelete,
+        onCancel = onCancel,
+    )
 }

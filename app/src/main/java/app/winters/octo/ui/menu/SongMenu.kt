@@ -1,48 +1,18 @@
 package app.winters.octo.ui.menu
 
 import android.util.Log
-import androidx.annotation.DrawableRes
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import androidx.navigation3.runtime.NavKey
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.OnlineDao
-import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.isFind
-import app.winters.octo.design.GlassSheet
-import app.winters.octo.design.OctoColors
-import app.winters.octo.design.OctoIcons
-import app.winters.octo.design.OctoType
+import app.winters.octo.design.PopupPages
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.DownloadState
 import app.winters.octo.discovery.Downloads
@@ -50,26 +20,15 @@ import app.winters.octo.discovery.asTrack
 import app.winters.octo.offline.DownloadEntity
 import app.winters.octo.offline.DownloadStatus
 import app.winters.octo.offline.OfflineDownloads
-import app.winters.octo.offline.Reasons
-import app.winters.octo.offline.reasons
 import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.playback.RatingStore
-import app.winters.octo.ui.common.RatingStars
-import app.winters.octo.ui.common.Artwork
-import app.winters.octo.ui.common.Feedback
-import app.winters.octo.ui.common.SelectionBarHost
-import app.winters.octo.ui.common.SelectionBarState
-import app.winters.octo.ui.common.SongSelection
-import app.winters.octo.ui.nav.AlbumRoute
-import app.winters.octo.ui.nav.ArtistRoute
-import app.winters.octo.ui.playlist.LocalPlaylistSheets
-import app.winters.octo.ui.playlist.PlaylistSheet
 import app.winters.octo.server.ServerControls
 import app.winters.octo.subsonic.SubsonicException
-import app.winters.octo.ui.server.LocalShareSheet
-import app.winters.octo.ui.server.ShareRequest
+import app.winters.octo.ui.common.Feedback
+import app.winters.octo.ui.common.SelectionBarState
+import app.winters.octo.ui.common.SongSelection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -102,16 +61,20 @@ interface QuickSongActions {
     fun addToQueue(trackId: String)
 }
 
+// The pages of a song's menu: its actions first, and what some of them open
+// in its place, each with a way back.
+enum class SongPage { Actions, AddToPlaylist, Rate, Share, Info }
+
 // Which song the menu is open for, if any. Any song on any screen can
 // open it: a long press on a row, or the more button in the player. It also
 // carries what shares the menu's layer: the menus for albums, artists and
-// playlists, the song info sheet, and the bar for picked songs.
+// playlists, and the bar for picked songs.
 class SongMenuState {
     var trackId by mutableStateOf<String?>(null)
         private set
 
-    // The last song opened, kept after closing so the sheet can still show
-    // it while it slides away.
+    // The last song opened, kept after closing so the menu can still show
+    // it while it fades away.
     var lastTrackId by mutableStateOf<String?>(null)
         private set
 
@@ -119,7 +82,11 @@ class SongMenuState {
     var lastContext by mutableStateOf(SongMenuContext())
         private set
 
+    // Which page the menu shows. Each opening starts at the actions.
+    val pages = PopupPages(SongPage.Actions)
+
     fun open(trackId: String, context: SongMenuContext = SongMenuContext()) {
+        pages.reset(SongPage.Actions)
         this.trackId = trackId
         lastTrackId = trackId
         lastContext = context
@@ -135,44 +102,8 @@ class SongMenuState {
     var quick: QuickSongActions? = null
         internal set
 
-    // The song the info sheet is open for, if any, and the last one, kept
-    // while the sheet slides away.
-    var infoTrackId by mutableStateOf<String?>(null)
-        private set
-    var lastInfoTrackId by mutableStateOf<String?>(null)
-        private set
-
-    // Swaps the menu for the info sheet.
-    fun openInfo(trackId: String) {
-        this.trackId = null
-        infoTrackId = trackId
-        lastInfoTrackId = trackId
-    }
-
-    fun closeInfo() {
-        infoTrackId = null
-    }
-
     fun close() {
         trackId = null
-    }
-
-    // The song the rating sheet is open for, if any, and the last one, kept
-    // while the sheet slides away.
-    var ratingTrackId by mutableStateOf<String?>(null)
-        private set
-    var lastRatingTrackId by mutableStateOf<String?>(null)
-        private set
-
-    // Swaps the menu for the rating sheet.
-    fun openRating(trackId: String) {
-        this.trackId = null
-        ratingTrackId = trackId
-        lastRatingTrackId = trackId
-    }
-
-    fun closeRating() {
-        ratingTrackId = null
     }
 }
 
@@ -243,6 +174,21 @@ fun songActions(
     }
     add(SongAction.Info)
 }
+
+// How a song's menu groups its actions, top to bottom: playing it, keeping
+// it, going to its album or artist, sharing and looking into it, and last,
+// what takes it away. A hairline parts the groups.
+private val SongMenuOrder = listOf(
+    listOf(SongAction.PlayNext, SongAction.AddToQueue, SongAction.StartRadio),
+    listOf(SongAction.AddToPlaylist, SongAction.Like, SongAction.Rate, SongAction.Download, SongAction.KeepOffline),
+    listOf(SongAction.GoToAlbum, SongAction.GoToArtist),
+    listOf(SongAction.Share, SongAction.ShareFile, SongAction.SetAsSound, SongAction.Info, SongAction.Select),
+    listOf(SongAction.RemoveFromPlaylist, SongAction.DeleteFromPhone),
+)
+
+// The actions offered, in their groups, leaving out empty groups.
+fun songMenuGroups(actions: List<SongAction>): List<List<SongAction>> =
+    SongMenuOrder.map { group -> group.filter { it in actions } }.filter { it.isNotEmpty() }
 
 // The add row's words for a song not in the library, and how its adding
 // is going. "Download" is kept for saving a library song to the phone.
@@ -355,183 +301,3 @@ internal suspend fun playRadio(seed: TrackEntity, discovery: Discovery, playback
     }
 }
 
-// The menu itself, drawn over everything, the player included. `onOpen`
-// goes to a page, and is expected to close the player if it is open.
-@Composable
-fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuViewModel = hiltViewModel()) {
-    // Rows swipe and speak through these while the host is shown.
-    DisposableEffect(state, vm) {
-        state.quick = object : QuickSongActions {
-            override fun playNext(trackId: String) = vm.playNextUndoable(trackId)
-            override fun addToQueue(trackId: String) = vm.playLast(trackId)
-        }
-        onDispose { state.quick = null }
-    }
-    val phoneFiles = rememberPhoneFiles()
-    // Over the bottom bar and under every sheet, as the bar it stands in for.
-    SelectionBarHost(state.selectionBar, phoneFiles)
-    GlassSheet(visible = state.trackId != null, onDismiss = state::close) {
-        val trackId = state.lastTrackId ?: return@GlassSheet
-        val context = state.lastContext
-        val track by remember(trackId) { vm.track(trackId) }.collectAsStateWithLifecycle(null)
-        val liked by vm.liked.collectAsStateWithLifecycle()
-        val downloads by vm.downloadStates.collectAsStateWithLifecycle()
-        val kept by vm.kept.collectAsStateWithLifecycle()
-        val radio by vm.radio.collectAsStateWithLifecycle()
-        val sharing by vm.sharing.collectAsStateWithLifecycle()
-        val shareId by produceState<String?>(null, trackId, sharing) { value = if (sharing) vm.shareId(trackId) else null }
-        val shareSheet = LocalShareSheet.current
-        val song = track ?: return@GlassSheet
-        val isLiked = trackId in liked
-        val playlistSheets = LocalPlaylistSheets.current
-
-        val keptRow = kept[trackId]
-        val byHand = keptRow?.reasons?.contains(Reasons.MANUAL) == true
-
-        SongHeader(song)
-        Spacer(Modifier.height(8.dp))
-        val place = menuPlace(context, song.albumId, song.artistId)
-        val phone = song.onPhone && !isFind(trackId)
-        val actions = songActions(isFind(trackId), radio, share = shareId != null, offline = !song.onPhone || keptRow != null, place = place, phone = phone)
-        for (action in actions) {
-            when (action) {
-                SongAction.PlayNext -> MenuRow(OctoIcons.PlayNext, "Play next") {
-                    vm.playNext(trackId)
-                    state.close()
-                }
-                SongAction.AddToQueue -> MenuRow(OctoIcons.AddToQueue, "Add to queue") {
-                    vm.playLast(trackId)
-                    state.close()
-                }
-                SongAction.StartRadio -> MenuRow(OctoIcons.Radio, "Start radio") {
-                    state.close()
-                    vm.startRadio(song)
-                }
-                SongAction.Download -> {
-                    val download = downloads[trackId] ?: DownloadState.None
-                    val icon = when (download) {
-                        DownloadState.None, DownloadState.Requested -> OctoIcons.AddToLibrary
-                        DownloadState.Done -> OctoIcons.Check
-                    }
-                    MenuRow(icon, downloadLabel(download), enabled = download == DownloadState.None) {
-                        vm.download(song)
-                    }
-                }
-                SongAction.AddToPlaylist -> MenuRow(OctoIcons.AddToPlaylist, "Add to playlist") {
-                    state.close()
-                    playlistSheets.show(PlaylistSheet.Pick(trackId))
-                }
-                SongAction.RemoveFromPlaylist -> MenuRow(OctoIcons.RemoveFromPlaylist, "Remove from this playlist") {
-                    state.close()
-                    val playlistId = context.playlistId
-                    val itemId = context.playlistItemId
-                    if (playlistId != null && itemId != null) vm.removeFromPlaylist(playlistId, itemId)
-                }
-                SongAction.Select -> MenuRow(OctoIcons.Select, "Select") {
-                    state.close()
-                    context.selectKey?.let { key -> context.selection?.start(key) }
-                }
-                SongAction.KeepOffline -> {
-                    val state = keptRow?.state
-                    val icon = when (state) {
-                        DownloadStatus.Queued, DownloadStatus.Downloading -> OctoIcons.Downloading
-                        DownloadStatus.Done -> OctoIcons.Downloaded
-                        null, DownloadStatus.Failed -> OctoIcons.Download
-                    }
-                    MenuRow(icon, keepOfflineLabel(state, byHand), enabled = keepOfflineEnabled(state, byHand)) {
-                        when (state) {
-                            null -> vm.keepOffline(trackId)
-                            DownloadStatus.Failed -> vm.retryOffline(trackId)
-                            else -> vm.removeOffline(trackId)
-                        }
-                    }
-                }
-                SongAction.ShareFile -> MenuRow(OctoIcons.ShareFile, "Share file") {
-                    state.close()
-                    phoneFiles.share(listOf(trackId))
-                }
-                SongAction.Share -> MenuRow(OctoIcons.Share, "Share link") {
-                    state.close()
-                    shareId?.let { shareSheet.show(ShareRequest(listOf(it), song.title)) }
-                }
-                SongAction.Like -> MenuRow(
-                    if (isLiked) OctoIcons.Liked else OctoIcons.Like,
-                    if (isLiked) "Remove from Liked songs" else "Add to Liked songs",
-                ) {
-                    vm.toggleLike(trackId)
-                }
-                SongAction.Rate -> MenuRow(if (song.rating > 0) OctoIcons.StarFilled else OctoIcons.Star, "Rate") {
-                    state.openRating(trackId)
-                }
-                SongAction.GoToAlbum -> MenuRow(OctoIcons.Album, "Go to album") {
-                    state.close()
-                    onOpen(AlbumRoute(song.albumId))
-                }
-                SongAction.GoToArtist -> MenuRow(OctoIcons.Artist, "Go to artist") {
-                    state.close()
-                    onOpen(ArtistRoute(song.artistId))
-                }
-                SongAction.SetAsSound -> MenuRow(OctoIcons.Ringtone, "Set as ringtone") {
-                    state.close()
-                    phoneFiles.setSound(trackId)
-                }
-                SongAction.DeleteFromPhone -> MenuRow(OctoIcons.Delete, "Delete from phone") {
-                    state.close()
-                    phoneFiles.delete(listOf(trackId))
-                }
-                SongAction.Info -> MenuRow(OctoIcons.Info, "Song info") {
-                    state.openInfo(trackId)
-                }
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-    }
-    RatingSheet(state, vm)
-    SongInfoSheet(state)
-    CollectionMenuHost(state.collections, onOpen)
-}
-
-@Composable
-internal fun SongHeader(song: TrackEntity) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Artwork(song.artwork, 48.dp, shape = RoundedCornerShape(6.dp))
-        Column(Modifier.weight(1f)) {
-            Text(song.title, style = OctoType.body, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(song.artist, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (song.rating > 0) RatingStars(song.rating, Modifier.padding(top = 4.dp))
-        }
-    }
-}
-
-// One choice in the menu: an icon and what it does. One that cannot be
-// chosen right now is dimmed.
-@Composable
-fun MenuRow(@DrawableRes icon: Int, label: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            // Grows with the text at large font sizes.
-            .heightIn(min = 52.dp)
-            .padding(horizontal = 20.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Icon(
-            painterResource(icon),
-            contentDescription = null,
-            tint = if (enabled) OctoColors.TextSecondary else OctoColors.TextMuted,
-            modifier = Modifier.size(22.dp),
-        )
-        Text(
-            label,
-            style = OctoType.bodySmall,
-            color = if (enabled) OctoColors.TextPrimary else OctoColors.TextMuted,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}

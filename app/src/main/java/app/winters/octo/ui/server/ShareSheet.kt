@@ -8,8 +8,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,17 +24,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.data.userMessage
-import app.winters.octo.design.GlassSheet
+import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
+import app.winters.octo.ui.common.GlassMenuBack
+import app.winters.octo.ui.common.GlassMenuHeading
+import app.winters.octo.ui.common.GlassMenuNote
+import app.winters.octo.ui.common.GlassMenuPage
+import app.winters.octo.ui.common.GlassMenuTitle
+import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.rememberOpenedBeside
 import app.winters.octo.server.ServerControls
 import app.winters.octo.server.ShareExpiry
 import app.winters.octo.server.sharingUnavailable
@@ -115,48 +124,47 @@ fun shareLink(context: Context, url: String, title: String) {
     runCatching { context.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }
 
-// How long the link lasts, as a short list; picking one makes the link and
-// opens the phone's share sheet.
+// Sharing from a page, like an album's: a glass card beside the button.
 @Composable
-fun ShareSheetHost(state: ShareSheetState, vm: ShareViewModel = hiltViewModel()) {
+fun ShareSheetHost(state: ShareSheetState) {
+    val open = state.open != null
+    GlassPopup(
+        visible = open,
+        anchor = rememberOpenedBeside(open),
+        onDismiss = state::close,
+        backdrop = LocalHaze.current,
+        title = "Share",
+    ) {
+        val request = state.last ?: return@GlassPopup
+        key(state.shown) { ShareLinkPage(request, onBack = null, onDone = state::close) }
+    }
+}
+
+// How long the link lasts, as a short list; picking one makes the link and
+// opens the phone's share sheet. A page of a glass menu; `onBack` is there
+// when it was opened from another page.
+@Composable
+fun ShareLinkPage(request: ShareRequest, onBack: (() -> Unit)?, onDone: () -> Unit, vm: ShareViewModel = hiltViewModel()) {
     val context = LocalContext.current
-    GlassSheet(visible = state.open != null, onDismiss = state::close) {
-        val request = state.last ?: return@GlassSheet
-        key(state.shown) {
-            LaunchedEffect(Unit) { vm.reset() }
-            Text(
-                "Share \"${request.title}\"",
-                style = OctoType.section,
-                color = OctoColors.TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 20.dp),
-            )
-            Text(
-                "Anyone with the link can listen.",
-                style = OctoType.caption,
-                color = OctoColors.TextMuted,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp),
-            )
-            Text(
-                "Link expires",
-                style = OctoType.label,
-                color = OctoColors.TextSecondary,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp),
-            )
-            ShareExpiry.entries.forEach { expiry ->
-                ExpiryLine(expiry.label, busy = vm.making == expiry, enabled = vm.making == null) {
-                    vm.make(request, expiry) { url ->
-                        state.close()
-                        shareLink(context, url, request.title)
-                    }
+    // Each page starts with nothing being made and nothing gone wrong.
+    LaunchedEffect(Unit) { vm.reset() }
+    GlassMenuPage(
+        header = {
+            if (onBack != null) GlassMenuBack("Share link", onBack) else GlassMenuHeading("Share \"${request.title}\"")
+        },
+    ) {
+        GlassMenuNote("Anyone with the link can listen.")
+        GlassMenuTitle("Link expires")
+        ShareExpiry.entries.forEach { expiry ->
+            ExpiryLine(expiry.label, busy = vm.making == expiry, enabled = vm.making == null) {
+                vm.make(request, expiry) { url ->
+                    onDone()
+                    shareLink(context, url, request.title)
                 }
             }
-            vm.problem?.let {
-                Text(it, style = OctoType.caption, color = OctoColors.Error, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-            }
-            Spacer(Modifier.height(12.dp))
         }
+        vm.problem?.let { GlassMenuNote(it, color = OctoColors.Error) }
+        Spacer(Modifier.height(4.dp))
     }
 }
 
@@ -165,9 +173,10 @@ private fun ExpiryLine(label: String, busy: Boolean, enabled: Boolean, onClick: 
     Row(
         Modifier
             .fillMaxWidth()
+            .heightIn(min = 46.dp)
+            .clip(RoundedCornerShape(14.dp))
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .height(52.dp)
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -180,3 +189,4 @@ private fun ExpiryLine(label: String, busy: Boolean, enabled: Boolean, onClick: 
         if (busy) CircularProgressIndicator(color = OctoColors.Accent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
     }
 }
+

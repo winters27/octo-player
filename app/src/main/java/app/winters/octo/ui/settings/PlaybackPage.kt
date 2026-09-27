@@ -13,8 +13,7 @@ import app.winters.octo.playback.speedLabel
 import app.winters.octo.player.CrossfadeSecondsRange
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
-import app.winters.octo.player.SpeedSheet
-import app.winters.octo.ui.common.FloatingSheet
+import app.winters.octo.player.SpeedPopup
 import app.winters.octo.ui.settings.rows.ChoiceRow
 import app.winters.octo.ui.settings.rows.SettingsGroup
 import app.winters.octo.ui.settings.rows.SettingsPageFrame
@@ -129,7 +128,7 @@ fun PlaybackPage(onBack: () -> Unit, highlight: String?, vm: PlaybackViewModel =
         }
     }
     // The same speed controls as the player's, kept for every song.
-    FloatingSheet(visible = speedOpen, onDismiss = { speedOpen = false }) { SpeedSheet() }
+    SpeedPopup(visible = speedOpen, onDismiss = { speedOpen = false })
 }
 
 // How long the blend is, from 1 to 12 seconds, saved as it changes.

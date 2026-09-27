@@ -66,10 +66,11 @@ private const val MoreOptions = "More options"
 
 private val RowShape = RoundedCornerShape(12.dp)
 
-// Opens the menu on a long press, with a little buzz.
-private fun Modifier.pressOrHold(haptics: HapticFeedback, onClick: () -> Unit, onLongClick: (() -> Unit)?): Modifier {
+// Opens the menu on a long press, with a little buzz, floating beside
+// what was held.
+private fun Modifier.pressOrHold(haptics: HapticFeedback, spot: PressSpot, onClick: () -> Unit, onLongClick: (() -> Unit)?): Modifier {
     if (onLongClick == null) return clickable(onClick = onClick)
-    return combinedClickable(
+    return pressSpot(spot).combinedClickable(
         onClick = onClick,
         onLongClickLabel = MoreOptions,
         onLongClick = {
@@ -106,7 +107,7 @@ private fun AlbumCard(
 ) {
     Column(
         (if (width != null) modifier.width(width) else modifier.fillMaxWidth())
-            .pressOrHold(LocalHapticFeedback.current, onClick, onLongClick),
+            .pressOrHold(LocalHapticFeedback.current, LocalPressSpot.current, onClick, onLongClick),
     ) {
         ArtworkFill(artwork, outside = outside)
         Spacer(Modifier.height(8.dp))
@@ -138,7 +139,7 @@ fun SongCard(track: TrackEntity, onClick: () -> Unit) {
         Modifier
             .width(150.dp)
             .alpha(if (LocalOfflineMarks.current.isOutOfReach(track)) OutOfReachAlpha else 1f)
-            .pressOrHold(LocalHapticFeedback.current, onClick) { menu.open(track.id) },
+            .pressOrHold(LocalHapticFeedback.current, LocalPressSpot.current, onClick) { menu.open(track.id) },
     ) {
         ArtworkFill(track.artwork, outside = isOutsideLibrary(track.id))
         Spacer(Modifier.height(8.dp))
@@ -267,6 +268,7 @@ private fun SongLine(
                 .fillMaxWidth()
                 // A tap plays, or picks while the list is picking; a long
                 // press opens the song's menu.
+                .pressSpot(LocalPressSpot.current)
                 .combinedClickable(
                     onClick = { if (selecting) selection.toggle(selectKey) else onClick?.invoke() },
                     onLongClickLabel = MoreOptions,
@@ -421,7 +423,7 @@ fun ArtistRow(artist: ArtistEntity, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .pressOrHold(LocalHapticFeedback.current, onClick) { menus.open(CollectionTarget.Artist(artist.id)) }
+            .pressOrHold(LocalHapticFeedback.current, LocalPressSpot.current, onClick) { menus.open(CollectionTarget.Artist(artist.id)) }
             // At least a row tall; taller when large text needs it.
             .heightIn(min = 64.dp)
             .padding(horizontal = 20.dp, vertical = 4.dp),
@@ -453,7 +455,7 @@ fun ArtistCircle(artist: OnlineArtist, outside: Boolean = true, onClick: () -> U
 @Composable
 private fun ArtistCircle(artwork: String?, name: String, onClick: () -> Unit, onLongClick: (() -> Unit)?, outside: Boolean) {
     Column(
-        Modifier.width(96.dp).pressOrHold(LocalHapticFeedback.current, onClick, onLongClick),
+        Modifier.width(96.dp).pressOrHold(LocalHapticFeedback.current, LocalPressSpot.current, onClick, onLongClick),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Artwork(artwork, 96.dp, shape = CircleShape, outside = outside)

@@ -40,7 +40,6 @@ import app.winters.octo.catalog.isFind
 import app.winters.octo.catalog.songDetails
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
-import app.winters.octo.design.GlassSheet
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.device.DEVICE
@@ -50,6 +49,9 @@ import app.winters.octo.listening.PlayHistory
 import app.winters.octo.offline.DownloadStatus
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playback.audioQuality
+import app.winters.octo.ui.common.GlassMenuBack
+import app.winters.octo.ui.common.GlassMenuNote
+import app.winters.octo.ui.common.GlassMenuPage
 import app.winters.octo.ui.common.asClock
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -326,28 +328,34 @@ class SongInfoViewModel @Inject constructor(
     }.getOrNull()
 }
 
-// Everything known about a song, as plain labelled lines.
+// Everything known about a song, as plain labelled lines, a page of the
+// song's menu. It scrolls when long.
 @Composable
-internal fun SongInfoSheet(state: SongMenuState, vm: SongInfoViewModel = hiltViewModel()) {
-    GlassSheet(visible = state.infoTrackId != null, onDismiss = state::closeInfo) {
-        val trackId = state.lastInfoTrackId ?: return@GlassSheet
-        val info by remember(trackId) { vm.info(trackId) }.collectAsStateWithLifecycle(null)
-        val shown = info ?: return@GlassSheet
+internal fun SongInfoPage(trackId: String, onBack: () -> Unit, vm: SongInfoViewModel = hiltViewModel()) {
+    val info by remember(trackId) { vm.info(trackId) }.collectAsStateWithLifecycle(null)
+    GlassMenuPage(width = InfoWidth, header = { GlassMenuBack("Song info", onBack) }) {
+        val shown = info
+        if (shown == null) {
+            GlassMenuNote("Reading the song")
+            return@GlassMenuPage
+        }
         SongHeader(shown.track)
-        Spacer(Modifier.height(12.dp))
         for (line in infoLines(shown.facts)) InfoRow(line)
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(8.dp))
     }
 }
+
+// A little wider than the menu, for the labels beside the values.
+private val InfoWidth = 320.dp
 
 @Composable
 private fun InfoRow(line: InfoLine) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 5.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp, top = 5.dp, bottom = 5.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        Text(line.label, style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.width(96.dp).padding(top = 2.dp))
+        Text(line.label, style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.width(92.dp).padding(top = 2.dp))
         Text(line.value, style = OctoType.bodySmall, color = OctoColors.TextPrimary, modifier = Modifier.weight(1f))
         if (line.copyable) CopyButton(line.label, line.value)
     }
