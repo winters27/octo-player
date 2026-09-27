@@ -23,6 +23,7 @@ castFramework = "22.3.1"
 mediarouter = "1.8.1"
 palette = "1.0.0"
 reorderable = "3.1.0"
+jna = "5.19.1"
 junit = "4.13.2"
 androidxTestRunner = "1.7.0"
 androidxTestJunit = "1.3.0"
@@ -54,6 +55,7 @@ mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver3", versi
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+kotlinx-coroutines-swing = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-swing", version.ref = "coroutines" }
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
@@ -67,6 +69,7 @@ kotlinx-coroutines-guava = { group = "org.jetbrains.kotlinx", name = "kotlinx-co
 androidx-palette = { group = "androidx.palette", name = "palette-ktx", version.ref = "palette" }
 reorderable = { group = "sh.calvin.reorderable", name = "reorderable", version.ref = "reorderable" }
 taglib = { group = "io.github.kyant0", name = "taglib", version.ref = "taglib" }
+jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna" }
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
 coil-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }

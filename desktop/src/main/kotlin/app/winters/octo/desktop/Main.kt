@@ -1,47 +1,149 @@
 package app.winters.octo.desktop
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.text.BasicText
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowPlacement
+import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import app.winters.octo.catalog.SongIdentity
-import app.winters.octo.lyrics.engine.linePositionSpring
-import java.util.Locale
+import app.winters.octo.desktop.library.coverLoader
+import app.winters.octo.desktop.nav.KeyPress
+import app.winters.octo.desktop.nav.shortcutFor
+import app.winters.octo.desktop.secrets.SecretStore
+import app.winters.octo.desktop.server.Accounts
+import app.winters.octo.desktop.settings.AppPlaces
+import app.winters.octo.desktop.settings.DesktopOs
+import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.desktop.settings.WindowSpot
+import app.winters.octo.desktop.settings.currentOs
+import app.winters.octo.desktop.ui.Shell
+import app.winters.octo.desktop.window.Frame
+import app.winters.octo.desktop.window.MIN_HEIGHT
+import app.winters.octo.desktop.window.MIN_WIDTH
+import app.winters.octo.desktop.window.ScreenArea
+import app.winters.octo.desktop.window.placeWindow
+import app.winters.octo.desktop.window.roundWindowsCorners
+import app.winters.octo.desktop.window.seeThroughMacTitleBar
+import app.winters.octo.design.LocalTyping
+import app.winters.octo.design.TypingState
+import coil3.compose.setSingletonImageLoaderFactory
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.debounce
+import okhttp3.OkHttpClient
+import java.awt.Dimension
+import java.awt.GraphicsEnvironment
+import java.awt.Toolkit
+import java.io.File
+import java.util.concurrent.TimeUnit
 
-// Two answers worked out by the shared core, to show it runs here: whether
-// two spellings name the same song, and where a lyric line's spring is a
-// quarter of a second after it was sent to 100.
-fun sharedCoreReadings(): List<String> {
-    val match = SongIdentity.same("${'$'}UICIDE", "${'$'}uicideboy${'$'}", "Suicide", "Suicideboys")
-    val spring = linePositionSpring().apply {
-        setTarget(100.0)
-        update(0.25)
+// The usable part of every screen, without taskbars and menu bars.
+private fun screenAreas(): List<ScreenArea> = runCatching {
+    val toolkit = Toolkit.getDefaultToolkit()
+    GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices.map { device ->
+        val config = device.defaultConfiguration
+        val b = config.bounds
+        val i = toolkit.getScreenInsets(config)
+        ScreenArea((b.x + i.left).toFloat(), (b.y + i.top).toFloat(), (b.width - i.left - i.right).toFloat(), (b.height - i.top - i.bottom).toFloat())
     }
-    return listOf(
-        "SongIdentity: \"\$UICIDE\" and \"Suicide\" are ${match.verdict} (${match.reason})",
-        "Lyric line spring at 0.25 s: " + String.format(Locale.ROOT, "%.2f", spring.value()),
-    )
-}
+}.getOrDefault(emptyList())
 
-fun main() = application {
-    Window(onCloseRequest = ::exitApplication, title = "Octo", state = rememberWindowState()) {
-        Column(
-            modifier = Modifier.fillMaxSize().background(Color(0xFF101014)).padding(32.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+private fun appIcon(): Painter? = runCatching {
+    val bytes = AppState::class.java.getResourceAsStream("/octo-icon.png")!!.use { it.readBytes() }
+    BitmapPainter(org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap())
+}.getOrNull()
+
+@OptIn(FlowPreview::class)
+fun main() {
+    val places = AppPlaces.forSystem()
+    val settings = SettingsStore(File(places.config, SettingsStore.FILE_NAME))
+    val http = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .build()
+    val accounts = Accounts(settings, SecretStore.forSystem(), http)
+    val os = currentOs()
+    val icon = appIcon()
+
+    application {
+        val app = remember { AppState(settings, accounts, http, CoroutineScope(SupervisorJob() + Dispatchers.Main), os) }
+        setSingletonImageLoaderFactory { context -> coverLoader(context, http, places.cache) }
+        val spot = remember { placeWindow(settings.current.window, screenAreas()) }
+        // Windows and Linux get the app's own glass frame unless the
+        // listener asked for the system's; macOS keeps its own lights.
+        val custom = remember { os != DesktopOs.Mac && !settings.current.systemTitleBar }
+        val windowState = rememberWindowState(
+            placement = if (spot.maximized && !custom) WindowPlacement.Maximized else WindowPlacement.Floating,
+            position = WindowPosition(spot.x.dp, spot.y.dp),
+            size = DpSize(spot.width.dp, spot.height.dp),
+        )
+        val typing = remember { TypingState() }
+        var frame by remember { mutableStateOf<Frame?>(null) }
+        // Where the window last was at its own size, for the next run.
+        var floating by remember { mutableStateOf(spot.copy(maximized = false)) }
+        fun maximizedNow() = frame?.maximized ?: (windowState.placement == WindowPlacement.Maximized)
+        fun keepPlace() = settings.update { it.copy(window = floating.copy(maximized = maximizedNow())) }
+        fun close() {
+            keepPlace()
+            app.player.close()
+            exitApplication()
+        }
+
+        Window(
+            onCloseRequest = ::close,
+            state = windowState,
+            title = "Octo",
+            icon = icon,
+            undecorated = custom,
+            onPreviewKeyEvent = { event ->
+                if (event.type != KeyEventType.KeyDown) return@Window false
+                val press = KeyPress(event.key, event.isCtrlPressed, event.isAltPressed, event.isShiftPressed, event.isMetaPressed)
+                val shortcut = shortcutFor(press, app.mac, typing.active) ?: return@Window false
+                app.perform(shortcut)
+            },
         ) {
-            BasicText("Octo", style = TextStyle(color = Color.White, fontSize = 40.sp))
-            sharedCoreReadings().forEach { line ->
-                BasicText(line, style = TextStyle(color = Color(0xFFB8B8C4), fontSize = 16.sp))
+            val own = remember { if (custom) Frame(window, windowState) else null }
+            LaunchedEffect(Unit) {
+                frame = own
+                window.minimumSize = Dimension(MIN_WIDTH.toInt(), MIN_HEIGHT.toInt())
+                if (os == DesktopOs.Mac) seeThroughMacTitleBar(window)
+                if (own != null && os == DesktopOs.Windows) roundWindowsCorners(window)
+                if (own != null && spot.maximized) own.maximize()
+            }
+            // Remembers the window's own size and place as it changes, and
+            // saves it once it settles, so a crash does not lose it.
+            LaunchedEffect(Unit) {
+                snapshotFlow { Triple(windowState.position, windowState.size, maximizedNow() || windowState.placement != WindowPlacement.Floating) }
+                    .debounce(700)
+                    .collect { (position, size, filled) ->
+                        if (!filled && position is WindowPosition.Absolute) {
+                            floating = WindowSpot(position.x.value, position.y.value, size.width.value, size.height.value)
+                        }
+                        keepPlace()
+                    }
+            }
+            CompositionLocalProvider(LocalTyping provides typing) {
+                Shell(app, own, ::close)
             }
         }
     }

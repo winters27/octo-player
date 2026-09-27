@@ -1,0 +1,114 @@
+package app.winters.octo.desktop.nav
+
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+
+// Every page the main area can show.
+sealed interface Page {
+    data object Home : Page
+    data object Search : Page
+    data object Songs : Page
+    data object Albums : Page
+    data object Artists : Page
+    data object Genres : Page
+    data object Folders : Page
+    data object Favourites : Page
+    data object History : Page
+    data object Settings : Page
+    data class Album(val id: String) : Page
+    data class Artist(val id: String, val name: String = "") : Page
+    data class Genre(val name: String) : Page
+    data class Folder(val id: String, val name: String) : Page
+    data class Playlist(val id: String) : Page
+}
+
+// The sidebar's items. Settings sits at the bottom; playlists are listed
+// under their own heading.
+sealed interface SidebarItem {
+    data class Top(val page: Page) : SidebarItem
+    data class PlaylistItem(val id: String) : SidebarItem
+}
+
+// The item a top-level page lights up in the sidebar, or null for a page
+// that is not in it (an album, an artist), which keeps the item of the page
+// it was opened from.
+fun sidebarItemOf(page: Page): SidebarItem? = when (page) {
+    Page.Home, Page.Search, Page.Songs, Page.Albums, Page.Artists, Page.Genres, Page.Folders,
+    Page.Favourites, Page.History, Page.Settings,
+    -> SidebarItem.Top(page)
+    is Page.Playlist -> SidebarItem.PlaylistItem(page.id)
+    is Page.Album, is Page.Artist, is Page.Genre, is Page.Folder -> null
+}
+
+// One visit to a page. The id is its own, so the same page visited twice
+// keeps two scroll positions; `item` is what the sidebar shows lit.
+data class Visit(val id: Long, val page: Page, val item: SidebarItem?)
+
+// Where a list was scrolled to: the first row showing and how far into it.
+data class ScrollSpot(val index: Int = 0, val offset: Int = 0)
+
+// Back and forward through the pages, as a browser does: going somewhere
+// new drops what was ahead. Each visit remembers how far it was scrolled.
+@Stable
+class Navigator(start: Page = Page.Home, private val limit: Int = 100) {
+    private var nextId = 1L
+    private val visits = ArrayList<Visit>()
+    private var at by mutableStateOf(0)
+    private val scrolls = HashMap<Long, ScrollSpot>()
+
+    // Bumped on every move, so the screen redraws.
+    private var moves by mutableStateOf(0)
+
+    init {
+        visits += visit(start, null)
+    }
+
+    val current: Visit get() = moves.let { visits[at] }
+
+    val canGoBack: Boolean get() = moves.let { at > 0 }
+
+    val canGoForward: Boolean get() = moves.let { at < visits.lastIndex }
+
+    // What the sidebar lights up now.
+    val sidebarItem: SidebarItem? get() = current.item
+
+    fun go(page: Page) {
+        if (page == current.page) return
+        // Anything ahead is dropped, with its scroll positions.
+        while (visits.lastIndex > at) scrolls.remove(visits.removeAt(visits.lastIndex).id)
+        visits += visit(page, current.item)
+        // A very long history forgets its oldest pages.
+        while (visits.size > limit) scrolls.remove(visits.removeAt(0).id)
+        at = visits.lastIndex
+        moves++
+    }
+
+    fun back(): Boolean {
+        if (!canGoBack) return false
+        at--
+        moves++
+        return true
+    }
+
+    fun forward(): Boolean {
+        if (!canGoForward) return false
+        at++
+        moves++
+        return true
+    }
+
+    fun scrollOf(visit: Visit): ScrollSpot = scrolls[visit.id] ?: ScrollSpot()
+
+    fun keepScroll(visit: Visit, spot: ScrollSpot) {
+        if (visits.any { it.id == visit.id }) scrolls[visit.id] = spot
+    }
+
+    // A page opened from another keeps that page's sidebar item lit, unless
+    // it is in the sidebar itself.
+    private fun visit(page: Page, from: SidebarItem?) = Visit(nextId++, page, sidebarItemOf(page) ?: from)
+
+    // How many pages back and forward there are, for tests.
+    val depth: Pair<Int, Int> get() = at to visits.lastIndex - at
+}
