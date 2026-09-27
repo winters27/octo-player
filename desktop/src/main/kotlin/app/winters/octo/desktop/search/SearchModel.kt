@@ -1,0 +1,189 @@
+package app.winters.octo.desktop.search
+
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import app.winters.octo.catalog.searchKey
+import app.winters.octo.desktop.library.LibraryIndex
+import app.winters.octo.desktop.server.Connection
+import app.winters.octo.desktop.server.userMessage
+import app.winters.octo.subsonic.Album
+import app.winters.octo.subsonic.Artist
+import app.winters.octo.subsonic.Playlist
+import app.winters.octo.subsonic.SearchResult
+import app.winters.octo.subsonic.Song
+import app.winters.octo.subsonic.SubsonicException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+// Which kind of result a search shows: everything, or one kind in full.
+// The same filters as the phone.
+enum class SearchFilter(val label: String) {
+    All("All"),
+    Songs("Songs"),
+    Albums("Albums"),
+    Artists("Artists"),
+    Playlists("Playlists"),
+}
+
+// How many of each kind a search shows, as on the phone: a few of each for
+// everything, all of one kind (up to a limit) when it is picked.
+data class SearchCaps(val artists: Int, val albums: Int, val songs: Int, val playlists: Int)
+
+fun searchCaps(filter: SearchFilter): SearchCaps = when (filter) {
+    SearchFilter.All -> SearchCaps(artists = 10, albums = 20, songs = 50, playlists = 10)
+    SearchFilter.Songs -> SearchCaps(0, 0, songs = 1_000, playlists = 0)
+    SearchFilter.Albums -> SearchCaps(0, albums = 500, 0, 0)
+    SearchFilter.Artists -> SearchCaps(artists = 500, 0, 0, 0)
+    SearchFilter.Playlists -> SearchCaps(0, 0, 0, playlists = 500)
+}
+
+// What the library has that matches, and whether there are more of a kind
+// than shown, for its "See all".
+data class LibraryResults(
+    val artists: List<Artist> = emptyList(),
+    val albums: List<Album> = emptyList(),
+    val songs: List<Song> = emptyList(),
+    val playlists: List<Playlist> = emptyList(),
+    val moreArtists: Boolean = false,
+    val moreAlbums: Boolean = false,
+    val moreSongs: Boolean = false,
+    val morePlaylists: Boolean = false,
+) {
+    val isEmpty get() = artists.isEmpty() && albums.isEmpty() && songs.isEmpty() && playlists.isEmpty()
+}
+
+// What the server found online, beyond the library: only from a server
+// that lists octoAcquisitions, which can also fetch them into the library.
+data class OutsideResults(
+    val songs: List<Song> = emptyList(),
+    val albums: List<Album> = emptyList(),
+    val artists: List<Artist> = emptyList(),
+) {
+    val isEmpty get() = songs.isEmpty() && albums.isEmpty() && artists.isEmpty()
+}
+
+data class SearchFound(val library: LibraryResults, val outside: OutsideResults)
+
+sealed interface SearchState {
+    // Too little typed to ask.
+    data object Idle : SearchState
+    data object Looking : SearchState
+    data class Done(val found: SearchFound) : SearchState
+    data class Failed(val message: String) : SearchState
+}
+
+// Splits what the server sent into the library's and the rest. Only a
+// server that can fetch songs into the library (`outsideOn`) mixes in songs
+// found online, and only once the library has been read can they be told
+// apart; otherwise everything counts as the library's. One more of each
+// kind than shown is asked for, to know whether there are more.
+fun splitResults(
+    sent: SearchResult,
+    query: String,
+    filter: SearchFilter,
+    playlists: List<Playlist>,
+    index: LibraryIndex?,
+    outsideOn: Boolean,
+): SearchFound {
+    val caps = searchCaps(filter)
+    val telling = outsideOn && index != null
+    val (songs, outsideSongs) = if (telling) sent.song.partition { index!!.holds(it) } else sent.song to emptyList()
+    val (albums, outsideAlbums) = if (telling) sent.album.partition { index!!.hasAlbum(it.id) } else sent.album to emptyList()
+    val (artists, outsideArtists) = if (telling) sent.artist.partition { index!!.hasArtist(it.id) } else sent.artist to emptyList()
+    val key = searchKey(query)
+    val named = if (caps.playlists > 0) playlists.filter { searchKey(it.name).contains(key) } else emptyList()
+    return SearchFound(
+        LibraryResults(
+            artists = artists.take(caps.artists),
+            albums = albums.take(caps.albums),
+            songs = songs.take(caps.songs),
+            playlists = named.take(caps.playlists),
+            moreArtists = artists.size > caps.artists,
+            moreAlbums = albums.size > caps.albums,
+            moreSongs = songs.size > caps.songs,
+            morePlaylists = named.size > caps.playlists,
+        ),
+        OutsideResults(
+            songs = if (caps.songs > 0) outsideSongs else emptyList(),
+            albums = if (caps.albums > 0) outsideAlbums else emptyList(),
+            artists = if (caps.artists > 0) outsideArtists else emptyList(),
+        ),
+    )
+}
+
+// How long typing has to pause before the server is asked.
+const val SEARCH_AFTER_MS = 250L
+
+// Octo holds back songs found online when a search asks for 12 songs or
+// fewer, so a search always asks for more than that.
+private const val MIN_SONGS = 40
+
+// The search page's state: what is typed, the filter, and what came back.
+// New text cancels the question before it.
+@Stable
+class SearchModel(
+    private val connection: Connection,
+    private val index: () -> LibraryIndex?,
+    private val playlists: () -> List<Playlist>,
+    private val scope: CoroutineScope,
+) {
+    var text by mutableStateOf("")
+        private set
+    var filter by mutableStateOf(SearchFilter.All)
+        private set
+    var state by mutableStateOf<SearchState>(SearchState.Idle)
+        private set
+
+    private var job: Job? = null
+
+    fun type(value: String) {
+        text = value
+        ask(pause = true)
+    }
+
+    fun pick(value: SearchFilter) {
+        if (value == filter) return
+        filter = value
+        ask(pause = false)
+    }
+
+    fun again() = ask(pause = false)
+
+    private fun ask(pause: Boolean) {
+        job?.cancel()
+        val query = text.trim()
+        if (searchKey(query).length < 2) {
+            state = SearchState.Idle
+            return
+        }
+        val filter = filter
+        state = SearchState.Looking
+        job = scope.launch {
+            if (pause) delay(SEARCH_AFTER_MS)
+            state = try {
+                SearchState.Done(search(query, filter))
+            } catch (e: SubsonicException) {
+                SearchState.Failed(e.userMessage())
+            }
+        }
+    }
+
+    suspend fun search(query: String, filter: SearchFilter): SearchFound {
+        val caps = searchCaps(filter)
+        val sent = if (caps.artists + caps.albums + caps.songs == 0) {
+            SearchResult()
+        } else {
+            connection.client.search(
+                query,
+                artists = if (caps.artists > 0) caps.artists + 1 else 0,
+                albums = if (caps.albums > 0) caps.albums + 1 else 0,
+                songs = if (caps.songs > 0) maxOf(caps.songs + 1, MIN_SONGS) else 0,
+            )
+        }
+        return splitResults(sent, query, filter, playlists(), index(), connection.acquires)
+    }
+}
