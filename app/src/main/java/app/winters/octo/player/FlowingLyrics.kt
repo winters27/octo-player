@@ -75,6 +75,7 @@ import app.winters.octo.lyrics.engine.LineState
 import app.winters.octo.lyrics.engine.LineStatus
 import app.winters.octo.lyrics.engine.LyricEngine
 import app.winters.octo.lyrics.engine.LyricMapper
+import app.winters.octo.lyrics.engine.MaskShape
 import app.winters.octo.lyrics.engine.PRESSED_SCALE
 import app.winters.octo.lyrics.engine.StillDots
 import app.winters.octo.lyrics.engine.SyncLine
@@ -83,13 +84,13 @@ import app.winters.octo.lyrics.engine.arcPose
 import app.winters.octo.lyrics.engine.bobEm
 import app.winters.octo.lyrics.engine.dotsPose
 import app.winters.octo.lyrics.engine.emphasisFor
+import app.winters.octo.lyrics.engine.fillProgress
 import app.winters.octo.lyrics.engine.glyphPose
 import app.winters.octo.lyrics.engine.liftEm
 import app.winters.octo.lyrics.engine.maskLeft
 import app.winters.octo.lyrics.engine.maskShape
 import app.winters.octo.lyrics.engine.onScreen
 import app.winters.octo.lyrics.engine.shownBlur
-import app.winters.octo.lyrics.engine.wordProgress
 import app.winters.octo.lyrics.heardAt
 import app.winters.octo.lyrics.totalOffset
 import app.winters.octo.playback.NowPlaying
@@ -433,7 +434,8 @@ private fun DrawScope.drawWords(engine: LyricEngine, st: LineState, box: LineBox
             cold -> -(if (line.isBackground) BACKGROUND_LIFT_EM else LIFT_EM) * lift
             else -> liftEm(t, word.start, word.end, line.isBackground, lift)
         } * box.em
-        val progress = if (cold) 1.0 else wordProgress(t, word.start, word.end)
+        val shape = maskShape(wb.width.toDouble(), wb.rowHeight.toDouble(), look.fraction(LookDial.Fade))
+        val progress = if (cold) 1.0 else fillProgress(t, word.start, word.end, shape.edge)
         val glyphs = letters?.getOrNull(j)
         val bloom = glyphs?.let {
             emphasisFor(word.end - word.start, it.size, j >= lastGroup, look.fraction(LookDial.Emphasis), look.fraction(LookDial.Glow))
@@ -442,7 +444,7 @@ private fun DrawScope.drawWords(engine: LyricEngine, st: LineState, box: LineBox
         when {
             progress <= 0.0 -> paint(dark)
             progress >= 1.0 -> paint(bright)
-            else -> fillWord(wb, box.em, progress, look.fraction(LookDial.Fade), line.rtl, bright, dark, paint)
+            else -> fillWord(wb, box.em, progress, shape, line.rtl, bright, dark, paint)
         }
     }
 }
@@ -453,7 +455,7 @@ private fun DrawScope.fillWord(
     wb: WordBox,
     em: Float,
     progress: Double,
-    softness: Double,
+    shape: MaskShape,
     rtl: Boolean,
     bright: Float,
     dark: Float,
@@ -462,7 +464,6 @@ private fun DrawScope.fillWord(
     if (wb.width <= 0f) return
     val margin = 0.5f * em
     val area = Rect(wb.x - margin, wb.rowTop - margin, wb.x + wb.width + margin, wb.rowTop + wb.rowHeight + margin)
-    val shape = maskShape(wb.width.toDouble(), wb.rowHeight.toDouble(), softness)
     val left = maskLeft(progress, wb.x.toDouble(), wb.width.toDouble(), shape, rtl).toFloat()
     val right = left + (shape.size * wb.width).toFloat()
     val lit = Color.Black.copy(alpha = bright)
