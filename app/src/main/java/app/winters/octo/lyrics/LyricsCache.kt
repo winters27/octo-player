@@ -74,6 +74,11 @@ class LyricsCache(private val folder: File) {
         }
     }
 
+    // Forgets a song's answer, so its lyrics are looked up again.
+    fun drop(songId: String) {
+        runCatching { fileFor(songId).delete() }
+    }
+
     private fun fileFor(songId: String): File = File(folder, "${hash(songId)}.json")
 
     private fun hash(text: String): String =

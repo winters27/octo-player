@@ -72,9 +72,12 @@ private fun joinLayers(layers: List<CueLine>): Pair<String, List<LyricWord>>? {
     val words = mutableListOf<LyricWord>()
     layers.forEach { layer ->
         if (text.isNotEmpty()) text.append(' ')
-        val shift = text.length
-        text.append(layer.value)
-        words += cueWords(layer).map { it.copy(from = it.from + shift, to = it.to + shift) }
+        // Spaces a cue line starts with are left out, since the lyrics view
+        // trims its lines and the words must keep their places.
+        val cut = layer.value.length - layer.value.trimStart().length
+        val shift = text.length - cut
+        text.append(layer.value, cut, layer.value.length)
+        words += cueWords(layer).filter { it.to > cut }.map { it.copy(from = maxOf(it.from, cut) + shift, to = it.to + shift) }
     }
     return text.toString() to words
 }

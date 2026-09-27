@@ -33,16 +33,22 @@ private fun pickKey(trackId: String) = stringPreferencesKey("$PICK_PREFIX$trackI
 private fun hiddenKey(trackId: String) = booleanPreferencesKey("$HIDDEN_PREFIX$trackId")
 
 // Lyrics the listener picked for a song: one of the song's own sources,
-// or one copy in the online library, by its number.
+// one copy in the online library, by its number, or a choice the server
+// keeps for every app (see ServerChoices.kt). This phone never keeps a
+// server choice as its own pick: the server keeps it.
 sealed interface LyricsPick {
     data class Own(val source: LyricsSource) : LyricsPick
     data class Online(val id: Long) : LyricsPick
+
+    // "auto", or the id of one copy the server holds ("kugou:123").
+    data class OnServer(val choice: String) : LyricsPick
 }
 
-// How a pick is kept: "own:Server" or "online:12345".
+// How a pick is written: "own:Server", "online:12345" or "server:auto".
 fun LyricsPick.encoded(): String = when (this) {
     is LyricsPick.Own -> "own:${source.name}"
     is LyricsPick.Online -> "online:$id"
+    is LyricsPick.OnServer -> "server:$choice"
 }
 
 // A kept pick, or null for one this app cannot read.
@@ -52,6 +58,7 @@ fun decodePick(text: String?): LyricsPick? {
     return when (kind) {
         "own" -> LyricsSource.entries.firstOrNull { it.name == value && it != LyricsSource.Online }?.let(LyricsPick::Own)
         "online" -> value.toLongOrNull()?.let(LyricsPick::Online)
+        "server" -> value.takeIf(String::isNotEmpty)?.let(LyricsPick::OnServer)
         else -> null
     }
 }
@@ -94,6 +101,16 @@ class LyricsChoices internal constructor(private val store: DataStore<Preference
 
     suspend fun show(trackId: String) {
         store.edit { it.remove(hiddenKey(trackId)) }
+    }
+
+    // Forgets what this phone said about the song, so the server's choice
+    // stands alone. `hidden` keeps the song hidden here, as the server now
+    // has it.
+    suspend fun clear(trackId: String, hidden: Boolean = false) {
+        store.edit {
+            it.remove(pickKey(trackId))
+            if (hidden) it[hiddenKey(trackId)] = true else it.remove(hiddenKey(trackId))
+        }
     }
 
     private fun read(prefs: Preferences, trackId: String) =

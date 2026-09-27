@@ -24,6 +24,10 @@ data class Lyrics(
     // fetched again. Null for other sources, and for answers saved before
     // it was kept.
     val onlineId: Long? = null,
+    // The copy the server has pinned for the song ("kugou:123"), when this
+    // phone knows it, so the menu can say where they are from. Null for the
+    // server's own automatic answer and for other sources.
+    val serverPick: String? = null,
 ) {
     val isEmpty: Boolean get() = !instrumental && lines.none { it.text.isNotBlank() }
 }
