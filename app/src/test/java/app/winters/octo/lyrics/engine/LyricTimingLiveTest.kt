@@ -29,8 +29,8 @@ class LyricTimingLiveTest {
         engine.frame(now, position, true, 1.0, offsetMs = 0)
         assertEquals(3, engine.focus)
 
-        // Three steps earlier while it plays: the words run 0.75 s sooner.
-        val earlier = stepTiming(stepTiming(stepTiming(0, -1), -1), -1)
+        // Fifteen steps earlier while it plays: the words run 0.75 s sooner.
+        val earlier = (1..15).fold(0L) { offset, _ -> stepTiming(offset, -1) }
         assertEquals(-750L, earlier)
         now += frame
         position += 1000 / 60

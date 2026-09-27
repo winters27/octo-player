@@ -45,12 +45,61 @@ class LyricsTimingTest {
     }
 
     @Test
-    fun stepsAreAQuarterSecondAndStopAtTheLimit() {
-        assertEquals(250, stepTiming(0, 1))
-        assertEquals(-500, stepTiming(-250, -1))
-        assertEquals(0, stepTiming(250, -1))
+    fun stepsAreATwentiethOfASecondAndStopAtTheLimit() {
+        assertEquals(50, stepTiming(0, 1))
+        assertEquals(-300, stepTiming(-250, -1))
+        assertEquals(0, stepTiming(50, -1))
         assertEquals(TIMING_LIMIT_MS, stepTiming(TIMING_LIMIT_MS, 1))
         assertEquals(-TIMING_LIMIT_MS, stepTiming(-TIMING_LIMIT_MS, -3))
+        // An output stops sooner.
+        assertEquals(OUTPUT_TIMING_LIMIT_MS, stepTiming(OUTPUT_TIMING_LIMIT_MS - 20, 1, OUTPUT_TIMING_LIMIT_MS))
+        assertEquals(-OUTPUT_TIMING_LIMIT_MS, stepTiming(-OUTPUT_TIMING_LIMIT_MS, -1, OUTPUT_TIMING_LIMIT_MS))
+    }
+
+    @Test
+    fun anOutputNeverMovedIsInTime() {
+        val stored = mapOf<String, Any?>(
+            "lyrics_output_offset:bluetooth:AA:BB" to -150L,
+            "lyrics_output_offset:speaker" to 50L,
+            // A song's timing and other settings are not outputs.
+            "offset:track-1" to 750L,
+            "lyrics_style" to "Flowing",
+        )
+        val outputs = outputOffsetsIn(stored)
+        assertEquals(mapOf("bluetooth:AA:BB" to -150L, "speaker" to 50L), outputs)
+        assertEquals(-150L, outputOffsetIn(outputs, "bluetooth:AA:BB"))
+        assertEquals(50L, outputOffsetIn(outputs, "speaker"))
+        assertEquals(0L, outputOffsetIn(outputs, "wired"))
+        assertEquals(0L, outputOffsetIn(outputs, "bluetooth:CC:DD"))
+        assertEquals(0L, outputOffsetIn(emptyMap(), "speaker"))
+    }
+
+    @Test
+    fun theSongsAndTheOutputsTimingAddUp() {
+        val total = totalOffset(songMs = 250, outputMs = -100)
+        assertEquals(150L, total)
+        // Line 2 is sung at 20.15 s, and a tap there plays from 20.15 s.
+        assertEquals(1, lines.lineAt(lyricsClock(20_149, total)))
+        assertEquals(2, lines.lineAt(lyricsClock(20_150, total)))
+        assertEquals(20_150L, heardAt(20_000, total))
+    }
+
+    @Test
+    fun theScreenLeadIsTwoFramesAtItsRefreshRate() {
+        assertEquals(-33L, screenLeadMs(60f))
+        assertEquals(-22L, screenLeadMs(90f))
+        assertEquals(-17L, screenLeadMs(120f))
+        // A rate the display could not give is taken as 60.
+        assertEquals(-33L, screenLeadMs(0f))
+        assertEquals(-33L, screenLeadMs(Float.NaN))
+    }
+
+    @Test
+    fun theMenuLineNamesWhatWasMoved() {
+        assertEquals(null, timingSummary(0, 0, "Galaxy Buds"))
+        assertEquals("This song +0.25 s", timingSummary(250, 0, "Galaxy Buds"))
+        assertEquals("Galaxy Buds -0.15 s", timingSummary(0, -150, "Galaxy Buds"))
+        assertEquals("This song -0.1 s · Phone speaker +0.05 s", timingSummary(-100, 50, "Phone speaker"))
     }
 
     @Test

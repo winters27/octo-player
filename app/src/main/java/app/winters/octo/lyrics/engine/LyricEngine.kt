@@ -34,9 +34,9 @@ const val SCROLL_BOTTOM_LIMIT = 0.7
 // ripple, the fades, the scroll by hand, and which lines get their word
 // animation ready. Drawing only reads what this leaves behind, through
 // each line's version counters, so a frame never composes anything.
-class LyricEngine(val lines: List<SyncLine>, latency: Double = 0.0) {
+class LyricEngine(val lines: List<SyncLine>) {
     val states: List<LineState> = lines.map(::LineState)
-    val clock = LyricClock(latency)
+    val clock = LyricClock()
 
     // Lines the focus can rest on: every line except backing vocals sung
     // under the lead line just above them.
@@ -124,19 +124,23 @@ class LyricEngine(val lines: List<SyncLine>, latency: Double = 0.0) {
         return if (found >= 0) found else max(first, 0)
     }
 
-    // One frame. `prepare` readies a line's word animation and `release`
-    // lets it go; both come from the view, which holds the text.
+    // One frame. `offsetMs` is the song's lyrics timing and `outputOffsetMs`
+    // the output's, which the clock takes as its latency. `prepare` readies
+    // a line's word animation and `release` lets it go; both come from the
+    // view, which holds the text.
     fun frame(
         nanos: Long,
         reportedMs: Long,
         playing: Boolean,
         rate: Double,
         offsetMs: Long,
+        outputOffsetMs: Long = 0,
         prepare: (Int) -> Unit = {},
         release: (Int) -> Unit = {},
     ) {
         if (!ready) return
         lastNanos = nanos
+        clock.setLatency(outputOffsetMs / 1000.0)
         val playerTime = clock.frame(nanos, reportedMs / 1000.0, rate, playing)
         val dt = clock.step
         val t = playerTime - offsetMs / 1000.0

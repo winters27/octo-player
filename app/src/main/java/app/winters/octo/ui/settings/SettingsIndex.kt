@@ -362,6 +362,10 @@ object SettingsIndex {
         "lyrics_arc", SettingsPage.Lyrics, "Curved lyrics", "The lines bend around a drum",
         listOf("arc", "curve", "3d", "perspective", "wheel"), section = "Look",
     )
+    val LyricsOutputTiming = add(
+        "lyrics_output_timing", SettingsPage.Lyrics, "Lyrics timing on this output", "Words earlier or later on this speaker or headphones",
+        listOf("sync", "delay", "latency", "bluetooth", "earbuds", "offset", "late", "early", "behind"), section = "Timing",
+    )
 
     // Scrobbling
     val ListenBrainz = add(

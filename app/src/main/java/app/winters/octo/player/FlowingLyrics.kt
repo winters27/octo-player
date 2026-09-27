@@ -91,6 +91,7 @@ import app.winters.octo.lyrics.engine.onScreen
 import app.winters.octo.lyrics.engine.shownBlur
 import app.winters.octo.lyrics.engine.wordProgress
 import app.winters.octo.lyrics.heardAt
+import app.winters.octo.lyrics.totalOffset
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.ui.common.asClock
 import app.winters.octo.ui.common.rememberSystemReduceMotion
@@ -146,6 +147,7 @@ fun FlowingLyrics(
     speed: () -> Float,
     timeEvents: Flow<Int>,
     offsetMs: Long,
+    outputOffsetMs: Long,
     look: LyricsLook,
     reduceMotion: Boolean,
     onSeek: (Long) -> Unit,
@@ -163,7 +165,10 @@ fun FlowingLyrics(
     }
     val position by rememberUpdatedState(positionMs)
     val rate by rememberUpdatedState(speed)
+    // The song's timing, and the output's, read afresh every frame: a new
+    // output (earbuds put in) moves the words on the next one.
     val offset by rememberUpdatedState(offsetMs)
+    val outputOffset by rememberUpdatedState(outputOffsetMs)
     val playing by rememberUpdatedState(now.isPlaying)
     val seek by rememberUpdatedState(onSeek)
 
@@ -215,6 +220,7 @@ fun FlowingLyrics(
                             playing,
                             rate().toDouble(),
                             offset,
+                            outputOffset,
                             prepare = { shown.prepare(it, lines[it], measurer) },
                             release = shown::release,
                         )
@@ -234,7 +240,9 @@ fun FlowingLyrics(
             val line = lines[index]
             // A line faded right out is not there to tap.
             if (line.isCredit || engine.states[index].opacity < 0.05) return@tap
-            val target = heardAt((line.start * 1000).roundToLong(), offset)
+            // Played from where it is heard, with both timings, so the line
+            // is just starting when the tap lands.
+            val target = heardAt((line.start * 1000).roundToLong(), totalOffset(offset, outputOffset))
             engine.tapped(index, target / 1000.0)
             seek(target)
             said = "Playing from ${clockText(target)}"
@@ -250,7 +258,7 @@ fun FlowingLyrics(
                         LineNode(engine, index, shown, textColor, calm, onTap = tap, onLongPress = { stamp = it })
                     }
                 }
-                stamp?.let { TimeStamp(engine, it, shown, offset) }
+                stamp?.let { TimeStamp(engine, it, shown, totalOffset(offset, outputOffset)) }
                 if (said.isNotEmpty()) {
                     Box(
                         Modifier.size(1.dp).semantics {

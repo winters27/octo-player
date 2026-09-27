@@ -90,9 +90,12 @@ import app.winters.octo.lyrics.endOf
 import app.winters.octo.lyrics.heardAt
 import app.winters.octo.lyrics.lineAt
 import app.winters.octo.lyrics.lyricsClock
+import app.winters.octo.lyrics.screenLeadMs
 import app.winters.octo.lyrics.shownLines
+import app.winters.octo.lyrics.totalOffset
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.sound.SoundEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -134,16 +137,22 @@ private val LyricStyle = TextStyle(fontWeight = FontWeight.Bold, lineHeight = 1.
 // How lines move as the song reaches them.
 private fun <T> lineSpring() = spring<T>(dampingRatio = 0.7f, stiffness = 80f)
 
-// Each song's lyrics timing, whether the screen stays on for lyrics, how
-// they look, and the player's clock for the flowing style.
+// Each song's lyrics timing and the output's, whether the screen stays on
+// for lyrics, how they look, and the player's clock for the flowing style.
 @HiltViewModel
 class LyricsTimingViewModel @Inject constructor(
     private val timing: LyricsTiming,
     lookSettings: LyricsLookSettings,
     player: PlayerSettings,
     private val playback: PlaybackConnection,
+    sound: SoundEngine,
 ) : ViewModel() {
     val keepScreenOn: StateFlow<Boolean> = timing.keepScreenOn.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    // The timing kept for the output playing now; it follows the output as
+    // earbuds or a cable come and go.
+    val outputOffset: StateFlow<Long> = timing.outputOffsetFor(sound.output)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
     // Null until read, so the chosen style shows from the first frame.
     val look: StateFlow<LyricsLook?> = lookSettings.look.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -183,6 +192,14 @@ fun LyricsPane(
     val keepOn by timing.keepScreenOn.collectAsStateWithLifecycle()
     if (keepOn && state is LyricsState.Found) KeepScreenOn()
 
+    // The output's timing on top of the screen's own lead, which starts
+    // every output a couple of frames early so the words are on the glass
+    // when the song gets there.
+    val kept by timing.outputOffset.collectAsStateWithLifecycle()
+    val view = LocalView.current
+    val screenLead = remember(view) { screenLeadMs(view.display?.refreshRate ?: 60f) }
+    val outputOffset = kept + screenLead
+
     Crossfade(targetState = state, animationSpec = tween(300), modifier = modifier, label = "lyrics") { shown ->
         when (shown) {
             is LyricsState.Found -> {
@@ -204,13 +221,14 @@ fun LyricsPane(
                             timing::speed,
                             timing.timeEvents,
                             offset,
+                            outputOffset,
                             chosen,
                             calm,
                             onSeek,
                             // Dark on a pale background, white otherwise.
                             textColor = LocalContentColor.current,
                         )
-                        lyrics.synced -> SyncedLyrics(lyrics, now, positionMs, onSeek, offset)
+                        lyrics.synced -> SyncedLyrics(lyrics, now, positionMs, onSeek, totalOffset(offset, outputOffset))
                         else -> PlainLyrics(lyrics)
                     }
                 }
@@ -298,8 +316,8 @@ private fun PlainLyrics(lyrics: Lyrics) {
 @Composable
 private fun SyncedLyrics(lyrics: Lyrics, now: NowPlaying, positionMs: () -> Long, onSeek: (Long) -> Unit, offsetMs: Long) {
     val lines = remember(lyrics) { lyrics.shownLines() }
-    // Everything here runs on the lyrics' own clock, which the song's
-    // timing offset moves.
+    // Everything here runs on the lyrics' own clock, which the song's and
+    // the output's timing move together.
     val offset by rememberUpdatedState(offsetMs)
     val clock = remember(positionMs) { { lyricsClock(positionMs(), offset) } }
     val position = rememberPositionMs(now, clock)

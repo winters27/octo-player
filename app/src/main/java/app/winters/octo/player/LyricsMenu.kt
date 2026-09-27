@@ -34,10 +34,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.ImeAction
@@ -52,7 +50,6 @@ import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.matchKey
 import app.winters.octo.design.GlassInput
 import app.winters.octo.design.GlassPopup
-import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.GlazeSelected
 import app.winters.octo.design.PopupPager
 import app.winters.octo.design.rememberPopupPages
@@ -72,16 +69,19 @@ import app.winters.octo.lyrics.TIMING_LIMIT_MS
 import app.winters.octo.lyrics.candidateLabel
 import app.winters.octo.lyrics.candidateList
 import app.winters.octo.lyrics.showingPick
-import app.winters.octo.lyrics.signedTiming
+import app.winters.octo.lyrics.OUTPUT_TIMING_LIMIT_MS
 import app.winters.octo.lyrics.sourceLine
-import app.winters.octo.lyrics.timingLabel
+import app.winters.octo.lyrics.timingSummary
 import app.winters.octo.subsonic.LYRICS_AUTO
 import app.winters.octo.playback.NowPlaying
+import app.winters.octo.sound.AudioOutput
+import app.winters.octo.sound.SoundEngine
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.GlassMenuBack
 import app.winters.octo.ui.common.GlassMenuOptions
 import app.winters.octo.ui.common.GlassMenuTitle
 import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.TimingAdjuster
 import app.winters.octo.ui.common.asClock
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.chrisbanes.haze.HazeState
@@ -89,7 +89,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -100,6 +102,7 @@ import javax.inject.Inject
 class LyricsMenuViewModel @Inject constructor(
     private val repository: LyricsRepository,
     private val timing: LyricsTiming,
+    private val sound: SoundEngine,
 ) : ViewModel() {
     fun offsetFor(trackId: String): Flow<Long> = timing.offsetFor(trackId)
 
@@ -109,6 +112,22 @@ class LyricsMenuViewModel @Inject constructor(
 
     fun resetTiming(trackId: String) {
         viewModelScope.launch { timing.reset(trackId) }
+    }
+
+    // The output playing now, and its own timing, for every song on it.
+    val output: StateFlow<AudioOutput> = sound.output
+
+    val outputOffset: StateFlow<Long> = timing.outputOffsetFor(sound.output)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+
+    fun stepOutput(steps: Int) {
+        val key = sound.output.value.key
+        viewModelScope.launch { timing.stepOutput(key, steps) }
+    }
+
+    fun resetOutput() {
+        val key = sound.output.value.key
+        viewModelScope.launch { timing.resetOutput(key) }
     }
 
     // On the server too, for every app, when it keeps lyrics choices.
@@ -284,6 +303,8 @@ private fun MenuOptions(
     onDismiss: () -> Unit,
 ) {
     val offset by remember(trackId) { model.offsetFor(trackId) }.collectAsStateWithLifecycle(0L)
+    val output by model.output.collectAsStateWithLifecycle()
+    val outputOffset by model.outputOffset.collectAsStateWithLifecycle()
     val lyrics = (state as? LyricsState.Found)?.lyrics
     val entries = buildList<Pair<Choice, () -> Unit>> {
         if (state == LyricsState.HiddenForSong) {
@@ -297,7 +318,8 @@ private fun MenuOptions(
         } else {
             add(Choice(if (lyrics == null) "Find lyrics" else "Choose other lyrics", "Every copy that can be found for this song") to onChooseOther)
             if (lyrics != null && lyrics.synced && !lyrics.instrumental) {
-                add(Choice("Adjust timing", if (offset == 0L) "Move the words earlier or later" else signedTiming(offset)) to onTiming)
+                val moved = timingSummary(offset, outputOffset, output.label)
+                add(Choice("Adjust timing", moved ?: "Move the words earlier or later") to onTiming)
             }
             if (lyrics != null) {
                 add(
@@ -313,39 +335,39 @@ private fun MenuOptions(
     GlassMenuOptions(entries.map { it.first }, selected = -1, onPick = { entries[it].second() })
 }
 
-// Moves the song's lyrics earlier or later a quarter second a tap, while
-// they keep playing behind the menu.
+// Moves the lyrics earlier or later a twentieth of a second a tap, while
+// they keep playing behind the menu: for this song, and for every song on
+// the output playing now (the phone's speaker, a pair of earbuds).
 @Composable
 private fun TimingControl(trackId: String, model: LyricsMenuViewModel) {
     val offset by remember(trackId) { model.offsetFor(trackId) }.collectAsStateWithLifecycle(0L)
+    val output by model.output.collectAsStateWithLifecycle()
+    val outputOffset by model.outputOffset.collectAsStateWithLifecycle()
     Text(
-        signedTiming(offset),
-        style = OctoType.headline.copy(fontFeatureSettings = "tnum"),
-        color = OctoColors.TextPrimary,
-        textAlign = TextAlign.Center,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .semantics {
-                liveRegion = LiveRegionMode.Polite
-                contentDescription = timingLabel(offset)
-            },
-    )
-    Text(
-        "For this song only. If the words light up late, tap Earlier. If early, tap Later.",
+        "If the words light up late, tap Earlier. If early, tap Later.",
         style = OctoType.caption,
         color = OctoColors.TextMuted,
         textAlign = TextAlign.Center,
-        modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+        modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 12.dp),
     )
-    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        GlazeButton("Earlier", onClick = { model.step(trackId, -1) }, modifier = Modifier.weight(1f), enabled = offset > -TIMING_LIMIT_MS)
-        GlazeButton("Later", onClick = { model.step(trackId, 1) }, modifier = Modifier.weight(1f), enabled = offset < TIMING_LIMIT_MS)
-    }
+    TimingAdjuster(
+        title = "This song",
+        about = "For this song only, on every output.",
+        offsetMs = offset,
+        limitMs = TIMING_LIMIT_MS,
+        onStep = { model.step(trackId, it) },
+        onReset = { model.resetTiming(trackId) },
+    )
+    Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp).height(1.dp).background(LineColour))
     Spacer(Modifier.height(8.dp))
-    if (offset != 0L) {
-        GlassMenuOptions(listOf(Choice("Reset", "Back to the timing the lyrics came with")), selected = -1, onPick = { model.resetTiming(trackId) })
-    }
+    TimingAdjuster(
+        title = output.label,
+        about = "Applies to every song on this output.",
+        offsetMs = outputOffset,
+        limitMs = OUTPUT_TIMING_LIMIT_MS,
+        onStep = model::stepOutput,
+        onReset = model::resetOutput,
+    )
 }
 
 private val RowShape = RoundedCornerShape(14.dp)
