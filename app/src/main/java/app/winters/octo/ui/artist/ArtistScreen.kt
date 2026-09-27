@@ -74,7 +74,6 @@ import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.CHECK_SETTLE_MS
 import app.winters.octo.ui.common.DetailTopGap
-import app.winters.octo.ui.common.DownloadButton
 import app.winters.octo.ui.common.FavouriteHeart
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.common.PlayShuffle
@@ -302,9 +301,7 @@ fun ArtistScreen(
                         SectionTitle("Top songs")
                         top.forEachIndexed { index, track ->
                             // A song found online can be downloaded from here.
-                            val download: (@Composable () -> Unit)? =
-                                if (isFind(track.id)) ({ DownloadButton(track, size = 40.dp, iconSize = 22.dp) }) else null
-                            SongRow(track, subtitle = track.album, trailing = download, menuContext = SongMenuContext(artistId = id)) { vm.playTop(index) }
+                            SongRow(track, subtitle = track.album, menuContext = SongMenuContext(artistId = id), offerDownload = true) { vm.playTop(index) }
                         }
                     }
                 }
@@ -356,7 +353,7 @@ private fun SimilarRow(similar: List<SimilarArtist>, onOpen: (NavKey) -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         items(similar, key = { it.libraryId ?: "online:${it.serverId}" }) { other ->
-            ArtistCircle(OnlineArtist(other.serverId, other.name, 0, other.artwork)) {
+            ArtistCircle(OnlineArtist(other.serverId, other.name, 0, other.artwork), outside = other.libraryId == null) {
                 onOpen(other.libraryId?.let(::ArtistRoute) ?: OnlineArtistRoute(other.serverId))
             }
         }
