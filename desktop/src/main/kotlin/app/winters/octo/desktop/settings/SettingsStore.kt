@@ -24,6 +24,8 @@ data class AppSettings(
     val playback: PlaybackPrefs = PlaybackPrefs(),
     // How the Songs page is ordered, as the shared sort lists save it.
     val songSort: String? = null,
+    // How the Albums page is ordered, the same way.
+    val albumSort: String? = null,
     // The panel open on the right: "queue", "lyrics", or none.
     val sidePanel: String? = null,
 )

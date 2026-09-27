@@ -24,7 +24,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.skiaCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -120,7 +120,7 @@ fun LineSlider(
                             glowPaint.color = color.copy(alpha = glowAlpha / 3f).toArgb()
                             glowPaint.strokeWidth = stroke
                             glowPaint.maskFilter = MaskFilter.makeBlur(FilterBlurMode.NORMAL, 4f * spread)
-                            canvas.nativeCanvas.drawLine(0f, y, end, y, glowPaint)
+                            canvas.skiaCanvas.drawLine(0f, y, end, y, glowPaint)
                         }
                     }
                     drawLine(color, Offset(0f, y), Offset(end, y), stroke, StrokeCap.Round)

@@ -11,6 +11,14 @@ plugins {
 
 kotlin { jvmToolchain(17) }
 
+// The phone app's icon, for the window and the taskbar.
+val shareIcon by tasks.registering(Sync::class) {
+    from(rootProject.file("app/src/main/ic_launcher-playstore.png")) { rename { "octo-icon.png" } }
+    into(layout.buildDirectory.dir("generated/appIcon"))
+}
+
+sourceSets.main { resources.srcDir(shareIcon) }
+
 dependencies {
     implementation(project(":shared:core"))
     implementation(project(":desktop-design"))

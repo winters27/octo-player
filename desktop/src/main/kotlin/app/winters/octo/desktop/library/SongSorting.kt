@@ -1,11 +1,13 @@
 package app.winters.octo.desktop.library
 
 import app.winters.octo.catalog.sortKey
+import app.winters.octo.sort.AlbumSort
 import app.winters.octo.sort.Listening
 import app.winters.octo.sort.SongSort
 import app.winters.octo.sort.SortOrder
 import app.winters.octo.sort.byListening
 import app.winters.octo.sort.sortedByKey
+import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Song
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -23,6 +25,7 @@ enum class SongColumn(val title: String, val sort: SongSort?) {
     Length("Length", SongSort.Length),
     Plays("Plays", SongSort.MostPlayed),
     Added("Added", SongSort.RecentlyAdded),
+    Played("Last played", SongSort.RecentlyPlayed),
     ;
 
     companion object {
@@ -72,6 +75,27 @@ fun sortSongs(songs: List<Song>, order: SortOrder): List<Song> {
         SongSort.Rating -> sortedByKey(songs, down, { it.userRating?.takeIf { r -> r > 0 } }, byTitle)
         SongSort.Liked, SongSort.DateLiked -> sortedByKey(songs, down, { serverTime(it.starred) }, byTitle)
         SongSort.FolderOrder -> if (down) songs.reversed() else songs
+    }
+}
+
+// Albums in the chosen order, by the shared album orders: names by their
+// sort key, missing years and dates last, plays by the listening order.
+fun sortAlbums(albums: List<Album>, order: SortOrder): List<Album> {
+    val by = order.by as? AlbumSort ?: return albums
+    val down = order.descending
+    val byName: Comparator<Album> = compareBy({ sortKey(it.name) }, { sortKey(it.artist) }, { it.id })
+    return when (by) {
+        AlbumSort.Title -> sortedByKey(albums, down, { sortKey(it.name) }, byName)
+        AlbumSort.Artist -> sortedByKey(albums, down, { sortKey(it.artist) }, compareBy<Album>({ it.year ?: 0 }, { sortKey(it.name) }, { it.id }))
+        AlbumSort.Year -> sortedByKey(albums, down, { it.year?.takeIf { y -> y > 0 } }, byName)
+        AlbumSort.RecentlyAdded -> sortedByKey(albums, down, { serverTime(it.created) }, byName)
+        AlbumSort.SongCount -> sortedByKey(albums, down, { it.songCount }, byName)
+        AlbumSort.Length -> sortedByKey(albums, down, { it.duration.takeIf { d -> d > 0 } }, byName)
+        AlbumSort.MostPlayed, AlbumSort.RecentlyPlayed -> {
+            val base = sortedByKey(albums, false, { sortKey(it.name) }, byName)
+            val listening = albums.associate { it.id to Listening(it.playCount.toInt(), serverTime(it.played) ?: 0) }
+            byListening(base, { it.id }, listening, mostPlayed = by == AlbumSort.MostPlayed, descending = down)
+        }
     }
 }
 

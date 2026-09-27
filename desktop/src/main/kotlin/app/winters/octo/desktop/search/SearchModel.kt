@@ -91,9 +91,9 @@ fun splitResults(
 ): SearchFound {
     val caps = searchCaps(filter)
     val telling = outsideOn && index != null
-    val (songs, outsideSongs) = if (telling) sent.song.partition { index!!.holds(it) } else sent.song to emptyList()
-    val (albums, outsideAlbums) = if (telling) sent.album.partition { index!!.hasAlbum(it.id) } else sent.album to emptyList()
-    val (artists, outsideArtists) = if (telling) sent.artist.partition { index!!.hasArtist(it.id) } else sent.artist to emptyList()
+    val (songs, outsideSongs) = if (telling) sent.song.partition { index.holds(it) } else sent.song to emptyList()
+    val (albums, outsideAlbums) = if (telling) sent.album.partition { index.hasAlbum(it.id) } else sent.album to emptyList()
+    val (artists, outsideArtists) = if (telling) sent.artist.partition { index.hasArtist(it.id) } else sent.artist to emptyList()
     val key = searchKey(query)
     val named = if (caps.playlists > 0) playlists.filter { searchKey(it.name).contains(key) } else emptyList()
     return SearchFound(

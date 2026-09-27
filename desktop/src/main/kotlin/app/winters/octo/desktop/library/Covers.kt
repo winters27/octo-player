@@ -82,9 +82,10 @@ fun Cover(
     val context = LocalPlatformContext.current
     BoxWithConstraints(modifier.clip(shape).background(OctoColors.BackgroundTertiary), contentAlignment = Alignment.Center) {
         val px = with(LocalDensity.current) { maxOf(maxWidth, maxHeight).roundToPx() }
-        if (coverId == null || client == null) {
-            Glyph(placeholder, size = (maxWidth * 0.36f).coerceIn(12.dp, 64.dp), tint = OctoColors.TextMuted)
-        } else {
+        // The glyph sits under the picture, so a cover the server has none
+        // for (or that fails) still shows what it stands for.
+        Glyph(placeholder, size = (maxWidth * 0.36f).coerceIn(12.dp, 64.dp), tint = OctoColors.TextMuted)
+        if (coverId != null && client != null) {
             val bucket = coverBucket(px)
             val key = coverKey(client.primaryUrl.host, coverId, bucket, online)
             val request = remember(key) {
