@@ -432,6 +432,8 @@ private fun AnimatedVisibilityScope.ArtStage(
                     .fillMaxSize()
                     .padding(vertical = 8.dp)
                     .graphicsLayer { alpha = lyricsShown },
+                // Out to the screen's margins, past the player's side padding.
+                edgeBleed = 24.dp,
             )
         }
     }

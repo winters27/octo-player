@@ -2,15 +2,20 @@ package app.winters.octo.ui.settings
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
 import app.winters.octo.ambient.AmbienceViewModel
 import app.winters.octo.ambient.AmbientArea
 import app.winters.octo.ambient.AmbientPrefs
 import app.winters.octo.ambient.AmbientPreview
 import app.winters.octo.ambient.AmbientStrength
+import app.winters.octo.player.PlayerPrefs
+import app.winters.octo.player.PlayerSettings
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.LocalChoiceSheet
@@ -18,6 +23,12 @@ import app.winters.octo.ui.settings.rows.ChoiceRow
 import app.winters.octo.ui.settings.rows.SettingsGroup
 import app.winters.octo.ui.settings.rows.SettingsPageFrame
 import app.winters.octo.ui.settings.rows.SwitchRow
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 private val StrengthChoices = mapOf(
     AmbientStrength.Off to Choice("Off", "The plain dark background everywhere."),
@@ -25,15 +36,27 @@ private val StrengthChoices = mapOf(
     AmbientStrength.Rich to Choice("Rich", "A fuller glow, still kept dark enough for text."),
 )
 
+// The Octo-wide switch for less movement.
+@HiltViewModel
+class MotionViewModel @Inject constructor(private val settings: PlayerSettings) : ViewModel() {
+    val prefs: StateFlow<PlayerPrefs> = settings.prefs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerPrefs())
+
+    fun setReduceMotion(on: Boolean) {
+        viewModelScope.launch { settings.setReduceMotion(on) }
+    }
+}
+
 // How the app looks: the artwork's colours glowing behind the pages, how
-// strongly and where, and the player's background.
+// strongly and where, the player's background, and how much moves.
 @Composable
 fun AppearancePage(
     onBack: () -> Unit,
     highlight: String?,
     vm: AmbienceViewModel = hiltViewModel(),
+    motion: MotionViewModel = hiltViewModel(),
 ) {
     val prefs = vm.prefs.collectAsStateWithLifecycle().value ?: AmbientPrefs()
+    val motionPrefs by motion.prefs.collectAsStateWithLifecycle()
     val sheet = LocalChoiceSheet.current
 
     SettingsPageFrame("Appearance", onBack, highlight) {
@@ -69,5 +92,14 @@ fun AppearancePage(
             }
         }
         PlayerBackgroundSection()
+        SettingsGroup(title = "Motion") {
+            SwitchRow(
+                SettingsIndex.ReduceMotion,
+                checked = motionPrefs.reduceMotion,
+                onChange = motion::setReduceMotion,
+                helper = "The backgrounds stop drifting, and synced lyrics jump into place without ripple, bloom or " +
+                    "bouncing dots; words still fill as they are sung. Also on when the phone's animations are off.",
+            )
+        }
     }
 }

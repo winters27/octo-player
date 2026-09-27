@@ -17,6 +17,7 @@ import app.winters.octo.favourites.PinKey
 import app.winters.octo.favourites.PinStore
 import app.winters.octo.listening.FavouriteKind
 import app.winters.octo.listening.ListenBrainzStore
+import app.winters.octo.lyrics.LyricsLookSettings
 import app.winters.octo.lyrics.LyricsTiming
 import app.winters.octo.offline.OfflineSettings
 import app.winters.octo.playback.LikeStore
@@ -63,6 +64,7 @@ class Backups @Inject constructor(
     private val favourites: FavouriteStore,
     private val pins: PinStore,
     private val lyrics: LyricsTiming,
+    private val lyricsLook: LyricsLookSettings,
     private val offline: OfflineSettings,
     private val listenBrainz: ListenBrainzStore,
     private val sorts: SortSettings,
@@ -107,6 +109,7 @@ class Backups @Inject constructor(
                 keepScreenOn = lyrics.keepScreenOn.first(),
                 offsets = lyrics.offsets().mapNotNull { (id, ms) -> tracks[id]?.let { LyricsOffsetBackup(it.toKey(), ms) } }
                     .sortedBy { it.song.relinkKey },
+                look = lyricsLook.current(),
             ),
             offline = offline.prefs.first().toBackup(playlistNames),
             listenBrainz = listenBrainz.current().let { ListenBrainzBackup(it.enabled, it.sendPlays, it.nowPlaying) },
@@ -170,6 +173,7 @@ class Backups @Inject constructor(
         backup.listenBrainz?.let { listenBrainz.restoreChoices(it.enabled, it.sendPlays, it.nowPlaying) }
         sorts.restore(backup.sortOrders)
         backup.lyrics?.let { lyrics.setKeepScreenOn(it.keepScreenOn) }
+        backup.lyrics?.look?.let { lyricsLook.restore(it) }
         plan.lyricsOffsets.forEach { (id, ms) -> lyrics.setOffset(id, ms) }
         // Playlists by name, with the ones made here, so pins can find them.
         val playlistIds = userDao.playlists().first().associate { it.name.trim().lowercase() to it.id }.toMutableMap()

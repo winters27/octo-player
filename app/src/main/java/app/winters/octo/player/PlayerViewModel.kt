@@ -24,10 +24,13 @@ import app.winters.octo.player.immersive.over
 import app.winters.octo.sound.SoundEngine
 import app.winters.octo.ui.common.Feedback
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -36,6 +39,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transformLatest
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 // Everything the full player shows, and what its buttons do.
@@ -195,7 +199,36 @@ class PlayerViewModel @Inject constructor(
             emit(lyricsRepository.lyricsFor(song)?.let { LyricsState.Found(id, it) } ?: LyricsState.None)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LyricsState.Hidden)
+
+    // While lyrics show, the songs either side of this one have theirs
+    // looked up once the song has settled, so skipping shows them at once.
+    // A skip before then starts the wait again, so skipping quickly through
+    // the queue asks for nothing.
+    init {
+        viewModelScope.launch {
+            combine(playback.now.map { it.trackId }.distinctUntilChanged(), lyricsShown) { id, open -> id.takeIf { open } }
+                .distinctUntilChanged()
+                .collectLatest { id ->
+                    if (id == null) return@collectLatest
+                    delay(LYRICS_PREFETCH_SETTLE_MS)
+                    listOfNotNull(upNext.value.getOrNull(1), played.value.lastOrNull())
+                        .filterNot { isRadio(it.trackId) || it.trackId == id }
+                        .forEach { entry ->
+                            try {
+                                lyricsRepository.lyricsFor(LyricsSong(entry.trackId, entry.title, entry.artist, "", entry.durationMs))
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (_: Exception) {
+                                // A neighbour's lyrics are only a head start; it is asked again when it plays.
+                            }
+                        }
+                }
+        }
+    }
 }
+
+// How long a song must stay on before its neighbours' lyrics are looked up.
+private const val LYRICS_PREFETCH_SETTLE_MS = 1_200L
 
 // What the lyrics view shows.
 sealed interface LyricsState {

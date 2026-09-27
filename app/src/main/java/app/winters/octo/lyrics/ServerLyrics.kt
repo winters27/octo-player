@@ -52,12 +52,13 @@ fun serverLyrics(all: List<StructuredLyrics>, language: String?): Lyrics? {
         }
     }
 
-    val translated = translationFor(all, main, language)
+    val translated = companionFor(all, main, language, "translation")
+    val sounded = companionFor(all, main, language, "pronunciation", matchLanguage = false)
     val offset = main.offset.roundToLong()
     return Lyrics(
         synced = true,
         lines = lines.mapIndexed { index, line ->
-            line.copy(translation = translated?.get(index)).shifted(-offset)
+            line.copy(translation = translated?.get(index), romanization = sounded?.get(index)).shifted(-offset)
         },
         source = LyricsSource.Server,
     )
@@ -131,12 +132,20 @@ class Utf8Positions(private val text: String) {
     }
 }
 
-// The translation's text for each line of the main lyrics, by line number
-// when both have the same lines, or else by start time. Only when the phone
-// reads another language than the song is sung in.
-private fun translationFor(all: List<StructuredLyrics>, main: StructuredLyrics, language: String?): Map<Int, String>? {
+// A translation's or pronunciation's text for each line of the main lyrics,
+// by line number when both have the same lines, or else by start time. Only
+// when the phone reads another language than the song is sung in. A
+// translation must be in the phone's language; a pronunciation is in
+// whatever letters the server wrote it in.
+private fun companionFor(
+    all: List<StructuredLyrics>,
+    main: StructuredLyrics,
+    language: String?,
+    kind: String,
+    matchLanguage: Boolean = true,
+): Map<Int, String>? {
     if (language.isNullOrBlank() || sameLanguage(main.lang, language)) return null
-    val translation = all.firstOrNull { it.kind == "translation" && sameLanguage(it.lang, language) } ?: return null
+    val translation = all.firstOrNull { it.kind == kind && (!matchLanguage || sameLanguage(it.lang, language)) } ?: return null
     return if (translation.line.size == main.line.size) {
         translation.line.withIndex().filter { it.value.value.isNotBlank() }.associate { it.index to it.value.value.trim() }
     } else {

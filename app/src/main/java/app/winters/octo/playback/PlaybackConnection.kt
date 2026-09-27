@@ -57,9 +57,24 @@ class PlaybackConnection @Inject constructor(
     private val _played = MutableStateFlow<List<QueueEntry>>(emptyList())
     val played: StateFlow<List<QueueEntry>> = _played
 
+    // Counts the times the player said its clock moved other than by
+    // playing on: a seek, a new song, play or pause, or a new speed. The
+    // lyrics take a fresh anchor on each.
+    private val _timeEvents = MutableStateFlow(0)
+    val timeEvents: StateFlow<Int> = _timeEvents
+
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
             publish(player)
+            if (events.containsAny(
+                    Player.EVENT_POSITION_DISCONTINUITY,
+                    Player.EVENT_MEDIA_ITEM_TRANSITION,
+                    Player.EVENT_IS_PLAYING_CHANGED,
+                    Player.EVENT_PLAYBACK_PARAMETERS_CHANGED,
+                )
+            ) {
+                _timeEvents.value++
+            }
             if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)) {
                 publishQueue(player)
             }
@@ -96,6 +111,9 @@ class PlaybackConnection @Inject constructor(
     }
 
     fun positionMs(): Long = controller?.currentPosition ?: 0
+
+    // How fast the player is playing now, 1 being normal.
+    fun speed(): Float = controller?.playbackParameters?.speed ?: 1f
 
     // Plays a list of songs, starting at one of them, or shuffled.
     fun playTracks(trackIds: List<String>, startIndex: Int = 0, shuffle: Boolean = false) {

@@ -26,7 +26,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import app.winters.octo.ambient.rememberReduceMotion
+import app.winters.octo.ui.common.rememberSystemReduceMotion
 import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.songDetails
@@ -109,7 +109,7 @@ fun PlayerBackground(
         BackgroundMode.Default -> {
             val cover by vm.cover.collectAsStateWithLifecycle()
             val bpm by vm.bpm.collectAsStateWithLifecycle()
-            val still = !prefs.liveBackground || rememberReduceMotion()
+            val still = !prefs.liveBackground || prefs.reduceMotion || rememberSystemReduceMotion()
             ImmersiveWash(cover, paceBpm(bpm, background.useBpm), background.fps, moving = !still, dolly = dolly)
         }
         BackgroundMode.Artwork -> {

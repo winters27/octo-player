@@ -161,6 +161,10 @@ object SettingsIndex {
         "immersive_bg_fps", SettingsPage.Appearance, "Frame rate", "How smoothly the background moves",
         listOf("fps", "battery", "smooth", "background"), section = "Player",
     )
+    val ReduceMotion = add(
+        "reduce_motion", SettingsPage.Appearance, "Reduce motion", "What moves only for show holds still",
+        listOf("animation", "animations", "accessibility", "still", "calm", "motion sickness"), section = "Motion",
+    )
 
     // Library
     val PhoneAccess = add(
@@ -304,6 +308,46 @@ object SettingsIndex {
     val LyricsScreenOn = add(
         "lyrics_screen_on", SettingsPage.Lyrics, "Keep the screen on", "While lyrics show in the player",
         listOf("screen", "timeout", "awake", "display"),
+    )
+    val LyricsStyle = add(
+        "lyrics_style", SettingsPage.Lyrics, "Lyrics style", "Flowing, or the classic view",
+        listOf("look", "flowing", "classic", "animation", "synced", "karaoke"), section = "Synced lyrics",
+    )
+    val LyricsEmphasis = add(
+        "lyrics_fx_emphasis", SettingsPage.Lyrics, "Emphasis", "How much long notes swell letter by letter",
+        listOf("bloom", "held notes", "letters", "swell"), section = "Look",
+    )
+    val LyricsGlow = add(
+        "lyrics_fx_glow", SettingsPage.Lyrics, "Glow", "How strongly long notes glow",
+        listOf("shine", "bloom", "light"), section = "Look",
+    )
+    val LyricsLift = add(
+        "lyrics_fx_lift", SettingsPage.Lyrics, "Lift", "How far sung words rise and bob",
+        listOf("rise", "bob", "bounce"), section = "Look",
+    )
+    val LyricsMotionSpeed = add(
+        "lyrics_fx_speed", SettingsPage.Lyrics, "Motion speed", "How quickly lines move into place",
+        listOf("springs", "faster", "slower", "animation"), section = "Look",
+    )
+    val LyricsInactiveScale = add(
+        "lyrics_fx_inactive_scale", SettingsPage.Lyrics, "Inactive line size", "How big the lines not being sung are",
+        listOf("scale", "size", "smaller", "other lines"), section = "Look",
+    )
+    val LyricsFade = add(
+        "lyrics_fx_fade", SettingsPage.Lyrics, "Fill softness", "How soft the edge of the word fill is",
+        listOf("wipe", "gradient", "edge", "soft", "sweep"), section = "Look",
+    )
+    val LyricsCascade = add(
+        "lyrics_fx_cascade", SettingsPage.Lyrics, "Ripple", "How far apart lines start moving",
+        listOf("cascade", "stagger", "wave"), section = "Look",
+    )
+    val LyricsKeepCompleted = add(
+        "lyrics_keep_completed", SettingsPage.Lyrics, "Keep sung lines visible", "Lines already sung stay faintly on screen",
+        listOf("history", "past", "completed", "previous"), section = "Look",
+    )
+    val LyricsArc = add(
+        "lyrics_arc", SettingsPage.Lyrics, "Curved lyrics", "The lines bend around a drum",
+        listOf("arc", "curve", "3d", "perspective", "wheel"), section = "Look",
     )
 
     // Scrobbling
