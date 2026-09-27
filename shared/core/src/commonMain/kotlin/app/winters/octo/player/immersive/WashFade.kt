@@ -1,7 +1,5 @@
 package app.winters.octo.player.immersive
 
-import androidx.compose.animation.core.Easing
-
 // How long one cover takes to become the next, and the quicker fade used
 // when covers change within a moment of each other (skipping through).
 const val CoverFadeMs = 500L
@@ -21,8 +19,6 @@ fun easeInOutCubic(x: Float): Float {
     val t = x.coerceIn(0f, 1f)
     return if (t < 0.5f) 4f * t * t * t else 1f - (-2f * t + 2f).let { it * it * it } / 2f
 }
-
-val EaseInOutCubicCurve = Easing { easeInOutCubic(it) }
 
 // The fade between the old cover and the new one, run by the frame clock.
 class CoverFade {

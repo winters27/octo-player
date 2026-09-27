@@ -1,6 +1,5 @@
 package app.winters.octo.player.immersive
 
-import androidx.compose.ui.graphics.Color
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
@@ -99,14 +98,6 @@ private const val White = 0xFFFFFFFF.toInt()
 // Whether white words would struggle on this colour: under 3:1 against
 // white and brighter than 0.3.
 fun washIsLight(argb: Int): Boolean = contrastRatio(argb, White) < 3.0 && relativeLuminance(argb) > 0.3
-
-// The dark words used over a light background.
-val DarkInk = Color(0xFF141416)
-
-// The colour for the player's words over a background made from a cover
-// whose main colour is this: dark over a light wash, white otherwise.
-fun washContent(dominant: Int?, tuning: WashTuning): Color =
-    if (dominant != null && washIsLight(prepareColor(dominant, tuning))) DarkInk else Color.White
 
 private fun argb(a: Int, r: Int, g: Int, b: Int): Int =
     (a.coerceIn(0, 255) shl 24) or (r.coerceIn(0, 255) shl 16) or (g.coerceIn(0, 255) shl 8) or b.coerceIn(0, 255)

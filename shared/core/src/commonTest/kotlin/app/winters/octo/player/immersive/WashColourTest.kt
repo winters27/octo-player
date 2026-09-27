@@ -1,6 +1,5 @@
 package app.winters.octo.player.immersive
 
-import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -82,37 +81,6 @@ class WashColourTest {
         assertEquals(1.0, contrastRatio(rgb(255, 255, 255), rgb(255, 255, 255)), 0.001)
         assertEquals(1.0, relativeLuminance(rgb(255, 255, 255)), 0.0001)
         assertEquals(0.2159, relativeLuminance(rgb(128, 128, 128)), 0.001)
-    }
-
-    @Test
-    fun theWordsFlipOnlyOverALightWash() {
-        val white = rgb(255, 255, 255)
-        val pale = rgb(0xF2, 0xEA, 0xD8)
-        val mid = rgb(128, 128, 128)
-        val dark = rgb(32, 32, 32)
-        val yellow = rgb(255, 255, 0)
-
-        // At the defaults the cap pulls white and pale covers down, so the
-        // words stay white.
-        val defaults = WashTuning()
-        assertEquals(Color.White, washContent(white, defaults))
-        assertEquals(Color.White, washContent(pale, defaults))
-        assertEquals(Color.White, washContent(mid, defaults))
-        assertEquals(Color.White, washContent(dark, defaults))
-        // A vivid yellow stays bright enough under it: dark words.
-        assertTrue(washIsLight(prepareColor(yellow, defaults)))
-        assertEquals(DarkInk, washContent(yellow, defaults))
-
-        // With no cap, white and pale covers flip to dark words; mid and
-        // dark ones do not.
-        val uncapped = WashTuning(brightnessCap = 1f)
-        assertEquals(DarkInk, washContent(white, uncapped))
-        assertEquals(DarkInk, washContent(pale, uncapped))
-        assertEquals(Color.White, washContent(mid, uncapped))
-        assertEquals(Color.White, washContent(dark, uncapped))
-
-        // No artwork colour: white.
-        assertEquals(Color.White, washContent(null, defaults))
     }
 
     @Test
