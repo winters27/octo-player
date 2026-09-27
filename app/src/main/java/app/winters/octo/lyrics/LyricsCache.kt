@@ -8,6 +8,10 @@ import java.security.MessageDigest
 // How long "no lyrics" is believed before the sources are asked again.
 const val NONE_FOUND_FOR_MS = 24 * 60 * 60 * 1000L
 
+// Raised when the online lookup learns a new way to find synced lyrics, so
+// songs that only got plain ones are asked again once.
+const val ONLINE_LOOKUP_VERSION = 2
+
 // One song's saved answer: its lyrics, or none, when that was found, and
 // whether the online library was asked.
 @Serializable
@@ -15,6 +19,9 @@ data class CachedLyrics(
     val savedAt: Long,
     val lyrics: Lyrics? = null,
     val askedOnline: Boolean = false,
+    // Which online lookup gave this answer; older ones are asked again when
+    // they found no synced lyrics.
+    val lookupVersion: Int = 0,
 ) {
     // Whether the answer still stands. "None" lasts a day. An answer found
     // without asking online (it was off, or only plain lyrics were found)
@@ -22,6 +29,7 @@ data class CachedLyrics(
     // are there.
     fun stillGood(now: Long, onlineAllowed: Boolean): Boolean {
         if (onlineAllowed && !askedOnline && lyrics?.synced != true) return false
+        if (onlineAllowed && lyrics != null && !lyrics.synced && lookupVersion < ONLINE_LOOKUP_VERSION) return false
         return lyrics != null || now - savedAt < NONE_FOUND_FOR_MS
     }
 }

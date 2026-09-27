@@ -116,7 +116,7 @@ class LyricsRepository @Inject constructor(
             }
         }
         val search = searchInOrder(steps)
-        val entry = CachedLyrics(now, search.lyrics, search.askedOnline)
+        val entry = CachedLyrics(now, search.lyrics, search.askedOnline, ONLINE_LOOKUP_VERSION)
         // A "none" from a search that could not reach a source is not kept
         // at all, so opening the lyrics again tries again.
         if (search.complete || search.lyrics != null) synchronized(recent) { recent[song.id] = entry }

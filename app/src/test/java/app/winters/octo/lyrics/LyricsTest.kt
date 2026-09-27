@@ -119,5 +119,35 @@ class LyricsTest {
         assertFalse(offlineNone.stillGood(now = 1, onlineAllowed = true))
         val offlinePlain = CachedLyrics(savedAt = 0, lyrics = lyrics.copy(synced = false), askedOnline = false)
         assertFalse(offlinePlain.stillGood(now = 1, onlineAllowed = true))
+
+        // Plain lyrics from an older online lookup are asked again once, in
+        // case the newer lookup finds synced ones; from the current one, kept.
+        val oldPlain = CachedLyrics(savedAt = 0, lyrics = lyrics.copy(synced = false), askedOnline = true)
+        assertFalse(oldPlain.stillGood(now = 1, onlineAllowed = true))
+        assertTrue(oldPlain.copy(lookupVersion = ONLINE_LOOKUP_VERSION).stillGood(now = 1, onlineAllowed = true))
+    }
+
+    @Test
+    fun searchFindsATimedCopyOfTheSameRecording() {
+        val body = """[
+            {"albumName":"Other","duration":201.0,"plainLyrics":"Hi","syncedLyrics":null},
+            {"albumName":"Live","duration":260.0,"syncedLyrics":"[00:01.00] Live take"},
+            {"albumName":"Other","duration":202.5,"syncedLyrics":"[00:01.00] Close"},
+            {"albumName":"Album","duration":203.9,"syncedLyrics":"[00:01.00] Same album"}
+        ]"""
+        // Same album wins among copies of the right length; the live one is too long.
+        assertEquals("Same album", bestSearchMatch(body, "Album", 201_600)!!.lines.first().text)
+        assertEquals("Close", bestSearchMatch(body, "Nothing like it", 201_600)!!.lines.first().text)
+        assertNull(bestSearchMatch("""[{"duration":201.0,"plainLyrics":"Hi"}]""", "", 201_000))
+        assertNull(bestSearchMatch("not json", "", 0))
+    }
+
+    @Test
+    fun searchAsksByTitleAndArtistOnly() {
+        val url = searchUrl("https://lyrics.example".toHttpUrl(), "Song", "Artist")
+        assertEquals("/api/search", url.encodedPath)
+        assertEquals("Song", url.queryParameter("track_name"))
+        assertEquals("Artist", url.queryParameter("artist_name"))
+        assertNull(url.queryParameter("duration"))
     }
 }

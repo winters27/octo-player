@@ -3,6 +3,7 @@ package app.winters.octo.lyrics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -10,6 +11,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
 import javax.inject.Inject
+import kotlin.math.abs
 
 // The free, open lyrics library used when nothing else has a song's lyrics.
 // It needs no key; the shared client already names the app in every request.
@@ -21,7 +23,13 @@ internal data class LibrarySong(
     val instrumental: Boolean = false,
     val plainLyrics: String? = null,
     val syncedLyrics: String? = null,
+    // Seconds; only search answers carry it.
+    val duration: Double? = null,
+    val albumName: String? = null,
 )
+
+// How far apart two lengths may be and still be the same recording.
+private const val SAME_LENGTH_S = 3.0
 
 private val json = Json { ignoreUnknownKeys = true }
 
@@ -32,16 +40,51 @@ class OnlineLyrics(private val http: OkHttpClient, private val base: HttpUrl) {
 
     // The song's lyrics, or null when the library does not have them.
     // Throws IOException when the library cannot be reached.
+    // The exact lookup comes first. When it finds nothing timed, the
+    // library's search is asked too: it often holds a timed copy of the same
+    // recording under a slightly different album or title.
     suspend fun find(title: String, artist: String, album: String, durationMs: Long): Lyrics? = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url(lookupUrl(base, title, artist, album, durationMs)).build()
-        http.newCall(request).execute().use { response ->
+        val exact = fetch(lookupUrl(base, title, artist, album, durationMs))?.let(::libraryLyrics)
+        if (exact != null && (exact.synced || exact.instrumental)) return@withContext exact
+        val found = runCatching { fetch(searchUrl(base, title, artist)) }.getOrNull()
+        found?.let { bestSearchMatch(it, album, durationMs) } ?: exact
+    }
+
+    // The answer's body, or null when the library has nothing for it.
+    private fun fetch(url: HttpUrl): String? {
+        val request = Request.Builder().url(url).build()
+        return http.newCall(request).execute().use { response ->
             when {
                 response.code == 404 -> null
                 !response.isSuccessful -> throw IOException("Lyrics lookup failed: HTTP ${response.code}")
-                else -> libraryLyrics(response.body.string())
+                else -> response.body.string()
             }
         }
     }
+}
+
+// A search by title and artist, which returns every copy the library holds.
+internal fun searchUrl(base: HttpUrl, title: String, artist: String): HttpUrl =
+    base.newBuilder()
+        .addPathSegments("api/search")
+        .addQueryParameter("track_name", title)
+        .addQueryParameter("artist_name", artist)
+        .build()
+
+// The timed copy in a search answer that is the same recording: its length
+// within a few seconds of the song's (when the song's is known), the same
+// album preferred. Null when none is timed.
+internal fun bestSearchMatch(body: String, album: String, durationMs: Long): Lyrics? {
+    val songs = runCatching { json.decodeFromString(ListSerializer(LibrarySong.serializer()), body) }.getOrNull() ?: return null
+    val seconds = durationMs / 1000.0
+    return songs
+        .filter { !it.syncedLyrics.isNullOrBlank() }
+        .filter { durationMs <= 0 || (it.duration != null && abs(it.duration - seconds) <= SAME_LENGTH_S) }
+        .sortedWith(
+            compareBy<LibrarySong> { !it.albumName.equals(album, ignoreCase = true) }
+                .thenBy { if (durationMs > 0 && it.duration != null) abs(it.duration - seconds) else 0.0 },
+        )
+        .firstNotNullOfOrNull { song -> song.syncedLyrics?.let { parseLyricsText(it, LyricsSource.Online) }?.takeIf { it.synced } }
 }
 
 // The lookup for one song. The library matches the length to within a
