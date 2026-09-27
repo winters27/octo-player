@@ -16,13 +16,22 @@ import app.winters.octo.device.DEVICE
 import app.winters.octo.device.TagReader
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.server.serverSourceId
+import app.winters.octo.subsonic.LYRICS_AUTO
+import app.winters.octo.subsonic.LYRICS_NONE
+import app.winters.octo.subsonic.LyricsCandidates
+import app.winters.octo.subsonic.OCTO_LYRICS
 import app.winters.octo.subsonic.SubsonicException
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
@@ -34,6 +43,10 @@ import javax.inject.Singleton
 // How long to wait for the saved sign-in to come back as the app starts.
 private const val SESSION_WAIT_MS = 3_000L
 
+// How long what the server said about keeping lyrics choices is believed
+// before it is asked again.
+private const val RECHECK_CHOICES_MS = 30 * 60 * 1000L
+
 // What is known about the song on now, for the lookups that go by name.
 data class LyricsSong(
     val id: String,
@@ -43,16 +56,18 @@ data class LyricsSong(
     val durationMs: Long,
 )
 
-// One place lyrics can come from, tried in order.
-class LyricsStep(val source: LyricsSource, val fetch: suspend () -> Lyrics?)
+// One place lyrics can come from, tried in order. What a `final` source
+// finds is used even when it is plain: it has already chosen.
+class LyricsStep(val source: LyricsSource, val final: Boolean = false, val fetch: suspend () -> Lyrics?)
 
 // What a search found, and whether every source answered. An answer with a
 // source that could not be reached is not saved, so it is asked again.
 data class LyricsSearch(val lyrics: Lyrics?, val complete: Boolean, val askedOnline: Boolean)
 
-// Asks each source in order. The first synced lyrics win at once; plain
-// lyrics are kept while the rest are asked for synced ones, and win if none
-// have them. A source that fails is skipped.
+// Asks each source in order. The first synced lyrics, or any a final
+// source finds, win at once; plain lyrics are kept while the rest are
+// asked for synced ones, and win if none have them. A source that fails is
+// skipped.
 suspend fun searchInOrder(steps: List<LyricsStep>): LyricsSearch {
     var plain: Lyrics? = null
     var complete = true
@@ -68,7 +83,7 @@ suspend fun searchInOrder(steps: List<LyricsStep>): LyricsSearch {
             null
         }
         if (found == null || found.isEmpty) continue
-        if (found.synced) return LyricsSearch(found, complete, askedOnline)
+        if (found.synced || step.final) return LyricsSearch(found, complete, askedOnline)
         if (plain == null) plain = found
     }
     return LyricsSearch(plain, complete, askedOnline)
@@ -76,12 +91,24 @@ suspend fun searchInOrder(steps: List<LyricsStep>): LyricsSearch {
 
 // Every set of lyrics found for a song to choose from, the sources that
 // could not be reached, and whether the online library may be asked.
-data class CandidateSearch(val found: List<LyricsCandidate>, val missed: Set<LyricsSource>, val onlineAllowed: Boolean)
+// `serverChoice` is what the server has the song set to ("auto", "none" or
+// a copy's id) when the server keeps lyrics choices for every app, and
+// null when every choice stays on this phone.
+data class CandidateSearch(
+    val found: List<LyricsCandidate>,
+    val missed: Set<LyricsSource>,
+    val onlineAllowed: Boolean,
+    val serverChoice: String? = null,
+)
+
+// A song on the signed-in server: the session, and the song's id there.
+private class ServerSong(val session: Session, val id: String, val copy: SourceTrackEntity?)
 
 // Finds a song's lyrics: the ones the listener picked, if any, or else from
 // the server, then the song file, then an .lrc file beside it, then (when
 // allowed) the online library. Answers are kept per song, in memory and in
-// the cache folder.
+// the cache folder. A server that keeps lyrics choices for every app has
+// the last word on its songs (see ServerChoices.kt).
 @Singleton
 class LyricsRepository @Inject constructor(
     @ApplicationContext context: Context,
@@ -99,6 +126,19 @@ class LyricsRepository @Inject constructor(
     private val recent = object : LinkedHashMap<String, CachedLyrics>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedLyrics>) = size > 32
     }
+
+    // The copy the server has pinned for a song, by song, as far as this
+    // phone has heard, so its lyrics can say where they are from.
+    private val serverPicks = HashMap<String, String>()
+
+    // Whether each server keeps lyrics choices, and when that was learned.
+    private val keepsChoices = HashMap<String, Pair<Boolean, Long>>()
+
+    // Goes up for a song each time its lyrics must be fetched again though
+    // the listener's choice on this phone stayed the same.
+    private val revisions = MutableStateFlow<Map<String, Int>>(emptyMap())
+
+    fun revisionOf(songId: String): Flow<Int> = revisions.map { it[songId] ?: 0 }.distinctUntilChanged()
 
     // The song's lyrics, or null when none were found or the listener hid
     // them. Lyrics the listener picked come first, while their source still
@@ -133,16 +173,18 @@ class LyricsRepository @Inject constructor(
                 return found
             }
         }
-        val steps = buildList {
-            add(LyricsStep(LyricsSource.Server) { fromServer(facts, copies) })
-            if (phone != null) {
-                add(LyricsStep(LyricsSource.SongFile) { fromSongFile(phone) })
-                add(LyricsStep(LyricsSource.LyricsFile) { fromLyricsFile(phone) })
-            }
-            if (onlineAllowed && facts.title.isNotBlank() && facts.artist.isNotBlank()) {
-                add(LyricsStep(LyricsSource.Online) { online.find(facts.title, facts.artist, facts.album, facts.durationMs) })
-            }
-        }
+        val serverDecides = serverSong(song.id, copies)?.let { keepsChoices(it.session) } == true
+        val steps = lyricsSteps(
+            server = { fromServer(facts, copies) },
+            serverDecides = serverDecides,
+            songFile = phone?.let { file -> suspend { fromSongFile(file) } },
+            lyricsFile = phone?.let { file -> suspend { fromLyricsFile(file) } },
+            online = if (onlineAllowed && facts.title.isNotBlank() && facts.artist.isNotBlank()) {
+                suspend { online.find(facts.title, facts.artist, facts.album, facts.durationMs) }
+            } else {
+                null
+            },
+        )
         val search = searchInOrder(steps)
         val entry = CachedLyrics(now, search.lyrics, search.askedOnline, ONLINE_LOOKUP_VERSION)
         // A "none" from a search that could not reach a source is not kept
@@ -152,13 +194,15 @@ class LyricsRepository @Inject constructor(
         return search.lyrics
     }
 
-    // Uses these lyrics for the song from now on. They are kept as the
-    // song's answer before the pick is saved, so the lyrics view, which
-    // follows the pick, finds them at once.
+    // Uses these lyrics for the song from now on, on this phone. They are
+    // kept as the song's answer before the pick is saved, so the lyrics
+    // view, which follows the pick, finds them at once. A copy the server
+    // holds is chosen with chooseOnServer instead.
     suspend fun choose(songId: String, candidate: LyricsCandidate) {
+        val lyrics = candidate.lyrics ?: return
         val entry = CachedLyrics(
             System.currentTimeMillis(),
-            candidate.lyrics,
+            lyrics,
             askedOnline = true,
             lookupVersion = ONLINE_LOOKUP_VERSION,
             pick = candidate.pick.encoded(),
@@ -167,16 +211,140 @@ class LyricsRepository @Inject constructor(
         choices.pick(songId, candidate.pick)
     }
 
+    // Sets the song's lyrics on the server, for every app: one of its
+    // copies by id, "auto" or "none". This phone then follows the server
+    // (see ServerChoices.kt) and the song's lyrics are fetched again at
+    // once. Throws IOException when the server cannot take it.
+    suspend fun chooseOnServer(songId: String, choice: String, showAgain: Boolean = false) {
+        val copies = if (isFind(songId)) emptyList() else sources.copies(songId)
+        val server = serverSong(songId, copies) ?: throw IOException("The song is not on the server")
+        sendServerChoice(
+            songId,
+            choice,
+            choices,
+            send = { wanted ->
+                val now = try {
+                    server.session.client.setLyricsChoice(server.id, wanted)
+                } catch (e: SubsonicException) {
+                    throw IOException(e.message, e)
+                }
+                notePin(songId, now)
+            },
+            forget = { forget(songId) },
+            showAgain = showAgain,
+        )
+        refresh(songId)
+    }
+
+    // Hides the song's lyrics: on the server too, for every app, when it
+    // keeps lyrics choices, or else only on this phone.
+    suspend fun hide(songId: String) {
+        if (!onServerIfKept(songId, LYRICS_NONE)) choices.hide(songId)
+    }
+
+    // Shows the song's lyrics again, on the server too when it keeps
+    // lyrics choices.
+    suspend fun show(songId: String) {
+        if (!onServerIfKept(songId, LYRICS_AUTO, showAgain = true)) choices.show(songId)
+    }
+
+    // Sends a choice to the server when the song is on one that keeps
+    // lyrics choices. False when it is not, or the server could not take it.
+    private suspend fun onServerIfKept(songId: String, choice: String, showAgain: Boolean = false): Boolean {
+        val copies = if (isFind(songId)) emptyList() else sources.copies(songId)
+        val server = serverSong(songId, copies) ?: return false
+        if (!keepsChoices(server.session)) return false
+        return try {
+            chooseOnServer(songId, choice, showAgain)
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     // Every set of lyrics that can be found for the song, for the listener
-    // to choose from: the server's, the song file's, the .lrc file's, and
-    // (when allowed) the online library's match and the copies its search
-    // holds with the same title and artist. All are asked at once. A source
-    // that cannot be reached is named in the answer and left out.
-    suspend fun candidatesFor(song: LyricsSong): CandidateSearch = coroutineScope {
+    // to choose from. With a server that keeps lyrics choices for every app:
+    // its automatic answer, the copies its sources hold, and the song
+    // file's and .lrc file's. Otherwise: the server's, the song file's, the
+    // .lrc file's, and (when allowed) the online library's match and the
+    // copies its search holds with the same title and artist. A source that
+    // cannot be reached is named in the answer and left out.
+    suspend fun candidatesFor(song: LyricsSong): CandidateSearch {
         val onlineAllowed = settings.prefs.first().lyricsOnline
         val facts = described(song)
         val copies = if (isFind(song.id)) emptyList() else sources.copies(song.id)
         val phone = copies.firstOrNull { it.sourceId == DEVICE && !it.uri.isNullOrEmpty() }?.uri?.toUri()
+        val server = serverSong(song.id, copies)
+        if (server != null && keepsChoices(server.session)) {
+            serverCandidatesFor(song.id, facts, copies, phone, server, onlineAllowed)?.let { return it }
+        }
+        return localCandidatesFor(facts, copies, phone, onlineAllowed)
+    }
+
+    // The chooser's list from a server that keeps lyrics choices, or null
+    // when it turns out not to offer them for this song (its lookups were
+    // switched off, or it does not know the song), so the usual list is
+    // made instead.
+    private suspend fun serverCandidatesFor(
+        songId: String,
+        facts: LyricsSong,
+        copies: List<SourceTrackEntity>,
+        phone: Uri?,
+        server: ServerSong,
+        onlineAllowed: Boolean,
+    ): CandidateSearch? = coroutineScope {
+        val missed = mutableSetOf<LyricsSource>()
+        val listed: LyricsCandidates? = try {
+            server.session.client.lyricsCandidates(server.id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: SubsonicException.Unreachable) {
+            missed += LyricsSource.Server
+            null
+        } catch (_: SubsonicException.Server) {
+            noteKeepsChoices(server.session, false)
+            return@coroutineScope null
+        } catch (_: Exception) {
+            return@coroutineScope null
+        }
+        val choice = listed?.choice ?: LYRICS_AUTO
+        if (listed != null) {
+            notePin(songId, choice)
+            // Changed from another app or device since this phone saved it.
+            val saved = synchronized(recent) { recent[songId] } ?: withContext(Dispatchers.IO) { cache.read(songId) }
+            if (servedStale(saved, choice)) {
+                forget(songId)
+                refresh(songId)
+            }
+        }
+        suspend fun <T> attempt(source: LyricsSource, fetch: suspend () -> T?): T? = try {
+            fetch()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            synchronized(missed) { missed += source }
+            null
+        }
+        val answer = async { if (listed != null && choice == LYRICS_AUTO) attempt(LyricsSource.Server) { fromServer(facts, copies) } else null }
+        val songFile = async { phone?.let { attempt(LyricsSource.SongFile) { fromSongFile(it) } } }
+        val lyricsFile = async { phone?.let { attempt(LyricsSource.LyricsFile) { fromLyricsFile(it) } } }
+        val local = buildList {
+            songFile.await()?.let { add(LyricsCandidate(LyricsPick.Own(LyricsSource.SongFile), CandidateOrigin.SongFile, it)) }
+            lyricsFile.await()?.let { add(LyricsCandidate(LyricsPick.Own(LyricsSource.LyricsFile), CandidateOrigin.LyricsFile, it)) }
+        }
+        CandidateSearch(serverCandidates(listed, answer.await(), local), synchronized(missed) { missed.toSet() }, onlineAllowed, choice)
+    }
+
+    // The chooser's list with every choice kept on this phone. All sources
+    // are asked at once.
+    private suspend fun localCandidatesFor(
+        facts: LyricsSong,
+        copies: List<SourceTrackEntity>,
+        phone: Uri?,
+        onlineAllowed: Boolean,
+    ): CandidateSearch = coroutineScope {
         val missed = mutableSetOf<LyricsSource>()
         suspend fun <T> attempt(source: LyricsSource, fetch: suspend () -> T?): T? = try {
             fetch()
@@ -211,6 +379,21 @@ class LyricsRepository @Inject constructor(
     suspend fun searchOnline(query: String): List<LyricsCandidate> =
         online.search(query).map { it.asCandidate(CandidateOrigin.OnlineSearch) }
 
+    // What the server's sources find for words the listener typed, for a
+    // song whose tags are wrong: "artist - title", or a title. Throws
+    // IOException when the server cannot be reached or asked.
+    suspend fun searchOnServer(songId: String, query: String): List<LyricsCandidate> {
+        val copies = if (isFind(songId)) emptyList() else sources.copies(songId)
+        val server = serverSong(songId, copies) ?: throw IOException("The song is not on the server")
+        val (title, artist) = splitLyricsSearch(query)
+        val found = try {
+            server.session.client.lyricsCandidates(server.id, title, artist)
+        } catch (e: SubsonicException) {
+            throw IOException(e.message, e)
+        }
+        return found.candidate.filter { it.id.isNotBlank() }.map { it.asCandidate() }
+    }
+
     // The lyrics a pick names, fetched from its source again.
     private suspend fun fetchPick(
         pick: LyricsPick,
@@ -220,6 +403,8 @@ class LyricsRepository @Inject constructor(
         onlineAllowed: Boolean,
     ): Lyrics? = when (pick) {
         is LyricsPick.Online -> if (onlineAllowed) online.byId(pick.id) else null
+        // The server answers with its own choice.
+        is LyricsPick.OnServer -> fromServer(facts, copies)
         is LyricsPick.Own -> when (pick.source) {
             LyricsSource.Server -> fromServer(facts, copies)
             LyricsSource.SongFile -> phone?.let { fromSongFile(it) }
@@ -232,6 +417,44 @@ class LyricsRepository @Inject constructor(
     private suspend fun keep(songId: String, entry: CachedLyrics) {
         synchronized(recent) { recent[songId] = entry }
         withContext(Dispatchers.IO) { cache.write(songId, entry) }
+    }
+
+    // Forgets a song's answer, in memory and in the cache folder.
+    private suspend fun forget(songId: String) {
+        synchronized(recent) { recent.remove(songId) }
+        withContext(Dispatchers.IO) { cache.drop(songId) }
+    }
+
+    // Tells whoever shows the song's lyrics to fetch them again.
+    private fun refresh(songId: String) {
+        revisions.update { it + (songId to (it[songId] ?: 0) + 1) }
+    }
+
+    // Remembers what the server has the song set to, for where its lyrics
+    // are from.
+    private fun notePin(songId: String, choice: String) {
+        synchronized(serverPicks) {
+            if (choice == LYRICS_AUTO || choice == LYRICS_NONE) serverPicks.remove(songId) else serverPicks[songId] = choice
+        }
+    }
+
+    // Whether the server keeps lyrics choices for every app: from what it
+    // listed at sign-in, or by asking, since it may have been updated or
+    // had its lookups switched on since. A "no" learned from the server
+    // itself stands over what it listed at sign-in, for a while.
+    private suspend fun keepsChoices(session: Session): Boolean {
+        val now = System.currentTimeMillis()
+        synchronized(keepsChoices) {
+            keepsChoices[session.sourceId]?.let { (yes, at) -> if (now - at < RECHECK_CHOICES_MS) return yes }
+        }
+        if (offersLyricsChoices(session.extensions)) return true
+        val yes = session.client.supports(OCTO_LYRICS)
+        noteKeepsChoices(session, yes)
+        return yes
+    }
+
+    private fun noteKeepsChoices(session: Session, yes: Boolean) {
+        synchronized(keepsChoices) { keepsChoices[session.sourceId] = yes to System.currentTimeMillis() }
     }
 
     private suspend fun fromSongFile(file: Uri): Lyrics? = withContext(Dispatchers.IO) {
@@ -257,30 +480,35 @@ class LyricsRepository @Inject constructor(
         )
     }
 
+    // The song on the signed-in server, or null when it is not there.
+    private suspend fun serverSong(songId: String, copies: List<SourceTrackEntity>): ServerSong? {
+        val session = session() ?: return null
+        val sourceId = serverSourceId(session.client.baseUrl)
+        val copy = copies.firstOrNull { it.sourceId == sourceId }
+        val serverId = if (isFind(songId)) songId.removePrefix(FIND_PREFIX) else copy?.nativeId ?: return null
+        return ServerSong(session, serverId, copy)
+    }
+
     // The server's lyrics for the song, when it is on the signed-in server.
     // A server with the songLyrics extension is asked by song id (version 2
-    // adds word timings); an older one by artist and title.
+    // adds word timings); an older one by artist and title. Lyrics from a
+    // copy the server has pinned say which.
     private suspend fun fromServer(song: LyricsSong, copies: List<SourceTrackEntity>): Lyrics? {
-        val session = session() ?: return null
-        val client = session.client
-        val sourceId = serverSourceId(client.baseUrl)
-        val copy = copies.firstOrNull { it.sourceId == sourceId }
-        val serverId = if (isFind(song.id)) song.id.removePrefix(FIND_PREFIX) else copy?.nativeId ?: return null
-        val versions = session.extensions
-            .filter { it.startsWith("songLyrics:") }
-            .mapNotNull { it.substringAfter(':').toIntOrNull() }
-        return try {
-            if (versions.isNotEmpty()) {
-                serverLyrics(client.lyricsBySongId(serverId, enhanced = versions.max() >= 2), Locale.getDefault().language)
-            } else {
-                client.lyrics(copy?.artist ?: song.artist, copy?.title ?: song.title)
+        val server = serverSong(song.id, copies) ?: return null
+        val client = server.session.client
+        val found = try {
+            when (val call = serverLyricsCall(server.session.extensions)) {
+                ServerLyricsCall.ByName -> client.lyrics(server.copy?.artist ?: song.artist, server.copy?.title ?: song.title)
                     ?.let { parseLyricsText(it, LyricsSource.Server) }
+                else -> serverLyrics(client.lyricsBySongId(server.id, enhanced = call == ServerLyricsCall.WithWords), Locale.getDefault().language)
             }
         } catch (_: SubsonicException.NotFound) {
             null
         } catch (e: SubsonicException.Unreachable) {
             throw IOException("Server unreachable", e)
         }
+        val pinned = synchronized(serverPicks) { serverPicks[song.id] }
+        return if (pinned != null) found?.copy(serverPick = pinned) else found
     }
 
     private suspend fun session(): Session? {

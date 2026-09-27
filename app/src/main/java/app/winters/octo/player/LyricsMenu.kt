@@ -62,16 +62,20 @@ import app.winters.octo.design.OctoType
 import app.winters.octo.lyrics.CandidateOrigin
 import app.winters.octo.lyrics.CandidateSearch
 import app.winters.octo.lyrics.LyricsCandidate
-import app.winters.octo.lyrics.LyricsChoices
+import app.winters.octo.lyrics.LyricsKind
+import app.winters.octo.lyrics.LyricsPick
 import app.winters.octo.lyrics.LyricsRepository
 import app.winters.octo.lyrics.LyricsSong
 import app.winters.octo.lyrics.LyricsSource
 import app.winters.octo.lyrics.LyricsTiming
 import app.winters.octo.lyrics.TIMING_LIMIT_MS
+import app.winters.octo.lyrics.candidateLabel
 import app.winters.octo.lyrics.candidateList
-import app.winters.octo.lyrics.pickOf
+import app.winters.octo.lyrics.showingPick
 import app.winters.octo.lyrics.signedTiming
+import app.winters.octo.lyrics.sourceLine
 import app.winters.octo.lyrics.timingLabel
+import app.winters.octo.subsonic.LYRICS_AUTO
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.GlassMenuBack
@@ -95,7 +99,6 @@ import javax.inject.Inject
 @HiltViewModel
 class LyricsMenuViewModel @Inject constructor(
     private val repository: LyricsRepository,
-    private val choices: LyricsChoices,
     private val timing: LyricsTiming,
 ) : ViewModel() {
     fun offsetFor(trackId: String): Flow<Long> = timing.offsetFor(trackId)
@@ -108,12 +111,13 @@ class LyricsMenuViewModel @Inject constructor(
         viewModelScope.launch { timing.reset(trackId) }
     }
 
+    // On the server too, for every app, when it keeps lyrics choices.
     fun hide(trackId: String) {
-        viewModelScope.launch { choices.hide(trackId) }
+        viewModelScope.launch { repository.hide(trackId) }
     }
 
     fun show(trackId: String) {
-        viewModelScope.launch { choices.show(trackId) }
+        viewModelScope.launch { repository.show(trackId) }
     }
 
     private val foundNow = MutableStateFlow<FoundLyrics>(FoundLyrics.Looking(""))
@@ -122,6 +126,10 @@ class LyricsMenuViewModel @Inject constructor(
     private val searchedNow = MutableStateFlow<SearchedLyrics>(SearchedLyrics.Nothing)
     val searched: StateFlow<SearchedLyrics> = searchedNow
 
+    // Set when the server could not take a choice, until the next one.
+    private val notTakenNow = MutableStateFlow(false)
+    val notTaken: StateFlow<Boolean> = notTakenNow
+
     private var looking: Job? = null
     private var searching: Job? = null
 
@@ -129,6 +137,7 @@ class LyricsMenuViewModel @Inject constructor(
         looking?.cancel()
         searching?.cancel()
         searchedNow.value = SearchedLyrics.Nothing
+        notTakenNow.value = false
         foundNow.value = FoundLyrics.Looking(song.id)
         looking = viewModelScope.launch {
             foundNow.value = try {
@@ -141,17 +150,20 @@ class LyricsMenuViewModel @Inject constructor(
         }
     }
 
-    fun search(query: String) {
+    // Searches the server's sources when it keeps lyrics choices for the
+    // song, or else the online library.
+    fun search(trackId: String, query: String) {
         val words = query.trim()
         searching?.cancel()
         if (words.isEmpty()) {
             searchedNow.value = SearchedLyrics.Nothing
             return
         }
+        val onServer = (foundNow.value as? FoundLyrics.Ready)?.search?.serverChoice != null
         searchedNow.value = SearchedLyrics.Searching
         searching = viewModelScope.launch {
             searchedNow.value = try {
-                SearchedLyrics.Ready(repository.searchOnline(words))
+                SearchedLyrics.Ready(if (onServer) repository.searchOnServer(trackId, words) else repository.searchOnline(words))
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -160,13 +172,32 @@ class LyricsMenuViewModel @Inject constructor(
         }
     }
 
-    // Uses the candidate for the song from now on. Its timing starts as the
+    // Uses the candidate for the song from now on: on this phone, or for a
+    // server choice, on the server for every app. Its timing starts as the
     // new lyrics are written: an offset set for other lyrics would be wrong
-    // for these.
-    fun choose(trackId: String, candidate: LyricsCandidate) {
+    // for these. `onDone` runs once the choice is made; a server choice
+    // the server could not take leaves the chooser open and says so.
+    fun choose(trackId: String, candidate: LyricsCandidate, onDone: () -> Unit) {
+        val pick = candidate.pick
+        if (pick !is LyricsPick.OnServer) {
+            viewModelScope.launch {
+                timing.reset(trackId)
+                repository.choose(trackId, candidate)
+            }
+            onDone()
+            return
+        }
+        notTakenNow.value = false
         viewModelScope.launch {
-            timing.reset(trackId)
-            repository.choose(trackId, candidate)
+            try {
+                repository.chooseOnServer(trackId, pick.choice)
+                timing.reset(trackId)
+                onDone()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                notTakenNow.value = true
+            }
         }
     }
 }
@@ -237,7 +268,7 @@ fun LyricsMenu(
 
 // Where the lyrics came from, in plain words, at the top of the menu.
 private fun sourceLine(state: LyricsState): String = when (state) {
-    is LyricsState.Found -> state.lyrics.source.label
+    is LyricsState.Found -> state.lyrics.sourceLine()
     LyricsState.HiddenForSong -> "Lyrics are hidden for this song"
     LyricsState.None -> "No lyrics found for this song"
     LyricsState.Loading, LyricsState.Hidden -> "Looking for lyrics"
@@ -323,9 +354,11 @@ private val LineColour = OctoColors.TextPrimary.copy(alpha = 0.08f)
 // The lyrics to choose from for the song playing, as the lines of a glass
 // sheet: a search by hand at the top, for a song whose title or artist is
 // filed wrong, then the lyrics showing now in the darker pill, then every
-// other copy found. Each says where it is from, what the online library
-// calls it, and its first lines. Picking one uses it for this song from
-// now on and closes the sheet.
+// other copy found. Each says where it is from, what its source calls it,
+// and its first lines. Picking one uses it for this song from now on and
+// closes the sheet. With a server that keeps lyrics choices for every app,
+// the list and the search come from the server, and a pick from it holds
+// for every app, which one quiet line says.
 @Composable
 fun ColumnScope.LyricsChooser(now: NowPlaying, state: LyricsState, onDone: () -> Unit, model: LyricsMenuViewModel = hiltViewModel()) {
     val trackId = now.trackId ?: return
@@ -334,14 +367,19 @@ fun ColumnScope.LyricsChooser(now: NowPlaying, state: LyricsState, onDone: () ->
     }
     val found by model.found.collectAsStateWithLifecycle()
     val searched by model.searched.collectAsStateWithLifecycle()
+    val notTaken by model.notTaken.collectAsStateWithLifecycle()
     var query by rememberSaveable(trackId) { mutableStateOf("") }
     val focus = LocalFocusManager.current
     val showing = (state as? LyricsState.Found)?.lyrics
-    val pick: (String, LyricsCandidate, Boolean) -> Unit = { song, candidate, isShowing ->
-        if (!isShowing) model.choose(song, candidate)
-        onDone()
+    val pick: (LyricsCandidate, Boolean) -> Unit = { candidate, isShowing ->
+        if (isShowing) onDone() else model.choose(trackId, candidate, onDone)
     }
     val side = Modifier.padding(horizontal = 16.dp)
+
+    val ready = (found as? FoundLyrics.Ready)?.takeIf { it.trackId == trackId }
+    val serverChoice = ready?.search?.serverChoice
+    val onServer = serverChoice != null
+    val current = showingPick(serverChoice, showing)
 
     Text("Choose lyrics", style = OctoType.section, color = OctoColors.TextPrimary, modifier = side.padding(horizontal = 8.dp))
     Text(
@@ -350,20 +388,28 @@ fun ColumnScope.LyricsChooser(now: NowPlaying, state: LyricsState, onDone: () ->
         color = OctoColors.TextMuted,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        modifier = side.padding(start = 8.dp, end = 8.dp, bottom = 12.dp),
+        modifier = side.padding(start = 8.dp, end = 8.dp, bottom = if (onServer) 2.dp else 12.dp),
     )
+    if (onServer) {
+        Text(
+            "Lyrics picked from your server show on all your devices and apps.",
+            style = OctoType.caption,
+            color = OctoColors.TextMuted,
+            modifier = side.padding(start = 8.dp, end = 8.dp, bottom = 12.dp),
+        )
+    }
 
-    val ready = found as? FoundLyrics.Ready
     val onlineAllowed = ready?.search?.onlineAllowed ?: true
-    if (onlineAllowed) {
+    if (onServer || onlineAllowed) {
+        val searchPlace = if (onServer) "your server" else "LRCLIB"
         GlassInput(
             value = query,
             onValueChange = { query = it },
-            placeholder = "Search LRCLIB by title or artist",
+            placeholder = if (onServer) "Search by title, or artist - title" else "Search LRCLIB by title or artist",
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = {
                 focus.clearFocus()
-                model.search(query)
+                model.search(trackId, query)
             }),
             modifier = side,
             trailing = {
@@ -372,7 +418,7 @@ fun ColumnScope.LyricsChooser(now: NowPlaying, state: LyricsState, onDone: () ->
                         .size(40.dp)
                         .clickable(interactionSource = null, indication = null, role = Role.Button) {
                             focus.clearFocus()
-                            model.search(query)
+                            model.search(trackId, query)
                         }
                         .semantics { contentDescription = "Search" },
                     contentAlignment = Alignment.Center,
@@ -383,15 +429,15 @@ fun ColumnScope.LyricsChooser(now: NowPlaying, state: LyricsState, onDone: () ->
         )
         when (val result = searched) {
             SearchedLyrics.Nothing -> Unit
-            SearchedLyrics.Searching -> QuietLine("Searching LRCLIB", side)
-            SearchedLyrics.Failed -> QuietLine("Could not reach LRCLIB", side)
+            SearchedLyrics.Searching -> QuietLine("Searching $searchPlace", side)
+            SearchedLyrics.Failed -> QuietLine("Could not reach $searchPlace", side)
             is SearchedLyrics.Ready -> {
                 SectionTitle("Search results", side)
                 if (result.found.isEmpty()) QuietLine("Nothing found for that", side)
                 result.found.forEachIndexed { index, candidate ->
-                    val isShowing = showing != null && candidate.pick == pickOf(showing)
+                    val isShowing = current != null && candidate.pick == current
                     if (index > 0) Hairline(side)
-                    CandidateRow(candidate, isShowing, now, byHand = true, modifier = side) { pick(trackId, candidate, isShowing) }
+                    CandidateRow(candidate, isShowing, now, byHand = true, modifier = side) { pick(candidate, isShowing) }
                 }
             }
         }
@@ -400,18 +446,18 @@ fun ColumnScope.LyricsChooser(now: NowPlaying, state: LyricsState, onDone: () ->
     }
 
     SectionTitle("For this song", side)
+    if (notTaken) QuietLine("Your server could not use those lyrics this time. Try again, or pick others.", side)
     when (val result = found) {
         is FoundLyrics.Looking -> QuietLine("Looking for lyrics", side)
         is FoundLyrics.Ready -> {
             if (result.trackId != trackId) return
-            val current = showing?.let(::pickOf)
             val list = remember(result, current, showing) { candidateList(result.search.found, current, showing) }
             if (list.items.isEmpty()) QuietLine("No lyrics found for this song", side)
             list.items.forEachIndexed { index, candidate ->
                 val isShowing = index == list.showing
                 // No line touches the darker pill.
                 if (index > 0) Hairline(side, drawn = index - 1 != list.showing)
-                CandidateRow(candidate, isShowing, now, byHand = false, modifier = side) { pick(trackId, candidate, isShowing) }
+                CandidateRow(candidate, isShowing, now, byHand = false, modifier = side) { pick(candidate, isShowing) }
             }
             missedLine(result.search.missed)?.let { QuietLine(it, side) }
         }
@@ -478,11 +524,11 @@ private fun CandidateRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Column(Modifier.weight(1f)) {
-                Text(originLabel(candidate.origin), style = OctoType.bodySmall, color = OctoColors.TextPrimary)
+                Text(candidateLabel(candidate), style = OctoType.bodySmall, color = OctoColors.TextPrimary)
                 if (detail.isNotEmpty()) {
                     Text(detail, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
-                val preview = if (candidate.lyrics.instrumental) listOf("Instrumental") else candidate.preview
+                val preview = if (candidate.kind == LyricsKind.Instrumental) listOf("Instrumental") else candidate.preview
                 if (preview.isNotEmpty()) {
                     Text(
                         preview.joinToString("\n"),
@@ -501,20 +547,19 @@ private fun CandidateRow(
     }
 }
 
-private fun originLabel(origin: CandidateOrigin): String = when (origin) {
-    CandidateOrigin.Server -> LyricsSource.Server.label
-    CandidateOrigin.SongFile -> LyricsSource.SongFile.label
-    CandidateOrigin.LyricsFile -> LyricsSource.LyricsFile.label
-    CandidateOrigin.OnlineMatch, CandidateOrigin.OnlineSearch -> LyricsSource.Online.label
-}
-
-// What a candidate is: for an online copy, its title and artist when they
-// differ from the song's (or it came from a search by hand), its album and
-// length; then whether it is timed.
+// What a candidate is: for the server's "Automatic", what it does; for a
+// copy from the online library or the server's sources, its title and
+// artist when they differ from the song's (or it came from a search by
+// hand), its album and length; then how it is timed.
 private fun candidateDetail(candidate: LyricsCandidate, now: NowPlaying, byHand: Boolean): String {
     val parts = mutableListOf<String>()
-    val online = candidate.origin == CandidateOrigin.OnlineMatch || candidate.origin == CandidateOrigin.OnlineSearch
-    if (online) {
+    if (candidate.pick == LyricsPick.OnServer(LYRICS_AUTO)) {
+        parts += if (candidate.lyrics == null) "Let your server find the best match" else "Found by your server"
+    }
+    val copy = candidate.origin == CandidateOrigin.OnlineMatch ||
+        candidate.origin == CandidateOrigin.OnlineSearch ||
+        candidate.origin == CandidateOrigin.ServerCopy
+    if (copy) {
         val otherName = byHand || matchKey(candidate.title) != matchKey(now.title.orEmpty())
         if (otherName && candidate.title.isNotBlank()) {
             parts += if (candidate.artist.isNotBlank()) "${candidate.title} by ${candidate.artist}" else candidate.title
@@ -522,10 +567,8 @@ private fun candidateDetail(candidate: LyricsCandidate, now: NowPlaying, byHand:
         if (candidate.album.isNotBlank()) parts += candidate.album
         if (candidate.durationMs >= 1_000) parts += (candidate.durationMs / 1_000).toInt().asClock()
     }
-    when {
-        candidate.lyrics.instrumental -> Unit
-        candidate.lyrics.synced -> parts += "Timed"
-        else -> parts += "Not timed"
+    if (candidate.lyrics != null || candidate.origin == CandidateOrigin.ServerCopy) {
+        candidate.kind.label.takeIf(String::isNotEmpty)?.let { parts += it }
     }
     return parts.joinToString(" · ")
 }

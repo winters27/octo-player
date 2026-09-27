@@ -191,11 +191,14 @@ class PlayerViewModel @Inject constructor(
 
     // They follow the listener's choice for the song too: picking other
     // lyrics shows them at once, and hiding them shows that they are hidden.
+    // A choice sent to the server fetches them again at once.
     val lyrics: StateFlow<LyricsState> = combine(playback.now.map { it.trackId }.distinctUntilChanged(), lyricsShown) { id, open ->
         id.takeIf { open }
     }
         .distinctUntilChanged()
-        .flatMapLatest { id -> if (id == null) flowOf(null) else lyricsChoices.choiceFor(id).map { id to it } }
+        .flatMapLatest { id ->
+            if (id == null) flowOf(null) else combine(lyricsChoices.choiceFor(id), lyricsRepository.revisionOf(id)) { choice, _ -> id to choice }
+        }
         .transformLatest { shown ->
             if (shown == null) {
                 emit(LyricsState.Hidden)
