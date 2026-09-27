@@ -79,6 +79,18 @@ fun SettingsPage(app: AppState, visit: Visit) {
                 }
             }
         }
+        item(key = "lyrics") {
+            SettingsCard("Lyrics") {
+                SwitchLine(
+                    "Look lyrics up online",
+                    "When your server and the song file have none, ask LRCLIB, sending only the song's title, artist, album and length.",
+                    settings.lyrics.online,
+                ) { on ->
+                    app.settings.update { it.copy(lyrics = it.lyrics.copy(online = on)) }
+                    app.lyrics.state.value.song?.let { song -> app.lyrics.sources.refresh(song.id) }
+                }
+            }
+        }
         item(key = "playback") {
             SettingsCard("Playback") {
                 Txt("The equalizer, loudness, crossfade and speed are on the Sound page.", OctoType.bodySmall, OctoColors.TextSecondary, maxLines = 2)

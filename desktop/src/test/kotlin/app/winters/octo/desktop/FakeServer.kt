@@ -17,6 +17,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 class FakeServer : AutoCloseable {
     private val server = MockWebServer()
     private val answers = HashMap<String, String>()
+    private val files = HashMap<String, ByteArray>()
     val calls = CopyOnWriteArrayList<RecordedRequest>()
 
     init {
@@ -24,6 +25,9 @@ class FakeServer : AutoCloseable {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 calls += request
                 val endpoint = request.url.pathSegments.lastOrNull().orEmpty()
+                synchronized(files) { files[endpoint] }?.let { bytes ->
+                    return MockResponse.Builder().body(okio.Buffer().write(bytes)).build()
+                }
                 val body = synchronized(answers) { answers[endpoint] }
                     ?: return MockResponse.Builder().body(error(70, "not found")).build()
                 return MockResponse.Builder().body(body).build()
@@ -40,6 +44,11 @@ class FakeServer : AutoCloseable {
         synchronized(answers) {
             answers[endpoint] = """{"subsonic-response":{"status":"ok","version":"1.16.1","type":"$type","serverVersion":"0.58.0","openSubsonic":$openSubsonic$extra}}"""
         }
+    }
+
+    // Answers `endpoint` with these bytes as they are, like a song file.
+    fun file(endpoint: String, bytes: ByteArray) {
+        synchronized(files) { files[endpoint] = bytes }
     }
 
     fun fail(endpoint: String, code: Int, message: String) {

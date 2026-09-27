@@ -8,6 +8,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.FocusRequester
 import app.winters.octo.desktop.audio.SoundTarget
 import app.winters.octo.desktop.library.LibraryStore
+import app.winters.octo.desktop.lyrics.LyricsModel
+import app.winters.octo.desktop.lyrics.LyricsSources
 import app.winters.octo.desktop.sound.SoundController
 import app.winters.octo.desktop.nav.Navigator
 import app.winters.octo.desktop.nav.Page
@@ -25,6 +27,7 @@ import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.design.PopupHost
+import app.winters.octo.lyrics.OnlineLyrics
 import app.winters.octo.sort.SortList
 import app.winters.octo.sort.SortOrder
 import app.winters.octo.subsonic.FORM_POST_EXTENSION
@@ -56,9 +59,14 @@ class AppState(
     val scope: CoroutineScope,
     val os: DesktopOs,
     val player: DesktopPlayer = SilentPlayer(scope = scope, volume = settings.current.playback.volume),
+    // The online lyrics library; tests give one at a pretend address.
+    lyricsLibrary: OnlineLyrics = OnlineLyrics(http),
 ) {
     // The Sound page's settings, kept on the engine; none for the silent player.
     val sound: SoundController? = (player as? SoundTarget)?.let { SoundController(it, settings, scope) }
+
+    // The lyrics of the song playing, for the side panel and the full player.
+    val lyrics = LyricsModel(player, LyricsSources({ connection }, http, lyricsLibrary, settings), settings, scope)
 
     val navigator = Navigator()
     val popups = PopupHost()

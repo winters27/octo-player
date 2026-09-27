@@ -72,7 +72,7 @@ val shareAudioEngine = tasks.register<Sync>("shareAudioEngine") {
 
 // The phone app's word-by-word lyrics layout, which uses nothing from
 // Android, compiled here from the same file so the two apps lay lyrics out
-// alike. The drawing around it is ported in player/lyrics.
+// alike. The drawing around it is ported in lyrics/FlowingLyrics.kt.
 val shareLyricsText = tasks.register<Sync>("shareLyricsText") {
     from(rootProject.file("app/src/main/java/app/winters/octo/player")) { include("FlowingLyricsText.kt") }
     into(layout.buildDirectory.dir("generated/sharedLyrics/kotlin"))

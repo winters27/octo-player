@@ -31,8 +31,9 @@ suspend fun checkSound(app: AppState, file: File, close: () -> Unit) {
         val state = player.state.value
         println("check: engine ${engine?.state()} playing=${state.playing} position=${last} ms on ${state.playingOn?.name ?: "?"}")
     }
-    val moved = engine != null && first != null && last - first!! >= 1_000
-    println(if (moved) "check: sound is playing, the clock moved ${last - first!!} ms" else "check: FAILED, the engine did not play")
+    val start = first
+    val moved = engine != null && start != null && last - start >= 1_000
+    println(if (moved) "check: sound is playing, the clock moved ${last - start} ms" else "check: FAILED, the engine did not play")
     player.pause()
     close()
 }

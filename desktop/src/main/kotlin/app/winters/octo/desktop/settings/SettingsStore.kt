@@ -31,6 +31,27 @@ data class AppSettings(
     val sidePanel: String? = null,
     // The equalizer, loudness and the rest of the Sound page.
     val sound: SoundPrefs = SoundPrefs(),
+    // Where lyrics come from, and their timing.
+    val lyrics: LyricsPrefs = LyricsPrefs(),
+)
+
+// Lyrics settings, by song id (the server's) and by output device id.
+@Serializable
+data class LyricsPrefs(
+    // Whether the online lyrics library (LRCLIB) may be asked, as on the phone.
+    val online: Boolean = true,
+    // How much later than written each song's words are heard, in ms; kept
+    // only for songs that were moved.
+    val offsets: Map<String, Long> = emptyMap(),
+    // The same for each output: a Bluetooth pair heard late, say.
+    val outputOffsets: Map<String, Long> = emptyMap(),
+    // Songs whose lyrics the listener hid, on a server that does not keep
+    // that choice itself.
+    val hidden: Set<String> = emptySet(),
+    // Lyrics picked for a song from somewhere other than the server:
+    // "online:<id>" for a copy in the online library, "file" for the song
+    // file's own.
+    val picks: Map<String, String> = emptyMap(),
 )
 
 // The Sound page's settings. With `perOutput` on, every output (a sound
@@ -79,6 +100,27 @@ data class Appearance(
     val ambientGlow: Boolean = true,
     // How strong that wash is, from 0 to 1.
     val glowStrength: Float = 0.5f,
+    // Less motion everywhere: the full player's background holds still and
+    // lyrics move without springs or blooms.
+    val calmMotion: Boolean = false,
+    // The full player's moving background.
+    val wash: WashPrefs = WashPrefs(),
+)
+
+// The full player's background, as the phone's settings have it: whether
+// it moves, how fast it drifts (a share of the full pace), whether it
+// follows the song's tempo, the frame rate it is held to, and how the
+// cover is prepared (a cap on brightness and the saturation, both in
+// percent, and the contrast as a factor).
+@Serializable
+data class WashPrefs(
+    val moving: Boolean = true,
+    val speed: Int = 25,
+    val useBpm: Boolean = true,
+    val fps: Int = 60,
+    val brightnessCap: Int = 50,
+    val saturation: Int = 180,
+    val contrast: Float = 1.3f,
 )
 
 // Playback settings, read by the audio engine's player.
