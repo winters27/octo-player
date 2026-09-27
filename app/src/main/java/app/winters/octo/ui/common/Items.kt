@@ -470,7 +470,3 @@ private fun ArtistCircle(artwork: String?, name: String, onClick: () -> Unit, on
         )
     }
 }
-
-// The first letter a list is grouped under; anything else goes under "#".
-fun indexLetter(sortKey: String): Char =
-    sortKey.firstOrNull()?.uppercaseChar()?.takeIf { it in 'A'..'Z' } ?: '#'

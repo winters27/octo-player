@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "OctoPlayer"
-include(":app", ":design", ":subsonic")
+include(":app", ":design", ":subsonic", ":shared:core", ":desktop")
