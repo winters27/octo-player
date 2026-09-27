@@ -142,6 +142,13 @@ class Downloads @Inject constructor(
         .map { phases -> phases.mapValues { (_, phase) -> phase.state } }
         .stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
+    // Each find now in the library, by the library song it became. Null
+    // until first read, so a row can tell a song that was already in the
+    // library from one that arrives while it is shown.
+    val adoptions: StateFlow<Map<String, String>?> = online.requestedFlow()
+        .map(::adoptionsOf)
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
     private val _arrived = MutableStateFlow(0)
 
     // Goes up by one each time downloads join the library, so pages that
