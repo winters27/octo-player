@@ -220,4 +220,63 @@ class CatalogMergerTest {
         assertEquals("s1", merged.mergedIds["s1"])
         assertEquals(3, merged.tracks.size)
     }
+
+    @Test
+    fun songsMatchByTheirTitleAsTheServerReadsIt() {
+        val serverSide = server(
+            tracks = listOf(
+                track("s1", "server", "Hotline Bling - Remastered 2011", "server:album"),
+                track("s2", "server", "One Dance (Live)", "server:album"),
+            ),
+            albums = listOf(album("server:album", "server", songs = 2)),
+            artists = listOf(artist("server:artist", "server")),
+        )
+        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        // A remaster is the same recording; a live take of the same length
+        // is not, and keeps its own id.
+        assertEquals("p1", merged.mergedIds["s1"])
+        assertEquals("s2", merged.mergedIds["s2"])
+        assertEquals(3, merged.tracks.size)
+    }
+
+    @Test
+    fun stylizedAndCurlyTitlesStillMerge() {
+        val phone = phone(
+            tracks = listOf(track("p1", "device", "Huntin’ Wabbitz", "device:album"), track("p2", "device", "${'$'}UICIDE", "device:album")),
+            albums = listOf(album("device:album", "device")),
+            artists = listOf(artist("device:artist", "device")),
+        )
+        val serverSide = server(
+            tracks = listOf(track("s1", "server", "Huntin' Wabbitz", "server:album"), track("s2", "server", "＄UICIDE", "server:album")),
+            albums = listOf(album("server:album", "server")),
+            artists = listOf(artist("server:artist", "server")),
+        )
+        val merged = mergeCatalogs(listOf(phone, serverSide))
+        assertEquals("p1", merged.mergedIds["s1"])
+        assertEquals("p2", merged.mergedIds["s2"])
+    }
+
+    @Test
+    fun aGuestInTheCreditStillFindsTheSongElsewhere() {
+        // Filed under another album, credited with its guest: still the
+        // phone's song by the same artist.
+        val single = track("s1", "server", "One Dance (feat. Wizkid & Kyla)", "server:single").copy(artist = "Drake feat. Wizkid")
+        val serverSide = server(
+            tracks = listOf(single),
+            albums = listOf(album("server:single", "server", title = "One Dance - Single", songs = 1)),
+            artists = listOf(artist("server:artist", "server")),
+        )
+        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        assertEquals("p2", merged.mergedIds["s1"])
+    }
+
+    @Test
+    fun namesMatchWithoutAccentsOrAnAmpersand() {
+        assertEquals(matchKey("Beyoncé"), matchKey("BEYONCE"))
+        assertEquals(matchKey("Simon & Garfunkel"), matchKey("Simon and Garfunkel"))
+        assertEquals(matchKey("ＬＯＶＥ"), matchKey("Love"))
+        // A name of symbols keeps them, so two such names stay apart.
+        assertEquals("!!!", matchKey("!!!"))
+        assertFalse(matchKey("÷") == matchKey("×"))
+    }
 }
