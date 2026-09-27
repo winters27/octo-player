@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -42,7 +43,9 @@ const val MAX_LISTENS_PER_REQUEST = 1_000
 const val MAX_QUEUED_LISTENS = 5_000
 
 // One play as ListenBrainz hears it. `listenedAt` is when it started, in
-// seconds; a length of zero and a missing track number are left out.
+// seconds; a length of zero and a missing track number are left out. The
+// MusicBrainz ids, where the song's tags or server have them, let
+// ListenBrainz link the play to the exact recording and release.
 @Serializable
 data class Listen(
     val listenedAt: Long,
@@ -51,6 +54,10 @@ data class Listen(
     val album: String = "",
     val durationMs: Long = 0,
     val trackNumber: Int? = null,
+    val recordingMbid: String? = null,
+    val releaseMbid: String? = null,
+    val releaseGroupMbid: String? = null,
+    val artistMbids: List<String> = emptyList(),
 )
 
 // What was played, as far as the app knows it, and whether the signed-in
@@ -62,6 +69,10 @@ data class PlayedSong(
     val durationMs: Long,
     val trackNumber: Int?,
     val reachesServer: Boolean,
+    val recordingMbid: String? = null,
+    val releaseMbid: String? = null,
+    val releaseGroupMbid: String? = null,
+    val artistMbids: List<String> = emptyList(),
 ) {
     // Null when the song has no title or artist, which ListenBrainz needs.
     fun listenAt(startedAtMs: Long): Listen? {
@@ -73,9 +84,19 @@ data class PlayedSong(
             album = album.trim(),
             durationMs = durationMs.coerceAtLeast(0),
             trackNumber = trackNumber?.takeIf { it > 0 },
+            recordingMbid = validMbid(recordingMbid),
+            releaseMbid = validMbid(releaseMbid),
+            releaseGroupMbid = validMbid(releaseGroupMbid),
+            artistMbids = artistMbids.mapNotNull(::validMbid).distinct(),
         )
     }
 }
+
+private val mbidShape = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+// ListenBrainz refuses a whole request over one malformed id, so only
+// well-formed ones go.
+fun validMbid(text: String?): String? = text?.trim()?.lowercase()?.takeIf(mbidShape::matches)
 
 // Which plays are sent: all of them, or only those the server never hears,
 // so a server that passes its own plays on does not count them twice.
@@ -139,6 +160,10 @@ private fun trackMetadata(listen: Listen, clientVersion: String): JsonObject = b
             put("submission_client_version", clientVersion)
             if (listen.durationMs > 0) put("duration_ms", listen.durationMs)
             listen.trackNumber?.let { put("tracknumber", it.toString()) }
+            listen.recordingMbid?.let { put("recording_mbid", it) }
+            listen.releaseMbid?.let { put("release_mbid", it) }
+            listen.releaseGroupMbid?.let { put("release_group_mbid", it) }
+            if (listen.artistMbids.isNotEmpty()) put("artist_mbids", buildJsonArray { listen.artistMbids.forEach { add(JsonPrimitive(it)) } })
         },
     )
 }

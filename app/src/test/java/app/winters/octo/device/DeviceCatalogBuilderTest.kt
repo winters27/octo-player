@@ -181,4 +181,54 @@ class DeviceCatalogBuilderTest {
         )
         assertEquals(listOf("Hip-Hop", "Hip-Hop", "Hip-Hop", "Pop"), catalog.tracks.sortedBy { it.id }.map { it.genre })
     }
+
+    @Test
+    fun everyDetailOfTheFileReachesItsRow() {
+        val tags = FileTags(
+            originalYear = 1977, artists = listOf("A", "B"), composer = "C", bpm = 120, comment = "note", explicit = true,
+            discTitle = "Side B", mbRecordingId = "rec", mbReleaseGroupId = "grp", mbArtistIds = listOf("x", "y"),
+            trackGain = -6f, albumGain = -7f, trackPeak = 0.9f, albumPeak = 1f,
+        )
+        val track = buildDeviceCatalog(listOf(row(1, year = 2017, mbAlbumId = "rel", genres = listOf("Rock", "Pop")).copy(tags = tags)))
+            .tracks.single()
+        // The row keeps this edition's year; the library shows the original.
+        assertEquals(2017, track.year)
+        assertEquals(1977, track.originalYear)
+        assertEquals("Rock\nPop", track.genres)
+        assertEquals("A\nB", track.artists)
+        assertEquals("C", track.composer)
+        assertEquals(120, track.bpm)
+        assertEquals("note", track.comment)
+        assertEquals(true, track.explicit)
+        assertEquals("Side B", track.discTitle)
+        assertEquals("rec", track.mbRecordingId)
+        assertEquals("rel", track.mbAlbumId)
+        assertEquals("grp", track.mbReleaseGroupId)
+        assertEquals("x\ny", track.mbArtistIds)
+        assertEquals(-6f, track.trackGain)
+        assertEquals(1f, track.albumPeak)
+    }
+
+    @Test
+    fun anAlbumShowsItsOriginalYear() {
+        val original = buildDeviceCatalog(listOf(row(1, year = 2017).copy(tags = FileTags(originalYear = 1977))))
+        assertEquals(1977, original.albums.single().year)
+    }
+
+    @Test
+    fun sortTagsFileTitlesAlbumsAndArtists() {
+        val catalog = buildDeviceCatalog(
+            listOf(
+                row(1, title = "The Song", album = "The Album", albumArtist = "The Band")
+                    .copy(tags = FileTags(sortTitle = "Song, The", sortAlbum = "Album, The", sortAlbumArtist = "Band, The")),
+            ),
+        )
+        assertEquals("song, the", catalog.tracks.single().sortKey)
+        assertEquals("album, the", catalog.albums.single().sortKey)
+        assertEquals("band, the", catalog.artists.single().sortKey)
+        // Without sort tags the names file as before.
+        val plain = buildDeviceCatalog(listOf(row(1, title = "The Song", album = "The Album", albumArtist = "The Band")))
+        assertEquals("song", plain.tracks.single().sortKey)
+        assertEquals("band", plain.artists.single().sortKey)
+    }
 }

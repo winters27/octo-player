@@ -4,9 +4,13 @@ import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.catalog.SourceAlbumEntity
 import app.winters.octo.catalog.SourceArtistEntity
 import app.winters.octo.catalog.SourceTrackEntity
+import app.winters.octo.catalog.joinLines
 import app.winters.octo.catalog.relinkKey
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.catalog.sortKey
+import app.winters.octo.device.explicitOf
+import app.winters.octo.device.musicIds
+import app.winters.octo.device.parseGenres
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Library
 import app.winters.octo.subsonic.Song
@@ -51,7 +55,11 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
     val unlisted = songs.filter { albumKey(it) !in listed }.groupBy(::albumKey)
         .map { (key, group) -> albumFromSongs(key, group) }
 
-    val albumRows = (listed.values + unlisted).associate { album ->
+    val albumsByKey = (listed.values + unlisted).associateBy { it.id }
+    // Each artist's MusicBrainz id, where the server knows it.
+    val artistIds = library.artists.mapNotNull { artist -> musicId(artist.musicBrainzId)?.let { artist.id to it } }.toMap()
+
+    val albumRows = albumsByKey.values.associate { album ->
         val title = album.name.ifBlank { UNKNOWN_ALBUM }
         val artist = album.artist.ifBlank { UNKNOWN_ARTIST }
         album.id to SourceAlbumEntity(
@@ -63,7 +71,8 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
             sortKey = sortKey(title),
             artist = artist,
             artistId = id(album.artistId?.takeIf(String::isNotEmpty) ?: "artist:${searchKey(artist)}"),
-            year = album.year.positive(),
+            // The year it shows: the first edition's where known.
+            year = albumYears(album).let { it.original ?: it.year },
             songCount = album.songCount,
             durationMs = album.duration * 1000L,
             addedAt = seconds(album.created) ?: 0,
@@ -73,9 +82,13 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
 
     val tracks = songs.groupBy(::albumKey).flatMap { (key, group) ->
         val album = albumRows.getValue(key)
+        val listedAlbum = albumsByKey[key]
+        val albumYear = listedAlbum?.let(::albumYears)
         inAlbumOrder(group).mapIndexed { index, song ->
             val title = song.title.ifBlank { "Untitled" }
             val durationMs = song.duration * 1000L
+            val year = song.year.positive() ?: albumYear?.year
+            val genres = song.genres.ifEmpty { parseGenres(listOfNotNull(song.genre)) }
             SourceTrackEntity(
                 id = id(song.id),
                 sourceId = sourceId,
@@ -89,8 +102,14 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
                 albumId = album.id,
                 trackNo = song.track.positive(),
                 discNo = song.discNumber.positive(),
-                year = song.year.positive() ?: album.year,
+                year = year,
                 durationMs = durationMs,
+                // Navidrome's "created" for a song is when its scan first saw
+                // the file (the file's modified time only when the server is
+                // set to sort recently added by it). Subsonic and OpenSubsonic
+                // send nothing nearer to when the song was really got, so the
+                // merge takes the earliest time any copy has, usually the
+                // phone file's own.
                 addedAt = seconds(song.created) ?: album.addedAt,
                 mimeType = mimeFor(song.suffix) ?: song.contentType,
                 sizeBytes = song.size,
@@ -99,7 +118,7 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
                 uri = null,
                 albumOrder = index,
                 relinkKey = relinkKey(album.artist, album.title, song.discNumber.positive(), song.track.positive(), title, durationMs),
-                genre = song.genre.orEmpty(),
+                genre = genres.firstOrNull() ?: song.genre?.trim().orEmpty(),
                 bitrate = song.bitRate.positive()?.times(1000),
                 sampleRate = song.samplingRate.positive(),
                 bitDepth = song.bitDepth.positive(),
@@ -113,6 +132,18 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
                 baseGain = song.replayGain?.baseGain.finite(),
                 fallbackGain = song.replayGain?.fallbackGain.finite(),
                 rating = song.userRating?.coerceIn(0, 5),
+                // The album's first-edition year, which cannot be after this one's.
+                originalYear = albumYear?.original?.takeIf { year == null || it <= year },
+                genres = joinLines(genres),
+                artists = joinLines(song.artists.map { it.name.trim() }.filter(String::isNotEmpty)),
+                composer = song.displayComposer.orBlankNull(),
+                bpm = song.bpm.positive(),
+                comment = song.comment.orBlankNull(),
+                explicit = explicitOf(song.explicitStatus.orEmpty()) ?: explicitOf(listedAlbum?.explicitStatus.orEmpty()),
+                discTitle = listedAlbum?.discTitles?.firstOrNull { it.disc == (song.discNumber.positive() ?: 1) }?.title.orBlankNull(),
+                mbRecordingId = musicId(song.musicBrainzId),
+                mbAlbumId = musicId(listedAlbum?.musicBrainzId),
+                mbArtistIds = joinLines(song.artists.mapNotNull { artistIds[it.id] }.distinct()),
             )
         }
     }
@@ -146,7 +177,11 @@ private fun albumFromSongs(key: String, songs: List<Song>): Album {
     return Album(
         id = key,
         name = first.album.orEmpty(),
-        artist = (first.displayAlbumArtist ?: first.artist).orEmpty(),
+        artist = listOfNotNull(
+            first.displayAlbumArtist,
+            first.albumArtists.joinToString(", ") { it.name.trim() },
+            first.artist,
+        ).firstOrNull(String::isNotBlank).orEmpty(),
         coverArt = first.coverArt,
         songCount = songs.size,
         duration = songs.sumOf { it.duration },
@@ -162,6 +197,21 @@ private fun inAlbumOrder(songs: List<Song>): List<Song> =
             .thenBy { it.track.positive() ?: Int.MAX_VALUE }
             .thenBy { sortKey(it.title) },
     )
+
+// This edition's year and the first edition's, as an album gives them. The
+// older year field is this edition's; the release dates are OpenSubsonic's.
+private class AlbumYears(val year: Int?, val original: Int?)
+
+private fun albumYears(album: Album): AlbumYears {
+    val year = album.year.positive() ?: album.releaseDate?.year.positive()
+    val original = album.originalReleaseDate?.year.positive()
+    return AlbumYears(year, original?.takeIf { year == null || it <= year })
+}
+
+private fun String?.orBlankNull(): String? = this?.trim()?.takeIf(String::isNotEmpty)
+
+// A MusicBrainz id when the text is one, in lower case.
+private fun musicId(text: String?): String? = musicIds(listOfNotNull(text)).firstOrNull()
 
 // Servers send 0 for a number they do not know.
 private fun Int?.positive(): Int? = this?.takeIf { it > 0 }

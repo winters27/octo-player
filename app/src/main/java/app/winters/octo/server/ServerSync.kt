@@ -45,6 +45,12 @@ private val Context.syncData by preferencesDataStore("server_sync")
 // A copy older than this is made again when the app starts.
 private const val STALE_MS = 6 * 60 * 60 * 1000L
 
+// Raised whenever a copy learns to keep something new from the server, so
+// the next start copies the library again whatever its age. Copies made
+// before this was kept count as version 1; version 2 keeps genres, credits,
+// original years, MusicBrainz ids and the other details.
+private const val ROWS_VERSION = 2
+
 // Keeps a copy of the signed-in server's library beside the phone's music:
 // copied after signing in, at app start when the last copy is old, and when
 // asked. Disconnecting, or losing the sign-in, takes the server's music out.
@@ -91,7 +97,8 @@ class ServerSync @Inject constructor(
                         val sourceId = state.session.sourceId
                         dropServers(keep = sourceId)
                         val done = last.first()
-                        val stale = done == null || done.sourceId != sourceId ||
+                        val older = context.syncData.data.first()[ROWS] != ROWS_VERSION
+                        val stale = done == null || done.sourceId != sourceId || older ||
                             System.currentTimeMillis() - done.at > STALE_MS
                         if (stale) syncNow()
                     }
@@ -162,6 +169,7 @@ class ServerSync @Inject constructor(
                 p[SYNCED_AT] = System.currentTimeMillis()
                 p[SONGS] = catalog.tracks.size
                 p[ALBUMS] = catalog.albums.size
+                p[ROWS] = ROWS_VERSION
             }
             _problem.value = null
             // Counts only, like the phone scan's line.
@@ -202,5 +210,6 @@ class ServerSync @Inject constructor(
         val SYNCED_AT = longPreferencesKey("synced_at")
         val SONGS = intPreferencesKey("songs")
         val ALBUMS = intPreferencesKey("albums")
+        val ROWS = intPreferencesKey("rows_version")
     }
 }

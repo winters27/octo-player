@@ -56,6 +56,33 @@ class ListenBrainzTest {
         assertFalse("release_name" in meta)
         assertFalse("duration_ms" in info)
         assertFalse("tracknumber" in info)
+        assertFalse("recording_mbid" in info)
+        assertFalse("artist_mbids" in info)
+    }
+
+    @Test
+    fun musicBrainzIdsGoWhenKnownAndWellFormed() {
+        val recording = "b1a9c0e9-d987-4042-ae91-78d6a3267d69"
+        val release = "3f0a4f44-1f1b-4b3c-9c62-7a7d7e2c1a10"
+        val group = "7c3218d7-75e0-4e8c-971f-f097b6c308c5"
+        val artist = "056e4f3e-d505-4dad-8ec1-d04f521cbb56"
+        val tagged = song.copy(
+            recordingMbid = recording.uppercase(),
+            releaseMbid = release,
+            releaseGroupMbid = group,
+            artistMbids = listOf(artist, "not-an-id", artist),
+        )
+        val info = listensJson("single", listOf(tagged.listenAt(1_000_000)!!), "1")
+            .first().getValue("track_metadata").jsonObject.getValue("additional_info").jsonObject
+        assertEquals(recording, info.getValue("recording_mbid").jsonPrimitive.content)
+        assertEquals(release, info.getValue("release_mbid").jsonPrimitive.content)
+        assertEquals(group, info.getValue("release_group_mbid").jsonPrimitive.content)
+        assertEquals(listOf(artist), info.getValue("artist_mbids").jsonArray.map { it.jsonPrimitive.content })
+
+        // A malformed id would get the whole request refused, so it stays home.
+        val broken = song.copy(recordingMbid = "12345", releaseMbid = "").listenAt(1_000_000)!!
+        assertNull(broken.recordingMbid)
+        assertNull(broken.releaseMbid)
     }
 
     @Test

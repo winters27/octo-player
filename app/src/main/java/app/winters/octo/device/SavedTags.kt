@@ -1,0 +1,72 @@
+package app.winters.octo.device
+
+import app.winters.octo.catalog.FileTagsEntity
+import app.winters.octo.catalog.joinLines
+import app.winters.octo.catalog.splitLines
+
+// A file's tags as they are kept between scans, and back. Lists are kept
+// one value per line. Null tags mean the file could not be read.
+fun savedTags(mediaId: Long, modifiedAt: Long, size: Long, tags: FileTags?, version: Int) = FileTagsEntity(
+    mediaId = mediaId,
+    modifiedAt = modifiedAt,
+    size = size,
+    readOk = tags != null,
+    title = tags?.title,
+    artist = tags?.artist,
+    albumArtist = tags?.albumArtist,
+    album = tags?.album,
+    trackNo = tags?.trackNo,
+    discNo = tags?.discNo,
+    year = tags?.year,
+    compilation = tags?.compilation ?: false,
+    mbAlbumId = tags?.mbAlbumId,
+    genres = joinLines(tags?.genres),
+    tagsVersion = version,
+    originalYear = tags?.originalYear,
+    artists = joinLines(tags?.artists),
+    composer = tags?.composer,
+    bpm = tags?.bpm,
+    comment = tags?.comment,
+    explicit = tags?.explicit,
+    discTitle = tags?.discTitle,
+    mbRecordingId = tags?.mbRecordingId,
+    mbReleaseGroupId = tags?.mbReleaseGroupId,
+    mbArtistIds = joinLines(tags?.mbArtistIds),
+    sortTitle = tags?.sortTitle,
+    sortAlbum = tags?.sortAlbum,
+    sortAlbumArtist = tags?.sortAlbumArtist,
+    trackGain = tags?.trackGain,
+    albumGain = tags?.albumGain,
+    trackPeak = tags?.trackPeak,
+    albumPeak = tags?.albumPeak,
+)
+
+fun FileTagsEntity.toTags() = FileTags(
+    title = title,
+    artist = artist,
+    albumArtist = albumArtist,
+    album = album,
+    trackNo = trackNo,
+    discNo = discNo,
+    year = year,
+    compilation = compilation,
+    mbAlbumId = mbAlbumId,
+    genres = splitLines(genres),
+    originalYear = originalYear,
+    artists = splitLines(artists),
+    composer = composer,
+    bpm = bpm,
+    comment = comment,
+    explicit = explicit,
+    discTitle = discTitle,
+    mbRecordingId = mbRecordingId,
+    mbReleaseGroupId = mbReleaseGroupId,
+    mbArtistIds = splitLines(mbArtistIds),
+    sortTitle = sortTitle,
+    sortAlbum = sortAlbum,
+    sortAlbumArtist = sortAlbumArtist,
+    trackGain = trackGain,
+    albumGain = albumGain,
+    trackPeak = trackPeak,
+    albumPeak = albumPeak,
+)

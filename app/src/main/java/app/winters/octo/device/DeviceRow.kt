@@ -11,6 +11,7 @@ data class DeviceFile(
     val modifiedAt: Long,
     val sizeBytes: Long,
     val durationMs: Long,
+    // When the file joined the collection, in seconds (see fileAddedAt).
     val addedAtSeconds: Long,
     val mimeType: String?,
     val fallback: FileTags,
@@ -39,6 +40,8 @@ data class DeviceRow(
     val addedAtSeconds: Long,
     val mimeType: String?,
     val sizeBytes: Long?,
+    // Everything else the file's tags say; empty when they could not be read.
+    val tags: FileTags = FileTags(),
 )
 
 // Prefers the file's own tags, falling back to the phone's reading for
@@ -62,4 +65,25 @@ fun DeviceFile.toRow(tags: FileTags?): DeviceRow = DeviceRow(
     addedAtSeconds = addedAtSeconds,
     mimeType = mimeType,
     sizeBytes = sizeBytes,
+    tags = tags ?: FileTags(),
 )
+
+// Times before this (1 January 1990) are a clock that was never set, not
+// when a song was really got.
+private const val EARLIEST_REAL_SECONDS = 631_152_000L
+
+// When a phone file joined the collection, in seconds since 1970.
+//
+// The phone's own "added" time is when the file reached this phone, so a
+// library copied over in one go all looks added that day. The file's
+// modified time usually survives the copy and says when the song was really
+// got, and a tag editor that touches a file later only moves it forward.
+// So the earliest real time wins: modified, added, or "taken", which a
+// phone may fill in for audio (in milliseconds). A time before 1990 or more
+// than a day from now is a broken clock and is passed over. With no real
+// time at all, the phone's added time is kept as it is.
+fun fileAddedAt(modifiedSeconds: Long, addedSeconds: Long, takenMs: Long?, nowSeconds: Long): Long =
+    listOfNotNull(modifiedSeconds, addedSeconds, takenMs?.div(1000))
+        .filter { it >= EARLIEST_REAL_SECONDS && it <= nowSeconds + 86_400 }
+        .minOrNull()
+        ?: addedSeconds.coerceAtLeast(0)

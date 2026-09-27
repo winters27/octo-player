@@ -101,6 +101,25 @@ data class FileTagsEntity(
     // Which way of reading tags wrote this row; rows from an older one are
     // read again, so what it adds reaches files already seen.
     @ColumnInfo(defaultValue = "0") val tagsVersion: Int = 0,
+    // The rest of what the file says, as FileTags has it. Lists are one
+    // value per line.
+    val originalYear: Int? = null,
+    @ColumnInfo(defaultValue = "") val artists: String = "",
+    val composer: String? = null,
+    val bpm: Int? = null,
+    val comment: String? = null,
+    val explicit: Boolean? = null,
+    val discTitle: String? = null,
+    val mbRecordingId: String? = null,
+    val mbReleaseGroupId: String? = null,
+    @ColumnInfo(defaultValue = "") val mbArtistIds: String = "",
+    val sortTitle: String? = null,
+    val sortAlbum: String? = null,
+    val sortAlbumArtist: String? = null,
+    val trackGain: Float? = null,
+    val albumGain: Float? = null,
+    val trackPeak: Float? = null,
+    val albumPeak: Float? = null,
 )
 
 // A genre on the Genres page: its name, how many songs, and a cover from
