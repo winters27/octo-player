@@ -194,18 +194,18 @@ object SongIdentity {
             val plain = value.replace('`', '\'').replace('_', ' ')
             return trimSpace(if ("  " in plain) Whitespace.replace(plain, " ") else plain)
         }
-        val text = Normalizer.normalize(value.replace('´', '\''), Normalizer.Form.NFKC)
+        val text = Normalizer.normalize(value.replace('\u00B4', '\''), Normalizer.Form.NFKC)
         val sb = StringBuilder(text.length)
         for (ch in text) {
             sb.append(
                 when (ch) {
-                    '‘', '’', '‚', '‛', '′', '`' -> '\''
-                    '“', '”', '„', '‟', '″' -> '"'
-                    '‐', '‑', '‒', '–', '—', '―', '−' -> '-'
-                    '【', '〖' -> '['
-                    '】', '〗' -> ']'
-                    '〔' -> '('
-                    '〕' -> ')'
+                    '\u2018', '\u2019', '\u201A', '\u201B', '\u2032', '`' -> '\''
+                    '\u201C', '\u201D', '\u201E', '\u201F', '\u2033' -> '"'
+                    '\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2015', '\u2212' -> '-'
+                    '\u3010', '\u3016' -> '['
+                    '\u3011', '\u3017' -> ']'
+                    '\u3014' -> '('
+                    '\u3015' -> ')'
                     '_' -> ' '
                     else -> if (isSpace(ch)) ' ' else ch
                 },
@@ -316,7 +316,7 @@ object SongIdentity {
             // Only the Latin, Greek and Cyrillic accents. A kana's voicing
             // mark is a different letter, and stripping it would make two
             // Japanese titles one.
-            if (ch in '̀'..'ͯ' || ch in '᪰'..'᫿' || ch in '᷀'..'᷿' || ch in '︠'..'︯') continue
+            if (ch in '\u0300'..'\u036F' || ch in '\u1AB0'..'\u1AFF' || ch in '\u1DC0'..'\u1DFF' || ch in '\uFE20'..'\uFE2F') continue
             sb.append(ch)
         }
         return Normalizer.normalize(sb, Normalizer.Form.NFC)
@@ -1077,7 +1077,7 @@ object SongIdentity {
     // the short forms differently.
     private const val S = """[\t\n\u000B\f\r\u0085\p{Z}]"""
     private const val D = """\p{Nd}"""
-    private const val W = """[\p{L}\p{Mn}\p{Nd}\p{Pc}‌‍]"""
+    private const val W = """[\p{L}\p{Mn}\p{Nd}\p{Pc}\u200C\u200D]"""
     private const val B = """(?<!$W)"""
     private const val E = """(?!$W)"""
 
