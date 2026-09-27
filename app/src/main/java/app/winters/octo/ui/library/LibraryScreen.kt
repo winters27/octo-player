@@ -57,6 +57,7 @@ import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.SortButton
+import app.winters.octo.ui.common.TitleWithSort
 import app.winters.octo.ui.common.TopOnNewOrder
 import app.winters.octo.ui.common.letterRuns
 import app.winters.octo.ui.common.letteredRows
@@ -266,10 +267,7 @@ private fun LibraryPage(
     Refreshable {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Spacer(Modifier.height(DetailTopGap))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ScreenTitle(title, Modifier.weight(1f))
-                Box(Modifier.padding(end = 10.dp, top = 8.dp, bottom = 16.dp)) { action() }
-            }
+            TitleWithSort(title, sort = action)
             buttons()
             content()
         }

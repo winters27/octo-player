@@ -59,8 +59,8 @@ import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.common.RemoveBackground
-import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SortButton
+import app.winters.octo.ui.common.TitleWithSort
 import app.winters.octo.ui.common.TopOnNewOrder
 import app.winters.octo.ui.common.songs
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -147,11 +147,8 @@ fun DownloadsScreen(onBack: () -> Unit, vm: OfflineDownloadsViewModel = hiltView
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Spacer(Modifier.height(DetailTopGap))
             val sorted = rows
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ScreenTitle("Downloads", Modifier.weight(1f))
-                if (sorted != null && sorted.items.isNotEmpty()) {
-                    SortButton(SortList.Downloads, sorted.order, vm::setOrder, Modifier.padding(end = 10.dp, top = 8.dp, bottom = 16.dp))
-                }
+            TitleWithSort("Downloads") {
+                if (sorted != null && sorted.items.isNotEmpty()) SortButton(SortList.Downloads, sorted.order, vm::setOrder)
             }
             if (sorted != null) {
                 val list = sorted.items

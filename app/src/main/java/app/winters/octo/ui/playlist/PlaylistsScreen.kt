@@ -3,14 +3,11 @@ package app.winters.octo.ui.playlist
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -30,8 +27,8 @@ import app.winters.octo.sort.sortPlaylists
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.Refreshable
-import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SortButton
+import app.winters.octo.ui.common.TitleWithSort
 import app.winters.octo.ui.common.TopOnNewOrder
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.common.sortedRows
@@ -97,11 +94,8 @@ fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsV
     Refreshable {
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding(extraTop = DetailTopGap)) {
             item(key = "title") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    ScreenTitle("Playlists", Modifier.weight(1f))
-                    playlists?.let { sorted ->
-                        SortButton(SortList.Playlists, sorted.order, vm::setOrder, Modifier.padding(end = 10.dp, top = 8.dp, bottom = 16.dp))
-                    }
+                TitleWithSort("Playlists") {
+                    playlists?.let { sorted -> SortButton(SortList.Playlists, sorted.order, vm::setOrder) }
                 }
             }
             item(key = "new") { NewPlaylistLine { sheets.show(PlaylistSheet.Create()) } }

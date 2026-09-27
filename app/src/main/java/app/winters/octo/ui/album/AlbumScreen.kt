@@ -181,10 +181,10 @@ fun AlbumScreen(
     }
 }
 
-// The top of an album page: cover, title and artist, then a line with the
-// details on the left and the heart, Shuffle and Play on the right. The
-// artist opens only when there is somewhere to go. `heart` sits beside the
-// buttons and `more` under them, for quieter actions.
+// The top of an album page: cover, title and artist, then a quiet line with
+// the details on the left and the heart on the right, and Play and Shuffle
+// under it. The artist opens only when there is somewhere to go. `heart`
+// sits on the details line and `more` under the buttons, for quieter actions.
 @Composable
 fun AlbumHeader(
     artwork: String?,
