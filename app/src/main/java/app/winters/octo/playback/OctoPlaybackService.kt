@@ -270,8 +270,8 @@ class OctoPlaybackService : MediaLibraryService() {
                 )
                 NotificationHeart.Download -> add(
                     CommandButton.Builder(CommandButton.ICON_UNDEFINED)
-                        .setCustomIconResId(OctoIcons.Download)
-                        .setDisplayName("Download")
+                        .setCustomIconResId(OctoIcons.AddToLibrary)
+                        .setDisplayName("Add to your library")
                         .setSessionCommand(DOWNLOAD)
                         .setSlots(CommandButton.SLOT_FORWARD_SECONDARY, CommandButton.SLOT_OVERFLOW)
                         .build(),

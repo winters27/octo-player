@@ -244,10 +244,11 @@ fun songActions(
     add(SongAction.Info)
 }
 
-// The download row's words for where a find's download is.
+// The add row's words for a song not in the library, and how its adding
+// is going. "Download" is kept for saving a library song to the phone.
 fun downloadLabel(state: DownloadState): String = when (state) {
-    DownloadState.None -> "Download"
-    DownloadState.Requested -> "Downloading"
+    DownloadState.None -> "Add to your library"
+    DownloadState.Requested -> "Adding to your library"
     DownloadState.Done -> "In your library"
 }
 
@@ -409,9 +410,8 @@ fun SongMenuHost(state: SongMenuState, onOpen: (NavKey) -> Unit, vm: SongMenuVie
                 SongAction.Download -> {
                     val download = downloads[trackId] ?: DownloadState.None
                     val icon = when (download) {
-                        DownloadState.None -> OctoIcons.Download
-                        DownloadState.Requested -> OctoIcons.Downloading
-                        DownloadState.Done -> OctoIcons.Downloaded
+                        DownloadState.None, DownloadState.Requested -> OctoIcons.AddToLibrary
+                        DownloadState.Done -> OctoIcons.Check
                     }
                     MenuRow(icon, downloadLabel(download), enabled = download == DownloadState.None) {
                         vm.download(song)

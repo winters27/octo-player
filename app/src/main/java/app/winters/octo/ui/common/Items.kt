@@ -50,6 +50,7 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.discovery.OnlineAlbum
 import app.winters.octo.discovery.OnlineArtist
+import app.winters.octo.discovery.shownLengthMs
 import app.winters.octo.ui.menu.CollectionTarget
 import app.winters.octo.ui.menu.LocalSongMenu
 import app.winters.octo.ui.menu.SongMenuContext
@@ -175,30 +176,47 @@ sealed interface SongLead {
     data class Number(val track: Int?) : SongLead
 }
 
+// The album a row names. A song found online often has its own title for
+// an album, which says nothing new, so that is left off.
+fun rowAlbum(track: TrackEntity): String =
+    track.album.takeUnless { isFind(track.id) && it.trim().equals(track.title.trim(), ignoreCase = true) }.orEmpty()
+
+// "Artist • Album" under a song's title.
+fun songSubtitle(track: TrackEntity): String =
+    listOf(track.artist, rowAlbum(track)).filter { it.isNotEmpty() }.joinToString(" • ")
+
+// How wide the add button is in a row, and its plus.
+private val AddButtonSize = 40.dp
+private val AddIconSize = 22.dp
+
 // A song line; tapping it plays it. `trailing` goes after the length, such
 // as a drag handle. `menuContext` says what page the row is on, for its
 // menu. In a list that picks songs, `selectKey` is the row's key; a tap
 // then picks it instead. A swipe right puts it next in the queue, on lists
 // where a swipe does nothing else (`swipeToPlayNext`).
-// A song found online that is not in the library carries the
-// not-in-library mark on its artwork. With `offerDownload`, it gets the
-// download button at the end instead: the button already says the song is
-// not in the library, so the row says it once.
+// A song found online that is not in the library carries a small plus on
+// its artwork. In a list that offers adding (`offerAdd`), it gets the add
+// button at the end instead, and the row says it once. Every other row in
+// such a list keeps that space empty, so the lengths line up.
 @Composable
 fun SongRow(
     track: TrackEntity,
     lead: SongLead = SongLead.Artwork,
-    subtitle: String? = listOf(track.artist, track.album).filter { it.isNotEmpty() }.joinToString(" • "),
+    subtitle: String? = songSubtitle(track),
     trailing: (@Composable () -> Unit)? = null,
     menuContext: SongMenuContext = SongMenuContext(),
     selectKey: String = track.id,
     swipeToPlayNext: Boolean = true,
-    offerDownload: Boolean = false,
+    offerAdd: Boolean = false,
     onClick: (() -> Unit)? = null,
 ) {
-    val download = offerDownload && isFind(track.id)
-    val end: (@Composable () -> Unit)? = if (download) ({ DownloadButton(track, size = 40.dp, iconSize = 22.dp) }) else trailing
-    val mark = rowMarksArtwork(track.id, LocalAdoptedFinds.current, offerDownload)
+    val sign = rowAddSign(track.id, LocalAdoptedFinds.current, offerAdd)
+    val end: (@Composable () -> Unit)? = when {
+        sign == AddSign.Button -> ({ AddToLibraryButton(track, size = AddButtonSize, iconSize = AddIconSize) })
+        trailing == null && rowKeepsAddSpace(sign, offerAdd) -> ({ Spacer(Modifier.width(AddButtonSize)) })
+        else -> trailing
+    }
+    val mark = sign == AddSign.Mark
     if (swipeToPlayNext) {
         val menu = LocalSongMenu.current
         // No swiping while the list is picking songs.
@@ -295,12 +313,10 @@ private fun SongLine(
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                // A song found online carries a download button instead, and
-                // often has no known length.
+                // A song found online has no mark here: its artwork or add
+                // button says it. Its length may only be learned by playing it.
                 SourceMark(track)
-                if (track.durationMs > 0) {
-                    Text((track.durationMs / 1000).toInt().asClock(), style = OctoType.caption, color = OctoColors.TextMuted)
-                }
+                LengthSlot(shownLengthMs(track.durationMs, LocalLearnedLengths.current[track.id]))
             }
             trailing?.invoke()
         }

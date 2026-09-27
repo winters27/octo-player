@@ -71,6 +71,7 @@ import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistCircle
 import app.winters.octo.ui.common.Artwork
+import app.winters.octo.ui.common.rowAlbum
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.CHECK_SETTLE_MS
 import app.winters.octo.ui.common.DetailTopGap
@@ -299,9 +300,11 @@ fun ArtistScreen(
                 wide("top") {
                     Column {
                         SectionTitle("Top songs")
+                        val offerAdd = top.any { isFind(it.id) }
                         top.forEachIndexed { index, track ->
-                            // A song found online can be downloaded from here.
-                            SongRow(track, subtitle = track.album, menuContext = SongMenuContext(artistId = id), offerDownload = true) { vm.playTop(index) }
+                            // A song found online can be added from here; with none
+                            // among them, library rows need no space kept for the button.
+                            SongRow(track, subtitle = rowAlbum(track), menuContext = SongMenuContext(artistId = id), offerAdd = offerAdd) { vm.playTop(index) }
                         }
                     }
                 }

@@ -113,9 +113,9 @@ class SongActionsTest {
     }
 
     @Test
-    fun theDownloadRowSaysWhereTheDownloadIs() {
-        assertEquals("Download", downloadLabel(DownloadState.None))
-        assertEquals("Downloading", downloadLabel(DownloadState.Requested))
+    fun theAddRowSaysWhereTheSongIs() {
+        assertEquals("Add to your library", downloadLabel(DownloadState.None))
+        assertEquals("Adding to your library", downloadLabel(DownloadState.Requested))
         assertEquals("In your library", downloadLabel(DownloadState.Done))
     }
 }

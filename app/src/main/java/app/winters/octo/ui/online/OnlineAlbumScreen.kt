@@ -154,16 +154,17 @@ fun OnlineAlbumScreen(
                         onArtist = album.artistId?.takeIf { it.isNotEmpty() }?.let { artistId -> { onOpen(OnlineArtistRoute(artistId)) } },
                         onPlay = { vm.play(0) },
                         onShuffle = vm::shuffle,
-                        // The cover stays clean; the line under it says how
-                        // much of the album is not in the library yet.
+                        // The cover stays clean. The plus adds the album to the
+                        // library; for an album partly there, a note says how
+                        // much of it is.
                         more = if (found.songs.any { isFind(it.id) }) {
                             {
                                 val adopted = LocalAdoptedFinds.current
                                 val note = albumLibraryNote(found.songs.size, found.songs.count { isOutsideLibrary(it.id, adopted) })
                                 QuietActions {
                                     QuietAction(
-                                        if (downloading) OctoIcons.Downloading else OctoIcons.Download,
-                                        if (downloading) "Downloading" else "Download album",
+                                        OctoIcons.AddToLibrary,
+                                        if (downloading) "Adding" else "Add to your library",
                                         onClick = vm::download,
                                         enabled = !downloading,
                                     )
@@ -189,7 +190,7 @@ fun OnlineAlbumScreen(
                 itemsIndexed(found.songs, key = { _, track -> track.id }) { index, track ->
                     // Only say who is singing when it is not the album's artist.
                     val subtitle = track.artist.takeIf { it != album.artist }
-                    SongRow(track, SongLead.Number(index + 1), subtitle, offerDownload = true) { vm.play(index) }
+                    SongRow(track, SongLead.Number(index + 1), subtitle, offerAdd = true) { vm.play(index) }
                 }
             }
         }

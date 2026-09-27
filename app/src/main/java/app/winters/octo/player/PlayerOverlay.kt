@@ -124,7 +124,7 @@ import app.winters.octo.ui.common.AxisDrag
 import app.winters.octo.ui.common.SwipeSkip
 import app.winters.octo.ui.common.detectAxisDrags
 import app.winters.octo.ui.common.swipeSkip
-import app.winters.octo.ui.common.DownloadButton
+import app.winters.octo.ui.common.AddToLibraryButton
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.RatingStars
 import app.winters.octo.ui.menu.LocalSongMenu
@@ -610,14 +610,14 @@ private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit) {
 }
 
 // Beside the song: a heart for Liked songs, glowing while it is in them,
-// or a download button for a song found online, and the song's menu.
+// or the add button for a song not in the library, and the song's menu.
 @Composable
 private fun SongButtons(now: NowPlaying, model: PlayerViewModel) {
     val menu = LocalSongMenu.current
     if (now.trackId != null && isFind(now.trackId)) {
         val find by model.find.collectAsStateWithLifecycle()
         // Held back until the find for this song has loaded, not the last one.
-        find?.takeIf { it.id == now.trackId }?.let { DownloadButton(it, size = 44.dp, iconSize = 24.dp) }
+        find?.takeIf { it.id == now.trackId }?.let { AddToLibraryButton(it, size = 44.dp, iconSize = 24.dp) }
             ?: Spacer(Modifier.size(44.dp))
     } else {
         LikeButton(model)

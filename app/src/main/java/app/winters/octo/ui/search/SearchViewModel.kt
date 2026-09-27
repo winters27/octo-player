@@ -12,9 +12,11 @@ import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.PlaylistSummary
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.searchKey
+import app.winters.octo.discovery.AddHint
 import app.winters.octo.discovery.Discovered
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.Downloads
+import app.winters.octo.discovery.showsAddHint
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.ui.common.LoadState
@@ -91,6 +93,7 @@ class SearchViewModel @Inject constructor(
     private val recents: RecentSearches,
     playlists: PlaylistStore,
     downloads: Downloads,
+    private val hint: AddHint,
 ) : ViewModel() {
     var text by mutableStateOf("")
     var filter by mutableStateOf(SearchFilter.All)
@@ -159,6 +162,22 @@ class SearchViewModel @Inject constructor(
                 )
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DiscoverState.Idle)
+
+    // Whether this visit has counted the line saying what the plus does.
+    @Volatile
+    private var hintCounted = false
+
+    // Whether the line shows under songs not in the library.
+    val addHint: StateFlow<Boolean> = hint.state
+        .map { showsAddHint(it, hintCounted) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    // The line came on screen: one showing, however many searches follow.
+    fun addHintSeen() {
+        if (hintCounted) return
+        hintCounted = true
+        viewModelScope.launch { hint.shown() }
+    }
 
     // Keeps what was typed among the recent searches, once it led to a
     // result being opened or played.

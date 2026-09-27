@@ -27,6 +27,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -59,6 +60,7 @@ import app.winters.octo.ui.common.Pickable
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistCircle
 import app.winters.octo.ui.common.ArtistRow
+import app.winters.octo.ui.common.NotInLibraryText
 import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
@@ -79,6 +81,7 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
     val signedIn by vm.signedIn.collectAsStateWithLifecycle()
     val discover by vm.discover.collectAsStateWithLifecycle()
     val recent by vm.recent.collectAsStateWithLifecycle()
+    val addHint by vm.addHint.collectAsStateWithLifecycle()
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 120.dp
     val keyboard = LocalSoftwareKeyboardController.current
     val list = rememberLazyListState()
@@ -145,7 +148,9 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
                     if (found.isEmpty && online is DiscoverState.Failed) {
                         item { Hint("No results for \"${vm.text.trim()}\"") }
                     }
-                    if (!nothingOnline) discoverSection(online, open, onPlay = vm::playFound, top = !found.isEmpty)
+                    if (!nothingOnline) {
+                        discoverSection(online, open, onPlay = vm::playFound, top = !found.isEmpty, hint = addHint, onHintSeen = vm::addHintSeen)
+                    }
                 }
             }
         }
@@ -327,23 +332,28 @@ private fun DiscoverState.only(filter: SearchFilter): DiscoverState {
     )
 }
 
-// What the server has beyond the library: songs, then albums, then artists.
-// While it looks, or when it cannot be reached, a quiet line says so.
+// What the server has beyond the library: songs, then albums, then artists,
+// under a title that says so. The first few times, a quiet line under it
+// says what the plus does. While it looks, or when it cannot be reached, a
+// quiet line says so.
 private fun LazyListScope.discoverSection(
     online: DiscoverState,
     onOpen: (NavKey) -> Unit,
     onPlay: (TrackEntity) -> Unit,
     top: Boolean,
+    hint: Boolean,
+    onHintSeen: () -> Unit,
 ) {
-    item(key = "discover") { SectionTitle("Discover", if (top) Modifier.padding(top = 12.dp) else Modifier) }
+    item(key = "discover") { SectionTitle(NotInLibraryText, if (top) Modifier.padding(top = 12.dp) else Modifier) }
     when (online) {
         DiscoverState.Loading -> item(key = "discover:looking") { QuietLine("Looking online") }
         DiscoverState.Failed -> item(key = "discover:failed") { QuietLine("Could not reach your server") }
         is DiscoverState.Done -> {
             val found = online.found
+            if (hint && found.songs.isNotEmpty()) item(key = "discover:hint") { AddHintLine(onHintSeen) }
             if (found.songs.isNotEmpty()) item(key = "discover:songs:title") { SubTitle("Songs") }
             items(found.songs, key = { "discover:${it.id}" }) { track ->
-                SongRow(track, offerDownload = true) { onPlay(track) }
+                SongRow(track, offerAdd = true) { onPlay(track) }
             }
             if (found.albums.isNotEmpty()) {
                 item(key = "discover:albums:title") { SubTitle("Albums") }
@@ -384,6 +394,19 @@ private fun SubTitle(text: String) {
         style = OctoType.bodySmall,
         color = OctoColors.TextMuted,
         modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp),
+    )
+}
+
+// What the plus does, in a muted line under the title. Counted as seen once
+// it is on screen.
+@Composable
+private fun AddHintLine(onSeen: () -> Unit) {
+    LaunchedEffect(Unit) { onSeen() }
+    Text(
+        "Tap + to add a song to your library.",
+        style = OctoType.caption,
+        color = OctoColors.TextMuted,
+        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 2.dp),
     )
 }
 
