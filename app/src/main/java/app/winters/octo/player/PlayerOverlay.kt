@@ -6,6 +6,10 @@ import android.content.ContextWrapper
 import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.animateContentSize
@@ -13,6 +17,8 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateInt
@@ -130,6 +136,7 @@ import app.winters.octo.ui.common.RatingStars
 import app.winters.octo.ui.menu.LocalSongMenu
 import app.winters.octo.ui.output.CastButton
 import app.winters.octo.ui.common.asClock
+import app.winters.octo.ui.common.rememberSystemReduceMotion
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
@@ -163,6 +170,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     var showQueue by remember { mutableStateOf(false) }
     var showSleep by remember { mutableStateOf(false) }
     var showSpeed by remember { mutableStateOf(false) }
+    var showLyricsChooser by remember { mutableStateOf(false) }
 
     BackHandler(onBack = onClose)
     LightOnDarkBars(darkIcons = colors.content.isDarkInk)
@@ -242,10 +250,15 @@ fun AnimatedVisibilityScope.PlayerOverlay(
                     onOpenSleep = { showSleep = true },
                     onOpenSound = onOpenSound,
                     onOpenSpeed = { showSpeed = true },
+                    onChooseLyrics = { showLyricsChooser = true },
                 )
             }
         }
         QueueSheets(model, now.shuffle, visible = showQueue, onDismiss = { showQueue = false })
+        GlassSheet(visible = showLyricsChooser, onDismiss = { showLyricsChooser = false }) {
+            val lyrics by model.lyrics.collectAsStateWithLifecycle()
+            LyricsChooser(now, lyrics, onDone = { showLyricsChooser = false })
+        }
         GlassSheet(visible = showSleep, onDismiss = { showSleep = false }) {
             SleepSheet(model, onDone = { showSleep = false }, onOpenSpeed = {
                 showSleep = false
@@ -270,12 +283,19 @@ private fun AnimatedVisibilityScope.PlayerContent(
     onOpenSleep: () -> Unit,
     onOpenSound: () -> Unit,
     onOpenSpeed: () -> Unit,
+    onChooseLyrics: () -> Unit,
 ) {
     val lyricsOpen by model.lyricsOpen.collectAsStateWithLifecycle()
+    val prefs by model.prefs.collectAsStateWithLifecycle()
+    val calm = prefs.reduceMotion || rememberSystemReduceMotion()
+    // The player's own scope, so the controls still rise in as the player
+    // opens wherever they are placed.
+    val player = this
     val header: @Composable () -> Unit = { TopLine(now, model, onClose, onOpenAlbum, onOpenSound) }
     val controls: @Composable (Boolean) -> Unit = { roomy ->
-        Controls(now, model, lyricsOpen, onOpenArtist, onOpenQueue, onOpenSleep, onOpenSpeed, roomy)
+        with(player) { Controls(now, model, lyricsOpen, onOpenArtist, onOpenQueue, onOpenSleep, onOpenSpeed, roomy) }
     }
+    val lyricsBar: @Composable () -> Unit = { LyricsBar(now, model, onChooseLyrics, Modifier.bleed(LyricsBarBleed)) }
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
@@ -287,7 +307,8 @@ private fun AnimatedVisibilityScope.PlayerContent(
         if (maxWidth > maxHeight) {
             // Turned sideways: the artwork on the left, everything else on
             // the right. A short screen drops the volume line; the phone's
-            // own buttons still set it.
+            // own buttons still set it. In lyrics mode the lyrics take the
+            // right side, over the small player, and the artwork stays.
             Row(
                 Modifier.fillMaxSize().padding(horizontal = 24.dp),
                 horizontalArrangement = Arrangement.spacedBy(32.dp),
@@ -296,24 +317,111 @@ private fun AnimatedVisibilityScope.PlayerContent(
                 ArtStage(
                     now,
                     model,
-                    lyricsOpen,
+                    folded = false,
+                    calm = calm,
                     maxSide = 420.dp,
                     modifier = Modifier.weight(1f).fillMaxHeight().padding(vertical = 12.dp),
                     artModifier = artModifier,
                 )
-                Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.Center) {
-                    header()
-                    controls(roomy)
+                AnimatedContent(
+                    targetState = lyricsOpen,
+                    transitionSpec = { lyricsFold(calm, resize = false) },
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    label = "player side",
+                ) { open ->
+                    if (open) {
+                        Column(Modifier.fillMaxSize()) {
+                            header()
+                            val lyrics by model.lyrics.collectAsStateWithLifecycle()
+                            LyricsPane(lyrics, now, model::positionMs, model::seekTo, Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp))
+                            Box(Modifier.padding(bottom = 8.dp)) { lyricsBar() }
+                        }
+                    } else {
+                        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
+                            header()
+                            controls(roomy)
+                        }
+                    }
                 }
             }
         } else {
-            Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
-                header()
-                ArtStage(now, model, lyricsOpen, maxSide = 312.dp, modifier = Modifier.weight(1f).fillMaxWidth(), artModifier = artModifier)
-                controls(true)
-                Spacer(Modifier.height(16.dp))
+            // Upright: in lyrics mode the artwork, the song, the controls,
+            // the volume and the switches fold away, and the lyrics fill
+            // everything from under the top line to just above the small
+            // player that takes the controls' place.
+            Box(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
+                Column(Modifier.fillMaxSize()) {
+                    header()
+                    ArtStage(now, model, folded = lyricsOpen, calm = calm, maxSide = 312.dp, modifier = Modifier.weight(1f).fillMaxWidth(), artModifier = artModifier)
+                    AnimatedContent(
+                        targetState = lyricsOpen,
+                        transitionSpec = { lyricsFold(calm, resize = true) },
+                        contentAlignment = Alignment.BottomCenter,
+                        label = "player controls",
+                    ) { open ->
+                        if (open) {
+                            Box(Modifier.fillMaxWidth().padding(bottom = LyricsBarGap)) { lyricsBar() }
+                        } else {
+                            Column {
+                                controls(true)
+                                Spacer(Modifier.height(16.dp))
+                            }
+                        }
+                    }
+                }
+                // Laid out at their full size from the start, so the lines
+                // settle where they belong while the rest folds away.
+                LyricsLayer(
+                    now,
+                    model,
+                    lyricsOpen,
+                    calm,
+                    Modifier.fillMaxSize().padding(top = TopLineHeight, bottom = LyricsBarHeight + LyricsBarGap),
+                )
             }
         }
+    }
+}
+
+// The small player reaches past the player's side margins, nearer the
+// screen's edges, to give the song's name more room.
+private val LyricsBarBleed = 12.dp
+
+private val TopLineHeight = 56.dp
+
+// How long the controls take to fold away as lyrics mode opens.
+private const val LYRICS_FOLD_MS = 360
+
+// Lyrics mode coming or going: the old controls fade out quickly, the new
+// ones fade in once they have mostly gone, and, upright, the space they
+// take eases to its new height. With reduced motion it all changes at once.
+private fun AnimatedContentTransitionScope<Boolean>.lyricsFold(calm: Boolean, resize: Boolean): ContentTransform {
+    if (calm) return (EnterTransition.None togetherWith ExitTransition.None).using(SizeTransform(clip = false) { _, _ -> snap() })
+    val change = fadeIn(tween(240, delayMillis = 120)) togetherWith fadeOut(tween(160))
+    return change.using(
+        SizeTransform(clip = false) { _, _ -> if (resize) tween(LYRICS_FOLD_MS, easing = FastOutSlowInEasing) else snap() },
+    )
+}
+
+// The lyrics over the upright player, fading in as the rest folds away.
+@Composable
+private fun LyricsLayer(now: NowPlaying, model: PlayerViewModel, open: Boolean, calm: Boolean, modifier: Modifier = Modifier) {
+    val lyrics by model.lyrics.collectAsStateWithLifecycle()
+    val shown by animateFloatAsState(
+        if (open) 1f else 0f,
+        if (calm) snap() else tween(LYRICS_FOLD_MS, delayMillis = if (open) 120 else 0),
+        label = "lyrics shown",
+    )
+    if (shown > 0f) {
+        LyricsPane(
+            lyrics,
+            now,
+            model::positionMs,
+            model::seekTo,
+            modifier.padding(vertical = 8.dp).graphicsLayer { alpha = shown },
+            // Out to the screen's margins, past the player's side padding.
+            edgeBleed = 24.dp,
+        )
     }
 }
 
@@ -363,21 +471,21 @@ private fun TopLine(
     }
 }
 
-// The artwork, or the lyrics in its place. The artwork stays laid out under
-// them, so it can still fly back to the bar when the player closes. Swiping
-// the artwork sideways skips: it follows the finger a little way, and a
-// tick marks the point past which letting go skips.
+// The artwork. Upright, it folds away under the lyrics in lyrics mode, but
+// stays laid out there, so it can still fly back to the bar when the player
+// closes. Swiping the artwork sideways skips: it follows the finger a
+// little way, and a tick marks the point past which letting go skips.
 @Composable
 private fun AnimatedVisibilityScope.ArtStage(
     now: NowPlaying,
     model: PlayerViewModel,
-    lyricsOpen: Boolean,
+    folded: Boolean,
+    calm: Boolean,
     maxSide: Dp,
     modifier: Modifier,
     artModifier: Modifier,
 ) {
-    val lyrics by model.lyrics.collectAsStateWithLifecycle()
-    val lyricsShown by animateFloatAsState(if (lyricsOpen) 1f else 0f, tween(300), label = "lyrics shown")
+    val fold by animateFloatAsState(if (folded) 1f else 0f, if (calm) snap() else tween(300), label = "art folded")
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     // How far the artwork has been swiped, in pixels.
@@ -387,8 +495,8 @@ private fun AnimatedVisibilityScope.ArtStage(
         val width = constraints.maxWidth.toFloat()
         Box(
             Modifier
-                .pointerInput(lyricsOpen, width) {
-                    if (lyricsOpen) return@pointerInput
+                .pointerInput(folded, width) {
+                    if (folded) return@pointerInput
                     val distance = 88.dp.toPx()
                     val fling = 900.dp.toPx()
                     var armed = false
@@ -419,26 +527,12 @@ private fun AnimatedVisibilityScope.ArtStage(
                 // the screen rather than on the moving artwork.
                 .graphicsLayer {
                     translationX = swipe
-                    alpha = (1f - lyricsShown) * (1f - 0.5f * (abs(swipe) / (width * 0.5f)).coerceAtMost(1f))
-                    scaleX = 1f - 0.08f * lyricsShown
-                    scaleY = 1f - 0.08f * lyricsShown
+                    alpha = (1f - fold) * (1f - 0.5f * (abs(swipe) / (width * 0.5f)).coerceAtMost(1f))
+                    scaleX = 1f - 0.08f * fold
+                    scaleY = 1f - 0.08f * fold
                 },
         ) {
             PlayerArt(now.artwork, side, now.isPlaying, artModifier)
-        }
-        if (lyricsShown > 0f) {
-            LyricsPane(
-                lyrics,
-                now,
-                model::positionMs,
-                model::seekTo,
-                Modifier
-                    .fillMaxSize()
-                    .padding(vertical = 8.dp)
-                    .graphicsLayer { alpha = lyricsShown },
-                // Out to the screen's margins, past the player's side padding.
-                edgeBleed = 24.dp,
-            )
         }
     }
 }

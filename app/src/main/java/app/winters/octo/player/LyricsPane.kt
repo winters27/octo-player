@@ -61,10 +61,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -80,7 +77,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.lyrics.LyricLine
@@ -90,16 +86,13 @@ import app.winters.octo.lyrics.LyricsLook
 import app.winters.octo.lyrics.LyricsLookSettings
 import app.winters.octo.lyrics.LyricsStyle
 import app.winters.octo.lyrics.LyricsTiming
-import app.winters.octo.lyrics.TIMING_LIMIT_MS
 import app.winters.octo.lyrics.endOf
 import app.winters.octo.lyrics.heardAt
 import app.winters.octo.lyrics.lineAt
 import app.winters.octo.lyrics.lyricsClock
 import app.winters.octo.lyrics.shownLines
-import app.winters.octo.lyrics.timingLabel
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.PlaybackConnection
-import app.winters.octo.ui.common.FloatingSheet
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -164,22 +157,16 @@ class LyricsTimingViewModel @Inject constructor(
 
     fun speed(): Float = playback.speed()
 
+    // Read afresh by every frame, so a change in the lyrics menu moves the
+    // words while they play.
     fun offsetFor(trackId: String): Flow<Long> = timing.offsetFor(trackId)
-
-    fun step(trackId: String, steps: Int) {
-        viewModelScope.launch { timing.step(trackId, steps) }
-    }
-
-    fun reset(trackId: String) {
-        viewModelScope.launch { timing.reset(trackId) }
-    }
 }
 
-// The lyrics, in place of the artwork. Synced lyrics follow the song in
-// the chosen style: flowing, or the classic view with the line being sung
-// in the middle; a tap on a line plays from there. Plain lyrics are text to
-// scroll. Where they came from shows quietly underneath, beside a way to
-// fix synced lyrics that run early or late for this one song. The flowing
+// The lyrics, filling the player in lyrics mode. Synced lyrics follow the
+// song in the chosen style: flowing, or the classic view with the line
+// being sung in the middle; a tap on a line plays from there. Plain lyrics
+// are text to scroll. Where they came from, their timing, and other lyrics
+// to choose are in the lyrics menu on the small player below. The flowing
 // lyrics reach `edgeBleed` past the sides, to the screen's own margins.
 @Composable
 fun LyricsPane(
@@ -203,61 +190,33 @@ fun LyricsPane(
                 val offset by remember(shown.trackId) { timing.offsetFor(shown.trackId) }.collectAsStateWithLifecycle(0L)
                 val look by timing.look.collectAsStateWithLifecycle()
                 val calm by timing.reduceMotion.collectAsStateWithLifecycle()
-                var adjusting by remember { mutableStateOf(false) }
                 val flowing = lyrics.synced && !lyrics.instrumental && look?.style == LyricsStyle.Flowing
-                Column(Modifier.fillMaxSize()) {
-                    Box(Modifier.weight(1f).fillMaxWidth().bleed(if (flowing) edgeBleed else 0.dp).fadedEdges()) {
-                        val chosen = look
-                        when {
-                            lyrics.instrumental -> Quiet("Instrumental")
-                            // The style is not known yet: nothing, for a moment.
-                            lyrics.synced && chosen == null -> Unit
-                            lyrics.synced && chosen != null && flowing -> FlowingLyrics(
-                                lyrics,
-                                now,
-                                positionMs,
-                                timing::speed,
-                                timing.timeEvents,
-                                offset,
-                                chosen,
-                                calm,
-                                onSeek,
-                                // Dark on a pale background, white otherwise.
-                                textColor = LocalContentColor.current,
-                            )
-                            lyrics.synced -> SyncedLyrics(lyrics, now, positionMs, onSeek, offset)
-                            else -> PlainLyrics(lyrics)
-                        }
-                    }
-                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            lyrics.source.label,
-                            style = OctoType.caption,
-                            color = OctoColors.TextMuted,
-                            modifier = Modifier.weight(1f),
+                Box(Modifier.fillMaxSize().bleed(if (flowing) edgeBleed else 0.dp).fadedEdges()) {
+                    val chosen = look
+                    when {
+                        lyrics.instrumental -> Quiet("Instrumental")
+                        // The style is not known yet: nothing, for a moment.
+                        lyrics.synced && chosen == null -> Unit
+                        lyrics.synced && chosen != null && flowing -> FlowingLyrics(
+                            lyrics,
+                            now,
+                            positionMs,
+                            timing::speed,
+                            timing.timeEvents,
+                            offset,
+                            chosen,
+                            calm,
+                            onSeek,
+                            // Dark on a pale background, white otherwise.
+                            textColor = LocalContentColor.current,
                         )
-                        // A quiet way to move the words when they run early or late.
-                        if (lyrics.synced && !lyrics.instrumental) {
-                            Text(
-                                if (offset == 0L) "Timing" else timingLabel(offset),
-                                style = OctoType.caption,
-                                color = OctoColors.TextMuted,
-                                modifier = Modifier
-                                    .clickable(role = Role.Button, onClickLabel = "Change the lyrics timing") { adjusting = true }
-                                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                            )
-                        }
+                        lyrics.synced -> SyncedLyrics(lyrics, now, positionMs, onSeek, offset)
+                        else -> PlainLyrics(lyrics)
                     }
-                }
-                FloatingSheet(visible = adjusting, onDismiss = { adjusting = false }) {
-                    TimingSheet(
-                        offset,
-                        onStep = { steps -> timing.step(shown.trackId, steps) },
-                        onReset = { timing.reset(shown.trackId) },
-                    )
                 }
             }
             LyricsState.None -> Quiet("No lyrics for this song")
+            LyricsState.HiddenForSong -> Quiet("Lyrics are hidden for this song")
             LyricsState.Loading, LyricsState.Hidden -> Box(Modifier.fillMaxSize())
         }
     }
@@ -273,33 +232,6 @@ private fun KeepScreenOn() {
     }
 }
 
-// Moves one song's lyrics earlier or later, a quarter second at a time.
-@Composable
-private fun TimingSheet(offsetMs: Long, onStep: (Int) -> Unit, onReset: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
-        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Lyrics timing", style = OctoType.section, color = OctoColors.TextPrimary, modifier = Modifier.weight(1f))
-            if (offsetMs != 0L) GlazeButton("Reset", onClick = onReset)
-        }
-        Text(
-            timingLabel(offsetMs),
-            style = OctoType.headline.copy(fontFeatureSettings = "tnum"),
-            color = OctoColors.TextPrimary,
-            modifier = Modifier.padding(top = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
-        )
-        Text(
-            "For this song only. If the words light up late, move them earlier; if early, move them later.",
-            style = OctoType.caption,
-            color = OctoColors.TextMuted,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-        Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            GlazeButton("Earlier", onClick = { onStep(-1) }, modifier = Modifier.weight(1f), enabled = offsetMs > -TIMING_LIMIT_MS)
-            GlazeButton("Later", onClick = { onStep(1) }, modifier = Modifier.weight(1f), enabled = offsetMs < TIMING_LIMIT_MS)
-        }
-    }
-}
-
 @Composable
 private fun Quiet(text: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -308,7 +240,7 @@ private fun Quiet(text: String) {
 }
 
 // Reaches `horizontal` past each side of the space it is given.
-private fun Modifier.bleed(horizontal: Dp): Modifier = if (horizontal <= 0.dp) {
+internal fun Modifier.bleed(horizontal: Dp): Modifier = if (horizontal <= 0.dp) {
     this
 } else {
     layout { measurable, constraints ->

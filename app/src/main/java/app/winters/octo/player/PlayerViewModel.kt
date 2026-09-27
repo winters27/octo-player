@@ -8,6 +8,7 @@ import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
 import app.winters.octo.discovery.asTrack
 import app.winters.octo.lyrics.Lyrics
+import app.winters.octo.lyrics.LyricsChoices
 import app.winters.octo.lyrics.LyricsRepository
 import app.winters.octo.lyrics.LyricsSong
 import app.winters.octo.playback.DeviceVolume
@@ -56,6 +57,7 @@ class PlayerViewModel @Inject constructor(
     private val sleepTimer: SleepTimer,
     sound: SoundEngine,
     private val lyricsRepository: LyricsRepository,
+    private val lyricsChoices: LyricsChoices,
     private val editor: QueueEditor,
     private val playlists: PlaylistStore,
     private val feedback: Feedback,
@@ -187,13 +189,21 @@ class PlayerViewModel @Inject constructor(
         lyricsShown.value = !lyricsShown.value
     }
 
+    // They follow the listener's choice for the song too: picking other
+    // lyrics shows them at once, and hiding them shows that they are hidden.
     val lyrics: StateFlow<LyricsState> = combine(playback.now.map { it.trackId }.distinctUntilChanged(), lyricsShown) { id, open ->
         id.takeIf { open }
     }
         .distinctUntilChanged()
-        .transformLatest { id ->
-            if (id == null) {
+        .flatMapLatest { id -> if (id == null) flowOf(null) else lyricsChoices.choiceFor(id).map { id to it } }
+        .transformLatest { shown ->
+            if (shown == null) {
                 emit(LyricsState.Hidden)
+                return@transformLatest
+            }
+            val (id, choice) = shown
+            if (choice.hidden) {
+                emit(LyricsState.HiddenForSong)
                 return@transformLatest
             }
             emit(LyricsState.Loading)
@@ -236,6 +246,8 @@ private const val LYRICS_PREFETCH_SETTLE_MS = 1_200L
 // What the lyrics view shows.
 sealed interface LyricsState {
     data object Hidden : LyricsState
+    // The listener hid this song's lyrics.
+    data object HiddenForSong : LyricsState
     data object Loading : LyricsState
     data object None : LyricsState
     data class Found(val trackId: String, val lyrics: Lyrics) : LyricsState
