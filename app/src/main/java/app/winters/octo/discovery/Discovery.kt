@@ -155,8 +155,9 @@ class Discovery @Inject constructor(
         val unlinked = songs.filter { it.id !in links }
         val candidates = unlinked.flatMap { titleKeys(it.title) }.distinct().chunked(900).flatMap { catalog.tracksWithKeys(it) }
         val resolved = resolveSongs(songs, sourceId, links, candidates, System.currentTimeMillis())
-        online.keep(resolved.filterIsInstance<Resolved.Found>().map { it.song }.distinctBy { it.id })
-        return resolved
+        // Finds as stored, so a length learned from playing one shows.
+        val kept = online.keep(resolved.filterIsInstance<Resolved.Found>().map { it.song }.distinctBy { it.id }).associateBy { it.id }
+        return resolved.map { r -> if (r is Resolved.Found) kept[r.song.id]?.let(Resolved::Found) ?: r else r }
     }
 
     // The server's id for a song: a find's own, a library song's server copy,

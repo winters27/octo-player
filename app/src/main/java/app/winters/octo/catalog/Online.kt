@@ -32,7 +32,8 @@ data class OnlineSongEntity(
     val album: String,
     val albumId: String?,
     val artistId: String?,
-    // Zero when the server only guessed the length.
+    // Zero when the server only guessed the length, until the player has
+    // played the song and learned it.
     val durationMs: Long,
     val coverId: String?,
     val mimeType: String?,
@@ -73,18 +74,20 @@ interface OnlineDao {
     @Query("UPDATE online_song SET adoptedId = :trackId WHERE id = :id")
     suspend fun adopt(id: String, trackId: String)
 
+    // Gives a find the length the player learned, only when it has none.
+    // Answers how many rows took it.
+    @Query("UPDATE online_song SET durationMs = :durationMs WHERE id = :id AND durationMs = 0")
+    suspend fun fillLength(id: String, durationMs: Long): Int
+
     // Stores what the server says about these songs now, keeping what the
-    // app knows about each: whether a download was asked for, and what it became.
+    // app knows about each, and answers them as stored.
     @Transaction
-    suspend fun keep(rows: List<OnlineSongEntity>) {
-        if (rows.isEmpty()) return
+    suspend fun keep(rows: List<OnlineSongEntity>): List<OnlineSongEntity> {
+        if (rows.isEmpty()) return rows
         val before = rows.map { it.id }.chunked(900).flatMap { byIds(it) }.associateBy { it.id }
-        insert(
-            rows.map { row ->
-                val old = before[row.id] ?: return@map row
-                row.copy(requestedAt = old.requestedAt, adoptedId = old.adoptedId)
-            },
-        )
+        val kept = rows.map { row -> before[row.id]?.let { keptFind(row, it) } ?: row }
+        insert(kept)
+        return kept
     }
 
     // Lets go of finds from other servers, and old ones nothing needs: not
@@ -102,3 +105,12 @@ interface OnlineDao {
     @Query("DELETE FROM online_song")
     suspend fun clear()
 }
+
+// What the server says about a find now, with what the app already knew:
+// whether a download was asked for, what it became, and a length learned
+// from playing it when the server still sends none.
+fun keptFind(now: OnlineSongEntity, before: OnlineSongEntity): OnlineSongEntity = now.copy(
+    requestedAt = before.requestedAt,
+    adoptedId = before.adoptedId,
+    durationMs = if (now.durationMs > 0) now.durationMs else before.durationMs,
+)
