@@ -73,6 +73,9 @@ dependencies {
     implementation(libs.media3.session)
     implementation(libs.media3.datasource.okhttp)
     implementation(libs.media3.ui.compose)
+    // Casting: Android's list of outputs, and Google Cast (kept to the cast package).
+    implementation(libs.androidx.mediarouter)
+    implementation(libs.play.services.cast.framework)
     implementation(libs.kotlinx.coroutines.guava)
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)

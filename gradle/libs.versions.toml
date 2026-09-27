@@ -18,6 +18,8 @@ coil = "3.6.3"
 room = "2.8.5"
 taglib = "1.0.6"
 media3 = "1.11.1"
+castFramework = "22.3.1"
+mediarouter = "1.8.1"
 palette = "1.0.0"
 reorderable = "3.1.0"
 junit = "4.13.2"
@@ -57,6 +59,8 @@ media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", versi
 media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
 media3-datasource-okhttp = { group = "androidx.media3", name = "media3-datasource-okhttp", version.ref = "media3" }
 media3-ui-compose = { group = "androidx.media3", name = "media3-ui-compose", version.ref = "media3" }
+play-services-cast-framework = { group = "com.google.android.gms", name = "play-services-cast-framework", version.ref = "castFramework" }
+androidx-mediarouter = { group = "androidx.mediarouter", name = "mediarouter", version.ref = "mediarouter" }
 kotlinx-coroutines-guava = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-guava", version.ref = "coroutines" }
 androidx-palette = { group = "androidx.palette", name = "palette-ktx", version.ref = "palette" }
 reorderable = { group = "sh.calvin.reorderable", name = "reorderable", version.ref = "reorderable" }
