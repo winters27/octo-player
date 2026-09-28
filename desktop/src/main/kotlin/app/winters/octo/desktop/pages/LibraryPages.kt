@@ -222,35 +222,6 @@ fun FavouritesPage(app: AppState, visit: Visit) {
     }
 }
 
-// What was played, newest first, from the play dates the server keeps.
-@Composable
-fun HistoryPage(app: AppState, visit: Visit) {
-    val list = rememberListState(app.navigator, visit)
-    val query = app.navigator.filterOf(visit)
-    val filter: (LibraryQuery) -> Unit = { app.navigator.keepFilter(visit, it) }
-    val fields = rememberShownFields(app)
-    WithLibrary(app) { index ->
-        var order by remember { mutableStateOf(SortOrder(SongSort.RecentlyPlayed, descending = true)) }
-        val songs = rememberFiltered(rememberSorted(index.history, order), query, fields)?.songs ?: return@WithLibrary LoadingLine()
-        SongTable(
-            app,
-            songs,
-            listOf(SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Plays, SongColumn.Played, SongColumn.Length),
-            list,
-            id = "history",
-            order = order,
-            onSort = { order = it },
-            empty = {
-                if (query.filters && index.history.isNotEmpty()) NoMatches { filter(query.cleared()) }
-                else NothingHere("No history yet", "Your server hasn't recorded any plays, or doesn't share them.")
-            },
-        ) {
-            item(key = "title") { PageTitle("Recently played", detail = if (query.filters) filteredCount(songs.size, index.history.size, true) else null) }
-            if (index.history.isNotEmpty()) item(key = "filters") { FilterBar(app, query, filter, index.history) }
-        }
-    }
-}
-
 // A heading across the whole width of a grid.
 fun LazyGridScope.header(content: @Composable () -> Unit) {
     item(span = { GridItemSpan(maxLineSpan) }) { content() }

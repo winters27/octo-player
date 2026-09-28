@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.winters.octo.query.LibraryQuery
+import app.winters.octo.desktop.home.AlbumShelf
 
 // Every page the main area can show.
 sealed interface Page {
@@ -28,6 +29,8 @@ sealed interface Page {
     // from one of them; `focus` a song to show in it ("Show in folder").
     data class Folder(val id: String, val name: String, val trail: List<FolderStep> = emptyList(), val focus: String? = null) : Page
     data class Playlist(val id: String) : Page
+    // Every album on one of Home's shelves.
+    data class Shelf(val shelf: AlbumShelf) : Page
 }
 
 // One folder on the way down to another, for the breadcrumbs.
@@ -49,6 +52,7 @@ fun sidebarItemOf(page: Page): SidebarItem? = when (page) {
     -> SidebarItem.Top(page)
     is Page.Playlist -> SidebarItem.PlaylistItem(page.id)
     is Page.Album, is Page.Artist, is Page.Genre, is Page.Folder -> null
+    is Page.Shelf -> null
 }
 
 // One visit to a page. The id is its own, so the same page visited twice

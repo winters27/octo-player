@@ -20,7 +20,11 @@ import app.winters.octo.desktop.audio.ServerSongs
 import app.winters.octo.desktop.audio.writeSine
 import app.winters.octo.desktop.lyrics.openLyricsMenu
 import app.winters.octo.desktop.removeQueued
+import app.winters.octo.desktop.home.AlbumShelf
+import app.winters.octo.desktop.listening.LoggedPlay
+import app.winters.octo.desktop.listening.logged
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.nav.ScrollSpot
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.CertificateQuestion
@@ -49,6 +53,8 @@ import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.time.Duration
+import java.time.Instant
 
 // Draws the whole window off screen against a pretend server and saves
 // pictures of the main pages, for looking at the layout without a display.
@@ -95,7 +101,7 @@ class ScreenShotsTest {
                 "a10|Hail to the Thief|Radiohead|r1|2003", "a11|Protection|Massive Attack|r3|1994", "a12|Post|Björk|r4|1995",
             ).mapIndexed { index, line ->
                 val (id, name, artist, artistId, year) = line.split("|")
-                """{"id":"$id","name":"$name","artist":"$artist","artistId":"$artistId","year":$year,"songCount":10,"duration":2700,"coverArt":"al-$id","playCount":${(12 - index) * 4}}"""
+                """{"id":"$id","name":"$name","artist":"$artist","artistId":"$artistId","year":$year,"songCount":10,"duration":2700,"coverArt":"al-$id","playCount":${(12 - index) * 4},"created":"2026-0${1 + index % 9}-1${index % 9}T10:00:00Z"}"""
             }.joinToString(",")
             // OK Computer as its page reads it: two discs, each named.
             val okTitles = listOf("Airbag", "Paranoid Android", "Subterranean Homesick Alien", "Exit Music (For a Film)", "Let Down", "Karma Police", "Fitter Happier", "Electioneering", "Climbing Up the Walls", "No Surprises", "Lucky", "The Tourist")
@@ -125,11 +131,16 @@ class ScreenShotsTest {
             val biography = "Radiohead are an English rock band formed in Abingdon, Oxfordshire, in 1985. The band is <b>Thom Yorke</b>, the brothers Jonny and Colin Greenwood, Ed O&#39;Brien and Philip Selway. " +
                 "Their third album, OK Computer, made them one of the best known bands of the late 1990s; Kid A and Amnesiac then turned toward electronic music, and In Rainbows was first sold for whatever listeners chose to pay. " +
                 "They have sold more than 30 million albums. <a href='https://www.last.fm/music/Radiohead'>Read more on Last.fm</a>"
+            // Songs of an album last played a year ago, for Home's "Not played in 6 months".
+            val older = (1..3).joinToString(",") { i ->
+                songJson("o$i", "Old song $i", artist = "Radiohead", album = "Album number 3", albumId = "a3", duration = 200).dropLast(1) + ""","playCount":6,"played":"2025-09-0${i}T20:00:00Z"}"""
+            }
             server.answer("ping", type = "octo")
             server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[{"name":"songLyrics","versions":[1]},{"name":"octoAcquisitions","versions":[1]}]""", type = "octo")
             server.answer("getAlbumList2", """"albumList2":{"album":[$albums]}""")
             server.answer("getArtists", """"artists":{"index":[{"name":"R","artist":[{"id":"r1","name":"Radiohead","albumCount":9},{"id":"r2","name":"Portishead","albumCount":3,"coverArt":"ar-r2"},{"id":"r3","name":"Massive Attack","albumCount":2,"coverArt":"ar-r3"},{"id":"r4","name":"Björk","albumCount":2,"coverArt":"ar-r4"}]}]}""")
-            server.answer("search3", """"searchResult3":{"song":[$songs],"album":[{"id":"a1","name":"OK Computer","artist":"Radiohead"}],"artist":[{"id":"r1","name":"Radiohead"}]}""")
+            server.answer("search3", """"searchResult3":{"song":[$songs,$older],"album":[{"id":"a1","name":"OK Computer","artist":"Radiohead"}],"artist":[{"id":"r1","name":"Radiohead"}]}""")
+            server.answer("getStarred2", """"starred2":{"album":[{"id":"a5","name":"Album number 5","artist":"Radiohead","starred":"2026-09-01T00:00:00Z"},{"id":"a8","name":"Album number 8","artist":"Radiohead","starred":"2026-09-10T00:00:00Z"}]}""")
             server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"p1","name":"Late night","songCount":12},{"id":"p2","name":"Running","songCount":40}]}""")
             server.answer("getAlbum", """"album":{"id":"a1","name":"OK Computer","artist":"Radiohead","artistId":"r1","year":1997,"songCount":12,"coverArt":"al-a1","genres":[{"name":"Alternative"}],"releaseTypes":["Album"],"discTitles":[{"disc":1,"title":"OK Computer"},{"disc":2,"title":"The other side"}],"song":[$okSongs]}""")
             server.answer("getPlaylist", """"playlist":{"id":"p1","name":"Late night","owner":"winters","comment":"For the drive home after midnight","public":false,"songCount":12,"entry":[$songs]}""")
@@ -164,12 +175,13 @@ class ScreenShotsTest {
             lateinit var app: AppState
             val player = EnginePlayer(NativeAudioEngine.open(silent = true), LocalOrServer(ServerSongs { app.connection?.client }))
             SwingUtilities.invokeAndWait {
-                app = AppState(settings, accounts, http, CoroutineScope(SupervisorJob() + Dispatchers.Main), DesktopOs.Windows, player, OnlineLyrics(http, server.address.toHttpUrl()))
+                app = AppState(settings, accounts, http, CoroutineScope(SupervisorJob() + Dispatchers.Main), DesktopOs.Windows, player, OnlineLyrics(http, server.address.toHttpUrl()), listeningRoot = File(folder.root, "listening"))
             }
             val scene = ImageComposeScene(1440, 900, Density(1f)) {
                 CompositionLocalProvider(LocalTyping provides TypingState()) { Shell(app, null) {} }
             }
-            fun shot(name: String, settleMs: Long = 1_500) {
+            // Draws for a while and saves the picture; with no name, only draws.
+            fun shot(name: String?, settleMs: Long = 1_500) {
                 val begin = System.currentTimeMillis()
                 val end = begin + settleMs
                 // The scene's clock follows real time, so animations finish
@@ -181,7 +193,7 @@ class ScreenShotsTest {
                     t = (System.currentTimeMillis() - begin) * 1_000_000
                 }
                 val image = scene.render(t)
-                File(out, "$name.png").writeBytes(image.encodeToData(EncodedImageFormat.PNG)!!.bytes)
+                if (name != null) File(out, "$name.png").writeBytes(image.encodeToData(EncodedImageFormat.PNG)!!.bytes)
             }
             // Turns the mouse wheel over the page, `clicks` times, then moves
             // the pointer off the page so no row is lit under it.
@@ -219,6 +231,27 @@ class ScreenShotsTest {
             val done = runBlocking { accounts.signIn(server.address, "winters", "pw") } as SignInOutcome.Done
             SwingUtilities.invokeAndWait { app.signedIn(done.connection) }
             shot("home", 3_000)
+            // Further down Home: playlists and the rediscovery shelves, by
+            // leaving it scrolled and coming back.
+            val home = app.navigator.current
+            SwingUtilities.invokeAndWait { app.navigator.go(Page.Songs) }
+            shot(null, 300)
+            SwingUtilities.invokeAndWait {
+                app.navigator.keepScroll(home, ScrollSpot(7))
+                app.navigator.back()
+            }
+            shot("home-more")
+            SwingUtilities.invokeAndWait { app.navigator.go(Page.Shelf(AlbumShelf.NeverPlayed)) }
+            shot("shelf")
+            // Recently played: two plays logged here, the rest from the server.
+            SwingUtilities.invokeAndWait {
+                val log = app.plays.log()!!
+                val library = app.library!!.index!!.songs
+                log.add(LoggedPlay(System.currentTimeMillis() - 20 * 60_000, 180_000, library[0].logged()))
+                log.add(LoggedPlay(System.currentTimeMillis() - 5 * 60_000, 180_000, library[3].logged()))
+                app.navigator.go(Page.History)
+            }
+            shot("history")
             SwingUtilities.invokeAndWait {
                 val list = app.library?.index?.songs.orEmpty()
                 app.play(list, 0)
