@@ -77,6 +77,41 @@ class NavigatorTest {
     }
 
     @Test
+    fun aVisitKeepsItsTabAndEachOfItsListsScroll() {
+        val nav = Navigator()
+        nav.go(Page.Favourites)
+        val favourites = nav.current
+        nav.keepTab(favourites, "Albums")
+        nav.keepScroll(favourites, ScrollSpot(3, 0))
+        nav.keepScroll(favourites, ScrollSpot(9, 4), "grid")
+        nav.go(Page.Album("a1"))
+        nav.back()
+        assertEquals("Albums", nav.tabOf(nav.current))
+        assertEquals(ScrollSpot(3, 0), nav.scrollOf(nav.current))
+        assertEquals(ScrollSpot(9, 4), nav.scrollOf(nav.current, "grid"))
+        nav.go(Page.Songs)
+        nav.go(Page.Favourites)
+        assertNull("a new visit starts on the first tab", nav.tabOf(nav.current))
+    }
+
+    @Test
+    fun startingOverForgetsEveryPageAndScroll() {
+        val nav = Navigator()
+        nav.go(Page.Albums)
+        val albums = nav.current
+        nav.keepScroll(albums, ScrollSpot(40, 12))
+        nav.go(Page.Album("a1"))
+        nav.back()
+        nav.startOver()
+        assertEquals(Page.Home, nav.current.page)
+        assertEquals(0 to 0, nav.depth)
+        nav.keepScroll(albums, ScrollSpot(5, 5))
+        nav.go(Page.Albums)
+        assertEquals(ScrollSpot(), nav.scrollOf(nav.current))
+        assertEquals("a visit from before is not kept", ScrollSpot(), nav.scrollOf(albums))
+    }
+
+    @Test
     fun aLongHistoryForgetsItsOldestPages() {
         val nav = Navigator(limit = 5)
         repeat(10) { nav.go(Page.Album("a$it")) }
@@ -123,6 +158,16 @@ class ShortcutsTest {
         assertNull(on(Key.DirectionLeft, typing = true))
         assertEquals(Shortcut.Search, on(Key.F, ctrl = true, typing = true))
         assertEquals(Shortcut.CloseLayer, on(Key.Escape, typing = true))
+    }
+
+    @Test
+    fun whileTypingAltArrowsMoveByWordsOnEverySystem() {
+        for (mac in listOf(false, true)) {
+            assertNull(on(Key.DirectionLeft, alt = true, mac = mac, typing = true))
+            assertNull(on(Key.DirectionRight, alt = true, mac = mac, typing = true))
+            assertEquals(Shortcut.Back, on(Key.DirectionLeft, alt = true, mac = mac))
+        }
+        assertEquals(Shortcut.Back, on(Key.LeftBracket, meta = true, mac = true, typing = true))
     }
 
     @Test

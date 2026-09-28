@@ -91,14 +91,17 @@ fun rememberListState(navigator: Navigator, visit: Visit): LazyListState {
     return state
 }
 
+// A grid's is kept apart from a list's, for a page that has both.
 @Composable
 fun rememberGridState(navigator: Navigator, visit: Visit): LazyGridState {
-    val state = remember(visit.id) { navigator.scrollOf(visit).let { LazyGridState(it.index, it.offset) } }
+    val state = remember(visit.id) { navigator.scrollOf(visit, GRID).let { LazyGridState(it.index, it.offset) } }
     DisposableEffect(visit.id) {
-        onDispose { navigator.keepScroll(visit, ScrollSpot(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset)) }
+        onDispose { navigator.keepScroll(visit, ScrollSpot(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset), GRID) }
     }
     return state
 }
+
+private const val GRID = "grid"
 
 // Room a page leaves at its foot for the now-playing bar floating over it.
 val LocalBottomRoom = staticCompositionLocalOf { 0.dp }
@@ -220,7 +223,8 @@ fun MediaCard(
 // A card's width in a shelf that scrolls sideways.
 val ShelfCardWidth = 176.dp
 
-// A blank that swallows clicks, so a click on empty space does nothing.
+// A blank that swallows clicks and the wheel, so a click or scroll on empty
+// space does nothing, and nothing lying under it hears them.
 fun Modifier.swallowClicks(): Modifier = pointerInput(Unit) {
     awaitEachGesture { awaitFirstDown(requireUnconsumed = false) }
 }

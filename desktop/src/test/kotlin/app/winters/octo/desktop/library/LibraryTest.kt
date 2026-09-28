@@ -1,8 +1,10 @@
 package app.winters.octo.desktop.library
 
+import app.winters.octo.catalog.naturalSortKey
 import app.winters.octo.sort.SongSort
 import app.winters.octo.sort.SortList
 import app.winters.octo.sort.SortOrder
+import app.winters.octo.sort.sortedByKey
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Artist
 import app.winters.octo.subsonic.Song
@@ -11,6 +13,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.random.Random
 
 class SongSortingTest {
     private val songs = listOf(
@@ -70,6 +73,58 @@ class SongSortingTest {
     @Test
     fun newestAddedFirst() {
         assertEquals("2", sortSongs(songs, SortOrder(SongSort.RecentlyAdded, true)).first().id)
+    }
+
+    // The orders as they were first written, with every key worked out on
+    // every comparison, to hold the quicker ones to the same results.
+    private val slowInAlbum: Comparator<Song> = compareBy<Song>({ naturalSortKey(it.album.orEmpty()) }, { it.albumId.orEmpty() }, { it.discNumber ?: 0 }, { it.track ?: 0 }, { naturalSortKey(it.title) }, { it.id })
+    private val slowByTitle: Comparator<Song> = compareBy({ naturalSortKey(it.title) }, { naturalSortKey(it.artist.orEmpty()) }, { it.id })
+
+    private fun slowSort(songs: List<Song>, by: SongSort, down: Boolean): List<Song>? = when (by) {
+        SongSort.Title -> sortedByKey(songs, down, { naturalSortKey(it.title) }, slowByTitle)
+        SongSort.Artist -> sortedByKey(songs, down, { naturalSortKey(it.artist.orEmpty()) }, slowInAlbum)
+        SongSort.Album -> sortedByKey(songs, down, { naturalSortKey(it.album.orEmpty()) }, compareBy<Song> { naturalSortKey(it.artist.orEmpty()) }.then(slowInAlbum))
+        SongSort.Year -> sortedByKey(songs, down, { it.year?.takeIf { y -> y > 0 } }, slowInAlbum)
+        SongSort.Length -> sortedByKey(songs, down, { it.duration.takeIf { d -> d > 0 } }, slowByTitle)
+        SongSort.RecentlyAdded -> sortedByKey(songs, down, { serverTime(it.created) }, slowInAlbum)
+        else -> null
+    }
+
+    // A big made-up library, with repeated names, articles, accents, numbers
+    // and missing values, so ties and tie-breaks all come up.
+    private fun bigLibrary(count: Int): List<Song> {
+        val random = Random(7)
+        val words = listOf("The Wall", "a Song", "Élan", "elan", "Vol. 2", "Vol. 10", "Track 01", "track 1", "", "Zebra", "An Hour", "99 Luftballons")
+        return List(count) { i ->
+            Song(
+                "s$i",
+                words.random(random) + if (random.nextBoolean()) " ${random.nextInt(30)}" else "",
+                artist = words.random(random).takeIf { random.nextInt(8) > 0 },
+                album = words.random(random).takeIf { random.nextInt(8) > 0 },
+                albumId = "a${random.nextInt(40)}",
+                discNumber = random.nextInt(3).takeIf { it > 0 },
+                track = random.nextInt(15).takeIf { it > 0 },
+                year = listOf(null, 0, 1965, 1997, 2024).random(random),
+                duration = random.nextInt(0, 400),
+                created = listOf(null, "2024-01-02T00:00:00Z", "2025-05-05T00:00:00Z", "not a date").random(random),
+                playCount = random.nextLong(0, 5),
+                played = listOf(null, "2026-09-01T10:00:00Z", "2026-08-01T10:00:00Z").random(random),
+            )
+        }
+    }
+
+    @Test
+    fun aBigLibrarySortsExactlyAsTheSlowOrdersDid() {
+        val big = bigLibrary(5_000)
+        for (by in SongSort.entries) {
+            for (down in listOf(false, true)) {
+                val slow = slowSort(big, by, down) ?: continue
+                assertEquals("$by ${if (down) "down" else "up"}", ids(slow), ids(sortSongs(big, SortOrder(by, down))))
+            }
+        }
+        val artists = big.mapNotNull { it.artist }.distinct().map { Artist(it, it) }
+        assertEquals(artists.sortedBy { naturalSortKey(it.name) }, sortedByName(artists) { it.name })
+        assertEquals(ids(big.filter { serverTime(it.played) != null }.sortedByDescending { serverTime(it.played) }), ids(recentlyPlayed(big)))
     }
 
     @Test

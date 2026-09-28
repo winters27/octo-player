@@ -14,12 +14,15 @@ private const val ALBUMS_AT_ONCE = 4
 class Library(val songs: List<Song>, val albums: List<Album>, val artists: List<Artist>)
 
 // Reads the whole library in pages. Songs come from an empty search where
-// the server allows one, and otherwise album by album.
+// the server allows one, and otherwise album by album. Anything listed
+// twice is kept once: when the library changes during the read, the pages
+// shift and the same item can come back on the next page.
 suspend fun SubsonicClient.readLibrary(page: Int = LIBRARY_PAGE): Library {
-    val albums = pages(page) { offset -> albumList(AlbumListType.ALPHABETICAL, page, offset) }
-    val artists = artists().flatMap { it.artist }
+    val albums = pages(page) { offset -> albumList(AlbumListType.ALPHABETICAL, page, offset) }.distinctBy { it.id }
+    val artists = artists().flatMap { it.artist }.distinctBy { it.id }
     val songs = pages(page) { offset -> songPage(page, offset) }
         .ifEmpty { songsByAlbum(albums) }
+        .distinctBy { it.id }
     return Library(songs, albums, artists)
 }
 

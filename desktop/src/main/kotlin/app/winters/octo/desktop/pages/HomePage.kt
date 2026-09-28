@@ -2,6 +2,7 @@ package app.winters.octo.desktop.pages
 
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -9,16 +10,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.winters.octo.desktop.AppState
-import app.winters.octo.desktop.home.loadHome
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.server.userMessage
-import app.winters.octo.desktop.ui.Load
 import app.winters.octo.desktop.ui.LocalBottomRoom
 import app.winters.octo.desktop.ui.MediaCard
 import app.winters.octo.desktop.ui.PageTitle
 import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.rememberListState
-import app.winters.octo.desktop.ui.rememberLoad
 import app.winters.octo.desktop.ui.FailedLine
 import app.winters.octo.desktop.ui.LoadingLine
 import app.winters.octo.design.Spinner
@@ -31,16 +29,19 @@ import kotlinx.coroutines.launch
 @Composable
 fun HomePage(app: AppState, visit: Visit) {
     val connection = app.connection ?: return
-    val loaded = rememberLoad(connection) { loadHome(connection) }
+    val store = app.home ?: return
+    // The shelves read before show at once; they are refreshed behind them.
+    LaunchedEffect(store) { store.refresh() }
+    val home = store.data
+    val failure = store.failure
     val list = rememberListState(app.navigator, visit)
     var starting by remember { mutableStateOf<String?>(null) }
     LazyColumn(state = list, contentPadding = pagePadding(LocalBottomRoom.current)) {
         item(key = "title") { PageTitle("Home") }
-        when (val state = loaded.state) {
-            Load.Loading -> item(key = "loading") { LoadingLine() }
-            is Load.Failed -> item(key = "failed") { FailedLine(state.message, loaded.retry) }
-            is Load.Ready -> {
-                val home = state.data
+        when {
+            home == null && failure != null -> item(key = "failed") { FailedLine(failure, store::retry) }
+            home == null -> item(key = "loading") { LoadingLine() }
+            else -> {
                 if (home.isEmpty) item(key = "empty") { NothingHere("Nothing here yet", "Once your server has music, the newest albums show here.") }
                 item(key = "stations") {
                     Shelf("Stations", home.stations, { it.id }) { station ->

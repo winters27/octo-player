@@ -57,7 +57,10 @@ class Navigator(start: Page = Page.Home, private val limit: Int = 100) {
     private var nextId = 1L
     private val visits = ArrayList<Visit>()
     private var at by mutableStateOf(0)
-    private val scrolls = HashMap<Long, ScrollSpot>()
+    // Scrolls by visit and by which list on the page, since a page can
+    // have two (a list and a grid).
+    private val scrolls = HashMap<Pair<Long, String>, ScrollSpot>()
+    private val tabs = HashMap<Long, String>()
 
     // Bumped on every move, so the screen redraws.
     private var moves by mutableStateOf(0)
@@ -78,10 +81,10 @@ class Navigator(start: Page = Page.Home, private val limit: Int = 100) {
     fun go(page: Page) {
         if (page == current.page) return
         // Anything ahead is dropped, with its scroll positions.
-        while (visits.lastIndex > at) scrolls.remove(visits.removeAt(visits.lastIndex).id)
+        while (visits.lastIndex > at) forget(visits.removeAt(visits.lastIndex))
         visits += visit(page, current.item)
         // A very long history forgets its oldest pages.
-        while (visits.size > limit) scrolls.remove(visits.removeAt(0).id)
+        while (visits.size > limit) forget(visits.removeAt(0))
         at = visits.lastIndex
         moves++
     }
@@ -100,10 +103,33 @@ class Navigator(start: Page = Page.Home, private val limit: Int = 100) {
         return true
     }
 
-    fun scrollOf(visit: Visit): ScrollSpot = scrolls[visit.id] ?: ScrollSpot()
+    // Forgets every page and scroll and starts again at `page`, for a
+    // different account.
+    fun startOver(page: Page = Page.Home) {
+        visits.clear()
+        scrolls.clear()
+        tabs.clear()
+        visits += visit(page, null)
+        at = 0
+        moves++
+    }
 
-    fun keepScroll(visit: Visit, spot: ScrollSpot) {
-        if (visits.any { it.id == visit.id }) scrolls[visit.id] = spot
+    fun scrollOf(visit: Visit, list: String = ""): ScrollSpot = scrolls[visit.id to list] ?: ScrollSpot()
+
+    fun keepScroll(visit: Visit, spot: ScrollSpot, list: String = "") {
+        if (visits.any { it.id == visit.id }) scrolls[visit.id to list] = spot
+    }
+
+    // The tab a visit was left on, for pages with tabs.
+    fun tabOf(visit: Visit): String? = tabs[visit.id]
+
+    fun keepTab(visit: Visit, tab: String) {
+        if (visits.any { it.id == visit.id }) tabs[visit.id] = tab
+    }
+
+    private fun forget(visit: Visit) {
+        scrolls.keys.removeAll { it.first == visit.id }
+        tabs.remove(visit.id)
     }
 
     // A page opened from another keeps that page's sidebar item lit, unless

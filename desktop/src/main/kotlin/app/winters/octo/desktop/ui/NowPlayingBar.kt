@@ -64,15 +64,16 @@ import kotlin.math.roundToInt
 val BarHeight = 84.dp
 val BarShape = RoundedCornerShape(22.dp)
 
-// Where the song is, read from the player a few times a second while it
-// plays, for the time and the progress line.
+// Where the song is, read from the player a few times a second, for the
+// time and the progress line. It is read while paused too, so a seek then
+// shows at once.
 @Composable
 fun rememberPosition(player: DesktopPlayer): State<Long> {
     val position = remember { mutableLongStateOf(player.positionMs()) }
     val playing by player.state.collectAsState()
     LaunchedEffect(player, playing) {
         position.longValue = player.positionMs()
-        while (playing.playing) {
+        while (playing.current != null) {
             delay(200)
             position.longValue = player.positionMs()
         }

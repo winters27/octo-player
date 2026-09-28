@@ -37,14 +37,16 @@ fun shortcutFor(press: KeyPress, mac: Boolean, typing: Boolean): Shortcut? {
         command && !press.alt && press.key == Key.L -> Shortcut.Lyrics
         command && !press.alt && press.key == Key.U -> Shortcut.Queue
         command && !press.alt && press.key == Key.Comma -> Shortcut.Settings
-        // Back and forward: Alt with the arrows, and Cmd with the brackets
-        // or arrows on a Mac, as browsers do there.
-        press.alt && !press.ctrl && !press.meta && press.key == Key.DirectionLeft -> Shortcut.Back
-        press.alt && !press.ctrl && !press.meta && press.key == Key.DirectionRight -> Shortcut.Forward
+        // Back and forward: Cmd with the brackets on a Mac, as browsers do
+        // there, and Alt with the arrows below, when not typing.
         mac && press.meta && press.key == Key.LeftBracket -> Shortcut.Back
         mac && press.meta && press.key == Key.RightBracket -> Shortcut.Forward
         press.key == Key.Escape -> Shortcut.CloseLayer
         typing -> null
+        // In a text field Alt (Option on a Mac) with the arrows moves by
+        // words, so these only go back and forward outside one.
+        press.alt && !press.ctrl && !press.meta && press.key == Key.DirectionLeft -> Shortcut.Back
+        press.alt && !press.ctrl && !press.meta && press.key == Key.DirectionRight -> Shortcut.Forward
         plain && press.key == Key.Spacebar -> Shortcut.PlayPause
         plain && press.key == Key.DirectionLeft -> Shortcut.SeekBack
         plain && press.key == Key.DirectionRight -> Shortcut.SeekForward

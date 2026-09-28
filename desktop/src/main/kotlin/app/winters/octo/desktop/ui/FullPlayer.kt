@@ -60,6 +60,7 @@ import app.winters.octo.design.Txt
 import app.winters.octo.player.immersive.WashTuning
 import app.winters.octo.player.immersive.paceBpm
 import app.winters.octo.subsonic.Song
+import kotlinx.coroutines.delay
 
 // The dark words used over a light background, as on the phone.
 val DarkInk = Color(0xFF141416)
@@ -68,7 +69,8 @@ val DarkInk = Color(0xFF141416)
 // settling, as on the phone.
 private val DollyIn = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
 
-// Where the song is, read every frame while it plays, so the line glides.
+// Where the song is, read every frame while it plays, so the line glides,
+// and a few times a second while paused, so a seek then shows at once.
 @Composable
 fun rememberFramePosition(player: DesktopPlayer): State<Long> {
     val position = remember { mutableLongStateOf(player.positionMs()) }
@@ -76,6 +78,10 @@ fun rememberFramePosition(player: DesktopPlayer): State<Long> {
     LaunchedEffect(player, state.playing, state.current?.key) {
         position.longValue = player.positionMs()
         while (state.playing) withFrameMillis { position.longValue = player.positionMs() }
+        while (state.current != null) {
+            delay(200)
+            position.longValue = player.positionMs()
+        }
     }
     return position
 }
@@ -102,7 +108,9 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
     val dolly = remember { Animatable(0f) }
     LaunchedEffect(Unit) { dolly.animateTo(1f, tween(800, delayMillis = 20, easing = DollyIn)) }
 
-    Box(modifier.background(OctoColors.Background)) {
+    // It takes every click and scroll on its background, so none reach the
+    // page hidden under it.
+    Box(modifier.swallowClicks().background(OctoColors.Background)) {
         ImmersiveWash(
             cover,
             paceBpm(song.bpm, wash.useBpm),

@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.FocusRequester
 import app.winters.octo.desktop.audio.SoundTarget
+import app.winters.octo.desktop.home.HomeStore
 import app.winters.octo.desktop.library.LibraryStore
 import app.winters.octo.desktop.lyrics.LyricsModel
 import app.winters.octo.desktop.lyrics.LyricsSources
@@ -36,6 +37,7 @@ import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
@@ -62,6 +64,9 @@ class AppState(
     val player: DesktopPlayer = SilentPlayer(scope = scope, volume = settings.current.playback.volume),
     // The online lyrics library; tests give one at a pretend address.
     lyricsLibrary: OnlineLyrics = OnlineLyrics(http),
+    // The saved server, read from the password store before the window
+    // opens, since the store can keep the caller waiting.
+    restored: Connection? = accounts.restore(),
 ) {
     // The Sound page's settings, kept on the engine; none for the silent player.
     val sound: SoundController? = (player as? SoundTarget)?.let { SoundController(it, settings, scope) }
@@ -73,6 +78,11 @@ class AppState(
     val popups = PopupHost()
     val searchFocus = FocusRequester()
 
+    // Bumped by the search shortcut, so a Search page already open brings
+    // its field back into view.
+    var searchAsks by mutableStateOf(0)
+        private set
+
     var connection by mutableStateOf<Connection?>(null)
         private set
     var library by mutableStateOf<LibraryStore?>(null)
@@ -80,6 +90,8 @@ class AppState(
     var fetches by mutableStateOf<Fetches?>(null)
         private set
     var search by mutableStateOf<SearchModel?>(null)
+        private set
+    var home by mutableStateOf<HomeStore?>(null)
         private set
 
     // The user's playlists, for the sidebar and "Add to playlist".
@@ -113,7 +125,7 @@ class AppState(
     val mac: Boolean get() = os == DesktopOs.Mac
 
     init {
-        accounts.restore()?.let(::signedIn)
+        restored?.let(::signedIn)
     }
 
     fun signedIn(connection: Connection, note: String? = null) {
@@ -122,22 +134,28 @@ class AppState(
         library = store
         fetches = if (connection.acquires) Fetches(connection.client, scope, onArrived = { store.load() }) else null
         search = SearchModel(connection, { store.index }, { playlists }, scope)
+        home = HomeStore(connection, scope)
         notice = note
         starOverrides.clear()
         store.load()
         refreshPlaylists()
-        navigator.go(Page.Home)
+        // Back and forward start afresh for this account.
+        navigator.startOver()
     }
 
     fun signOut() {
         player.clear()
-        accounts.signOut()
+        // The server is forgotten at once; the password store is left to
+        // finish off the window's thread.
+        scope.launch(start = CoroutineStart.UNDISPATCHED) { accounts.signOut() }
         connection = null
         library = null
         fetches = null
         search = null
+        home = null
         playlists = emptyList()
         fullPlayer = false
+        navigator.startOver()
     }
 
     fun refreshPlaylists() {
@@ -178,7 +196,9 @@ class AppState(
         settings.update { it.copy(playback = it.playback.copy(outputDevice = id.takeUnless { it == DEFAULT_OUTPUT })) }
     }
 
-    // Favourites, as server stars.
+    // Favourites, as server stars. A heart set or cleared here shows from
+    // the overrides until the next library read brings the server's own,
+    // so the library is not read or sorted again for it.
 
     fun isStarred(song: Song): Boolean = starOverrides[song.id] ?: (song.starred != null)
 
@@ -189,7 +209,6 @@ class AppState(
         scope.launch {
             try {
                 if (starred) client.star(ids) else client.unstar(ids)
-                library?.markStarred(ids.toSet(), starred)
             } catch (e: SubsonicException) {
                 ids.forEach { starOverrides.remove(it) }
                 notice = "Couldn't change favourites: ${e.userMessage()}"
@@ -287,7 +306,7 @@ class AppState(
                 if (connection == null) return false
                 fullPlayer = false
                 navigator.go(Page.Search)
-                runCatching { searchFocus.requestFocus() }
+                searchAsks++
             }
             Shortcut.Lyrics -> if (connection != null) toggleSidePanel(SidePanel.Lyrics) else return false
             Shortcut.Queue -> if (connection != null) toggleSidePanel(SidePanel.Queue) else return false

@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.home
 
 import app.winters.octo.desktop.FakeServer
+import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -55,5 +56,18 @@ class HomeDataTest {
         } catch (e: SubsonicException) {
             assertTrue(e.message!!.contains("down"))
         }
+    }
+
+    @Test
+    fun theRandomPickStaysUntilNewAlbumsComeIn() {
+        fun shelf(vararg ids: String) = ids.map { Album(it) }
+        val shown = HomeData(recentlyAdded = shelf("n1"), random = shelf("r1", "r2"))
+        val again = HomeData(recentlyAdded = shelf("n1"), mostPlayed = shelf("m1"), random = shelf("r3"))
+        val kept = keepRandom(shown, again)
+        assertEquals(listOf("r1", "r2"), kept.random.map { it.id })
+        assertEquals("the other shelves are fresh", listOf("m1"), kept.mostPlayed.map { it.id })
+        val newer = HomeData(recentlyAdded = shelf("n2", "n1"), random = shelf("r3"))
+        assertEquals(listOf("r3"), keepRandom(shown, newer).random.map { it.id })
+        assertEquals(listOf("r3"), keepRandom(null, again).random.map { it.id })
     }
 }

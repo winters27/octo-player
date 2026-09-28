@@ -56,11 +56,12 @@ val SidePanelWidth = 340.dp
 // The panel on the right: the queue or the lyrics, in glass.
 @Composable
 fun SidePanelView(app: AppState, panel: SidePanel, backdrop: HazeState, modifier: Modifier = Modifier) {
+    val playing by app.player.state.collectAsState()
     FloatingGlaze(backdrop, modifier, shape = SidebarShape) {
         Column(Modifier.fillMaxSize().padding(top = 14.dp)) {
             Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Txt(if (panel == SidePanel.Queue) "Queue" else "Lyrics", OctoType.headline, modifier = Modifier.weight(1f))
-                if (panel == SidePanel.Queue) TextAction("Clear", { app.player.clear() }, enabled = app.player.state.value.queue.isNotEmpty())
+                if (panel == SidePanel.Queue) TextAction("Clear", { app.player.clear() }, enabled = playing.queue.isNotEmpty())
                 if (panel == SidePanel.Lyrics) LyricsMenuButton(app)
                 IconAction(OctoIcons.Close, "Close", { app.toggleSidePanel(panel) }, size = 32.dp, iconSize = 18.dp)
             }

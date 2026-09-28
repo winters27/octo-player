@@ -25,11 +25,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
-import app.winters.octo.catalog.naturalSortKey
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.library.SongColumn
 import app.winters.octo.desktop.library.sortAlbums
 import app.winters.octo.desktop.library.sortSongs
+import app.winters.octo.desktop.library.sortedByName
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.ui.LocalBottomRoom
@@ -111,7 +111,7 @@ fun AlbumsPage(app: AppState, visit: Visit) {
 fun ArtistsPage(app: AppState, visit: Visit) {
     val grid = rememberGridState(app.navigator, visit)
     WithLibrary(app) { index ->
-        val artists = remember(index) { index.artists.sortedBy { naturalSortKey(it.name) } }
+        val artists = remember(index) { sortedByName(index.artists) { it.name } }
         LazyVerticalGrid(GridCells.Adaptive(GridCard), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
             header { PageTitle("Artists", detail = "${artists.size} artists") }
             items(artists, key = { it.id }) { ArtistCard(app, it) }
@@ -194,7 +194,7 @@ fun FoldersPage(app: AppState, visit: Visit) {
     loaded.show(Modifier.padding(horizontal = 28.dp)) { top ->
         SongTable(app, top.songs, listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Length), list, covers = false) {
             item(key = "title") { PageTitle("Folders") }
-            if (top.folders.isEmpty() && top.songs.isEmpty()) item(key = "empty") { NothingHere("No folders", "This server doesn't list its folders.") }
+            if (top.folders.isEmpty() && top.songs.isEmpty()) item(key = "no-folders") { NothingHere("No folders", "This server doesn't list its folders.") }
             items(top.folders, key = { "f:${it.id}" }) { folder -> FolderRow(folder.name) { app.navigator.go(Page.Folder(folder.id, folder.name)) } }
         }
     }
@@ -243,14 +243,15 @@ private enum class FavouriteKind(val label: String) { Songs("Songs"), Albums("Al
 @Composable
 fun FavouritesPage(app: AppState, visit: Visit) {
     val connection = app.connection ?: return
-    var kind by remember { mutableStateOf(FavouriteKind.Songs) }
+    // The tab is kept with the visit, so Back returns to it.
+    var kind by remember(visit.id) { mutableStateOf(FavouriteKind.entries.firstOrNull { it.name == app.navigator.tabOf(visit) } ?: FavouriteKind.Songs) }
     val loaded = rememberLoad(connection) { connection.client.starred() }
     val list = rememberListState(app.navigator, visit)
     val grid = rememberGridState(app.navigator, visit)
     val title: @Composable () -> Unit = {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             PageTitle("Favourites", Modifier.weight(1f))
-            GlazeSegments(FavouriteKind.entries, kind, { it.label }, { kind = it })
+            GlazeSegments(FavouriteKind.entries, kind, { it.label }, { kind = it; app.navigator.keepTab(visit, it.name) })
         }
     }
     loaded.show(Modifier.padding(horizontal = 28.dp)) { starred ->

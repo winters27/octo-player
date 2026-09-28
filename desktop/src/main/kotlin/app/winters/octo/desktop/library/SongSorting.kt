@@ -48,10 +48,18 @@ fun serverTime(text: String?): Long? {
         ?: runCatching { OffsetDateTime.parse(text).toInstant().toEpochMilli() }.getOrNull()
 }
 
-// An album's songs in the album's own order: disc, then track.
-private val inAlbum: Comparator<Song> = compareBy<Song>({ naturalSortKey(it.album.orEmpty()) }, { it.albumId.orEmpty() }, { it.discNumber ?: 0 }, { it.track ?: 0 }, { naturalSortKey(it.title) }, { it.id })
+// Each name's sort key, worked out once per sort. Working it out on every
+// comparison froze the window on a big library.
+private class SortKeys {
+    private val known = HashMap<String, String>()
 
-private val byTitle: Comparator<Song> = compareBy({ naturalSortKey(it.title) }, { naturalSortKey(it.artist.orEmpty()) }, { it.id })
+    fun of(text: String?): String = known.getOrPut(text.orEmpty()) { naturalSortKey(text.orEmpty()) }
+}
+
+// An album's songs in the album's own order: disc, then track.
+private fun inAlbum(keys: SortKeys): Comparator<Song> = compareBy<Song>({ keys.of(it.album) }, { it.albumId.orEmpty() }, { it.discNumber ?: 0 }, { it.track ?: 0 }, { keys.of(it.title) }, { it.id })
+
+private fun byTitle(keys: SortKeys): Comparator<Song> = compareBy({ keys.of(it.title) }, { keys.of(it.artist) }, { it.id })
 
 // Songs in the chosen order, with the same keys and tie-breaks the phone's
 // song lists use: names by their sort key (so "The Beatles" files under B),
@@ -60,15 +68,18 @@ private val byTitle: Comparator<Song> = compareBy({ naturalSortKey(it.title) }, 
 fun sortSongs(songs: List<Song>, order: SortOrder): List<Song> {
     val by = order.by as? SongSort ?: return songs
     val down = order.descending
+    val keys = SortKeys()
+    val inAlbum = inAlbum(keys)
+    val byTitle = byTitle(keys)
     return when (by) {
-        SongSort.Title -> sortedByKey(songs, down, { naturalSortKey(it.title) }, byTitle)
-        SongSort.Artist -> sortedByKey(songs, down, { naturalSortKey(it.artist.orEmpty()) }, inAlbum)
-        SongSort.Album -> sortedByKey(songs, down, { naturalSortKey(it.album.orEmpty()) }, compareBy<Song> { naturalSortKey(it.artist.orEmpty()) }.then(inAlbum))
+        SongSort.Title -> sortedByKey(songs, down, { keys.of(it.title) }, byTitle)
+        SongSort.Artist -> sortedByKey(songs, down, { keys.of(it.artist) }, inAlbum)
+        SongSort.Album -> sortedByKey(songs, down, { keys.of(it.album) }, compareBy<Song> { keys.of(it.artist) }.then(inAlbum))
         SongSort.Year -> sortedByKey(songs, down, { it.year?.takeIf { y -> y > 0 } }, inAlbum)
         SongSort.Length -> sortedByKey(songs, down, { it.duration.takeIf { d -> d > 0 } }, byTitle)
         SongSort.RecentlyAdded -> sortedByKey(songs, down, { serverTime(it.created) }, inAlbum)
         SongSort.MostPlayed, SongSort.RecentlyPlayed -> {
-            val base = sortedByKey(songs, false, { naturalSortKey(it.title) }, byTitle)
+            val base = sortedByKey(songs, false, { keys.of(it.title) }, byTitle)
             val listening = songs.associate { it.id to Listening((it.playCount ?: 0).toInt(), serverTime(it.played) ?: 0) }
             byListening(base, { it.id }, listening, mostPlayed = by == SongSort.MostPlayed, descending = down)
         }
@@ -83,25 +94,30 @@ fun sortSongs(songs: List<Song>, order: SortOrder): List<Song> {
 fun sortAlbums(albums: List<Album>, order: SortOrder): List<Album> {
     val by = order.by as? AlbumSort ?: return albums
     val down = order.descending
-    val byName: Comparator<Album> = compareBy({ naturalSortKey(it.name) }, { naturalSortKey(it.artist) }, { it.id })
+    val keys = SortKeys()
+    val byName: Comparator<Album> = compareBy({ keys.of(it.name) }, { keys.of(it.artist) }, { it.id })
     return when (by) {
-        AlbumSort.Title -> sortedByKey(albums, down, { naturalSortKey(it.name) }, byName)
-        AlbumSort.Artist -> sortedByKey(albums, down, { naturalSortKey(it.artist) }, compareBy<Album>({ it.year ?: 0 }, { naturalSortKey(it.name) }, { it.id }))
+        AlbumSort.Title -> sortedByKey(albums, down, { keys.of(it.name) }, byName)
+        AlbumSort.Artist -> sortedByKey(albums, down, { keys.of(it.artist) }, compareBy<Album>({ it.year ?: 0 }, { keys.of(it.name) }, { it.id }))
         AlbumSort.Year -> sortedByKey(albums, down, { it.year?.takeIf { y -> y > 0 } }, byName)
         AlbumSort.RecentlyAdded -> sortedByKey(albums, down, { serverTime(it.created) }, byName)
         AlbumSort.SongCount -> sortedByKey(albums, down, { it.songCount }, byName)
         AlbumSort.Length -> sortedByKey(albums, down, { it.duration.takeIf { d -> d > 0 } }, byName)
         AlbumSort.MostPlayed, AlbumSort.RecentlyPlayed -> {
-            val base = sortedByKey(albums, false, { naturalSortKey(it.name) }, byName)
+            val base = sortedByKey(albums, false, { keys.of(it.name) }, byName)
             val listening = albums.associate { it.id to Listening(it.playCount.toInt(), serverTime(it.played) ?: 0) }
             byListening(base, { it.id }, listening, mostPlayed = by == AlbumSort.MostPlayed, descending = down)
         }
     }
 }
 
+// Things A to Z by the sort key of their name, each key worked out once.
+fun <T> sortedByName(items: List<T>, name: (T) -> String): List<T> =
+    items.map { naturalSortKey(name(it)) to it }.sortedBy { it.first }.map { it.second }
+
 // Songs that have play data, most recently played first: the History page.
 fun recentlyPlayed(songs: List<Song>): List<Song> =
-    songs.filter { serverTime(it.played) != null }.sortedByDescending { serverTime(it.played) }
+    songs.mapNotNull { song -> serverTime(song.played)?.let { song to it } }.sortedByDescending { it.second }.map { it.first }
 
 // "3:07", or "1:02:03" for an hour or more.
 fun lengthText(seconds: Int): String {

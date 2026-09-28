@@ -98,6 +98,9 @@ fun main(args: Array<String>) {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
     val accounts = Accounts(settings, SecretStore.forSystem(), http)
+    // Read here, before the window, since the password store can wait on
+    // the listener (a locked keyring asks to be unlocked).
+    val restored = accounts.restore()
     val os = currentOs()
     val systemCalm = systemReducesMotion(os)
     val icon = appIcon()
@@ -108,7 +111,7 @@ fun main(args: Array<String>) {
             var made: AppState? = null
             // Server songs are signed with whoever is signed in when they queue.
             val opened = openPlayer(settings, scope) { made?.connection?.client }
-            AppState(settings, accounts, http, scope, os, opened.player).also {
+            AppState(settings, accounts, http, scope, os, opened.player, restored = restored).also {
                 made = it
                 opened.problem?.let { problem -> it.notice = problem }
             }

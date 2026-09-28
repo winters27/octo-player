@@ -13,6 +13,8 @@ import app.winters.octo.subsonic.ServerInfo
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.normalizeServerUrl
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 
@@ -109,17 +111,18 @@ class Accounts(
             openSubsonic = facts.info.openSubsonic,
             extensions = facts.extensionKeys,
         )
-        // A different server or user replaces the old one, whose password goes.
-        settings.current.server?.let { old ->
-            if (old.address != saved.address || old.username != saved.username) {
+        val old = settings.current.server
+        val note = withContext(keychain) {
+            // A different server or user replaces the old one, whose password goes.
+            if (old != null && (old.address != saved.address || old.username != saved.username)) {
                 runCatching { secrets.delete(secretAccount(old.username, old.address)) }
             }
-        }
-        val note = try {
-            secrets.write(secretAccount(saved.username, saved.address), password)
-            if (secrets.lasting) null else "This computer has no password store, so Octo will ask for the password each time it opens."
-        } catch (e: SecretStoreException) {
-            "Octo couldn't save the password (${e.message}), so it will ask for it next time."
+            try {
+                secrets.write(secretAccount(saved.username, saved.address), password)
+                if (secrets.lasting) null else "This computer has no password store, so Octo will ask for the password each time it opens."
+            } catch (e: SecretStoreException) {
+                "Octo couldn't save the password (${e.message}), so it will ask for it next time."
+            }
         }
         settings.update { it.copy(server = saved) }
         memory = password
@@ -128,6 +131,8 @@ class Accounts(
 
     // The saved server, ready to use, or null when there is none or its
     // password is not in the store. Nothing is asked of the server here.
+    // The store can wait on the listener (a locked keyring asks to be
+    // unlocked), so this is called before the window opens, not on it.
     fun restore(): Connection? {
         val saved = settings.current.server ?: return null
         val password = memory ?: runCatching { secrets.read(secretAccount(saved.username, saved.address)) }.getOrNull() ?: return null
@@ -137,17 +142,23 @@ class Accounts(
     // The server signed in to last, for filling in the sign-in page.
     val last: SavedServer? get() = settings.current.server
 
-    // Forgets the password and the server.
-    fun signOut() {
-        settings.current.server?.let { old -> runCatching { secrets.delete(secretAccount(old.username, old.address)) } }
+    // Forgets the server at once, and the password off the window's thread.
+    suspend fun signOut() {
+        val old = settings.current.server
         memory = null
         settings.update { it.copy(server = null) }
+        if (old != null) withContext(keychain) { runCatching { secrets.delete(secretAccount(old.username, old.address)) } }
     }
 
     val storeLabel: String get() = secrets.label
 
     // The password of this run, for a store that cannot keep it.
     @Volatile private var memory: String? = null
+
+    // The system's store is slow at times, and can wait on the listener,
+    // so it is only used off the window's thread, one call at a time so a
+    // sign-out's delete cannot land after the next sign-in's write.
+    private val keychain = Dispatchers.IO.limitedParallelism(1)
 
     private fun clientFor(saved: SavedServer, password: String): SubsonicClient {
         val url = saved.address.toHttpUrlOrNull() ?: normalizeServerUrl(saved.address)!!
