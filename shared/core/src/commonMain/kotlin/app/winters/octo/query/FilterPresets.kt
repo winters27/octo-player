@@ -31,6 +31,22 @@ object FilterPresets {
 
     // A decade, from the year it starts: 1990 is 1990 to 1999.
     fun decade(start: Int) = QueryRule(QueryField.Year, QueryOp.Between, number = start.toLong(), to = start + 9L)
+
+    // More that a live list offers beside the quick ones.
+    fun playedInTheLast(days: Int) = QueryRule(QueryField.LastPlayed, QueryOp.InTheLast, days = days)
+    fun notPlayedInTheLast(days: Int) = QueryRule(QueryField.LastPlayed, QueryOp.NotInTheLast, days = days)
+    fun playedAtLeast(times: Int) = QueryRule(QueryField.Plays, QueryOp.AtLeast, number = times.toLong())
+    fun shorterThan(seconds: Int) = QueryRule(QueryField.Duration, QueryOp.AtMost, number = seconds.toLong())
+    fun longerThan(seconds: Int) = QueryRule(QueryField.Duration, QueryOp.AtLeast, number = seconds.toLong())
+    fun artist(name: String) = QueryRule(QueryField.Artist, QueryOp.Is, text = name)
+}
+
+// The artists a list's songs are by, A to Z, each once however it is spelt
+// in case or accents.
+fun <T> artistsIn(songs: List<T>, fields: SongFields<T>): List<String> {
+    val seen = HashMap<String, String>()
+    songs.forEach { song -> fields.artist(song)?.takeIf(String::isNotBlank)?.let { name -> seen.getOrPut(foldText(name)) { name.trim() } } }
+    return seen.values.sortedBy(::naturalSortKey)
 }
 
 // The genres a list's songs are filed under, A to Z, each once however it
