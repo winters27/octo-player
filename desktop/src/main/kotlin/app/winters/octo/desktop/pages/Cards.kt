@@ -40,12 +40,14 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import app.winters.octo.desktop.ui.LocalKeyColour
 import app.winters.octo.desktop.ui.keyRim
+import app.winters.octo.design.GlazeSegments
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.SeparatorColor
 import app.winters.octo.design.SliderLook
+import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 
 // The parts the Settings and Sound pages are made of.
@@ -134,6 +136,23 @@ internal fun SwitchLine(title: String, detail: String, on: Boolean, change: (Boo
             Txt(detail, OctoType.caption, OctoColors.TextMuted, maxLines = 2)
         }
         OctoSwitch(on, change)
+    }
+}
+
+// A setting with a few choices: its name and what the chosen one does,
+// with the choices beside them.
+@Composable
+internal fun <T> ChoiceLine(title: String, detail: String, options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().cardLine().padding(vertical = Space.L),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.Xl),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Txt(title, OctoType.bodySmall)
+            Txt(detail, OctoType.caption, OctoColors.TextMuted, maxLines = 2)
+        }
+        GlazeSegments(options, selected, label, onSelect)
     }
 }
 

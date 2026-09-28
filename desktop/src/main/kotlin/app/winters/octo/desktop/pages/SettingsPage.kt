@@ -17,14 +17,19 @@ import app.winters.octo.desktop.setAutoplay
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.nav.shortcutList
+import app.winters.octo.desktop.settings.AmbienceMotion
+import app.winters.octo.desktop.settings.AmbienceStyle
+import app.winters.octo.desktop.settings.Appearance
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.WashPrefs
 import app.winters.octo.desktop.system.SystemSettingsCard
 import app.winters.octo.desktop.ui.LocalBottomRoom
+import app.winters.octo.desktop.ui.LocalSoftwareDrawing
 import app.winters.octo.desktop.ui.PageTitle
 import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.rememberListState
 import app.winters.octo.design.GlazeCapsule
+import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -58,17 +63,30 @@ fun SettingsPage(app: AppState, visit: Visit) {
         }
         item(key = "look") {
             SettingsCard("Appearance") {
-                SwitchLine("Ambient glow", "A soft wash of the playing song's colours behind the window.", settings.appearance.ambientGlow) { on ->
-                    app.settings.update { it.copy(appearance = it.appearance.copy(ambientGlow = on)) }
+                val look = settings.appearance
+                fun appearance(edit: (Appearance) -> Appearance) = app.settings.update { it.copy(appearance = edit(it.appearance)) }
+                // Off, or one of the two looks; null stands for off.
+                val chosen = if (look.ambientGlow) look.ambience else null
+                ChoiceLine("Ambience", ambienceHelp(chosen), listOf(null, AmbienceStyle.Glow, AmbienceStyle.Immersive), chosen, ::ambienceName) { style ->
+                    appearance { if (style == null) it.copy(ambientGlow = false) else it.copy(ambientGlow = true, ambience = style) }
                 }
-                if (settings.appearance.ambientGlow) {
-                    SliderLine("Strength", "${(settings.appearance.glowStrength * 100).roundToInt()}%", settings.appearance.glowStrength, { value ->
-                        app.settings.update { it.copy(appearance = it.appearance.copy(glowStrength = value)) }
+                if (look.ambientGlow) {
+                    SliderLine("Strength", "${(look.glowStrength * 100).roundToInt()}%", look.glowStrength, { value ->
+                        appearance { it.copy(glowStrength = value) }
                     })
                 }
-                val look = settings.appearance
+                if (chosen == AmbienceStyle.Immersive) {
+                    val detail = when {
+                        LocalSoftwareDrawing.current -> "Holds still here: this computer draws Octo without its graphics card."
+                        LocalReduceMotion.current -> "Holds still while motion is reduced, by Calm motion or your system."
+                        else -> motionHelp(look.ambienceMotion)
+                    }
+                    ChoiceLine("Movement", detail, AmbienceMotion.entries, look.ambienceMotion, ::motionName) { motion ->
+                        appearance { it.copy(ambienceMotion = motion) }
+                    }
+                }
                 fun wash(edit: (WashPrefs) -> WashPrefs) = app.settings.update { it.copy(appearance = it.appearance.copy(wash = edit(it.appearance.wash))) }
-                SwitchLine("Calm motion", "The player's background holds still, and lyrics move without springs or blooms.", look.calmMotion) { on ->
+                SwitchLine("Calm motion", "The player's background and the window's colours hold still, and lyrics move without springs or blooms.", look.calmMotion) { on ->
                     app.settings.update { it.copy(appearance = it.appearance.copy(calmMotion = on)) }
                 }
                 SwitchLine("Moving player background", "The cover's colours drift slowly behind the full player.", look.wash.moving) { on -> wash { it.copy(moving = on) } }
@@ -142,6 +160,32 @@ fun SettingsPage(app: AppState, visit: Visit) {
     }
 }
 
+// The ambience choices by name, null being off.
+private fun ambienceName(style: AmbienceStyle?): String = when (style) {
+    null -> "Off"
+    AmbienceStyle.Glow -> "Glow"
+    AmbienceStyle.Immersive -> "Immersive"
+}
+
+// What each ambience choice looks like, for the line under its name.
+private fun ambienceHelp(style: AmbienceStyle?): String = when (style) {
+    null -> "The plain dark background."
+    AmbienceStyle.Glow -> "A soft glow of the playing song's colours across the top of the window."
+    AmbienceStyle.Immersive -> "The full player's wash of the cover's colours, behind the whole window."
+}
+
+private fun motionName(motion: AmbienceMotion): String = when (motion) {
+    AmbienceMotion.Still -> "Still"
+    AmbienceMotion.Gentle -> "Gentle"
+    AmbienceMotion.Full -> "Full"
+}
+
+// When each movement is the one to pick.
+private fun motionHelp(motion: AmbienceMotion): String = when (motion) {
+    AmbienceMotion.Still -> "Holds still. Easiest on a laptop's battery or an older computer."
+    AmbienceMotion.Gentle -> "Drifts slowly while music plays, and rests when it stops."
+    AmbienceMotion.Full -> "Drifts at the full player's pace while music plays."
+}
 
 // The version the build stamped, or "Development build" when run from source
 // without it.

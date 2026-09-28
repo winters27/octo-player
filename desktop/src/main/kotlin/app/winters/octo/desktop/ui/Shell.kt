@@ -91,6 +91,7 @@ import app.winters.octo.desktop.pages.SettingsPage
 import app.winters.octo.desktop.pages.SignInPage
 import app.winters.octo.desktop.pages.SongsPage
 import app.winters.octo.desktop.pages.SoundPage
+import app.winters.octo.desktop.settings.AmbienceStyle
 import app.winters.octo.desktop.window.Frame
 import app.winters.octo.desktop.window.MacLightsRoom
 import app.winters.octo.desktop.window.ResizeEdges
@@ -315,11 +316,13 @@ private fun rememberKeyColour(app: AppState): Color {
     return key
 }
 
-// A soft wash of the playing song's colours across the top of the window:
-// its cover, blurred far past recognition and kept faint. Garnish, and off
-// when the listener turns it off. With no cover to show, Octo's own
-// colours stand in, still and very dim, so the glass has something behind
-// it. Before signing in they move, behind the sign-in card.
+// The window's colours, behind everything. The glow: a soft wash of the
+// playing song's colours across the top of the window, its cover blurred
+// far past recognition and kept faint. Garnish, and off when the listener
+// turns it off. With no cover to show, Octo's own colours stand in, still
+// and very dim, so the glass has something behind it. Before signing in
+// they move, behind the sign-in card. Immersive instead lays the full
+// player's moving wash behind the whole window.
 @Composable
 private fun BoxScope.AmbientGlow(app: AppState) {
     val settings by app.settings.state.collectAsState()
@@ -331,21 +334,28 @@ private fun BoxScope.AmbientGlow(app: AppState) {
         return
     }
     if (!look.ambientGlow) return
-    if (cover == null) {
-        OctoAmbience(app, moving = false, veil = 0.8f - 0.3f * look.glowStrength.coerceIn(0f, 1f))
+    if (look.ambience == AmbienceStyle.Immersive) {
+        ImmersiveAmbience(app)
         return
     }
+    if (cover == null) {
+        OctoAmbience(app, moving = false, veil = 1f - quietOpacity(look.glowStrength))
+        return
+    }
+    CoverGlow(look.glowStrength) { blurred -> Cover(cover, blurred, shape = RectangleShape) }
+}
+
+// The glow itself: `picture` draws the cover into the blurred modifier it
+// is given, faint and fading into the page below.
+@Composable
+internal fun CoverGlow(strength: Float, picture: @Composable (Modifier) -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
             .height(Ambience.Height)
-            .alpha(0.12f + 0.38f * look.glowStrength.coerceIn(0f, 1f)),
+            .alpha(0.12f + 0.38f * strength.coerceIn(0f, 1f)),
     ) {
-        Cover(
-            cover,
-            Modifier.fillMaxSize().blur(Ambience.Blur, BlurredEdgeTreatment.Unbounded),
-            shape = RectangleShape,
-        )
+        picture(Modifier.fillMaxSize().blur(Ambience.Blur, BlurredEdgeTreatment.Unbounded))
         // Fades into the page below, so there is no edge.
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, OctoColors.Background))))
     }

@@ -29,6 +29,7 @@ import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.CertificateQuestion
 import app.winters.octo.desktop.server.SignInOutcome
+import app.winters.octo.desktop.settings.AmbienceStyle
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.songJson
@@ -455,6 +456,111 @@ class ScreenShotsTest {
             scene.close()
             player.close()
         }
+    }
+
+    // The window with the Immersive ambience, over a dark cover and over
+    // the brightest ones (yellow, white, green), on the pages where words
+    // sit straight on it; then the glow over the same yellow, and Settings.
+    // Saved as immersive-*.png.
+    @Test
+    fun drawTheImmersiveAmbience() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        val out = File("build/shots").apply { mkdirs() }
+        FakeServer().use { server ->
+            val kinds = listOf("dark", "yellow", "white", "green")
+            val songs = kinds.flatMapIndexed { k, kind ->
+                (1..4).map { n ->
+                    val i = k * 4 + n
+                    songJson("s$i", "${kind.replaceFirstChar { it.uppercase() }} song $n", artist = "The ${kind.replaceFirstChar { it.uppercase() }}s", album = "A $kind record", albumId = "a-$kind", duration = 200 + i * 7).dropLast(1) +
+                        ""","artistId":"r-$kind","coverArt":"c-$kind","suffix":"flac","bitDepth":16,"samplingRate":44100,"track":$n,"year":2020,"genre":"Pop","playCount":$i,"played":"2026-09-27T21:${10 + i}:00Z","created":"2026-09-0${1 + n}T10:00:00Z"}"""
+                }
+            }.joinToString(",")
+            val albums = kinds.joinToString(",") { kind ->
+                """{"id":"a-$kind","name":"A $kind record","artist":"The ${kind.replaceFirstChar { it.uppercase() }}s","artistId":"r-$kind","year":2020,"songCount":4,"duration":900,"coverArt":"c-$kind","created":"2026-09-01T10:00:00Z"}"""
+            }
+            server.answer("ping", type = "octo")
+            server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[]""", type = "octo")
+            server.answer("getAlbumList2", """"albumList2":{"album":[$albums]}""")
+            server.answer("getArtists", """"artists":{"index":[]}""")
+            server.answer("search3", """"searchResult3":{"song":[$songs]}""")
+            server.answer("getStarred2", """"starred2":{}""")
+            server.answer("getPlaylists", """"playlists":{"playlist":[]}""")
+            server.fileBy("getCoverArt") { request -> plainCover(request.url.queryParameter("id").orEmpty().removePrefix("c-")) }
+
+            val settings = SettingsStore(File(folder.root, "settings.json"))
+            settings.update { it.copy(lyrics = it.lyrics.copy(online = false), appearance = it.appearance.copy(ambience = AmbienceStyle.Immersive)) }
+            val http = OkHttpClient()
+            val accounts = Accounts(settings, SessionOnlySecrets(), http)
+            lateinit var app: AppState
+            SwingUtilities.invokeAndWait {
+                app = AppState(settings, accounts, http, CoroutineScope(SupervisorJob() + Dispatchers.Main), DesktopOs.Windows, lyricsLibrary = OnlineLyrics(http, server.address.toHttpUrl()), restored = null)
+            }
+            val scene = ImageComposeScene(1440, 900, Density(1f)) {
+                CompositionLocalProvider(LocalTyping provides TypingState()) { Shell(app, null) {} }
+            }
+            fun shot(name: String, settleMs: Long = 1_500) {
+                val begin = System.currentTimeMillis()
+                var t = 0L
+                while (System.currentTimeMillis() < begin + settleMs) {
+                    SwingUtilities.invokeAndWait { scene.render(t).close() }
+                    Thread.sleep(30)
+                    t = (System.currentTimeMillis() - begin) * 1_000_000
+                }
+                File(out, "immersive-$name.png").writeBytes(scene.render(t).encodeToData(EncodedImageFormat.PNG)!!.bytes)
+            }
+            val done = runBlocking { accounts.signIn(server.address, "winters", "pw") } as SignInOutcome.Done
+            SwingUtilities.invokeAndWait { app.signedIn(done.connection) }
+            shot("nothing-playing", 3_000)
+            for (kind in kinds) {
+                SwingUtilities.invokeAndWait {
+                    val list = app.library!!.index!!.songs.filter { it.albumId == "a-$kind" }.sortedBy { it.track }
+                    app.play(list, 0)
+                    app.navigator.go(Page.Songs)
+                }
+                shot("$kind-songs", 2_500)
+                SwingUtilities.invokeAndWait { app.navigator.go(Page.Home) }
+                shot("$kind-home")
+            }
+            // The strongest setting over the yellow cover.
+            SwingUtilities.invokeAndWait {
+                app.play(app.library!!.index!!.songs.filter { it.albumId == "a-yellow" }.sortedBy { it.track }, 0)
+                app.settings.update { it.copy(appearance = it.appearance.copy(glowStrength = 1f)) }
+                app.navigator.go(Page.Songs)
+            }
+            shot("yellow-songs-strongest", 2_500)
+            SwingUtilities.invokeAndWait { app.settings.update { it.copy(appearance = it.appearance.copy(glowStrength = 0.5f)) } }
+            SwingUtilities.invokeAndWait { app.navigator.go(Page.Settings) }
+            shot("settings")
+            // The glow, as before, over the same cover, for comparison.
+            SwingUtilities.invokeAndWait {
+                app.settings.update { it.copy(appearance = it.appearance.copy(ambience = AmbienceStyle.Glow)) }
+                app.navigator.go(Page.Songs)
+            }
+            shot("glow-yellow-songs")
+            SwingUtilities.invokeAndWait { app.navigator.go(Page.Settings) }
+            shot("settings-glow")
+            scene.close()
+        }
+    }
+
+    // A cover mostly of one colour, with a shape and a band of another:
+    // dark (navy and wine), or one of the brightest a cover can be.
+    private fun plainCover(kind: String): ByteArray {
+        val (ground, shape) = when (kind) {
+            "yellow" -> 0xFFFFE000 to 0xFFFF8A00
+            "white" -> 0xFFFFFFFF to 0xFFF2EAD8
+            "green" -> 0xFF00FF40 to 0xFFB0FF00
+            else -> 0xFF101830 to 0xFF8A1C3C
+        }
+        val surface = org.jetbrains.skia.Surface.makeRasterN32Premul(300, 300)
+        val canvas = surface.canvas
+        canvas.clear(ground.toInt())
+        val paint = org.jetbrains.skia.Paint()
+        paint.color = shape.toInt()
+        canvas.drawCircle(150f, 140f, 90f, paint)
+        paint.color = 0xFF202020.toInt()
+        canvas.drawRect(org.jetbrains.skia.Rect.makeXYWH(30f, 250f, 160f, 24f), paint)
+        return surface.makeImageSnapshot().encodeToData(EncodedImageFormat.PNG)!!.bytes
     }
 
     // A cover of soft coloured shapes, as a PNG, in colours and places of
