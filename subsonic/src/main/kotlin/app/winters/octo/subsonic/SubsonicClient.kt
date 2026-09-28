@@ -98,6 +98,17 @@ class SubsonicClient(
     suspend fun acquisitions(): List<Acquisition> =
         get("getAcquisitions", key = "acquisitions", serializer = Acquisitions.serializer(), default = Acquisitions()).acquisition
 
+    // What the signed-in user may do to the library's files. Only for
+    // servers that list the octoLibraryActions extension.
+    suspend fun libraryActions(): LibraryActions =
+        get("getLibraryActions", key = "libraryActions", serializer = LibraryActions.serializer(), default = LibraryActions())
+
+    // Asks the server to act on one library song's file; for now only
+    // LIBRARY_ACTION_REMOVE, which moves it out of the library into the
+    // server's trash. Never a rating: on some servers a low rating deletes.
+    suspend fun libraryAction(id: String, action: String = LIBRARY_ACTION_REMOVE): LibraryActionResult =
+        get("libraryAction", mapOf("id" to id, "action" to action), "libraryAction", LibraryActionResult.serializer())
+
     // One song, by its id on the server.
     suspend fun song(id: String): Song = get("getSong", mapOf("id" to id), "song", Song.serializer())
 
