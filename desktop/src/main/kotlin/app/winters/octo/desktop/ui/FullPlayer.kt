@@ -106,7 +106,9 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
     }
     val ink = if (cover?.darkWords == true) DarkInk else Color.White
     val dolly = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { dolly.animateTo(1f, tween(800, delayMillis = 20, easing = DollyIn)) }
+    val calm = LocalReduceMotion.current
+    // With motion reduced, the background is simply there.
+    LaunchedEffect(Unit) { if (calm) dolly.snapTo(1f) else dolly.animateTo(1f, tween(800, delayMillis = 20, easing = DollyIn)) }
 
     // It takes every click and scroll on its background, so none reach the
     // page hidden under it.
