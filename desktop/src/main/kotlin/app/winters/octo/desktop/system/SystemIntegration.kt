@@ -16,12 +16,10 @@ import androidx.compose.ui.window.isTraySupported
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
-import app.winters.octo.desktop.window.ScreenArea
+import app.winters.octo.desktop.window.screenAreas
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.awt.Desktop
-import java.awt.GraphicsEnvironment
-import java.awt.Toolkit
 import java.awt.desktop.AppReopenedListener
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
@@ -225,17 +223,6 @@ class SystemIntegration(
         runCatching { notifier?.close() }
     }
 }
-
-// The usable part of every screen, without taskbars and menu bars.
-fun screenAreas(): List<ScreenArea> = runCatching {
-    val toolkit = Toolkit.getDefaultToolkit()
-    GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices.map { device ->
-        val config = device.defaultConfiguration
-        val b = config.bounds
-        val i = toolkit.getScreenInsets(config)
-        ScreenArea((b.x + i.left).toFloat(), (b.y + i.top).toFloat(), (b.width - i.left - i.right).toFloat(), (b.height - i.top - i.bottom).toFloat())
-    }
-}.getOrDefault(emptyList())
 
 // A picture from the app's resources.
 fun picture(resource: String): Painter? = runCatching {
