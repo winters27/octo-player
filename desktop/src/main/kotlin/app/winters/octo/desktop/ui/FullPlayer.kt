@@ -2,6 +2,7 @@ package app.winters.octo.desktop.ui
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -34,6 +35,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.text.style.TextAlign
@@ -57,13 +59,35 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.Txt
+import app.winters.octo.player.immersive.CoverFadeMs
+import app.winters.octo.player.immersive.DarkInkArgb
+import app.winters.octo.player.immersive.FinalGain
+import app.winters.octo.player.immersive.WashInk
 import app.winters.octo.player.immersive.WashTuning
+import app.winters.octo.player.immersive.inkOver
 import app.winters.octo.player.immersive.paceBpm
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.delay
 
 // The dark words used over a light background, as on the phone.
-val DarkInk = Color(0xFF141416)
+val DarkInk = Color(DarkInkArgb)
+
+// What the full player's words need over this cover's wash, drawn over the
+// page colour: dark or white, and how much of the wash shows so they read
+// on every part of it.
+fun WashCover.playerInk(): WashInk = inkOver(range.scaled(FinalGain), OctoColors.Background.toArgb())
+
+// The words' colour for that.
+fun WashInk?.color(): Color = if (this?.dark == true) DarkInk else Color.White
+
+// The full player's background: the moving wash of the cover, dimmed as its
+// words need (`playerInk`), easing between covers.
+@Composable
+internal fun PlayerBackdrop(cover: WashCover?, bpm: Float, fps: Int, speed: Float, moving: Boolean, dolly: () -> Float) {
+    val ink = remember(cover) { cover?.playerInk() }
+    val show by animateFloatAsState(ink?.show ?: 1f, tween(CoverFadeMs.toInt()), label = "player wash")
+    ImmersiveWash(cover, bpm, fps, speed, moving, dolly = dolly, opacity = { show })
+}
 
 // The way in: the background dollies in over 0.8 s after 0.02 s, quick then
 // settling, as on the phone.
@@ -89,7 +113,8 @@ fun rememberFramePosition(player: DesktopPlayer): State<Long> {
 // The player filling the window: the moving wash of the cover's colours
 // behind, the cover, the song, the seek line, the transport, volume and the
 // heart on the left, and the lyrics or the queue on the right. The words
-// turn dark over a light wash. Escape closes it, as the collapse button does.
+// turn dark over a wash light all over; otherwise they stay white and the
+// wash dims as far as they need. Escape closes it, as the collapse button does.
 // The wash fills the whole window; `top` is the room the title bar keeps.
 @Composable
 fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compose.ui.unit.Dp = 0.dp) {
@@ -104,7 +129,7 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
     LaunchedEffect(song.coverArt, tuning, app.connection) {
         cover = app.washCovers.prepare(app.connection?.client, song.coverArt, tuning)
     }
-    val ink = if (cover?.darkWords == true) DarkInk else Color.White
+    val ink = remember(cover) { cover?.playerInk() }.color()
     val dolly = remember { Animatable(0f) }
     val calm = LocalReduceMotion.current
     // With motion reduced, the background is simply there.
@@ -113,7 +138,7 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
     // It takes every click and scroll on its background, so none reach the
     // page hidden under it.
     Box(modifier.swallowClicks().background(OctoColors.Background)) {
-        ImmersiveWash(
+        PlayerBackdrop(
             cover,
             paceBpm(song.bpm, wash.useBpm),
             wash.fps,

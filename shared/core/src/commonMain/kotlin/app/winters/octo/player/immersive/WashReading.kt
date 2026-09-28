@@ -11,10 +11,79 @@ val ContrastRange = 0.5f..2f
 val FpsChoices = listOf(30, 60, 90, 120)
 val SpeedRange = 5..100
 
-// Whether words over a wash made from a cover with this main colour
-// should be dark: when the colour, prepared as the covers are, is light.
-fun washDarkWords(dominant: Int?, tuning: WashTuning): Boolean =
-    dominant != null && washIsLight(prepareColor(dominant, tuning))
+// The darkest and the brightest a background gets, as colours.
+data class WashRange(val low: Int, val high: Int) {
+    // Both dimmed (or brightened) by `gain`, as the wash's final pass does.
+    fun scaled(gain: Float): WashRange = WashRange(scale(low, gain), scale(high, gain))
+
+    companion object {
+        // A background of this one colour, or of these few (a flat fill, the
+        // classic mesh).
+        fun of(vararg colours: Int): WashRange =
+            WashRange(colours.minBy { relativeLuminance(it) }, colours.maxBy { relativeLuminance(it) })
+    }
+}
+
+// The range of a picture as a background drawn blurred from it shows: the
+// picture averaged in `cells` x `cells` blocks (16 pixels each over the
+// 512 square), and the darkest and brightest block. A patch of colour much
+// smaller than a block is blurred away; one as big survives.
+fun washRange(pixels: IntArray, width: Int, cells: Int = 32): WashRange {
+    val height = pixels.size / width
+    val bw = maxOf(1, width / cells)
+    val bh = maxOf(1, height / cells)
+    var low = 0
+    var high = 0
+    var lowL = Double.MAX_VALUE
+    var highL = -1.0
+    for (cy in 0 until height / bh) for (cx in 0 until width / bw) {
+        var r = 0L
+        var g = 0L
+        var b = 0L
+        for (y in cy * bh until (cy + 1) * bh) for (x in cx * bw until (cx + 1) * bw) {
+            val p = pixels[y * width + x]
+            r += p shr 16 and 0xFF
+            g += p shr 8 and 0xFF
+            b += p and 0xFF
+        }
+        val n = bw * bh
+        val mean = (0xFF shl 24) or ((r / n).toInt() shl 16) or ((g / n).toInt() shl 8) or (b / n).toInt()
+        val l = relativeLuminance(mean)
+        if (l < lowL) { lowL = l; low = mean }
+        if (l > highL) { highL = l; high = mean }
+    }
+    return WashRange(low, high)
+}
+
+private fun scale(argb: Int, gain: Float): Int {
+    fun channel(shift: Int) = ((argb shr shift and 0xFF) * gain).roundToInt().coerceIn(0, 255)
+    return (0xFF shl 24) or (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
+}
+
+// The dark words used over a light background, on the phone and the desktop.
+const val DarkInkArgb = 0xFF141416.toInt()
+private const val WhiteArgb = 0xFFFFFFFF.toInt()
+
+// The contrast the player's words keep against what is drawn under them,
+// the usual minimum for reading.
+const val PlayerContrast = 4.5
+
+// What words over a background need: whether they are dark, and how much of
+// the background shows over the colour under it (`show`, 1 for all of it)
+// so that they read.
+data class WashInk(val dark: Boolean, val show: Float)
+
+// The words' colour for a background spanning `range`, drawn over `under`.
+// Dark words when they read on its darkest part as it is and white ones
+// would need it dimmed; otherwise white words, with the background dimmed
+// just enough that they read on its brightest part. A background both light
+// and dark in places (a teal cover with a deep red shape) gets white words
+// and a little dimming, never dark words over its dark half.
+fun inkOver(range: WashRange, under: Int, contrast: Double = PlayerContrast): WashInk {
+    val white = readableAlpha(range.high, under, WhiteArgb, contrast, 1f)
+    val darkReads = contrastRatio(DarkInkArgb, range.low) >= contrast
+    return if (darkReads && white < 1f) WashInk(dark = true, show = 1f) else WashInk(dark = false, show = white)
+}
 
 // The brightest the wash gets over a prepared cover, as a colour: the
 // pixel at the 98th percentile of brightness (every `step`th pixel is

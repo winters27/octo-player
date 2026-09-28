@@ -1,5 +1,6 @@
 package app.winters.octo.player
 
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.CatalogDao
@@ -23,6 +24,10 @@ import app.winters.octo.playback.QueueEntry
 import app.winters.octo.playback.SleepState
 import app.winters.octo.playback.SleepTimer
 import app.winters.octo.playback.isRadio
+import app.winters.octo.player.immersive.BackgroundMode
+import app.winters.octo.player.immersive.WashArtwork
+import app.winters.octo.player.immersive.drawnMode
+import app.winters.octo.player.immersive.drawnRange
 import app.winters.octo.player.immersive.over
 import app.winters.octo.sound.SoundEngine
 import app.winters.octo.ui.common.Feedback
@@ -66,6 +71,7 @@ class PlayerViewModel @Inject constructor(
     private val editor: QueueEditor,
     private val playlists: PlaylistStore,
     private val feedback: Feedback,
+    private val artwork: WashArtwork,
 ) : ViewModel() {
     val now: StateFlow<NowPlaying> = playback.now
     val upNext: StateFlow<List<QueueEntry>> = playback.upNext
@@ -108,12 +114,24 @@ class PlayerViewModel @Inject constructor(
 
     // Colours follow the artwork, not the song, so an album plays through
     // without the background flickering. `content` is the colour for the
-    // player's words and icons over the chosen background.
-    val colors: StateFlow<PlayerColors> = playback.now
-        .map { it.artwork }
-        .distinctUntilChanged()
-        .mapLatest(palette::colorsFor)
-        .combine(settings.prefs.map { it.background }.distinctUntilChanged()) { colors, background -> colors.over(background) }
+    // player's words and icons, decided from what the chosen background
+    // draws (the prepared cover, shared with the background), and `show`
+    // how far the background dims for them.
+    val colors: StateFlow<PlayerColors> = combine(
+        playback.now.map { it.artwork }.distinctUntilChanged(),
+        settings.prefs.map { it.background to it.liveBackground }.distinctUntilChanged(),
+    ) { ref, prefs -> ref to prefs }
+        .mapLatest { (ref, prefs) ->
+            val (background, live) = prefs
+            val colors = palette.colorsFor(ref)
+            val mode = drawnMode(background.mode, Build.VERSION.SDK_INT)
+            val cover = if (mode == BackgroundMode.Default || mode == BackgroundMode.Artwork) {
+                runCatching { artwork.prepare(ref, colors, background.tuning).range }.getOrNull()
+            } else {
+                null
+            }
+            colors.over(drawnRange(mode, colors, background, cover, live && LiveBackgroundSupported))
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlayerColors.Quiet)
 
     fun positionMs() = playback.positionMs()

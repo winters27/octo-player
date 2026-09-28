@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.player.wash
 
+import app.winters.octo.desktop.ui.playerInk
 import app.winters.octo.player.immersive.WashMotion
 import app.winters.octo.player.immersive.WashSize
 import app.winters.octo.player.immersive.WashTuning
@@ -85,15 +86,15 @@ class WashTest {
         val p = cover.square.pixel(100, 100)
         val mean = (Color.getR(p) + Color.getG(p) + Color.getB(p)) / 3
         assertTrue("capped: $mean", mean in 118..126)
-        assertFalse("white words over a capped wash", cover.darkWords)
+        assertFalse("white words over a capped wash", cover.playerInk().dark)
     }
 
     @Test
     fun wordsTurnDarkOverALightWash() {
         val light = WashCovers.prepared("pale", solid(0xFFF4EEDC.toInt()), WashTuning(contrast = 1f, saturation = 1f, brightnessCap = 1f))
-        assertTrue(light.darkWords)
+        assertTrue(light.playerInk().dark)
         val dark = WashCovers.prepared("navy", solid(0xFF101830.toInt()), WashTuning(contrast = 1f, saturation = 1f, brightnessCap = 1f))
-        assertFalse(dark.darkWords)
+        assertFalse(dark.playerInk().dark)
     }
 
     @Test
@@ -102,6 +103,6 @@ class WashTest {
         val corner = cover.square.pixel(0, 0)
         val far = cover.square.pixel(WashSize - 1, WashSize - 1)
         assertTrue(corner != far)
-        assertFalse(cover.darkWords)
+        assertFalse(cover.playerInk().dark)
     }
 }

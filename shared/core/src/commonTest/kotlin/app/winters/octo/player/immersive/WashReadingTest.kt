@@ -56,11 +56,72 @@ class WashReadingTest {
         assertEquals(rgb(134, 134, 134), overlay(white, 0.5f, page))
     }
 
+    // A 512 square, prepared, of `ground` with a disc of `shape` in the
+    // middle a third across, as the made-up covers are.
+    private fun square(ground: Int, shape: Int, tuning: WashTuning = WashTuning()): IntArray {
+        val g = prepareColor(ground, tuning)
+        val s = prepareColor(shape, tuning)
+        return IntArray(512 * 512) { i ->
+            val x = i % 512 - 256
+            val y = i / 512 - 256
+            if (x * x + y * y < 90 * 90) s else g
+        }
+    }
+
+    // The words' colour, as ARGB, and what they sit on at worst.
+    private fun worst(ink: WashInk, range: WashRange): Double {
+        val words = if (ink.dark) DarkInkArgb else white
+        return minOf(contrastRatio(words, overlay(range.low, ink.show, page)), contrastRatio(words, overlay(range.high, ink.show, page)))
+    }
+
     @Test
-    fun theWordsGoDarkOnlyOverALightWash() {
-        assertTrue(washDarkWords(rgb(255, 255, 0), WashTuning()))
-        assertFalse(washDarkWords(rgb(32, 32, 32), WashTuning()))
-        assertFalse(washDarkWords(null, WashTuning()))
+    fun theRangeIsTheDarkestAndBrightestPatch() {
+        val range = washRange(square(rgb(0x3A, 0xA6, 0xA0), rgb(0x1B, 0x2A, 0x4A)), 512)
+        assertTrue(relativeLuminance(range.high) > 0.3)
+        assertTrue(relativeLuminance(range.low) < 0.05)
+        // A lone bright pixel is blurred away.
+        val speck = IntArray(512 * 512) { if (it == 1000) white else rgb(10, 10, 10) }
+        assertEquals(rgb(10, 10, 10), washRange(speck, 512).high)
+        assertEquals(WashRange(rgb(1, 2, 3), rgb(200, 200, 200)), WashRange.of(rgb(200, 200, 200), rgb(1, 2, 3)))
+    }
+
+    @Test
+    fun aCoverLightInPlacesAndDarkInOthersGetsWhiteWordsAndADim() {
+        // The teal cover with a navy disc: its main colour is light, yet the
+        // wash is dark in places, so dark words would vanish there.
+        val range = washRange(square(rgb(0x3A, 0xA6, 0xA0), rgb(0x1B, 0x2A, 0x4A)), 512).scaled(FinalGain)
+        val ink = inkOver(range, page)
+        assertFalse(ink.dark)
+        assertTrue(ink.show < 1f)
+        assertTrue(worst(ink, range) >= 4.5)
+    }
+
+    @Test
+    fun everyCoverReadsWhicheverWordsItGets() {
+        val covers = listOf(
+            rgb(0x10, 0x18, 0x30) to rgb(0x8A, 0x1C, 0x3C),
+            rgb(0x3A, 0xA6, 0xA0) to rgb(0x1B, 0x2A, 0x4A),
+            rgb(0xFF, 0xE0, 0x00) to rgb(0xFF, 0x8A, 0x00),
+            rgb(0xFF, 0xFF, 0xFF) to rgb(0xF2, 0xEA, 0xD8),
+            rgb(0x00, 0xFF, 0x40) to rgb(0xB0, 0xFF, 0x00),
+        )
+        for (tuning in listOf(WashTuning(), WashTuning(brightnessCap = 1f), WashTuning(contrast = 2f, saturation = 3f, brightnessCap = 1f))) {
+            for ((ground, shape) in covers) {
+                val range = washRange(square(ground, shape, tuning), 512).scaled(FinalGain)
+                val ink = inkOver(range, page)
+                assertTrue("${Integer.toHexString(ground)} at $tuning: $ink", worst(ink, range) >= 4.5)
+            }
+        }
+    }
+
+    @Test
+    fun wordsGoDarkOverAWashLightAllOver() {
+        // A pale cover with no cap: light everywhere, so dark words, and the
+        // wash shows whole.
+        val range = washRange(square(rgb(0xF4, 0xEE, 0xDC), rgb(0xF2, 0xEA, 0xD8), WashTuning(contrast = 1f, saturation = 1f, brightnessCap = 1f)), 512)
+        assertEquals(WashInk(dark = true, show = 1f), inkOver(range, page))
+        // A dark one keeps white words over the whole of it.
+        assertEquals(WashInk(dark = false, show = 1f), inkOver(WashRange.of(rgb(0x10, 0x18, 0x30), rgb(0x40, 0x10, 0x20)), page))
     }
 
     @Test

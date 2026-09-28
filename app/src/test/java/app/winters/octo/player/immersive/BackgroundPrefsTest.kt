@@ -1,13 +1,9 @@
 package app.winters.octo.player.immersive
 
-import androidx.compose.ui.graphics.Color
-import app.winters.octo.player.PlayerColors
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class BackgroundPrefsTest {
-    private val yellow = PlayerColors.Quiet.copy(dominant = Color(0xFFFFFF00))
-
     @Test
     fun theDefaultsAreTheSpecs() {
         val prefs = BackgroundPrefs()
@@ -30,19 +26,6 @@ class BackgroundPrefsTest {
         assertEquals(2f, odd.contrast)
         assertEquals(60, odd.fps)
         assertEquals(5, odd.speed)
-    }
-
-    @Test
-    fun theWordsFollowTheBackground() {
-        assertEquals(DarkInk, yellow.over(BackgroundPrefs()).content)
-        assertEquals(DarkInk, yellow.over(BackgroundPrefs(mode = BackgroundMode.Artwork)).content)
-        assertEquals(DarkInk, yellow.over(BackgroundPrefs(mode = BackgroundMode.Colour)).content)
-        // The classic mesh keeps white words.
-        assertEquals(Color.White, yellow.over(BackgroundPrefs(mode = BackgroundMode.Classic)).content)
-        // A low cap keeps even yellow dim enough for white.
-        assertEquals(Color.White, yellow.over(BackgroundPrefs(brightnessCap = 30)).content)
-        // No artwork: white.
-        assertEquals(Color.White, PlayerColors.Quiet.over(BackgroundPrefs()).content)
     }
 
     @Test

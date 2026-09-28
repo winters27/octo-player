@@ -53,8 +53,26 @@ data class BackgroundPrefs(
 
 // The ranges and frame rates offered are in shared core (WashReading.kt).
 
-// The player's colours with the words' colour decided for this background:
-// the light or dark test on the adjusted main colour, or white over the
-// classic mesh.
-fun PlayerColors.over(prefs: BackgroundPrefs): PlayerColors =
-    copy(content = if (prefs.prepared) washContent(dominant?.toArgb(), prefs.tuning) else Color.White)
+// The darkest and brightest the background drawn in `mode` gets: the
+// prepared cover's range (`cover`, from WashArtwork), brightened or dimmed
+// as the wash's last pass leaves it; the adjusted main colour for a flat
+// fill; the mesh's four colours for the classic one (at 60% over the base
+// when it cannot move, as the blurred artwork then shows). Null while the
+// cover is still being made.
+fun drawnRange(mode: BackgroundMode, colors: PlayerColors, prefs: BackgroundPrefs, cover: WashRange?, live: Boolean): WashRange? = when (mode) {
+    BackgroundMode.Default -> cover?.scaled(FinalGain)
+    BackgroundMode.Artwork -> cover
+    BackgroundMode.Colour -> WashRange.of(colors.dominant?.let { prepareColor(it.toArgb(), prefs.tuning) } ?: colors.base.toArgb())
+    BackgroundMode.Classic -> {
+        val mesh = colors.mesh.map { it.toArgb() }
+        if (live) WashRange.of(*mesh.toIntArray()) else WashRange.of(*mesh.map { overlay(it, 0.6f, colors.base.toArgb()) }.toIntArray())
+    }
+}
+
+// The player's colours with the words' colour decided from what is drawn
+// behind them (`drawnRange`), and the background dimmed as far as they
+// need. Until the cover is ready, white words over the background as it is.
+fun PlayerColors.over(range: WashRange?): PlayerColors {
+    val ink = range?.let { inkOver(it, base.toArgb()) } ?: WashInk(dark = false, show = 1f)
+    return copy(content = if (ink.dark) DarkInk else Color.White, show = ink.show)
+}

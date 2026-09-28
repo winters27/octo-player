@@ -16,6 +16,8 @@ import app.winters.octo.player.PlayerColors
 import app.winters.octo.playback.artworkBitmap
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -24,8 +26,9 @@ import androidx.core.graphics.scale
 
 // A cover made ready for the background: the 512 square the wash and the
 // blurred artwork draw from, and on phones older than Android 12, which
-// cannot blur as they draw, a small copy blurred once here instead.
-class WashCover(val key: String, val square: Bitmap, val stillBlurred: Bitmap?)
+// cannot blur as they draw, a small copy blurred once here instead. `range`
+// is its darkest and brightest patches, which the words' colour follows.
+class WashCover(val key: String, val square: Bitmap, val stillBlurred: Bitmap?, val range: WashRange)
 
 // Prepares covers for the background, off the main thread, and keeps the
 // last few so going back a song is instant.
@@ -33,18 +36,24 @@ class WashCover(val key: String, val square: Bitmap, val stillBlurred: Bitmap?)
 class WashArtwork @Inject constructor(@ApplicationContext private val context: Context) {
     private val cache = LruCache<String, WashCover>(4)
 
+    // The background and the player's words both ask for the cover; one at
+    // a time, so the second finds the first's.
+    private val making = Mutex()
+
     // The cover for a song's artwork with these adjustments. A song with
     // no artwork gets a soft blend of its colours instead.
-    suspend fun prepare(ref: String?, colors: PlayerColors, tuning: WashTuning): WashCover {
+    suspend fun prepare(ref: String?, colors: PlayerColors, tuning: WashTuning): WashCover = making.withLock {
         val key = "$ref|${tuning.contrast}|${tuning.saturation}|${tuning.brightnessCap}"
-        cache.get(key)?.let { return it }
+        cache.get(key)?.let { return@withLock it }
         val source = ref?.let { withContext(Dispatchers.IO) { artworkBitmap(context, it, WashSize) } }
         val cover = withContext(Dispatchers.Default) {
             val square = processed(source ?: blend(colors), tuning)
-            WashCover(key, square, if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) stillBlur(square) else null)
+            val pixels = IntArray(WashSize * WashSize)
+            square.getPixels(pixels, 0, WashSize, 0, 0, WashSize, WashSize)
+            WashCover(key, square, if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) stillBlur(square) else null, washRange(pixels, WashSize))
         }
         cache.put(key, cover)
-        return cover
+        cover
     }
 
     // Cropped to its middle square and brought to 512, then contrast and
