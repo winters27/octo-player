@@ -228,6 +228,11 @@ compose.desktop {
         // `-Pocto.checkPlay=build/check/tone.wav` plays a made-up tone once
         // the window opens and prints what the engine says (audio/SoundCheck.kt).
         providers.gradleProperty("octo.checkPlay").orNull?.let { jvmArgs("-Docto.checkPlay=${file(it).absolutePath}") }
+        // Octo's Discord application, for showing the song in the listener's
+        // Discord status: its id from the Discord developer portal, as
+        // octo.discordAppId in gradle.properties (it is public, not a secret)
+        // or -Pocto.discordAppId=... . Without one, Settings leaves Discord out.
+        providers.gradleProperty("octo.discordAppId").orNull?.takeIf(String::isNotBlank)?.let { jvmArgs("-Docto.discordAppId=${it.trim()}") }
         nativeDistributions {
             // MSI for Windows, DMG for macOS, DEB and RPM for Linux.
             //

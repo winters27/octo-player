@@ -19,6 +19,14 @@ import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.systemReducesMotion
 import app.winters.octo.desktop.window.screenAreas
+import app.winters.octo.desktop.discord.DiscordPresence
+import app.winters.octo.desktop.discord.DiscordSync
+import app.winters.octo.desktop.discord.discordActivityFor
+import app.winters.octo.desktop.discord.discordAppId
+import app.winters.octo.desktop.discord.discordPipes
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.awt.Desktop
@@ -71,6 +79,14 @@ class SystemIntegration(
 
     val notificationsAvailable: Boolean get() = notifier != null
 
+    // The song in the listener's Discord status, in a build that carries
+    // Octo's Discord application; null otherwise.
+    val discord: DiscordPresence? = discordAppId()?.let { id -> DiscordPresence(DiscordSync(id, discordPipes(os))) }
+
+    // Whether Discord is open and showing Octo's status, for the settings page.
+    var discordConnected by mutableStateOf(false)
+        private set
+
     // Whether the media keys reach Octo, for the settings page.
     var mediaKeysWork by mutableStateOf(false)
         private set
@@ -92,6 +108,7 @@ class SystemIntegration(
 
     fun start(launchArgs: List<String>) {
         session.start { works -> mediaKeysWork = works }
+        startDiscord()
         // The system bus can be slow to answer, so it is reached off the window's thread.
         sleepWatch?.let { watch -> app.scope.launch(Dispatchers.IO) { watch.start { event -> app.scope.launch { session.handle(event) } } } }
         app.scope.launch {
@@ -196,6 +213,27 @@ class SystemIntegration(
         if (open) hideWindow() else raise()
     }
 
+    // Tells Discord what plays, as it changes and every few seconds (a seek
+    // moves the times), while the listener has it on.
+    private fun startDiscord() {
+        val presence = discord ?: return
+        presence.onConnected = { connected -> app.scope.launch { discordConnected = connected } }
+        presence.start()
+        fun tell() {
+            val prefs = app.settings.current.discord
+            val now = nowPlayingOf(app.player.state.value)
+            presence.want(prefs.on, discordActivityFor(now, app.player.positionMs(), System.currentTimeMillis(), prefs))
+        }
+        app.scope.launch { app.player.state.collect { tell() } }
+        app.scope.launch { app.settings.state.map { it.discord }.distinctUntilChanged().collect { tell() } }
+        app.scope.launch {
+            while (true) {
+                delay(DISCORD_CHECK_MS)
+                if (app.settings.current.discord.on) tell()
+            }
+        }
+    }
+
     fun onTray(action: TrayAction) {
         when (action) {
             TrayAction.PlayPause -> app.player.togglePlay()
@@ -254,8 +292,12 @@ class SystemIntegration(
         runCatching { session.close() }
         runCatching { sleepWatch?.close() }
         runCatching { notifier?.close() }
+        runCatching { discord?.close() }
     }
 }
+
+// How often the Discord status is checked against the player (for seeks).
+private const val DISCORD_CHECK_MS = 3_000L
 
 // A picture from the app's resources.
 fun picture(resource: String): Painter? = runCatching {
