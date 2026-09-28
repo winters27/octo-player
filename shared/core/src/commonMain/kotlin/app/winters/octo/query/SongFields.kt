@@ -131,3 +131,39 @@ fun quickTime(text: String?): Long? {
     val days = runCatching { LocalDate.of(year, month, day).toEpochDay() }.getOrNull() ?: return serverTime(text)
     return days * 86_400_000L + hour * 3_600_000L + minute * 60_000L + second * 1_000L + millis
 }
+
+// The songs of `items` read by their places in it, so a query can pick
+// places rather than songs: a playlist filtered on screen still knows
+// which of its entries each row is, and a list keeps its headings in step.
+fun <T> SongFields<T>.at(items: List<T>): SongFields<Int> {
+    val read = this
+    return object : SongFields<Int> {
+        override fun id(song: Int) = read.id(items[song])
+        override fun title(song: Int) = read.title(items[song])
+        override fun artist(song: Int) = read.artist(items[song])
+        override fun album(song: Int) = read.album(items[song])
+        override fun albumId(song: Int) = read.albumId(items[song])
+        override fun albumArtist(song: Int) = read.albumArtist(items[song])
+        override fun genres(song: Int) = read.genres(items[song])
+        override fun composer(song: Int) = read.composer(items[song])
+        override fun year(song: Int) = read.year(items[song])
+        override fun disc(song: Int) = read.disc(items[song])
+        override fun track(song: Int) = read.track(items[song])
+        override fun addedAt(song: Int) = read.addedAt(items[song])
+        override fun lastPlayedAt(song: Int) = read.lastPlayedAt(items[song])
+        override fun plays(song: Int) = read.plays(items[song])
+        override fun rating(song: Int) = read.rating(items[song])
+        override fun favourite(song: Int) = read.favourite(items[song])
+        override fun likedAt(song: Int) = read.likedAt(items[song])
+        override fun seconds(song: Int) = read.seconds(items[song])
+        override fun format(song: Int) = read.format(items[song])
+        override fun lossless(song: Int) = read.lossless(items[song])
+        override fun bitRate(song: Int) = read.bitRate(items[song])
+        override fun bpm(song: Int) = read.bpm(items[song])
+    }
+}
+
+// The places in `items` a query picks, in its order. The ids a sort breaks
+// ties by are the items' own, so a song twice in a list sorts beside itself.
+fun <T> LibraryQuery.places(items: List<T>, now: Long, fields: SongFields<T>): List<Int> =
+    select(items.indices.toList(), now, fields.at(items))

@@ -163,6 +163,16 @@ class LibraryQueryTest {
     }
 
     @Test
+    fun aQueryCanPickPlacesInAList() {
+        // A playlist with a song twice: both places pass or fail together.
+        val playlist = listOf(songs[3], songs[0], songs[2], songs[0])
+        assertEquals(listOf(1, 3), LibraryQuery(listOf(FilterPresets.Favourites)).places(playlist, now, SubsonicSongs))
+        assertEquals(listOf(0, 2), LibraryQuery(text = "electronic").places(playlist, now, SubsonicSongs))
+        val byTitle = LibraryQuery(sort = QuerySort.of(SortOrder(SongSort.Title, descending = false)))
+        assertEquals(listOf(1, 3, 0, 2), byTitle.places(playlist, now, SubsonicSongs))
+    }
+
+    @Test
     fun aFilterBarKeepsOneRuleAField() {
         val query = LibraryQuery()
             .setting(FilterPresets.AddedThisWeek)
