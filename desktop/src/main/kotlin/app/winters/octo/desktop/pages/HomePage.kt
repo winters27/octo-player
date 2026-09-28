@@ -1,90 +1,183 @@
 package app.winters.octo.desktop.pages
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.home.AlbumShelf
+import app.winters.octo.desktop.home.SHELF_SIZE
+import app.winters.octo.desktop.home.pinnedFirst
 import app.winters.octo.desktop.library.Cover
+import app.winters.octo.desktop.library.LibraryState
+import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.queue.ResumeOffer
 import app.winters.octo.desktop.server.userMessage
+import app.winters.octo.desktop.ui.FailedLine
+import app.winters.octo.desktop.ui.LoadingLine
 import app.winters.octo.desktop.ui.LocalBottomRoom
 import app.winters.octo.desktop.ui.LocalKeyColour
 import app.winters.octo.desktop.ui.MediaCard
 import app.winters.octo.desktop.ui.PageTitle
+import app.winters.octo.desktop.ui.ShelfCardWidth
 import app.winters.octo.desktop.ui.pagePadding
+import app.winters.octo.desktop.ui.playlistMenu
 import app.winters.octo.desktop.ui.rememberListState
-import app.winters.octo.desktop.ui.FailedLine
-import app.winters.octo.desktop.ui.LoadingLine
+import app.winters.octo.design.ControlHeight
+import app.winters.octo.design.Corner
+import app.winters.octo.design.DesktopType
+import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlazeCapsule
+import app.winters.octo.design.IconSize
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.Space
 import app.winters.octo.design.Spinner
+import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
+import app.winters.octo.subsonic.Album
+import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.RadioStation
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.launch
 
-// Home: what came in lately, what was played lately and most, a handful at
-// random, and Octo's stations and mixes when the server runs them.
+// Home: picking up where another device left off, what was played lately,
+// what came in, what is played most, favourites, playlists, Octo's
+// stations, then albums worth going back to. Every shelf is one row that
+// fills the width, with See all where a full list exists.
 @Composable
 fun HomePage(app: AppState, visit: Visit) {
     val connection = app.connection ?: return
     val store = app.home ?: return
     // The shelves read before show at once; they are refreshed behind them.
     LaunchedEffect(store) { store.refresh() }
+    val library = app.library?.state?.collectAsState()?.value
+    val index = (library as? LibraryState.Ready)?.index
+    LaunchedEffect(store, index) { index?.let(store::rediscover) }
+    val settings by app.settings.state.collectAsState()
+    val playlists = remember(app.playlists, settings.frame.pinnedPlaylists) { pinnedFirst(app.playlists, settings.frame.pinnedPlaylists) }
     val home = store.data
     val failure = store.failure
+    val found = store.rediscovered
     val list = rememberListState(app.navigator, visit)
     var starting by remember { mutableStateOf<String?>(null) }
+    fun open(shelf: AlbumShelf): () -> Unit = { app.navigator.go(Page.Shelf(shelf)) }
     LazyColumn(state = list, contentPadding = pagePadding(LocalBottomRoom.current)) {
         item(key = "title") { PageTitle("Home") }
         app.queueSync.offer?.let { offer -> item(key = "resume") { ResumeCard(app, offer) } }
         when {
-            home == null && failure != null -> item(key = "failed") { FailedLine(failure, store::retry) }
+            home == null && failure != null -> item(key = "failed") { FailedLine("Couldn't read Home from your server. $failure", store::retry) }
             home == null -> item(key = "loading") { LoadingLine() }
+            home.isEmpty && playlists.isEmpty() && (found == null || found.isEmpty) -> item(key = "empty") {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.M)) {
+                    NothingHere("No music yet", "Music on your server shows up here on its own. Once some is there, look again.")
+                    GlazeCapsule(null, "Look again", {
+                        store.retry()
+                        app.library?.load()
+                    })
+                }
+            }
             else -> {
-                if (home.isEmpty) item(key = "empty") { NothingHere("Nothing here yet", "Once your server has music, the newest albums show here.") }
-                item(key = "stations") {
-                    Shelf("Stations", home.stations, { it.id }) { station ->
-                        StationCard(station, starting == station.id) {
-                            if (starting != null) return@StationCard
-                            starting = station.id
-                            app.scope.launch {
-                                try {
-                                    app.play(connection.client.playlist(station.id).entry)
-                                } catch (e: SubsonicException) {
-                                    app.notice = "Couldn't start ${station.name}: ${e.userMessage()}"
-                                } finally {
-                                    starting = null
+                albums(app, "Recently played", home.recentlyPlayed) { app.navigator.go(Page.History) }
+                if (home.stations.isNotEmpty()) {
+                    item(key = "shelf:stations") {
+                        ShelfRow("Stations", home.stations, { it.id }, null) { station ->
+                            StationCard(station, starting == station.id) {
+                                if (starting != null) return@StationCard
+                                starting = station.id
+                                app.scope.launch {
+                                    try {
+                                        app.play(connection.client.playlist(station.id).entry)
+                                    } catch (e: SubsonicException) {
+                                        app.notice = "Couldn't start ${station.name}: ${e.userMessage()}"
+                                    } finally {
+                                        starting = null
+                                    }
                                 }
                             }
                         }
                     }
                 }
-                item(key = "added") { Shelf("Recently added", home.recentlyAdded, { it.id }) { AlbumCard(app, it) } }
-                item(key = "played") { Shelf("Recently played", home.recentlyPlayed, { it.id }) { AlbumCard(app, it) } }
-                item(key = "most") { Shelf("Most played", home.mostPlayed, { it.id }) { AlbumCard(app, it) } }
-                item(key = "random") { Shelf("Random albums", home.random, { it.id }) { AlbumCard(app, it) } }
+                albums(app, "Recently added", home.recentlyAdded) { app.navigator.go(Page.RecentlyAdded) }
+                albums(app, "Most played", home.mostPlayed, whole = home.mostPlayed.size < SHELF_SIZE, seeAll = open(AlbumShelf.MostPlayed))
+                albums(app, "Favourite albums", home.favourites) {
+                    app.navigator.go(Page.Favourites)
+                    app.navigator.keepTab(app.navigator.current, "Albums")
+                }
+                if (playlists.isNotEmpty()) {
+                    item(key = "shelf:playlists") { ShelfRow("Your playlists", playlists, { it.id }, null) { PlaylistCard(app, it) } }
+                }
+                if (found != null) {
+                    albums(app, AlbumShelf.NotPlayedLately.title, found.notPlayedLately, whole = found.notPlayedLately.size < SHELF_SIZE, seeAll = open(AlbumShelf.NotPlayedLately))
+                    albums(app, AlbumShelf.NeverFinished.title, found.neverFinished, whole = found.neverFinished.size < SHELF_SIZE, seeAll = open(AlbumShelf.NeverFinished))
+                    albums(app, AlbumShelf.NeverPlayed.title, found.neverPlayed, whole = found.neverPlayed.size < SHELF_SIZE, seeAll = open(AlbumShelf.NeverPlayed))
+                }
             }
         }
     }
+}
+
+// A shelf of albums, left out when it has none. `whole` says the shelf
+// already holds every album its See all page would, so See all is left
+// out when they all fit.
+private fun LazyListScope.albums(app: AppState, title: String, albums: List<Album>, whole: Boolean = false, seeAll: (() -> Unit)?) {
+    if (albums.isEmpty()) return
+    item(key = "shelf:$title") { ShelfRow(title, albums, { it.id }, seeAll, whole) { AlbumCard(app, it) } }
+}
+
+// A shelf: its name, See all at the right when it leads to more, and one
+// row of cards filling the width, as many as fit. No arrows and no
+// sideways scrolling: the rest is behind See all.
+@Composable
+private fun <T> ShelfRow(title: String, items: List<T>, id: (T) -> Any, seeAll: (() -> Unit)?, whole: Boolean = false, card: @Composable (T) -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val fit = (maxWidth / ShelfCardWidth).toInt().coerceAtLeast(1)
+        val width = maxWidth / fit
+        Column(Modifier.fillMaxWidth()) {
+            // As tall with See all as without, so shelves keep one rhythm.
+            Row(Modifier.fillMaxWidth().padding(top = Space.Xxl, bottom = Space.Xs).heightIn(min = ControlHeight.L), verticalAlignment = Alignment.CenterVertically) {
+                Txt(title, DesktopType.section, modifier = Modifier.weight(1f).padding(start = Space.M))
+                if (seeAll != null && !(whole && items.size <= fit)) TextAction("See all", seeAll)
+            }
+            Row {
+                items.take(fit).forEach { item -> key(id(item)) { Box(Modifier.width(width)) { card(item) } } }
+            }
+        }
+    }
+}
+
+// A playlist, opening its page, with the playlist menu on a right click.
+@Composable
+private fun PlaylistCard(app: AppState, playlist: Playlist) {
+    val songs = if (playlist.songCount == 1) "1 song" else "${playlist.songCount} songs"
+    MediaCard(
+        playlist.name,
+        if (app.isPinned(playlist.id)) "Pinned · $songs" else songs,
+        playlist.coverArt,
+        onOpen = { app.navigator.go(Page.Playlist(playlist.id)) },
+        onMenu = playlistMenu(app, playlist),
+    )
 }
 
 // A station Octo runs: a click plays the songs it has lined up today.
@@ -95,24 +188,25 @@ private fun StationCard(station: RadioStation, starting: Boolean, onPlay: () -> 
         "Station",
         station.coverArt ?: station.id,
         onOpen = onPlay,
-        badge = if (starting) ({ Spinner(size = 22.dp) }) else null,
-        modifier = Modifier,
+        badge = if (starting) ({ Spinner(size = IconSize.Transport) }) else null,
     )
 }
 
 // A queue saved on another device (the phone, most often), offered once:
-// Resume loads it paused where it was left; Not now puts it away.
+// Resume loads it paused where it was left; Not now puts it away. At most
+// as wide as the player's transport, so its buttons stay near its words,
+// and in line with the covers below.
 @Composable
 private fun ResumeCard(app: AppState, offer: ResumeOffer) {
     val key = LocalKeyColour.current
-    val shape = RoundedCornerShape(14.dp)
     Row(
-        Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(top = 8.dp, bottom = 4.dp).settingsSurface(shape, key).padding(14.dp),
+        Modifier.padding(start = Space.M).widthIn(max = FrameSize.TransportMax).fillMaxWidth().padding(top = Space.M, bottom = Space.Xs)
+            .settingsSurface(Corner.PanelShape, key).padding(Space.L),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.L),
     ) {
-        Cover(offer.remote.current?.coverArt, Modifier.size(56.dp), shape = RoundedCornerShape(8.dp), placeholder = OctoIcons.Songs)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Cover(offer.remote.current?.coverArt, Modifier.size(FrameSize.PlayerCover), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
             Txt(offer.device?.let { "Pick up where you left off on $it" } ?: "Pick up where you left off", OctoType.caption, OctoColors.TextMuted)
             Txt(offer.title, OctoType.label)
             offer.artist?.let { Txt(it, OctoType.bodySmall, OctoColors.TextSecondary) }

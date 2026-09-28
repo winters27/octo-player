@@ -77,6 +77,7 @@ import app.winters.octo.desktop.pages.HistoryPage
 import app.winters.octo.desktop.pages.HomePage
 import app.winters.octo.desktop.pages.PlaylistPage
 import app.winters.octo.desktop.pages.RecentlyAddedPage
+import app.winters.octo.desktop.pages.ShelfPage
 import app.winters.octo.desktop.pages.SearchPage
 import app.winters.octo.desktop.pages.SettingsPage
 import app.winters.octo.desktop.pages.SignInPage
@@ -275,6 +276,7 @@ private fun PageHost(app: AppState) {
             is Page.Genre -> GenrePage(app, visit, page.name)
             is Page.Folder -> FolderPage(app, visit, page.id, page.name)
             is Page.Playlist -> PlaylistPage(app, visit, page.id)
+            is Page.Shelf -> ShelfPage(app, visit, page.shelf)
         }
     }
 }
