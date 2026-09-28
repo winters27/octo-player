@@ -73,8 +73,16 @@ private enum class MenuPage { Main, Playlists, Rate, Move }
 // taking the songs out of a playlist or the queue. Songs found online
 // (`outside`) are not in the library, so they have no favourite heart (on
 // Octo a star would fetch them), no rating and no album or artist to open.
+// `extra` is a first group of the place's own rows (the queue's moves).
 @Composable
-fun ColumnScope.SongMenu(app: AppState, songs: List<Song>, close: () -> Unit, outside: Boolean = false, place: SongPlace = SongPlace.Library) {
+fun ColumnScope.SongMenu(
+    app: AppState,
+    songs: List<Song>,
+    close: () -> Unit,
+    outside: Boolean = false,
+    place: SongPlace = SongPlace.Library,
+    extra: (@Composable ColumnScope.() -> Unit)? = null,
+) {
     var page by remember { mutableStateOf(MenuPage.Main) }
     // The playlist the chooser adds to at once: the last one used.
     var start by remember { mutableStateOf<Playlist?>(null) }
@@ -87,6 +95,10 @@ fun ColumnScope.SongMenu(app: AppState, songs: List<Song>, close: () -> Unit, ou
             val owns = inPlaylist?.let { p -> app.playlists.firstOrNull { it.id == p.id }?.let(app::canEdit) } == true
             val starred = songs.all(app::isStarred)
             val rating = sharedRating(songs.map(app::ratingOf))
+            if (extra != null) {
+                extra()
+                MenuSeparator()
+            }
             val last = app.lastPlaylists().firstOrNull()
             songMenuActions(songs.size, place, outside, owns, lastPlaylist = last != null).forEachIndexed { index, group ->
                 if (index > 0) MenuSeparator()

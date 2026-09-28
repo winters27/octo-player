@@ -22,6 +22,7 @@ import app.winters.octo.desktop.player.SavedQueue
 import app.winters.octo.desktop.player.SongFormat
 import app.winters.octo.desktop.player.libraryFormat
 import app.winters.octo.playback.PlayFailure
+import app.winters.octo.playback.QueueSource
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,13 +41,6 @@ interface SoundTarget {
     fun setCrossfade(ms: Int)
 
     fun setSpeed(speed: Float, pitch: Float)
-}
-
-// Called when the last song to come starts playing, with repeat off, so
-// more can be added in time to follow it without a gap. `add` puts songs
-// at the end of the queue, and may be called later from any thread.
-fun interface AutoplayHook {
-    fun queueRunningOut(last: Song, queued: List<Song>, add: (List<Song>) -> Unit)
 }
 
 // The player that makes sound: the Rust audio engine, driven from the same
@@ -129,8 +123,6 @@ class EnginePlayer(
     // answer comes back from the engine's own thread.
     private val background = Executors.newSingleThreadExecutor { r -> Thread(r, "octo-player").apply { isDaemon = true } }
 
-    @Volatile var autoplay: AutoplayHook? = null
-
     private val _state = MutableStateFlow(PlayerState(volume = level, output = defaultOutput(), outputs = listOf(defaultOutput())))
     override val state: StateFlow<PlayerState> = _state
 
@@ -191,10 +183,10 @@ class EnginePlayer(
 
     // ---- Transport ----
 
-    override fun play(songs: List<Song>, start: Int, shuffle: Boolean) {
+    override fun play(songs: List<Song>, start: Int, shuffle: Boolean, source: QueueSource) {
         synchronized(lock) {
             this.shuffle = shuffle
-            queue.replace(songs, start, shuffle)
+            queue.replace(songs, start, shuffle, source)
             playing = queue.currentEntry != null
             problem = null
             load(startMs = 0, play = playing)
@@ -275,11 +267,15 @@ class EnginePlayer(
 
     // ---- The queue ----
 
-    override fun playNext(songs: List<Song>) = changeQueue { queue.playNext(songs) }
+    override fun playNext(songs: List<Song>, source: QueueSource) = changeQueue { queue.playNext(songs, source) }
 
-    override fun addToQueue(songs: List<Song>) = changeQueue { queue.add(songs) }
+    override fun addToQueue(songs: List<Song>, source: QueueSource) = changeQueue { queue.add(songs, source) }
+
+    override fun insert(songs: List<Song>, before: Long?) = changeQueue { queue.insertBefore(songs, before) }
 
     override fun moveUpcoming(from: Int, to: Int) = changeQueue { queue.moveUpcoming(from, to) }
+
+    override fun move(keys: List<Long>, before: Long?) = changeQueue { queue.move(keys, before) }
 
     private fun changeQueue(change: () -> Unit) {
         synchronized(lock) {
@@ -295,9 +291,24 @@ class EnginePlayer(
         }
     }
 
-    override fun remove(key: Long) {
+    override fun remove(keys: List<Long>) = edited { queue.remove(keys) }
+
+    override fun clearUpcoming() = edited { queue.clearUpcoming(); false }
+
+    override fun removePlayed() = edited { queue.removePlayed(); false }
+
+    override fun undo(): Boolean {
+        var done = false
+        edited { queue.undo().also { done = it != null } == true }
+        return done
+    }
+
+    // An edit that may have changed the song playing: the engine moves to
+    // the new one, or stops when there is none; otherwise it takes the
+    // queue as it now is.
+    private fun edited(change: () -> Boolean) {
         synchronized(lock) {
-            if (queue.remove(key)) {
+            if (change()) {
                 if (queue.currentEntry == null) {
                     playing = false
                     load(startMs = 0, play = false)
@@ -403,7 +414,7 @@ class EnginePlayer(
     override fun restore(saved: SavedQueue) {
         synchronized(lock) {
             shuffle = saved.shuffle
-            queue.restore(saved.songs, saved.order, saved.index, saved.shuffle)
+            queue.restore(saved.songs, saved.order, saved.index, saved.shuffle, saved.sources)
             playing = false
             buffering = false
             stopAfter = false
@@ -497,7 +508,6 @@ class EnginePlayer(
 
     private fun onEvent(event: EngineEvent) {
         var devicesMoved = false
-        var runningOut: Pair<Song, List<Song>>? = null
         synchronized(lock) {
             when (event) {
                 is EngineEvent.TrackStarted -> {
@@ -505,7 +515,7 @@ class EnginePlayer(
                     val entry = queue.songs.firstOrNull { it.key == key }
                     val info = event.info
                     if (entry != null && info != null) decoded = entry.key to songFormatOf(info, entry.song)
-                    runningOut = started(key)
+                    started(key)
                 }
                 is EngineEvent.TrackEnded -> if (event.reason == EndReason.FINISHED) {
                     val key = keyOfItem(event.itemId)
@@ -535,7 +545,7 @@ class EnginePlayer(
                         // Heard on another song with no word of it
                         // starting, and nothing awaited (or the song a
                         // jump went for never came): follow it.
-                        key != queue.currentEntry?.key && !stillExpecting() -> runningOut = started(key)
+                        key != queue.currentEntry?.key && !stillExpecting() -> started(key)
                         else -> return
                     }
                 }
@@ -550,17 +560,15 @@ class EnginePlayer(
             publish()
         }
         if (devicesMoved) refreshDevices()
-        runningOut?.let { (last, queued) -> autoplay?.queueRunningOut(last, queued) { more -> addToQueue(more) } }
     }
 
-    // A song began to be heard. Returns the last song and the queue when
-    // nothing follows it, for autoplay.
-    private fun started(key: Long?): Pair<Song, List<Song>>? {
+    // A song began to be heard.
+    private fun started(key: Long?) {
         // News from a queue since replaced.
-        if (key == null || queue.songs.none { it.key == key }) return null
+        if (key == null || queue.songs.none { it.key == key }) return
         val waiting = expecting
         if (waiting != null && key != waiting) {
-            if (stillExpecting()) return null
+            if (stillExpecting()) return
             // The song a jump went for never came: what is heard wins.
             expecting = null
         }
@@ -575,8 +583,6 @@ class EnginePlayer(
         lastStarted = key
         if (pending?.key != key) pending = null
         problem = null
-        val now = queue.currentEntry ?: return null
-        return if (repeat == RepeatMode.Off && queue.nextPosition(repeat) == null) now.song to queue.songs.map(QueueEntry::song) else null
     }
 
     // A song played to its end. With stop-after-current, the engine is now
@@ -644,6 +650,7 @@ class EnginePlayer(
             format = formatNow(),
             fade = fade,
             ended = ended,
+            canUndo = queue.canUndo,
         )
     }
 

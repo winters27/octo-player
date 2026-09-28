@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.player
 
+import app.winters.octo.playback.QueueSource
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -109,10 +110,10 @@ class SilentPlayer(
         }
     }
 
-    override fun play(songs: List<Song>, start: Int, shuffle: Boolean) {
+    override fun play(songs: List<Song>, start: Int, shuffle: Boolean, source: QueueSource) {
         synchronized(lock) {
             this.shuffle = shuffle
-            queue.replace(songs, start, shuffle)
+            queue.replace(songs, start, shuffle, source)
             restartAt(0, play = queue.currentEntry != null)
         }
     }
@@ -175,18 +176,17 @@ class SilentPlayer(
         }
     }
 
-    override fun playNext(songs: List<Song>) {
-        synchronized(lock) {
-            val wasEmpty = queue.currentEntry == null
-            queue.playNext(songs)
-            if (wasEmpty) restartAt(0, play = false) else publish()
-        }
-    }
+    override fun playNext(songs: List<Song>, source: QueueSource) = putIn { queue.playNext(songs, source) }
 
-    override fun addToQueue(songs: List<Song>) {
+    override fun addToQueue(songs: List<Song>, source: QueueSource) = putIn { queue.add(songs, source) }
+
+    override fun insert(songs: List<Song>, before: Long?) = putIn { queue.insertBefore(songs, before) }
+
+    // Songs put into an empty queue wait to be played.
+    private fun putIn(change: () -> Unit) {
         synchronized(lock) {
             val wasEmpty = queue.currentEntry == null
-            queue.add(songs)
+            change()
             if (wasEmpty) restartAt(0, play = false) else publish()
         }
     }
@@ -198,9 +198,30 @@ class SilentPlayer(
         }
     }
 
-    override fun remove(key: Long) {
+    override fun move(keys: List<Long>, before: Long?) {
         synchronized(lock) {
-            if (queue.remove(key)) restartAt(0, play = running && queue.currentEntry != null) else publish()
+            queue.move(keys, before)
+            publish()
+        }
+    }
+
+    override fun remove(keys: List<Long>) = edited { queue.remove(keys) }
+
+    override fun clearUpcoming() = edited { queue.clearUpcoming(); false }
+
+    override fun removePlayed() = edited { queue.removePlayed(); false }
+
+    override fun undo(): Boolean {
+        var done = false
+        edited { queue.undo().also { done = it != null } == true }
+        return done
+    }
+
+    // An edit that may have changed the song playing: the new one starts
+    // from its beginning, playing if the old one was.
+    private fun edited(change: () -> Boolean) {
+        synchronized(lock) {
+            if (change()) restartAt(0, play = running && queue.currentEntry != null) else publish()
         }
     }
 
@@ -256,7 +277,7 @@ class SilentPlayer(
             shuffle = saved.shuffle
             repeat = saved.repeat
             stopAfter = false
-            queue.restore(saved.songs, saved.order, saved.index, saved.shuffle)
+            queue.restore(saved.songs, saved.order, saved.index, saved.shuffle, saved.sources)
             restartAt(saved.positionMs.coerceIn(0, durationMs().coerceAtLeast(0)), play = false)
         }
     }
@@ -296,6 +317,7 @@ class SilentPlayer(
             format = queue.currentEntry?.song?.let(::libraryFormat)?.let { PlayFormat(it, null) },
             fade = fade,
             ended = ended,
+            canUndo = queue.canUndo,
         )
     }
 

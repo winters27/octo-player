@@ -11,13 +11,30 @@ const val EXTRA_QUEUE_ENTRY = "app.winters.octo.queueEntry"
 // A song Autoplay added once the listener's own queue ran out.
 const val EXTRA_AUTOPLAY = "app.winters.octo.autoplay"
 
+// Where a song came from (QueueSource.encoded): the listener's own pick
+// or the list it was played from, for the queue's headings. A song
+// playTracks asks for carries it in its request, and the service puts it
+// on the song.
+const val EXTRA_SOURCE = "app.winters.octo.source"
+
 val MediaItem.entryId: String? get() = mediaMetadata.extras?.getString(EXTRA_QUEUE_ENTRY)
 
 val MediaItem.isAutoplay: Boolean get() = mediaMetadata.extras?.getBoolean(EXTRA_AUTOPLAY, false) == true
 
+// Where the song came from; Autoplay's own are marked apart.
+val MediaItem.queueSource: QueueSource
+    get() = if (isAutoplay) QueueSource.Autoplay else queueSourceOf(mediaMetadata.extras?.getString(EXTRA_SOURCE))
+
+// The source a request from the app names, if any.
+val MediaItem.requestedSource: String? get() = requestMetadata.extras?.getString(EXTRA_SOURCE)
+
 fun MediaItem.withEntry(id: String): MediaItem = withExtras { putString(EXTRA_QUEUE_ENTRY, id) }
 
 fun MediaItem.markedAutoplay(): MediaItem = withExtras { putBoolean(EXTRA_AUTOPLAY, true) }
+
+fun MediaItem.withSource(source: QueueSource): MediaItem = withSource(source.encoded())
+
+fun MediaItem.withSource(word: String): MediaItem = withExtras { putString(EXTRA_SOURCE, word) }
 
 // The same song with its extras changed, keeping everything else.
 private fun MediaItem.withExtras(change: Bundle.() -> Unit): MediaItem {

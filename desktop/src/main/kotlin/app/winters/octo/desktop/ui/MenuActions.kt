@@ -29,7 +29,9 @@ enum class SongAction {
 }
 
 // The song menu's rows in their groups. A radio and the details are for
-// one song; so are Go to album and Go to artist. Songs found online
+// one song; so are Go to album and Go to artist. In the queue, playing
+// and queueing give way to the queue's own rows (play now, move), since
+// they would play or queue the songs a second time. Songs found online
 // (`outside`) are not in the library, so they cannot be favourites, be
 // rated or open an album or artist. A playlist's songs can be moved or
 // come out of it only when the listener's own playlist (`ownsPlaylist`).
@@ -45,7 +47,11 @@ fun songMenuActions(
     val one = count == 1
     val editable = place is SongPlace.Playlist && ownsPlaylist && place.positions.isNotEmpty()
     val groups = listOf(
-        listOfNotNull(SongAction.Play, SongAction.PlayNext, SongAction.AddToQueue, SongAction.StartRadio.takeIf { one }),
+        if (place is SongPlace.Queue) {
+            listOfNotNull(SongAction.StartRadio.takeIf { one })
+        } else {
+            listOfNotNull(SongAction.Play, SongAction.PlayNext, SongAction.AddToQueue, SongAction.StartRadio.takeIf { one })
+        },
         listOfNotNull(
             SongAction.AddToLastPlaylist.takeIf { lastPlaylist },
             SongAction.AddToPlaylist,

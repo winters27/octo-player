@@ -25,9 +25,15 @@ import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.desktop.player.SleepTimer
 import app.winters.octo.desktop.player.wash.WashCovers
+import app.winters.octo.desktop.queue.Autoplay
 import app.winters.octo.desktop.queue.QueueKeeper
 import app.winters.octo.desktop.queue.ServerQueueSync
+import app.winters.octo.desktop.queue.autoplaySongs
+import app.winters.octo.desktop.queue.queueNameFor
 import app.winters.octo.desktop.search.COMMAND_MARK
+import app.winters.octo.playback.QueueSource
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import app.winters.octo.desktop.search.Fetches
 import app.winters.octo.desktop.search.OmniboxState
 import app.winters.octo.desktop.search.SearchModel
@@ -202,6 +208,22 @@ class AppState(
     // fresh read is not shown until none are, so it cannot undo one.
     internal val playlistSaves = mutableStateMapOf<String, Int>()
 
+    // ---- The queue's edits and Autoplay (see QueueActions.kt) ----
+
+    // A word the notice line offers beside its text, like Undo after a
+    // queue edit; shown only while the notice is still the one it came with.
+    var noticeAction by mutableStateOf<NoticeAction?>(null)
+
+    // Keeps music playing when the queue runs out, when the listener wants it.
+    val autoplay = Autoplay(
+        player,
+        settings.state.map { it.playback.autoplay }.stateIn(scope, SharingStarted.Eagerly, settings.current.playback.autoplay),
+        scope,
+        pick = { seed, exclude -> autoplaySongs(seed, exclude, connection?.client, library?.index) },
+    ).also { it.start() }
+
+    // ---- End of the queue's edits ----
+
     init {
         if (listeningRoot != null) {
             plays.start()
@@ -331,9 +353,12 @@ class AppState(
 
     // Playing and queueing.
 
-    fun play(songs: List<Song>, start: Int = 0, shuffle: Boolean = false) {
+    // `source` names the list for the queue ("OK Computer"); without one,
+    // the page it was played from names it (queueNameFor).
+    fun play(songs: List<Song>, start: Int = 0, shuffle: Boolean = false, source: String? = null) {
         if (songs.isEmpty()) return
-        player.play(songs, if (shuffle) (songs.indices).random() else start, shuffle)
+        val name = source ?: queueNameFor(navigator.current.page, songs) { id -> playlists.firstOrNull { it.id == id }?.name }
+        player.play(songs, if (shuffle) (songs.indices).random() else start, shuffle, QueueSource.Played(name))
     }
 
     fun playNext(songs: List<Song>) = player.playNext(songs)

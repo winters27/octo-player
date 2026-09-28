@@ -2,6 +2,10 @@ package app.winters.octo.desktop.ui
 
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ImageComposeScene
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerButton
+import androidx.compose.ui.input.pointer.PointerButtons
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.unit.Density
 import app.winters.octo.desktop.AddQuestion
 import app.winters.octo.desktop.AppState
@@ -13,6 +17,7 @@ import app.winters.octo.desktop.audio.writeSine
 import app.winters.octo.desktop.lyrics.openLyricsMenu
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.SidePanel
+import app.winters.octo.desktop.removeQueued
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.server.Accounts
@@ -265,6 +270,48 @@ class ScreenShotsTest {
             shot("player", 4_000)
             SwingUtilities.invokeAndWait { app.togglePlayerPanel(SidePanel.Queue) }
             shot("player-queue")
+            // The queue in its parts: played, now playing, the listener's
+            // own, then the rest of the album; then a song's menu there and
+            // the queue's own menu.
+            SwingUtilities.invokeAndWait {
+                app.togglePlayerPanel(SidePanel.Queue)
+                app.fullPlayer = false
+                app.navigator.go(Page.Album("a1"))
+                val list = app.library!!.index!!.songs
+                app.play(list.filter { it.albumId == "a1" }.sortedBy { it.track }, 4, source = "OK Computer")
+                app.playNext(list.filter { it.albumId == "a2" }.take(2))
+                app.showSidePanel(SidePanel.Queue)
+            }
+            shot("queue", 2_000)
+            // A click (or a right click) at a spot in the window, with a
+            // frame drawn between each step, as a real pointer would allow.
+            fun click(x: Float, y: Float, right: Boolean = false) {
+                val at = Offset(x, y)
+                val button = if (right) PointerButton.Secondary else PointerButton.Primary
+                val steps = listOf(
+                    { scene.sendPointerEvent(PointerEventType.Move, at) },
+                    { scene.sendPointerEvent(PointerEventType.Press, at, buttons = PointerButtons(isPrimaryPressed = !right, isSecondaryPressed = right), button = button) },
+                    { scene.sendPointerEvent(PointerEventType.Release, at, buttons = PointerButtons(), button = button) },
+                )
+                steps.forEach { step ->
+                    SwingUtilities.invokeAndWait {
+                        step()
+                        scene.render()
+                    }
+                }
+            }
+            // A song under "Next from you", then the queue's More button.
+            click(1250f, 463f, right = true)
+            shot("queue-menu")
+            SwingUtilities.invokeAndWait { app.popups.close() }
+            click(1418f, 107f)
+            shot("queue-options")
+            // Taking a song out: the notice line, with Undo.
+            SwingUtilities.invokeAndWait {
+                app.popups.close()
+                app.removeQueued(listOf(app.player.state.value.upcoming.last().key))
+            }
+            shot("queue-undo")
             scene.close()
             player.close()
         }

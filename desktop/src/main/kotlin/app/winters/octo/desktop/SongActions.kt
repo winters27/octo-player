@@ -1,7 +1,9 @@
 package app.winters.octo.desktop
 
 import app.winters.octo.desktop.library.sortAlbums
+import app.winters.octo.desktop.queue.radioName
 import app.winters.octo.desktop.server.userMessage
+import app.winters.octo.playback.QueueSource
 import app.winters.octo.sort.SortList
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicException
@@ -67,7 +69,8 @@ fun radioSeed(songs: List<Song>): Song? =
 // something else meanwhile.
 fun AppState.startRadio(seed: Song) {
     val client = connection?.client ?: return
-    player.play(listOf(seed))
+    val radio = QueueSource.Played(radioName(seed.title))
+    player.play(listOf(seed), source = radio)
     val key = player.state.value.current?.key
     scope.launch {
         val similar = try {
@@ -77,7 +80,7 @@ fun AppState.startRadio(seed: Song) {
         }
         if (player.state.value.queue.none { it.key == key }) return@launch
         val picks = radioPicks(seed, similar)
-        if (picks.isEmpty()) notice = "Couldn't find songs like ${seed.title}" else player.addToQueue(picks)
+        if (picks.isEmpty()) notice = "Couldn't find songs like ${seed.title}" else player.addToQueue(picks, radio)
     }
 }
 
@@ -100,7 +103,7 @@ fun AppState.startArtistRadio(artistId: String, name: String) {
                 emptyList()
             }
         }
-        if (songs.isEmpty()) notice = "Couldn't find songs like $name" else player.play(songs)
+        if (songs.isEmpty()) notice = "Couldn't find songs like $name" else player.play(songs, source = QueueSource.Played(radioName(name)))
     }
 }
 
@@ -146,4 +149,4 @@ fun AppState.removeFromPlaylist(id: String, positions: List<Int>) {
     }
 }
 
-fun AppState.removeFromQueue(keys: List<Long>) = keys.forEach(player::remove)
+fun AppState.removeFromQueue(keys: List<Long>) = removeQueued(keys)

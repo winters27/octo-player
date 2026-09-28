@@ -299,7 +299,7 @@ internal suspend fun playRadio(seed: TrackEntity, discovery: Discovery, playback
     }
     // Only the song itself back means the server found nothing like it.
     if (songs.size > 1) {
-        playback.playTracks(songs.map { it.id }, 0)
+        playback.playTracks(songs.map { it.id }, 0, source = "${seed.title} radio")
     } else {
         feedback.show("No similar songs found")
     }

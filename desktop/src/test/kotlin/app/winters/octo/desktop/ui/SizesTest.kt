@@ -18,6 +18,7 @@ class SizesTest {
         "ui/Omnibox.kt",
         "ui/FilterBar.kt",
         "library/SongFilters.kt",
+        "ui/SidePanels.kt",
     )
 
     private val root = File("src/main/kotlin/app/winters/octo/desktop")

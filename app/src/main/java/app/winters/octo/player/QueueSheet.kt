@@ -46,7 +46,10 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.elevation3
 import app.winters.octo.design.mix
+import app.winters.octo.playback.NoSource
 import app.winters.octo.playback.QueueEntry
+import app.winters.octo.playback.queueSourceTitle
+import app.winters.octo.playback.sourceRuns
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.DragHandle
 import app.winters.octo.ui.common.RemoveBackground
@@ -150,7 +153,9 @@ class QueueActions(
 )
 
 // The "Up next" sheet: songs already played, dimmed, then the song that is
-// on, then the rest of the queue in the order it will play. It opens at
+// on, then the rest of the queue in the order it will play, under headings
+// by where each part came from ("Next from you", "Next from OK Computer"),
+// as the desktop's queue shows it. It opens at
 // the song that is on. Drag a song by its handle to move it, swipe it left
 // to take it out, tap it to play it, long-press it for its menu. Moving is
 // off while shuffle is on. Tools along the top clear the queue, take out
@@ -240,47 +245,65 @@ fun ColumnScope.QueueSheet(played: List<QueueEntry>, queue: List<QueueEntry>, sh
                 )
             }
         }
-        items(rows, key = { it.key }) { entry ->
-            ReorderableItem(reorder, key = entry.key, enabled = !shuffle) { dragging ->
-                // Moves the song in the queue to the place of the one it landed on.
-                val drop = {
-                    val landed = rows.indexOfFirst { it.key == entry.key }
-                    val to = upcoming.getOrNull(landed)?.index
-                    if (to != null && to != entry.index) actions.move(entry.index, to)
-                }
-                val swipe = rememberSwipeToDismissBoxState()
-                SwipeToDismissBox(
-                    state = swipe,
-                    enableDismissFromStartToEnd = false,
-                    gesturesEnabled = !dragging,
-                    onDismiss = {
-                        rows = rows.filterNot { it.key == entry.key }
-                        actions.remove(entry)
-                    },
-                    backgroundContent = { RemoveBackground(swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart, RowShape) },
-                ) {
-                    SongLine(
-                        entry,
-                        Modifier
-                            .then(if (dragging) Modifier.elevation3(RowShape) else Modifier)
-                            .background(RowFill, RowShape)
-                            .combinedClickable(
-                                onClickLabel = "Play",
-                                onLongClickLabel = "Song options",
-                                onLongClick = { longPress(entry, QueuePlace.Upcoming) },
-                                onClick = { actions.play(entry.index) },
-                            )
-                            .padding(horizontal = 20.dp),
-                        handle = if (shuffle) {
-                            null
-                        } else {
-                            Modifier.draggableHandle(onDragStopped = drop)
+        // What is to come, part by part. A single list with no name needs
+        // no heading under "Up next".
+        val runs = sourceRuns(rows) { it.source }
+        val headed = runs.size > 1 || runs.singleOrNull()?.first.let { it != null && it != NoSource }
+        runs.forEach { (source, run) ->
+            if (headed) item(key = "part:${run.first().key}") { PartHeading(queueSourceTitle(source)) }
+            items(run, key = { it.key }) { entry ->
+                ReorderableItem(reorder, key = entry.key, enabled = !shuffle) { dragging ->
+                    // Moves the song in the queue to the place of the one it landed on.
+                    val drop = {
+                        val landed = rows.indexOfFirst { it.key == entry.key }
+                        val to = upcoming.getOrNull(landed)?.index
+                        if (to != null && to != entry.index) actions.move(entry.index, to)
+                    }
+                    val swipe = rememberSwipeToDismissBoxState()
+                    SwipeToDismissBox(
+                        state = swipe,
+                        enableDismissFromStartToEnd = false,
+                        gesturesEnabled = !dragging,
+                        onDismiss = {
+                            rows = rows.filterNot { it.key == entry.key }
+                            actions.remove(entry)
                         },
-                    )
+                        backgroundContent = { RemoveBackground(swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart, RowShape) },
+                    ) {
+                        SongLine(
+                            entry,
+                            Modifier
+                                .then(if (dragging) Modifier.elevation3(RowShape) else Modifier)
+                                .background(RowFill, RowShape)
+                                .combinedClickable(
+                                    onClickLabel = "Play",
+                                    onLongClickLabel = "Song options",
+                                    onLongClick = { longPress(entry, QueuePlace.Upcoming) },
+                                    onClick = { actions.play(entry.index) },
+                                )
+                                .padding(horizontal = 20.dp),
+                            handle = if (shuffle) {
+                                null
+                            } else {
+                                Modifier.draggableHandle(onDragStopped = drop)
+                            },
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+// The heading over one part of what is to come.
+@Composable
+private fun PartHeading(title: String) {
+    Text(
+        title,
+        style = OctoType.caption,
+        color = OctoColors.TextMuted,
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp),
+    )
 }
 
 // The count and length of the listener's own songs still to come, and how

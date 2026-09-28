@@ -17,6 +17,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 // What the app shows about the song that is on.
@@ -121,10 +122,12 @@ class PlaybackConnection @Inject constructor(
     fun speed(): Float = controller?.playbackParameters?.speed ?: 1f
 
     // Plays a list of songs, starting at one of them, or shuffled.
-    fun playTracks(trackIds: List<String>, startIndex: Int = 0, shuffle: Boolean = false) {
+    // `source` names the list for the queue's headings ("OK Computer").
+    fun playTracks(trackIds: List<String>, startIndex: Int = 0, shuffle: Boolean = false, source: String? = null) {
         if (trackIds.isEmpty()) return
+        val word = QueueSource.Played(source).encoded()
         withController { c ->
-            val items = trackIds.map(::songRequest)
+            val items = trackIds.map { songRequest(it, word) }
             c.shuffleModeEnabled = shuffle
             if (shuffle) c.setMediaItems(items, true) else c.setMediaItems(items, startIndex, 0)
             c.prepare()
@@ -145,7 +148,7 @@ class PlaybackConnection @Inject constructor(
     }
 
     fun playAlbum(albumId: String, shuffle: Boolean = false) {
-        scope.launch { playTracks(catalog.albumTrackIds(albumId), 0, shuffle) }
+        scope.launch { playTracks(catalog.albumTrackIds(albumId), 0, shuffle, catalog.album(albumId).first()?.title) }
     }
 
     // With nothing queued, the play button shuffles the whole library.
@@ -299,6 +302,7 @@ class PlaybackConnection @Inject constructor(
                 artwork = meta.artworkRef(),
                 durationMs = meta.durationMs ?: 0,
                 autoplay = item.isAutoplay,
+                source = item.queueSource,
             )
         }
         _upNext.value = upNextOrder(trackIds, current, entryIds) {

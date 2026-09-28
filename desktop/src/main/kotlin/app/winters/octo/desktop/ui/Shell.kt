@@ -67,6 +67,8 @@ import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.design.chromeFilm
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.NoticeAction
+import app.winters.octo.desktop.actionFor
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.library.LocalCovers
 import app.winters.octo.desktop.nav.Page
@@ -207,7 +209,7 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState) {
             CompositionLocalProvider(LocalBottomRoom provides FrameSize.Player + FrameSize.PlayerGap) {
                 BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
                     Column(Modifier.fillMaxSize().clipToBounds()) {
-                        app.notice?.let { Notice(it, app.noticeDetail) { app.notice = null; app.noticeDetail = null } }
+                        app.notice?.let { Notice(it, app.noticeDetail, app.actionFor(it)) { app.notice = null; app.noticeDetail = null } }
                         Box(Modifier.weight(1f)) { PageHost(app) }
                     }
                     // A third of the window, in the middle of the page.
@@ -251,13 +253,15 @@ private fun TitleBar(app: AppState, frame: Frame?, onClose: () -> Unit) {
 }
 
 // A single quiet line above the page, closed with its cross. When there
-// is more to say (the engine's own words for a failure), Details shows it.
+// is more to say (the engine's own words for a failure), Details shows it;
+// an `action` (Undo after a queue edit) sits beside the words.
 @Composable
-private fun Notice(text: String, detail: String?, onClose: () -> Unit) {
+private fun Notice(text: String, detail: String?, action: NoticeAction?, onClose: () -> Unit) {
     var open by remember(text) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(start = PageSide, end = PageSide, top = Space.M)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
             Txt(text, OctoType.bodySmall, OctoColors.TextSecondary, Modifier.weight(1f), maxLines = 2)
+            if (action != null) TextAction(action.label, action.run)
             if (detail != null) TextAction(if (open) "Hide details" else "Details", { open = !open })
             IconAction(OctoIcons.Close, "Dismiss", onClose, size = ControlHeight.S, iconSize = IconSize.Inline, tint = OctoColors.TextSecondary)
         }

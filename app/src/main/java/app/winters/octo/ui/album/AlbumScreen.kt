@@ -86,7 +86,7 @@ class AlbumViewModel @AssistedInject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     // Plays the album from one of its songs.
-    fun play(index: Int) = playback.playTracks(tracks.value.map { it.id }, index)
+    fun play(index: Int) = playback.playTracks(tracks.value.map { it.id }, index, source = album.value?.title)
 
     fun shuffle() = playback.playAlbum(id, shuffle = true)
 
