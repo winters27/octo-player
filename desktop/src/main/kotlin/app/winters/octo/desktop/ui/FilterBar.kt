@@ -74,7 +74,15 @@ fun rememberShownFields(app: AppState): SongFields<Song> = remember(app) { Shown
 // bring the keyboard to the field.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun FilterBar(app: AppState, query: LibraryQuery, onChange: (LibraryQuery) -> Unit, songs: List<Song>, modifier: Modifier = Modifier) {
+fun FilterBar(
+    app: AppState,
+    query: LibraryQuery,
+    onChange: (LibraryQuery) -> Unit,
+    songs: List<Song>,
+    modifier: Modifier = Modifier,
+    // Keeps these filters as a live list, on pages whose songs a live list can pick.
+    onSaveAsLive: (() -> Unit)? = null,
+) {
     val focus = remember { FocusRequester() }
     DisposableEffect(focus) {
         app.pageFilterFocus = focus
@@ -107,13 +115,14 @@ fun FilterBar(app: AppState, query: LibraryQuery, onChange: (LibraryQuery) -> Un
             icon = OctoIcons.Add,
         )
         if (query.filters) TextAction("Clear all", { onChange(query.cleared()) })
+        if (query.filters && onSaveAsLive != null) TextAction("Save as live list", onSaveAsLive, icon = OctoIcons.Filter)
     }
 }
 
 // A filter that is on: its words in a filled pill, no border, and a cross
-// that says a click takes it off.
+// that says a click takes it off. Live lists show their rules the same way.
 @Composable
-private fun FilterPill(text: String, onRemove: () -> Unit) {
+internal fun FilterPill(text: String, onRemove: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     Row(

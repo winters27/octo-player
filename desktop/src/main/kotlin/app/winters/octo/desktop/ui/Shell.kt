@@ -82,6 +82,8 @@ import app.winters.octo.desktop.pages.FoldersPage
 import app.winters.octo.desktop.pages.GenrePage
 import app.winters.octo.desktop.pages.GenresPage
 import app.winters.octo.desktop.pages.HistoryPage
+import app.winters.octo.desktop.pages.LiveListPage
+import app.winters.octo.desktop.pages.NewLiveListPage
 import app.winters.octo.desktop.pages.HomePage
 import app.winters.octo.desktop.pages.PlaylistPage
 import app.winters.octo.desktop.pages.RecentlyAddedPage
@@ -296,6 +298,8 @@ private fun PageHost(app: AppState) {
             is Page.Folder -> FolderPage(app, visit, page.id, page.name)
             is Page.Playlist -> PlaylistPage(app, visit, page.id)
             is Page.Shelf -> ShelfPage(app, visit, page.shelf)
+            is Page.LiveList -> LiveListPage(app, visit, page.id, page.editing)
+            is Page.NewLiveList -> NewLiveListPage(app, visit, page)
         }
     }
 }

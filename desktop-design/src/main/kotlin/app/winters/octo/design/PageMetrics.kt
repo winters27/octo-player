@@ -22,6 +22,8 @@ object PageSize {
     val FolderCover = 28.dp
     // The widest a biography runs, so its lines stay easy to read.
     val Reading = 720.dp
+    // A live list's name while it is edited.
+    val NameField = 420.dp
 }
 
 // An artist's first letter, in place of a picture the server does not have.
