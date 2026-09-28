@@ -44,6 +44,7 @@ class DetailsTest {
         assertEquals("Single edit", song.comment)
         assertEquals("Thomas Bangalter, Guy-Manuel de Homem-Christo", song.displayComposer)
         assertEquals("clean", song.explicitStatus)
+        assertEquals(listOf("USQX91300108"), song.isrc)
         assertEquals("2026-08-14T09:12:45.123Z", song.created)
         val gain = song.replayGain!!
         assertEquals(-9.12f, gain.trackGain!!, 0.001f)
@@ -63,10 +64,32 @@ class DetailsTest {
         assertEquals(128, odd.bpm)
         assertNull(odd.replayGain?.trackGain)
         assertEquals("", odd.musicBrainzId)
+        // One ISRC on its own, kept as written.
+        assertEquals(listOf("us-rc1-76-07839"), odd.isrc)
         // One genre sent on its own, and a tempo that is not a number.
         val broken = songs[2]
         assertEquals(listOf("Techno"), broken.genres)
         assertEquals(0, broken.bpm)
+        // An ISRC in a shape that is neither text nor a list of it.
+        assertEquals(emptyList<String>(), broken.isrc)
+    }
+
+    @Test
+    fun songsCarryTheIsrcsOctoLists() = runTest {
+        // An outside song with its code, one with none, and a library song
+        // with the codes Navidrome gave it, exactly as sent.
+        val body = """{"subsonic-response":{"status":"ok","version":"1.16.1","type":"octo","openSubsonic":true,"searchResult3":{"song":[
+            {"id":"ext-deezer-song-3135556","title":"Gurenge","artist":"LiSA","duration":239,"isrc":["JPU901901234"]},
+            {"id":"ext-deezer-song-42","title":"Unknown","artist":"Someone","duration":180,"isrc":[]},
+            {"id":"s9","title":"Get Lucky","artist":"Daft Punk","duration":369,"isrc":["GBA1B9800001","us-rc1-76-07839"]},
+            {"id":"s10","title":"Old Server","artist":"Someone","duration":200}]}}}"""
+        server.enqueue(MockResponse.Builder().body(body).build())
+        val songs = client().search("lisa").song
+        assertEquals(listOf("JPU901901234"), songs[0].isrc)
+        assertEquals(emptyList<String>(), songs[1].isrc)
+        assertEquals(listOf("GBA1B9800001", "us-rc1-76-07839"), songs[2].isrc)
+        // A server that sends no isrc at all.
+        assertEquals(emptyList<String>(), songs[3].isrc)
     }
 
     @Test
