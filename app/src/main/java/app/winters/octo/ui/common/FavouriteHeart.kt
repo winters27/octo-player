@@ -18,7 +18,9 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.winters.octo.design.GlowIcon
+import app.winters.octo.design.IconAccent
 import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.rememberIconAccent
 import app.winters.octo.favourites.FavouriteStore
 import app.winters.octo.listening.FavouriteKind
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -33,10 +35,15 @@ class FavouriteHeartViewModel @Inject constructor(val favourites: FavouriteStore
 fun FavouriteHeart(kind: FavouriteKind, id: String, modifier: Modifier = Modifier, vm: FavouriteHeartViewModel = hiltViewModel()) {
     val ids by vm.favourites.ids(kind).collectAsStateWithLifecycle()
     val on = id in ids
+    // The heart beats once as it is added.
+    val pulse = rememberIconAccent(IconAccent.Pulse)
     Box(
         modifier
             .size(44.dp)
-            .clickable(interactionSource = null, indication = null, role = Role.Button) { vm.favourites.toggle(kind, id) }
+            .clickable(interactionSource = null, indication = null, role = Role.Button) {
+                if (!on) pulse.play()
+                vm.favourites.toggle(kind, id)
+            }
             .semantics {
                 contentDescription = "Favourite"
                 stateDescription = if (on) "In favourites" else "Not in favourites"
@@ -48,6 +55,7 @@ fun FavouriteHeart(kind: FavouriteKind, id: String, modifier: Modifier = Modifie
             tint = if (on) Color.White else Color.White.copy(alpha = 0.6f),
             lit = on,
             modifier = Modifier.size(24.dp),
+            accent = pulse,
         )
     }
 }

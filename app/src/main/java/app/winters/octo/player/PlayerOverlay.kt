@@ -113,7 +113,9 @@ import app.winters.octo.design.GlazeInset
 import app.winters.octo.design.GlazeClearFilm
 import app.winters.octo.design.GlowIcon
 import app.winters.octo.design.Glaze
+import app.winters.octo.design.IconAccent
 import app.winters.octo.design.LineSlider
+import app.winters.octo.design.rememberIconAccent
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.elevation3
@@ -760,10 +762,15 @@ private fun SongButtons(now: NowPlaying, model: PlayerViewModel) {
 @Composable
 private fun LikeButton(model: PlayerViewModel) {
     val liked by model.liked.collectAsStateWithLifecycle()
+    // The heart beats once as a song is liked.
+    val pulse = rememberIconAccent(IconAccent.Pulse)
     Box(
         Modifier
             .size(44.dp)
-            .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = model::toggleLike)
+            .clickable(interactionSource = null, indication = null, role = Role.Button) {
+                if (!liked) pulse.play()
+                model.toggleLike()
+            }
             .semantics {
                 contentDescription = "Like"
                 stateDescription = if (liked) "In Liked songs" else "Not in Liked songs"
@@ -775,6 +782,7 @@ private fun LikeButton(model: PlayerViewModel) {
             tint = if (liked) LocalContentColor.current else LocalContentColor.current.copy(alpha = 0.6f),
             lit = liked,
             modifier = Modifier.size(24.dp),
+            accent = pulse,
         )
     }
 }
