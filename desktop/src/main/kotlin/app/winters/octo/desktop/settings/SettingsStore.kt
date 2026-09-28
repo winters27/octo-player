@@ -200,6 +200,9 @@ data class PlaybackPrefs(
     val speed: Float = 1f,
     val keepPitch: Boolean = true,
     val pitchSemitones: Int = 0,
+    // When the queue runs out, songs like the last one keep playing. On by
+    // default, as on the phone.
+    val autoplay: Boolean = true,
 )
 
 private val json = Json {
