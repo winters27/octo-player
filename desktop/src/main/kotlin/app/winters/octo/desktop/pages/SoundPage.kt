@@ -185,14 +185,17 @@ private fun PresetButton(app: AppState, sound: SoundController, settings: SoundS
         GlazeCapsule(OctoIcons.Sound, presetLabel(settings), {
             app.popups.showUnder(anchor, width = 280.dp) { close ->
                 MenuTitle("Presets")
-                val own = app.settings.current.sound.presets.map { it.name }.toSet()
+                // Watched, so a preset deleted here leaves the list at once.
+                val saved by app.settings.state.collectAsState()
+                val now by sound.current.collectAsState()
+                val own = saved.sound.presets.map { it.name }.toSet()
                 sound.presets().forEach { preset ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.weight(1f)) {
                             MenuRow(preset.name, {
                                 sound.update { withPreset(it, preset) }
                                 close()
-                            }, if (preset.name == settings.preset) OctoIcons.Check else null)
+                            }, if (preset.name == now.preset) OctoIcons.Check else null)
                         }
                         if (preset.name in own) TextAction("Delete", { sound.deletePreset(preset.name) }, Modifier.padding(end = 10.dp))
                     }
