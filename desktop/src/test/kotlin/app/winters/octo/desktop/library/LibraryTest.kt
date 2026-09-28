@@ -243,4 +243,15 @@ class LibraryIndexTest {
         assertEquals("cover:music.test:al-1:300", coverKey("music.test", "al-1", 300))
         assertEquals("online-cover:v$ONLINE_COVER_VERSION:music.test:al-1:300", coverKey("music.test", "al-1", 300, online = true))
     }
+
+    @Test
+    fun aSmallCoverIsFetchedAtLeastTwiceItsSize() {
+        // A sidebar cover, a song row's, a card's, a page's.
+        assertEquals(150, coverBucket(coverFetchPx(32)))
+        assertEquals(150, coverBucket(coverFetchPx(64)))
+        assertEquals(300, coverBucket(coverFetchPx(100)))
+        assertEquals(300, coverBucket(coverFetchPx(240)))
+        assertEquals(600, coverBucket(coverFetchPx(400)))
+        for (px in 1..1200) assertTrue(coverFetchPx(px) >= minOf(px * 2, 300) && coverFetchPx(px) >= px)
+    }
 }

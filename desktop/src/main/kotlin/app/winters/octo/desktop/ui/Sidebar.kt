@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,7 +27,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.IntRect
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
@@ -77,10 +80,11 @@ private val YourPlaces = listOf(
 )
 
 // The sidebar: part of the frame's glass, down the left from the title bar
-// to the player. Home on its own, then the library, then what is yours,
-// then the playlists (pinned first, with their covers), and Sound and
-// Settings at the foot. Groups fold shut by their names. Folded to a rail,
-// it shows only icons and covers, each named in a tooltip.
+// to the player. The search field at the top, then Home on its own, the
+// library, what is yours, the playlists (pinned first, with their covers),
+// and Sound and Settings at the foot. Groups fold shut by their names.
+// Folded to a rail, it shows only icons and covers, each named in a
+// tooltip, and search is a button that floats the field out beside it.
 @Composable
 fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
     val settings by app.settings.state.collectAsState()
@@ -89,6 +93,8 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
     val lit = app.navigator.sidebarItem
     fun go(page: Page) = app.navigator.go(page)
     Column(modifier.chromeFilm(backdrop).padding(horizontal = Space.M, vertical = Space.M)) {
+        if (rail) RailSearch(app) else OmniField(app, Modifier.fillMaxWidth())
+        Spacer(Modifier.height(Space.S))
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
             item(key = "home") { NavRow("Home", OctoIcons.Home, lit == SidebarItem.Top(Page.Home), rail) { go(Page.Home) } }
             group(app, "library", "Library", rail, frame.foldedGroups) {
@@ -116,6 +122,23 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
 }
 
 private val ControlSize = RowHeight.Nav - Space.Xs
+
+// The rail's search: a button that opens the search field beside the rail,
+// or closes it again.
+@Composable
+private fun RailSearch(app: AppState) {
+    val box = app.omnibox
+    DisposableEffect(Unit) { onDispose { box.trigger = IntRect.Zero } }
+    NavRow(
+        if (app.mac) "Search (⌘K)" else "Search (Ctrl+K)",
+        OctoIcons.Search,
+        selected = box.open,
+        rail = true,
+        modifier = Modifier.onGloballyPositioned { box.trigger = it.windowRect() },
+    ) {
+        if (box.open) box.open = false else app.openSearch()
+    }
+}
 
 // A group of rows under its name, which folds it shut or open. On the rail
 // there are no names, so a hairline stands between groups instead.
@@ -156,10 +179,10 @@ private fun LazyListScope.group(
 // One place to go: an icon and its name, the chosen one on the darker
 // pill. On the rail, the icon alone with its name in a tooltip.
 @Composable
-private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Boolean, onClick: () -> Unit) {
+private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val row: @Composable () -> Unit = {
         Box(
-            Modifier
+            modifier
                 .fillMaxWidth()
                 .height(RowHeight.Nav)
                 .hoverLift(Corner.ControlShape, lifted = false)
@@ -168,7 +191,7 @@ private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Bo
         ) {
             if (selected) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
             Row(Modifier.padding(horizontal = if (rail) Space.None else Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
-                Glyph(icon, size = IconSize.Toolbar - Space.Xxs, tint = if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary)
+                Glyph(icon, size = IconSize.Toolbar, tint = if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary)
                 if (!rail) Txt(label, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary)
             }
         }
