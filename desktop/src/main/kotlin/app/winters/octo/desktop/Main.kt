@@ -50,6 +50,8 @@ import app.winters.octo.desktop.system.SystemIntegration
 import app.winters.octo.desktop.system.letRunningOctoComeForward
 import app.winters.octo.desktop.ui.ListFocus
 import app.winters.octo.desktop.ui.LocalListFocus
+import app.winters.octo.desktop.ui.LocalSoftwareDrawing
+import app.winters.octo.desktop.ui.LocalWindowShown
 import app.winters.octo.desktop.ui.Shell
 import app.winters.octo.desktop.window.Frame
 import app.winters.octo.desktop.window.MIN_HEIGHT
@@ -69,6 +71,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.debounce
+import org.jetbrains.skiko.GraphicsApi
 import okhttp3.OkHttpClient
 
 private fun appIcon(): Painter? = runCatching {
@@ -202,9 +205,24 @@ fun main(args: Array<String>) {
                         keepPlace()
                     }
             }
+            // Whether the window fell back to drawing without the graphics card.
+            var software by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                fun check() {
+                    software = window.renderApi == GraphicsApi.SOFTWARE_FAST || window.renderApi == GraphicsApi.SOFTWARE_COMPAT
+                }
+                check()
+                window.onRenderApiChanged(::check)
+            }
             val look by app.settings.state.collectAsState()
             ProvideWindowLook(reduceMotion = look.appearance.calmMotion || systemCalm) {
-                CompositionLocalProvider(LocalTyping provides typing, LocalSystem provides system, LocalListFocus provides lists) {
+                CompositionLocalProvider(
+                    LocalTyping provides typing,
+                    LocalSystem provides system,
+                    LocalListFocus provides lists,
+                    LocalWindowShown provides (system.windowVisible && !windowState.isMinimized),
+                    LocalSoftwareDrawing provides software,
+                ) {
                     AudioDropZone(system::openFiles) { Shell(app, own, ::closeWindow) }
                 }
             }

@@ -51,10 +51,8 @@ fun ImmersiveWash(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Float, mo
     }
 }
 
-// The two covers being faded between, and whether a frame has been drawn.
-private class WashCovers {
-    var old: Bitmap? = null
-    var new: Bitmap? = null
+// Whether a frame has been drawn yet.
+private class FirstFrame {
     var drawn = false
 }
 
@@ -63,39 +61,14 @@ private class WashCovers {
 private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Float, moving: Boolean, dolly: () -> Float) {
     val renderer = remember { WashRenderer() }
     DisposableEffect(renderer) { onDispose { renderer.release() } }
-    val motion = remember { WashMotion() }
-    val fade = remember { CoverFade() }
-    val covers = remember { WashCovers() }
+    val covers = remember { CoverSwap<Bitmap>() }
+    val first = remember { FirstFrame() }
     // One more for every frame drawn. Only the drawing reads it, so a new
     // frame redraws this layer and nothing is recomposed.
     val frames = remember { mutableIntStateOf(0) }
     val shown = remember { Animatable(0f) }
     // Changes when a new cover arrives, to wake the clock for its fade.
     var arrivals by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(cover) {
-        val next = cover?.square ?: return@LaunchedEffect
-        val current = covers.new
-        // Mid-fade, the new fade starts from whichever cover shows most.
-        val from = when {
-            current == null -> next
-            fade.running && fade.mix < 0.5f -> covers.old ?: current
-            else -> current
-        }
-        covers.old = from
-        covers.new = next
-        renderer.setCovers(from, next)
-        fade.start(SystemClock.uptimeMillis())
-        arrivals++
-    }
-
-    // Fades in on the first frame drawn, or after 1.5 s if that is slow.
-    LaunchedEffect(Unit) {
-        val start = withFrameNanos { it }
-        var now = start
-        while (!covers.drawn && now - start < FirstFrameWaitNanos) now = withFrameNanos { it }
-        shown.animateTo(1f, tween(FadeInMs))
-    }
 
     val focused = LocalWindowInfo.current.isWindowFocused
     val powerSave = rememberPowerSave()
@@ -104,7 +77,23 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Floa
     )
     val tempo by rememberUpdatedState(bpm)
     val pace by rememberUpdatedState(speed)
-    val rate = remember { FrameRate(target) }
+    val clock = remember { WashClock(target) }
+
+    LaunchedEffect(cover) {
+        val next = cover?.square ?: return@LaunchedEffect
+        val (from, to) = covers.arrive(next, clock.fade, SystemClock.uptimeMillis())
+        renderer.setCovers(from, to)
+        arrivals++
+    }
+
+    // Fades in on the first frame drawn, or after 1.5 s if that is slow.
+    LaunchedEffect(Unit) {
+        val start = withFrameNanos { it }
+        var now = start
+        while (!first.drawn && now - start < FirstFrameWaitNanos) now = withFrameNanos { it }
+        shown.animateTo(1f, tween(FadeInMs))
+    }
+
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 
     // The one clock. It runs while the player is in view (hidden or with
@@ -112,18 +101,11 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Floa
     // there is something to move: the motion, or a cover fading in.
     LaunchedEffect(lifecycle, moving, arrivals) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            var last = withFrameNanos { it }
+            clock.start(withFrameNanos { it })
             frames.intValue++
-            while (moving || fade.running) {
+            while (clock.busy(moving)) {
                 withFrameNanos { now ->
-                    val elapsed = now - last
-                    if (frameDue(elapsed, rate.limit)) {
-                        last = now
-                        val limit = rate.ease(target)
-                        if (moving) motion.step(frameFactor(tempo, limit) * framesElapsed(elapsed, limit) * pace, tempo, elapsed / 1e9f)
-                        fade.advance(elapsed / 1e6f)
-                        frames.intValue++
-                    }
+                    if (clock.tick(now, target, tempo, pace, moving)) frames.intValue++
                 }
             }
         }
@@ -140,12 +122,12 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Floa
                         canvas.nativeCanvas,
                         size.width.toInt(),
                         size.height.toInt(),
-                        motion,
-                        fade.mix,
+                        clock.motion,
+                        clock.fade.mix,
                         zoom,
                         shown.value,
                     )
-                    if (drew) covers.drawn = true
+                    if (drew) first.drawn = true
                 }
             },
     )

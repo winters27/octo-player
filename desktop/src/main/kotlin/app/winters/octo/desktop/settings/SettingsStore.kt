@@ -174,7 +174,22 @@ data class Appearance(
     val calmMotion: Boolean = false,
     // The full player's moving background.
     val wash: WashPrefs = WashPrefs(),
+    // What the window's colours are, when on: the glow across the top, or
+    // the full player's wash behind everything.
+    val ambience: AmbienceStyle = AmbienceStyle.Glow,
+    // How the immersive colours move behind the pages.
+    val ambienceMotion: AmbienceMotion = AmbienceMotion.Gentle,
 )
+
+// The window's colours: the playing cover blurred into a glow across the
+// top, or the full player's moving wash of it behind the whole window.
+@Serializable
+enum class AmbienceStyle { Glow, Immersive }
+
+// How the immersive colours move behind the pages: not at all, slowly, or
+// at the full player's own pace.
+@Serializable
+enum class AmbienceMotion { Still, Gentle, Full }
 
 // The full player's background, as the phone's settings have it: whether
 // it moves, how fast it drifts (a share of the full pace), whether it

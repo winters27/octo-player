@@ -20,7 +20,7 @@ class SettingsStoreTest {
             window = WindowSpot(10f, 20f, 1400f, 900f, maximized = true),
             systemTitleBar = true,
             server = SavedServer("http://music.test/", "winters", AuthMode.LegacyPassword, "navidrome", "0.58.0", true, listOf("songLyrics:1")),
-            appearance = Appearance(ambientGlow = false, glowStrength = 0.8f),
+            appearance = Appearance(ambientGlow = false, glowStrength = 0.8f, ambience = AmbienceStyle.Immersive, ambienceMotion = AmbienceMotion.Full),
             playback = PlaybackPrefs(volume = 0.3f, crossfadeSeconds = 6, outputDevice = "usb:dac", speed = 1.25f, keepPitch = false, pitchSemitones = -2),
             songSort = "Year:desc",
             sidePanel = "queue",
@@ -110,5 +110,25 @@ class SettingsStoreTest {
         assertEquals(400f, read.panelWidth)
         assertEquals(listOf("p2", "p1"), read.pinnedPlaylists)
         assertEquals(setOf("library"), read.foldedGroups)
+    }
+
+    @Test
+    fun theAmbienceIsKeptAndAnOldFileKeepsTheGlow() {
+        // A file from before Immersive: the glow, as it was.
+        file().apply { parentFile.mkdirs() }.writeText("""{"appearance":{"ambientGlow":true,"glowStrength":0.7}}""")
+        val old = SettingsStore(file(), 0).current.appearance
+        assertEquals(AmbienceStyle.Glow, old.ambience)
+        assertEquals(AmbienceMotion.Gentle, old.ambienceMotion)
+        assertEquals(0.7f, old.glowStrength)
+        SettingsStore(file(), 0).update { it.copy(appearance = it.appearance.copy(ambience = AmbienceStyle.Immersive, ambienceMotion = AmbienceMotion.Still)) }
+        val read = SettingsStore(file(), 0).current.appearance
+        assertEquals(AmbienceStyle.Immersive, read.ambience)
+        assertEquals(AmbienceMotion.Still, read.ambienceMotion)
+        assertEquals(0.7f, read.glowStrength)
+        // A choice a newer version added reads as the default.
+        file().writeText("""{"appearance":{"ambience":"Aurora","ambienceMotion":"Wild"}}""")
+        val newer = SettingsStore(file(), 0).current.appearance
+        assertEquals(AmbienceStyle.Glow, newer.ambience)
+        assertEquals(AmbienceMotion.Gentle, newer.ambienceMotion)
     }
 }
