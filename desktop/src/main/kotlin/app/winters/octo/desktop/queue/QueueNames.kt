@@ -12,6 +12,8 @@ fun queueNameFor(page: Page, songs: List<Song>, playlistName: (String) -> String
     val album = songs.takeIf { it.isNotEmpty() }?.map { it.albumId }?.distinct()?.singleOrNull()?.let { songs.first().album }?.takeIf { it.isNotBlank() }
     return when (page) {
         is Page.Playlist -> playlistName(page.id)
+        // A live list's name, looked up the same way.
+        is Page.LiveList -> playlistName(page.id)
         is Page.Artist -> page.name.ifBlank { null } ?: album
         is Page.Genre -> page.name
         is Page.Folder -> page.name
@@ -20,7 +22,7 @@ fun queueNameFor(page: Page, songs: List<Song>, playlistName: (String) -> String
         Page.History -> "Recently played"
         Page.RecentlyAdded -> "Recently added"
         Page.Search -> album ?: "Search"
-        is Page.Album, is Page.Shelf, Page.Home, Page.Albums, Page.Artists, Page.Genres, Page.Folders, Page.LibraryHealth, Page.Settings, Page.Sound -> album
+        is Page.Album, is Page.Shelf, is Page.NewLiveList, Page.Home, Page.Albums, Page.Artists, Page.Genres, Page.Folders, Page.LibraryHealth, Page.Settings, Page.Sound -> album
     }
 }
 

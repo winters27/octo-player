@@ -49,11 +49,13 @@ import app.winters.octo.desktop.ui.SongTable
 import app.winters.octo.desktop.ui.artistMenu
 import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.rememberShownFields
+import app.winters.octo.desktop.ui.saveAsLiveList
 import app.winters.octo.desktop.ui.rememberGridState
 import app.winters.octo.desktop.ui.rememberListState
 import app.winters.octo.desktop.ui.rememberLoad
 import app.winters.octo.desktop.ui.show
 import app.winters.octo.desktop.ui.windowRect
+import app.winters.octo.query.FilterPresets
 import app.winters.octo.query.LibraryQuery
 import app.winters.octo.sort.AlbumSort
 import app.winters.octo.sort.SongSort
@@ -98,7 +100,7 @@ fun SongsPage(app: AppState, visit: Visit) {
                     }
                 }
             }
-            if (index.songs.isNotEmpty()) item(key = "filters") { FilterBar(app, query, filter, index.songs) }
+            if (index.songs.isNotEmpty()) item(key = "filters") { FilterBar(app, query, filter, index.songs, onSaveAsLive = { saveAsLiveList(app, emptyList(), query, order) }) }
         }
     }
 }
@@ -203,7 +205,7 @@ fun FavouritesPage(app: AppState, visit: Visit) {
                     },
                 ) {
                     item(key = "title") { title(if (query.filters) filteredCount(songs.size, all.size, true) else null) }
-                    if (all.isNotEmpty()) item(key = "filters") { FilterBar(app, query, filter, all) }
+                    if (all.isNotEmpty()) item(key = "filters") { FilterBar(app, query, filter, all, onSaveAsLive = { saveAsLiveList(app, listOf(FilterPresets.Favourites), query, null) }) }
                 }
             }
             FavouriteKind.Albums, FavouriteKind.Artists -> LazyVerticalGrid(GridCells.Adaptive(GridCard), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {

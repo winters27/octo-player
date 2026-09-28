@@ -7,13 +7,13 @@ import org.junit.Test
 class PlaylistsLeadTest {
     @Test
     fun makingAndImportingComeFirst() {
-        assertEquals(listOf(PlaylistsLead.New, PlaylistsLead.Import), playlistsLead(importNote = false))
+        assertEquals(listOf(PlaylistsLead.New, PlaylistsLead.NewLive, PlaylistsLead.Import), playlistsLead(importNote = false))
     }
 
     @Test
     fun theImportNoteFollowsWhileThereIsOne() {
         assertEquals(
-            listOf(PlaylistsLead.New, PlaylistsLead.Import, PlaylistsLead.ImportNote),
+            listOf(PlaylistsLead.New, PlaylistsLead.NewLive, PlaylistsLead.Import, PlaylistsLead.ImportNote),
             playlistsLead(importNote = true),
         )
     }

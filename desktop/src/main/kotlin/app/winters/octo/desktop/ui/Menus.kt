@@ -337,7 +337,7 @@ private fun ColumnScope.ConfirmDelete(app: AppState, playlist: Playlist, close: 
 
 // A question a menu asks in place of its rows, with a quieter line under it.
 @Composable
-private fun Question(words: String, detail: String? = null) {
+internal fun Question(words: String, detail: String? = null) {
     Column(Modifier.fillMaxWidth().padding(horizontal = Space.Xl, vertical = Space.M), verticalArrangement = Arrangement.spacedBy(Space.Xs)) {
         Txt(words, OctoType.bodySmall, OctoColors.TextPrimary, maxLines = 3)
         if (detail != null) Txt(detail, OctoType.caption, OctoColors.TextMuted, maxLines = 3)
@@ -347,7 +347,7 @@ private fun Question(words: String, detail: String? = null) {
 // A name typed in place of a menu row, like a new playlist's or a new
 // name for one: Enter or the button saves, Escape goes back to the row.
 @Composable
-private fun NameField(value: String, onChange: (String) -> Unit, placeholder: String, action: String, save: () -> Unit, cancel: () -> Unit) {
+internal fun NameField(value: String, onChange: (String) -> Unit, placeholder: String, action: String, save: () -> Unit, cancel: () -> Unit) {
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     Row(Modifier.fillMaxWidth().padding(horizontal = Space.L, vertical = Space.S), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {

@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import app.winters.octo.livelists.DefaultLiveListSort
 import app.winters.octo.query.LibraryQuery
 import app.winters.octo.desktop.home.AlbumShelf
 
@@ -32,6 +33,11 @@ sealed interface Page {
     data class Playlist(val id: String) : Page
     // Every album on one of Home's shelves.
     data class Shelf(val shelf: AlbumShelf) : Page
+    // A live list: songs picked by rules, kept on this computer; opened
+    // straight into its editor with `editing`.
+    data class LiveList(val id: String, val editing: Boolean = false) : Page
+    // A live list being made, from these rules (a page's filters, or none).
+    data class NewLiveList(val query: LibraryQuery = LibraryQuery(sort = DefaultLiveListSort), val name: String = "") : Page
 }
 
 // One folder on the way down to another, for the breadcrumbs.
@@ -42,6 +48,7 @@ data class FolderStep(val id: String, val name: String)
 sealed interface SidebarItem {
     data class Top(val page: Page) : SidebarItem
     data class PlaylistItem(val id: String) : SidebarItem
+    data class LiveListItem(val id: String) : SidebarItem
 }
 
 // The item a top-level page lights up in the sidebar, or null for a page
@@ -54,6 +61,8 @@ fun sidebarItemOf(page: Page): SidebarItem? = when (page) {
     is Page.Playlist -> SidebarItem.PlaylistItem(page.id)
     is Page.Album, is Page.Artist, is Page.Genre, is Page.Folder -> null
     is Page.Shelf -> null
+    is Page.LiveList -> SidebarItem.LiveListItem(page.id)
+    is Page.NewLiveList -> null
 }
 
 // One visit to a page. The id is its own, so the same page visited twice
@@ -105,6 +114,15 @@ class Navigator(start: Page = Page.Home, private val limit: Int = 100) {
         // A very long history forgets its oldest pages.
         while (visits.size > limit) forget(visits.removeAt(0))
         at = visits.lastIndex
+        moves++
+    }
+
+    // Shows `page` in place of the one on screen, so Back skips what it
+    // replaced: a live list once made, in place of its editor.
+    fun replace(page: Page) {
+        val old = visits[at]
+        forget(old)
+        visits[at] = visit(page, old.item)
         moves++
     }
 

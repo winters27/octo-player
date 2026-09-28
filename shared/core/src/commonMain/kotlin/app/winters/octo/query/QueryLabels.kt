@@ -64,6 +64,24 @@ private fun QueryRule.numberLabel(name: String): String {
         QueryField.BitRate -> { n -> "$n kbps" }
         else -> Long::toString
     }
+    // Plays and lengths read as a person says them: "Played 10 times or
+    // more", "3:00 or shorter".
+    if (field == QueryField.Plays) {
+        fun times(n: Long) = if (n == 1L) "once" else "$n times"
+        when (op) {
+            QueryOp.Is -> return if (low == 0L) "Never played" else "Played ${times(low)}"
+            QueryOp.AtLeast -> return if (low <= 1L) "Played at least once" else "Played ${times(low)} or more"
+            QueryOp.AtMost -> return "Played ${times(low)} or fewer"
+            else -> {}
+        }
+    }
+    if (field == QueryField.Duration) {
+        when (op) {
+            QueryOp.AtLeast -> return "${show(low)} or longer"
+            QueryOp.AtMost -> return "${show(low)} or shorter"
+            else -> {}
+        }
+    }
     return when (op) {
         QueryOp.Is -> "$name is ${show(low)}"
         QueryOp.IsNot -> "$name is not ${show(low)}"

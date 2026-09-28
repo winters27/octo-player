@@ -34,6 +34,14 @@ import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.songJson
 import app.winters.octo.lyrics.OnlineLyrics
+import app.winters.octo.livelists.LiveList
+import app.winters.octo.livelists.LiveListStarters
+import app.winters.octo.livelists.liveListQueryFrom
+import app.winters.octo.query.QueryMatch
+import app.winters.octo.query.QuerySort
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import app.winters.octo.query.FilterPresets
 import app.winters.octo.query.LibraryQuery
 import app.winters.octo.query.QueryField
@@ -304,6 +312,46 @@ class ScreenShotsTest {
             }
             shot("filters-empty")
             SwingUtilities.invokeAndWait { app.navigator.keepFilter(app.navigator.current, LibraryQuery()) }
+            // Live lists: the editor with its starters, the editor from a
+            // page's filters with the rule menu open, a list's page with the
+            // lists in the sidebar, its menu, and one that matches nothing.
+            SwingUtilities.invokeAndWait { app.navigator.go(Page.NewLiveList()) }
+            shot("livelist-new")
+            SwingUtilities.invokeAndWait {
+                val filters = LibraryQuery(listOf(FilterPresets.Lossless, FilterPresets.genre("Trip Hop"), FilterPresets.genre("Electronic")), QueryMatch.Any)
+                app.navigator.go(Page.NewLiveList(liveListQueryFrom(emptyList(), filters, app.songOrder)))
+            }
+            shot("livelist-editor")
+            SwingUtilities.invokeAndWait {
+                scene.semanticsOwners.firstNotNullOfOrNull { findText(it.unmergedRootSemanticsNode, "Add another rule") }?.let { node ->
+                    val spot = node.boundsInRoot.center
+                    scene.sendPointerEvent(PointerEventType.Enter, spot)
+                    scene.sendPointerEvent(PointerEventType.Press, spot, buttons = PointerButtons(isPrimaryPressed = true))
+                    scene.render()
+                    scene.sendPointerEvent(PointerEventType.Release, spot)
+                }
+            }
+            shot("livelist-rules-menu")
+            SwingUtilities.invokeAndWait { app.popups.close() }
+            lateinit var tripHop: LiveList
+            lateinit var lossless: LiveList
+            SwingUtilities.invokeAndWait {
+                val starters = LiveListStarters.associateBy { it.name }
+                app.liveLists.save(LiveList.new("Most played this month", starters.getValue("Most played this month").query, System.currentTimeMillis()))
+                tripHop = app.liveLists.save(LiveList.new("Trip hop nights", LibraryQuery(listOf(FilterPresets.genre("Trip Hop"), FilterPresets.Lossless), sort = QuerySort("Title")), System.currentTimeMillis()))
+                lossless = app.liveLists.save(LiveList.new("Lossless favourites", starters.getValue("Lossless favourites").query, System.currentTimeMillis()))
+                app.navigator.go(Page.LiveList(tripHop.id))
+            }
+            shot("livelist")
+            SwingUtilities.invokeAndWait { app.popups.showAt(androidx.compose.ui.unit.IntOffset(140, 330)) { close -> LiveListMenu(app, tripHop, close) } }
+            shot("livelist-menu")
+            SwingUtilities.invokeAndWait {
+                app.popups.close()
+                app.navigator.go(Page.LiveList(lossless.id))
+            }
+            shot("livelist-empty")
+            SwingUtilities.invokeAndWait { app.navigator.go(Page.LiveList(tripHop.id, editing = true)) }
+            shot("livelist-editing")
             // A song that would not play: the notice line, with details, and its row marked.
             SwingUtilities.invokeAndWait {
                 val failed = app.library!!.index!!.songs[1]
@@ -728,5 +776,11 @@ class ScreenShotsTest {
         paint.color = colour(3)
         canvas.drawRect(org.jetbrains.skia.Rect.makeXYWH(40f, 210f, 120f + seed % 60f, 60f), paint)
         return surface.makeImageSnapshot().encodeToData(EncodedImageFormat.PNG)!!.bytes
+    }
+
+    // The node showing exactly this text, for clicking it in a shot.
+    private fun findText(node: SemanticsNode, text: String): SemanticsNode? {
+        if (node.config.getOrNull(SemanticsProperties.Text)?.joinToString { it.text } == text) return node
+        return node.children.firstNotNullOfOrNull { findText(it, text) }
     }
 }

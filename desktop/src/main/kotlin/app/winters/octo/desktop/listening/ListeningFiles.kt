@@ -4,19 +4,16 @@ import app.winters.octo.listening.PendingPlay
 import app.winters.octo.listening.decodePending
 import app.winters.octo.listening.encodePending
 import app.winters.octo.listening.plusPlay
+import app.winters.octo.livelists.accountKey
 import app.winters.octo.subsonic.Song
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
-import java.security.MessageDigest
 
 // Each server account keeps its listening in its own folder, named by a
 // hash of the name and address so neither shows in the file name.
-fun listeningFolder(root: File, username: String, address: String): File {
-    val digest = MessageDigest.getInstance("SHA-256").digest("$username@$address".toByteArray())
-    val name = digest.take(8).joinToString("") { "%02x".format(it) }
-    return File(File(root, "listening"), name)
-}
+fun listeningFolder(root: File, username: String, address: String): File =
+    File(File(root, "listening"), accountKey(username, address))
 
 // A song as the play log keeps it: enough to show it and open its album
 // and artist, even when it has left the library.

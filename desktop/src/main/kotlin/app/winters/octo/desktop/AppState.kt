@@ -12,6 +12,7 @@ import app.winters.octo.desktop.health.HealthModel
 import app.winters.octo.desktop.home.HomeStore
 import app.winters.octo.desktop.library.LibraryStore
 import app.winters.octo.desktop.listening.PlayReporter
+import app.winters.octo.desktop.livelists.LiveListStore
 import app.winters.octo.desktop.listening.listeningFolder
 import app.winters.octo.desktop.lyrics.LyricsModel
 import app.winters.octo.desktop.lyrics.LyricsSources
@@ -228,6 +229,10 @@ class AppState(
 
     // ---- End of the queue's edits ----
 
+    // The account's live lists: songs picked by rules, kept on this
+    // computer (see LiveListActions.kt).
+    val liveLists = LiveListStore(scope)
+
     init {
         if (listeningRoot != null) {
             plays.start()
@@ -256,6 +261,7 @@ class AppState(
     fun beforeQuit() {
         plays.flush()
         if (listeningRoot != null) queueKeeper.saveNow()
+        liveLists.saveNow()
     }
 
     fun signedIn(connection: Connection, note: String? = null) {
@@ -285,6 +291,7 @@ class AppState(
         queueKeeper.folder = folder
         queueSync.folder = folder
         queueSync.reset()
+        liveLists.open(folder?.let { File(it, LiveListStore.FILE_NAME) })
         scope.launch {
             if (folder != null) queueKeeper.restore()?.let(queueSync::restored)
             queueSync.check(force = true)
@@ -299,6 +306,8 @@ class AppState(
         queueKeeper.folder = null
         queueSync.folder = null
         queueSync.reset()
+        liveLists.saveNow()
+        liveLists.open(null)
         player.clear()
         // The server is forgotten at once; the password store is left to
         // finish off the window's thread.
@@ -363,7 +372,7 @@ class AppState(
     // the page it was played from names it (queueNameFor).
     fun play(songs: List<Song>, start: Int = 0, shuffle: Boolean = false, source: String? = null) {
         if (songs.isEmpty()) return
-        val name = source ?: queueNameFor(navigator.current.page, songs) { id -> playlists.firstOrNull { it.id == id }?.name }
+        val name = source ?: queueNameFor(navigator.current.page, songs) { id -> playlists.firstOrNull { it.id == id }?.name ?: liveLists.byId(id)?.name }
         player.play(songs, if (shuffle) (songs.indices).random() else start, shuffle, QueueSource.Played(name))
     }
 

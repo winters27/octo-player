@@ -4,6 +4,7 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.player.RepeatMode
+import app.winters.octo.desktop.ui.newLiveList
 import app.winters.octo.desktop.ui.newPlaylist
 import app.winters.octo.playback.SleepState
 import app.winters.octo.subsonic.SubsonicException
@@ -36,6 +37,7 @@ fun commandsFor(app: AppState): List<Command> = buildList {
     page("Library health", Page.LibraryHealth, "duplicates missing tags problems")
     page("Sound", Page.Sound, "equalizer eq loudness crossfade")
     page("Settings", Page.Settings, "preferences options")
+    app.liveLists.lists.value.forEach { list -> page(list.name, Page.LiveList(list.id), "live list smart playlist") }
 
     val state = app.player.state.value
     val song = state.current?.song
@@ -72,6 +74,7 @@ fun commandsFor(app: AppState): List<Command> = buildList {
 
     val library = "Library"
     add(Command("New playlist", library, "create make") { newPlaylist(app) })
+    add(Command("New live list", library, "create make smart playlist rules auto") { newLiveList(app) })
     add(Command("Shuffle all songs", library, "random play everything") { app.library?.index?.songs?.let { app.play(it, shuffle = true) } })
     add(Command("Play favourites", library, "liked starred hearts") { playFavourites(app) })
     add(Command("Read the library again", library, "refresh reload rescan scan") { app.library?.load(); app.refreshPlaylists() })

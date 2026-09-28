@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -16,6 +17,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
 import app.winters.octo.catalog.PlaylistSummary
+import app.winters.octo.livelists.LiveList
+import app.winters.octo.livelists.LiveListStore
 import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.playlists.PlaylistFiles
 import app.winters.octo.sort.SortList
@@ -30,10 +33,14 @@ import app.winters.octo.ui.common.SortButton
 import app.winters.octo.ui.common.TitleWithSort
 import app.winters.octo.ui.common.TopOnNewOrder
 import app.winters.octo.ui.common.screenPadding
-import app.winters.octo.ui.common.sortedRows
 import app.winters.octo.ui.common.songs
+import app.winters.octo.ui.common.sortedRows
+import app.winters.octo.ui.livelists.LiveListLine
+import app.winters.octo.ui.livelists.NewLiveListLine
 import app.winters.octo.ui.menu.CollectionTarget
 import app.winters.octo.ui.menu.LocalSongMenu
+import app.winters.octo.ui.nav.LiveListEditRoute
+import app.winters.octo.ui.nav.LiveListRoute
 import app.winters.octo.ui.nav.PlaylistRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,7 +56,12 @@ class PlaylistsViewModel @Inject constructor(
     store: PlaylistStore,
     private val files: PlaylistFiles,
     private val sorting: SortSettings,
+    liveListStore: LiveListStore,
 ) : ViewModel() {
+    // The live lists, in the order they were made, above the playlists.
+    val liveLists: StateFlow<List<LiveList>> =
+        liveListStore.lists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     // The playlists in the chosen order. There are few, so they sort here.
     val playlists: StateFlow<Sorted<PlaylistSummary>?> =
         combine(store.playlists, sorting.order(SortList.Playlists)) { list, order -> Sorted(sortPlaylists(list, order), order, null) }
@@ -74,13 +86,14 @@ class PlaylistsViewModel @Inject constructor(
 // The lines above the playlists, in order.
 enum class PlaylistsLead(val key: String) {
     New("new"),
+    NewLive("new-live"),
     Import("import"),
     ImportNote("import-note"),
 }
 
-// The lead lines to show: making and importing, then how the last import
-// went while there is one. Liked songs is not here; hearted songs live on
-// the Favourites page.
+// The lead lines to show: making a playlist or a live list, importing, then
+// how the last import went while there is one. Liked songs is not here;
+// hearted songs live on the Favourites page.
 fun playlistsLead(importNote: Boolean): List<PlaylistsLead> =
     PlaylistsLead.entries.filter { it != PlaylistsLead.ImportNote || importNote }
 
@@ -91,6 +104,7 @@ fun playlistsLead(importNote: Boolean): List<PlaylistsLead> =
 fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsViewModel = hiltViewModel()) {
     val playlists by vm.playlists.collectAsStateWithLifecycle()
     val importState by vm.importState.collectAsStateWithLifecycle()
+    val liveLists by vm.liveLists.collectAsStateWithLifecycle()
     val sheets = LocalPlaylistSheets.current
     val menus = LocalSongMenu.current.collections
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::importFile) }
@@ -109,10 +123,14 @@ fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsV
                 item(key = lead.key) {
                     when (lead) {
                         PlaylistsLead.New -> NewPlaylistLine { sheets.show(PlaylistSheet.Create()) }
+                        PlaylistsLead.NewLive -> NewLiveListLine { onOpen(LiveListEditRoute()) }
                         PlaylistsLead.Import -> ImportPlaylistLine { pickFile.launch(PlaylistFileTypes) }
                         PlaylistsLead.ImportNote -> importState?.let { ImportNote(it) }
                     }
                 }
+            }
+            items(liveLists, key = { "live:${it.id}" }) { list ->
+                LiveListLine(list, onClick = { onOpen(LiveListRoute(list.id)) }, onLongClick = { sheets.show(PlaylistSheet.LiveOptions(list.id, list.name)) })
             }
             sortedRows(playlists?.items.orEmpty(), key = { it.id }) { playlist ->
                 PlaylistLine(
