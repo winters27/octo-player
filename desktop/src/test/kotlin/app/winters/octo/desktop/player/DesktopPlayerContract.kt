@@ -300,4 +300,28 @@ abstract class DesktopPlayerContract {
         assertNotEquals(null, p.state.value.output)
         assertTrue(p.state.value.outputs.isNotEmpty())
     }
+
+    @Test
+    fun theFadeLeavesTheVolumeAlone() {
+        val p = newPlayer()
+        p.setVolume(0.6f)
+        p.play(songs)
+        p.setFade(0.25f)
+        assertEquals(0.6f, p.state.value.volume)
+        assertEquals(0.25f, p.state.value.fade)
+        p.setFade(7f)
+        assertEquals(1f, p.state.value.fade)
+        assertEquals(0.6f, p.state.value.volume)
+    }
+
+    @Test
+    fun onlySongsThatPlayOutCountAsEnded() {
+        val p = newPlayer()
+        p.play(songs)
+        p.next()
+        assertEquals(0, p.state.value.ended)
+        elapse(p, 100_300)
+        assertEquals("s3", p.now())
+        assertEquals(1, p.state.value.ended)
+    }
 }

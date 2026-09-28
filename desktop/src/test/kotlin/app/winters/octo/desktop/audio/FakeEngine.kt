@@ -7,6 +7,7 @@ import app.winters.octo.audio.PlaybackState
 import app.winters.octo.audio.QueueItem
 import app.winters.octo.audio.ReplayGainSettings
 import app.winters.octo.audio.OutputDevice as EngineDevice
+import app.winters.octo.audio.OutputFormat as EngineFormat
 import app.winters.octo.audio.RepeatMode as EngineRepeat
 
 // A pretend engine for the player's own tests: it keeps its queue the way
@@ -28,6 +29,7 @@ class FakeEngine : AudioEngine {
     var speed = 1f to 1f
     var listed = listOf(EngineDevice("spk", "Speakers", true), EngineDevice("usb", "USB DAC", false))
     var current: EngineDevice? = null
+    var format: EngineFormat? = null
     var pins: Map<String, String>? = null
 
     val ids: List<String> get() = queue.map { it.id }
@@ -112,6 +114,8 @@ class FakeEngine : AudioEngine {
     override fun devices(): List<EngineDevice> = listed
 
     override fun currentDevice(): EngineDevice? = current
+
+    override fun outputFormat(): EngineFormat? = format
 
     override fun heard(): Heard = heard
 

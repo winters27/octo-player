@@ -34,6 +34,10 @@ class SilentPlayer(
     private var repeat = RepeatMode.Off
     private var level = volume.coerceIn(0f, 1f)
     private var stopAfter = false
+    // The sleep timer's fade, kept only to show: there is no sound.
+    private var fade = 1f
+    // Songs played to their end by themselves.
+    private var ended = 0
     // Times round the current entry by repeat one, and which entry that is.
     private var rounds = 0
     private var roundsOf: Long? = null
@@ -65,6 +69,7 @@ class SilentPlayer(
             var over = rawPosition() - duration
             while (running && over >= 0) {
                 val endedAt = clock() - over
+                ended++
                 if (stopAfter) {
                     // Paused at the start of what would play next, as the
                     // engine does; at the end of the queue it just ends.
@@ -232,6 +237,13 @@ class SilentPlayer(
         // One output only: this player makes no sound.
     }
 
+    override fun setFade(fade: Float) {
+        synchronized(lock) {
+            this.fade = fade.coerceIn(0f, 1f)
+            publish()
+        }
+    }
+
     override fun setStopAfterCurrent(on: Boolean) {
         synchronized(lock) {
             stopAfter = on
@@ -280,6 +292,10 @@ class SilentPlayer(
             output = system,
             outputs = listOf(system),
             stopAfterCurrent = stopAfter,
+            // The library's word only: nothing is decoded or played.
+            format = queue.currentEntry?.song?.let(::libraryFormat)?.let { PlayFormat(it, null) },
+            fade = fade,
+            ended = ended,
         )
     }
 

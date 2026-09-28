@@ -4,10 +4,15 @@ import app.winters.octo.audio.EndReason
 import app.winters.octo.audio.EngineEvent
 import app.winters.octo.audio.ErrorKind
 import app.winters.octo.audio.PlaybackState
+import app.winters.octo.audio.TrackInfo
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.player.DEFAULT_OUTPUT
+import app.winters.octo.desktop.player.DeviceFormat
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.SavedQueue
+import app.winters.octo.desktop.player.SongFormat
+import app.winters.octo.desktop.player.formatLabel
+import app.winters.octo.desktop.player.outputSentence
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SongReplayGain
 import org.junit.Assert.assertEquals
@@ -18,6 +23,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Test
 import kotlin.random.Random
 import app.winters.octo.audio.OutputDevice as EngineDevice
+import app.winters.octo.audio.OutputFormat as EngineFormat
 
 // The player's side of the engine: that the engine's queue always holds
 // the songs in the order they play, that jumps use the queue it has, and
@@ -390,5 +396,63 @@ class EngineSyncTest {
             assertTrue("signed", url.queryParameter("t") != null || url.queryParameter("p") != null)
         }
         assertNull(ServerSongs { null }.addressOf(Song("abc", "A")))
+    }
+
+    @Test
+    fun theSongsFormatAndTheDevicesReachTheState() {
+        val (p, engine) = setUp()
+        val flac = songs.map { it.copy(suffix = "flac", samplingRate = 44_100, bitDepth = 16) }
+        p.play(flac)
+        // The library's word until the song starts.
+        assertEquals("FLAC 16/44.1", formatLabel(p.state.value.format))
+        engine.current = EngineDevice("spk", "Speakers", true)
+        engine.emit(EngineEvent.DeviceChanged(engine.current, EngineFormat(48_000u, 2u, "f32", 32u)))
+        val info = TrackInfo("flac", true, 96_000u, 2u, 24u, null, null)
+        engine.emit(EngineEvent.TrackStarted(itemId(p.key("s1")), 0u, info))
+        val format = p.state.value.format!!
+        assertEquals(SongFormat("flac", true, 96_000, 24, 2), format.song)
+        assertEquals(DeviceFormat(48_000, 2, 32, float = true), format.output)
+        assertTrue(format.resampled)
+        assertEquals("Playing at 48 kHz, 32-bit float on Speakers, resampled from 96 kHz", outputSentence(format, p.state.value.playingOn?.name))
+        // The next song shows the library's word again until it starts.
+        p.next()
+        assertEquals(44_100, p.state.value.format?.song?.sampleRate)
+        assertEquals(format.output, p.state.value.format?.output)
+    }
+
+    @Test
+    fun theFadeTurnsTheEngineDownAndLeavesTheVolume() {
+        val (p, engine) = setUp()
+        p.setVolume(0.5f)
+        assertEquals(0.25f, engine.level, 0.0001f)
+        p.setFade(0.5f)
+        assertEquals(0.125f, engine.level, 0.0001f)
+        assertEquals(0.5f, p.state.value.volume)
+        assertEquals(0.5f, p.state.value.fade)
+        // A volume change under a fade keeps the fade.
+        p.setVolume(1f)
+        assertEquals(0.5f, engine.level, 0.0001f)
+        p.setFade(1f)
+        assertEquals(1f, engine.level, 0.0001f)
+    }
+
+    @Test
+    fun onlySongsThatPlayOutCountAsEnded() {
+        val (p, engine) = setUp()
+        p.play(songs)
+        engine.emit(EngineEvent.TrackEnded(itemId(p.key("s1")), EndReason.FINISHED))
+        engine.emit(EngineEvent.TrackEnded(itemId(p.key("s2")), EndReason.SKIPPED))
+        engine.emit(EngineEvent.TrackEnded("q:9999", EndReason.FINISHED))
+        assertEquals(1, p.state.value.ended)
+    }
+
+    @Test
+    fun theDecodersWordIsNamedForPeople() {
+        val pcm = TrackInfo("pcm_s16le", true, 48_000u, 1u, 16u, null, null)
+        assertEquals("wav", songFormatOf(pcm, Song("C:/music/tone.WAV")).codec)
+        assertEquals("aiff", songFormatOf(pcm, Song("x", suffix = "aiff")).codec)
+        assertEquals("pcm", songFormatOf(pcm, null).codec)
+        val mp3 = songFormatOf(TrackInfo("mp3", false, 44_100u, 2u, null, null, null), Song("y", bitRate = 320))
+        assertEquals(SongFormat("mp3", false, 44_100, null, 2, 320), mp3)
     }
 }

@@ -9,7 +9,9 @@ import app.winters.octo.audio.PlaybackState
 import app.winters.octo.audio.ReplayGainSettings
 import app.winters.octo.desktop.player.DEFAULT_OUTPUT
 import app.winters.octo.desktop.player.DesktopPlayer
+import app.winters.octo.desktop.player.DeviceFormat
 import app.winters.octo.desktop.player.OutputDevice
+import app.winters.octo.desktop.player.PlayFormat
 import app.winters.octo.desktop.player.PlayProblem
 import app.winters.octo.desktop.player.PlayQueue
 import app.winters.octo.desktop.player.PlayerState
@@ -17,6 +19,8 @@ import app.winters.octo.desktop.player.QueueEntry
 import app.winters.octo.desktop.player.RESTART_AFTER_MS
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.SavedQueue
+import app.winters.octo.desktop.player.SongFormat
+import app.winters.octo.desktop.player.libraryFormat
 import app.winters.octo.playback.PlayFailure
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -70,6 +74,17 @@ class EnginePlayer(
     private var level = volume.coerceIn(0f, 1f)
     private var speed = 1f
 
+    // The sleep timer's fade, on top of the volume.
+    private var fade = 1f
+
+    // Songs played to their end by themselves.
+    private var ended = 0
+
+    // The decoder's word on the entry that started last, and what the
+    // device runs at.
+    private var decoded: Pair<Long, SongFormat>? = null
+    private var deviceFormat: DeviceFormat? = null
+
     // What the listener asked for: playing or not. The engine's own state
     // changes only override it when the engine stops by itself.
     private var playing = false
@@ -121,7 +136,7 @@ class EnginePlayer(
 
     init {
         engine.setListener(::onEvent)
-        engine.setVolume(loudness(level))
+        engine.setVolume(heardLevel())
         // A steady word of where playback is, which also catches a song
         // start whose own news never came (a seek before it was heard).
         engine.setPositionInterval(POSITION_EVERY_MS)
@@ -341,10 +356,23 @@ class EnginePlayer(
     override fun setVolume(volume: Float) {
         synchronized(lock) {
             level = volume.coerceIn(0f, 1f)
-            engine.setVolume(loudness(level))
+            engine.setVolume(heardLevel())
             publish()
         }
     }
+
+    override fun setFade(fade: Float) {
+        synchronized(lock) {
+            val next = fade.coerceIn(0f, 1f)
+            if (next == this.fade) return
+            this.fade = next
+            engine.setVolume(heardLevel())
+            publish()
+        }
+    }
+
+    // What the engine plays at: the volume as heard, times the fade.
+    private fun heardLevel(): Float = loudness(level) * fade
 
     override fun selectOutput(id: String) {
         synchronized(lock) {
@@ -472,8 +500,18 @@ class EnginePlayer(
         var runningOut: Pair<Song, List<Song>>? = null
         synchronized(lock) {
             when (event) {
-                is EngineEvent.TrackStarted -> runningOut = started(keyOfItem(event.itemId))
-                is EngineEvent.TrackEnded -> if (event.reason == EndReason.FINISHED) finished(keyOfItem(event.itemId))
+                is EngineEvent.TrackStarted -> {
+                    val key = keyOfItem(event.itemId)
+                    val entry = queue.songs.firstOrNull { it.key == key }
+                    val info = event.info
+                    if (entry != null && info != null) decoded = entry.key to songFormatOf(info, entry.song)
+                    runningOut = started(key)
+                }
+                is EngineEvent.TrackEnded -> if (event.reason == EndReason.FINISHED) {
+                    val key = keyOfItem(event.itemId)
+                    if (queue.songs.any { it.key == key }) ended++
+                    finished(key)
+                }
                 is EngineEvent.Buffering -> buffering = playing
                 is EngineEvent.Ready -> buffering = false
                 is EngineEvent.StateChanged -> when (event.state) {
@@ -503,6 +541,7 @@ class EnginePlayer(
                 }
                 is EngineEvent.DeviceChanged -> {
                     playingOn = event.device?.let { OutputDevice(it.id, it.name) }
+                    deviceFormat = event.format?.let(::deviceFormatOf)
                     _deviceKey.value = event.device?.id
                     devicesMoved = true
                 }
@@ -558,8 +597,10 @@ class EnginePlayer(
             background.execute {
                 val listed = runCatching { engine.devices() }.getOrDefault(emptyList())
                 val current = runCatching { engine.currentDevice() }.getOrNull()
+                val format = runCatching { engine.outputFormat() }.getOrNull()
                 synchronized(lock) {
                     devices = listed.map { OutputDevice(it.id, it.name) }
+                    if (format != null) deviceFormat = deviceFormatOf(format)
                     if (current != null) {
                         playingOn = OutputDevice(current.id, current.name)
                         _deviceKey.value = current.id
@@ -600,7 +641,19 @@ class EnginePlayer(
             stopAfterCurrent = stopAfter,
             speed = speed,
             playingOn = playingOn,
+            format = formatNow(),
+            fade = fade,
+            ended = ended,
         )
+    }
+
+    // The current song's format, the decoder's once it started and the
+    // library's until then, with the device's.
+    private fun formatNow(): PlayFormat? {
+        val current = queue.currentEntry
+        val song = decoded?.takeIf { it.first == current?.key }?.second ?: current?.song?.let(::libraryFormat)
+        if (song == null && deviceFormat == null) return null
+        return PlayFormat(song, deviceFormat)
     }
 
     private companion object {

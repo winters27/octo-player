@@ -1,6 +1,8 @@
 package app.winters.octo.desktop.audio
 
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.player.outputSentence
+import app.winters.octo.desktop.player.songFormatWords
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -36,6 +38,8 @@ suspend fun checkSound(app: AppState, file: File, close: () -> Unit) {
     val start = first
     val moved = engine != null && start != null && last - start >= 1_000
     println(if (moved) "check: sound is playing, the clock moved ${last - start} ms" else "check: FAILED, the engine did not play")
+    val state = player.state.value
+    println("check: song ${songFormatWords(state.format) ?: "format not known"}; ${outputSentence(state.format, state.playingOn?.name) ?: "no output format"}")
     player.pause()
     println(secureCheck(app))
     close()
