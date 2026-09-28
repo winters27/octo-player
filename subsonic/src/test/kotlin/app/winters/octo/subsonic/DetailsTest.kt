@@ -124,6 +124,32 @@ class DetailsTest {
     }
 
     @Test
+    fun releaseTypesAreReadFromAListOrAWord() = runTest {
+        val body = """{"subsonic-response":{"status":"ok","artist":{"id":"r1","name":"Radiohead","album":[
+            {"id":"a","name":"OK Computer","releaseTypes":["Album"]},
+            {"id":"b","name":"I Might Be Wrong","releaseTypes":["Album","Live"]},
+            {"id":"c","name":"Creep","releaseTypes":"Single"},
+            {"id":"d","name":"Pablo Honey"}]}}}"""
+        server.enqueue(MockResponse.Builder().body(body).build())
+        val albums = client().artist("r1").album
+        assertEquals(listOf(listOf("Album"), listOf("Album", "Live"), listOf("Single"), emptyList()), albums.map { it.releaseTypes })
+    }
+
+    @Test
+    fun anAlbumPageCarriesItsDiscTitlesAndKind() = runTest {
+        val body = """{"subsonic-response":{"status":"ok","album":{"id":"a","name":"Live","starred":"2026-01-01T00:00:00Z",
+            "isCompilation":true,"releaseTypes":["Album","Compilation"],"genres":[{"name":"Rock"}],
+            "discTitles":[{"disc":2,"title":"Encore"}],"song":[{"id":"s","title":"One","discNumber":2}]}}}"""
+        server.enqueue(MockResponse.Builder().body(body).build())
+        val album = client().album("a")
+        assertEquals(listOf(DiscTitle(2, "Encore")), album.discTitles)
+        assertEquals(listOf("Album", "Compilation"), album.releaseTypes)
+        assertEquals(listOf("Rock"), album.genres)
+        assertEquals(true, album.isCompilation)
+        assertEquals("2026-01-01T00:00:00Z", album.starred)
+    }
+
+    @Test
     fun anArtistCarriesItsMusicBrainzId() = runTest {
         val body = """{"subsonic-response":{"status":"ok","artists":{"index":[{"name":"D","artist":[
             {"id":"ar1","name":"Daft Punk","musicBrainzId":"056e4f3e-d505-4dad-8ec1-d04f521cbb56","sortName":"daft punk"}]}]}}}"""

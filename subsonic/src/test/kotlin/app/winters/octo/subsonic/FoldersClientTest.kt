@@ -65,6 +65,33 @@ class FoldersClientTest {
         // A child with no id is skipped.
         assertEquals(listOf("XEjJFBng9tY4swUvEp7Wj7"), dir.songs.map { it.id })
         assertEquals(179, dir.songs[0].duration)
+        // The folder it is in, the cover a folder has, and each song's own
+        // folder, for "Show in folder" and breadcrumbs.
+        assertEquals("root", dir.parent)
+        assertEquals("al-7wsVynyqPtHmsFWz6wUDCj", dir.folders[0].coverArt)
+        assertNull(dir.folders[1].coverArt)
+        assertEquals("1mNJ8hAlbt4jJc2dFaf38y", dir.songs[0].parent)
+    }
+
+    @Test
+    fun aNumberedParentAndSongCountsAreRead() = runTest {
+        server.enqueue(
+            MockResponse.Builder().body(
+                """{"subsonic-response":{"status":"ok","directory":{"id":12,"name":"Albums","parent":3,"child":[
+                {"id":13,"isDir":true,"title":"Kid A","songCount":10},
+                {"id":"s1","isDir":false,"title":"Idioteque","parent":"12","path":"Radiohead/Kid A/08 Idioteque.flac"}]}}}""",
+            ).build(),
+        )
+        val dir = client().musicDirectory("12")
+        assertEquals("3", dir.parent)
+        assertEquals(10, dir.folders.single().songCount)
+        assertEquals("Radiohead/Kid A/08 Idioteque.flac", dir.songs.single().path)
+    }
+
+    @Test
+    fun aFolderWithNoParentSaysNone() = runTest {
+        server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"ok","directory":{"id":"top","name":"Top"}}}""").build())
+        assertNull(client().musicDirectory("top").parent)
     }
 
     @Test
