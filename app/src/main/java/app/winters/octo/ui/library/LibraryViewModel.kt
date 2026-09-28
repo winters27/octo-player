@@ -47,7 +47,7 @@ class LibraryViewModel @Inject constructor(
     // Plays every song, in the order shown, or shuffled.
     fun playSongs(shuffle: Boolean) {
         val all = songs.value?.items ?: return
-        playback.playTracks(all.map { it.id }, 0, shuffle)
+        playback.playTracks(all.map { it.id }, 0, shuffle, "Songs")
     }
 
     // Plays every album in the order shown, each from its first song, or
@@ -77,6 +77,6 @@ class LibraryViewModel @Inject constructor(
     // Plays the whole song list, in the order shown, from the one tapped.
     fun playSong(track: TrackEntity) {
         val all = songs.value?.items ?: return
-        playback.playTracks(all.map { it.id }, all.indexOf(track).coerceAtLeast(0))
+        playback.playTracks(all.map { it.id }, all.indexOf(track).coerceAtLeast(0), source = "Songs")
     }
 }

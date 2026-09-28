@@ -90,9 +90,9 @@ class PlaylistViewModel @AssistedInject constructor(
 
     private fun ids() = page.value?.tracks.orEmpty().map { it.track.id }
 
-    fun play(index: Int) = playback.playTracks(ids(), index)
+    fun play(index: Int) = playback.playTracks(ids(), index, source = page.value?.playlist?.name)
 
-    fun shuffle() = playback.playTracks(ids(), shuffle = true)
+    fun shuffle() = playback.playTracks(ids(), shuffle = true, source = page.value?.playlist?.name)
 
     // Takes a song out, with an Undo that puts it back in its place.
     fun remove(itemId: Long) {

@@ -78,7 +78,14 @@ fun TrackEntity.toMediaItem(uri: String?, mimeType: String?, loudness: ReplayGai
         .build()
 
 // Just the id: what the app sends to the service, which fills in the rest.
-fun songRequest(trackId: String): MediaItem = MediaItem.Builder().setMediaId(trackId).build()
+// `source` is the list it is played from, as QueueSource.encoded words.
+fun songRequest(trackId: String, source: String? = null): MediaItem {
+    val request = MediaItem.Builder().setMediaId(trackId)
+    if (source != null) {
+        request.setRequestMetadata(MediaItem.RequestMetadata.Builder().setExtras(Bundle().apply { putString(EXTRA_SOURCE, source) }).build())
+    }
+    return request.build()
+}
 
 // Turns artwork references back into pictures for the lock screen and
 // notification; anything else goes to the standard loader.

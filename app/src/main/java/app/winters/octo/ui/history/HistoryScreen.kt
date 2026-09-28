@@ -107,7 +107,7 @@ class HistoryViewModel @Inject constructor(
     // where it first shows.
     fun play(songs: List<TrackEntity>, from: TrackEntity) {
         val once = songs.distinctBy { it.id }
-        playback.playTracks(once.map { it.id }, once.indexOfFirst { it.id == from.id }.coerceAtLeast(0))
+        playback.playTracks(once.map { it.id }, once.indexOfFirst { it.id == from.id }.coerceAtLeast(0), source = "History")
     }
 }
 
