@@ -21,6 +21,7 @@ class FakeServer(tls: SSLSocketFactory? = null) : AutoCloseable {
     private val answers = HashMap<String, String>()
     private val rules = HashMap<String, (RecordedRequest) -> String>()
     private val files = HashMap<String, ByteArray>()
+    private val fileRules = HashMap<String, (RecordedRequest) -> ByteArray>()
     val calls = CopyOnWriteArrayList<RecordedRequest>()
 
     init {
@@ -30,6 +31,9 @@ class FakeServer(tls: SSLSocketFactory? = null) : AutoCloseable {
                 val endpoint = request.url.pathSegments.lastOrNull().orEmpty()
                 synchronized(files) { files[endpoint] }?.let { bytes ->
                     return MockResponse.Builder().body(okio.Buffer().write(bytes)).build()
+                }
+                synchronized(fileRules) { fileRules[endpoint] }?.let { rule ->
+                    return MockResponse.Builder().body(okio.Buffer().write(rule(request))).build()
                 }
                 synchronized(rules) { rules[endpoint] }?.let { rule -> return MockResponse.Builder().body(rule(request)).build() }
                 val body = synchronized(answers) { answers[endpoint] }
@@ -54,6 +58,12 @@ class FakeServer(tls: SSLSocketFactory? = null) : AutoCloseable {
     // Answers `endpoint` with these bytes as they are, like a song file.
     fun file(endpoint: String, bytes: ByteArray) {
         synchronized(files) { files[endpoint] = bytes }
+    }
+
+    // Answers `endpoint` with bytes made for each request, like a cover
+    // that differs by id.
+    fun fileBy(endpoint: String, rule: (RecordedRequest) -> ByteArray) {
+        synchronized(fileRules) { fileRules[endpoint] = rule }
     }
 
     // Answers `endpoint` by looking at each request: `ok` for an answer
