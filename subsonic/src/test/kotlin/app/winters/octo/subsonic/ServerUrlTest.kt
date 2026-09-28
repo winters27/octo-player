@@ -21,6 +21,8 @@ class ServerUrlTest {
     @Test
     fun subPathIsKept() {
         assertEquals("https://x.com/music", normalizeServerUrl("https://x.com/music/").toString())
+        // A pasted name and password are dropped, never saved with the address.
+        assertEquals("https://x.com/music", normalizeServerUrl("https://bob:secret@x.com/music/").toString())
     }
 
     @Test

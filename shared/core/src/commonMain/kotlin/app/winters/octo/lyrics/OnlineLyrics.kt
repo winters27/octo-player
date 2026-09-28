@@ -1,10 +1,14 @@
 package app.winters.octo.lyrics
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import okhttp3.Call
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -104,10 +108,21 @@ class OnlineLyrics(private val http: OkHttpClient, private val base: HttpUrl) {
         fetch(recordUrl(base, id))?.let(::libraryLyrics)
     }
 
-    // The answer's body, or null when the library has nothing for it.
-    private fun fetch(url: HttpUrl): String? {
-        val request = Request.Builder().url(url).build()
-        return http.newCall(request).execute().use { response ->
+    // The answer's body, or null when the library has nothing for it. A
+    // lookup no longer wanted (the song was skipped) stops its request.
+    private suspend fun fetch(url: HttpUrl): String? {
+        currentCoroutineContext().ensureActive()
+        val call = http.newCall(Request.Builder().url(url).build())
+        val stop = currentCoroutineContext()[Job]?.invokeOnCompletion { if (it != null) call.cancel() }
+        try {
+            return read(call)
+        } finally {
+            stop?.dispose()
+        }
+    }
+
+    private fun read(call: Call): String? {
+        return call.execute().use { response ->
             when {
                 response.code == 404 -> null
                 !response.isSuccessful -> throw IOException("Lyrics lookup failed: HTTP ${response.code}")

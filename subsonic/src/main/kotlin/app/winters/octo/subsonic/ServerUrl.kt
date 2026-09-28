@@ -14,6 +14,9 @@ fun normalizeServerUrl(input: String): HttpUrl? {
     // A pasted API path or web player path is not part of the base.
     if (segments.lastOrNull() in setOf("rest", "app")) segments.removeAt(segments.lastIndex)
     return url.newBuilder()
+        // A name and password pasted into the address are never kept with it.
+        .username("")
+        .password("")
         .encodedPath("/")
         .apply { segments.forEach { addPathSegment(it) } }
         .query(null)

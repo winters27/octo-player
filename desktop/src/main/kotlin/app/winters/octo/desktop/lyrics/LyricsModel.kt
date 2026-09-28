@@ -74,7 +74,9 @@ class LyricsModel(private val player: DesktopPlayer, val sources: LyricsSources,
                     _state.value = Shown(song, null)
                     Shown(song, sources.answerFor(song))
                 }
-                .collect { _state.value = it }
+                // An answer that lands just as the song changes belongs to
+                // the old song; it is never shown over the new one.
+                .collect { shown -> if (shown.song?.id == player.state.value.current?.song?.id) _state.value = shown }
         }
     }
 
