@@ -48,6 +48,7 @@ import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.Ambience
@@ -101,10 +102,10 @@ import dev.chrisbanes.haze.rememberHazeState
 
 // The whole window. Behind everything, the window's colours (the playing
 // song's, blurred), which the frame frosts. Over them, one frame of dark
-// glass: the title bar across the top, the sidebar down the left, the side
-// panel down the right when open, and the player across the foot, meeting
-// at hairlines. The page is the one open surface in the middle; nothing
-// scrolls under the glass. The full player covers it all when open, with
+// glass: the title bar across the top, the sidebar down the left and the
+// side panel down the right when open, meeting at hairlines. The page is
+// the one open surface in the middle, with the player floating at its foot;
+// the page's lists leave room for it at their end. The full player covers it all when open, with
 // the title bar's buttons still over it. `frame` is null when the system
 // draws the window's frame.
 @OptIn(ExperimentalComposeUiApi::class)
@@ -184,6 +185,8 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState) {
     var panelWidth by remember { mutableStateOf(saved.panelWidth.dp) }
     val sideWidth = if (saved.sidebarRail) FrameSize.SidebarRail else sidebar.coerceIn(FrameSize.SidebarMin, FrameSize.SidebarMax)
     val panel = app.sidePanel
+    // The window's width, for the player's.
+    val window = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() }
     Column(Modifier.fillMaxSize()) {
         // Room for the title bar, in the frame's glass; its buttons are drawn
         // over it, last, so they stay over the full player too.
@@ -201,10 +204,16 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState) {
                 }
             }
             Seam(vertical = true)
-            CompositionLocalProvider(LocalBottomRoom provides Space.None) {
-                Column(Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
-                    app.notice?.let { Notice(it, app.noticeDetail) { app.notice = null; app.noticeDetail = null } }
-                    Box(Modifier.weight(1f)) { PageHost(app) }
+            CompositionLocalProvider(LocalBottomRoom provides FrameSize.Player + FrameSize.PlayerGap) {
+                BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
+                    Column(Modifier.fillMaxSize().clipToBounds()) {
+                        app.notice?.let { Notice(it, app.noticeDetail) { app.notice = null; app.noticeDetail = null } }
+                        Box(Modifier.weight(1f)) { PageHost(app) }
+                    }
+                    // A third of the window, in the middle of the page.
+                    val room = maxWidth - FrameSize.PlayerGap * 2
+                    val width = (window / 3).coerceIn(minOf(FrameSize.PlayerMin, room), room)
+                    PlayerBar(app, backdrop, Modifier.align(Alignment.BottomCenter).padding(bottom = FrameSize.PlayerGap).width(width).height(FrameSize.Player))
                 }
             }
             if (panel != null) {
@@ -220,8 +229,6 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState) {
                 }
             }
         }
-        Seam(vertical = false)
-        PlayerBar(app, backdrop, Modifier.fillMaxWidth().height(FrameSize.Player))
     }
 }
 
