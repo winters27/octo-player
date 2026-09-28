@@ -165,6 +165,18 @@ dependencies {
     testImplementation(libs.mockwebserver)
 }
 
+// The performance harness (OCTO_PERF=1, perf/LibraryPerfTest.kt) runs each
+// time it is asked for, with room for a library of 100,000 songs.
+// OCTO_PERF_HEAP tries it under another heap limit, and OCTO_PERF_JVM
+// with other JVM options (space between them).
+if (providers.environmentVariable("OCTO_PERF").orNull == "1") {
+    tasks.test {
+        maxHeapSize = providers.environmentVariable("OCTO_PERF_HEAP").orNull ?: "2g"
+        providers.environmentVariable("OCTO_PERF_JVM").orNull?.let { jvmArgs(it.split(" ").filter(String::isNotBlank)) }
+        outputs.upToDateWhen { false }
+    }
+}
+
 // The audio files Octo opens, and their types.
 val audioTypes = listOf(
     "mp3" to "audio/mpeg",
@@ -193,6 +205,26 @@ compose.desktop {
     application {
         mainClass = "app.winters.octo.desktop.MainKt"
         jvmArgs("-Docto.version=$desktopVersion")
+        // The heap, for `run` and the installers alike. Left to itself the
+        // JVM takes a quarter of the machine's memory as its limit and a
+        // 64th as its start (8 GB and 512 MB on 32 GB), never gives it back
+        // while the app sits idle, and lets the cover cache (a fifth of the
+        // limit) grow to 1.6 GB. The perf harness (perf/LibraryPerfTest.kt)
+        // measured a 100,000 song library and its index at 152 MB, 110 MB
+        // with repeated strings shared, and a refresh holds two for a moment,
+        // so 1 GB leaves room for bigger libraries. After two minutes with
+        // no collection a full one runs (70 ms with two such libraries
+        // held) and hands back what is free past 30%.
+        jvmArgs(
+            "-Xms64m",
+            "-Xmx1g",
+            "-XX:+UseG1GC",
+            "-XX:+UseStringDeduplication",
+            "-XX:G1PeriodicGCInterval=120000",
+            "-XX:-G1PeriodicGCInvokesConcurrent",
+            "-XX:MinHeapFreeRatio=10",
+            "-XX:MaxHeapFreeRatio=30",
+        )
         // `-Pocto.checkPlay=build/check/tone.wav` plays a made-up tone once
         // the window opens and prints what the engine says (audio/SoundCheck.kt).
         providers.gradleProperty("octo.checkPlay").orNull?.let { jvmArgs("-Docto.checkPlay=${file(it).absolutePath}") }
