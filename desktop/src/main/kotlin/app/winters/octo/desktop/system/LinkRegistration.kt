@@ -101,31 +101,43 @@ private object Registry {
     }
 }
 
-// On Linux the installed app adds a hidden desktop entry for octo:// links
-// in the user's own applications folder and makes it the handler, the
-// freedesktop way. The package's own entry stays as it is.
+// On Linux the package's own desktop entry starts Octo with no file, so
+// "Open with Octo" would open nothing, and it does not claim octo:// links.
+// The installed app writes an entry of the same name into the user's own
+// applications folder, which the desktop reads in place of the package's:
+// the same app, handed the files and links it is opened with.
 
-// The hidden entry's text for a program.
-fun linkDesktopEntry(program: String): String = """
-    [Desktop Entry]
-    Type=Application
-    Name=Octo
-    NoDisplay=true
-    Exec="$program" %u
-    MimeType=x-scheme-handler/octo;
-""".trimIndent() + "\n"
+// The desktop entry for the installed program. The package keeps its icon
+// beside the program: /opt/octo/bin/Octo has /opt/octo/lib/Octo.png.
+fun linuxDesktopEntry(program: String): String {
+    val icon = program.substringBeforeLast('/').substringBeforeLast('/') + "/lib/Octo.png"
+    val types = (AUDIO_TYPES + "x-scheme-handler/octo").joinToString(";", postfix = ";")
+    return """
+        [Desktop Entry]
+        Type=Application
+        Name=Octo
+        Comment=A music player for Subsonic, Navidrome and Octo servers
+        Exec="$program" %U
+        Icon=$icon
+        Terminal=false
+        Categories=AudioVideo;Audio;Player;
+        MimeType=$types
+    """.trimIndent() + "\n"
+}
 
 // Writes the entry into `applications` (normally ~/.local/share/applications)
-// when it differs, and asks the system to use it. True once written.
-fun registerLinksOnLinux(program: String, applications: java.io.File, makeDefault: Boolean = true): Boolean {
-    val entry = java.io.File(applications, LINUX_LINK_ENTRY)
-    val text = linkDesktopEntry(program)
+// when it differs, and makes Octo the handler for octo:// links. Audio files
+// only gain "Open with Octo"; the listener's usual player stays the default.
+// True once written.
+fun registerWithLinuxDesktop(program: String, applications: java.io.File, makeDefault: Boolean = true): Boolean {
+    val entry = java.io.File(applications, LINUX_ENTRY)
+    val text = linuxDesktopEntry(program)
     if (entry.isFile && runCatching { entry.readText() }.getOrNull() == text) return true
     return runCatching {
         applications.mkdirs()
         entry.writeText(text)
         if (makeDefault) {
-            val process = ProcessBuilder("xdg-mime", "default", LINUX_LINK_ENTRY, "x-scheme-handler/octo").redirectErrorStream(true).start()
+            val process = ProcessBuilder("xdg-mime", "default", LINUX_ENTRY, "x-scheme-handler/octo").redirectErrorStream(true).start()
             process.inputStream.readAllBytes()
             process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
         }
@@ -139,4 +151,8 @@ fun linuxApplicationsFolder(env: (String) -> String? = System::getenv, home: Str
     return java.io.File(data, "applications")
 }
 
-private const val LINUX_LINK_ENTRY = "octo-links.desktop"
+// The package's entry name, which the media controls announce too.
+private const val LINUX_ENTRY = "octo-Octo.desktop"
+
+// The audio types the installers associate with Octo.
+private val AUDIO_TYPES = listOf("audio/mpeg", "audio/flac", "audio/mp4", "audio/aac", "audio/ogg", "audio/opus", "audio/wav", "audio/aiff")

@@ -42,18 +42,21 @@ class LinkRegistrationTest {
     }
 
     @Test
-    fun linuxGetsAHiddenEntryForLinksOnlyOnce() {
+    fun linuxGetsTheAppsEntryWithFilesAndLinksOnlyOnce() {
         val folder = kotlin.io.path.createTempDirectory("octo-apps").toFile()
         try {
-            assertTrue(registerLinksOnLinux("/opt/octo/bin/Octo", folder, makeDefault = false))
-            val entry = java.io.File(folder, "octo-links.desktop").readText()
-            assertTrue("Exec=\"/opt/octo/bin/Octo\" %u" in entry)
-            assertTrue("MimeType=x-scheme-handler/octo;" in entry)
-            assertTrue("NoDisplay=true" in entry)
+            assertTrue(registerWithLinuxDesktop("/opt/octo/bin/Octo", folder, makeDefault = false))
+            // Named as the package names its own, so it is read in its place.
+            val file = java.io.File(folder, "octo-Octo.desktop")
+            val entry = file.readText()
+            assertTrue("Exec=\"/opt/octo/bin/Octo\" %U" in entry)
+            assertTrue("Icon=/opt/octo/lib/Octo.png" in entry)
+            assertTrue("audio/flac;" in entry)
+            assertTrue("x-scheme-handler/octo;" in entry)
             // The same program again changes nothing.
-            val written = java.io.File(folder, "octo-links.desktop").lastModified()
-            assertTrue(registerLinksOnLinux("/opt/octo/bin/Octo", folder, makeDefault = false))
-            assertEquals(written, java.io.File(folder, "octo-links.desktop").lastModified())
+            val written = file.lastModified()
+            assertTrue(registerWithLinuxDesktop("/opt/octo/bin/Octo", folder, makeDefault = false))
+            assertEquals(written, file.lastModified())
         } finally {
             folder.deleteRecursively()
         }

@@ -105,7 +105,7 @@ class SystemIntegration(
             app.scope.launch(Dispatchers.IO) {
                 when (os) {
                     DesktopOs.Windows -> registerLinksOnWindows(program)
-                    DesktopOs.Linux -> registerLinksOnLinux(program, linuxApplicationsFolder())
+                    DesktopOs.Linux -> registerWithLinuxDesktop(program, linuxApplicationsFolder())
                     DesktopOs.Mac -> Unit
                 }
             }
