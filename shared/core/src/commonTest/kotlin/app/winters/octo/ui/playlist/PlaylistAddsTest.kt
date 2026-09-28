@@ -69,6 +69,20 @@ class PlaylistAddsTest {
     }
 
     @Test
+    fun theLastPlaylistsUsedComeFirst() {
+        val all = listOf("a", "b", "c", "d")
+        assertEquals(listOf("c", "a", "b", "d"), recentFirst(all, listOf("c", "a"), { it }))
+        // One remembered but gone is simply not there.
+        assertEquals(listOf("b", "a", "c", "d"), recentFirst(all, listOf("gone", "b"), { it }))
+    }
+
+    @Test
+    fun aCopyIsNamedAfterItsPlaylist() {
+        assertEquals("Late night (copy)", playlistCopyName(" Late night "))
+        assertEquals("Made a copy: Late night (copy)", copiedMessage("Late night (copy)"))
+    }
+
+    @Test
     fun anImportSaysHowManySongsWereFound() {
         assertEquals("Imported 18 of 20 songs into \"Road trip\"", importSummary(ImportReport("Road trip", 18, 20, listOf("a", "b"))))
         assertEquals("Imported 1 of 1 song into \"Road trip\"", importSummary(ImportReport("Road trip", 1, 1, emptyList())))

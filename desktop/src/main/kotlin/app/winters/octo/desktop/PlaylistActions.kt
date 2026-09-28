@@ -18,8 +18,10 @@ import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.playlist.AddPlan
 import app.winters.octo.ui.playlist.addAgainQuestion
 import app.winters.octo.ui.playlist.addedMessage
+import app.winters.octo.ui.playlist.copiedMessage
 import app.winters.octo.ui.playlist.importSummary
 import app.winters.octo.ui.playlist.planAdd
+import app.winters.octo.ui.playlist.playlistCopyName
 import app.winters.octo.ui.playlist.recentPlaylists
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -151,9 +153,6 @@ fun AppState.setPlaylistPublic(id: String, public: Boolean) {
 
 // Copying and deleting.
 
-// The name a copy of a playlist gets.
-fun copyName(name: String): String = "$name (copy)"
-
 // A new playlist of the listener's own with the same songs in the same order.
 fun AppState.duplicatePlaylist(playlist: Playlist) {
     connection?.client ?: return
@@ -164,8 +163,8 @@ fun AppState.duplicatePlaylist(playlist: Playlist) {
             notice = "Couldn't copy the playlist: ${e.userMessage()}"
             return@launch
         }
-        val name = copyName(playlist.name)
-        createPlaylist(name, songs) { id -> if (id != null) notice = "Made a copy: $name" }
+        val name = playlistCopyName(playlist.name)
+        createPlaylist(name, songs) { id -> if (id != null) notice = copiedMessage(name) }
     }
 }
 

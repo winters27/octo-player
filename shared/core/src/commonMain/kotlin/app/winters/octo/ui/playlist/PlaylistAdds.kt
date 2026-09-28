@@ -52,6 +52,18 @@ fun recentPlaylists(recent: List<String>, id: String, keep: Int = RECENT_PLAYLIS
 // How many playlists added to lately are remembered.
 const val RECENT_PLAYLISTS = 3
 
+// The playlists with those added to lately first, newest first, and the
+// rest in the order they came.
+fun <T> recentFirst(playlists: List<T>, recent: List<String>, id: (T) -> String): List<T> {
+    val rank = recent.withIndex().associate { it.value to it.index }
+    return playlists.sortedBy { rank[id(it)] ?: Int.MAX_VALUE }
+}
+
+// The name a copy of a playlist gets, and the line that says it was made.
+fun playlistCopyName(name: String): String = "${name.trim()} (copy)"
+
+fun copiedMessage(copy: String): String = "Made a copy: $copy"
+
 // "Imported 42 of 45 songs into "Road trip"", or why nothing was.
 fun importSummary(report: ImportReport): String = when {
     report.total == 0 -> "\"${report.name}\" has no songs in it."
