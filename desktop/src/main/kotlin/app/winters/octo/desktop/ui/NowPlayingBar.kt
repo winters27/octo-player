@@ -104,38 +104,41 @@ fun rememberPosition(player: DesktopPlayer): State<Long> {
     return position
 }
 
-// The player, floating in glass at the foot of the page. The top line has
-// the song on the left, the transport in the middle and the panels, volume
-// and More on the right; the progress line runs underneath. The two sides
-// share the width evenly, so the transport stays centred whatever the
-// song's title.
+// The player, floating in glass at the foot of the page. The cover fills
+// its height on the left (a click opens the full player). Beside it, the
+// top line has the song, the transport in the middle and the panels,
+// volume and More on the right, with the progress line underneath. The two
+// sides share the width evenly, so the transport stays centred whatever
+// the song's title.
 @Composable
 fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
     val state by app.player.state.collectAsState()
     val song = state.current?.song
     FloatingGlaze(backdrop, modifier, shape = MenuShape, film = MenuFilm, frost = MenuFrost, halo = true) {
-        Column(Modifier.fillMaxSize().padding(horizontal = Space.L, vertical = Space.S), verticalArrangement = Arrangement.Center) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { SongZone(app, song) }
-                Transport(app, state)
-                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { UtilityZone(app, state) }
+        Row(Modifier.fillMaxSize().padding(horizontal = Space.L), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
+            Cover(
+                song?.coverArt,
+                Modifier.size(FrameSize.PlayerThumb).clickable(enabled = song != null) { app.fullPlayer = true },
+                shape = Corner.ArtMShape,
+                placeholder = OctoIcons.Songs,
+            )
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { SongZone(app, song) }
+                    Transport(app, state)
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { UtilityZone(app, state) }
+                }
+                ProgressLine(app, state)
             }
-            ProgressLine(app, state)
         }
     }
 }
 
-// The song: its cover (which opens the full player), its title (which
-// opens its album), the artist as a link, and the heart.
+// The song's title (which opens its album), the artist as a link, and the
+// heart.
 @Composable
 private fun SongZone(app: AppState, song: Song?) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
-        Cover(
-            song?.coverArt,
-            Modifier.size(FrameSize.PlayerThumb).clickable(enabled = song != null) { app.fullPlayer = true },
-            shape = Corner.ArtMShape,
-            placeholder = OctoIcons.Songs,
-        )
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
         Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
             if (song == null) {
                 Txt("Nothing playing", DesktopType.emphasis, OctoColors.TextMuted)
@@ -194,7 +197,7 @@ private fun ProgressLine(app: AppState, state: PlayerState) {
         // Where a drag would land, shown in place of the time while dragging.
         var scrubbing by remember { mutableStateOf<Float?>(null) }
         val shownMs = scrubbing?.let { (it * duration).toLong() } ?: position
-        Txt(lengthText((shownMs / 1000).toInt()).ifEmpty { "0:00" }, TimeStyle, OctoColors.TextMuted, Modifier.width(TimeWidth), align = TextAlign.End)
+        Txt(lengthText((shownMs / 1000).toInt()).ifEmpty { "0:00" }, TimeStyle, OctoColors.TextMuted, Modifier.width(TimeWidth))
         Scrubber(
             fraction = { if (duration > 0) position.toFloat() / duration else 0f },
             onSeek = { app.player.seekTo((it * duration).toLong()) },
@@ -207,6 +210,7 @@ private fun ProgressLine(app: AppState, state: PlayerState) {
             TimeStyle,
             OctoColors.TextMuted,
             Modifier.width(TimeWidth).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { app.updateFrame { it.copy(showTimeLeft = !left) } },
+            align = TextAlign.End,
         )
     }
 }

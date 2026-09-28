@@ -78,12 +78,12 @@ object FrameSize {
     val Panel = 328.dp
     val PanelMin = 280.dp
     val PanelMax = 480.dp
-    val Player = 76.dp
+    val Player = 80.dp
     val PlayerCover = 56.dp
     // The floating player: a third of the window wide, but never narrower
     // than its controls need; its cover; and the gap around it.
     val PlayerMin = 600.dp
-    val PlayerThumb = 40.dp
+    val PlayerThumb = 56.dp
     val PlayerGap = 16.dp
     val PlayButton = 36.dp
     val PlayButtonLarge = 44.dp
