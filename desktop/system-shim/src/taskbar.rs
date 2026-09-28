@@ -32,11 +32,11 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallWindowProcW, ChangeWindowMessageFilterEx, CreateIconIndirect, CreateWindowExW, DefWindowProcW,
-    DestroyIcon, DestroyWindow, DispatchMessageW, GWLP_WNDPROC, GetMessageW, GetSystemMetrics,
-    GetWindowLongPtrW, HICON, HWND_MESSAGE, ICONINFO, IsWindow, MSG, MSGFLT_ALLOW, PostMessageW,
-    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SM_CXSMICON, SendMessageW, SetWindowLongPtrW,
-    TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WNDCLASSW, WNDPROC,
-    WS_OVERLAPPED,
+    DestroyIcon, DestroyWindow, DispatchMessageW, GA_ROOT, GWLP_WNDPROC, GetAncestor, GetMessageW,
+    GetSystemMetrics, GetWindowLongPtrW, HICON, HWND_MESSAGE, ICONINFO, IsWindow, MSG, MSGFLT_ALLOW,
+    PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SM_CXSMICON, SendMessageW,
+    SetWindowLongPtrW, TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY,
+    WNDCLASSW, WNDPROC, WS_OVERLAPPED,
 };
 use windows::core::w;
 
@@ -201,6 +201,10 @@ pub fn attach(window: isize, callback: Option<TaskbarCallback>) -> Result<(), i3
     if window == 0 || !unsafe { IsWindow(Some(HWND(window as *mut _))) }.as_bool() {
         return Err(BAD_ARGUMENT);
     }
+    // The taskbar button belongs to the top window, whichever of its
+    // windows was handed over (the drawing surface's, say).
+    let root = unsafe { GetAncestor(HWND(window as *mut _), GA_ROOT) };
+    let window = if root.0.is_null() { window } else { root.0 as isize };
     {
         let mut guard = WANTED.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(existing) = guard.as_mut()
@@ -378,6 +382,12 @@ thread_local! {
 // Brings the taskbar up to what is wanted. With `again` the button is new,
 // so everything is sent afresh.
 fn apply(again: bool) -> windows::core::Result<()> {
+    // A taskbar call waits on the taskbar, and meanwhile a message sent to
+    // this thread can arrive and ask again: that one comes back later.
+    if APPLIED.with(|cell| cell.try_borrow_mut().is_err()) {
+        post(if again { RECREATED } else { SYNC }, 0);
+        return Ok(());
+    }
     let taken = {
         let mut guard = WANTED.lock().unwrap_or_else(|e| e.into_inner());
         guard.as_mut().map(|w| (w.window, w.buttons.clone(), w.progress, w.new_icons.take()))
