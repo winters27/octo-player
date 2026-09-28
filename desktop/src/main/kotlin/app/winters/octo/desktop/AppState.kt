@@ -180,7 +180,9 @@ class AppState(
         settings.update { it.copy(playback = it.playback.copy(outputDevice = id.takeUnless { it == DEFAULT_OUTPUT })) }
     }
 
-    // Favourites, as server stars.
+    // Favourites, as server stars. A heart set or cleared here shows from
+    // the overrides until the next library read brings the server's own,
+    // so the library is not read or sorted again for it.
 
     fun isStarred(song: Song): Boolean = starOverrides[song.id] ?: (song.starred != null)
 
@@ -191,7 +193,6 @@ class AppState(
         scope.launch {
             try {
                 if (starred) client.star(ids) else client.unstar(ids)
-                library?.markStarred(ids.toSet(), starred)
             } catch (e: SubsonicException) {
                 ids.forEach { starOverrides.remove(it) }
                 notice = "Couldn't change favourites: ${e.userMessage()}"

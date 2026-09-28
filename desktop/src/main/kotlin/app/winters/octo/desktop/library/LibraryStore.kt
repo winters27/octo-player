@@ -1,6 +1,5 @@
 package app.winters.octo.desktop.library
 
-import app.winters.octo.catalog.naturalSortKey
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.discovery.TitleIndex
 import app.winters.octo.discovery.knownLengthMs
@@ -45,8 +44,7 @@ class LibraryIndex(val songs: List<Song>, val albums: List<Album>, val artists: 
                 song.albumId?.let { albumSets.getOrPut(key) { HashSet() } += it }
             }
         }
-        songCounts.keys.map { GenreCount(names.getValue(it), songCounts.getValue(it), albumSets[it]?.size ?: 0) }
-            .sortedBy { naturalSortKey(it.name) }
+        sortedByName(songCounts.keys.map { GenreCount(names.getValue(it), songCounts.getValue(it), albumSets[it]?.size ?: 0) }) { it.name }
     }
 
     fun songsInGenre(name: String): List<Song> = songs.filter { song -> genresOf(song).any { it.equals(name, ignoreCase = true) } }
@@ -107,13 +105,5 @@ class LibraryStore(private val client: SubsonicClient, private val scope: Corout
                 previous?.let { LibraryState.Ready(it) } ?: LibraryState.Failed(e.userMessage())
             }
         }
-    }
-
-    // Songs starred or unstarred here show at once, before the next read.
-    fun markStarred(ids: Set<String>, starred: Boolean) {
-        val index = index ?: return
-        val stamp = if (starred) java.time.Instant.now().toString() else null
-        val songs = index.songs.map { if (it.id in ids) it.copy(starred = stamp) else it }
-        _state.value = LibraryState.Ready(LibraryIndex(songs, index.albums, index.artists))
     }
 }
