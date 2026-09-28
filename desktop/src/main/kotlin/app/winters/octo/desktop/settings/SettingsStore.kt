@@ -35,6 +35,9 @@ data class AppSettings(
     // The panel open on the right, by its tab: "queue", "lyrics", "info",
     // or none.
     val sidePanel: String? = null,
+    // The playlists songs were added to lately, newest first, by id, for
+    // "Add to last playlist" and the top of the playlist chooser.
+    val recentPlaylists: List<String> = emptyList(),
     // The frame: sidebar and panel sizes, and what the sidebar shows.
     val frame: FramePrefs = FramePrefs(),
     // The last searches that led somewhere, newest first.

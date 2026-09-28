@@ -27,9 +27,12 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.importPlaylistFile
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.SidebarItem
+import app.winters.octo.desktop.playlists.choosePlaylistFile
+import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
@@ -47,11 +50,13 @@ import app.winters.octo.design.PopupPadding
 import app.winters.octo.design.RowHeight
 import app.winters.octo.design.Separator
 import app.winters.octo.design.Space
+import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.design.chromeFilm
 import app.winters.octo.design.hoverLift
 import app.winters.octo.subsonic.Playlist
 import dev.chrisbanes.haze.HazeState
+import kotlinx.coroutines.launch
 
 // A place in the sidebar: the page, its name and icon.
 private class Place(val page: Page, val label: String, val icon: ImageVector)
@@ -170,8 +175,8 @@ private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Bo
     if (rail) OctoTooltip(label) { row() } else row()
 }
 
-// A playlist with its small cover; right-click opens its menu, to play it
-// or pin it to the top. On the rail, the cover alone.
+// A playlist with its small cover; right-click opens its menu, to play,
+// pin, rename, copy, export or delete it. On the rail, the cover alone.
 @Composable
 private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, rail: Boolean, pinned: Boolean) {
     val pointer = LocalPointer.current
@@ -198,7 +203,8 @@ private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, ra
     if (rail) OctoTooltip(playlist.name) { row() } else row()
 }
 
-// A small form for naming a new, empty playlist, in the middle of the window.
+// A small form for naming a new, empty playlist, in the middle of the
+// window, or making one from a playlist file instead.
 fun newPlaylist(app: AppState) {
     app.popups.showCentred { close ->
         var name by remember { mutableStateOf("") }
@@ -211,7 +217,14 @@ fun newPlaylist(app: AppState) {
                 }
             }
             GlassField(name, { name = it }, Modifier.fillMaxWidth(), placeholder = "Name", onSubmit = create, onEscape = close)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs, Alignment.End)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs), verticalAlignment = Alignment.CenterVertically) {
+                // Or one made from a playlist file, named after it.
+                TextAction("Import a file", {
+                    close()
+                    // After the form has gone, since the file window holds the window's thread.
+                    app.scope.launch { choosePlaylistFile(save = false, windows = app.os == DesktopOs.Windows)?.let(app::importPlaylistFile) }
+                }, icon = OctoIcons.Folder)
+                Spacer(Modifier.weight(1f))
                 GlazeCapsule(null, "Cancel", close)
                 GlazeCapsule(null, "Create", create, lit = true, enabled = name.isNotBlank())
             }

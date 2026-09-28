@@ -213,6 +213,16 @@ class ClientTest {
     }
 
     @Test
+    fun aPlaylistsPathsComeInItsOrder() = runTest {
+        val body = """{"subsonic-response":{"status":"ok","version":"1.16.1","playlist":{"id":"p1","name":"Late night","entry":[""" +
+            """{"id":"s2","title":"Two","path":"Radiohead/OK Computer/02 - Two.flac"},{"id":"s1","title":"One"}]}}}"""
+        server.enqueue(MockResponse.Builder().body(body).build())
+        val paths = client().playlistPaths("p1")
+        assertEquals(listOf(SongPath("s2", "Radiohead/OK Computer/02 - Two.flac"), SongPath("s1", null)), paths)
+        assertEquals("p1", server.takeRequest().url.queryParameter("id"))
+    }
+
+    @Test
     fun subPathBaseKeepsItsPath() = runTest {
         answer("ping")
         client("/music/").ping()

@@ -131,7 +131,7 @@ private fun PlaylistMenu(target: CollectionTarget.Playlist, state: CollectionMen
         actions,
         state,
         vm,
-    ) { action -> favouriteOrPin(action, vm, null, pin) }
+    ) { action -> if (action == CollectionAction.Duplicate) vm.duplicatePlaylist(target.id) else favouriteOrPin(action, vm, null, pin) }
 }
 
 // The favourite and pin choices, the same for every kind. `kind` is null
@@ -183,6 +183,7 @@ private fun CollectionActionsPage(
                 CollectionAction.MoveToFront -> OctoIcons.Pin to "Move to front"
                 CollectionAction.GoToArtist -> OctoIcons.Artist to "Go to artist"
                 CollectionAction.Rename -> OctoIcons.Rename to "Rename"
+                CollectionAction.Duplicate -> OctoIcons.AddToPlaylist to "Duplicate"
                 CollectionAction.Delete -> OctoIcons.Delete to "Delete"
             }
             val page = when (action) {

@@ -2,6 +2,7 @@ package app.winters.octo.ui.menu
 
 import app.winters.octo.discovery.DownloadState
 import app.winters.octo.offline.DownloadStatus
+import app.winters.octo.ui.menu.SongAction.AddToLastPlaylist
 import app.winters.octo.ui.menu.SongAction.AddToPlaylist
 import app.winters.octo.ui.menu.SongAction.AddToQueue
 import app.winters.octo.ui.menu.SongAction.DeleteFromPhone
@@ -27,6 +28,15 @@ class SongActionsTest {
             listOf(PlayNext, AddToQueue, StartRadio, AddToPlaylist, Like, Rate, GoToAlbum, GoToArtist, Info),
             songActions(find = false, radio = true),
         )
+    }
+
+    @Test
+    fun theLastPlaylistComesFirstAmongTheWaysToKeepASong() {
+        val actions = songActions(find = false, radio = true, lastPlaylist = true)
+        assertEquals(listOf(PlayNext, AddToQueue, StartRadio, AddToLastPlaylist, AddToPlaylist, Like, Rate, GoToAlbum, GoToArtist, Info), actions)
+        assertEquals(listOf(AddToLastPlaylist, AddToPlaylist, Like, Rate), songMenuGroups(actions)[1])
+        // A song found online cannot go in a playlist yet.
+        assertEquals(listOf(PlayNext, AddToQueue, Download, Info), songActions(find = true, radio = false, lastPlaylist = true))
     }
 
     @Test
