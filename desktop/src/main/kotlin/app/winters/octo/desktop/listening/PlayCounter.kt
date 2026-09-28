@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.listening
 
 import app.winters.octo.desktop.player.PlayerState
+import app.winters.octo.discovery.knownLengthMs
 import app.winters.octo.playback.countsAsPlay
 import app.winters.octo.subsonic.Song
 
@@ -41,7 +42,7 @@ class PlayCounter(
             announced = false
         }
         if (current == null) return
-        val length = current.song.duration * 1000L
+        val length = knownLengthMs(current.song)
         durationMs = if (length > 0) length else state.durationMs
         val hearing = state.playing && !state.buffering
         if (hearing && hearingSince == null) {

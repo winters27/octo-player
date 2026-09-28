@@ -21,6 +21,7 @@ import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.SavedQueue
 import app.winters.octo.desktop.player.SongFormat
 import app.winters.octo.desktop.player.libraryFormat
+import app.winters.octo.discovery.knownLengthMs
 import app.winters.octo.playback.PlayFailure
 import app.winters.octo.playback.QueueSource
 import app.winters.octo.subsonic.Song
@@ -175,9 +176,11 @@ class EnginePlayer(
 
     private fun clamp(ms: Long, duration: Long) = if (duration > 0) ms.coerceIn(0, duration) else ms.coerceAtLeast(0)
 
+    // The listed length, or the file's once the engine has it (a song found
+    // online may be listed with a guess).
     private fun durationMs(): Long {
         val song = queue.currentEntry?.song ?: return 0
-        if (song.duration > 0) return song.duration * 1000L
+        knownLengthMs(song).takeIf { it > 0 }?.let { return it }
         return engine.heard().takeIf { keyOfItem(it.itemId) == queue.currentEntry?.key }?.durationMs ?: 0
     }
 

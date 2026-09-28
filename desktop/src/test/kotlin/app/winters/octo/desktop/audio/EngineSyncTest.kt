@@ -60,6 +60,21 @@ class EngineSyncTest {
         assertEquals(1003, first.albumOrder)
     }
 
+    // Octo lists many songs found online at 3:00, a guess. The engine is
+    // left to read the length from the file, and that length is the one
+    // shown and sought within.
+    @Test
+    fun aGuessedLengthIsLeftToTheFile() {
+        val (p, engine) = setUp()
+        p.play(listOf(Song("f", "Found online", duration = 180), Song("l", "Listed", duration = 240)), 0, shuffle = false)
+        assertNull(engine.queue[0].durationMs)
+        assertEquals(240_000uL, engine.queue[1].durationMs)
+        engine.heard = Heard(engine.queue[0].id, 0.0, 713_000)
+        p.seekTo(400_000)
+        assertEquals("seek 400000", engine.calls.last())
+        assertEquals(713_000, p.state.value.durationMs)
+    }
+
     @Test
     fun loudnessTheServerKnowsGoesAlong() {
         val (p, engine) = setUp()

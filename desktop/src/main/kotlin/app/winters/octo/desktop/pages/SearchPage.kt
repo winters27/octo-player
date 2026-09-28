@@ -58,6 +58,7 @@ import app.winters.octo.desktop.ui.onRightClick
 import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.playlistMenu
 import app.winters.octo.desktop.ui.rememberListState
+import app.winters.octo.discovery.knownLengthMs
 import app.winters.octo.subsonic.Song
 
 // Not in the library, in the phone app's words.
@@ -210,7 +211,7 @@ private fun OutsideSong(app: AppState, songs: List<Song>, index: Int, song: Song
             Txt(song.title, OctoType.bodySmall)
             Txt(listOfNotNull(song.displayArtist ?: song.artist, song.album).joinToString(" · "), OctoType.caption, OctoColors.TextMuted)
         }
-        Txt(lengthText(song.duration), OctoType.caption, OctoColors.TextMuted, Modifier.width(52.dp))
+        Txt(lengthText((knownLengthMs(song) / 1000).toInt()), OctoType.caption, OctoColors.TextMuted, Modifier.width(52.dp))
         FetchButton(app, song)
         FetchProblem(app, song)
     }
