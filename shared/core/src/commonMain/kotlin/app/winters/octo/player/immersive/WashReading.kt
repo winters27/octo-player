@@ -11,11 +11,6 @@ val ContrastRange = 0.5f..2f
 val FpsChoices = listOf(30, 60, 90, 120)
 val SpeedRange = 5..100
 
-// Whether words over a wash made from a cover with this main colour
-// should be dark: when the colour, prepared as the covers are, is light.
-fun washDarkWords(dominant: Int?, tuning: WashTuning): Boolean =
-    dominant != null && washIsLight(prepareColor(dominant, tuning))
-
 // The darkest and the brightest a background gets, as colours.
 data class WashRange(val low: Int, val high: Int) {
     // Both dimmed (or brightened) by `gain`, as the wash's final pass does.

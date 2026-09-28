@@ -21,6 +21,9 @@ data class PlayerColors(
     val base: Color,
     val dominant: Color? = null,
     val content: Color = Color.White,
+    // How much of the background shows over `base` so the words in
+    // `content` read on every part of it: 1 for all of it.
+    val show: Float = 1f,
 ) {
     companion object {
         // Before artwork loads, or for music without any: quiet shades of the

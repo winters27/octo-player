@@ -4,6 +4,7 @@ import android.os.Build
 import android.os.SystemClock
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -97,6 +98,15 @@ fun PlayerBackground(
     dolly: () -> Float,
     vm: BackgroundViewModel = hiltViewModel(),
 ) {
+    val background = prefs.background
+    // Dimmed over the base as far as the words need (`PlayerColors.show`).
+    val show by animateFloatAsState(colors.show, tween(CoverFadeMs.toInt(), easing = EaseInOutCubicCurve), label = "background show")
+    Box(Modifier.fillMaxSize().graphicsLayer { alpha = show }) { DrawnBackground(prefs, colors, now, dolly, vm) }
+}
+
+// The background itself, by the mode this phone draws.
+@Composable
+private fun DrawnBackground(prefs: PlayerPrefs, colors: PlayerColors, now: NowPlaying, dolly: () -> Float, vm: BackgroundViewModel) {
     val background = prefs.background
     when (drawnMode(background.mode, Build.VERSION.SDK_INT)) {
         BackgroundMode.Default -> {
