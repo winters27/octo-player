@@ -1,6 +1,8 @@
 package app.winters.octo.desktop.nav
 
 import androidx.compose.ui.input.key.Key
+import app.winters.octo.query.FilterPresets
+import app.winters.octo.query.LibraryQuery
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -42,6 +44,36 @@ class NavigatorTest {
         nav.go(Page.Albums)
         nav.go(Page.Albums)
         assertEquals(1 to 0, nav.depth)
+    }
+
+    @Test
+    fun filtersBelongToOneVisitAndComeBackWithIt() {
+        val nav = Navigator()
+        nav.go(Page.Songs)
+        val songs = nav.current
+        val favourites = LibraryQuery(listOf(FilterPresets.Favourites))
+        nav.keepFilter(songs, favourites)
+        assertEquals(favourites, nav.filterOf(songs))
+        nav.go(Page.Album("a1"))
+        assertEquals(LibraryQuery(), nav.filterOf(nav.current))
+        nav.back()
+        assertEquals(favourites, nav.filterOf(nav.current))
+        // The same page visited again starts unfiltered.
+        nav.go(Page.Albums)
+        nav.go(Page.Songs)
+        assertEquals(LibraryQuery(), nav.filterOf(nav.current))
+        // A visit dropped from the history takes its filters with it, and
+        // takes none after.
+        val again = nav.current
+        nav.keepFilter(again, favourites)
+        nav.back()
+        nav.go(Page.Artists)
+        assertEquals(LibraryQuery(), nav.filterOf(again))
+        nav.keepFilter(again, favourites)
+        assertEquals(LibraryQuery(), nav.filterOf(again))
+        nav.keepFilter(nav.current, favourites)
+        nav.startOver()
+        assertEquals(LibraryQuery(), nav.filterOf(nav.current))
     }
 
     @Test
