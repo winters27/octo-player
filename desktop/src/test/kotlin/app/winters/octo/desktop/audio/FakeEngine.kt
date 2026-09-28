@@ -28,6 +28,7 @@ class FakeEngine : AudioEngine {
     var speed = 1f to 1f
     var listed = listOf(EngineDevice("spk", "Speakers", true), EngineDevice("usb", "USB DAC", false))
     var current: EngineDevice? = null
+    var pins: Map<String, String>? = null
 
     val ids: List<String> get() = queue.map { it.id }
 
@@ -117,6 +118,11 @@ class FakeEngine : AudioEngine {
     override fun state(): PlaybackState = engineState
 
     override fun setPositionInterval(ms: Int) {}
+
+    override fun setTrustedCertificates(pins: Map<String, String>) {
+        this.pins = pins
+        calls += "trust ${pins.size}"
+    }
 
     override fun close() {}
 }

@@ -1,6 +1,7 @@
 //! Where a song's bytes come from: a file on this computer, or a server.
 
 pub mod http;
+pub mod trust;
 
 use std::fs::File;
 use std::path::Path;

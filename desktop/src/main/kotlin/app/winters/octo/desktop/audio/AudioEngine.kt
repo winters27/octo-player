@@ -8,6 +8,7 @@ import app.winters.octo.audio.EqSettings
 import app.winters.octo.audio.PlaybackState
 import app.winters.octo.audio.QueueItem
 import app.winters.octo.audio.ReplayGainSettings
+import app.winters.octo.audio.TrustedCertificate
 import app.winters.octo.audio.OutputDevice as EngineDevice
 import app.winters.octo.audio.RepeatMode as EngineRepeat
 
@@ -68,6 +69,11 @@ interface AudioEngine : AutoCloseable {
 
     // Sends a Position event this often while playing; 0 for none.
     fun setPositionInterval(ms: Int)
+
+    // The certificates the listener trusted, as SHA-256 fingerprints by
+    // host, so songs stream from the servers the app itself may reach.
+    // Replaces the ones given before.
+    fun setTrustedCertificates(pins: Map<String, String>)
 }
 
 // The Rust engine behind the interface. Every call returns at once; the
@@ -144,6 +150,10 @@ class NativeAudioEngine(private val engine: Engine) : AudioEngine {
     override fun state(): PlaybackState = ifOpen(PlaybackState.IDLE) { engine.state() }
 
     override fun setPositionInterval(ms: Int) = ifOpen(Unit) { engine.setPositionInterval(ms.coerceAtLeast(0).toUInt()) }
+
+    override fun setTrustedCertificates(pins: Map<String, String>) = ifOpen(Unit) {
+        engine.setTrustedCertificates(pins.map { (host, fingerprint) -> TrustedCertificate(host, fingerprint) })
+    }
 
     override fun close() {
         if (closed) return

@@ -16,10 +16,13 @@ use std::time::{Duration, Instant};
 use symphonia::core::io::MediaSource;
 
 use crate::error::{ErrorKind, Failure};
+use crate::source::trust::{PinnedTls, Trust};
 
 /// How a stream is fetched.
 #[derive(Clone, Debug)]
 pub struct HttpOptions {
+    /// The client that fetches, with the certificates the engine trusts.
+    pub agent: ureq::Agent,
     /// With no new bytes for this long while the reader waits, the
     /// connection is dropped and made again.
     pub stall_timeout: Duration,
@@ -40,6 +43,7 @@ pub struct HttpOptions {
 impl Default for HttpOptions {
     fn default() -> Self {
         Self {
+            agent: untrusting_agent().clone(),
             stall_timeout: Duration::from_secs(20),
             read_ahead: 4 << 20,
             keep_behind: 1 << 20,
@@ -57,21 +61,31 @@ const RANGE_JUMP: u64 = 512 << 10;
 
 const CHUNK: usize = 64 << 10;
 
-// One client for every stream, so connections are reused.
-fn agent() -> &'static ureq::Agent {
+/// A client for streams, trusting what the system trusts and the
+/// certificates pinned in `trust`. One per engine, shared by every stream,
+/// so connections are reused.
+pub fn agent(trust: Arc<Trust>) -> ureq::Agent {
+    use ureq::unversioned::resolver::DefaultResolver;
+    use ureq::unversioned::transport::{ConnectProxyConnector, Connector, TcpConnector};
+    let config = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .timeout_connect(Some(Duration::from_secs(10)))
+        .timeout_send_request(Some(Duration::from_secs(10)))
+        .timeout_recv_response(Some(Duration::from_secs(15)))
+        .user_agent("Octo")
+        .build();
+    // ureq's usual chain, with TLS that also knows the pins.
+    let connector =
+        ().chain(ConnectProxyConnector::default())
+            .chain(TcpConnector::default())
+            .chain(PinnedTls::new(trust));
+    ureq::Agent::with_parts(config, connector, DefaultResolver::default())
+}
+
+// A client with no pins, for streams opened outside an engine.
+fn untrusting_agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-    AGENT.get_or_init(|| {
-        let tls = ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::PlatformVerifier).build();
-        let config = ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .timeout_connect(Some(Duration::from_secs(10)))
-            .timeout_send_request(Some(Duration::from_secs(10)))
-            .timeout_recv_response(Some(Duration::from_secs(15)))
-            .user_agent("Octo")
-            .tls_config(tls)
-            .build();
-        ureq::Agent::new_with_config(config)
-    })
+    AGENT.get_or_init(|| agent(Arc::new(Trust::default())))
 }
 
 /// A stream being read.
@@ -539,7 +553,7 @@ fn backoff(shared: &Shared, generation: u64, failures: u32) -> bool {
 }
 
 fn request(url: &str, opts: &HttpOptions, from: u64) -> Result<ureq::http::Response<ureq::Body>, Failure> {
-    let mut req = agent().get(url);
+    let mut req = opts.agent.get(url);
     for (name, value) in &opts.headers {
         req = req.header(name, value);
     }

@@ -24,6 +24,16 @@ pub struct HttpHeader {
     pub value: String,
 }
 
+/// A certificate the listener chose to trust for one host, although the
+/// system does not (a server's own self-signed one, say).
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct TrustedCertificate {
+    /// The host's name or address, in any case.
+    pub host: String,
+    /// The SHA-256 of the certificate itself, in hex; colons and spaces are ignored.
+    pub sha256: String,
+}
+
 /// One entry in the play queue.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct QueueItem {
@@ -355,6 +365,14 @@ impl Engine {
     /// device was opened. Above zero means audible gaps.
     pub fn underruns(&self) -> u64 {
         self.shared.underruns()
+    }
+
+    /// Replaces the certificates trusted for streams. A server's certificate
+    /// is checked the system's way first; only when that fails is it let
+    /// through, and only when its host has a pin equal to its SHA-256.
+    /// Applies to connections made from now on.
+    pub fn set_trusted_certificates(&self, certificates: Vec<TrustedCertificate>) {
+        self.shared.trust.replace(certificates.into_iter().map(|c| (c.host, c.sha256)));
     }
 
     /// Sends a `Position` event every `ms` while playing; 0 turns it off.

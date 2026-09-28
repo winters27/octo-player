@@ -6,6 +6,11 @@ import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.subsonic.SubsonicClient
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 // The player the app plays through, and why it makes no sound when the
 // audio engine could not start.
@@ -24,6 +29,7 @@ fun openPlayer(
     val playback = settings.current.playback
     return try {
         val engine = NativeAudioEngine.open()
+        keepTrust(engine, settings, scope)
         val device = playback.outputDevice?.takeUnless { it == DEFAULT_OUTPUT }
         OpenedPlayer(EnginePlayer(engine, LocalOrServer(ServerSongs(headers, client)), volume = playback.volume, device = device), null)
     } catch (e: Throwable) {
@@ -34,3 +40,12 @@ fun openPlayer(
         )
     }
 }
+
+// Gives the engine the certificates the listener trusted, now and after
+// every change, since it fetches songs itself: a server whose own
+// certificate was trusted at sign-in then plays as well as it browses.
+fun keepTrust(engine: AudioEngine, settings: SettingsStore, scope: CoroutineScope): Job =
+    // Undispatched, so the engine has them before the first song is asked for.
+    scope.launch(start = CoroutineStart.UNDISPATCHED) {
+        settings.state.map { it.trustedCertificates }.distinctUntilChanged().collect { engine.setTrustedCertificates(it) }
+    }
