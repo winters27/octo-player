@@ -14,7 +14,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,9 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.GlassField
 import app.winters.octo.design.GlazeSegments
@@ -34,7 +30,6 @@ import app.winters.octo.design.Glyph
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
-import app.winters.octo.design.ProgressRing
 import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 import app.winters.octo.design.hoverLift
@@ -48,8 +43,8 @@ import app.winters.octo.desktop.search.FetchPhase
 import app.winters.octo.desktop.search.SearchFilter
 import app.winters.octo.desktop.search.SearchFound
 import app.winters.octo.desktop.search.SearchState
-import app.winters.octo.desktop.search.phaseText
 import app.winters.octo.desktop.ui.FailedLine
+import app.winters.octo.desktop.ui.FetchButton
 import app.winters.octo.desktop.ui.LoadingLine
 import app.winters.octo.desktop.ui.LocalBottomRoom
 import app.winters.octo.desktop.ui.LocalPointer
@@ -214,37 +209,15 @@ private fun OutsideSong(app: AppState, songs: List<Song>, index: Int, song: Song
         }
         Txt(lengthText(song.duration), OctoType.caption, OctoColors.TextMuted, Modifier.width(52.dp))
         FetchButton(app, song)
+        FetchProblem(app, song)
     }
 }
 
-// The "+" that has the server add a song found online to the library: a
-// ring fills while it downloads and a check shows once it is in. A failed
-// one shows why and can be tried again.
+// Why the server couldn't add a song found online, beside its "+".
 @Composable
-private fun FetchButton(app: AppState, song: Song) {
+private fun FetchProblem(app: AppState, song: Song) {
     val fetches = app.fetches ?: return
     val phases by fetches.phases.collectAsState()
-    val phase = phases[song.id] ?: FetchPhase.None
-    val canAsk = phase == FetchPhase.None || phase is FetchPhase.Failed
-    Box(
-        Modifier
-            .size(36.dp)
-            .hoverLift(CircleShape, clickable = canAsk)
-            .clickable(enabled = canAsk) { fetches.request(song.id) }
-            .semantics {
-                contentDescription = "Add to your library"
-                stateDescription = phaseText(phase)
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        when (phase) {
-            FetchPhase.None -> Glyph(OctoIcons.AddToLibrary, size = 22.dp, tint = OctoColors.TextPrimary.copy(alpha = 0.7f))
-            FetchPhase.Queued -> ProgressRing(null, size = 20.dp)
-            is FetchPhase.Downloading -> ProgressRing(phase.progress, size = 20.dp)
-            FetchPhase.Adding -> ProgressRing(1f, size = 20.dp)
-            FetchPhase.Done -> Glyph(OctoIcons.Check, size = 20.dp, tint = OctoColors.Accent)
-            is FetchPhase.Failed -> Glyph(OctoIcons.Info, size = 20.dp, tint = OctoColors.Error)
-        }
-    }
-    if (phase is FetchPhase.Failed) Txt("Couldn't add it: ${phase.reason}. Press to try again.", OctoType.caption, OctoColors.TextMuted, Modifier.width(180.dp), maxLines = 2)
+    val phase = phases[song.id] as? FetchPhase.Failed ?: return
+    Txt("Couldn't add it: ${phase.reason}. Press to try again.", OctoType.caption, OctoColors.TextMuted, Modifier.width(180.dp), maxLines = 2)
 }

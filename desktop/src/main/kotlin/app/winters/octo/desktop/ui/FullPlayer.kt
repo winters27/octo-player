@@ -186,15 +186,19 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
                     },
                 )
             }
-            val starred = app.isStarred(song)
-            IconAction(
-                if (starred) OctoIcons.Liked else OctoIcons.Like,
-                if (starred) "Remove from favourites" else "Add to favourites",
-                { app.setStarred(listOf(song), !starred) },
-                size = 40.dp,
-                iconSize = 22.dp,
-                tint = ink,
-            )
+            if (isOutside(app, song)) {
+                FetchButton(app, song, 40.dp, 22.dp, tint = ink)
+            } else {
+                val starred = app.isStarred(song)
+                IconAction(
+                    if (starred) OctoIcons.Liked else OctoIcons.Like,
+                    if (starred) "Remove from favourites" else "Add to favourites",
+                    { app.setStarred(listOf(song), !starred) },
+                    size = 40.dp,
+                    iconSize = 22.dp,
+                    tint = ink,
+                )
+            }
         }
         Spacer(Modifier.height(14.dp))
         val position by rememberFramePosition(app.player)

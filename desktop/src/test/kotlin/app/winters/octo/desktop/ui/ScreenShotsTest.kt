@@ -3,15 +3,17 @@ package app.winters.octo.desktop.ui
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.unit.Density
+import app.winters.octo.design.LocalTyping
+import app.winters.octo.design.TypingState
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.FakeServer
+import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.audio.EnginePlayer
 import app.winters.octo.desktop.audio.LocalOrServer
 import app.winters.octo.desktop.audio.NativeAudioEngine
 import app.winters.octo.desktop.audio.ServerSongs
 import app.winters.octo.desktop.audio.writeSine
 import app.winters.octo.desktop.lyrics.openLyricsMenu
-import app.winters.octo.desktop.FakeServer
-import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.server.Accounts
@@ -20,18 +22,19 @@ import app.winters.octo.desktop.server.SignInOutcome
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.songJson
-import app.winters.octo.design.LocalTyping
-import app.winters.octo.design.TypingState
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.runBlocking
 import app.winters.octo.lyrics.OnlineLyrics
 import app.winters.octo.query.FilterPresets
 import app.winters.octo.query.LibraryQuery
 import app.winters.octo.query.QueryField
 import app.winters.octo.query.QueryOp
 import app.winters.octo.query.QueryRule
+import app.winters.octo.subsonic.Song
+import java.io.File
+import javax.swing.SwingUtilities
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.jetbrains.skia.EncodedImageFormat
@@ -39,8 +42,6 @@ import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import java.io.File
-import javax.swing.SwingUtilities
 
 // Draws the whole window off screen against a pretend server and saves
 // pictures of the main pages, for looking at the layout without a display.
@@ -236,6 +237,13 @@ class ScreenShotsTest {
             shot("player", 4_000)
             SwingUtilities.invokeAndWait { app.togglePlayerPanel(SidePanel.Queue) }
             shot("player-queue")
+            // A song the server found online, not in the library: the
+            // floating player offers its "+" in place of the heart.
+            SwingUtilities.invokeAndWait {
+                app.fullPlayer = false
+                app.play(listOf(Song("x9", "A song found online", artist = "Someone new", duration = 200)))
+            }
+            shot("player-outside", 2_000)
             scene.close()
             player.close()
         }
