@@ -77,6 +77,24 @@ class NavigatorTest {
     }
 
     @Test
+    fun aVisitKeepsItsTabAndEachOfItsListsScroll() {
+        val nav = Navigator()
+        nav.go(Page.Favourites)
+        val favourites = nav.current
+        nav.keepTab(favourites, "Albums")
+        nav.keepScroll(favourites, ScrollSpot(3, 0))
+        nav.keepScroll(favourites, ScrollSpot(9, 4), "grid")
+        nav.go(Page.Album("a1"))
+        nav.back()
+        assertEquals("Albums", nav.tabOf(nav.current))
+        assertEquals(ScrollSpot(3, 0), nav.scrollOf(nav.current))
+        assertEquals(ScrollSpot(9, 4), nav.scrollOf(nav.current, "grid"))
+        nav.go(Page.Songs)
+        nav.go(Page.Favourites)
+        assertNull("a new visit starts on the first tab", nav.tabOf(nav.current))
+    }
+
+    @Test
     fun startingOverForgetsEveryPageAndScroll() {
         val nav = Navigator()
         nav.go(Page.Albums)

@@ -243,14 +243,15 @@ private enum class FavouriteKind(val label: String) { Songs("Songs"), Albums("Al
 @Composable
 fun FavouritesPage(app: AppState, visit: Visit) {
     val connection = app.connection ?: return
-    var kind by remember { mutableStateOf(FavouriteKind.Songs) }
+    // The tab is kept with the visit, so Back returns to it.
+    var kind by remember(visit.id) { mutableStateOf(FavouriteKind.entries.firstOrNull { it.name == app.navigator.tabOf(visit) } ?: FavouriteKind.Songs) }
     val loaded = rememberLoad(connection) { connection.client.starred() }
     val list = rememberListState(app.navigator, visit)
     val grid = rememberGridState(app.navigator, visit)
     val title: @Composable () -> Unit = {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             PageTitle("Favourites", Modifier.weight(1f))
-            GlazeSegments(FavouriteKind.entries, kind, { it.label }, { kind = it })
+            GlazeSegments(FavouriteKind.entries, kind, { it.label }, { kind = it; app.navigator.keepTab(visit, it.name) })
         }
     }
     loaded.show(Modifier.padding(horizontal = 28.dp)) { starred ->
