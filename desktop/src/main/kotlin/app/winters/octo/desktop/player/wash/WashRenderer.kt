@@ -27,6 +27,8 @@ import org.jetbrains.skia.RuntimeEffect
 import org.jetbrains.skia.RuntimeShaderBuilder
 import org.jetbrains.skia.SamplingMode
 import org.jetbrains.skia.Shader
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.random.Random
 
 // The phone's moving background (player/immersive/WashRenderer.kt there),
@@ -94,7 +96,7 @@ class WashRenderer {
         val magnify = 2f * b * zoom
         val place = Matrix33.makeTranslate(width / 2f, height / 2f)
             .makeConcat(Matrix33.makeScale(magnify * width / WashSize, magnify * height / WashSize))
-            .makeConcat(Matrix33.makeRotate(Math.toDegrees(motion.turn.toDouble()).toFloat()))
+            .makeConcat(turned(motion.turn))
             .makeConcat(Matrix33.makeTranslate(-WashSize / 2f, -WashSize / 2f))
         val placed = ImageFilter.makeMatrixTransform(place, smooth, blurred)
         val paint = Paint().apply {
@@ -104,6 +106,16 @@ class WashRenderer {
         canvas.saveLayer(Rect.makeWH(width, height), paint)
         canvas.restore()
         return true
+    }
+
+    // A turn by `radians`, built by hand: this Skia's Matrix33.makeRotate
+    // does not take degrees as its name says (90 turns by about 5157
+    // radians), and passing it the turn in degrees spun the picture some
+    // 3,300 times too fast, a strobe rather than a drift.
+    internal fun turned(radians: Float): Matrix33 {
+        val c = cos(radians)
+        val s = sin(radians)
+        return Matrix33(c, -s, 0f, s, c, 0f, 0f, 0f, 1f)
     }
 
     private fun coverShader(image: Image): Shader = image.makeShader(FilterTileMode.REPEAT, FilterTileMode.REPEAT, SamplingMode.LINEAR)
