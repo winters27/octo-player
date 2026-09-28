@@ -166,7 +166,7 @@ class ScreenShotsTest {
             server.answer("getArtists", """"artists":{"index":[{"name":"R","artist":[{"id":"r1","name":"Radiohead","albumCount":9},{"id":"r2","name":"Portishead","albumCount":3,"coverArt":"ar-r2"},{"id":"r3","name":"Massive Attack","albumCount":2,"coverArt":"ar-r3"},{"id":"r4","name":"Björk","albumCount":2,"coverArt":"ar-r4"}]}]}""")
             server.answer("search3", """"searchResult3":{"song":[$songs,$older,$okSongs,$amnesiacMine],"album":[{"id":"a1","name":"OK Computer","artist":"Radiohead"}],"artist":[{"id":"r1","name":"Radiohead"}]}""")
             server.answer("getStarred2", """"starred2":{"album":[{"id":"a5","name":"Album number 5","artist":"Radiohead","starred":"2026-09-01T00:00:00Z"},{"id":"a8","name":"Album number 8","artist":"Radiohead","starred":"2026-09-10T00:00:00Z"}]}""")
-            server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"p1","name":"Late night","songCount":12},{"id":"p2","name":"Running","songCount":40}]}""")
+            server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"p1","name":"Late night","songCount":12,"coverArt":"pl-p1"},{"id":"p2","name":"Running","songCount":40,"coverArt":"pl-p2"}]}""")
             server.answerBy("getAlbum") { request ->
                 when (request.url.queryParameter("id")) {
                     "a9" -> server.ok(""""album":{"id":"a9","name":"Amnesiac","artist":"Radiohead","artistId":"r1","year":2001,"songCount":11,"coverArt":"al-a9","genres":[{"name":"Alternative"}],"releaseTypes":["Album"],"song":[${amnesiacSongs.joinToString(",")}]}""")
@@ -397,7 +397,17 @@ class ScreenShotsTest {
                 app.navigator.go(Page.RecentlyAdded)
             }
             shot("rail")
-            SwingUtilities.invokeAndWait { app.updateFrame { it.copy(sidebarRail = false) } }
+            // The rail's search floats out beside its button.
+            SwingUtilities.invokeAndWait {
+                app.openSearch()
+                app.search?.type("radiohead")
+            }
+            shot("rail-search", 2_000)
+            SwingUtilities.invokeAndWait {
+                app.search?.type("")
+                app.omnibox.open = false
+                app.updateFrame { it.copy(sidebarRail = false) }
+            }
             SwingUtilities.invokeAndWait {
                 app.navigator.go(Page.Search)
                 app.search?.type("radiohead")
@@ -672,6 +682,15 @@ class ScreenShotsTest {
     // A cover of soft coloured shapes, as a PNG, in colours and places of
     // its own for each cover id.
     private fun madeUpCover(id: String = ""): ByteArray {
+        // A playlist's cover is four of its songs' covers, as servers make them.
+        if (id.startsWith("pl-")) {
+            val surface = org.jetbrains.skia.Surface.makeRasterN32Premul(300, 300)
+            for (i in 0 until 4) {
+                val tile = org.jetbrains.skia.Image.makeFromEncoded(madeUpCover("al-a${i + 1}$id"))
+                surface.canvas.drawImageRect(tile, org.jetbrains.skia.Rect.makeXYWH(150f * (i % 2), 150f * (i / 2), 150f, 150f))
+            }
+            return surface.makeImageSnapshot().encodeToData(EncodedImageFormat.PNG)!!.bytes
+        }
         val palette = listOf(0xFF1B2A4A, 0xFFE0703A, 0xFF3AA6A0, 0xFFF2D06B, 0xFF6B3A7A, 0xFFB8C4C9, 0xFF2F5D3A, 0xFFC0463F).map { it.toInt() }
         val seed = id.hashCode() and 0x7fffffff
         fun colour(n: Int) = palette[(seed / (n + 1) + n) % palette.size]

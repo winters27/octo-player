@@ -159,7 +159,7 @@ class AppState(
     // menus read and set them through ratingOf and setRating (SongActions.kt).
     internal val ratingOverrides = mutableStateMapOf<String, Int>()
 
-    // The search box in the title bar: open or not, and its line.
+    // The search box at the top of the sidebar: open or not, and its line.
     val omnibox = OmniboxState()
 
     // Keeps a search that led somewhere, as the phone does.
@@ -197,7 +197,7 @@ class AppState(
 
     // The filter field of the page on screen, when it has one (the song
     // lists' filter bar sets it while shown), so the find shortcut can go
-    // there before the title bar's search.
+    // there before the sidebar's search.
     var pageFilterFocus: FocusRequester? = null
 
     // Playlists as last read or changed here, for their pages, so an edit

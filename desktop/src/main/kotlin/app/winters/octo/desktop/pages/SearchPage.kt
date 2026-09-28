@@ -83,7 +83,7 @@ fun SearchPage(app: AppState, visit: Visit) {
         id = "search",
         footer = { if (found != null) after(app, found) },
     ) {
-        // The field itself is in the title bar, on every page.
+        // The field itself is at the top of the sidebar, on every page.
         item(key = "filters") {
             Column(verticalArrangement = Arrangement.spacedBy(Space.L)) {
                 PageTitle("Search", detail = model.text.takeIf(String::isNotBlank)?.let { "Results for \"$it\"" })
@@ -91,7 +91,7 @@ fun SearchPage(app: AppState, visit: Visit) {
             }
         }
         when (state) {
-            SearchState.Idle -> item(key = "idle") { Txt("Type at least two letters in the search field above.", OctoType.bodySmall, OctoColors.TextMuted, Modifier.padding(top = Space.Page)) }
+            SearchState.Idle -> item(key = "idle") { Txt("Type at least two letters in the search field.", OctoType.bodySmall, OctoColors.TextMuted, Modifier.padding(top = Space.Page)) }
             SearchState.Looking -> item(key = "looking") { LoadingLine("Searching") }
             is SearchState.Failed -> item(key = "failed") { FailedLine(state.message, model::again) }
             is SearchState.Done -> before(app, state.found)

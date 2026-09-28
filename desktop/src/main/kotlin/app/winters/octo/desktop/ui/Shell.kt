@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -53,11 +54,15 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.Ambience
 import app.winters.octo.design.ControlHeight
+import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlassField
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
 import app.winters.octo.design.LocalPopups
+import app.winters.octo.design.MenuFilm
+import app.winters.octo.design.MenuFrost
+import app.winters.octo.design.MenuShape
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -94,6 +99,8 @@ import app.winters.octo.desktop.pages.SignInPage
 import app.winters.octo.desktop.pages.SongsPage
 import app.winters.octo.desktop.pages.SoundPage
 import app.winters.octo.desktop.settings.AmbienceStyle
+import app.winters.octo.desktop.search.omniPanelPlace
+import app.winters.octo.desktop.search.railFieldPlace
 import app.winters.octo.desktop.window.Frame
 import app.winters.octo.desktop.window.MacLightsRoom
 import app.winters.octo.desktop.window.ResizeEdges
@@ -160,19 +167,7 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
                     FullPlayer(app, Modifier.fillMaxSize(), top = FrameSize.TitleBar)
                 }
             }
-            if (connection != null && app.omnibox.open && !app.fullPlayer) {
-                // Under the search field, centred on it.
-                val field = app.omnibox.field
-                val density = LocalDensity.current
-                val width = with(density) { FrameSize.OmniWidth.roundToPx() }
-                OmniPanel(
-                    app,
-                    backdrop,
-                    Modifier
-                        .offset { IntOffset(field.center.x - width / 2, field.bottom + Space.S.roundToPx()) }
-                        .onGloballyPositioned { app.omnibox.panel = it.windowRect() },
-                )
-            }
+            if (connection != null && app.omnibox.open && !app.fullPlayer) OmniboxOver(app, backdrop)
             TitleBar(app, frame, onClose)
             PopupLayer(app.popups, backdrop)
             DragLabel(drag)
@@ -238,9 +233,48 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState) {
     }
 }
 
-// The strip along the top: back and forward, the search field in the
-// middle, room to drag the window by, and the window's buttons when the app
-// draws its frame. It paints nothing itself; the frame's glass is under it.
+// What the open search box lays over the page: its list, under the field
+// and lined up with its start, reaching over the page as far as the window
+// allows. With the sidebar folded to a rail, the field floats beside the
+// rail's search button too.
+@Composable
+private fun OmniboxOver(app: AppState, backdrop: HazeState) {
+    val box = app.omnibox
+    val density = LocalDensity.current
+    val window = LocalWindowInfo.current.containerSize.width
+    val settings by app.settings.state.collectAsState()
+    if (settings.frame.sidebarRail) {
+        val gap = with(density) { Space.M.roundToPx() }
+        val inset = with(density) { Space.Xs.roundToPx() }
+        FloatingGlaze(
+            backdrop,
+            Modifier
+                .offset { railFieldPlace(box.trigger, gap).let { IntOffset(it.x, it.y - inset) } }
+                .width(FrameSize.SearchWidth),
+            shape = MenuShape,
+            film = MenuFilm,
+            frost = MenuFrost,
+            halo = true,
+        ) {
+            OmniField(app, Modifier.fillMaxWidth().padding(Space.Xs))
+        }
+        // The field is new each time it floats in, so the keyboard goes to it here.
+        LaunchedEffect(Unit) { runCatching { app.searchFocus.requestFocus() } }
+    }
+    val place = with(density) { omniPanelPlace(box.field, FrameSize.OmniWidth.roundToPx(), window, Space.S.roundToPx(), Space.M.roundToPx()) }
+    OmniPanel(
+        app,
+        backdrop,
+        Modifier
+            .offset { IntOffset(place.left, place.top) }
+            .width(with(density) { place.width.toDp() })
+            .onGloballyPositioned { box.panel = it.windowRect() },
+    )
+}
+
+// The strip along the top: back and forward, room to drag the window by,
+// and the window's buttons when the app draws its frame. It paints nothing
+// itself; the frame's glass is under it.
 @Composable
 private fun TitleBar(app: AppState, frame: Frame?, onClose: () -> Unit) {
     TitleStrip {
@@ -249,9 +283,7 @@ private fun TitleBar(app: AppState, frame: Frame?, onClose: () -> Unit) {
             IconAction(OctoIcons.Back, "Back", { app.navigator.back() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.navigator.canGoBack)
             IconAction(OctoIcons.Forward, "Forward", { app.navigator.forward() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.navigator.canGoForward)
         }
-        Box(Modifier.weight(1f).fillMaxHeight().then(if (frame != null) Modifier.dragsWindow(frame) else Modifier), contentAlignment = Alignment.Center) {
-            if (app.connection != null && !app.fullPlayer) OmniField(app)
-        }
+        Box(Modifier.weight(1f).fillMaxHeight().then(if (frame != null) Modifier.dragsWindow(frame) else Modifier))
         if (frame != null) WindowButtons(frame, onClose)
     }
 }
