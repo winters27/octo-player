@@ -22,7 +22,7 @@ sealed interface SongPlace {
 enum class SongAction {
     Play, PlayNext, AddToQueue, StartRadio,
     AddToLastPlaylist, AddToPlaylist, Favourite, Rate,
-    GoToAlbum, GoToArtist,
+    GoToAlbum, GoToArtist, ShowInFolder,
     Details,
     Move,
     RemoveFromPlaylist, RemoveFromQueue,
@@ -36,13 +36,15 @@ enum class SongAction {
 // rated or open an album or artist. A playlist's songs can be moved or
 // come out of it only when the listener's own playlist (`ownsPlaylist`).
 // `lastPlaylist` is whether there is a playlist added to lately, offered
-// first among the ways to keep the songs.
+// first among the ways to keep the songs. Show in folder needs the server
+// to have said which folder the song is in (`inFolder`).
 fun songMenuActions(
     count: Int,
     place: SongPlace,
     outside: Boolean = false,
     ownsPlaylist: Boolean = false,
     lastPlaylist: Boolean = false,
+    inFolder: Boolean = false,
 ): List<List<SongAction>> {
     val one = count == 1
     val editable = place is SongPlace.Playlist && ownsPlaylist && place.positions.isNotEmpty()
@@ -58,7 +60,7 @@ fun songMenuActions(
             SongAction.Favourite.takeIf { !outside },
             SongAction.Rate.takeIf { !outside },
         ),
-        if (one && !outside) listOf(SongAction.GoToAlbum, SongAction.GoToArtist) else emptyList(),
+        if (one && !outside) listOfNotNull(SongAction.GoToAlbum, SongAction.GoToArtist, SongAction.ShowInFolder.takeIf { inFolder }) else emptyList(),
         listOfNotNull(SongAction.Details.takeIf { one }),
         listOfNotNull(SongAction.Move.takeIf { editable }),
         listOfNotNull(
@@ -82,6 +84,7 @@ fun songActionLabel(action: SongAction, starred: Boolean, last: String? = null):
     SongAction.Rate -> "Rate"
     SongAction.GoToAlbum -> "Go to album"
     SongAction.GoToArtist -> "Go to artist"
+    SongAction.ShowInFolder -> "Show in folder"
     SongAction.Details -> "Song details"
     SongAction.Move -> "Move"
     SongAction.RemoveFromPlaylist -> "Remove from this playlist"

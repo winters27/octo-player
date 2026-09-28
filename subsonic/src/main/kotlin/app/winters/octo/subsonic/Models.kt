@@ -71,6 +71,9 @@ data class Album(
     val originalReleaseDate: ItemDate? = null,
     val releaseDate: ItemDate? = null,
     val explicitStatus: String? = null,
+    // What kind of release it is, from MusicBrainz tags ("Album", "EP",
+    // "Single", "Compilation", "Live"...), on OpenSubsonic servers.
+    @Serializable(with = LooseStrings::class) val releaseTypes: List<String> = emptyList(),
 )
 
 // A date an OpenSubsonic server sends in parts, any of which can be missing.
@@ -129,6 +132,10 @@ data class Song(
     // The recording's ISRCs, as the server wrote them. OpenSubsonic sends a
     // list; a single code is read as a list of one.
     @Serializable(with = LooseStrings::class) val isrc: List<String> = emptyList(),
+    // The folder the song's file is in, as the server's folder calls name
+    // it, and the file's path in the library, when the server shares it.
+    val parent: String? = null,
+    val path: String? = null,
 )
 
 @Serializable
@@ -144,6 +151,16 @@ data class AlbumWithSongs(
     val year: Int? = null,
     val genre: String? = null,
     val song: List<Song> = emptyList(),
+    // What the album list also says of it, for the album's own page: the
+    // heart, the names of its discs, what kind of release it is, and its
+    // OpenSubsonic genres and dates.
+    val starred: String? = null,
+    val isCompilation: Boolean = false,
+    val discTitles: List<DiscTitle> = emptyList(),
+    @Serializable(with = LooseStrings::class) val releaseTypes: List<String> = emptyList(),
+    @Serializable(with = GenreNames::class) val genres: List<String> = emptyList(),
+    val releaseDate: ItemDate? = null,
+    val originalReleaseDate: ItemDate? = null,
 )
 
 @Serializable
@@ -429,15 +446,22 @@ data class PlainLyrics(val artist: String? = null, val title: String? = null, va
 // A folder on the server, as its folder listings name it. Older servers
 // send ids as numbers, so they are read as either and kept as text.
 @Serializable
-data class DirectoryRef(@Serializable(with = LooseString::class) val id: String, val name: String = "")
+data class DirectoryRef(
+    @Serializable(with = LooseString::class) val id: String,
+    val name: String = "",
+    // What some servers add: a cover, and how many albums or songs it holds.
+    val coverArt: String? = null,
+    val albumCount: Int? = null,
+    val songCount: Int? = null,
+)
 
 // The top of the server's folders: the folders at its root and any songs
 // sitting loose there.
 data class FolderIndex(val folders: List<DirectoryRef>, val songs: List<Song>)
 
 // One folder on the server: its folders, then its songs, in the order the
-// server sent them.
-data class MusicDirectory(val id: String, val name: String, val folders: List<DirectoryRef>, val songs: List<Song>)
+// server sent them, and the folder it is in when the server says.
+data class MusicDirectory(val id: String, val name: String, val folders: List<DirectoryRef>, val songs: List<Song>, val parent: String? = null)
 
 // The folder calls as they come over the wire. The root's folders arrive
 // grouped by first letter; a folder's children mix folders and songs.
@@ -454,6 +478,7 @@ internal data class IndexGroupWire(val name: String = "", val artist: List<Direc
 internal data class DirectoryWire(
     @Serializable(with = LooseString::class) val id: String,
     val name: String = "",
+    @Serializable(with = LooseString::class) val parent: String? = null,
     val child: List<kotlinx.serialization.json.JsonObject> = emptyList(),
 )
 

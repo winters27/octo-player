@@ -77,6 +77,7 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
             durationMs = album.duration * 1000L,
             addedAt = seconds(album.created) ?: 0,
             artwork = art(album.coverArt),
+            releaseTypes = joinLines(album.releaseTypes.map(String::trim).filter(String::isNotEmpty)),
         )
     }
 

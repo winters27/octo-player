@@ -1,20 +1,15 @@
 package app.winters.octo.desktop.pages
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,18 +22,12 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.GlazeSegments
-import app.winters.octo.design.Glyph
 import app.winters.octo.design.MenuRow
 import app.winters.octo.design.MenuSeparator
 import app.winters.octo.design.MenuTitle
-import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
-import app.winters.octo.design.OctoType
 import app.winters.octo.design.Space
 import app.winters.octo.design.TextAction
-import app.winters.octo.design.Txt
-import app.winters.octo.design.glassPanel
-import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.library.LibraryIndex
 import app.winters.octo.desktop.library.SongColumn
@@ -174,126 +163,6 @@ fun ArtistCard(app: AppState, artist: Artist, outside: Boolean = false) {
         round = true,
         online = outside,
     )
-}
-
-// Every genre, with how much the library has in each.
-@Composable
-fun GenresPage(app: AppState, visit: Visit) {
-    val grid = rememberGridState(app.navigator, visit)
-    WithLibrary(app) { index ->
-        val genres = index.genres
-        LazyVerticalGrid(GridCells.Adaptive(220.dp), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
-            header { PageTitle("Genres", detail = "${genres.size} genres") }
-            if (genres.isEmpty()) header { NothingHere("No genres", "The songs on your server have no genre tags.") }
-            items(genres, key = { it.name }) { genre ->
-                Column(
-                    Modifier
-                        .padding(6.dp)
-                        .glassPanel(RoundedCornerShape(14.dp))
-                        .hoverLift(RoundedCornerShape(14.dp))
-                        .clickable { app.navigator.go(Page.Genre(genre.name)) }
-                        .padding(16.dp)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Txt(genre.name, OctoType.section)
-                    Txt("${genre.songs} songs · ${genre.albums} albums", OctoType.caption, OctoColors.TextMuted)
-                }
-            }
-        }
-    }
-}
-
-// One genre: its albums, then its songs, which the bar above them filters.
-@Composable
-fun GenrePage(app: AppState, visit: Visit, name: String) {
-    val list = rememberListState(app.navigator, visit)
-    val query = app.navigator.filterOf(visit)
-    val filter: (LibraryQuery) -> Unit = { app.navigator.keepFilter(visit, it) }
-    val fields = rememberShownFields(app)
-    WithLibrary(app) { index ->
-        var order by remember { mutableStateOf(SortList.GenreSongs.default) }
-        val all = remember(index, name) { index.songsInGenre(name) }
-        val songs = rememberFiltered(rememberSorted(all, order), query, fields)?.songs ?: return@WithLibrary LoadingLine()
-        val albums = remember(index, name) { index.albumsInGenre(name) }
-        SongTable(
-            app,
-            songs,
-            listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Year, SongColumn.Favourite, SongColumn.Length),
-            list,
-            id = "genre",
-            order = order,
-            onSort = { order = it },
-            empty = { if (query.filters) NoMatches { filter(query.cleared()) } },
-        ) {
-            item(key = "head") {
-                ListHeader(
-                    "Genre",
-                    name,
-                    albums.firstOrNull()?.coverArt,
-                    "${filteredCount(songs.size, all.size, query.filters)} · ${albums.size} albums",
-                    { app.play(songs) },
-                    { app.play(songs, shuffle = true) },
-                    playable = songs.isNotEmpty(),
-                )
-            }
-            item(key = "albums") { Shelf("Albums", albums, { it.id }) { AlbumCard(app, it) } }
-            item(key = "songs-title") { Txt("Songs", OctoType.headline, modifier = Modifier.padding(top = 22.dp, bottom = 8.dp)) }
-            if (all.isNotEmpty()) item(key = "filters") { FilterBar(app, query, filter, all) }
-        }
-    }
-}
-
-// The server's folders from the top, as it files them.
-@Composable
-fun FoldersPage(app: AppState, visit: Visit) {
-    val connection = app.connection ?: return
-    val loaded = rememberLoad(connection) { connection.client.indexes() }
-    val list = rememberListState(app.navigator, visit)
-    loaded.show(Modifier.padding(horizontal = 28.dp)) { top ->
-        SongTable(app, top.songs, listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Length), list, id = "folder", covers = false) {
-            item(key = "title") { PageTitle("Folders") }
-            if (top.folders.isEmpty() && top.songs.isEmpty()) item(key = "no-folders") { NothingHere("No folders", "This server doesn't list its folders.") }
-            items(top.folders, key = { "f:${it.id}" }) { folder -> FolderRow(folder.name) { app.navigator.go(Page.Folder(folder.id, folder.name)) } }
-        }
-    }
-}
-
-// One folder: the folders in it, then its songs, in the server's order.
-@Composable
-fun FolderPage(app: AppState, visit: Visit, id: String, name: String) {
-    val connection = app.connection ?: return
-    val loaded = rememberLoad(connection, id) { connection.client.musicDirectory(id) }
-    val list = rememberListState(app.navigator, visit)
-    loaded.show(Modifier.padding(horizontal = 28.dp)) { folder ->
-        SongTable(
-            app,
-            folder.songs,
-            listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Length),
-            list,
-            id = "folder",
-            covers = false,
-            number = { index, song -> song.track?.toString() ?: "${index + 1}" },
-        ) {
-            item(key = "title") {
-                ListHeader("Folder", folder.name.ifEmpty { name }, folder.songs.firstOrNull()?.coverArt, if (folder.songs.isEmpty()) null else songsLine(folder.songs.size, folder.songs.sumOf { it.duration }), { app.play(folder.songs) }, { app.play(folder.songs, shuffle = true) }, playable = folder.songs.isNotEmpty(), art = 140.dp)
-            }
-            items(folder.folders, key = { "f:${it.id}" }) { sub -> FolderRow(sub.name) { app.navigator.go(Page.Folder(sub.id, sub.name)) } }
-        }
-    }
-}
-
-@Composable
-private fun FolderRow(name: String, onOpen: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().height(40.dp).hoverLift(RoundedCornerShape(8.dp)).clickable(onClick = onOpen).padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Glyph(OctoIcons.Folder, size = 18.dp, tint = OctoColors.TextSecondary)
-        Txt(name, OctoType.bodySmall, modifier = Modifier.weight(1f))
-        Glyph(OctoIcons.Chevron, size = 16.dp, tint = OctoColors.TextMuted)
-    }
 }
 
 private enum class FavouriteKind(val label: String) { Songs("Songs"), Albums("Albums"), Artists("Artists") }

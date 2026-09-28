@@ -158,7 +158,7 @@ class SubsonicClient(
     suspend fun musicDirectory(id: String): MusicDirectory {
         val wire = get("getMusicDirectory", mapOf("id" to id), "directory", DirectoryWire.serializer())
         val (folders, songs) = children(wire.child)
-        return MusicDirectory(wire.id, wire.name, folders, songs)
+        return MusicDirectory(wire.id, wire.name, folders, songs, wire.parent?.takeIf(String::isNotEmpty))
     }
 
     // Splits a folder's children into folders and songs. A folder is named
@@ -171,7 +171,12 @@ class SubsonicClient(
             val id = child["id"]?.jsonPrimitive?.contentOrNull ?: continue
             if (isDir) {
                 val name = child["title"]?.jsonPrimitive?.contentOrNull ?: child["name"]?.jsonPrimitive?.contentOrNull
-                folders += DirectoryRef(id, name.orEmpty())
+                folders += DirectoryRef(
+                    id,
+                    name.orEmpty(),
+                    coverArt = child["coverArt"]?.jsonPrimitive?.contentOrNull,
+                    songCount = child["songCount"]?.jsonPrimitive?.intOrNull,
+                )
             } else {
                 songs += json.decodeFromJsonElement(Song.serializer(), child)
             }
