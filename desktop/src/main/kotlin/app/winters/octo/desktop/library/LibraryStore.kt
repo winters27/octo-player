@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.library
 
 import app.winters.octo.desktop.server.userMessage
+import app.winters.octo.discovery.IsrcIndex
 import app.winters.octo.discovery.TitleIndex
 import app.winters.octo.discovery.knownLengthMs
 import app.winters.octo.discovery.sameSong
@@ -29,6 +30,7 @@ class LibraryIndex(val songs: List<Song>, val albums: List<Album>, val artists: 
     private val albumIds = albums.mapTo(HashSet()) { it.id }
     private val artistIds = artists.mapTo(HashSet()) { it.id }
     private val byTitle = TitleIndex(songs, { it.title }, { it.artist.orEmpty() })
+    private val byIsrc = IsrcIndex(songs) { it.isrc }
 
     // Every genre, with its counts, A to Z. A song's genres are its
     // OpenSubsonic list when it has one, else its single genre.
@@ -60,11 +62,13 @@ class LibraryIndex(val songs: List<Song>, val albums: List<Album>, val artists: 
 
     // Whether a song a server sent is in the library: the same id, or the
     // same song by the same artist (a find the server has since downloaded
-    // under a new id). The same rules the phone app uses.
+    // under a new id), or a song with the same ISRC under another title. The
+    // same rules the phone app uses.
     fun holds(song: Song): Boolean {
         if (song.id in songIds) return true
         val length = knownLengthMs(song)
-        return byTitle.candidates(song.title, song.artist.orEmpty()).any { sameSong(song.title, song.artist.orEmpty(), length, it.title, it.artist.orEmpty(), knownLengthMs(it)) }
+        val candidates = byTitle.candidates(song.title, song.artist.orEmpty()) + byIsrc.candidates(song.isrc)
+        return candidates.any { sameSong(song.title, song.artist.orEmpty(), length, it.title, it.artist.orEmpty(), knownLengthMs(it), song.isrc, it.isrc) }
     }
 
     // Songs that have been played, most recently first.

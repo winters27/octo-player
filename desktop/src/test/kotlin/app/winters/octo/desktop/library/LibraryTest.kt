@@ -220,6 +220,18 @@ class LibraryIndexTest {
     }
 
     @Test
+    fun aSongWithTheSameIsrcIsInTheLibraryUnderAnyTitle() {
+        val library = LibraryIndex(
+            songs = listOf(Song("s1", "紅蓮華", artist = "LiSA", duration = 239, isrc = listOf("JPU901901234"))),
+            albums = emptyList(),
+            artists = emptyList(),
+        )
+        assertTrue("its romanised title", library.holds(Song("ext-1", "Gurenge", artist = "LiSA", duration = 239, isrc = listOf("JP-U90-19-01234"))))
+        assertFalse("no code to tell by", library.holds(Song("ext-2", "Gurenge", artist = "LiSA", duration = 239)))
+        assertFalse("another code", library.holds(Song("ext-3", "Gurenge", artist = "LiSA", duration = 239, isrc = listOf("JPU902003065"))))
+    }
+
+    @Test
     fun coversAreCachedByWhatTheyAreNotWhereTheyCameFrom() {
         assertEquals(300, coverBucket(160))
         assertEquals(1200, coverBucket(5000))
