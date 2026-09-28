@@ -17,6 +17,7 @@ import app.winters.octo.desktop.player.QueueEntry
 import app.winters.octo.desktop.player.RESTART_AFTER_MS
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.SavedQueue
+import app.winters.octo.playback.PlayFailure
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -616,13 +617,13 @@ class EnginePlayer(
 // sounds like the middle rather than nearly full.
 fun loudness(volume: Float): Float = volume.coerceIn(0f, 1f).let { it * it }
 
-// Why a song would not play, in plain words.
+// Why a song would not play, in plain words, the same as the phone's.
 fun plainWords(kind: ErrorKind): String = when (kind) {
-    ErrorKind.NOT_FOUND -> "That song isn't on the server any more."
-    ErrorKind.HTTP -> "The server wouldn't send that song."
-    ErrorKind.NETWORK -> "Couldn't reach the server to play that song."
-    ErrorKind.UNSUPPORTED -> "Octo can't play that kind of file."
-    ErrorKind.DECODE -> "That song's file is damaged."
-    ErrorKind.DEVICE -> "The sound device stopped working. Pick another output."
-    else -> "That song couldn't play."
-}
+    ErrorKind.NOT_FOUND -> PlayFailure.Missing
+    ErrorKind.HTTP -> PlayFailure.Refused
+    ErrorKind.NETWORK -> PlayFailure.Unreachable
+    ErrorKind.UNSUPPORTED -> PlayFailure.Unsupported
+    ErrorKind.DECODE -> PlayFailure.Damaged
+    ErrorKind.DEVICE -> PlayFailure.Device
+    else -> PlayFailure.Other
+}.words

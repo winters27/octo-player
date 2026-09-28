@@ -35,6 +35,7 @@ import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.design.PopupHost
 import app.winters.octo.lyrics.OnlineLyrics
+import app.winters.octo.playback.skippedLine
 import app.winters.octo.sort.SortList
 import app.winters.octo.sort.SortOrder
 import app.winters.octo.subsonic.FORM_POST_EXTENSION
@@ -169,7 +170,7 @@ class AppState(
                 if (problem == null) return@collect
                 val song = problem.song
                 if (song != null) failedSongs[song.id] = problem.words
-                notice = if (song != null) "Skipped ${song.title}. ${problem.words}" else problem.words
+                notice = if (song != null) skippedLine(song.title, problem.words) else problem.words
                 noticeDetail = problem.detail
             }
         }
