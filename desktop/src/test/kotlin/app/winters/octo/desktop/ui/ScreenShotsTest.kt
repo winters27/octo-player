@@ -440,7 +440,7 @@ class ScreenShotsTest {
             }
             // A section picked in the list beside the page: Lyrics, scrolled
             // to and marked.
-            tap(290f, 278f)
+            tap(400f, 278f)
             shot("settings-jump")
             SwingUtilities.invokeAndWait {
                 app.navigator.go(Page.Sound)
@@ -453,9 +453,9 @@ class ScreenShotsTest {
             shot("sound-bottom")
             // The equalizer's free filters, with one chosen, from the list.
             SwingUtilities.invokeAndWait { app.sound?.update { withNewFilter(withMode(it, EqMode.Parametric)) } }
-            tap(290f, 152f)
+            tap(400f, 163f)
             shot("sound-parametric")
-            SwingUtilities.invokeAndWait { app.sound?.update { withMode(it, EqMode.Graphic) } }
+            SwingUtilities.invokeAndWait { app.sound?.update { withPreset(withMode(it, EqMode.Graphic), EqPresets.first { preset -> preset.name == "Bass Boost" }) } }
             val wideSettings = ImageComposeScene(1980, 900, Density(1f)) {
                 CompositionLocalProvider(LocalTyping provides TypingState()) { Shell(app, null) {} }
             }

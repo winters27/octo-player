@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -118,20 +117,38 @@ internal fun SectionedPage(app: AppState, visit: Visit, title: String, sections:
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val withList = maxWidth >= PageSide * 2 + SettingsSize.Nav + Space.Wide + SettingsSize.ColumnMin
+        // With the list, the title, the list and the column are one group
+        // centred in the page; without it, the column starts at the margin.
+        val side = if (withList) groupSide(maxWidth) else PageSide
         Column(Modifier.fillMaxSize()) {
-            Txt(title, DesktopType.pageTitle, modifier = Modifier.padding(start = PageSide, end = PageSide, top = Space.Xxl, bottom = Space.Xs))
-            Row(Modifier.fillMaxSize()) {
-                if (withList) SectionList(sections, current, ::jump)
-                SectionColumn(list, sections, Modifier.weight(1f).fillMaxHeight(), start = if (withList) Space.Wide else PageSide)
+            Txt(title, DesktopType.pageTitle, modifier = Modifier.padding(start = side, end = PageSide, top = Space.Xxl, bottom = Space.Xs))
+            // The list of sections lies over the scrolling column, which
+            // spans the whole page so the wheel scrolls it from either side.
+            Box(Modifier.fillMaxSize()) {
+                SectionColumn(
+                    list,
+                    sections,
+                    Modifier.fillMaxSize(),
+                    start = if (withList) side - Space.M + SettingsSize.Nav + Space.Wide else PageSide,
+                    end = if (withList) side - Space.M else PageSide,
+                )
+                if (withList) SectionList(sections, current, ::jump, start = side - Space.M)
             }
         }
     }
 }
 
+// How far in from each side the list and the column start, so the two sit
+// together in the middle of a page this wide. The words of the list and of
+// the rows are both a little in from their edges, so the group is measured
+// by its words: that inset is taken back on each side.
+internal fun groupSide(width: Dp): Dp =
+    maxOf(PageSide, (width - SettingsSize.Nav - Space.Wide - SettingsSize.Column) / 2 + Space.M)
+
 // The names of the page's sections, the one being read on the darker pill.
 @Composable
-private fun SectionList(sections: List<PageSection>, current: Int, onPick: (Int) -> Unit) {
-    Column(Modifier.padding(start = PageSide - Space.M, top = Space.Xl - Space.S).width(SettingsSize.Nav), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
+private fun SectionList(sections: List<PageSection>, current: Int, onPick: (Int) -> Unit, start: Dp) {
+    Column(Modifier.padding(start = start, top = Space.Xl - Space.S).width(SettingsSize.Nav), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
         sections.forEachIndexed { index, section ->
             val chosen = index == current
             Box(
@@ -152,12 +169,12 @@ private fun SectionList(sections: List<PageSection>, current: Int, onPick: (Int)
 // The sections, one under another, in a column no wider than reads well,
 // with room at the foot so the last of them clears the floating player.
 @Composable
-private fun SectionColumn(list: LazyListState, sections: List<PageSection>, modifier: Modifier, start: Dp) {
+private fun SectionColumn(list: LazyListState, sections: List<PageSection>, modifier: Modifier, start: Dp, end: Dp) {
     val bottom = LocalBottomRoom.current + Space.Section
     LazyColumn(
         modifier.topFade(Space.Xl),
         state = list,
-        contentPadding = PaddingValues(start = start, end = PageSide, top = Space.Xl, bottom = bottom),
+        contentPadding = PaddingValues(start = start, end = end, top = Space.Xl, bottom = bottom),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         sections.forEach { section ->

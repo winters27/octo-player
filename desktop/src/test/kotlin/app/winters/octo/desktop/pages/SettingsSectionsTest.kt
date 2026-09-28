@@ -1,7 +1,11 @@
 package app.winters.octo.desktop.pages
 
+import androidx.compose.ui.unit.dp
+import app.winters.octo.design.SettingsSize
+import app.winters.octo.design.Space
 import app.winters.octo.desktop.settings.AmbienceStyle
 import app.winters.octo.desktop.settings.Appearance
+import app.winters.octo.desktop.ui.PageSide
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -46,6 +50,22 @@ class SettingsSectionsTest {
     @Test
     fun anEmptyListMarksTheFirst() {
         assertEquals(0, sectionInView(emptyList(), 800, atEnd = false, jumped = null))
+    }
+
+    @Test
+    fun onAWidePageTheListAndColumnSitTogetherInTheMiddle() {
+        // Sidebar 240 on a 1980 window.
+        val page = 1740.dp
+        val side = groupSide(page)
+        // The list's words start `side` in; the column runs its full width
+        // after the gap, and the rows' words end `side` from the right.
+        val column = page - (side - Space.M) - SettingsSize.Nav - Space.Wide - (side - Space.M)
+        assertEquals(SettingsSize.Column.value, column.value, 0.01f)
+        val left = side
+        val right = page - (side - Space.M) - Space.M
+        assertEquals(left.value, (page - right).value, 0.01f)
+        // With no room to spare, the page's own margin.
+        assertEquals(PageSide, groupSide(PageSide * 2 + SettingsSize.Nav + Space.Wide + SettingsSize.ColumnMin))
     }
 
     @Test
