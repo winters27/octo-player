@@ -166,6 +166,15 @@ class AppState(
 
     val mac: Boolean get() = os == DesktopOs.Mac
 
+    // Playlists as last read or changed here, for their pages, so an edit
+    // shows at once and goes back if the server refuses it. Each is kept
+    // with the server it came from. See PlaylistActions.kt.
+    internal val playlistViews = mutableStateMapOf<String, PlaylistView>()
+
+    // How many edits of each playlist are on their way to the server. A
+    // fresh read is not shown until none are, so it cannot undo one.
+    internal val playlistSaves = mutableStateMapOf<String, Int>()
+
     init {
         if (listeningRoot != null) {
             plays.start()
