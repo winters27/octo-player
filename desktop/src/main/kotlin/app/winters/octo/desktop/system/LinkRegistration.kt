@@ -13,8 +13,17 @@ import com.sun.jna.win32.W32APIOptions
 // Nothing is written when Octo runs from a build rather than an install,
 // or while it runs its self-check.
 
-// The installed app's own program, or null outside an installed app.
-fun installedProgram(): String? = System.getProperty("jpackage.app-path")?.takeIf(String::isNotBlank)
+// The installed app's own program, or null outside an installed app. The
+// Windows launcher does not say where it is, so the program this process
+// runs as tells: Octo's own launcher once installed, Java in a build.
+fun installedProgram(
+    told: String? = System.getProperty("jpackage.app-path"),
+    running: String? = ProcessHandle.current().info().command().orElse(null),
+): String? {
+    told?.takeIf(String::isNotBlank)?.let { return it }
+    val name = running?.let { java.io.File(it).name.lowercase() } ?: return null
+    return running.takeIf { name == "octo.exe" || name == "octo" }
+}
 
 // The command Windows runs for a link.
 fun linkCommand(program: String): String = "\"$program\" \"%1\""

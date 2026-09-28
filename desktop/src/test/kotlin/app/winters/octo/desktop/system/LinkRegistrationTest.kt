@@ -32,6 +32,16 @@ class LinkRegistrationTest {
     }
 
     @Test
+    fun onlyTheInstalledLauncherCountsAsInstalled() {
+        assertEquals("C:/Users/b/AppData/Local/Octo/Octo.exe", installedProgram(null, "C:/Users/b/AppData/Local/Octo/Octo.exe"))
+        assertEquals("/opt/octo/bin/Octo", installedProgram(null, "/opt/octo/bin/Octo"))
+        assertEquals("/opt/octo/bin/Octo", installedProgram("/opt/octo/bin/Octo", "/usr/lib/jvm/bin/java"))
+        // A build runs on Java: nothing is registered for it.
+        assertNull(installedProgram(null, "C:/jdks/17/bin/java.exe"))
+        assertNull(installedProgram(null, null))
+    }
+
+    @Test
     fun linuxGetsAHiddenEntryForLinksOnlyOnce() {
         val folder = kotlin.io.path.createTempDirectory("octo-apps").toFile()
         try {
