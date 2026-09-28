@@ -182,6 +182,8 @@ fun SongTable(
     // Where picked rows live, for the menu's removals and the Delete key:
     // a playlist says which of its places they are.
     place: (List<TableRow>) -> SongPlace = { SongPlace.Library },
+    // What the rows do with songs dropped on them, if anything.
+    rowDrop: RowDrop? = null,
     empty: @Composable () -> Unit = {},
     footer: LazyListScope.() -> Unit = {},
     header: LazyListScope.() -> Unit = {},
@@ -369,7 +371,7 @@ fun SongTable(
                     // any other row carries itself, and is picked.
                     onDragStart = { at ->
                         if (row.key !in selection.picked) selection.click(row.key, toggle = false, range = false, order = keys)
-                        drag.start(picked(), at)
+                        drag.start(picked(), at, place(selection.of(rows)))
                     },
                     onDrag = drag::move,
                     onDragEnd = { drag.drop() },
@@ -377,6 +379,9 @@ fun SongTable(
                     onMore = { at ->
                         selection.pickForMenu(row.key)
                         openMenu(at)
+                    },
+                    drop = rowDrop?.takeIf { drag.active && it.takes(drag.from) }?.let { taken ->
+                        "$id:${row.key}" to Modifier.dropTarget("$id:${row.key}", taken.action) { songs -> taken.onDrop(songs, drag.from, row, drag.below) }
                     },
                 )
             }
@@ -540,6 +545,8 @@ private fun SongRow(
     onDragEnd: () -> Unit,
     onDragCancel: () -> Unit,
     onMore: (IntOffset) -> Unit,
+    // The row as a drop target, while a drag it takes is under way.
+    drop: Pair<String, Modifier>? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     // Where the row is in the window, to follow a drag in window terms, and
@@ -557,6 +564,7 @@ private fun SongRow(
             .fillMaxWidth()
             .height(height)
             .hoverable(interaction)
+            .then(drop?.second ?: Modifier)
             .onGloballyPositioned { placed = it }
             .pointerInput(Unit) {
                 detectDragGestures(
@@ -584,6 +592,7 @@ private fun SongRow(
             hovered -> Box(Modifier.matchParentSize().background(HoverFill, Corner.RowShape))
         }
         if (focused) Box(Modifier.matchParentSize().border(FocusLine, OctoColors.FocusRing, Corner.RowShape))
+        drop?.let { DropLine(it.first) }
         Row(Modifier.fillMaxWidth().padding(horizontal = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ColumnGap)) {
             shown.forEach { column ->
                 Box(cell(this, column), contentAlignment = if (specOf(column).endAligned) Alignment.CenterEnd else Alignment.CenterStart) {

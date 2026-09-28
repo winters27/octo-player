@@ -3,18 +3,18 @@ package app.winters.octo.desktop.pages
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.Corner
 import app.winters.octo.design.GlassField
@@ -28,16 +28,18 @@ import app.winters.octo.design.Txt
 import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.asPlaylist
-import app.winters.octo.desktop.loadPlaylist
-import app.winters.octo.desktop.playlistView
-import app.winters.octo.desktop.renamePlaylist
-import app.winters.octo.desktop.setPlaylistComment
 import app.winters.octo.desktop.library.SongColumn
 import app.winters.octo.desktop.library.filteredCount
 import app.winters.octo.desktop.library.rememberFiltered
 import app.winters.octo.desktop.library.sortAlbums
+import app.winters.octo.desktop.loadPlaylist
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
+import app.winters.octo.desktop.playlistView
+import app.winters.octo.desktop.playlists.movedPositions
+import app.winters.octo.desktop.renamePlaylist
+import app.winters.octo.desktop.reorderPlaylist
+import app.winters.octo.desktop.setPlaylistComment
 import app.winters.octo.desktop.ui.FilterBar
 import app.winters.octo.desktop.ui.LinkText
 import app.winters.octo.desktop.ui.Load
@@ -47,6 +49,7 @@ import app.winters.octo.desktop.ui.LocalPointer
 import app.winters.octo.desktop.ui.NoMatches
 import app.winters.octo.desktop.ui.PageSide
 import app.winters.octo.desktop.ui.PlaylistMenu
+import app.winters.octo.desktop.ui.RowDrop
 import app.winters.octo.desktop.ui.SongPlace
 import app.winters.octo.desktop.ui.SongTable
 import app.winters.octo.desktop.ui.rememberListState
@@ -222,6 +225,17 @@ fun PlaylistPage(app: AppState, visit: Visit, id: String) {
             place = { picked -> SongPlace.Playlist(id, picked.map { shown.placeOf(it.position) }) },
             // The number is the song's place in the playlist, filtered or not.
             number = { index, _ -> "${shown.placeOf(index) + 1}" },
+            // In the listener's own playlist, its rows dragged onto another
+            // row move there, above or below it.
+            rowDrop = if (!owns) {
+                null
+            } else {
+                RowDrop("Move here", takes = { (it as? SongPlace.Playlist)?.id == id }) { _, from, row, below ->
+                    val picked = (from as? SongPlace.Playlist)?.positions.orEmpty()
+                    val to = shown.placeOf(row.position) + if (below) 1 else 0
+                    if (picked.isNotEmpty()) app.reorderPlaylist(id, movedPositions(all.indices.toList(), picked, to).map { all[it] })
+                }
+            },
             empty = {
                 if (query.filters && all.isNotEmpty()) NoMatches { filter(query.cleared()) }
                 else NothingHere("This playlist is empty", "Right-click songs anywhere and pick Add to playlist.")

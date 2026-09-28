@@ -38,6 +38,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -85,6 +86,7 @@ import app.winters.octo.design.chromeFilm
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.clearUpcoming
+import app.winters.octo.desktop.dropIntoQueue
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.library.TableSelection
 import app.winters.octo.desktop.library.lengthText
@@ -104,11 +106,11 @@ import app.winters.octo.desktop.saveQueueAsPlaylist
 import app.winters.octo.desktop.setAutoplay
 import app.winters.octo.desktop.undoQueue
 import dev.chrisbanes.haze.HazeState
+import java.time.LocalDateTime
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
-import java.time.LocalDateTime
 
 // The panel down the right of the frame, in its glass: the queue, the
 // lyrics, or the song's details, on tabs, so it can stay open while the
@@ -168,7 +170,9 @@ private fun itemsOf(sections: List<QueueSection>): List<QueueItem> = buildList {
 // Delete takes them out; Enter or a double click plays one; Ctrl+Z takes
 // the last edit back. A right click opens the song menu with the queue's
 // own moves. Over it, a quiet line says how long is left, with the
-// queue's menu beside it.
+// queue's menu beside it. Songs dragged here from a list go above or below
+// the song to come they are dropped on, next when dropped on the one
+// playing, and last anywhere else in the panel.
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun QueueList(app: AppState, modifier: Modifier = Modifier.fillMaxSize()) {
@@ -190,6 +194,7 @@ fun QueueList(app: AppState, modifier: Modifier = Modifier.fillMaxSize()) {
     val scope = rememberCoroutineScope()
     val clicks = remember { QueueClicks() }
     val pointer = LocalPointer.current
+    val drag = LocalDrag.current
 
     val reorder = rememberReorderableLazyListState(list) { from, to ->
         val a = items.indexOfFirst { it.key == from.key }
@@ -301,6 +306,8 @@ fun QueueList(app: AppState, modifier: Modifier = Modifier.fillMaxSize()) {
 
     Column(
         modifier
+            .then(if (drag.active) Modifier.dropTarget(QueueDrop, "Add to the queue") { app.addToQueue(it) } else Modifier)
+            .background(if (isDropOver(QueueDrop)) DropLit else Color.Transparent)
             .focusRequester(focus)
             .onFocusChanged {
                 hasFocus = it.hasFocus
@@ -359,12 +366,35 @@ fun QueueList(app: AppState, modifier: Modifier = Modifier.fillMaxSize()) {
                                 onRemove = { app.removeQueued(listOf(entry.key)) },
                             )
                         }
+                        // Songs dragged from a list: above or below a song
+                        // to come, or next on the one playing.
+                        val dropId = "$QueueDrop:$key"
+                        val next = item.kind == SectionKind.NowPlaying
+                        val takes = drag.active && item.kind != SectionKind.Played
+                        val target = if (!takes) {
+                            Modifier
+                        } else {
+                            Modifier.dropTarget(dropId, if (next) "Play next" else "Add here") { songs ->
+                                val at = if (next) 0 else app.player.state.value.upcoming.indexOfFirst { it.key == entry.key } + if (drag.below) 1 else 0
+                                app.dropIntoQueue(songs, at)
+                            }
+                        }
+                        val placed = @Composable { handle: Modifier, lifted: Boolean ->
+                            Box(target) {
+                                row(handle, lifted)
+                                when {
+                                    !takes -> {}
+                                    next -> if (isDropOver(dropId)) Box(Modifier.matchParentSize().background(DropLit, Corner.RowShape))
+                                    else -> DropLine(dropId)
+                                }
+                            }
+                        }
                         if (item.kind == SectionKind.Coming) {
                             ReorderableItem(reorder, key = item.key) { dragging ->
-                                row(Modifier.draggableHandle(onDragStopped = { dropped(entry) }), dragging)
+                                placed(Modifier.draggableHandle(onDragStopped = { dropped(entry) }), dragging)
                             }
                         } else {
-                            row(Modifier, false)
+                            placed(Modifier, false)
                         }
                     }
                 }
@@ -372,6 +402,8 @@ fun QueueList(app: AppState, modifier: Modifier = Modifier.fillMaxSize()) {
         }
     }
 }
+
+private const val QueueDrop = "queue"
 
 // The queue's own rows at the top of a song's menu there: play it now, or
 // move the picked songs to play next or last.

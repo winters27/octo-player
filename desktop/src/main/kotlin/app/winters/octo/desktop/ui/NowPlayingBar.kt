@@ -118,7 +118,7 @@ fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier)
     // Songs dragged here go to the end of the queue; the player lights
     // while they are held over it.
     val over = isDropOver(PlayerDrop)
-    FloatingGlaze(backdrop, modifier.dropTarget(PlayerDrop, "Add to the queue") { app.addToQueue(it) }, shape = MenuShape, film = MenuFilm, frost = MenuFrost, halo = true) {
+    FloatingGlaze(backdrop, modifier.dropTarget(PlayerDrop, "Add to the queue", layer = 1) { app.addToQueue(it) }, shape = MenuShape, film = MenuFilm, frost = MenuFrost, halo = true) {
         if (over) Box(Modifier.matchParentSize().background(DropLit, MenuShape))
         Row(Modifier.fillMaxSize().padding(horizontal = Space.L), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
             Cover(

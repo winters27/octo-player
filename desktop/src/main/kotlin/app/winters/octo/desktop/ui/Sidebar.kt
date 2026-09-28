@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -26,13 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
-import app.winters.octo.desktop.AppState
-import app.winters.octo.desktop.importPlaylistFile
-import app.winters.octo.desktop.library.Cover
-import app.winters.octo.desktop.nav.Page
-import app.winters.octo.desktop.nav.SidebarItem
-import app.winters.octo.desktop.playlists.choosePlaylistFile
-import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
@@ -54,6 +48,13 @@ import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.design.chromeFilm
 import app.winters.octo.design.hoverLift
+import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.importPlaylistFile
+import app.winters.octo.desktop.library.Cover
+import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.nav.SidebarItem
+import app.winters.octo.desktop.playlists.choosePlaylistFile
+import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.subsonic.Playlist
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
@@ -180,17 +181,24 @@ private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Bo
 @Composable
 private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, rail: Boolean, pinned: Boolean) {
     val pointer = LocalPointer.current
+    // Songs dragged onto the listener's own playlist are added to it.
+    val drag = LocalDrag.current
+    val dropId = "pl:${playlist.id}"
+    val takes = drag.active && app.canEdit(playlist)
+    val lit = takes && isDropOver(dropId)
     val row: @Composable () -> Unit = {
         Box(
             Modifier
                 .fillMaxWidth()
                 .height(RowHeight.Nav + Space.Xs)
+                .then(if (takes) Modifier.dropTarget(dropId, "Add to ${playlist.name}") { addDroppedSongs(app, playlist, it, pointer.point) } else Modifier)
                 .hoverLift(Corner.ControlShape, lifted = false)
                 .onRightClick { app.popups.showAt(pointer.point) { close -> PlaylistMenu(app, playlist, close) } }
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { app.navigator.go(Page.Playlist(playlist.id)) },
             contentAlignment = if (rail) Alignment.Center else Alignment.CenterStart,
         ) {
             if (selected) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
+            if (lit) Box(Modifier.matchParentSize().background(DropLit, Corner.ControlShape))
             Row(Modifier.padding(horizontal = if (rail) Space.None else Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs)) {
                 Cover(playlist.coverArt, Modifier.size(FrameSize.PlaylistCover), shape = Corner.ArtSShape, placeholder = OctoIcons.Playlists)
                 if (!rail) {
