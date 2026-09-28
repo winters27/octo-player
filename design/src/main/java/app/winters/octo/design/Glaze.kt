@@ -50,13 +50,6 @@ class GlazeLight(
     }
 }
 
-// Mixes two colours channel by channel, the way a stylesheet does.
-fun mix(from: Color, to: Color, amount: Float) = Color(
-    red = from.red + (to.red - from.red) * amount,
-    green = from.green + (to.green - from.green) * amount,
-    blue = from.blue + (to.blue - from.blue) * amount,
-)
-
 // The film: clear glass with the faintest dim, so whatever is behind (the
 // page, or a song's colours) shows through in its own colour without
 // glaring when it is bright. The bar can lay a trace of the song's colour

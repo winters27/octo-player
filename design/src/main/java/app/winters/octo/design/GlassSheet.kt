@@ -62,9 +62,10 @@ fun GlassSheet(
 ) {
     val dismiss by rememberUpdatedState(onDismiss)
     BackHandler(enabled = visible) { dismiss() }
+    val motion = motionScale()
 
     Box(Modifier.fillMaxSize()) {
-        AnimatedVisibility(visible, enter = fadeIn(tween(200)), exit = fadeOut(tween(200))) {
+        AnimatedVisibility(visible, enter = fadeIn(octoTween(motion, OctoDuration.Card)), exit = fadeOut(octoTween(motion, OctoDuration.Card))) {
             Box(
                 Modifier
                     .fillMaxSize()
@@ -75,7 +76,7 @@ fun GlassSheet(
         AnimatedVisibility(
             visible,
             enter = slideInVertically(spring(0.85f, 400f)) { it },
-            exit = slideOutVertically(tween(220)) { it },
+            exit = slideOutVertically(octoTween(motion, OctoDuration.Card, OctoEasing.EaseIn)) { it },
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             BoxWithConstraints {
