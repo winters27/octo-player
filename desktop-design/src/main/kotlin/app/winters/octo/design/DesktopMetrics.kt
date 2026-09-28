@@ -162,3 +162,16 @@ object Ambience {
     val Height = 520.dp
     val Blur = 110.dp
 }
+
+// The Settings and Sound pages: the list of sections beside the page, the
+// widest the settings run, the narrowest they may be before that list is
+// left out, a slider's line and the reading beside it, and the equalizer's
+// plot without its labels.
+object SettingsSize {
+    val Nav = 200.dp
+    val Column = 720.dp
+    val ColumnMin = 520.dp
+    val Slider = 200.dp
+    val Reading = 60.dp
+    val EqPlot = 160.dp
+}
