@@ -114,10 +114,15 @@ class LiveListTest {
         val top = LibraryQuery(listOf(FilterPresets.playedInTheLast(30)), sort = QuerySort.of(SortOrder(SongSort.MostPlayed, true)), limit = 50)
         assertEquals("Played in the last month, most played first, the top 50 songs", liveListSummary(top, 50, utc))
         assertEquals("Played in the last month, most played first, 12 songs", liveListSummary(top, 12, utc))
+        // Without a count, as in a list of lists.
+        assertEquals("Played in the last month, most played first, the top 50", liveListSummary(top, null, utc))
+        assertEquals("Added in the last month, lossless", liveListSummary(month, null, utc))
         assertEquals("With “live”, 3 songs", liveListSummary(LibraryQuery(text = " live "), 3, utc))
         // Capitals inside a word stay.
         val bpm = QueryRule(QueryField.Bpm, QueryOp.AtLeast, number = 120)
         assertEquals("Favourites, BPM at least 120, 0 songs", liveListSummary(LibraryQuery(listOf(FilterPresets.Favourites, bpm)), 0, utc))
+        assertEquals("1 song matches right now", matchWords(1))
+        assertEquals("1,204 songs match right now", matchWords(1204))
         // No dashes of any kind in what the apps show.
         assertFalse(liveListSummary(top, 1, utc).contains('—'))
     }

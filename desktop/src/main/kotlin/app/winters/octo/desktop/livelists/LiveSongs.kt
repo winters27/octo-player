@@ -4,28 +4,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import app.winters.octo.livelists.LiveList
-import app.winters.octo.livelists.liveListName
 import app.winters.octo.query.LibraryQuery
 import app.winters.octo.query.SongFields
 import app.winters.octo.query.select
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-
-// A live list as the editor holds it until saved: the name typed and the
-// rules picked.
-data class LiveListDraft(val name: String, val query: LibraryQuery) {
-    // The name it is saved under: the one typed, else one from its rules.
-    val savedName: String get() = name.trim().ifEmpty { liveListName(query) }
-
-    // Whether saving would change `list`.
-    fun changes(list: LiveList): Boolean = savedName != list.name || query != list.query
-
-    companion object {
-        fun of(list: LiveList) = LiveListDraft(list.name, list.query)
-    }
-}
 
 // Up to four covers for a live list's picture, from its first songs, one
 // per album; a single cover when there are fewer than four.

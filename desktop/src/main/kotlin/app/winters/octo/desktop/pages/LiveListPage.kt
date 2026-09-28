@@ -51,7 +51,6 @@ import app.winters.octo.desktop.createLiveList
 import app.winters.octo.desktop.createStarter
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.library.SongColumn
-import app.winters.octo.desktop.livelists.LiveListDraft
 import app.winters.octo.desktop.livelists.liveListCovers
 import app.winters.octo.desktop.livelists.rememberLiveSongs
 import app.winters.octo.desktop.nav.Page
@@ -67,6 +66,7 @@ import app.winters.octo.desktop.ui.rememberShownFields
 import app.winters.octo.desktop.ui.windowRect
 import app.winters.octo.desktop.updateLiveList
 import app.winters.octo.livelists.LiveList
+import app.winters.octo.livelists.LiveListDraft
 import app.winters.octo.livelists.LiveListLimits
 import app.winters.octo.livelists.LiveListRuleGroups
 import app.winters.octo.livelists.LiveListSorts
@@ -76,6 +76,7 @@ import app.winters.octo.livelists.asksMatch
 import app.winters.octo.livelists.limitWords
 import app.winters.octo.livelists.liveListName
 import app.winters.octo.livelists.liveListSummary
+import app.winters.octo.livelists.matchWords
 import app.winters.octo.livelists.sortWords
 import app.winters.octo.livelists.toggling
 import app.winters.octo.query.FilterPresets
@@ -429,7 +430,7 @@ private fun LimitButton(app: AppState, limit: Int?, onPick: (Int?) -> Unit) {
 private fun PreviewLine(count: Int) {
     if (count == 0) return
     Txt(
-        if (count == 1) "1 song matches right now" else "%,d songs match right now".format(count),
+        matchWords(count),
         DesktopType.meta,
         OctoColors.TextMuted,
         Modifier.padding(bottom = Space.M),

@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.livelists
 
 import app.winters.octo.livelists.LiveList
+import app.winters.octo.livelists.LiveListDraft
 import app.winters.octo.query.FilterPresets
 import app.winters.octo.query.LibraryQuery
 import app.winters.octo.subsonic.Song
