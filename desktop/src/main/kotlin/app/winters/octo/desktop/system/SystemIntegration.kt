@@ -214,11 +214,13 @@ class SystemIntegration(
         }
     }
 
+    // The listener for later launches goes first, so a launch made while
+    // quitting starts its own Octo instead of being taken and lost.
     override fun close() {
+        runCatching { instance?.close() }
         runCatching { session.close() }
         runCatching { sleepWatch?.close() }
         runCatching { notifier?.close() }
-        runCatching { instance?.close() }
     }
 }
 

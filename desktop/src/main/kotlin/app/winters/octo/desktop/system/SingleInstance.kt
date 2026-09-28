@@ -5,10 +5,12 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.nio.channels.FileChannel
 import java.nio.channels.FileLock
 import java.nio.channels.OverlappingFileLockException
@@ -18,6 +20,7 @@ import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermissions
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.util.concurrent.atomic.AtomicInteger
 
 // One Octo at a time. The first to start holds a lock file in the settings
 // folder and listens on a port of this machine's own loopback address,
@@ -43,13 +46,18 @@ class SingleInstance private constructor(
     @Volatile
     private var open = true
 
+    // Connections being read now, each on a thread of its own, so a slow
+    // one never keeps a real launch waiting.
+    private val reading = AtomicInteger()
+
     private val acceptor = Thread({ acceptLoop() }, "octo-instance").apply {
         isDaemon = true
         start()
     }
 
-    // Hears each later launch's command line, on the listening thread. Any
-    // that came before a listener was set are handed over at once.
+    // Hears each later launch's command line, on a listening thread; it
+    // should only pass it on. Any that came before a listener was set are
+    // handed over at once.
     fun onLaunch(listener: (List<String>) -> Unit) {
         val backlog = synchronized(guard) {
             this.listener = listener
@@ -65,29 +73,78 @@ class SingleInstance private constructor(
             } catch (e: IOException) {
                 break
             }
-            runCatching {
-                client.use { socket ->
-                    socket.soTimeout = READ_TIMEOUT_MS
-                    val input = DataInputStream(socket.getInputStream())
-                    val args = readMessage(input, secret) ?: return@use
+            // Too many at once is not a launch; the launch trying to get
+            // through tries again a moment later.
+            if (reading.incrementAndGet() > MAX_READING) {
+                reading.decrementAndGet()
+                runCatching { client.close() }
+                continue
+            }
+            val reader = Thread({
+                try {
+                    serve(client)
+                } finally {
+                    reading.decrementAndGet()
+                }
+            }, "octo-instance-read")
+            reader.isDaemon = true
+            runCatching { reader.start() }.onFailure {
+                reading.decrementAndGet()
+                runCatching { client.close() }
+            }
+        }
+    }
+
+    // Reads one launch in a second at most, however slowly it arrives, and
+    // answers only once the app has it. Once Octo is quitting nothing is
+    // answered, so that launch starts on its own instead of being lost.
+    private fun serve(client: Socket) {
+        runCatching {
+            client.use { socket ->
+                val input = DataInputStream(ReadBy(socket, System.currentTimeMillis() + READ_DEADLINE_MS))
+                val args = readMessage(input, secret) ?: return@use
+                synchronized(guard) {
+                    if (!open) return@use
+                    val target = listener
+                    if (target == null) waiting += args else target(args)
                     socket.getOutputStream().apply {
                         write(ACK.toInt())
                         flush()
                     }
-                    val target = synchronized(guard) { listener.also { if (it == null) waiting += args } }
-                    target?.invoke(args)
                 }
             }
         }
     }
 
     override fun close() {
-        open = false
+        synchronized(guard) { open = false }
         runCatching { server.close() }
         runCatching { Files.deleteIfExists(addressFile.toPath()) }
         runCatching { lock.release() }
         runCatching { lockChannel.close() }
-        runCatching { acceptor.join(1000) }
+        runCatching { acceptor.join(CLOSE_WAIT_MS) }
+    }
+
+    // A socket's input that gives up at `deadline`, counted over the whole
+    // message rather than each read.
+    private class ReadBy(private val socket: Socket, private val deadline: Long) : InputStream() {
+        private val raw = socket.getInputStream()
+
+        private fun allow() {
+            val left = deadline - System.currentTimeMillis()
+            if (left <= 0) throw SocketTimeoutException("too slow")
+            socket.soTimeout = left.toInt()
+        }
+
+        override fun read(): Int {
+            allow()
+            return raw.read()
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            allow()
+            return raw.read(b, off, len)
+        }
     }
 
     // How a start went.
@@ -109,6 +166,12 @@ class SingleInstance private constructor(
         private const val ACK: Byte = 1
         private const val SECRET_BYTES = 32
         private const val READ_TIMEOUT_MS = 3_000
+
+        // How long a running Octo gives one connection to say what it wants,
+        // and how many it reads at once.
+        private const val READ_DEADLINE_MS = 1_000L
+        private const val MAX_READING = 4
+        private const val CLOSE_WAIT_MS = 500L
         const val LOCK_FILE = "instance.lock"
         const val ADDRESS_FILE = "instance.port"
 
@@ -132,12 +195,15 @@ class SingleInstance private constructor(
                 if (lock != null) return listen(channel, lock, addressFile)
                 channel.close()
                 beforeHandover()
+                // The running one started in another folder, so files are
+                // named in full before they go.
+                val sent = absoluteLaunchArgs(args)
                 // The running one may hold the lock but not yet listen.
                 val until = System.currentTimeMillis() + waitMs
                 var last: Exception? = null
                 while (System.currentTimeMillis() < until) {
                     try {
-                        if (handOver(addressFile, args)) return Claim.HandedOver
+                        if (handOver(addressFile, sent)) return Claim.HandedOver
                     } catch (e: IOException) {
                         last = e
                     }
@@ -226,8 +292,10 @@ class SingleInstance private constructor(
                 null
             } else {
                 val sent = ByteArray(secret.size).also(input::readFully)
-                val count = input.readInt()
-                if (!MessageDigest.isEqual(sent, secret) || count !in 0..1000) {
+                // The secret is checked before reading on, so a stranger
+                // gets no further than it.
+                val count = if (MessageDigest.isEqual(sent, secret)) input.readInt() else -1
+                if (count !in 0..1000) {
                     null
                 } else {
                     List(count) {

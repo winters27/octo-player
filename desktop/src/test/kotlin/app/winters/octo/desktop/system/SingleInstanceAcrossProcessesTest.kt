@@ -37,15 +37,18 @@ class SingleInstanceAcrossProcessesTest {
     fun aSecondProcessHandsItsFilesToTheFirst() {
         val dir = folder.newFolder("octo")
         val java = File(System.getProperty("java.home"), "bin/java").path
+        // Started in another folder, as the running Octo usually is.
         val running = ProcessBuilder(java, "-cp", System.getProperty("java.class.path"), RunningOcto::class.java.name, dir.path)
+            .directory(folder.newFolder("elsewhere"))
             .redirectErrorStream(true)
             .start()
         try {
             val output = running.inputStream.bufferedReader()
             assertEquals("READY", output.readLine())
-            val claim = SingleInstance.claim(dir, listOf("C:\\Music\\a song.flac", "octo://album/7"))
+            val claim = SingleInstance.claim(dir, listOf("Music/a song.flac", "octo://album/7"))
             assertEquals(SingleInstance.Claim.HandedOver, claim)
-            assertEquals("LAUNCH C:\\Music\\a song.flac|octo://album/7", output.readLine())
+            val whole = File("Music/a song.flac").absolutePath
+            assertEquals("a file named from here arrives named in full", "LAUNCH $whole|octo://album/7", output.readLine())
             assertTrue(running.waitFor(10, TimeUnit.SECONDS))
         } finally {
             running.destroyForcibly()
