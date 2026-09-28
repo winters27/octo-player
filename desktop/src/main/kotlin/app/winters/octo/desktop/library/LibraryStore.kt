@@ -1,6 +1,6 @@
 package app.winters.octo.desktop.library
 
-import app.winters.octo.catalog.sortKey
+import app.winters.octo.catalog.naturalSortKey
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.discovery.TitleIndex
 import app.winters.octo.discovery.knownLengthMs
@@ -46,7 +46,7 @@ class LibraryIndex(val songs: List<Song>, val albums: List<Album>, val artists: 
             }
         }
         songCounts.keys.map { GenreCount(names.getValue(it), songCounts.getValue(it), albumSets[it]?.size ?: 0) }
-            .sortedBy { sortKey(it.name) }
+            .sortedBy { naturalSortKey(it.name) }
     }
 
     fun songsInGenre(name: String): List<Song> = songs.filter { song -> genresOf(song).any { it.equals(name, ignoreCase = true) } }

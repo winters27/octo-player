@@ -22,3 +22,13 @@ fun sortKey(text: String): String {
     val article = articles.firstOrNull { key.startsWith(it) && key.length > it.length }
     return if (article != null) key.removePrefix(article) else key
 }
+
+// Like sortKey, with numbers ordered by value: "Vol. 2" before "Vol. 10".
+// Kept apart from sortKey, which the phone stores in its catalogue.
+fun naturalSortKey(text: String): String =
+    digitRuns.replace(sortKey(text)) { run -> run.value.trimStart('0').padStart(NUMBER_WIDTH, '0') }
+
+private val digitRuns = Regex("[0-9]+")
+
+// Wide enough for any number in a title or a year.
+private const val NUMBER_WIDTH = 12

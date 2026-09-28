@@ -25,7 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
-import app.winters.octo.catalog.sortKey
+import app.winters.octo.catalog.naturalSortKey
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.library.SongColumn
 import app.winters.octo.desktop.library.sortAlbums
@@ -111,7 +111,7 @@ fun AlbumsPage(app: AppState, visit: Visit) {
 fun ArtistsPage(app: AppState, visit: Visit) {
     val grid = rememberGridState(app.navigator, visit)
     WithLibrary(app) { index ->
-        val artists = remember(index) { index.artists.sortedBy { sortKey(it.name) } }
+        val artists = remember(index) { index.artists.sortedBy { naturalSortKey(it.name) } }
         LazyVerticalGrid(GridCells.Adaptive(GridCard), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
             header { PageTitle("Artists", detail = "${artists.size} artists") }
             items(artists, key = { it.id }) { ArtistCard(app, it) }

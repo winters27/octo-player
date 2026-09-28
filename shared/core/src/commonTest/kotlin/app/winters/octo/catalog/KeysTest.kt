@@ -18,4 +18,10 @@ class KeysTest {
         assertEquals("the", sortKey("The"))
         assertEquals("theory", sortKey("Theory"))
     }
+
+    @Test
+    fun naturalKeysOrderNumbersByValue() {
+        val names = listOf("Album 10", "Album 2", "The Album 1", "Album 007", "album 2b")
+        assertEquals(listOf("The Album 1", "Album 2", "album 2b", "Album 007", "Album 10"), names.sortedBy(::naturalSortKey))
+    }
 }

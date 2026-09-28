@@ -4,6 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -36,6 +40,7 @@ import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.library.Cover
@@ -77,8 +82,37 @@ private fun RowScope.cell(column: SongColumn): Modifier = when (column) {
     SongColumn.Year -> Modifier.width(56.dp)
     SongColumn.Length -> Modifier.width(64.dp)
     SongColumn.Plays -> Modifier.width(56.dp)
-    SongColumn.Added, SongColumn.Played -> Modifier.width(112.dp)
+    // Set off from a number column on its left, which lines up on the right.
+    SongColumn.Added, SongColumn.Played -> Modifier.width(DateWidth).padding(start = 16.dp)
 }
+
+private val DateWidth = 128.dp
+
+// The fixed width a column takes, or the least a shared one should get
+// before columns start being left out.
+private fun roomFor(column: SongColumn): Dp = when (column) {
+    SongColumn.Number -> 44.dp
+    SongColumn.Title -> 200.dp
+    SongColumn.Artist, SongColumn.Album -> 120.dp
+    SongColumn.Year, SongColumn.Plays -> 56.dp
+    SongColumn.Length -> 64.dp
+    SongColumn.Added, SongColumn.Played -> DateWidth
+}
+
+// The columns that fit in `width`: when the table is narrow (a side panel
+// open, a small window), the least needed go first, so the titles keep
+// their room rather than being cut short beside empty columns.
+fun fitColumns(columns: List<SongColumn>, width: Dp): List<SongColumn> {
+    val shown = columns.toMutableList()
+    fun needed() = shown.fold(16.dp) { sum, column -> sum + roomFor(column) + 8.dp }
+    for (column in DropOrder) {
+        if (needed() <= width) break
+        shown.remove(column)
+    }
+    return shown
+}
+
+private val DropOrder = listOf(SongColumn.Added, SongColumn.Played, SongColumn.Plays, SongColumn.Year, SongColumn.Album, SongColumn.Artist)
 
 private fun alignOf(column: SongColumn) = when (column) {
     SongColumn.Length, SongColumn.Plays, SongColumn.Year -> TextAlign.End
@@ -112,67 +146,70 @@ fun SongTable(
     val playing by app.player.state.collectAsState()
     val currentId = playing.current?.song?.id
     val clicks = remember(songs) { LastClick() }
-    LazyColumn(modifier, state = state, contentPadding = padding) {
-        header()
-        if (songs.isEmpty()) {
-            item(key = "empty") { empty() }
-            return@LazyColumn
-        }
-        item(key = "columns") {
-            Row(Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                columns.forEach { column ->
-                    val sortable = onSort != null && order != null && column.sort != null
-                    val active = sortable && order.by == column.sort
-                    Row(
-                        cell(column)
-                            .then(if (sortable) Modifier.pointerHoverIcon(PointerIcon.Hand).clickable { onSort(order.clicking(column)) } else Modifier)
-                            .padding(end = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = if (alignOf(column) == TextAlign.End) Arrangement.End else Arrangement.Start,
-                    ) {
-                        Txt(column.title, OctoType.caption, if (active) OctoColors.TextPrimary else OctoColors.TextMuted)
-                        if (active) Glyph(if (order.descending) OctoIcons.Descending else OctoIcons.Ascending, Modifier.padding(start = 4.dp), size = 12.dp)
+    BoxWithConstraints(modifier) {
+        val shown = remember(columns, maxWidth) { fitColumns(columns, maxWidth - padding.calculateStartPadding(LayoutDirection.Ltr) - padding.calculateEndPadding(LayoutDirection.Ltr)) }
+        LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = padding) {
+            header()
+            if (songs.isEmpty()) {
+                item(key = "empty") { empty() }
+                return@LazyColumn
+            }
+            item(key = "columns") {
+                Row(Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    shown.forEach { column ->
+                        val sortable = onSort != null && order != null && column.sort != null
+                        val active = sortable && order.by == column.sort
+                        Row(
+                            cell(column)
+                                .then(if (sortable) Modifier.pointerHoverIcon(PointerIcon.Hand).clickable { onSort(order.clicking(column)) } else Modifier)
+                                .padding(end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = if (alignOf(column) == TextAlign.End) Arrangement.End else Arrangement.Start,
+                        ) {
+                            Txt(column.title, OctoType.caption, if (active) OctoColors.TextPrimary else OctoColors.TextMuted)
+                            if (active) Glyph(if (order.descending) OctoIcons.Descending else OctoIcons.Ascending, Modifier.padding(start = 4.dp), size = 12.dp)
+                        }
                     }
                 }
+                Separator(Modifier.padding(bottom = 4.dp))
             }
-            Separator(Modifier.padding(bottom = 4.dp))
-        }
-        itemsIndexed(songs, key = { index, song -> "$index:${song.id}" }) { index, song ->
-            groupTitle(index)?.let { title ->
-                Txt(title, OctoType.label, OctoColors.TextSecondary, Modifier.padding(start = 8.dp, top = if (index == 0) 4.dp else 18.dp, bottom = 6.dp))
-            }
-            val picked = index in selection.picked
-            val isCurrent = song.id == currentId
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(if (covers) 48.dp else 40.dp)
-                    .hoverLift(RowShape, clickable = false, lifted = false)
-                    .then(if (picked) Modifier.background(PickedFill, RowShape) else Modifier)
-                    .onPointerEvent(PointerEventType.Press) { event ->
-                        val keys = event.keyboardModifiers
-                        val toggle = if (app.mac) keys.isMetaPressed else keys.isCtrlPressed
-                        when {
-                            event.buttons.isSecondaryPressed -> {
-                                selection.pickForMenu(index)
-                                val chosen = selection.of(songs)
-                                app.popups.showAt(pointer.point) { close -> SongMenu(app, chosen, close) }
-                            }
-                            event.buttons.isPrimaryPressed -> {
-                                if (clicks.isDouble(index) && !toggle && !keys.isShiftPressed) {
-                                    app.play(songs, index)
-                                } else {
-                                    selection.click(index, toggle, keys.isShiftPressed)
+            itemsIndexed(songs, key = { index, song -> "$index:${song.id}" }) { index, song ->
+                groupTitle(index)?.let { title ->
+                    Txt(title, OctoType.label, OctoColors.TextSecondary, Modifier.padding(start = 8.dp, top = if (index == 0) 4.dp else 18.dp, bottom = 6.dp))
+                }
+                val picked = index in selection.picked
+                val isCurrent = song.id == currentId
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(if (covers) 48.dp else 40.dp)
+                        .hoverLift(RowShape, clickable = false, lifted = false)
+                        .then(if (picked) Modifier.background(PickedFill, RowShape) else Modifier)
+                        .onPointerEvent(PointerEventType.Press) { event ->
+                            val keys = event.keyboardModifiers
+                            val toggle = if (app.mac) keys.isMetaPressed else keys.isCtrlPressed
+                            when {
+                                event.buttons.isSecondaryPressed -> {
+                                    selection.pickForMenu(index)
+                                    val chosen = selection.of(songs)
+                                    app.popups.showAt(pointer.point) { close -> SongMenu(app, chosen, close) }
+                                }
+                                event.buttons.isPrimaryPressed -> {
+                                    if (clicks.isDouble(index) && !toggle && !keys.isShiftPressed) {
+                                        app.play(songs, index)
+                                    } else {
+                                        selection.click(index, toggle, keys.isShiftPressed)
+                                    }
                                 }
                             }
                         }
-                    }
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                columns.forEach { column ->
-                    Box(cell(column).padding(end = 8.dp), contentAlignment = if (alignOf(column) == TextAlign.End) Alignment.CenterEnd else Alignment.CenterStart) {
-                        SongCell(app, column, index, song, isCurrent, covers, number)
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    shown.forEach { column ->
+                        Box(cell(column).padding(end = 8.dp), contentAlignment = if (alignOf(column) == TextAlign.End) Alignment.CenterEnd else Alignment.CenterStart) {
+                            SongCell(app, column, index, song, isCurrent, covers, number)
+                        }
                     }
                 }
             }
