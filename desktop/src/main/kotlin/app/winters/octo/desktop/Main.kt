@@ -34,6 +34,11 @@ import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.settings.WindowSpot
 import app.winters.octo.desktop.settings.currentOs
+import app.winters.octo.desktop.system.AudioDropZone
+import app.winters.octo.desktop.system.LocalSystem
+import app.winters.octo.desktop.system.SingleInstance
+import app.winters.octo.desktop.system.SystemIntegration
+import app.winters.octo.desktop.system.letRunningOctoComeForward
 import app.winters.octo.desktop.ui.Shell
 import app.winters.octo.desktop.window.Frame
 import app.winters.octo.desktop.window.MIN_HEIGHT
@@ -74,8 +79,13 @@ private fun appIcon(): Painter? = runCatching {
 }.getOrNull()
 
 @OptIn(FlowPreview::class)
-fun main() {
+fun main(args: Array<String>) {
     val places = AppPlaces.forSystem()
+    // One Octo at a time: launching it again hands the files and links to
+    // the running one, which comes forward, and ends here.
+    val claim = SingleInstance.claim(places.config, args.toList(), beforeHandover = ::letRunningOctoComeForward)
+    if (claim is SingleInstance.Claim.HandedOver) return
+    val instance = (claim as? SingleInstance.Claim.First)?.instance
     val settings = SettingsStore(File(places.config, SettingsStore.FILE_NAME))
     val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -87,6 +97,7 @@ fun main() {
 
     application {
         val app = remember { AppState(settings, accounts, http, CoroutineScope(SupervisorJob() + Dispatchers.Main), os) }
+        val system = remember { SystemIntegration(app, places, os, instance) }
         setSingletonImageLoaderFactory { context -> coverLoader(context, http, places.cache) }
         val spot = remember { placeWindow(settings.current.window, screenAreas()) }
         // Windows and Linux get the app's own glass frame unless the
@@ -105,13 +116,26 @@ fun main() {
         fun keepPlace() = settings.update { it.copy(window = floating.copy(maximized = maximizedNow())) }
         fun close() {
             keepPlace()
+            system.close()
             app.player.close()
             exitApplication()
         }
+        // Closing the window quits, or with the setting on, leaves Octo
+        // playing in the tray.
+        fun closeWindow() {
+            if (!system.closesToTray) return close()
+            keepPlace()
+            system.hideWindow()
+        }
+        LaunchedEffect(Unit) {
+            system.quit = ::close
+            system.start(args.toList())
+        }
 
         Window(
-            onCloseRequest = ::close,
+            onCloseRequest = ::closeWindow,
             state = windowState,
+            visible = system.windowVisible,
             title = "Octo",
             icon = icon,
             undecorated = custom,
@@ -129,6 +153,13 @@ fun main() {
                 if (os == DesktopOs.Mac) seeThroughMacTitleBar(window)
                 if (own != null && os == DesktopOs.Windows) roundWindowsCorners(window)
                 if (own != null && spot.maximized) own.maximize()
+                system.watch(window)
+                system.focusWindow = {
+                    windowState.isMinimized = false
+                    window.isVisible = true
+                    window.toFront()
+                    window.requestFocus()
+                }
             }
             // Remembers the window's own size and place as it changes, and
             // saves it once it settles, so a crash does not lose it.
@@ -142,9 +173,10 @@ fun main() {
                         keepPlace()
                     }
             }
-            CompositionLocalProvider(LocalTyping provides typing) {
-                Shell(app, own, ::close)
+            CompositionLocalProvider(LocalTyping provides typing, LocalSystem provides system) {
+                AudioDropZone(system::openFiles) { Shell(app, own, ::closeWindow) }
             }
         }
+        with(system) { Surfaces(icon) }
     }
 }

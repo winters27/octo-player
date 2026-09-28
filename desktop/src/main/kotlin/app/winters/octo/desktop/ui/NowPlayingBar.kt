@@ -36,6 +36,7 @@ import app.winters.octo.desktop.library.lengthText
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.RepeatMode
+import app.winters.octo.desktop.system.MiniPlayerButton
 import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.GlazeLight
@@ -145,6 +146,7 @@ fun NowPlayingBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modif
                 IconAction(OctoIcons.Queue, "Queue", { app.toggleSidePanel(SidePanel.Queue) }, size = 34.dp, iconSize = 19.dp, active = app.sidePanel == SidePanel.Queue)
                 OutputButton(app)
                 VolumeControl(app, state.volume)
+                MiniPlayerButton()
                 IconAction(OctoIcons.Expand, "Open the player", { app.fullPlayer = !app.fullPlayer }, size = 34.dp, iconSize = 20.dp, enabled = song != null, active = app.fullPlayer)
             }
         }

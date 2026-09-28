@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.settings
 
+import app.winters.octo.desktop.system.SystemPrefs
 import app.winters.octo.subsonic.AuthMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +29,8 @@ data class AppSettings(
     val albumSort: String? = null,
     // The panel open on the right: "queue", "lyrics", or none.
     val sidePanel: String? = null,
+    // The tray, notifications and the mini player.
+    val system: SystemPrefs = SystemPrefs(),
 )
 
 // Where the window was and how big, in density-independent pixels, and
