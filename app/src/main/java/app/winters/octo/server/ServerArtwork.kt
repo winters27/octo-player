@@ -19,8 +19,9 @@ private val Sizes = listOf(150, 300, 600, 1200)
 // Covers of things found online used to come with a mark the server drew in
 // a corner. Octo now sends them clean to this app, so they are kept under
 // keys of their own that start afresh, while library covers keep theirs.
-// Raise this if the server ever changes how it draws them again.
-const val ONLINE_COVER_VERSION = 2
+// Raise this if the server ever changes how it draws them again. 3: the
+// server sends them at full size, where it had sent soft 600 pixel ones.
+const val ONLINE_COVER_VERSION = 3
 
 // What a cover is remembered by, whatever address fetched it: its server
 // and id.

@@ -236,6 +236,6 @@ class LibraryIndexTest {
         assertEquals(300, coverBucket(160))
         assertEquals(1200, coverBucket(5000))
         assertEquals("cover:music.test:al-1:300", coverKey("music.test", "al-1", 300))
-        assertEquals("online-cover:v2:music.test:al-1:300", coverKey("music.test", "al-1", 300, online = true))
+        assertEquals("online-cover:v$ONLINE_COVER_VERSION:music.test:al-1:300", coverKey("music.test", "al-1", 300, online = true))
     }
 }

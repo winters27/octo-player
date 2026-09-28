@@ -42,8 +42,9 @@ fun coverBucket(px: Int): Int = Buckets.firstOrNull { it >= px } ?: Buckets.last
 
 // Covers of songs found online used to come with a mark the server drew in
 // a corner. Octo sends them plain to a client named "Octo", so they are kept
-// under keys of their own, as on the phone.
-const val ONLINE_COVER_VERSION = 2
+// under keys of their own, as on the phone. 3: the server sends them at
+// full size, where it had sent soft 600 pixel ones.
+const val ONLINE_COVER_VERSION = 3
 
 // What a cover is cached under: its server and id and size, never the
 // address, which is signed afresh for every request.
