@@ -17,7 +17,21 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.audio.CHECK_PLAY
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
+import app.winters.octo.desktop.settings.systemReducesMotion
 import app.winters.octo.desktop.window.screenAreas
+import app.winters.octo.desktop.discord.DiscordPresence
+import app.winters.octo.desktop.discord.DiscordSync
+import app.winters.octo.desktop.discord.discordActivityFor
+import app.winters.octo.desktop.discord.discordAppId
+import app.winters.octo.desktop.discord.discordPipes
+import app.winters.octo.desktop.hotkeys.GlobalShortcuts
+import app.winters.octo.desktop.hotkeys.HotkeyAction
+import app.winters.octo.desktop.hotkeys.HotkeyBackend
+import app.winters.octo.desktop.nav.VOLUME_STEP
+import app.winters.octo.desktop.ui.anyOutside
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.awt.Desktop
@@ -43,6 +57,9 @@ class SystemIntegration(
     // Started with --tray (at sign-in, when asked to): the window waits in
     // the tray until opened from there.
     startInTray: Boolean = false,
+    // Where global shortcuts are claimed; the system's own unless a test
+    // hands in a pretend one.
+    hotkeys: HotkeyBackend? = null,
 ) : AutoCloseable {
     val controls: SystemMediaControls = when (os) {
         DesktopOs.Windows -> NativeMediaControls.load("System media controls") ?: NoMediaControls()
@@ -73,6 +90,17 @@ class SystemIntegration(
 
     val notificationsAvailable: Boolean get() = notifier != null
 
+    // The song in the listener's Discord status, in a build that carries
+    // Octo's Discord application; null otherwise.
+    val discord: DiscordPresence? = discordAppId()?.let { id -> DiscordPresence(DiscordSync(id, discordPipes(os))) }
+
+    // Whether Discord is open and showing Octo's status, for the settings page.
+    var discordConnected by mutableStateOf(false)
+        private set
+
+    // Keys that reach Octo from any app (Windows only for now).
+    val shortcuts = if (hotkeys != null) GlobalShortcuts(app.settings, app.scope, os, ::onShortcut, hotkeys) else GlobalShortcuts(app.settings, app.scope, os, ::onShortcut)
+
     // Whether the media keys reach Octo, for the settings page.
     var mediaKeysWork by mutableStateOf(false)
         private set
@@ -98,6 +126,8 @@ class SystemIntegration(
     fun start(launchArgs: List<String>) {
         session.start { works -> mediaKeysWork = works }
         shell.start()
+        startDiscord()
+        shortcuts.start()
         // The system bus can be slow to answer, so it is reached off the window's thread.
         sleepWatch?.let { watch -> app.scope.launch(Dispatchers.IO) { watch.start { event -> app.scope.launch { session.handle(event) } } } }
         app.scope.launch {
@@ -196,9 +226,61 @@ class SystemIntegration(
 
     fun toggleMiniPlayer() = setMiniPlayer(!miniPlayerOpen)
 
+    // The mini player stands in for the window: opening it puts the window
+    // away, and closing it brings the window back.
     fun setMiniPlayer(open: Boolean) {
+        if (open == miniPlayerOpen) return
         miniPlayerOpen = open
         app.settings.update { it.copy(system = it.system.copy(miniPlayerOpen = open)) }
+        if (open) hideWindow() else raise()
+    }
+
+    // Tells Discord what plays, as it changes and every few seconds (a seek
+    // moves the times), while the listener has it on.
+    private fun startDiscord() {
+        val presence = discord ?: return
+        presence.onConnected = { connected -> app.scope.launch { discordConnected = connected } }
+        presence.start()
+        fun tell() {
+            val prefs = app.settings.current.discord
+            val now = nowPlayingOf(app.player.state.value)
+            presence.want(prefs.on, discordActivityFor(now, app.player.positionMs(), System.currentTimeMillis(), prefs))
+        }
+        app.scope.launch { app.player.state.collect { tell() } }
+        app.scope.launch { app.settings.state.map { it.discord }.distinctUntilChanged().collect { tell() } }
+        app.scope.launch {
+            while (true) {
+                delay(DISCORD_CHECK_MS)
+                if (app.settings.current.discord.on) tell()
+            }
+        }
+    }
+
+    // A global shortcut was pressed.
+    private fun onShortcut(action: HotkeyAction) {
+        val player = app.player
+        when (action) {
+            HotkeyAction.PlayPause -> player.togglePlay()
+            HotkeyAction.Next -> player.next()
+            HotkeyAction.Previous -> player.previous()
+            HotkeyAction.VolumeUp -> app.setVolume((player.state.value.volume + VOLUME_STEP).coerceAtMost(1f))
+            HotkeyAction.VolumeDown -> app.setVolume((player.state.value.volume - VOLUME_STEP).coerceAtLeast(0f))
+            HotkeyAction.ShowHide -> if (windowVisible && windowInFront) putWindowAway() else raise()
+            HotkeyAction.MiniPlayer -> toggleMiniPlayer()
+            HotkeyAction.Like -> player.state.value.current?.song?.let { song ->
+                if (!isOpenedFile(song.id) && !app.anyOutside(listOf(song))) app.setStarred(listOf(song), !app.isStarred(song))
+            }
+        }
+    }
+
+    // Hides the window in the tray where there is one, and to the taskbar
+    // where there is not, so it can always be found again.
+    private fun putWindowAway() {
+        if (trayAvailable) {
+            hideWindow()
+        } else {
+            (mainWindow as? java.awt.Frame)?.let { it.extendedState = it.extendedState or java.awt.Frame.ICONIFIED }
+        }
     }
 
     fun onTray(action: TrayAction) {
@@ -212,9 +294,15 @@ class SystemIntegration(
         }
     }
 
+    private var mainWindow: java.awt.Window? = null
+
+    // Whether the system asks for less motion, read once, for the mini player.
+    private val systemCalm by lazy { systemReducesMotion(os) }
+
     // Follows the window's focus, for the notices, and takes on its
     // taskbar button.
     fun watch(window: java.awt.Window) {
+        mainWindow = window
         shell.attach(window)
         window.addWindowFocusListener(object : WindowAdapter() {
             override fun windowGainedFocus(e: WindowEvent?) {
@@ -238,15 +326,15 @@ class SystemIntegration(
         }
         if (miniPlayerOpen) {
             val spot = placeMiniPlayer(app.settings.current.system.miniPlayer, screenAreas())
+            val settings by app.settings.state.collectAsState()
             MiniPlayerWindow(
-                player = app.player,
-                covers = app.connection?.client,
+                app = app,
                 spot = spot,
                 os = os,
                 icon = windowIcon,
                 onMoved = { moved -> app.settings.update { it.copy(system = it.system.copy(miniPlayer = moved)) } },
-                onOpenOcto = ::raise,
                 onClose = { setMiniPlayer(false) },
+                reduceMotion = settings.appearance.calmMotion || systemCalm,
             )
         }
     }
@@ -259,8 +347,13 @@ class SystemIntegration(
         runCatching { session.close() }
         runCatching { sleepWatch?.close() }
         runCatching { notifier?.close() }
+        runCatching { discord?.close() }
+        runCatching { shortcuts.close() }
     }
 }
+
+// How often the Discord status is checked against the player (for seeks).
+private const val DISCORD_CHECK_MS = 3_000L
 
 // A picture from the app's resources.
 fun picture(resource: String): Painter? = runCatching {

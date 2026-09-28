@@ -29,6 +29,9 @@ import app.winters.octo.desktop.settings.Appearance
 import app.winters.octo.desktop.settings.WashPrefs
 import app.winters.octo.desktop.system.SystemRows
 import app.winters.octo.desktop.system.TaskbarAndStartupRows
+import app.winters.octo.desktop.system.MiniPlayerGroup
+import app.winters.octo.desktop.system.DiscordGroup
+import app.winters.octo.desktop.hotkeys.GlobalShortcutGroup
 import app.winters.octo.desktop.ui.LocalSoftwareDrawing
 import kotlin.math.roundToInt
 
@@ -51,8 +54,13 @@ fun SettingsPage(app: AppState, visit: Visit) {
             PageSection("system", "System") {
                 SystemRows(app)
                 TaskbarAndStartupRows(app)
+                MiniPlayerGroup(app)
+                DiscordGroup(app)
             },
-            PageSection("keys", "Keyboard") { KeyRows(app) },
+            PageSection("keys", "Keyboard") {
+                KeyRows(app)
+                GlobalShortcutGroup(app)
+            },
             PageSection("about", "About") { Rows { InfoRow("Version", null, appVersion()) } },
         ),
     )

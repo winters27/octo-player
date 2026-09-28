@@ -2,6 +2,8 @@ package app.winters.octo.desktop.settings
 
 import app.winters.octo.sound.SoundSettings
 import app.winters.octo.desktop.system.SystemPrefs
+import app.winters.octo.desktop.discord.DiscordPrefs
+import app.winters.octo.desktop.hotkeys.HotkeyPrefs
 import app.winters.octo.subsonic.AuthMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,6 +56,10 @@ data class AppSettings(
     val system: SystemPrefs = SystemPrefs(),
     // Telling the server what was played, and carrying the queue between devices.
     val listening: ListeningPrefs = ListeningPrefs(),
+    // Showing the song playing in the listener's Discord status (off unless asked).
+    val discord: DiscordPrefs = DiscordPrefs(),
+    // Keys that work from any app (off unless asked), and the ones chosen.
+    val hotkeys: HotkeyPrefs = HotkeyPrefs(),
     // Certificates the listener chose to trust although the system does
     // not, as SHA-256 fingerprints by host. Each counts only for its host.
     // Not secret: a fingerprint only names a certificate.

@@ -55,7 +55,7 @@ fun keyColour(argb: Int): Color {
 fun keyRim(key: Color, alpha: Float = 0.12f): Color = lerp(Color.White, key, 0.2f).copy(alpha = alpha)
 
 // Octo's icon made ready for the wash, once for the whole run.
-private object OctoArt {
+internal object OctoArt {
     @Volatile private var made: WashCover? = null
 
     fun cover(tuning: WashTuning): WashCover {
