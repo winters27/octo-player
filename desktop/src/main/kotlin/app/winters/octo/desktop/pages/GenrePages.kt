@@ -50,6 +50,8 @@ import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.rememberGridState
 import app.winters.octo.desktop.ui.rememberListState
 import app.winters.octo.desktop.ui.rememberShownFields
+import app.winters.octo.desktop.ui.saveAsLiveList
+import app.winters.octo.query.FilterPresets
 import app.winters.octo.query.LibraryQuery
 import app.winters.octo.query.SongFields
 import app.winters.octo.sort.SortList
@@ -217,7 +219,7 @@ private fun GenreBody(
                 page.cards("album-cards", contents.albums, columns) { AlbumCard(app, it) }
             }
             page.item("songs") { GroupTitle("Songs", contents.songs.size) }
-            page.item("filters") { FilterBar(app, query, filter, contents.songs) }
+            page.item("filters") { FilterBar(app, query, filter, contents.songs, onSaveAsLive = { saveAsLiveList(app, listOf(FilterPresets.genre(name)), query, null) }) }
         }
     }
 }

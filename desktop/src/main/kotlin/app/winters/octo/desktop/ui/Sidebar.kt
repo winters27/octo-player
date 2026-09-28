@@ -87,6 +87,7 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
     val frame = settings.frame
     val rail = frame.sidebarRail
     val lit = app.navigator.sidebarItem
+    val liveLists by app.liveLists.lists.collectAsState()
     fun go(page: Page) = app.navigator.go(page)
     Column(modifier.chromeFilm(backdrop).padding(horizontal = Space.M, vertical = Space.M)) {
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
@@ -103,7 +104,12 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
             }
             val pinned = frame.pinnedPlaylists
             val playlists = app.playlists.sortedBy { pinned.indexOf(it.id).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE }
-            group(app, "playlists", "Playlists", rail, frame.foldedGroups, action = { IconAction(OctoIcons.AddToLibrary, "New playlist", { newPlaylist(app) }, size = ControlSize, iconSize = IconSize.Table, tint = OctoColors.TextSecondary) }) {
+            group(app, "playlists", "Playlists", rail, frame.foldedGroups, action = {
+                val pointer = LocalPointer.current
+                IconAction(OctoIcons.AddToLibrary, "New playlist or live list", { showNewListMenu(app, pointer.point) }, size = ControlSize, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
+            }) {
+                // Live lists first, each with its own mark (LiveListParts.kt).
+                items(liveLists, key = { "ll:${it.id}" }) { list -> LiveListRow(app, list, lit == SidebarItem.LiveListItem(list.id), rail) }
                 items(playlists, key = { "pl:${it.id}" }) { playlist ->
                     PlaylistRow(app, playlist, lit == SidebarItem.PlaylistItem(playlist.id), rail, playlist.id in pinned)
                 }
