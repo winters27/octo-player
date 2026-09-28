@@ -94,6 +94,8 @@ object FrameSize {
     val OmniHeight = 520.dp
     val OmniLine = 44.dp
     val OmniArt = 32.dp
+    // A song list's filter field.
+    val FilterWidth = 260.dp
     // The transport's column, at most; the side zones share the rest evenly.
     val TransportMax = 640.dp
 }

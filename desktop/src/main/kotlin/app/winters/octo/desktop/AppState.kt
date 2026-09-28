@@ -188,6 +188,11 @@ class AppState(
 
     val mac: Boolean get() = os == DesktopOs.Mac
 
+    // The filter field of the page on screen, when it has one (the song
+    // lists' filter bar sets it while shown), so the find shortcut can go
+    // there before the title bar's search.
+    var pageFilterFocus: FocusRequester? = null
+
     init {
         if (listeningRoot != null) {
             plays.start()

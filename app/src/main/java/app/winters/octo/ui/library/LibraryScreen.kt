@@ -207,21 +207,41 @@ fun ArtistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: LibraryViewM
     }
 }
 
-// Every song, in the chosen order. A tap plays the list from that song.
+// Every song, in the chosen order, which the filter row above narrows. A
+// tap plays the list as shown from that song.
 @Composable
 fun SongsScreen(onBack: () -> Unit, vm: LibraryViewModel = hiltViewModel()) {
     val songs by vm.songs.collectAsStateWithLifecycle()
+    val shown by vm.shownSongs.collectAsStateWithLifecycle()
+    val query by vm.songFilter.collectAsStateWithLifecycle()
+    val choices by vm.songChoices.collectAsStateWithLifecycle()
     LibraryPage("Songs", onBack, action = {
         songs?.let { SortButton(SortList.Songs, it.order, onChange = { order -> vm.setOrder(SortList.Songs, order) }) }
-    }, buttons = { PlayButtons(songs, "song", vm::playSongs) }) {
-        Loaded(songs) { sorted ->
-            val pickable = remember(sorted.items) { sorted.items.map { Pickable(it.id, it) } }
-            SelectableSongs(pickable) {
-                SortedList(sorted, key = { it.id }) { track -> SongRow(track) { vm.playSong(track) } }
+    }, buttons = {
+        val all = songs?.items?.size ?: 0
+        PlayButtons(shown, "song", vm::playSongs, details = if (query.filters) filteredCount(shown?.items?.size ?: 0, all) else null)
+    }) {
+        Loaded(songs) { _ ->
+            SongFilterRow(query, choices, vm::filterSongs)
+            val list = shown
+            when {
+                list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = OctoColors.Accent, modifier = Modifier.size(28.dp))
+                }
+                list.items.isEmpty() -> NoMatchesNote { vm.filterSongs(query.cleared()) }
+                else -> {
+                    val pickable = remember(list.items) { list.items.map { Pickable(it.id, it) } }
+                    SelectableSongs(pickable) {
+                        SortedList(list, key = { it.id }) { track -> SongRow(track) { vm.playSong(track) } }
+                    }
+                }
             }
         }
     }
 }
+
+// "120 of 2,835 songs", for a filtered list.
+internal fun filteredCount(shown: Int, all: Int): String = "%,d of %,d %s".format(shown, all, if (all == 1) "song" else "songs")
 
 // Grids keep side margins; lists of rows run edge to edge. Both leave room
 // at the bottom for the floating bar.
@@ -276,13 +296,20 @@ private fun LibraryPage(
 }
 
 // Play and Shuffle for the whole list, once it has something in it: how
-// many `noun`s it holds on the left, then room for one quieter action.
+// many `noun`s it holds on the left (or `details`), then room for one
+// quieter action.
 @Composable
-private fun PlayButtons(list: Sorted<*>?, noun: String, onPlay: (shuffle: Boolean) -> Unit, extra: @Composable () -> Unit = {}) {
+private fun PlayButtons(
+    list: Sorted<*>?,
+    noun: String,
+    onPlay: (shuffle: Boolean) -> Unit,
+    details: String? = null,
+    extra: @Composable () -> Unit = {},
+) {
     if (list == null || list.items.isEmpty()) return
     val count = list.items.size
     PlayRow(
-        details = if (count == 1) "1 $noun" else "$count ${noun}s",
+        details = details ?: if (count == 1) "1 $noun" else "$count ${noun}s",
         onPlay = { onPlay(false) },
         onShuffle = { onPlay(true) },
         modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
