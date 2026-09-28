@@ -12,8 +12,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -45,7 +48,6 @@ import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.query.FilterPresets
 import app.winters.octo.query.LibraryQuery
 import app.winters.octo.query.QueryMatch
-import app.winters.octo.query.QueryRule
 import app.winters.octo.query.QuerySort
 import app.winters.octo.query.artistsIn
 import app.winters.octo.query.decadesIn
@@ -172,23 +174,32 @@ fun LiveListEditScreen(
     val query = draft.query
     val new = id == null
 
+    // The page of choices to ask next. The sheet closes itself after a pick,
+    // so the next page opens once that has happened.
+    var next by remember { mutableStateOf<RuleAsk?>(null) }
+    LaunchedEffect(next) {
+        val ask = next ?: return@LaunchedEffect
+        next = null
+        if (ask.rules.isEmpty()) return@LaunchedEffect
+        sheet.show(ChoiceRequest(ask.title, ask.rules.map { Choice(it.first) }, pickedIn(ask.rules.map { it.second }, vm.draft.value.query)) { i ->
+            vm.change(vm.draft.value.query.toggling(ask.rules[i].second))
+        })
+    }
+
     // Asks which rule to add, a page at a time.
     fun addRule() {
         val menu = ruleMenu()
         sheet.show(ChoiceRequest("Add a rule", menu.map { Choice(it.first) }, -1) { picked ->
-            fun ask(title: String, rules: List<Pair<String, QueryRule>>) {
-                if (rules.isEmpty()) return
-                sheet.show(ChoiceRequest(title, rules.map { Choice(it.first) }, pickedIn(rules.map { it.second }, vm.draft.value.query)) { i ->
-                    vm.change(vm.draft.value.query.toggling(rules[i].second))
-                })
-            }
-            when (val pick = menu[picked].second) {
-                is RulePick.Group -> ask(pick.group.title, pick.group.choices.map { it.words to it.rule })
-                RulePick.Rating -> ask("Rating", RatingRules)
-                RulePick.Genre -> ask("Genre", choices.genres.map { it to FilterPresets.genre(it) })
-                RulePick.Artist -> ask("Artist", choices.artists.map { it to FilterPresets.artist(it) })
-                RulePick.Year -> ask("Year", choices.decades.asReversed().map { "The ${it}s" to FilterPresets.decade(it) })
-                is RulePick.Rule -> vm.change(vm.draft.value.query.toggling(pick.rule))
+            next = when (val pick = menu[picked].second) {
+                is RulePick.Group -> RuleAsk(pick.group.title, pick.group.choices.map { it.words to it.rule })
+                RulePick.Rating -> RuleAsk("Rating", RatingRules)
+                RulePick.Genre -> RuleAsk("Genre", choices.genres.map { it to FilterPresets.genre(it) })
+                RulePick.Artist -> RuleAsk("Artist", choices.artists.map { it to FilterPresets.artist(it) })
+                RulePick.Year -> RuleAsk("Year", choices.decades.asReversed().map { "The ${it}s" to FilterPresets.decade(it) })
+                is RulePick.Rule -> {
+                    vm.change(vm.draft.value.query.toggling(pick.rule))
+                    null
+                }
             }
         })
     }

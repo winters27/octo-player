@@ -44,6 +44,9 @@ internal fun ruleMenu(): List<Pair<String, RulePick>> {
         other.map { it.words to RulePick.Rule(it.rule) }
 }
 
+// A second page of Add a rule: its title and its choices with their rules.
+internal data class RuleAsk(val title: String, val rules: List<Pair<String, QueryRule>>)
+
 // The ratings on offer, highest first.
 internal val RatingRules: List<Pair<String, QueryRule>> = (5 downTo 1).map { FilterPresets.ratingWords(it) to FilterPresets.ratingAtLeast(it) }
 
