@@ -320,7 +320,7 @@ class LibraryHealthTest {
         val found = report(song("One", albumId = "a"), song("Two", albumId = "a", seconds = 180))
 
         assertTrue(found.clean)
-        assertEquals("Checked 2 songs. Everything looks right.", found.overview())
+        assertEquals("Checked 2 songs.", found.overview())
     }
 
     @Test
