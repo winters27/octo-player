@@ -102,10 +102,9 @@ impl Driver for CpalDriver {
         let renderer = make(rate, channels);
         let events = self.events.clone();
         let on_error = move |e: cpal::Error| {
-            let event = match e.kind() {
-                cpal::ErrorKind::DeviceChanged => DeviceEvent::Rerouted,
-                cpal::ErrorKind::Xrun => return,
-                _ => DeviceEvent::Lost(e.to_string()),
+            let Some(event) = device_event(e.kind(), || e.to_string()) else {
+                log::debug!("sound device hiccup: {e}");
+                return;
             };
             if let Ok(mut list) = events.lock() {
                 list.push(event);
@@ -171,4 +170,43 @@ where
         on_error,
         Some(Duration::from_secs(5)),
     )
+}
+
+// What a stream error means for the device. Only a device or host that is
+// gone, or a stream that must be rebuilt, loses it; anything else is a
+// hiccup the stream carries on through. (The PulseAudio bridge on Linux
+// fails a timing call until its first timing report; taking that as a lost
+// device reopened it forever, with no sound.)
+fn device_event(kind: cpal::ErrorKind, why: impl FnOnce() -> String) -> Option<DeviceEvent> {
+    match kind {
+        cpal::ErrorKind::DeviceChanged => Some(DeviceEvent::Rerouted),
+        cpal::ErrorKind::DeviceNotAvailable
+        | cpal::ErrorKind::HostUnavailable
+        | cpal::ErrorKind::StreamInvalidated => Some(DeviceEvent::Lost(why())),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_gone_device_is_lost() {
+        assert!(matches!(
+            device_event(cpal::ErrorKind::DeviceNotAvailable, || "gone".into()),
+            Some(DeviceEvent::Lost(_))
+        ));
+        assert!(matches!(
+            device_event(cpal::ErrorKind::StreamInvalidated, String::new),
+            Some(DeviceEvent::Lost(_))
+        ));
+        assert!(matches!(
+            device_event(cpal::ErrorKind::DeviceChanged, String::new),
+            Some(DeviceEvent::Rerouted)
+        ));
+        // An underrun, a busy moment or a backend's own error is carried on through.
+        assert!(device_event(cpal::ErrorKind::Xrun, String::new).is_none());
+        assert!(device_event(cpal::ErrorKind::DeviceBusy, String::new).is_none());
+    }
 }

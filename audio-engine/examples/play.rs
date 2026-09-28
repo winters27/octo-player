@@ -38,7 +38,26 @@ fn fail(message: &str) -> ! {
     std::process::exit(2);
 }
 
+// The engine's own notes (a device lost, a song that would not open) on
+// standard error, so trouble on a machine can be seen.
+struct Notes;
+
+impl log::Log for Notes {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            eprintln!("[{}] {}", record.level(), record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
 fn main() {
+    let _ = log::set_logger(&Notes).map(|()| log::set_max_level(log::LevelFilter::Info));
     let mut sources = Vec::new();
     let (mut volume, mut crossfade, mut speed, mut pitch) = (1.0f32, 0u32, 1.0f32, 1.0f32);
     let (mut eq, mut replaygain, mut start, mut device) =
