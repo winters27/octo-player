@@ -2,10 +2,12 @@
 // phone app, for Compose on the desktop JVM.
 //
 // The Android design module stays an Android library, untouched. Its files
-// that use nothing but Compose and Haze (the colours, type, motion, the
-// glaze, panels, the artwork rim, the switch and the pause glyph) are
-// compiled here as they are, from the same source files, so the two apps
-// cannot drift apart. The icons are the same Material Symbols vector files,
+// that use nothing but Compose and Haze (the tokens for colour, type,
+// motion and shape, the glaze and the other materials, panels, the artwork
+// rim, and the controls: buttons, chrome buttons and groups, the switch,
+// segmented tabs, sliders, the scrubber, tooltips) are compiled here as
+// they are, from the same source files, so the two apps cannot drift
+// apart. The icons are the same Material Symbols vector files,
 // read into ImageVectors at run time. What only makes sense on a desktop
 // (menus at the pointer, hover, the slider, text fields) lives in this
 // module's own sources.
@@ -21,16 +23,30 @@ kotlin { jvmToolchain(17) }
 // added here must not import anything from Android; the build fails loudly
 // if one does.
 val sharedDesignFiles = listOf(
+    "AccentButton.kt",
     "Artwork.kt",
     "Blur.kt",
+    "Buttons.kt",
+    "ChromeButtons.kt",
     "GlassPanel.kt",
     "Glaze.kt",
+    "GlazeButton.kt",
+    "GlazedIconButton.kt",
     "GlazeInset.kt",
+    "GlazeTabs.kt",
+    "GlowIcon.kt",
     "Glyphs.kt",
+    "IconAccents.kt",
+    "Materials.kt",
     "OctoColors.kt",
     "OctoMotion.kt",
     "OctoSwitch.kt",
+    "OctoTokens.kt",
     "OctoType.kt",
+    "Scrubber.kt",
+    "Sliders.kt",
+    "Spinner.kt",
+    "Tooltip.kt",
 )
 
 val shareDesign by tasks.registering(Sync::class) {

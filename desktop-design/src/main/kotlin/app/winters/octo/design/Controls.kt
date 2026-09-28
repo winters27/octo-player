@@ -1,23 +1,16 @@
 package app.winters.octo.design
 
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -29,7 +22,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -62,7 +54,8 @@ fun IconAction(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val press by animateFloatAsState(if (pressed) 0.9f else 1f, spring(0.45f, 600f), label = "press")
+    val motion = motionScale()
+    val press by animateFloatAsState(if (pressed) motion.scale(0.9f) else 1f, octoTween(motion, OctoDuration.Press), label = "press")
     Box(
         modifier
             .size(size)
@@ -94,22 +87,17 @@ fun GlazeCapsule(
     height: Dp = 40.dp,
 ) {
     val interaction = remember { MutableInteractionSource() }
-    val hovered by interaction.collectIsHoveredAsState()
-    val pressed by interaction.collectIsPressedAsState()
-    val press by animateFloatAsState(if (pressed) 0.96f else 1f, spring(0.45f, 600f), label = "press")
+    val look = rememberButtonLook(interaction)
     Glaze(
         modifier
             .height(height)
-            .graphicsLayer {
-                scaleX = press
-                scaleY = press
-            }
-            .alpha(if (enabled) 1f else 0.4f)
+            .buttonMotion(look, CircleShape)
+            .alpha(if (enabled) 1f else OctoInk.DisabledAlpha)
             .hoverable(interaction)
             .pointerHoverIcon(PointerIcon.Hand)
             .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = text },
-        light = if (lit || hovered || pressed) GlazeLight.Lifted else GlazeLight.Rest,
+        light = if (lit || look.hovered || look.pressed) GlazeLight.Lifted else GlazeLight.Rest,
     ) {
         Row(
             Modifier.padding(horizontal = 22.dp),
@@ -150,47 +138,15 @@ fun <T> GlazeSegments(
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Glaze(modifier.height(36.dp)) {
-        Row(Modifier.fillMaxHeight().padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
-            options.forEach { option ->
-                val chosen = option == selected
-                Box(
-                    Modifier
-                        .fillMaxHeight()
-                        .clip(CircleShape)
-                        .pointerHoverIcon(PointerIcon.Hand)
-                        .clickable(role = Role.Tab) { onSelect(option) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (chosen) GlazeSelected(Modifier.matchParentSize())
-                    Txt(
-                        label(option),
-                        OctoType.label,
-                        if (chosen) OctoColors.TextPrimary else OctoColors.TextSecondary,
-                        Modifier.padding(horizontal = 14.dp),
-                    )
-                }
-            }
-        }
-    }
-}
-
-// A small turning arc, for something on its way.
-@Composable
-fun Spinner(modifier: Modifier = Modifier, size: Dp = 18.dp, color: Color = Color.White) {
-    val turn = rememberInfiniteTransition(label = "spinner")
-    val angle by turn.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "angle")
-    Canvas(modifier.size(size)) {
-        val stroke = this.size.minDimension * 0.12f
-        drawArc(
-            color,
-            startAngle = angle,
-            sweepAngle = 270f,
-            useCenter = false,
-            topLeft = Offset(stroke / 2, stroke / 2),
-            size = Size(this.size.width - stroke, this.size.height - stroke),
-            style = Stroke(stroke, cap = StrokeCap.Round),
-        )
+    GlazeTabs(
+        count = options.size,
+        selected = options.indexOf(selected),
+        onSelect = { onSelect(options[it]) },
+        modifier = modifier.pointerHoverIcon(PointerIcon.Hand),
+        height = 36.dp,
+        fillWidth = false,
+    ) { index, chosen ->
+        Txt(label(options[index]), OctoType.label, if (chosen) OctoColors.TextPrimary else OctoColors.TextSecondary)
     }
 }
 
@@ -201,7 +157,7 @@ fun ProgressRing(fraction: Float?, modifier: Modifier = Modifier, size: Dp = 22.
         Spinner(modifier, size, Color.White.copy(alpha = 0.8f))
         return
     }
-    val shown by animateFloatAsState(fraction.coerceIn(0f, 1f), tween(300), label = "ring")
+    val shown by animateFloatAsState(fraction.coerceIn(0f, 1f), octoTween(motionScale(), OctoDuration.Neutral), label = "ring")
     Canvas(modifier.size(size)) {
         val stroke = this.size.minDimension * 0.12f
         val inset = Offset(stroke / 2, stroke / 2)
@@ -218,11 +174,16 @@ private val ThumbHover = 6.dp
 val ControlGap = 4.dp
 
 // A glass pill that wraps a row of small controls, for a group like the
-// transport buttons.
+// transport buttons: 4 dp in from its ends, the controls 4 dp apart, with
+// the chrome shadow. The controls inside wear no glass of their own.
 @Composable
 fun GlazeGroup(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Glaze(modifier) {
-        Row(Modifier.padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) { content() }
+    Glaze(modifier.chromeShadow(CircleShape)) {
+        Row(
+            Modifier.padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(ControlGap),
+            verticalAlignment = Alignment.CenterVertically,
+        ) { content() }
     }
 }
 
