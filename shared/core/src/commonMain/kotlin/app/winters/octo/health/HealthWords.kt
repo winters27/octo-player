@@ -89,14 +89,24 @@ fun <T> DuplicateGroup<T>.heading(fields: HealthFields<T>): String {
 
 // A heading for a split album and what its parts disagree on.
 fun <T> SplitAlbum<T>.heading(): String {
-    val by = if (artist.isBlank()) title else "$title by $artist"
+    val by = if (artist.isBlank()) title.trim() else "${title.trim()} by ${artist.trim()}"
     return "$by, shown as ${parts.size} albums"
 }
 
 fun <T> SplitAlbum<T>.summary(): String = differences.joinToString(" ") { it.words() }
 
 fun AlbumDifferenceValues.words(): String {
-    val listed = values.joinToString(", ") { it.ifBlank { "none" } }
+    val listed = values.joinToString(", ") { it.trim().ifBlank { "none" } }
+    // A space before or after the words is there but cannot be seen.
+    val spaceOnly = values.map { it.trim() }.distinct().size == 1
+    return when {
+        spaceOnly && kind == AlbumDifference.Title -> "The album title has a stray space on some songs."
+        spaceOnly && kind == AlbumDifference.AlbumArtist -> "The album artist has a stray space on some songs."
+        else -> byKind(listed)
+    }
+}
+
+private fun AlbumDifferenceValues.byKind(listed: String): String {
     return when (kind) {
         AlbumDifference.Title -> "The album title is written differently: $listed."
         AlbumDifference.AlbumArtist -> "The album artist differs: $listed."

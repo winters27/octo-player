@@ -230,6 +230,17 @@ class LibraryHealthTest {
     }
 
     @Test
+    fun aStraySpaceIsNamedSinceItCannotBeSeen() {
+        val found = report(
+            song("One", "Disturbed", album = "The Sickness ", albumId = "a"),
+            song("Two", "Disturbed", album = "The Sickness", albumId = "b"),
+        ).splitAlbums.single()
+
+        assertEquals("The Sickness by Disturbed, shown as 2 albums", found.heading())
+        assertEquals("The album title has a stray space on some songs.", found.summary())
+    }
+
+    @Test
     fun twoAlbumsOfOneNameFromDifferentYearsAreTwoAlbums() {
         val found = report(
             song("My Name Is Jonas", "Weezer", album = "Weezer", albumId = "blue", year = 1994),
