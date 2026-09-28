@@ -19,7 +19,9 @@ use crate::deck::{Deck, DeckStatus};
 use crate::decode::TrackInfo;
 use crate::lane::Lane;
 use crate::mixer::{Marker, MixState, Mixer, Transition};
-use crate::output::{DeviceEvent, Driver, OpenedOutput, OutputDevice, OutputShared, Renderer, ring};
+use crate::output::{
+    DeviceEvent, Driver, OpenedOutput, OutputDevice, OutputFormat, OutputShared, Renderer, ring,
+};
 use crate::pace::Pace;
 use crate::sound::model::{DspSettings, EqSettings, ReplayGainSettings, SoundSettings};
 use crate::sound::replaygain::{Loudness, stored_replay_gain};
@@ -91,6 +93,8 @@ pub struct Status {
     pub state: PlaybackState,
     pub volume: f32,
     pub device: Option<OutputDevice>,
+    /// What the open device's stream runs at.
+    pub format: Option<OutputFormat>,
     pub info: Option<TrackInfo>,
     queue: Vec<QueueEntryView>,
     heard: Option<u64>,
@@ -118,6 +122,7 @@ impl Shared {
                 state: PlaybackState::Idle,
                 volume: 1.0,
                 device: None,
+                format: None,
                 info: None,
                 queue: Vec::new(),
                 heard: None,
@@ -565,7 +570,7 @@ impl Player {
         let key = self.queue[index].key;
         self.drop_prepared();
         self.flush_output(Moment { key, secs });
-        let rate = self.out.as_ref().map(|o| o.opened.rate).unwrap_or(48_000);
+        let rate = self.out.as_ref().map(|o| o.opened.rate()).unwrap_or(48_000);
         let base = self.out.as_ref().map(|o| o.written).unwrap_or(0);
         if self.mixer.as_ref().is_none_or(|m| m.rate() != rate) {
             self.mixer = Some(Mixer::new(rate, base, &self.settings, self.pace));
@@ -861,7 +866,7 @@ impl Player {
         let heard = out.shared.clock.heard(now);
         let buffered = out.written.saturating_sub(out.shared.read_frames());
         let written = out.written;
-        let rate = out.opened.rate as u64;
+        let rate = out.opened.rate() as u64;
         if let Some(frame) = heard {
             self.crossed.clear();
             self.shared.timeline.crossed(self.heard_frame, frame, &mut self.crossed);
@@ -1015,8 +1020,12 @@ impl Player {
         match result {
             Ok(()) => {
                 let device = self.out.as_ref().map(|o| o.opened.device.clone());
-                self.lock_status().device = device.clone();
-                self.emit(EngineEvent::DeviceChanged { device });
+                let format = self.out.as_ref().map(|o| o.opened.format.clone());
+                let mut status = self.lock_status();
+                status.device = device.clone();
+                status.format = format.clone();
+                drop(status);
+                self.emit(EngineEvent::DeviceChanged { device, format });
             }
             Err(e) if report => {
                 self.emit(EngineEvent::Error { kind: e.kind, message: e.message, item_id: None });
@@ -1039,7 +1048,7 @@ impl Player {
         })?;
         let (producer, shared) = made.expect("renderer made on open");
         *self.shared.output.lock().unwrap_or_else(|e| e.into_inner()) = Some(shared.clone());
-        let target = (opened.rate as f64 * RING_TARGET_SECS) as u64;
+        let target = (opened.rate() as f64 * RING_TARGET_SECS) as u64;
         self.out = Some(Out { opened, shared, producer, written: 0, target });
         self.heard_frame = 0.0;
         self.device_running = true;
@@ -1104,9 +1113,11 @@ impl Player {
                     self.reopen_output(true);
                 }
                 DeviceEvent::Rerouted => {
+                    // The same stream, so the same format, on another device.
                     let device = self.driver.default_device();
+                    let format = self.out.as_ref().map(|o| o.opened.format.clone());
                     self.lock_status().device = device.clone();
-                    self.emit(EngineEvent::DeviceChanged { device });
+                    self.emit(EngineEvent::DeviceChanged { device, format });
                 }
             }
         }

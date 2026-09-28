@@ -28,6 +28,16 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
+import app.winters.octo.design.GlassField
+import app.winters.octo.design.GlazeSegments
+import app.winters.octo.design.Glyph
+import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.OctoType
+import app.winters.octo.design.ProgressRing
+import app.winters.octo.design.Space
+import app.winters.octo.design.Txt
+import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.library.lengthText
@@ -38,65 +48,38 @@ import app.winters.octo.desktop.search.SearchFilter
 import app.winters.octo.desktop.search.SearchState
 import app.winters.octo.desktop.search.phaseText
 import app.winters.octo.desktop.ui.FailedLine
+import app.winters.octo.desktop.ui.LoadingLine
 import app.winters.octo.desktop.ui.LocalBottomRoom
 import app.winters.octo.desktop.ui.LocalPointer
-import app.winters.octo.desktop.ui.LoadingLine
+import app.winters.octo.desktop.ui.PageTitle
 import app.winters.octo.desktop.ui.SectionTitle
 import app.winters.octo.desktop.ui.ShelfCardWidth
 import app.winters.octo.desktop.ui.SongMenu
 import app.winters.octo.desktop.ui.onRightClick
 import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.rememberListState
-import app.winters.octo.design.GlassField
-import app.winters.octo.design.GlazeSegments
-import app.winters.octo.design.Glyph
-import app.winters.octo.design.OctoColors
-import app.winters.octo.design.OctoIcons
-import app.winters.octo.design.OctoType
-import app.winters.octo.design.ProgressRing
-import app.winters.octo.design.Txt
-import app.winters.octo.design.hoverLift
 import app.winters.octo.subsonic.Song
 
 // Not in the library, in the phone app's words.
 const val NotInLibraryText = "Not in your library"
 
-// Search: the field, the same filters as the phone, then the library's
+// Search: the same filters as the phone, then the library's
 // artists, albums, songs and playlists, and, from an Octo server that can
 // fetch music, what it found online with a "+" to add each song.
 @Composable
 fun SearchPage(app: AppState, visit: Visit) {
     val model = app.search ?: return
     val list = rememberListState(app.navigator, visit)
-    // The field has the keyboard as soon as the page opens, and again on
-    // the search shortcut here, brought back into view first when the list
-    // has scrolled it away.
-    val asks = app.searchAsks
-    val opened = remember { asks }
-    LaunchedEffect(asks) {
-        if (asks != opened && list.firstVisibleItemIndex > 0) {
-            list.scrollToItem(0)
-            withFrameNanos { }
-        }
-        runCatching { app.searchFocus.requestFocus() }
-    }
     LazyColumn(state = list, contentPadding = pagePadding(LocalBottomRoom.current)) {
-        item(key = "field") {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                GlassField(
-                    model.text,
-                    model::type,
-                    Modifier.fillMaxWidth(),
-                    placeholder = "Songs, albums, artists or playlists",
-                    icon = OctoIcons.Search,
-                    focusRequester = app.searchFocus,
-                    onEscape = { model.type("") },
-                )
+        // The field itself is in the title bar, on every page.
+        item(key = "filters") {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.L)) {
+                PageTitle("Search", detail = model.text.takeIf(String::isNotBlank)?.let { "Results for \"$it\"" })
                 GlazeSegments(SearchFilter.entries, model.filter, { it.label }, model::pick)
             }
         }
         when (val state = model.state) {
-            SearchState.Idle -> item(key = "idle") { Txt("Type at least two letters.", OctoType.bodySmall, OctoColors.TextMuted, Modifier.padding(top = 24.dp)) }
+            SearchState.Idle -> item(key = "idle") { Txt("Type at least two letters in the search field above.", OctoType.bodySmall, OctoColors.TextMuted, Modifier.padding(top = Space.Page)) }
             SearchState.Looking -> item(key = "looking") { LoadingLine("Searching") }
             is SearchState.Failed -> item(key = "failed") { FailedLine(state.message, model::again) }
             is SearchState.Done -> results(app, state)

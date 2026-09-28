@@ -2,6 +2,7 @@ package app.winters.octo.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.media.AudioManager
 import androidx.core.content.ContextCompat
 import androidx.media3.common.DeviceInfo
 import androidx.media3.common.MediaItem
@@ -11,12 +12,12 @@ import androidx.media3.session.SessionToken
 import app.winters.octo.catalog.CatalogDao
 import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.qualifiers.ApplicationContext
+import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-import javax.inject.Singleton
 
 // What the app shows about the song that is on.
 data class NowPlaying(
@@ -261,7 +262,8 @@ class PlaybackConnection @Inject constructor(
             album = meta?.albumTitle?.toString(),
             albumId = meta?.extra(EXTRA_ALBUM_ID),
             artistId = meta?.extra(EXTRA_ARTIST_ID),
-            quality = audioQuality(meta?.extra(EXTRA_MIME), player.currentTracks),
+            quality = audioQuality(meta?.extra(EXTRA_MIME), player.currentTracks)
+                ?.playingAt(if (player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) null else outputRate()),
             isPlaying = player.isPlaying,
             durationMs = player.duration.takeIf { it > 0 } ?: meta?.durationMs ?: 0,
             shuffle = player.shuffleModeEnabled,
@@ -306,4 +308,9 @@ class PlaybackConnection @Inject constructor(
             timeline.getPreviousWindowIndex(it, Player.REPEAT_MODE_OFF, shuffle)
         }.map(::entry)
     }
+
+    // The rate the phone's audio output mixes at, which Android resamples
+    // songs to unless it plays them bit for bit.
+    private fun outputRate(): Int? =
+        context.getSystemService(AudioManager::class.java)?.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull()
 }

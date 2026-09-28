@@ -40,19 +40,21 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import app.winters.octo.design.DesktopType
+import app.winters.octo.design.GlazeCapsule
+import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.OctoType
+import app.winters.octo.design.Space
+import app.winters.octo.design.Spinner
+import app.winters.octo.design.TextAction
+import app.winters.octo.design.Txt
+import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.nav.Navigator
 import app.winters.octo.desktop.nav.ScrollSpot
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.server.userMessage
-import app.winters.octo.design.GlazeCapsule
-import app.winters.octo.design.OctoColors
-import app.winters.octo.design.OctoIcons
-import app.winters.octo.design.OctoType
-import app.winters.octo.design.Spinner
-import app.winters.octo.design.TextAction
-import app.winters.octo.design.Txt
-import app.winters.octo.design.hoverLift
 import app.winters.octo.subsonic.SubsonicException
 
 // What a page's data has come to.
@@ -131,9 +133,9 @@ fun Modifier.onRightClick(action: () -> Unit): Modifier =
 
 @Composable
 fun PageTitle(text: String, modifier: Modifier = Modifier, detail: String? = null) {
-    Column(modifier.padding(bottom = 16.dp)) {
-        Txt(text, OctoType.display)
-        if (detail != null) Txt(detail, OctoType.bodySmall, OctoColors.TextMuted, Modifier.padding(top = 4.dp))
+    Column(modifier.padding(bottom = Space.Xl)) {
+        Txt(text, DesktopType.pageTitle)
+        if (detail != null) Txt(detail, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xs))
     }
 }
 

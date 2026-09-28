@@ -31,7 +31,7 @@ import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-private enum class MenuPage { Main, Playlists, Info }
+private enum class MenuPage { Main, Playlists }
 
 // The menu for songs: one, or everything picked in a table. Songs found
 // online (`outside`) are not in the library, so they have no favourite
@@ -60,10 +60,9 @@ fun ColumnScope.SongMenu(app: AppState, songs: List<Song>, close: () -> Unit, ou
                     if (all) OctoIcons.Liked else OctoIcons.Like,
                 )
             }
-            if (one != null) MenuRow("Song info", { page = MenuPage.Info }, OctoIcons.Info, more = true)
+            if (one != null) MenuRow("Song details", { app.showInfo(one); close() }, OctoIcons.Info)
         }
         MenuPage.Playlists -> PlaylistChooser(app, { songs }, close) { page = MenuPage.Main }
-        MenuPage.Info -> SongInfo(one!!) { page = MenuPage.Main }
     }
 }
 
@@ -122,41 +121,5 @@ fun ColumnScope.PlaylistChooser(app: AppState, songs: suspend () -> List<Song>, 
             close()
             app.scope.launch { app.addToPlaylist(playlist.id, runCatching { songs() }.getOrDefault(emptyList())) }
         }, OctoIcons.Playlists, detail = "${playlist.songCount}")
-    }
-}
-
-// Everything the server says about a song, in plain words.
-@Composable
-fun ColumnScope.SongInfo(song: Song, back: () -> Unit) {
-    MenuRow("Back", back, OctoIcons.Back)
-    MenuSeparator()
-    val format = listOfNotNull(
-        song.suffix?.uppercase(Locale.ROOT),
-        song.bitRate?.takeIf { it > 0 }?.let { "$it kbps" },
-        song.samplingRate?.takeIf { it > 0 }?.let { String.format(Locale.ROOT, "%.1f kHz", it / 1000.0) },
-        song.bitDepth?.takeIf { it > 0 }?.let { "$it-bit" },
-    ).joinToString(", ")
-    val facts = listOf(
-        "Title" to song.title,
-        "Artist" to (song.displayArtist ?: song.artist.orEmpty()),
-        "Album" to song.album.orEmpty(),
-        "Album artist" to song.displayAlbumArtist.orEmpty(),
-        "Year" to (song.year?.takeIf { it > 0 }?.toString().orEmpty()),
-        "Genre" to (song.genres.ifEmpty { listOfNotNull(song.genre) }.joinToString(", ")),
-        "Track" to listOfNotNull(song.discNumber?.let { "disc $it" }, song.track?.let { "track $it" }).joinToString(", "),
-        "Length" to lengthText(song.duration),
-        "Format" to format,
-        "Size" to (song.size?.takeIf { it > 0 }?.let { String.format(Locale.ROOT, "%.1f MB", it / 1_048_576.0) }.orEmpty()),
-        "Composer" to song.displayComposer.orEmpty(),
-        "Plays" to (song.playCount?.takeIf { it > 0 }?.toString().orEmpty()),
-        "Last played" to dateText(song.played),
-        "Added" to dateText(song.created),
-        "Rating" to (song.userRating?.takeIf { it > 0 }?.let { "$it of 5" }.orEmpty()),
-    ).filter { it.second.isNotBlank() }
-    facts.forEach { (label, value) ->
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp)) {
-            Txt(label, OctoType.caption, OctoColors.TextMuted, Modifier.width(96.dp))
-            Txt(value, OctoType.bodySmall, maxLines = 3, modifier = Modifier.weight(1f))
-        }
     }
 }

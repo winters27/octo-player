@@ -15,6 +15,10 @@ data class AudioQuality(
     val hiRes: Boolean,
     // Like "24-bit · 48 kHz" for lossless, or "128 kbps" for everything else.
     val specs: String?,
+    // The song's sample rate, and the rate the phone's output runs at, when
+    // known; they differ when the phone resamples.
+    val songRate: Int? = null,
+    val outputRate: Int? = null,
 ) {
     // What the badge says at a glance.
     val label: String get() = when {
@@ -23,8 +27,13 @@ data class AudioQuality(
         else -> codec
     }
 
-    // Everything, shown when the badge is tapped.
-    val full: String get() = listOfNotNull(codec, specs).joinToString(" · ")
+    // Everything, shown when the badge is tapped, with the output's rate
+    // when the phone plays the song at another.
+    val full: String get() = listOfNotNull(codec, specs, resampledTo?.let { "plays at ${kilohertz(it)} kHz" }).joinToString(" · ")
+
+    private val resampledTo: Int? get() = outputRate?.takeIf { songRate != null && it != songRate }
+
+    fun playingAt(rate: Int?): AudioQuality = copy(outputRate = rate)
 }
 
 // Uses what the decoder reports once the song is open, and the file type
@@ -55,10 +64,10 @@ internal fun audioQuality(
     val rate = sampleRate.takeIf { it > 0 }?.let { "${kilohertz(it)} kHz" }
     if (codec in Lossless) {
         val specs = listOfNotNull(bitDepth(pcmEncoding)?.let { "$it-bit" }, rate).joinToString(" · ").ifEmpty { null }
-        return AudioQuality(codec, lossless = true, hiRes = sampleRate > 48_000, specs = specs)
+        return AudioQuality(codec, lossless = true, hiRes = sampleRate > 48_000, specs = specs, songRate = sampleRate.takeIf { it > 0 })
     }
     val specs = bitrate.takeIf { it > 0 }?.let { "${it / 1000} kbps" } ?: rate
-    return AudioQuality(codec, lossless = false, hiRes = false, specs = specs)
+    return AudioQuality(codec, lossless = false, hiRes = false, specs = specs, songRate = sampleRate.takeIf { it > 0 })
 }
 
 private val Lossless = setOf("FLAC", "ALAC", "WAV")

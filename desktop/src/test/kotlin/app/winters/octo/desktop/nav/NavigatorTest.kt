@@ -178,7 +178,16 @@ class ShortcutsTest {
 
     @Test
     fun theSettingsListNamesThisSystemsKeys() {
-        assertTrue(shortcutList(mac = true).any { it.second == "Cmd+F" })
-        assertTrue(shortcutList(mac = false).any { it.second == "Ctrl+F" })
+        assertTrue(shortcutList(mac = true).any { it.second == "Cmd+F or Cmd+K" })
+        assertTrue(shortcutList(mac = false).any { it.second == "Ctrl+F or Ctrl+K" })
+    }
+
+    @Test
+    fun theFramesShortcuts() {
+        assertEquals(Shortcut.Search, on(Key.K, ctrl = true))
+        assertEquals(Shortcut.Info, on(Key.I, ctrl = true))
+        assertEquals(Shortcut.Sidebar, on(Key.B, ctrl = true))
+        assertEquals(Shortcut.MiniPlayer, on(Key.M, meta = true, mac = true))
+        assertNull("a plain letter is typing, not a shortcut", on(Key.B))
     }
 }

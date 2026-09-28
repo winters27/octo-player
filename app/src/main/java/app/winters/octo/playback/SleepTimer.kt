@@ -14,21 +14,6 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// Where the sleep timer is: off, counting down, or waiting for songs to end.
-sealed interface SleepState {
-    data object Off : SleepState
-    data class Counting(val remainingMs: Long) : SleepState
-    data object EndOfSong : SleepState
-
-    // Waiting for this many songs to end, the one playing included. Always
-    // 2 or more; the last one is EndOfSong.
-    data class Songs(val left: Int) : SleepState
-
-    // Waiting for one song further down the queue to end: `key` is its
-    // queue entry, `title` what to call it.
-    data class AfterSong(val key: String, val title: String) : SleepState
-}
-
 // What the sleep timer works on: the player, or a stand-in in tests.
 interface SleepTarget {
     // Volume on top of any ducking: 1 is full, 0 is silent.
@@ -54,23 +39,6 @@ private fun endedOnItsOwn(reason: Int, blending: Boolean): Boolean =
     reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
         reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT ||
         (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED && blending)
-
-// The last stretch of a timer, over which the music fades out.
-const val SLEEP_FADE_MS = 30_000L
-
-// How loud the music is with this long left: full until the last 30
-// seconds, then down to silence. Squared, so the fade sounds even.
-fun sleepFade(remainingMs: Long): Float {
-    val left = (remainingMs.toFloat() / SLEEP_FADE_MS).coerceIn(0f, 1f)
-    return left * left
-}
-
-// How long until the next tick: on each whole second while counting, so
-// the clock on screen never skips, and ten times a second through the fade.
-private fun untilNextTick(remainingMs: Long): Long {
-    val step = if (remainingMs > SLEEP_FADE_MS) 1_000L else 100L
-    return (remainingMs - 1) % step + 1
-}
 
 // Stops the music after a while, or at the end of the song. The service
 // attaches its player; the app starts and cancels it. The clock is passed
@@ -134,7 +102,7 @@ class SleepTimer internal constructor(
         ticker = scope.launch {
             var left = first
             while (left > 0) {
-                delay(untilNextTick(left))
+                delay(untilNextSleepTick(left))
                 left = tick()
             }
         }
