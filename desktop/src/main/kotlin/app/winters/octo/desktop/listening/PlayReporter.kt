@@ -42,6 +42,10 @@ class PlayReporter(
     private val counter = PlayCounter(::started, ::counted, clock, wallClock)
     private val sending = Mutex()
 
+    // Guards the waiting-plays file: a play finishing while an older one is
+    // being taken off must not lose either.
+    private val pendingFile = Any()
+
     // While quitting, a counted play is written at once rather than later.
     private var quitting = false
 
@@ -92,7 +96,7 @@ class PlayReporter(
         val send = reports() && !isOpenedFile(play.song.id)
         val write = {
             PlayLog(File(folder, "plays.jsonl")).add(LoggedPlay(play.startedAt, play.heardMs, play.song.logged()))
-            if (send) PendingPlays(File(folder, "pending.txt")).add(PendingPlay(play.song.id, play.startedAt))
+            if (send) synchronized(pendingFile) { PendingPlays(File(folder, "pending.txt")).add(PendingPlay(play.song.id, play.startedAt)) }
         }
         if (quitting) {
             runCatching(write)
@@ -113,7 +117,7 @@ class PlayReporter(
         val folder = folder() ?: return@launch
         val pending = PendingPlays(File(folder, "pending.txt"))
         sending.withLock {
-            for (play in pending.all()) {
+            for (play in synchronized(pendingFile) { pending.all() }) {
                 val failure = try {
                     client.scrobble(play.serverId, play.startedAt, submission = true)
                     null
@@ -121,7 +125,7 @@ class PlayReporter(
                     e
                 }
                 if (failure != null && worthRetrying(failure)) break
-                pending.remove(play)
+                synchronized(pendingFile) { pending.remove(play) }
             }
         }
     }
