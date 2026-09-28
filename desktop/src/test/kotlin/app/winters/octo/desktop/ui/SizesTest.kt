@@ -15,6 +15,9 @@ class SizesTest {
         "ui/NowPlayingBar.kt",
         "ui/InfoPanel.kt",
         "ui/FrameParts.kt",
+        "pages/HomePage.kt",
+        "pages/ShelfPage.kt",
+        "pages/HistoryPage.kt",
     )
 
     private val root = File("src/main/kotlin/app/winters/octo/desktop")

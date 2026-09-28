@@ -318,28 +318,6 @@ fun FavouritesPage(app: AppState, visit: Visit) {
     }
 }
 
-// What was played, newest first, from the play dates the server keeps.
-@Composable
-fun HistoryPage(app: AppState, visit: Visit) {
-    val list = rememberListState(app.navigator, visit)
-    WithLibrary(app) { index ->
-        var order by remember { mutableStateOf(SortOrder(SongSort.RecentlyPlayed, descending = true)) }
-        val songs = rememberSorted(index.history, order) ?: return@WithLibrary LoadingLine()
-        SongTable(
-            app,
-            songs,
-            listOf(SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Plays, SongColumn.Played, SongColumn.Length),
-            list,
-            id = "history",
-            order = order,
-            onSort = { order = it },
-            empty = { NothingHere("No history yet", "Your server hasn't recorded any plays, or doesn't share them.") },
-        ) {
-            item(key = "title") { PageTitle("Recently played") }
-        }
-    }
-}
-
 // A heading across the whole width of a grid.
 fun LazyGridScope.header(content: @Composable () -> Unit) {
     item(span = { GridItemSpan(maxLineSpan) }) { content() }

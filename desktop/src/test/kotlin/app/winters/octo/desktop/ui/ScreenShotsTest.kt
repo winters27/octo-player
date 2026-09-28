@@ -12,7 +12,11 @@ import app.winters.octo.desktop.audio.writeSine
 import app.winters.octo.desktop.lyrics.openLyricsMenu
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.SidePanel
+import app.winters.octo.desktop.home.AlbumShelf
+import app.winters.octo.desktop.listening.LoggedPlay
+import app.winters.octo.desktop.listening.logged
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.nav.ScrollSpot
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.CertificateQuestion
@@ -35,6 +39,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.time.Duration
+import java.time.Instant
 import javax.swing.SwingUtilities
 
 // Draws the whole window off screen against a pretend server and saves
@@ -51,14 +57,19 @@ class ScreenShotsTest {
         FakeServer().use { server ->
             val songs = (1..14).joinToString(",") { i ->
                 songJson("s$i", listOf("Karma Police", "Airbag", "Lucky", "No Surprises", "Let Down", "Paranoid Android", "Subterranean Homesick Alien", "Exit Music", "Electioneering", "Climbing Up the Walls", "Fitter Happier", "The Tourist", "Everything In Its Right Place", "Idioteque")[i - 1], artist = if (i % 3 == 0) "Portishead" else "Radiohead", album = if (i < 8) "OK Computer" else "Kid A", albumId = if (i < 8) "a1" else "a2", duration = 180 + i * 7).dropLast(1) +
-                    ""","suffix":"flac","contentType":"audio/flac","bitDepth":24,"samplingRate":96000,"size":${48_000_000 + i * 1_000_000},"playCount":${i * 3},"genre":"Alternative","year":1997,"track":$i,"discNumber":1,"bpm":${70 + i},"created":"2026-08-0${1 + i % 9}T10:00:00Z","played":"2026-09-27T21:${10 + i}:00Z","replayGain":{"trackGain":-7.4,"trackPeak":0.998,"albumGain":-8.1,"albumPeak":1.0}}"""
+                    ""","suffix":"flac","contentType":"audio/flac","bitDepth":24,"samplingRate":96000,"size":${48_000_000 + i * 1_000_000},"playCount":${if (i <= 10) i * 3 else 0},"genre":"Alternative","year":1997,"track":$i,"discNumber":1,"bpm":${70 + i},"created":"2026-08-0${1 + i % 9}T10:00:00Z"${if (i <= 10) ",\"played\":\"${Instant.now().minus(Duration.ofHours(i * 7L))}\"" else ""},"replayGain":{"trackGain":-7.4,"trackPeak":0.998,"albumGain":-8.1,"albumPeak":1.0}}"""
             }
-            val albums = (1..12).joinToString(",") { """{"id":"a$it","name":"Album number $it","artist":"Radiohead","artistId":"r1","year":${1990 + it},"songCount":10}""" }
+            val albums = (1..12).joinToString(",") { """{"id":"a$it","name":"Album number $it","artist":"Radiohead","artistId":"r1","year":${1990 + it},"songCount":10,"coverArt":"a$it","created":"2026-0${1 + it % 9}-1${it % 10}T10:00:00Z"}""" }
+            // Songs of an album last played a year ago, for Home's "Not played in 6 months".
+            val older = (1..3).joinToString(",") { i ->
+                songJson("o$i", "Old song $i", artist = "Radiohead", album = "Album number 3", albumId = "a3", duration = 200).dropLast(1) + ""","playCount":6,"played":"2025-09-0${i}T20:00:00Z"}"""
+            }
             server.answer("ping", type = "octo")
             server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[{"name":"songLyrics","versions":[1]},{"name":"octoAcquisitions","versions":[1]}]""", type = "octo")
             server.answer("getAlbumList2", """"albumList2":{"album":[$albums]}""")
             server.answer("getArtists", """"artists":{"index":[{"name":"R","artist":[{"id":"r1","name":"Radiohead","albumCount":9},{"id":"r2","name":"Portishead","albumCount":3}]}]}""")
-            server.answer("search3", """"searchResult3":{"song":[$songs],"album":[{"id":"a1","name":"OK Computer","artist":"Radiohead"}],"artist":[{"id":"r1","name":"Radiohead"}]}""")
+            server.answer("search3", """"searchResult3":{"song":[$songs,$older],"album":[{"id":"a1","name":"OK Computer","artist":"Radiohead"}],"artist":[{"id":"r1","name":"Radiohead"}]}""")
+            server.answer("getStarred2", """"starred2":{"album":[{"id":"a5","name":"Album number 5","artist":"Radiohead","starred":"2026-09-01T00:00:00Z"},{"id":"a8","name":"Album number 8","artist":"Radiohead","starred":"2026-09-10T00:00:00Z"}]}""")
             server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"p1","name":"Late night","songCount":12},{"id":"p2","name":"Running","songCount":40}]}""")
             server.answer("getAlbum", """"album":{"id":"a1","name":"OK Computer","artist":"Radiohead","artistId":"r1","year":1997,"songCount":7,"song":[$songs]}""")
             server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly"},{"id":"st2","name":"Rock mix"}]}""")
@@ -80,12 +91,13 @@ class ScreenShotsTest {
             lateinit var app: AppState
             val player = EnginePlayer(NativeAudioEngine.open(silent = true), LocalOrServer(ServerSongs { app.connection?.client }))
             SwingUtilities.invokeAndWait {
-                app = AppState(settings, accounts, http, CoroutineScope(SupervisorJob() + Dispatchers.Main), DesktopOs.Windows, player, OnlineLyrics(http, server.address.toHttpUrl()))
+                app = AppState(settings, accounts, http, CoroutineScope(SupervisorJob() + Dispatchers.Main), DesktopOs.Windows, player, OnlineLyrics(http, server.address.toHttpUrl()), listeningRoot = File(folder.root, "listening"))
             }
             val scene = ImageComposeScene(1440, 900, Density(1f)) {
                 CompositionLocalProvider(LocalTyping provides TypingState()) { Shell(app, null) {} }
             }
-            fun shot(name: String, settleMs: Long = 1_500) {
+            // Draws for a while and saves the picture; with no name, only draws.
+            fun shot(name: String?, settleMs: Long = 1_500) {
                 val begin = System.currentTimeMillis()
                 val end = begin + settleMs
                 // The scene's clock follows real time, so animations finish
@@ -97,7 +109,7 @@ class ScreenShotsTest {
                     t = (System.currentTimeMillis() - begin) * 1_000_000
                 }
                 val image = scene.render(t)
-                File(out, "$name.png").writeBytes(image.encodeToData(EncodedImageFormat.PNG)!!.bytes)
+                if (name != null) File(out, "$name.png").writeBytes(image.encodeToData(EncodedImageFormat.PNG)!!.bytes)
             }
             // The sign-in, filled in; then asking about a certificate; then
             // with Advanced open.
@@ -125,6 +137,27 @@ class ScreenShotsTest {
             val done = runBlocking { accounts.signIn(server.address, "winters", "pw") } as SignInOutcome.Done
             SwingUtilities.invokeAndWait { app.signedIn(done.connection) }
             shot("home", 3_000)
+            // Further down Home: playlists and the rediscovery shelves, by
+            // leaving it scrolled and coming back.
+            val home = app.navigator.current
+            SwingUtilities.invokeAndWait { app.navigator.go(Page.Songs) }
+            shot(null, 300)
+            SwingUtilities.invokeAndWait {
+                app.navigator.keepScroll(home, ScrollSpot(7))
+                app.navigator.back()
+            }
+            shot("home-more")
+            SwingUtilities.invokeAndWait { app.navigator.go(Page.Shelf(AlbumShelf.NeverPlayed)) }
+            shot("shelf")
+            // Recently played: two plays logged here, the rest from the server.
+            SwingUtilities.invokeAndWait {
+                val log = app.plays.log()!!
+                val library = app.library!!.index!!.songs
+                log.add(LoggedPlay(System.currentTimeMillis() - 20 * 60_000, 180_000, library[0].logged()))
+                log.add(LoggedPlay(System.currentTimeMillis() - 5 * 60_000, 180_000, library[3].logged()))
+                app.navigator.go(Page.History)
+            }
+            shot("history")
             SwingUtilities.invokeAndWait {
                 val list = app.library?.index?.songs.orEmpty()
                 app.play(list, 0)
