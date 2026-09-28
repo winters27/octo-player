@@ -64,6 +64,9 @@ data class AlbumEntity(
     val durationMs: Long,
     val addedAt: Long,
     val artwork: String?,
+    // What kind of release it is, one word a line ("Album", "EP", "Live"),
+    // as an OpenSubsonic server tags it; empty when nothing says.
+    @ColumnInfo(defaultValue = "") val releaseTypes: String = "",
 )
 
 @Entity(tableName = "artist", indices = [Index("sourceId"), Index("sortKey"), Index("searchKey")])
