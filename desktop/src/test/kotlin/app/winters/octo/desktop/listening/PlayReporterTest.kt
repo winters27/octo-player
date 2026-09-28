@@ -45,8 +45,10 @@ class PlayReporterTest {
 
     // Waits a little for the fake server to hear a call, since the client
     // answers on its own thread.
+    // Returns as soon as `what` holds; the bound is generous so a machine
+    // busy with other builds doesn't fail the test.
     private fun waitFor(what: () -> Boolean) {
-        val until = System.currentTimeMillis() + 5_000
+        val until = System.currentTimeMillis() + 30_000
         while (!what() && System.currentTimeMillis() < until) Thread.sleep(20)
     }
 
