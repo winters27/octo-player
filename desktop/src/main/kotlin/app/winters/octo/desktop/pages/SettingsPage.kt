@@ -95,6 +95,20 @@ fun SettingsPage(app: AppState, visit: Visit) {
                 }
             }
         }
+        item(key = "listening") {
+            SettingsCard("Listening") {
+                SwitchLine(
+                    "Tell the server what you play",
+                    "Plays count on your server, so play counts and recently played stay right in every app that uses it. Leave on unless another app already reports this computer's plays.",
+                    settings.listening.reportPlays,
+                ) { on -> app.settings.update { it.copy(listening = it.listening.copy(reportPlays = on)) } }
+                SwitchLine(
+                    "Carry the queue between devices",
+                    "Keeps what you're listening to on your server, so Octo on your phone can pick it up, and Home here offers the phone's.",
+                    settings.listening.syncQueue,
+                ) { on -> app.settings.update { it.copy(listening = it.listening.copy(syncQueue = on)) } }
+            }
+        }
         item(key = "playback") {
             SettingsCard("Playback") {
                 Txt("The equalizer, loudness, crossfade and speed are on the Sound page.", OctoType.bodySmall, OctoColors.TextSecondary, maxLines = 2)

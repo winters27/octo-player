@@ -40,10 +40,23 @@ data class AppSettings(
     val lyrics: LyricsPrefs = LyricsPrefs(),
     // The tray, notifications and the mini player.
     val system: SystemPrefs = SystemPrefs(),
+    // Telling the server what was played, and carrying the queue between devices.
+    val listening: ListeningPrefs = ListeningPrefs(),
     // Certificates the listener chose to trust although the system does
     // not, as SHA-256 fingerprints by host. Each counts only for its host.
     // Not secret: a fingerprint only names a certificate.
     val trustedCertificates: Map<String, String> = emptyMap(),
+)
+
+// What the server hears about listening here. Both are on unless switched
+// off, as on the phone.
+@Serializable
+data class ListeningPrefs(
+    // Plays count on the server, for play counts and recently played on
+    // every app that uses it.
+    val reportPlays: Boolean = true,
+    // The queue is kept on the server, so another device can pick it up.
+    val syncQueue: Boolean = true,
 )
 
 // Lyrics settings, by song id (the server's) and by output device id.

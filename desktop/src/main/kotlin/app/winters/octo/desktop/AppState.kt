@@ -9,6 +9,8 @@ import androidx.compose.ui.focus.FocusRequester
 import app.winters.octo.desktop.audio.SoundTarget
 import app.winters.octo.desktop.home.HomeStore
 import app.winters.octo.desktop.library.LibraryStore
+import app.winters.octo.desktop.listening.PlayReporter
+import app.winters.octo.desktop.listening.listeningFolder
 import app.winters.octo.desktop.lyrics.LyricsModel
 import app.winters.octo.desktop.lyrics.LyricsSources
 import app.winters.octo.desktop.sound.SoundController
@@ -21,6 +23,8 @@ import app.winters.octo.desktop.player.DEFAULT_OUTPUT
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.desktop.player.wash.WashCovers
+import app.winters.octo.desktop.queue.QueueKeeper
+import app.winters.octo.desktop.queue.ServerQueueSync
 import app.winters.octo.desktop.search.Fetches
 import app.winters.octo.desktop.search.SearchModel
 import app.winters.octo.desktop.server.Accounts
@@ -39,8 +43,11 @@ import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import java.io.File
 
 // The panel that can open on the right of the main area.
 enum class SidePanel(val key: String) {
@@ -68,6 +75,9 @@ class AppState(
     // The saved server, read from the password store before the window
     // opens, since the store can keep the caller waiting.
     restored: Connection? = accounts.restore(),
+    // Where each account's plays and queue are kept, or null to keep none
+    // (the screenshot tests).
+    private val listeningRoot: File? = null,
 ) {
     // The Sound page's settings, kept on the engine; none for the silent player.
     val sound: SoundController? = (player as? SoundTarget)?.let { SoundController(it, settings, scope) }
@@ -127,10 +137,48 @@ class AppState(
     // Hearts set or cleared here, shown before the server's lists catch up.
     private val starOverrides = mutableStateMapOf<String, Boolean>()
 
+    // Songs that could not play this run, by id, with why, for their rows.
+    val failedSongs = mutableStateMapOf<String, String>()
+
+    // The engine's own words for the notice's last failure, shown on asking.
+    var noticeDetail by mutableStateOf<String?>(null)
+
+    // Plays reach the server and this computer's play log; the queue is
+    // kept on disk and on the server.
+    val plays = PlayReporter(player, settings, { connection }, listeningRoot, scope)
+    val queueKeeper = QueueKeeper(player, scope)
+    val queueSync = ServerQueueSync(player, settings, { connection }, scope)
+
     val mac: Boolean get() = os == DesktopOs.Mac
 
     init {
+        if (listeningRoot != null) {
+            plays.start()
+            queueKeeper.start()
+        }
+        queueSync.start()
+        watchProblems()
         restored?.let(::signedIn)
+    }
+
+    // A song that could not play says so in the one notice line, and its
+    // rows are marked, rather than it being skipped in silence.
+    private fun watchProblems() {
+        scope.launch {
+            player.state.map { it.problem }.distinctUntilChanged().collect { problem ->
+                if (problem == null) return@collect
+                val song = problem.song
+                if (song != null) failedSongs[song.id] = problem.words
+                notice = if (song != null) "Skipped ${song.title}. ${problem.words}" else problem.words
+                noticeDetail = problem.detail
+            }
+        }
+    }
+
+    // Puts plays and the queue away before Octo quits.
+    fun beforeQuit() {
+        plays.flush()
+        if (listeningRoot != null) queueKeeper.saveNow()
     }
 
     fun signedIn(connection: Connection, note: String? = null) {
@@ -141,14 +189,37 @@ class AppState(
         search = SearchModel(connection, { store.index }, { playlists }, scope)
         home = HomeStore(connection, scope)
         notice = note
+        noticeDetail = null
         starOverrides.clear()
+        failedSongs.clear()
+        startListening(connection)
         store.load()
         refreshPlaylists()
         // Back and forward start afresh for this account.
         navigator.startOver()
     }
 
+    // This account's queue comes back, its waiting plays are sent, and a
+    // queue saved on another device may be offered.
+    private fun startListening(connection: Connection) {
+        val folder = listeningRoot?.let { listeningFolder(it, connection.client.username, connection.server.address) }
+        queueKeeper.folder = folder
+        queueSync.folder = folder
+        queueSync.reset()
+        scope.launch {
+            if (folder != null) queueKeeper.restore()?.let(queueSync::restored)
+            queueSync.check(force = true)
+        }
+        plays.signedIn()
+    }
+
     fun signOut() {
+        // What was playing counts, and the queue is kept for next time.
+        plays.flush()
+        if (listeningRoot != null) queueKeeper.saveNow()
+        queueKeeper.folder = null
+        queueSync.folder = null
+        queueSync.reset()
         player.clear()
         // The server is forgotten at once; the password store is left to
         // finish off the window's thread.

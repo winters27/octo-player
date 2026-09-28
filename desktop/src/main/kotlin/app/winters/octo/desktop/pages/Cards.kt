@@ -74,7 +74,7 @@ internal fun SettingsCard(title: String, trailing: @Composable () -> Unit = {}, 
 // The card's surface: a clearer glass than the page's other panels, with
 // a contour, a soft shadow, light along the top, and a rim with a fifth of
 // the key colour in it.
-private fun Modifier.settingsSurface(shape: Shape, key: Color): Modifier = this
+internal fun Modifier.settingsSurface(shape: Shape, key: Color): Modifier = this
     .dropShadow(shape, Shadow(radius = 0.dp, spread = 0.5.dp, color = Color.Black.copy(alpha = 0.40f)))
     .dropShadow(shape, Shadow(radius = 6.dp, color = Color.Black.copy(alpha = 0.20f), offset = DpOffset(0.dp, 6.dp)))
     .dropShadow(shape, Shadow(radius = 20.dp, color = Color.Black.copy(alpha = 0.10f)))
