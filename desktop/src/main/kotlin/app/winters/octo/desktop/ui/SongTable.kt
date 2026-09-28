@@ -139,7 +139,7 @@ import kotlinx.coroutines.launch
 
 // How long two clicks may be apart to count as a double click, and how
 // long typed letters keep adding to what is being looked for.
-private const val DOUBLE_CLICK_MS = 400L
+internal const val DOUBLE_CLICK_MS = 400L
 private const val TYPE_AHEAD_MS = 1_000L
 
 private val dates = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withZone(ZoneId.systemDefault())
