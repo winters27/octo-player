@@ -176,6 +176,10 @@ class ScreenShotsTest {
             }
             shot("menu")
             SwingUtilities.invokeAndWait {
+                app.popups.showAt(androidx.compose.ui.unit.IntOffset(700, 300)) { close -> ArtistMenu(app, "r1", "Radiohead", null, close) }
+            }
+            shot("menu-artist")
+            SwingUtilities.invokeAndWait {
                 app.popups.close()
                 app.navigator.go(Page.Settings)
             }

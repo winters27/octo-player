@@ -228,7 +228,8 @@ private val MenuRowShape = RoundedCornerShape(8.dp)
 // One line of a menu: an icon, the words, and a chevron when it opens more.
 // Under the pointer it sits in a quiet accent-tinted pill, at once. A
 // `destructive` one (deleting, removing) says so in soft red words; its
-// icon stays white like every other.
+// icon stays white like every other. `leading` draws something wider than
+// an icon in its place (a row of stars); `checked` ticks the choice in use.
 @Composable
 fun MenuRow(
     text: String,
@@ -239,6 +240,8 @@ fun MenuRow(
     detail: String? = null,
     destructive: Boolean = false,
     interactionSource: MutableInteractionSource? = null,
+    leading: (@Composable () -> Unit)? = null,
+    checked: Boolean = false,
 ) {
     val interaction = interactionSource ?: remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
@@ -262,7 +265,7 @@ fun MenuRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (icon != null) Glyph(icon, size = 16.dp, tint = if (enabled) Color.White else OctoColors.TextMuted)
+        if (leading != null) leading() else if (icon != null) Glyph(icon, size = 16.dp, tint = if (enabled) Color.White else OctoColors.TextMuted)
         Txt(
             text,
             OctoType.bodySmall,
@@ -274,6 +277,7 @@ fun MenuRow(
             Modifier.weight(1f),
         )
         if (detail != null) Txt(detail, OctoType.caption, OctoColors.TextMuted)
+        if (checked) Glyph(OctoIcons.Check, size = 16.dp, tint = OctoColors.TextPrimary)
         if (more) Glyph(OctoIcons.Chevron, size = 16.dp, tint = OctoColors.TextMuted)
     }
 }
