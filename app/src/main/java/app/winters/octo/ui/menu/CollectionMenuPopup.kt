@@ -189,7 +189,7 @@ private fun CollectionActionsPage(
                 CollectionAction.Delete -> CollectionPage.Delete
                 else -> null
             }
-            GlassMenuAction(icon, label, opensPage = page != null, onClick = {
+            GlassMenuAction(icon, label, opensPage = page != null, destructive = action == CollectionAction.Delete, onClick = {
                 if (page != null) {
                     state.pages.open(page)
                     return@GlassMenuAction

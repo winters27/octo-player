@@ -220,7 +220,7 @@ private fun SongActionsPage(
                     state.close()
                     phoneFiles.setSound(trackId)
                 })
-                SongAction.DeleteFromPhone -> GlassMenuAction(OctoIcons.Delete, "Delete from phone", onClick = {
+                SongAction.DeleteFromPhone -> GlassMenuAction(OctoIcons.Delete, "Delete from phone", destructive = true, onClick = {
                     state.close()
                     phoneFiles.delete(listOf(trackId))
                 })

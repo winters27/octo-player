@@ -1,9 +1,7 @@
 package app.winters.octo.design
 
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -35,11 +33,10 @@ import androidx.compose.ui.unit.dp
 
 private val InputShape = RoundedCornerShape(12.dp)
 
-// The house spring, overshooting a little before it settles.
-internal val SpringEasing = CubicBezierEasing(0.175f, 0.885f, 0.32f, 1.25f)
-
 // A text field sunk into the surface: dark inner shadow from the top left,
-// a faint highlight from the bottom right, both deeper while typing.
+// a faint highlight from the bottom right, both deeper while typing. Its
+// accent fill strengthens from a tenth to 15% while typing, and a thin
+// accent ring fades in round it.
 @Composable
 fun GlassInput(
     value: String,
@@ -56,7 +53,7 @@ fun GlassInput(
     val focused by interaction.collectIsFocusedAsState()
     val depth by animateFloatAsState(
         targetValue = if (focused) 1f else 0f,
-        animationSpec = tween(300, easing = SpringEasing),
+        animationSpec = octoTween(motionScale(), OctoDuration.Card, OctoEasing.Overshoot),
         label = "input depth",
     )
 
@@ -78,8 +75,9 @@ fun GlassInput(
                 Modifier
                     .fillMaxWidth()
                     .height(48.dp)
+                    .focusRing(InputShape, { depth.coerceIn(0f, 1f) }, width = 1.5.dp, color = OctoColors.Accent.copy(alpha = 0.60f))
                     .clip(InputShape)
-                    .background(OctoColors.Accent.copy(alpha = 0.15f))
+                    .drawBehind { drawRect(OctoColors.Accent.copy(alpha = 0.10f + 0.05f * depth.coerceIn(0f, 1f))) }
                     // The stylesheet uses a negative spread here, which Android
                     // ignores; a slightly smaller blur reaches the same depth.
                     .innerShadow(InputShape) {

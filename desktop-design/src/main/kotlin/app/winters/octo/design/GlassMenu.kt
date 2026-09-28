@@ -1,12 +1,13 @@
 package app.winters.octo.design
 
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +47,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.Role
@@ -133,7 +136,7 @@ class PopupHost {
 
 val LocalPopups = staticCompositionLocalOf { PopupHost() }
 
-private const val POPUP_MS = 140
+private const val POPUP_MS = OctoDuration.Hover
 
 // The layer the pop-ups draw in. It covers the window while one is open,
 // so a click anywhere off the card closes it, and Escape does too. The card
@@ -141,24 +144,29 @@ private const val POPUP_MS = 140
 @Composable
 fun PopupLayer(host: PopupHost, backdrop: HazeState) {
     val request = host.request ?: return
+    val motion = motionScale()
     val grow = remember(request) { Animatable(0f) }
     val focus = remember(request) { FocusRequester() }
     LaunchedEffect(request) {
         runCatching { focus.requestFocus() }
-        grow.animateTo(1f, tween(POPUP_MS, easing = FastOutSlowInEasing))
+        grow.animateTo(1f, octoTween(motion, POPUP_MS))
     }
     var origin by remember(request) { mutableStateOf(TransformOrigin(0f, 0f)) }
     Layout(
         content = {
+            // The menu plate's halo and inner hairline keep its words
+            // legible over a busy page, on the same floating glass.
             FloatingGlaze(
                 backdrop = backdrop,
                 shape = MenuShape,
                 film = MenuFilm,
                 frost = MenuFrost,
+                halo = true,
                 modifier = Modifier
                     .graphicsLayer {
                         val shown = grow.value
-                        val scale = 0.94f + 0.06f * shown
+                        // With motion reduced it only fades.
+                        val scale = motion.scale(0.94f + 0.06f * shown)
                         scaleX = scale
                         scaleY = scale
                         alpha = shown
@@ -214,7 +222,13 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
     }
 }
 
+// The corners of a menu row: the card's, less its 6 dp gutter.
+private val MenuRowShape = RoundedCornerShape(8.dp)
+
 // One line of a menu: an icon, the words, and a chevron when it opens more.
+// Under the pointer it sits in a quiet accent-tinted pill, at once. A
+// `destructive` one (deleting, removing) says so in soft red words; its
+// icon stays white like every other.
 @Composable
 fun MenuRow(
     text: String,
@@ -223,26 +237,42 @@ fun MenuRow(
     enabled: Boolean = true,
     more: Boolean = false,
     detail: String? = null,
+    destructive: Boolean = false,
+    interactionSource: MutableInteractionSource? = null,
 ) {
+    val interaction = interactionSource ?: remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val pressed by interaction.collectIsPressedAsState()
     Row(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 6.dp)
-            .hoverLift(RoundedCornerShape(9.dp), clickable = enabled)
+            .menuRowPress(MenuRowShape) { if ((hovered || pressed) && enabled) 1f else 0f }
+            .hoverable(interaction, enabled = enabled)
+            .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interaction,
                 indication = null,
                 enabled = enabled,
                 role = Role.Button,
                 onClick = onClick,
             )
-            .height(36.dp)
+            .height(MenuRowHeight.Pointer)
             .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (icon != null) Glyph(icon, size = 18.dp, tint = if (enabled) Color.White else OctoColors.TextMuted)
-        Txt(text, OctoType.bodySmall, if (enabled) OctoColors.TextPrimary else OctoColors.TextMuted, Modifier.weight(1f))
+        if (icon != null) Glyph(icon, size = 16.dp, tint = if (enabled) Color.White else OctoColors.TextMuted)
+        Txt(
+            text,
+            OctoType.bodySmall,
+            when {
+                !enabled -> OctoColors.TextMuted
+                destructive -> OctoColors.Destructive
+                else -> OctoColors.TextPrimary
+            },
+            Modifier.weight(1f),
+        )
         if (detail != null) Txt(detail, OctoType.caption, OctoColors.TextMuted)
         if (more) Glyph(OctoIcons.Chevron, size = 16.dp, tint = OctoColors.TextMuted)
     }
