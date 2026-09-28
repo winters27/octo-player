@@ -66,7 +66,7 @@ class EngineSyncTest {
         p.play(songs, 0, shuffle = true)
         engine.calls.clear()
         p.playNext(extra)
-        assertEquals(listOf("replace 6"), engine.calls)
+        assertEquals(listOf("queue 7 at 0"), engine.calls)
         assertEquals(p.playOrder(), p.engineSongs(engine))
         p.addToQueue(listOf(Song("z", "Z", duration = 60)))
         assertEquals(p.playOrder(), p.engineSongs(engine))
@@ -74,6 +74,31 @@ class EngineSyncTest {
         assertEquals(p.playOrder(), p.engineSongs(engine))
         p.remove(p.state.value.upcoming[1].key)
         assertEquals(p.playOrder(), p.engineSongs(engine))
+    }
+
+    @Test
+    fun shuffleOnAndOffGivesTheEngineTheWholeNewOrder() {
+        val (p, engine) = setUp()
+        p.play(songs, 2)
+        p.setShuffle(true)
+        // Every song once, from the one playing: nothing left over from
+        // the order before, for repeat all to go round to.
+        assertEquals(p.playOrder(), p.engineSongs(engine))
+        assertEquals(0, engine.index)
+        p.setShuffle(false)
+        assertEquals(listOf("s1", "s2", "s3", "s4", "s5"), p.engineSongs(engine))
+        assertEquals("s3", p.engineSongs(engine)[engine.index])
+    }
+
+    @Test
+    fun aQueueChangeAsTheEngineMovesOnKeepsEverySongOnce() {
+        val (p, engine) = setUp()
+        p.play(songs)
+        // The engine has moved on to s2; the news of it is on the way.
+        engine.index = 1
+        p.addToQueue(extra)
+        assertEquals(listOf("s1", "s2", "s3", "s4", "s5", "x", "y"), p.engineSongs(engine))
+        assertEquals("s2", p.engineSongs(engine)[engine.index])
     }
 
     @Test
@@ -249,6 +274,22 @@ class EngineSyncTest {
         engine.emit(EngineEvent.Position(itemId(p.key("s1")), 50.0))
         engine.emit(EngineEvent.Position(itemId(p.key("s2")), 10.0))
         assertEquals("s2", p.state.value.current?.song?.id)
+    }
+
+    @Test
+    fun aJumpThatLandsElsewhereIsFollowedOnceTheWaitIsOver() {
+        val (p, engine) = setUp()
+        p.play(songs)
+        p.skipTo(p.key("s4"))
+        // The engine is heard on s2, and never on s4.
+        engine.emit(EngineEvent.Position(itemId(p.key("s2")), 10.0))
+        assertEquals("s4", p.state.value.current?.song?.id)
+        now += 3_100
+        engine.emit(EngineEvent.Position(itemId(p.key("s2")), 3_000.0))
+        assertEquals("s2", p.state.value.current?.song?.id)
+        // Nothing is awaited now, so the next song is followed at once.
+        engine.emit(EngineEvent.TrackStarted(itemId(p.key("s3")), 2u, null))
+        assertEquals("s3", p.state.value.current?.song?.id)
     }
 
     @Test

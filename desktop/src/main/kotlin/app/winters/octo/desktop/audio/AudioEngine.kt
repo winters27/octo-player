@@ -24,8 +24,10 @@ interface AudioEngine : AutoCloseable {
 
     fun load(items: List<QueueItem>, startIndex: Int, startMs: Long, play: Boolean)
 
-    // Replaces everything after the song the engine is playing.
-    fun replaceUpcoming(items: List<QueueItem>)
+    // Replaces the whole queue around the song the engine is playing, which
+    // carries on. The engine finds that song in `items` by its id, and uses
+    // `current` only when it is not there.
+    fun replaceQueue(items: List<QueueItem>, current: Int)
 
     fun skipTo(index: Int)
 
@@ -100,7 +102,7 @@ class NativeAudioEngine(private val engine: Engine) : AudioEngine {
 
     override fun load(items: List<QueueItem>, startIndex: Int, startMs: Long, play: Boolean) = ifOpen(Unit) { engine.load(items, startIndex.coerceAtLeast(0).toUInt(), startMs.coerceAtLeast(0).toULong(), play) }
 
-    override fun replaceUpcoming(items: List<QueueItem>) = ifOpen(Unit) { engine.replaceUpcoming(items) }
+    override fun replaceQueue(items: List<QueueItem>, current: Int) = ifOpen(Unit) { engine.replaceQueue(items, current.coerceAtLeast(0).toUInt()) }
 
     override fun skipTo(index: Int) = ifOpen(Unit) { engine.skipTo(index.coerceAtLeast(0).toUInt()) }
 

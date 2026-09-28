@@ -43,9 +43,12 @@ class FakeEngine : AudioEngine {
         calls += "load ${items.size} at $startIndex from $startMs ${if (play) "playing" else "paused"}"
     }
 
-    override fun replaceUpcoming(items: List<QueueItem>) {
-        queue = queue.take(index + 1) + items
-        calls += "replace ${items.size}"
+    // Like the engine, finds the song it is on in the new list by its id.
+    override fun replaceQueue(items: List<QueueItem>, current: Int) {
+        val on = queue.getOrNull(index)?.id
+        queue = items
+        index = items.indexOfFirst { it.id == on }.takeIf { it >= 0 } ?: current
+        calls += "queue ${items.size} at $current"
     }
 
     override fun skipTo(index: Int) {
