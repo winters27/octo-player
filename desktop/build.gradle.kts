@@ -11,13 +11,58 @@ plugins {
 
 kotlin { jvmToolchain(17) }
 
-// The phone app's icon, for the window and the taskbar.
+// The phone app's icon, for the window and the taskbar, and the rounded one
+// made from it for the tray.
 val shareIcon by tasks.registering(Sync::class) {
     from(rootProject.file("app/src/main/ic_launcher-playstore.png")) { rename { "octo-icon.png" } }
+    from(file("icons/octo.png")) { rename { "octo-tray.png" } }
     into(layout.buildDirectory.dir("generated/appIcon"))
 }
 
-sourceSets.main { resources.srcDir(shareIcon) }
+// The system library in system-shim/ (media controls and sleep on Windows
+// and macOS), built with cargo for this machine and put where JNA looks for
+// it on the class path. Linux needs none: it talks D-Bus from the JVM.
+// Building without Rust installed: -Pocto.noSystemShim=true leaves it out,
+// and the app then runs without media controls.
+val hostName: String = System.getProperty("os.name").lowercase()
+val hostArch: String = System.getProperty("os.arch").lowercase().let { if (it == "amd64" || it == "x86_64") "x86-64" else if (it == "arm64") "aarch64" else it }
+val shimFolder = when {
+    hostName.startsWith("windows") -> "win32-$hostArch"
+    hostName.startsWith("mac") -> "darwin-$hostArch"
+    else -> null
+}
+val shimFile = if (hostName.startsWith("windows")) "octo_system.dll" else "libocto_system.dylib"
+val buildsShim = shimFolder != null && providers.gradleProperty("octo.noSystemShim").orNull != "true"
+val shimTarget = layout.buildDirectory.dir("system-shim")
+
+val buildSystemShim by tasks.registering(Exec::class) {
+    enabled = buildsShim
+    val crate = file("system-shim")
+    workingDir = crate
+    inputs.dir(crate.resolve("src"))
+    inputs.files(crate.resolve("Cargo.toml"), crate.resolve("Cargo.lock"))
+    outputs.file(shimTarget.map { it.file("release/$shimFile") })
+    commandLine("cargo", "build", "--release", "--locked", "--target-dir", shimTarget.get().asFile.absolutePath)
+}
+
+val shareSystemShim by tasks.registering(Sync::class) {
+    if (buildsShim) {
+        dependsOn(buildSystemShim)
+        from(shimTarget.map { it.file("release/$shimFile") }) { into(shimFolder!!) }
+    }
+    into(layout.buildDirectory.dir("generated/systemShim"))
+}
+
+sourceSets.main { resources.srcDirs(shareIcon, shareSystemShim) }
+
+// Writes the icon files for the window, tray and installers (icons/) from
+// the phone app's store icon. Run by hand when the icon changes; the files
+// are kept in the repository.
+val makeIcons by tasks.registering(JavaExec::class) {
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "app.winters.octo.desktop.system.IconFilesKt"
+    args(rootProject.file("app/src/main/ic_launcher-playstore.png").absolutePath, file("icons").absolutePath)
+}
 
 dependencies {
     implementation(project(":shared:core"))
@@ -32,8 +77,12 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     // Dragging songs in the queue.
     implementation(libs.reorderable)
-    // The operating system's password store and window corners.
+    // The operating system's password store and window corners, and the
+    // system library.
     implementation(libs.jna)
+    // D-Bus on Linux: the media controls (MPRIS), notifications and sleep.
+    implementation(libs.dbus.java.core)
+    implementation(libs.dbus.java.transport.unixsocket)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test)
@@ -45,11 +94,91 @@ compose.desktop {
     application {
         mainClass = "app.winters.octo.desktop.MainKt"
         nativeDistributions {
-            targetFormats(TargetFormat.Msi, TargetFormat.Dmg, TargetFormat.Deb)
+            // MSI for Windows, DMG for macOS, DEB and RPM for Linux.
+            //
+            // An AppImage is one extra step on Linux, from the app image
+            // that createDistributable makes:
+            //   ./gradlew :desktop:createDistributable
+            //   mkdir -p Octo.AppDir/usr
+            //   cp -r desktop/build/compose/binaries/main/app/Octo/* Octo.AppDir/usr/
+            //   cp desktop/icons/octo.png Octo.AppDir/octo.png
+            //   ln -s usr/bin/Octo Octo.AppDir/AppRun
+            // then Octo.AppDir/octo-Octo.desktop (the name the media controls
+            // announce) with these lines:
+            //   [Desktop Entry]
+            //   Type=Application
+            //   Name=Octo
+            //   Exec=Octo %U
+            //   Icon=octo
+            //   Categories=AudioVideo;Audio;Player;
+            //   MimeType=audio/mpeg;audio/flac;audio/mp4;audio/ogg;audio/opus;audio/wav;x-scheme-handler/octo;
+            // and last: appimagetool Octo.AppDir Octo-1.0.0-x86_64.AppImage
+            targetFormats(TargetFormat.Msi, TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "Octo"
             // The installers need a first number above 0 (macOS insists).
             packageVersion = "1.0.0"
-            vendor = "winters"
+            description = "A music player for Subsonic, Navidrome and Octo servers"
+            vendor = "Winters"
+            copyright = "Copyright Winters. Licensed under the GPL, version 3 or later."
+            licenseFile = rootProject.file("LICENSE")
+            // Only the parts of the Java runtime the app uses: what the
+            // suggestRuntimeModules task lists (java.instrument,
+            // jdk.security.auth, jdk.unsupported), plus what it cannot see
+            // because it is reached by name at run time: elliptic-curve TLS
+            // for https servers, name lookups, and XML for D-Bus on Linux.
+            modules("java.instrument", "jdk.security.auth", "jdk.unsupported", "jdk.crypto.ec", "java.naming", "java.xml")
+            windows {
+                iconFile = file("icons/octo.ico")
+                menuGroup = "Octo"
+                shortcut = true
+                menu = true
+                dirChooser = true
+                perUserInstall = true
+                // Keeps upgrades replacing this app rather than installing
+                // beside it. Never change it.
+                upgradeUuid = "4f7b3c1e-8a52-4d6b-9e0f-2c8d1a7b5e93"
+            }
+            macOS {
+                iconFile = file("icons/octo.icns")
+                bundleID = "app.winters.octo"
+                appCategory = "public.app-category.music"
+                // octo:// links open the app.
+                infoPlist {
+                    extraKeysRawXml = """
+                        <key>CFBundleURLTypes</key>
+                        <array>
+                          <dict>
+                            <key>CFBundleURLName</key>
+                            <string>app.winters.octo</string>
+                            <key>CFBundleURLSchemes</key>
+                            <array><string>octo</string></array>
+                          </dict>
+                        </array>
+                    """.trimIndent()
+                }
+            }
+            linux {
+                iconFile = file("icons/octo.png")
+                packageName = "octo"
+                menuGroup = "AudioVideo;Audio;Player"
+                appCategory = "AudioVideo"
+                shortcut = true
+            }
+            // "Open with Octo" for audio files, on every system.
+            listOf(
+                "mp3" to "audio/mpeg",
+                "flac" to "audio/flac",
+                "m4a" to "audio/mp4",
+                "aac" to "audio/aac",
+                "ogg" to "audio/ogg",
+                "oga" to "audio/ogg",
+                "opus" to "audio/opus",
+                "wav" to "audio/wav",
+                "aiff" to "audio/aiff",
+                "aif" to "audio/aiff",
+            ).forEach { (extension, mime) ->
+                fileAssociation(mime, extension, "Audio file", file("icons/octo.png"), file("icons/octo.ico"), file("icons/octo.icns"))
+            }
         }
     }
 }

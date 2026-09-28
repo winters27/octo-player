@@ -20,6 +20,7 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.nav.shortcutList
 import app.winters.octo.desktop.settings.DesktopOs
+import app.winters.octo.desktop.system.SystemSettingsCard
 import app.winters.octo.desktop.ui.LocalBottomRoom
 import app.winters.octo.desktop.ui.PageTitle
 import app.winters.octo.desktop.ui.pagePadding
@@ -113,6 +114,7 @@ fun SettingsPage(app: AppState, visit: Visit) {
                 }
             }
         }
+        item(key = "system") { SystemSettingsCard(app) }
         item(key = "keys") {
             Card("Keyboard shortcuts") {
                 shortcutList(app.mac).forEachIndexed { index, (what, keys) ->
@@ -135,7 +137,7 @@ private fun gainLabel(mode: String) = when (mode) {
 
 // A group of settings on a glass card.
 @Composable
-private fun Card(title: String, content: @Composable ColumnScope.() -> Unit) {
+internal fun Card(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column(
         Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(bottom = 18.dp).glassPanel(CardShape).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -154,7 +156,7 @@ private fun Line(label: String, value: String) {
 }
 
 @Composable
-private fun Toggle(title: String, detail: String, on: Boolean, change: (Boolean) -> Unit) {
+internal fun Toggle(title: String, detail: String, on: Boolean, change: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         Column(Modifier.weight(1f)) {
             Txt(title, OctoType.bodySmall)
