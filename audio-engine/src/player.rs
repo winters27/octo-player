@@ -23,7 +23,8 @@ use crate::output::{DeviceEvent, Driver, OpenedOutput, OutputDevice, OutputShare
 use crate::pace::Pace;
 use crate::sound::model::{DspSettings, EqSettings, ReplayGainSettings, SoundSettings};
 use crate::sound::replaygain::{Loudness, stored_replay_gain};
-use crate::source::http::HttpOptions;
+use crate::source::http::{self, HttpOptions};
+use crate::source::trust::Trust;
 use crate::timeline::{Moment, Timeline};
 
 /// How much sound is kept queued for the device, and the most it holds.
@@ -102,10 +103,15 @@ pub struct Shared {
     timeline: Timeline,
     output: Mutex<Option<Arc<OutputShared>>>,
     player: OnceLock<Thread>,
+    /// The certificates trusted for streams, changed from the app's threads.
+    pub trust: Arc<Trust>,
+    // The client every stream fetches with, knowing those certificates.
+    agent: ureq::Agent,
 }
 
 impl Shared {
     pub fn new() -> Self {
+        let trust = Arc::new(Trust::default());
         Shared {
             listener: Mutex::new(None),
             status: Mutex::new(Status {
@@ -119,6 +125,8 @@ impl Shared {
             timeline: Timeline::new(),
             output: Mutex::new(None),
             player: OnceLock::new(),
+            agent: http::agent(trust.clone()),
+            trust,
         }
     }
 
@@ -520,6 +528,7 @@ impl Player {
     fn open_deck(&self, index: usize, start_secs: f64) -> Deck {
         let entry = &self.queue[index];
         let http = HttpOptions {
+            agent: self.shared.agent.clone(),
             headers: entry.item.headers.iter().map(|h| (h.name.clone(), h.value.clone())).collect(),
             ..Default::default()
         };

@@ -35,6 +35,12 @@ cpal = { version = "0.18.2", features = ["realtime"] }
 rubato = "5.0.0"
 rtrb = "0.4.0"
 ureq = { version = "3.4.2", default-features = false, features = ["rustls", "platform-verifier"] }
+# The same TLS ureq uses, named directly to check a server's certificate
+# the system's way first and then against the ones the listener trusted.
+rustls = { version = "0.23.45", default-features = false, features = ["std", "ring"] }
+rustls-platform-verifier = { version = "0.7.1", default-features = false }
+# For a certificate's SHA-256 fingerprint.
+ring = { version = "0.17.14", default-features = false }
 crossbeam-channel = "0.5.17"
 thiserror = "2.0.21"
 log = "0.4.34"
@@ -42,6 +48,8 @@ uniffi = "0.32.2"
 
 [dev-dependencies]
 flacenc = "0.5.1"
+# Makes self-signed certificates for the HTTPS test server.
+rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "ring"] }
 
 [profile.release]
 lto = "thin"

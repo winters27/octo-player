@@ -501,3 +501,35 @@ fn a_lost_device_that_will_not_reopen_carries_on_once_one_does() {
     assert_eq!(device_errors(), 3);
     engine.shutdown();
 }
+
+#[test]
+fn a_server_with_a_trusted_certificate_plays() {
+    use crate::api::TrustedCertificate;
+    use crate::testing::http_server::{Behaviour, SelfSigned, TestServer};
+    let certificate = SelfSigned::new(&["127.0.0.1"]);
+    let song = flac_bytes(RATE, 2, &sine(440.0, RATE, 2, 0, 12_000, 0.3), &[]);
+    let server = TestServer::start_tls(song, Behaviour::default(), &certificate);
+    let streamed = |id: &str| QueueItem { source: server.url(), ..item(id, Path::new("")) };
+
+    // Not trusted: the song fails, as a network problem.
+    let (engine, events, _) = engine(4.0);
+    engine.load(vec![streamed("refused")], 0, 0, true).unwrap();
+    let error = events.wait_for("error", Duration::from_secs(10), |e| matches!(e, EngineEvent::Error { .. }));
+    assert!(matches!(error, EngineEvent::Error { kind: ErrorKind::Network, .. }), "{error:?}");
+
+    // Trusted for its host: it plays to the end.
+    engine.set_trusted_certificates(vec![TrustedCertificate {
+        host: "127.0.0.1".into(),
+        sha256: certificate.fingerprint(),
+    }]);
+    engine.load(vec![streamed("trusted")], 0, 0, true).unwrap();
+    events.wait_for(
+        "trusted song's end",
+        Duration::from_secs(10),
+        |e| matches!(e, EngineEvent::TrackEnded { item_id, .. } if item_id == "trusted"),
+    );
+    let story = events.story();
+    let trusted: Vec<&String> = story.iter().filter(|line| line.contains("trusted")).collect();
+    assert_eq!(trusted, ["start trusted", "end trusted Finished"], "{story:?}");
+    engine.shutdown();
+}

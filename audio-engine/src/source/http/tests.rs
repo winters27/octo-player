@@ -1,5 +1,6 @@
 use super::*;
-use crate::testing::http_server::{Behaviour, TestServer};
+use crate::source::trust::Trust;
+use crate::testing::http_server::{Behaviour, SelfSigned, TestServer};
 use std::io::{Read, Seek, SeekFrom};
 
 fn data(len: usize) -> Vec<u8> {
@@ -125,6 +126,88 @@ fn no_server_is_a_network_failure() {
     drop(listener);
     let err = HttpSource::open(&format!("http://127.0.0.1:{port}/x"), quick()).err().unwrap();
     assert_eq!(err.kind, ErrorKind::Network);
+}
+
+// Options fetching with its own client, trusting these pins.
+fn trusting(pins: &[(&str, &str)]) -> HttpOptions {
+    let trust = Arc::new(Trust::default());
+    trust.replace(pins.iter().map(|(host, sha)| (host.to_string(), sha.to_string())));
+    HttpOptions { agent: agent(trust), ..quick() }
+}
+
+#[test]
+fn a_self_signed_certificate_is_refused_without_a_pin() {
+    let certificate = SelfSigned::new(&["127.0.0.1"]);
+    let server = TestServer::start_tls(data(10_000), Behaviour::default(), &certificate);
+    let err = HttpSource::open(&server.url(), trusting(&[])).err().unwrap();
+    assert_eq!(err.kind, ErrorKind::Network);
+    assert!(err.message.to_lowercase().contains("certificate"), "{err}");
+    assert_eq!(server.requests(), 0, "nothing was asked over the refused connection");
+}
+
+#[test]
+fn a_pinned_certificate_streams_for_its_host() {
+    let body = data(3_000_000);
+    let certificate = SelfSigned::new(&["127.0.0.1"]);
+    let server = TestServer::start_tls(body.clone(), Behaviour::default(), &certificate);
+    // Marked up the way people read it, as the app may pass it on.
+    let shown: String = certificate
+        .fingerprint()
+        .to_uppercase()
+        .as_bytes()
+        .chunks(2)
+        .map(|pair| std::str::from_utf8(pair).unwrap())
+        .collect::<Vec<_>>()
+        .join(":");
+    let mut source = HttpSource::open(&server.url(), trusting(&[("127.0.0.1", &shown)])).unwrap();
+    assert_eq!(read_all(&mut source), body);
+    // Seeking makes new connections, each checked the same way.
+    source.seek(SeekFrom::Start(100)).unwrap();
+    let mut buf = vec![0u8; 1000];
+    source.read_exact(&mut buf).unwrap();
+    assert_eq!(buf, body[100..1100]);
+}
+
+#[test]
+fn a_pin_passes_a_certificate_naming_another_host() {
+    // Self-made certificates often name something else; the pin is the
+    // host's identity by itself.
+    let body = data(100_000);
+    let certificate = SelfSigned::new(&["octo.test"]);
+    let server = TestServer::start_tls(body.clone(), Behaviour::default(), &certificate);
+    let mut source =
+        HttpSource::open(&server.url(), trusting(&[("127.0.0.1", &certificate.fingerprint())])).unwrap();
+    assert_eq!(read_all(&mut source), body);
+}
+
+#[test]
+fn a_pin_for_another_host_or_certificate_is_no_use() {
+    let certificate = SelfSigned::new(&["127.0.0.1"]);
+    let other = SelfSigned::new(&["127.0.0.1"]);
+    let server = TestServer::start_tls(data(10_000), Behaviour::default(), &certificate);
+    let elsewhere =
+        trusting(&[("localhost", &certificate.fingerprint()), ("127.0.0.2", &certificate.fingerprint())]);
+    let err = HttpSource::open(&server.url(), elsewhere).err().unwrap();
+    assert_eq!(err.kind, ErrorKind::Network);
+    let wrong = trusting(&[("127.0.0.1", &other.fingerprint())]);
+    let err = HttpSource::open(&server.url(), wrong).err().unwrap();
+    assert_eq!(err.kind, ErrorKind::Network);
+}
+
+#[test]
+fn a_pin_given_later_applies_to_the_next_connection() {
+    let body = data(10_000);
+    let certificate = SelfSigned::new(&["127.0.0.1"]);
+    let server = TestServer::start_tls(body.clone(), Behaviour::default(), &certificate);
+    let trust = Arc::new(Trust::default());
+    let opts = HttpOptions { agent: agent(trust.clone()), ..quick() };
+    assert!(HttpSource::open(&server.url(), opts.clone()).is_err());
+    trust.replace([("127.0.0.1".to_string(), certificate.fingerprint())]);
+    let mut source = HttpSource::open(&server.url(), opts.clone()).unwrap();
+    assert_eq!(read_all(&mut source), body);
+    // Taken away again, it no longer lets a new connection in.
+    trust.replace([]);
+    assert!(HttpSource::open(&server.url(), opts).is_err());
 }
 
 #[test]

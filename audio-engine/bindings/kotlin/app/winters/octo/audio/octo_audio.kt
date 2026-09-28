@@ -749,6 +749,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_set_stop_after_current(
     ): Int
+    external fun uniffi_octo_audio_checksum_method_engine_set_trusted_certificates(
+    ): Int
     external fun uniffi_octo_audio_checksum_method_engine_set_volume(
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_set_volume_db(
@@ -849,6 +851,8 @@ internal object UniffiLib {
     external fun uniffi_octo_audio_fn_method_engine_set_speed(`ptr`: Long,`speed`: Float,`pitch`: Float,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_octo_audio_fn_method_engine_set_stop_after_current(`ptr`: Long,`on`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_octo_audio_fn_method_engine_set_trusted_certificates(`ptr`: Long,`certificates`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_octo_audio_fn_method_engine_set_volume(`ptr`: Long,`linear`: Float,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -1075,6 +1079,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_method_engine_set_stop_after_current() and 0xFFFF) != 64048) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_engine_set_trusted_certificates() and 0xFFFF) != 19505) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_method_engine_set_volume() and 0xFFFF) != 52620) {
@@ -1704,6 +1711,14 @@ public interface EngineInterface {
     fun `setStopAfterCurrent`(`on`: kotlin.Boolean)
     
     /**
+     * Replaces the certificates trusted for streams. A server's certificate
+     * is checked the system's way first; only when that fails is it let
+     * through, and only when its host has a pin equal to its SHA-256.
+     * Applies to connections made from now on.
+     */
+    fun `setTrustedCertificates`(`certificates`: List<TrustedCertificate>)
+    
+    /**
      * The volume as a factor from 0 to 1.
      */
     fun `setVolume`(`linear`: kotlin.Float)
@@ -2241,6 +2256,25 @@ open class Engine: Disposable, AutoCloseable, EngineInterface
         it,
         
         FfiConverterBoolean.lower(`on`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Replaces the certificates trusted for streams. A server's certificate
+     * is checked the system's way first; only when that fails is it let
+     * through, and only when its host has a pin equal to its SHA-256.
+     * Applies to connections made from now on.
+     */override fun `setTrustedCertificates`(`certificates`: List<TrustedCertificate>)
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_engine_set_trusted_certificates(
+        it,
+        
+        FfiConverterSequenceTypeTrustedCertificate.lower(`certificates`),_status)
 }
     }
     
@@ -3481,6 +3515,54 @@ public object FfiConverterTypeTrackInfo: FfiConverterRustBuffer<TrackInfo> {
 
 
 /**
+ * A certificate the listener chose to trust for one host, although the
+ * system does not (a server's own self-signed one, say).
+ */
+data class TrustedCertificate (
+    /**
+     * The host's name or address, in any case.
+     */
+    val `host`: kotlin.String
+    , 
+    /**
+     * The SHA-256 of the certificate itself, in hex; colons and spaces are ignored.
+     */
+    val `sha256`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTrustedCertificate: FfiConverterRustBuffer<TrustedCertificate> {
+    override fun read(buf: ByteBuffer): TrustedCertificate {
+        return TrustedCertificate(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TrustedCertificate) = (
+            FfiConverterString.allocationSize(value.`host`) +
+            FfiConverterString.allocationSize(value.`sha256`)
+    )
+
+    override fun write(value: TrustedCertificate, buf: ByteBuffer) {
+            FfiConverterString.write(value.`host`, buf)
+            FfiConverterString.write(value.`sha256`, buf)
+    }
+}
+
+
+
+/**
  * Why a song stopped sounding.
  */
 
@@ -4695,6 +4777,34 @@ public object FfiConverterSequenceTypeQueueItem: FfiConverterRustBuffer<List<Que
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeQueueItem.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeTrustedCertificate: FfiConverterRustBuffer<List<TrustedCertificate>> {
+    override fun read(buf: ByteBuffer): List<TrustedCertificate> {
+        val len = buf.getInt()
+        return List<TrustedCertificate>(len) {
+            FfiConverterTypeTrustedCertificate.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<TrustedCertificate>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeTrustedCertificate.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<TrustedCertificate>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeTrustedCertificate.write(it, buf)
         }
     }
 }

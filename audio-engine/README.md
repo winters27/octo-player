@@ -18,7 +18,7 @@ same sound shaping as the Android app, and a sample-accurate clock.
 | `src/deck.rs` | One song decoding ahead on its own thread |
 | `src/decode.rs` | symphonia decoding, gapless trims, seeking, tags |
 | `src/opus.rs` | Opus through a pure Rust decoder |
-| `src/source/` | Files, and HTTP(S) streams with read-ahead |
+| `src/source/` | Files, and HTTP(S) streams with read-ahead and pinned certificates |
 | `src/sound/` | EQ, presets, limiter, balance, mono, ReplayGain |
 | `src/pace.rs` | Speed (pitch kept) and pitch shift |
 | `src/output/` | Device callback, audio clock, cpal and silent drivers |
@@ -74,6 +74,7 @@ same sound shaping as the Android app, and a sample-accurate clock.
 | Seek | Sample-accurate, with a fade |
 | Pause and resume | 10 ms fade |
 | Per-output profiles | The app keeps them: it gets `DeviceChanged` and calls `set_eq` and `set_dsp` |
+| Trusted self-signed certificates | `set_trusted_certificates`: the system's check first, then a SHA-256 pin for that host only |
 | Skip silence | Not ported |
 
 <!-- markdownlint-enable MD013 -->
@@ -92,9 +93,11 @@ All newest stable, checked with `python scripts/check-deps.py`.
 | rubato | 5.0.0 | FFT resampler to the device rate |
 | rtrb | 0.4.0 | Wait-free ring to the callback |
 | ureq | 3.4.2 | Small blocking HTTP client, rustls with the OS trust store |
+| rustls, rustls-platform-verifier, ring | 0.23.45, 0.7.1, 0.17.14 | ureq's own TLS, named to add pinned certificates to the OS check |
 | uniffi | 0.32.2 | Kotlin bindings |
 | crossbeam-channel, thiserror, log | 0.5.17, 2.0.21, 0.4.34 | Commands, errors, logs |
 | flacenc (tests only) | 0.5.1 | FLAC files made while testing |
+| rcgen (tests only) | 0.14.10 | Self-signed certificates for the HTTPS test server |
 
 <!-- markdownlint-enable MD013 -->
 
