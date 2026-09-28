@@ -7,6 +7,7 @@ import app.winters.octo.ui.menu.CollectionAction.AddToPlaylist
 import app.winters.octo.ui.menu.CollectionAction.AddToQueue
 import app.winters.octo.ui.menu.CollectionAction.Delete
 import app.winters.octo.ui.menu.CollectionAction.Download
+import app.winters.octo.ui.menu.CollectionAction.Duplicate
 import app.winters.octo.ui.menu.CollectionAction.GoToArtist
 import app.winters.octo.ui.menu.CollectionAction.MoveToFront
 import app.winters.octo.ui.menu.CollectionAction.PinToHome
@@ -48,9 +49,9 @@ class CollectionActionsTest {
     }
 
     @Test
-    fun anEmptyPlaylistCanOnlyBePinnedRenamedOrDeleted() {
-        assertEquals(listOf(Play, Shuffle, PlayNext, AddToQueue, PinToHome, Rename, Delete), playlistActions(empty = false))
-        assertEquals(listOf(PinToHome, Rename, Delete), playlistActions(empty = true))
+    fun anEmptyPlaylistCanOnlyBePinnedRenamedCopiedOrDeleted() {
+        assertEquals(listOf(Play, Shuffle, PlayNext, AddToQueue, PinToHome, Rename, Duplicate, Delete), playlistActions(empty = false))
+        assertEquals(listOf(PinToHome, Rename, Duplicate, Delete), playlistActions(empty = true))
     }
 
     @Test
@@ -65,8 +66,8 @@ class CollectionActionsTest {
             listOf(Play, Shuffle, PlayNext, AddToQueue, AddToFavourites, Unpin, MoveToFront),
             artistActions(radio = false, pin = PinSpot.Pinned),
         )
-        assertEquals(listOf(Unpin, Rename, Delete), playlistActions(empty = true, pin = PinSpot.First))
-        assertEquals(listOf(Unpin, MoveToFront, Rename, Delete), playlistActions(empty = true, pin = PinSpot.Pinned))
+        assertEquals(listOf(Unpin, Rename, Duplicate, Delete), playlistActions(empty = true, pin = PinSpot.First))
+        assertEquals(listOf(Unpin, MoveToFront, Rename, Duplicate, Delete), playlistActions(empty = true, pin = PinSpot.Pinned))
     }
 
     @Test

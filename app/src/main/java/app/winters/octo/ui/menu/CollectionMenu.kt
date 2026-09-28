@@ -25,6 +25,8 @@ import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.ui.common.Feedback
+import app.winters.octo.ui.playlist.copiedMessage
+import app.winters.octo.ui.playlist.playlistCopyName
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
@@ -75,7 +77,7 @@ class CollectionMenuState {
 enum class CollectionAction {
     Play, Shuffle, PlayNext, AddToQueue, AddToPlaylist, Download, StartRadio,
     AddToFavourites, RemoveFromFavourites, PinToHome, Unpin, MoveToFront,
-    GoToArtist, Rename, Delete,
+    GoToArtist, Rename, Duplicate, Delete,
 }
 
 // Where a collection stands on Home: not pinned, pinned, or pinned first.
@@ -119,22 +121,24 @@ fun artistActions(radio: Boolean, favourite: Boolean = false, pin: PinSpot = Pin
     pin(pin)
 }
 
-// An empty playlist has nothing to play, only itself to pin, rename or delete.
+// An empty playlist has nothing to play, only itself to pin, rename, copy
+// or delete.
 fun playlistActions(empty: Boolean, pin: PinSpot = PinSpot.None): List<CollectionAction> = buildList {
     if (!empty) addAll(Playing)
     pin(pin)
     add(CollectionAction.Rename)
+    add(CollectionAction.Duplicate)
     add(CollectionAction.Delete)
 }
 
 // How a collection's menu groups its actions: playing it, keeping it,
-// Home, going to its artist, and last, renaming and deleting.
+// Home, going to its artist, and last, renaming, copying and deleting.
 private val CollectionMenuOrder = listOf(
     listOf(CollectionAction.Play, CollectionAction.Shuffle, CollectionAction.PlayNext, CollectionAction.AddToQueue, CollectionAction.StartRadio),
     listOf(CollectionAction.AddToPlaylist, CollectionAction.AddToFavourites, CollectionAction.RemoveFromFavourites, CollectionAction.Download),
     listOf(CollectionAction.PinToHome, CollectionAction.Unpin, CollectionAction.MoveToFront),
     listOf(CollectionAction.GoToArtist),
-    listOf(CollectionAction.Rename, CollectionAction.Delete),
+    listOf(CollectionAction.Rename, CollectionAction.Duplicate, CollectionAction.Delete),
 )
 
 // The actions offered, in their groups, leaving out empty groups.
@@ -203,6 +207,17 @@ class CollectionMenuViewModel @Inject constructor(
         is CollectionTarget.Album -> catalog.albumTrackIds(target.id)
         is CollectionTarget.Artist -> catalog.artistAlbums(target.id).first().flatMap { catalog.albumTrackIds(it.id) }
         is CollectionTarget.Playlist -> userDao.playlistTracks(target.id).first().map { it.track.id }
+    }
+
+    // A new playlist named "<name> (copy)" with the same songs in the same
+    // order, as the desktop's Duplicate makes.
+    fun duplicatePlaylist(id: String) {
+        viewModelScope.launch {
+            val playlist = userDao.playlistRow(id) ?: return@launch
+            val name = playlistCopyName(playlist.name)
+            store.create(name, userDao.playlistTracks(id).first().map { it.track.id })
+            feedback.show(copiedMessage(name))
+        }
     }
 
     fun play(target: CollectionTarget, shuffle: Boolean) {

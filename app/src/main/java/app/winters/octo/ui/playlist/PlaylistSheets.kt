@@ -49,12 +49,14 @@ import app.winters.octo.design.PopupPages
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.playlists.PlaylistFiles
+import app.winters.octo.playlists.RecentPlaylists
 import app.winters.octo.playlists.playlistFileName
 import app.winters.octo.ui.common.CloudMark
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.common.GlassMenuAction
 import app.winters.octo.ui.common.GlassMenuBack
 import app.winters.octo.ui.common.GlassMenuHeading
+import app.winters.octo.ui.common.GlassMenuNote
 import app.winters.octo.ui.common.GlassMenuPage
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.MenuWidth
@@ -130,9 +132,18 @@ class PlaylistSheetsViewModel @Inject constructor(
     private val files: PlaylistFiles,
     private val userDao: UserDao,
     private val feedback: Feedback,
+    private val recent: RecentPlaylists,
 ) : ViewModel() {
     val playlists: StateFlow<List<PlaylistSummary>> =
         store.playlists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // The playlists songs were added to lately, newest first, by id.
+    val recentIds: StateFlow<List<String>> =
+        recent.ids.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private fun used(id: String) {
+        viewModelScope.launch { recent.used(id) }
+    }
 
     // Which of the songs each playlist has already, by playlist.
     fun holdings(trackIds: List<String>): Flow<Map<String, Set<String>>> {
@@ -144,8 +155,11 @@ class PlaylistSheetsViewModel @Inject constructor(
     // A new playlist with songs in it says where they went, since nothing
     // on screen shows it.
     fun create(name: String, trackIds: List<String>) {
-        store.create(name, trackIds)
-        if (trackIds.isNotEmpty()) feedback.show(addedMessage(name.trim(), trackIds.size))
+        val id = store.create(name, trackIds)
+        if (trackIds.isNotEmpty()) {
+            used(id)
+            feedback.show(addedMessage(name.trim(), trackIds.size))
+        }
     }
 
     fun rename(id: String, name: String) = store.rename(id, name)
@@ -153,6 +167,7 @@ class PlaylistSheetsViewModel @Inject constructor(
 
     // Adds the songs, with an Undo that takes them back out.
     fun add(playlist: PlaylistSummary, trackIds: List<String>) {
+        used(playlist.id)
         store.add(playlist.id, trackIds) { rows ->
             feedback.undoable(addedMessage(playlist.name, rows.size)) { store.removeRows(playlist.id, rows) }
         }
@@ -247,21 +262,36 @@ fun PlaylistSheetsHost(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel = hil
 // The playlists to add songs to, as a page of a glass menu: "New playlist"
 // first, which turns into a name field in place, then the playlists.
 // Picking one adds the songs and closes; picking one that has some of them
-// already asks first. `onBack` is there when it was opened from a menu.
+// already asks first. The playlists added to lately come first. `onBack` is
+// there when it was opened from a menu. With `start`, it adds to that
+// playlist at once, as "Add to last playlist" does, asking first the same way.
 @Composable
 fun PlaylistPickerPage(
     trackIds: List<String>,
     onBack: (() -> Unit)?,
     onDone: () -> Unit,
     vm: PlaylistSheetsViewModel = hiltViewModel(),
+    start: String? = null,
 ) {
-    val playlists by vm.playlists.collectAsStateWithLifecycle()
+    val all by vm.playlists.collectAsStateWithLifecycle()
+    val recent by vm.recentIds.collectAsStateWithLifecycle()
+    val playlists = remember(all, recent) { recentFirst(all, recent) { it.id } }
     val holdings by remember(trackIds) { vm.holdings(trackIds) }.collectAsStateWithLifecycle(null)
     var asking by remember { mutableStateOf<Pair<PlaylistSummary, AddPlan>?>(null) }
     var naming by remember { mutableStateOf(false) }
+    // Whether the `start` playlist has been looked at yet.
+    var started by remember { mutableStateOf(start == null) }
     val add = { playlist: PlaylistSummary, songs: List<String> ->
         vm.add(playlist, songs)
         onDone()
+    }
+    LaunchedEffect(start, all, holdings) {
+        if (started) return@LaunchedEffect
+        val playlist = all.firstOrNull { it.id == start } ?: return@LaunchedEffect
+        val held = holdings ?: return@LaunchedEffect
+        started = true
+        val plan = planAdd(trackIds, held[playlist.id].orEmpty())
+        if (plan.asks) asking = playlist to plan else add(playlist, plan.songs)
     }
     asking?.let { (playlist, plan) ->
         ConfirmAgain(
@@ -271,6 +301,10 @@ fun PlaylistPickerPage(
             onAddAll = { add(playlist, plan.songs) },
             onAddNew = { add(playlist, plan.fresh) },
         )
+        return
+    }
+    if (!started) {
+        GlassMenuPage { GlassMenuNote("Checking the playlist") }
         return
     }
     val title = if (trackIds.size == 1) "Add to playlist" else "Add ${songs(trackIds.size)} to a playlist"
