@@ -51,8 +51,10 @@ data class SongMatchOptions(
     }
 }
 
-// One side of a comparison. Seconds is the length when it is known.
-data class SongRef(val title: String?, val artist: String?, val seconds: Double? = null)
+// One side of a comparison. Seconds is the length when it is known. Isrcs
+// are the codes a source gave the song, as it wrote them; anything that is
+// not a valid ISRC is ignored.
+data class SongRef(val title: String?, val artist: String?, val seconds: Double? = null, val isrcs: List<String?> = emptyList())
 
 // One query to try against a search service, in the order queryVariants
 // gives them. Artist is empty for the title-only query.
@@ -827,6 +829,40 @@ object SongIdentity {
         return keys(candidate, false).any { it in exact } || keys(candidate, true).any { it in loose }
     }
 
+    // ---- ISRCs ------------------------------------------------------------
+
+    // Two letters of country, three of registrant, two digits of year, five
+    // of designation.
+    private val IsrcShape = Regex("^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$")
+
+    // An ISRC in its one spelling, or null when the value is not one.
+    // Sources write "USRC17607839", "US-RC1-76-07839", "us rc1 76 07839" and
+    // with dots, and all of those are one code. Anything that is still not
+    // twelve characters of the right shape once the separators are gone
+    // counts as no code at all.
+    fun normalizeIsrc(value: String?): String? {
+        if (isBlank(value)) return null
+        val text = Normalizer.normalize(value!!, Normalizer.Form.NFKC)
+        val sb = StringBuilder(12)
+        for (ch in text) {
+            if (ch == '-' || ch == '.' || isSpace(ch)) continue
+            // Each character raised on its own, as the server does, and a
+            // dotless i left as it is.
+            sb.append(if (ch == '\u0131') ch else Character.toUpperCase(ch))
+        }
+        val isrc = sb.toString()
+        return if (IsrcShape.matches(isrc)) isrc else null
+    }
+
+    // Every valid ISRC among the values, in its one spelling.
+    fun isrcs(values: Iterable<String?>?): Set<String> = values?.mapNotNullTo(HashSet(), ::normalizeIsrc) ?: emptySet()
+
+    // Both sides carry a valid ISRC and at least one is on both.
+    fun sharesIsrc(a: Iterable<String?>?, b: Iterable<String?>?): Boolean {
+        val left = isrcs(a)
+        return left.isNotEmpty() && isrcs(b).any { it in left }
+    }
+
     // ---- comparing --------------------------------------------------------
 
     private enum class TitleAgreement { None, Exact, Loose, Numbers }
@@ -925,6 +961,12 @@ object SongIdentity {
     // Whether two songs are the same recording. Both artists must be known:
     // a title alone is not an identity.
     fun same(a: SongRef, b: SongRef, options: SongMatchOptions = SongMatchOptions.Default): SongMatch {
+        // First, and above the text: a romanised title and the same title in
+        // its own script share no letter, and one ISRC still says they are
+        // one recording. Different ISRCs fall through to the text, since a
+        // re-release can carry a new code for the same audio.
+        if (sharesIsrc(a.isrcs, b.isrcs)) return SongMatch(SongVerdict.Same, 1.0, "same ISRC")
+
         val titleA = parseTitle(a.title, a.artist ?: "")
         val titleB = parseTitle(b.title, b.artist ?: "")
         val title = compareTitles(titleA, titleB, options)

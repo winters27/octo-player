@@ -1,6 +1,7 @@
 package app.winters.octo.catalog
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -36,6 +37,13 @@ class SongIdentityCasesTest {
         text(side["title"]),
         text(side["artist"]),
         (side["seconds"] as? JsonPrimitive)?.doubleOrNull,
+        // One ISRC as a string, or several as a list. Absent in every case
+        // written before it.
+        when (val isrc = side["isrc"]) {
+            null -> emptyList()
+            is JsonArray -> strings(isrc)
+            else -> listOf(isrc.jsonPrimitive.content)
+        },
     )
 
     private fun options(case: JsonObject): SongMatchOptions {
@@ -53,7 +61,7 @@ class SongIdentityCasesTest {
 
     @Test
     fun theFileHasEveryCase() {
-        assertEquals(185, section("compare").size)
+        assertEquals(199, section("compare").size)
         assertEquals(51, section("parse").size)
         assertEquals(6, section("queries").size)
     }

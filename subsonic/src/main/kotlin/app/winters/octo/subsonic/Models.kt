@@ -126,6 +126,9 @@ data class Song(
     val comment: String? = null,
     val displayComposer: String? = null,
     val explicitStatus: String? = null,
+    // The recording's ISRCs, as the server wrote them. OpenSubsonic sends a
+    // list; a single code is read as a list of one.
+    @Serializable(with = LooseStrings::class) val isrc: List<String> = emptyList(),
 )
 
 @Serializable
@@ -313,6 +316,22 @@ internal object GenreNames : KSerializer<List<String>> {
                 else -> null
             }?.trim()?.takeIf(String::isNotEmpty)
         }
+    }
+
+    override fun serialize(encoder: Encoder, value: List<String>) =
+        ListSerializer(String.serializer()).serialize(encoder, value)
+}
+
+// Text sent as a list or as one value. Blanks are dropped, and anything
+// else reads as nothing, so one odd field never stops a library from
+// loading.
+internal object LooseStrings : KSerializer<List<String>> {
+    override val descriptor = ListSerializer(String.serializer()).descriptor
+
+    override fun deserialize(decoder: Decoder): List<String> {
+        val element = (decoder as? JsonDecoder)?.decodeJsonElement() ?: return emptyList()
+        val items = element as? JsonArray ?: listOf(element)
+        return items.mapNotNull { item -> (item as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()?.takeIf(String::isNotEmpty) }
     }
 
     override fun serialize(encoder: Encoder, value: List<String>) =
