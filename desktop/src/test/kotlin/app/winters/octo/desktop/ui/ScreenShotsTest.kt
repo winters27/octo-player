@@ -202,18 +202,18 @@ class ScreenShotsTest {
                 CompositionLocalProvider(LocalTyping provides TypingState()) { Shell(app, null) {} }
             }
             // Draws for a while and saves the picture; with no name, only draws.
-            fun shot(name: String?, settleMs: Long = 1_500) {
+            fun shot(name: String?, settleMs: Long = 1_500, on: ImageComposeScene = scene) {
                 val begin = System.currentTimeMillis()
                 val end = begin + settleMs
                 // The scene's clock follows real time, so animations finish
                 // however long a frame takes to draw off screen.
                 var t = 0L
                 while (System.currentTimeMillis() < end) {
-                    SwingUtilities.invokeAndWait { scene.render(t) }
+                    SwingUtilities.invokeAndWait { on.render(t) }
                     Thread.sleep(30)
                     t = (System.currentTimeMillis() - begin) * 1_000_000
                 }
-                val image = scene.render(t)
+                val image = on.render(t)
                 if (name != null) File(out, "$name.png").writeBytes(image.encodeToData(EncodedImageFormat.PNG)!!.bytes)
             }
             // Turns the mouse wheel over the page, `clicks` times, then moves
@@ -481,6 +481,12 @@ class ScreenShotsTest {
                 app.navigator.go(Page.Album("a9"))
             }
             shot("album-partial", 2_000)
+            // The same on a wide window, where the row's end is far from
+            // the titles: the marks sit beside the numbers.
+            val wide = ImageComposeScene(1980, 900, Density(1f)) {
+                CompositionLocalProvider(LocalTyping provides TypingState()) { Shell(app, null) {} }
+            }
+            shot("album-partial-wide", 2_000, wide)
             // Two of them asked for: one on its way, one arrived.
             server.answer("star")
             server.answer("getAcquisitions", """"acquisitions":{"acquisition":[{"id":"am1","state":"downloading","progress":0.4,"startedAt":"2026-09-28T10:00:00Z"},{"id":"am3","state":"done","startedAt":"2026-09-28T10:00:00Z"}]}""", type = "octo")
@@ -489,6 +495,8 @@ class ScreenShotsTest {
                 app.fetches!!.request("am3")
             }
             shot("album-partial-adding", 3_000)
+            shot("album-partial-adding-wide", 1_500, wide)
+            wide.close()
             // One of its songs found online: the menu leaves out what only a
             // library song has, and its details say where it plays from.
             val online = runBlocking { app.connection!!.client.album("a9") }.song.first { it.id == "am4" }

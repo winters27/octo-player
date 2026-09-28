@@ -324,7 +324,7 @@ fun SongTable(
             .focusable(),
     ) {
         val usable = maxWidth - padding.calculateStartPadding(LayoutDirection.Ltr) - padding.calculateEndPadding(LayoutDirection.Ltr) - Space.M * 2 -
-            (if (marks) RowEnd + ColumnGap else Space.None)
+            (if (marks) MarkWidth + ColumnGap else Space.None)
         val shown = remember(chosen, usable, prefs) { fitColumns(chosen, usable, prefs) }
         val favouriteShown = SongColumn.Favourite in shown
         // The heading sits on a plate only while rows pass under it.
@@ -411,6 +411,12 @@ fun SongTable(
 }
 
 private const val RowKey = "row:"
+
+// The library mark's column: as wide as a small button, just after the
+// number (first when the number is hidden).
+private val MarkWidth = ControlHeight.S
+
+private fun markAt(shown: List<SongColumn>): Int = shown.indexOf(SongColumn.Number) + 1
 private const val HeaderKey = "columns"
 
 // Tells a second click on the same row soon after the first.
@@ -473,7 +479,8 @@ private fun HeaderRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(ColumnGap),
         ) {
-            shown.forEach { column ->
+            shown.forEachIndexed { at, column ->
+                if (marks && at == markAt(shown)) Box(Modifier.width(MarkWidth))
                 val sortable = onSort != null && order != null && column.sort != null
                 val active = sortable && order.by == column.sort
                 Box(cell(this, column), contentAlignment = if (specOf(column).endAligned) Alignment.CenterEnd else Alignment.CenterStart) {
@@ -493,7 +500,6 @@ private fun HeaderRow(
                     }
                 }
             }
-            if (marks) Box(Modifier.width(RowEnd))
             Box(Modifier.width(RowEnd), contentAlignment = Alignment.Center) {
                 IconAction(OctoIcons.More, "Choose columns", openColumns, size = ControlHeight.S, iconSize = IconSize.Table, tint = OctoColors.TextMuted)
             }
@@ -543,7 +549,8 @@ private fun androidx.compose.foundation.layout.ColumnScope.ColumnsMenu(app: AppS
 // the key colour and marked in the number column, the keyboard's row
 // ringed. Under the pointer, the number becomes a play button and a More
 // button shows at the end. In a list mixing library songs with songs found
-// online (`marks`), a mark before the end says which this one is.
+// online (`marks`), a mark just after the number says which this one is,
+// so the songs in the library read down the left beside their titles.
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun SongRow(
@@ -619,13 +626,13 @@ private fun SongRow(
         if (focused) Box(Modifier.matchParentSize().border(FocusLine, OctoColors.FocusRing, Corner.RowShape))
         drop?.let { DropLine(it.first) }
         Row(Modifier.fillMaxWidth().padding(horizontal = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ColumnGap)) {
-            shown.forEach { column ->
+            shown.forEachIndexed { at, column ->
+                if (marks && at == markAt(shown)) {
+                    Box(Modifier.width(MarkWidth), contentAlignment = Alignment.Center) { LibraryMark(app, row.song, outside) }
+                }
                 Box(cell(this, column), contentAlignment = if (specOf(column).endAligned) Alignment.CenterEnd else Alignment.CenterStart) {
                     SongCell(app, column, index, row.song, playing, sounding, hovered, covers, heartInTitle, outside, number, onPlay)
                 }
-            }
-            if (marks) {
-                Box(Modifier.width(RowEnd), contentAlignment = Alignment.Center) { LibraryMark(app, row.song, outside) }
             }
             Box(Modifier.width(RowEnd).onGloballyPositioned { moreAnchor = it.windowRect() }, contentAlignment = Alignment.Center) {
                 if (hovered || picked) {

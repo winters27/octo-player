@@ -113,11 +113,14 @@ fun FetchButton(
 }
 
 // A song row's word on where the song is, in a list that mixes library
-// songs with songs found online: a check for one in the library, and for
-// one that is not, a quieter "+" that adds it.
+// songs with songs found online: a check lit in the key colour for one in
+// the library, and for one that is not, a quiet "+" that adds it. Once
+// the "+" has brought the song in, the row has the lit check too.
 @Composable
 fun LibraryMark(app: AppState, song: Song, outside: Boolean) {
-    if (outside) {
+    val fetches = app.fetches
+    val phases by remember(fetches) { fetches?.phases ?: MutableStateFlow(emptyMap()) }.collectAsState()
+    if (outside && phases[song.id] != FetchPhase.Done) {
         FetchButton(app, song, ControlHeight.S, IconSize.Table, tint = OctoColors.TextMuted)
     } else {
         OctoTooltip("In your library") {
@@ -125,7 +128,7 @@ fun LibraryMark(app: AppState, song: Song, outside: Boolean) {
                 Modifier.size(ControlHeight.S).semantics { contentDescription = "In your library" },
                 contentAlignment = Alignment.Center,
             ) {
-                Glyph(OctoIcons.Check, size = IconSize.Table, tint = OctoColors.TextSecondary)
+                Glyph(OctoIcons.Check, size = IconSize.Toolbar, tint = LocalKeyColour.current)
             }
         }
     }
