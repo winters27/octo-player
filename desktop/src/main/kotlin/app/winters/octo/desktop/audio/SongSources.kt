@@ -6,6 +6,7 @@ import app.winters.octo.audio.ReplayGainInfo
 import app.winters.octo.desktop.player.QueueEntry
 import app.winters.octo.desktop.system.isOpenedFile
 import app.winters.octo.desktop.system.openedFileOf
+import app.winters.octo.discovery.knownLengthMs
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 
@@ -58,9 +59,11 @@ fun keyOfItem(id: String?): Long? = id?.removePrefix("q:")?.toLongOrNull()
 // Disc and track in one number, for telling an album played in order.
 fun albumOrder(song: Song): Int? = song.track?.let { (song.discNumber ?: 1) * 1000 + it }
 
-// A queue entry as the engine takes it. The length always goes along:
-// without it the engine cannot plan a crossfade and joins songs gaplessly
-// instead. A song that cannot be reached gets an address that fails, so
+// A queue entry as the engine takes it. The length goes along when it is
+// known: without it the engine cannot plan a crossfade and joins songs
+// gaplessly instead. A song found online often comes with Octo's 3:00
+// guess, which is left out, so the engine takes the length from the file
+// as the phone does. A song that cannot be reached gets an address that fails, so
 // the engine reports it and moves on, as it does for any broken file.
 fun queueItem(entry: QueueEntry, sources: SongSources): QueueItem {
     val song = entry.song
@@ -73,7 +76,7 @@ fun queueItem(entry: QueueEntry, sources: SongSources): QueueItem {
         source = address?.source ?: UNREACHABLE,
         albumId = song.albumId,
         albumOrder = albumOrder(song),
-        durationMs = song.duration.takeIf { it > 0 }?.let { (it * 1000L).toULong() },
+        durationMs = knownLengthMs(song).takeIf { it > 0 }?.toULong(),
         replayGain = gain,
         headers = address?.headers.orEmpty().map { (name, value) -> HttpHeader(name, value) },
     )

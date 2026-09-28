@@ -29,6 +29,17 @@ class PlayCounterTest {
         assertEquals(1_000_000, counted.single().startedAt)
     }
 
+    // Octo lists many songs found online at 3:00, a guess; half of the
+    // file's own length is what counts.
+    @Test
+    fun aGuessedLengthGivesWayToTheFiles() {
+        val found = QueueEntry(3, Song("f", "Found online", duration = 180))
+        counter.update(PlayerState(current = found, playing = true, durationMs = 400_000))
+        now += 100_000
+        on(b)
+        assertEquals(emptyList<HeardPlay>(), counted)
+    }
+
     @Test
     fun lessThanHalfDoesNotCount() {
         on(a)

@@ -613,7 +613,5 @@ private class QueueClicks {
     }
 }
 
-private const val DOUBLE_CLICK_MS = 400L
-
 @Composable
 fun PanelSeparator() = Separator(Modifier.padding(vertical = Space.S))

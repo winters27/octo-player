@@ -43,6 +43,7 @@ import app.winters.octo.desktop.search.FetchPhase
 import app.winters.octo.desktop.search.SearchFilter
 import app.winters.octo.desktop.search.SearchFound
 import app.winters.octo.desktop.search.SearchState
+import app.winters.octo.desktop.ui.DOUBLE_CLICK_MS
 import app.winters.octo.desktop.ui.FailedLine
 import app.winters.octo.desktop.ui.FetchButton
 import app.winters.octo.desktop.ui.LoadingLine
@@ -57,6 +58,7 @@ import app.winters.octo.desktop.ui.onRightClick
 import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.playlistMenu
 import app.winters.octo.desktop.ui.rememberListState
+import app.winters.octo.discovery.knownLengthMs
 import app.winters.octo.subsonic.Song
 
 // Not in the library, in the phone app's words.
@@ -180,8 +182,10 @@ private fun CardRow(count: Int, card: @Composable (Int) -> Unit) {
     }
 }
 
-// A song the server found online: a double click plays it, a right click
-// opens its menu, and the "+" has the server add it to the library.
+// A song the server found online: a click plays it and the finds after it,
+// as on the phone, a right click opens its menu, and the "+" has the server
+// add it to the library. The second click of a double click does not start
+// it over.
 @Composable
 private fun OutsideSong(app: AppState, songs: List<Song>, index: Int, song: Song) {
     val outside = true
@@ -191,11 +195,11 @@ private fun OutsideSong(app: AppState, songs: List<Song>, index: Int, song: Song
         Modifier
             .fillMaxWidth()
             .height(52.dp)
-            .hoverLift(RoundedCornerShape(8.dp), clickable = false)
+            .hoverLift(RoundedCornerShape(8.dp))
             .onRightClick { app.popups.showAt(pointer.point) { close -> SongMenu(app, listOf(song), close, outside = outside) } }
             .clickable {
                 val now = System.currentTimeMillis()
-                if (now - clicks[0] < 400) app.play(songs, index)
+                if (now - clicks[0] >= DOUBLE_CLICK_MS) app.play(songs, index)
                 clicks[0] = now
             }
             .padding(horizontal = 8.dp),
@@ -207,7 +211,7 @@ private fun OutsideSong(app: AppState, songs: List<Song>, index: Int, song: Song
             Txt(song.title, OctoType.bodySmall)
             Txt(listOfNotNull(song.displayArtist ?: song.artist, song.album).joinToString(" · "), OctoType.caption, OctoColors.TextMuted)
         }
-        Txt(lengthText(song.duration), OctoType.caption, OctoColors.TextMuted, Modifier.width(52.dp))
+        Txt(lengthText((knownLengthMs(song) / 1000).toInt()), OctoType.caption, OctoColors.TextMuted, Modifier.width(52.dp))
         FetchButton(app, song)
         FetchProblem(app, song)
     }
