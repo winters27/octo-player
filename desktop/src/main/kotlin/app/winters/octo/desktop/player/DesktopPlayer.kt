@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.player
 
+import app.winters.octo.playback.NoSource
+import app.winters.octo.playback.QueueSource
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.flow.StateFlow
 
@@ -48,6 +50,8 @@ data class PlayerState(
     // How many songs have played to their end by themselves since the
     // player started (not skipped), for the sleep timer to count.
     val ended: Int = 0,
+    // Whether the last edit to the queue can be taken back (undo).
+    val canUndo: Boolean = false,
 )
 
 // Why a song could not play: in plain words for the listener, the song if
@@ -64,6 +68,8 @@ data class SavedQueue(
     val positionMs: Long = 0,
     val shuffle: Boolean = false,
     val repeat: RepeatMode = RepeatMode.Off,
+    // Where each song came from, in the same order as `songs`, when known.
+    val sources: List<QueueSource>? = null,
 )
 
 // What the desktop app needs from whatever plays its music. The screens
@@ -78,8 +84,9 @@ interface DesktopPlayer : AutoCloseable {
     fun positionMs(): Long
 
     // Replaces the queue and plays from `start`. Shuffled, that song plays
-    // first and the rest in a random order.
-    fun play(songs: List<Song>, start: Int = 0, shuffle: Boolean = false)
+    // first and the rest in a random order. `source` is the list they came
+    // from, for the queue's headings.
+    fun play(songs: List<Song>, start: Int = 0, shuffle: Boolean = false, source: QueueSource = NoSource)
 
     fun resume()
 
@@ -98,16 +105,41 @@ interface DesktopPlayer : AutoCloseable {
     // Plays a queue entry now.
     fun skipTo(key: Long)
 
-    // Puts songs right after the current one.
-    fun playNext(songs: List<Song>)
+    // Puts songs right after the current one. They are the listener's own
+    // unless a `source` says otherwise.
+    fun playNext(songs: List<Song>, source: QueueSource = QueueSource.You)
 
-    // Puts songs at the end of what is to come.
-    fun addToQueue(songs: List<Song>)
+    // Puts songs at the end of what is to come: the listener's own, or a
+    // radio's or Autoplay's by `source`.
+    fun addToQueue(songs: List<Song>, source: QueueSource = QueueSource.You)
+
+    // Puts the listener's songs among those to come, just before the entry
+    // `before` (at the end for null), as a drop into the queue does.
+    fun insert(songs: List<Song>, before: Long?)
 
     // Moves a song still to come, counted from the first after the current.
     fun moveUpcoming(from: Int, to: Int)
 
-    fun remove(key: Long)
+    // Moves entries to play just before the entry `before` (last for null),
+    // keeping their order; see PlayQueue.move.
+    fun move(keys: List<Long>, before: Long?)
+
+    fun remove(key: Long) = remove(listOf(key))
+
+    // Takes entries out as one edit. When the one playing goes, the next
+    // plays.
+    fun remove(keys: List<Long>)
+
+    // Takes out every song still to come; the one playing plays on.
+    fun clearUpcoming()
+
+    // Takes out the songs already played.
+    fun removePlayed()
+
+    // Takes back the most recent queue edit (a removal, a move, songs put
+    // in by the listener), if nothing else changed the queue since.
+    // Answers whether it did.
+    fun undo(): Boolean
 
     // Empties the queue and stops.
     fun clear()

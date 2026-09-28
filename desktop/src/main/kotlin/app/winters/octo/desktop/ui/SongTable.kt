@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -38,6 +39,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -46,6 +48,7 @@ import androidx.compose.ui.awt.awtEventOrNull
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -65,6 +68,8 @@ import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -177,6 +182,8 @@ fun SongTable(
     // Where picked rows live, for the menu's removals and the Delete key:
     // a playlist says which of its places they are.
     place: (List<TableRow>) -> SongPlace = { SongPlace.Library },
+    // What the rows do with songs dropped on them, if anything.
+    rowDrop: RowDrop? = null,
     empty: @Composable () -> Unit = {},
     footer: LazyListScope.() -> Unit = {},
     header: LazyListScope.() -> Unit = {},
@@ -204,6 +211,7 @@ fun SongTable(
     val rowHeight = rowHeightFor(settings.density)
     val showCovers = covers && settings.density == "roomy"
     val pointer = LocalPointer.current
+    val drag = LocalDrag.current
 
     fun picked(): List<Song> = selection.of(rows).map(TableRow::song)
     fun playFrom(key: String) {
@@ -359,9 +367,21 @@ fun SongTable(
                         }
                     },
                     onPlay = { playFrom(row.key) },
+                    // Dragging a picked row carries every picked song;
+                    // any other row carries itself, and is picked.
+                    onDragStart = { at ->
+                        if (row.key !in selection.picked) selection.click(row.key, toggle = false, range = false, order = keys)
+                        drag.start(picked(), at, place(selection.of(rows)))
+                    },
+                    onDrag = drag::move,
+                    onDragEnd = { drag.drop() },
+                    onDragCancel = drag::cancel,
                     onMore = { at ->
                         selection.pickForMenu(row.key)
                         openMenu(at)
+                    },
+                    drop = rowDrop?.takeIf { drag.active && it.takes(drag.from) }?.let { taken ->
+                        "$id:${row.key}" to Modifier.dropTarget("$id:${row.key}", taken.action) { songs -> taken.onDrop(songs, drag.from, row, drag.below) }
                     },
                 )
             }
@@ -520,9 +540,22 @@ private fun SongRow(
     cell: (RowScope, SongColumn) -> Modifier,
     onPress: (primary: Boolean, toggle: Boolean, range: Boolean) -> Unit,
     onPlay: () -> Unit,
+    onDragStart: (Offset) -> Unit,
+    onDrag: (Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
     onMore: (IntOffset) -> Unit,
+    // The row as a drop target, while a drag it takes is under way.
+    drop: Pair<String, Modifier>? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
+    // Where the row is in the window, to follow a drag in window terms, and
+    // the latest drag callbacks (the gesture is set up once per row).
+    var placed by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val dragStart by rememberUpdatedState(onDragStart)
+    val dragMove by rememberUpdatedState(onDrag)
+    val dragEnd by rememberUpdatedState(onDragEnd)
+    val dragCancel by rememberUpdatedState(onDragCancel)
     val hovered by interaction.collectIsHoveredAsState()
     val key = LocalKeyColour.current
     var moreAnchor by remember { mutableStateOf(IntRect.Zero) }
@@ -531,6 +564,18 @@ private fun SongRow(
             .fillMaxWidth()
             .height(height)
             .hoverable(interaction)
+            .then(drop?.second ?: Modifier)
+            .onGloballyPositioned { placed = it }
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { local -> placed?.let { dragStart(it.localToWindow(local)) } },
+                    onDragEnd = { dragEnd() },
+                    onDragCancel = { dragCancel() },
+                ) { change, _ ->
+                    change.consume()
+                    placed?.let { dragMove(it.localToWindow(change.position)) }
+                }
+            }
             .onPointerEvent(PointerEventType.Press) { event ->
                 val keys = event.keyboardModifiers
                 val toggle = if (app.mac) keys.isMetaPressed else keys.isCtrlPressed
@@ -547,6 +592,7 @@ private fun SongRow(
             hovered -> Box(Modifier.matchParentSize().background(HoverFill, Corner.RowShape))
         }
         if (focused) Box(Modifier.matchParentSize().border(FocusLine, OctoColors.FocusRing, Corner.RowShape))
+        drop?.let { DropLine(it.first) }
         Row(Modifier.fillMaxWidth().padding(horizontal = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ColumnGap)) {
             shown.forEach { column ->
                 Box(cell(this, column), contentAlignment = if (specOf(column).endAligned) Alignment.CenterEnd else Alignment.CenterStart) {

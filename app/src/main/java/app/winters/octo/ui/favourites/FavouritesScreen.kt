@@ -112,9 +112,9 @@ class FavouritesViewModel @Inject constructor(
 
     private fun songIds() = songs.value?.items.orEmpty().map { it.id }
 
-    fun playSongs(index: Int) = playback.playTracks(songIds(), index)
+    fun playSongs(index: Int) = playback.playTracks(songIds(), index, source = "Favourites")
 
-    fun shuffleSongs() = playback.playTracks(songIds(), shuffle = true)
+    fun shuffleSongs() = playback.playTracks(songIds(), shuffle = true, source = "Favourites")
 
     fun setOrder(order: SortOrder) {
         viewModelScope.launch { sorting.set(SortList.Favourites, order) }

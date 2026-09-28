@@ -61,7 +61,7 @@ import kotlinx.coroutines.launch
 
 @HiltViewModel(assistedFactory = GenreViewModel.Factory::class)
 class GenreViewModel @AssistedInject constructor(
-    @Assisted name: String,
+    @Assisted private val name: String,
     dao: CatalogDao,
     private val sorted: SortedLibrary,
     private val playback: PlaybackConnection,
@@ -76,9 +76,9 @@ class GenreViewModel @AssistedInject constructor(
     private fun ids() = tracks.value?.items.orEmpty().map { it.id }
 
     // Plays the genre's songs from one of them.
-    fun play(index: Int) = playback.playTracks(ids(), index)
+    fun play(index: Int) = playback.playTracks(ids(), index, source = name)
 
-    fun shuffle() = playback.playTracks(ids(), shuffle = true)
+    fun shuffle() = playback.playTracks(ids(), shuffle = true, source = name)
 
     fun setOrder(order: SortOrder) {
         viewModelScope.launch { sorted.setOrder(SortList.GenreSongs, order) }

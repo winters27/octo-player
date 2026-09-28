@@ -51,6 +51,7 @@ import app.winters.octo.ui.common.rememberOpenedBeside
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
 import app.winters.octo.ui.playlist.PlaylistPickerPage
+import app.winters.octo.ui.playlist.PlaylistSheetsViewModel
 import app.winters.octo.ui.server.ShareLinkPage
 import app.winters.octo.ui.server.ShareRequest
 import dev.chrisbanes.haze.HazeState
@@ -66,6 +67,7 @@ fun SongMenuHost(
     onOpen: (NavKey) -> Unit,
     backdrop: HazeState = LocalHaze.current,
     vm: SongMenuViewModel = hiltViewModel(),
+    sheets: PlaylistSheetsViewModel = hiltViewModel(),
 ) {
     // Rows swipe and speak through these while the host is shown.
     DisposableEffect(state, vm) {
@@ -95,8 +97,12 @@ fun SongMenuHost(
         val back: () -> Unit = { state.pages.back() }
         PopupPager(state.pages) { page, _ ->
             when (page) {
-                SongPage.Actions -> SongActionsPage(state, song, shareId, vm, phoneFiles, onOpen)
-                SongPage.AddToPlaylist -> PlaylistPickerPage(listOf(trackId), onBack = back, onDone = state::close)
+                SongPage.Actions -> SongActionsPage(state, song, shareId, vm, phoneFiles, onOpen, sheets)
+                SongPage.AddToPlaylist -> PlaylistPickerPage(listOf(trackId), onBack = back, onDone = state::close, vm = sheets)
+                SongPage.AddToLastPlaylist -> {
+                    val recent by sheets.recentIds.collectAsStateWithLifecycle()
+                    PlaylistPickerPage(listOf(trackId), onBack = back, onDone = state::close, vm = sheets, start = recent.firstOrNull())
+                }
                 SongPage.Rate -> RatePage(song, vm, onBack = back)
                 SongPage.Share -> shareId?.let { id ->
                     val request = remember(id, song.title) { ShareRequest(listOf(id), song.title) }
@@ -118,8 +124,13 @@ private fun SongActionsPage(
     vm: SongMenuViewModel,
     phoneFiles: PhoneFileActions,
     onOpen: (NavKey) -> Unit,
+    sheets: PlaylistSheetsViewModel,
 ) {
     val trackId = song.id
+    // The playlist added to last, while it is still there.
+    val playlists by sheets.playlists.collectAsStateWithLifecycle()
+    val recent by sheets.recentIds.collectAsStateWithLifecycle()
+    val last = recent.firstOrNull()?.let { id -> playlists.firstOrNull { it.id == id } }
     val context = state.lastContext
     val liked by vm.liked.collectAsStateWithLifecycle()
     val downloads by vm.downloadStates.collectAsStateWithLifecycle()
@@ -130,7 +141,7 @@ private fun SongActionsPage(
     val byHand = keptRow?.reasons?.contains(Reasons.MANUAL) == true
     val place = menuPlace(context, song.albumId, song.artistId)
     val phone = song.onPhone && !isFind(trackId)
-    val actions = songActions(isFind(trackId), radio, share = shareId != null, offline = !song.onPhone || keptRow != null, place = place, phone = phone)
+    val actions = songActions(isFind(trackId), radio, share = shareId != null, offline = !song.onPhone || keptRow != null, place = place, phone = phone, lastPlaylist = last != null)
 
     GlassMenuPage(
         header = {
@@ -160,6 +171,11 @@ private fun SongActionsPage(
                     }
                     GlassMenuAction(icon, downloadLabel(download), enabled = download == DownloadState.None, onClick = { vm.download(song) })
                 }
+                SongAction.AddToLastPlaylist -> GlassMenuAction(
+                    OctoIcons.AddToPlaylist,
+                    "Add to last playlist: ${last?.name.orEmpty()}",
+                    onClick = { state.pages.open(SongPage.AddToLastPlaylist) },
+                )
                 SongAction.AddToPlaylist -> GlassMenuAction(
                     OctoIcons.AddToPlaylist,
                     "Add to playlist",

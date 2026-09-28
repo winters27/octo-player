@@ -1,22 +1,31 @@
 package app.winters.octo.desktop.player
 
+import app.winters.octo.playback.NoSource
+import app.winters.octo.playback.QueueSource
 import app.winters.octo.playback.insertIntoShuffle
+import app.winters.octo.playback.movedSource
 import app.winters.octo.playback.removeFromShuffle
 import app.winters.octo.playback.shuffleRankFor
 import app.winters.octo.subsonic.Song
 import kotlin.random.Random
 
-// One place in the queue. The key tells two plays of the same song apart.
-data class QueueEntry(val key: Long, val song: Song)
+// One place in the queue. The key tells two plays of the same song apart;
+// `source` says where it came from: the listener's own pick, the list it
+// was played from, or Autoplay.
+data class QueueEntry(val key: Long, val song: Song, val source: QueueSource = NoSource)
 
 enum class RepeatMode { Off, All, One }
+
+// How many queue edits can be taken back, most recent first.
+const val UNDO_DEPTH = 20
 
 // The queue as two lists, the way the phone app keeps it: the songs in
 // queue order, and `order`, the queue positions in the order they play.
 // Unshuffled the two agree. Songs put in land by the shared ShuffleQueue
 // rules, so "Play next" plays next and "Add to queue" plays after the
-// listener's own songs, shuffled or not. Not thread safe; the player that
-// owns it keeps calls in order.
+// listener's own songs, shuffled or not. Edits the listener makes can be
+// taken back (undo), one at a time, as long as nothing else changed the
+// queue since. Not thread safe; the player that owns it keeps calls in order.
 class PlayQueue(private val random: Random = Random.Default) {
     private val entries = ArrayList<QueueEntry>()
     private var order = IntArray(0)
@@ -50,9 +59,10 @@ class PlayQueue(private val random: Random = Random.Default) {
 
     // Starts afresh with these songs, playing from `start`. Shuffled, the
     // chosen song plays first and the rest follow in a random order.
-    fun replace(songs: List<Song>, start: Int, shuffle: Boolean) {
+    fun replace(songs: List<Song>, start: Int, shuffle: Boolean, source: QueueSource = NoSource) {
+        changedElsewhere()
         entries.clear()
-        songs.forEach { entries += QueueEntry(nextKey++, it) }
+        songs.forEach { entries += QueueEntry(nextKey++, it, source) }
         current = if (entries.isEmpty()) -1 else start.coerceIn(0, entries.lastIndex)
         shuffled = shuffle
         order = if (shuffle) shuffledAround(current) else IntArray(entries.size) { it }
@@ -60,10 +70,12 @@ class PlayQueue(private val random: Random = Random.Default) {
 
     // Puts back a queue saved earlier: the songs in queue order, the play
     // order, and the current position. Unshuffled, or with a play order
-    // that does not fit the songs, they play in queue order.
-    fun restore(songs: List<Song>, playOrder: List<Int>, start: Int, shuffle: Boolean) {
+    // that does not fit the songs, they play in queue order. `sources` go
+    // with the songs when they were saved too.
+    fun restore(songs: List<Song>, playOrder: List<Int>, start: Int, shuffle: Boolean, sources: List<QueueSource>? = null) {
+        changedElsewhere()
         entries.clear()
-        songs.forEach { entries += QueueEntry(nextKey++, it) }
+        songs.forEachIndexed { i, song -> entries += QueueEntry(nextKey++, song, sources?.getOrNull(i) ?: NoSource) }
         current = if (entries.isEmpty()) -1 else start.coerceIn(0, entries.lastIndex)
         val fits = playOrder.size == entries.size && playOrder.sorted() == entries.indices.toList()
         shuffled = shuffle && fits
@@ -72,6 +84,7 @@ class PlayQueue(private val random: Random = Random.Default) {
 
     fun setShuffle(on: Boolean) {
         if (on == shuffled) return
+        changedElsewhere()
         shuffled = on
         order = if (on) shuffledAround(current) else IntArray(entries.size) { it }
     }
@@ -83,23 +96,42 @@ class PlayQueue(private val random: Random = Random.Default) {
     }
 
     // Puts songs right after the current one, in both orders.
-    fun playNext(songs: List<Song>) {
+    fun playNext(songs: List<Song>, source: QueueSource = QueueSource.You) {
         if (songs.isEmpty()) return
-        val at = if (current < 0) entries.size else current + 1
-        insert(at, songs, playNext = true)
+        edit(undoable = source == QueueSource.You) {
+            val at = if (current < 0) entries.size else current + 1
+            insert(at, songs, source, shuffleRankFor(order, at, entries.size, current, playNext = true))
+        }
     }
 
     // Puts songs at the end of the queue; shuffled, they play after
-    // everything still to come.
-    fun add(songs: List<Song>) {
+    // everything still to come. The listener's own can be taken back;
+    // songs a radio or Autoplay adds cannot.
+    fun add(songs: List<Song>, source: QueueSource = QueueSource.You) {
         if (songs.isEmpty()) return
-        insert(entries.size, songs, playNext = false)
+        edit(undoable = source == QueueSource.You) {
+            insert(entries.size, songs, source, order.size)
+        }
     }
 
-    private fun insert(at: Int, songs: List<Song>, playNext: Boolean) {
-        val placed = shuffleRankFor(order, at, entries.size, current, playNext = playNext)
+    // Puts the listener's songs among those to come, just before the entry
+    // `before` (at the end for null or an entry not to come), as a drop
+    // does. Wherever they land, they are the listener's own.
+    fun insertBefore(songs: List<Song>, before: Long?) {
+        if (songs.isEmpty()) return
+        edit(undoable = true) {
+            val target = upcoming.firstOrNull { it.key == before }
+            val position = target?.let { t -> entries.indexOfFirst { it.key == t.key } } ?: entries.size
+            val placed = if (target != null) order.indexOf(position) else order.size
+            insert(position, songs, QueueSource.You, placed)
+        }
+    }
+
+    // Songs go in at queue position `at`, after the first `placed` entries
+    // of the play order.
+    private fun insert(at: Int, songs: List<Song>, source: QueueSource, placed: Int) {
         order = insertIntoShuffle(order, at, songs.size, placed)
-        entries.addAll(at, songs.map { QueueEntry(nextKey++, it) })
+        entries.addAll(at, songs.map { QueueEntry(nextKey++, it, source) })
         if (current >= at) current += songs.size
         // Nothing was playing: the first song put in is up.
         if (current < 0 && entries.isNotEmpty()) current = order.first()
@@ -108,9 +140,37 @@ class PlayQueue(private val random: Random = Random.Default) {
     // Takes an entry out. When it is the one playing, the next in the play
     // order takes its place (or the one before, at the end). Answers
     // whether the current entry changed.
-    fun remove(key: Long): Boolean {
+    fun remove(key: Long): Boolean = remove(listOf(key))
+
+    // Takes these entries out, as one edit that can be taken back. Answers
+    // whether the current entry changed.
+    fun remove(keys: Collection<Long>): Boolean {
+        val wanted = keys.toSet()
+        if (entries.none { it.key in wanted }) return false
+        val playingKey = currentEntry?.key
+        edit(undoable = true) { wanted.forEach(::takeOut) }
+        return currentEntry?.key != playingKey
+    }
+
+    // Takes out every song still to come; the one playing plays on.
+    fun clearUpcoming(): Boolean {
+        val coming = upcoming.map { it.key }
+        if (current < 0 || coming.isEmpty()) return false
+        edit(undoable = true) { coming.forEach(::takeOut) }
+        return true
+    }
+
+    // Takes out the songs played before the current one.
+    fun removePlayed(): Boolean {
+        val gone = played.map { it.key }
+        if (gone.isEmpty()) return false
+        edit(undoable = true) { gone.forEach(::takeOut) }
+        return true
+    }
+
+    private fun takeOut(key: Long) {
         val position = entries.indexOfFirst { it.key == key }
-        if (position < 0) return false
+        if (position < 0) return
         val wasCurrent = position == current
         val followingKey = if (wasCurrent) {
             val r = rank
@@ -125,7 +185,6 @@ class PlayQueue(private val random: Random = Random.Default) {
             position < current -> current - 1
             else -> current
         }
-        return wasCurrent
     }
 
     // Moves one of the songs still to come, counted from the first one
@@ -133,22 +192,49 @@ class PlayQueue(private val random: Random = Random.Default) {
     // is a move in the queue itself; shuffled it changes only the play order,
     // which is the order the listener sees and drags in.
     fun moveUpcoming(from: Int, to: Int) {
-        val base = if (current < 0) 0 else rank + 1
-        val a = base + from
-        val b = base + to
-        if (a !in order.indices || b !in order.indices || a == b) return
-        if (!shuffled) {
-            val moved = entries.removeAt(a)
-            entries.add(b, moved)
-            // Unshuffled, the play order is the queue order.
-            order = IntArray(entries.size) { it }
-            // The current song is before every upcoming one, so it stays put.
-        } else {
-            val list = order.toMutableList()
-            val position = list.removeAt(a)
-            list.add(b, position)
-            order = list.toIntArray()
+        val coming = upcoming
+        val moving = coming.getOrNull(from) ?: return
+        if (to !in coming.indices || from == to) return
+        val rest = coming.filter { it.key != moving.key }
+        move(listOf(moving.key), rest.getOrNull(to)?.key, adopt = false)
+    }
+
+    // Moves entries (any but the one playing, songs already played too) to
+    // play just before the entry `before`, or last for null. They keep their
+    // order among themselves and, landing inside a run of one source, join
+    // it (movedSource), so a song dragged in among the listener's own
+    // becomes theirs. `before` must be a song still to come. Unshuffled
+    // the queue itself changes; shuffled only the play order. Answers
+    // whether anything moved.
+    fun move(keys: Collection<Long>, before: Long?, adopt: Boolean = true): Boolean {
+        val playingKey = currentEntry?.key
+        val wanted = keys.toSet() - setOfNotNull(playingKey, before)
+        val sequence = order.map { entries[it] }
+        val moving = sequence.filter { it.key in wanted }
+        if (moving.isEmpty()) return false
+        val rest = sequence.filter { it.key !in wanted }
+        // The first place after the song playing.
+        val firstFree = if (playingKey == null) 0 else rest.indexOfFirst { it.key == playingKey } + 1
+        val at = if (before == null) rest.size else rest.indexOfFirst { it.key == before }.takeIf { it >= firstFree } ?: return false
+        val beforeSource = rest.getOrNull(at - 1)?.takeIf { at - 1 >= firstFree }?.source
+        val afterSource = rest.getOrNull(at)?.source
+        val placed = moving.map { if (adopt) it.copy(source = movedSource(it.source, beforeSource, afterSource)) else it }
+        val result = rest.subList(0, at) + placed + rest.subList(at, rest.size)
+        if (result == sequence) return false
+        edit(undoable = true) {
+            val byKey = placed.associateBy { it.key }
+            if (!shuffled) {
+                entries.clear()
+                entries += result
+                order = IntArray(entries.size) { it }
+            } else {
+                entries.replaceAll { byKey[it.key] ?: it }
+                val position = entries.withIndex().associate { (i, e) -> e.key to i }
+                order = result.map { position.getValue(it.key) }.toIntArray()
+            }
+            current = playingKey?.let { k -> entries.indexOfFirst { it.key == k } } ?: -1
         }
+        return true
     }
 
     // Plays the entry with this key next, straight away.
@@ -186,8 +272,71 @@ class PlayQueue(private val random: Random = Random.Default) {
     }
 
     fun clear() {
+        changedElsewhere()
         entries.clear()
         order = IntArray(0)
         current = -1
+    }
+
+    // ---- Undo ----
+
+    // The queue as it was before an edit: its entries, play order and
+    // shuffle, and the entry that was playing.
+    private class Snapshot(val entries: List<QueueEntry>, val order: IntArray, val shuffled: Boolean, val playing: Long?)
+
+    // An edit that can be taken back, and the queue's stamp just after it,
+    // so an undo never acts on a queue something else has changed since.
+    private class Undo(val before: Snapshot, val stampBefore: Long, val stampAfter: Long)
+
+    // Changes every time the queue itself changes (not when a song ends
+    // and the next starts), and never goes back to a number used before.
+    private var stamps = 0L
+    private var stamp = 0L
+    private val undos = ArrayDeque<Undo>()
+
+    // Whether the most recent edit can be taken back now.
+    val canUndo: Boolean get() = undos.lastOrNull()?.stampAfter == stamp
+
+    private fun edit(undoable: Boolean, change: () -> Unit) {
+        val before = Snapshot(entries.toList(), order.copyOf(), shuffled, currentEntry?.key)
+        val stampBefore = stamp
+        change()
+        stamp = ++stamps
+        if (!undoable) {
+            undos.clear()
+            return
+        }
+        undos.addLast(Undo(before, stampBefore, stamp))
+        while (undos.size > UNDO_DEPTH) undos.removeFirst()
+    }
+
+    // A change that cannot be taken back, like a new queue or shuffle: the
+    // edits before it cannot be either.
+    private fun changedElsewhere() {
+        stamp = ++stamps
+        undos.clear()
+    }
+
+    // Takes back the most recent edit, putting every song back where it was.
+    // The song playing now plays on, wherever it lands; if the edit had put
+    // it in, the one playing before comes back instead. Answers null when
+    // there is nothing to take back, else whether the current entry changed.
+    fun undo(): Boolean? {
+        val last = undos.lastOrNull()
+        if (last == null || last.stampAfter != stamp) {
+            undos.clear()
+            return null
+        }
+        undos.removeLast()
+        val playingKey = currentEntry?.key
+        val before = last.before
+        entries.clear()
+        entries += before.entries
+        order = before.order.copyOf()
+        shuffled = before.shuffled
+        val keep = playingKey?.let { k -> entries.indexOfFirst { it.key == k } }?.takeIf { it >= 0 }
+        current = keep ?: before.playing?.let { k -> entries.indexOfFirst { it.key == k } } ?: -1
+        stamp = last.stampBefore
+        return currentEntry?.key != playingKey
     }
 }

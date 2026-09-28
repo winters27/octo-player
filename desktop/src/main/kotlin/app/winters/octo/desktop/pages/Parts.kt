@@ -110,6 +110,8 @@ fun ListHeader(
     online: Boolean = false,
     extras: @Composable () -> Unit = {},
     art: Dp = 200.dp,
+    // Draws the name instead of the plain title, like one renamed by clicking it.
+    titleContent: (@Composable () -> Unit)? = null,
 ) {
     Row(modifier.fillMaxWidth().padding(bottom = 20.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
         Cover(
@@ -121,7 +123,7 @@ fun ListHeader(
         )
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Txt(kind, OctoType.caption, OctoColors.TextMuted)
-            Txt(title, OctoType.display, maxLines = 2)
+            if (titleContent != null) titleContent() else Txt(title, OctoType.display, maxLines = 2)
             subtitle?.invoke()
             if (details != null) Txt(details, OctoType.bodySmall, OctoColors.TextMuted)
             Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {

@@ -2,7 +2,12 @@ package app.winters.octo.desktop.ui
 
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ImageComposeScene
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerButton
+import androidx.compose.ui.input.pointer.PointerButtons
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.unit.Density
+import app.winters.octo.desktop.AddQuestion
 import app.winters.octo.design.LocalTyping
 import app.winters.octo.design.TypingState
 import app.winters.octo.desktop.AppState
@@ -14,6 +19,7 @@ import app.winters.octo.desktop.audio.NativeAudioEngine
 import app.winters.octo.desktop.audio.ServerSongs
 import app.winters.octo.desktop.audio.writeSine
 import app.winters.octo.desktop.lyrics.openLyricsMenu
+import app.winters.octo.desktop.removeQueued
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.server.Accounts
@@ -28,6 +34,7 @@ import app.winters.octo.query.LibraryQuery
 import app.winters.octo.query.QueryField
 import app.winters.octo.query.QueryOp
 import app.winters.octo.query.QueryRule
+import app.winters.octo.ui.playlist.planAdd
 import app.winters.octo.subsonic.Song
 import java.io.File
 import javax.swing.SwingUtilities
@@ -67,6 +74,7 @@ class ScreenShotsTest {
             server.answer("search3", """"searchResult3":{"song":[$songs],"album":[{"id":"a1","name":"OK Computer","artist":"Radiohead"}],"artist":[{"id":"r1","name":"Radiohead"}]}""")
             server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"p1","name":"Late night","songCount":12},{"id":"p2","name":"Running","songCount":40}]}""")
             server.answer("getAlbum", """"album":{"id":"a1","name":"OK Computer","artist":"Radiohead","artistId":"r1","year":1997,"songCount":7,"song":[$songs]}""")
+            server.answer("getPlaylist", """"playlist":{"id":"p1","name":"Late night","owner":"winters","comment":"For the drive home after midnight","public":false,"songCount":12,"entry":[$songs]}""")
             server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly"},{"id":"st2","name":"Rock mix"}]}""")
             // The phone's queue, saved on the server, for Home's pick-up card.
             server.answer("getPlayQueue", """"playQueue":{"entry":[${songs}],"current":"s3","position":61000,"changed":"2026-09-28T10:00:00Z","changedBy":"Pixel 9"}""")
@@ -214,6 +222,32 @@ class ScreenShotsTest {
                 app.popups.showAt(androidx.compose.ui.unit.IntOffset(700, 300)) { close -> ArtistMenu(app, "r1", "Radiohead", null, close) }
             }
             shot("menu-artist")
+            // A playlist's page, then its menu, then the chooser asking about
+            // songs already on a playlist, then the new playlist form.
+            SwingUtilities.invokeAndWait {
+                app.popups.close()
+                app.navigator.go(Page.Playlist("p1"))
+            }
+            shot("playlist", 2_000)
+            SwingUtilities.invokeAndWait {
+                app.popups.showAt(androidx.compose.ui.unit.IntOffset(560, 250)) { close -> PlaylistMenu(app, app.playlists.first(), close) }
+            }
+            shot("playlist-menu")
+            SwingUtilities.invokeAndWait {
+                val picked = app.library!!.index!!.songs.take(5)
+                val question = AddQuestion(
+                    app.playlists.first(),
+                    planAdd(picked.map { it.id }, picked.take(2).map { it.id }.toSet()),
+                    picked,
+                )
+                app.popups.showAt(androidx.compose.ui.unit.IntOffset(700, 300)) { close -> AddAgainMenu(app, question, close) { } }
+            }
+            shot("duplicates")
+            SwingUtilities.invokeAndWait {
+                app.popups.close()
+                newPlaylist(app)
+            }
+            shot("new-playlist")
             SwingUtilities.invokeAndWait {
                 app.popups.close()
                 app.navigator.go(Page.Settings)
@@ -237,6 +271,48 @@ class ScreenShotsTest {
             shot("player", 4_000)
             SwingUtilities.invokeAndWait { app.togglePlayerPanel(SidePanel.Queue) }
             shot("player-queue")
+            // The queue in its parts: played, now playing, the listener's
+            // own, then the rest of the album; then a song's menu there and
+            // the queue's own menu.
+            SwingUtilities.invokeAndWait {
+                app.togglePlayerPanel(SidePanel.Queue)
+                app.fullPlayer = false
+                app.navigator.go(Page.Album("a1"))
+                val list = app.library!!.index!!.songs
+                app.play(list.filter { it.albumId == "a1" }.sortedBy { it.track }, 4, source = "OK Computer")
+                app.playNext(list.filter { it.albumId == "a2" }.take(2))
+                app.showSidePanel(SidePanel.Queue)
+            }
+            shot("queue", 2_000)
+            // A click (or a right click) at a spot in the window, with a
+            // frame drawn between each step, as a real pointer would allow.
+            fun click(x: Float, y: Float, right: Boolean = false) {
+                val at = Offset(x, y)
+                val button = if (right) PointerButton.Secondary else PointerButton.Primary
+                val steps = listOf(
+                    { scene.sendPointerEvent(PointerEventType.Move, at) },
+                    { scene.sendPointerEvent(PointerEventType.Press, at, buttons = PointerButtons(isPrimaryPressed = !right, isSecondaryPressed = right), button = button) },
+                    { scene.sendPointerEvent(PointerEventType.Release, at, buttons = PointerButtons(), button = button) },
+                )
+                steps.forEach { step ->
+                    SwingUtilities.invokeAndWait {
+                        step()
+                        scene.render()
+                    }
+                }
+            }
+            // A song under "Next from you", then the queue's More button.
+            click(1250f, 463f, right = true)
+            shot("queue-menu")
+            SwingUtilities.invokeAndWait { app.popups.close() }
+            click(1418f, 107f)
+            shot("queue-options")
+            // Taking a song out: the notice line, with Undo.
+            SwingUtilities.invokeAndWait {
+                app.popups.close()
+                app.removeQueued(listOf(app.player.state.value.upcoming.last().key))
+            }
+            shot("queue-undo")
             // A song the server found online, not in the library: the
             // floating player offers its "+" in place of the heart.
             SwingUtilities.invokeAndWait {

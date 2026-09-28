@@ -6,8 +6,8 @@ import org.junit.Test
 
 // What each menu offers, group by group, in the words shown.
 class MenuActionsTest {
-    private fun labels(count: Int, place: SongPlace = SongPlace.Library, outside: Boolean = false, owns: Boolean = false, starred: Boolean = false) =
-        songMenuActions(count, place, outside, owns).map { group -> group.map { songActionLabel(it, starred) } }
+    private fun labels(count: Int, place: SongPlace = SongPlace.Library, outside: Boolean = false, owns: Boolean = false, starred: Boolean = false, last: String? = null) =
+        songMenuActions(count, place, outside, owns, lastPlaylist = last != null).map { group -> group.map { songActionLabel(it, starred, last) } }
 
     @Test
     fun oneLibrarySongOffersEveryGroupButRemoval() {
@@ -34,11 +34,16 @@ class MenuActionsTest {
     }
 
     @Test
-    fun songsInTheListenersOwnPlaylistCanComeOutOfIt() {
+    fun songsInTheListenersOwnPlaylistCanMoveOrComeOutOfIt() {
         val place = SongPlace.Playlist("p1", listOf(4, 7))
-        assertEquals(listOf("Remove from this playlist"), labels(2, place, owns = true).last())
+        assertEquals(listOf(listOf("Move"), listOf("Remove from this playlist")), labels(2, place, owns = true).takeLast(2))
         // Someone else's playlist, or one the server keeps, cannot be changed.
         assertEquals(listOf("Add to playlist", "Add to favourites", "Rate"), labels(2, place, owns = false).last())
+    }
+
+    @Test
+    fun theLastPlaylistComesFirstAmongTheWaysToKeepSongs() {
+        assertEquals(listOf("Add to last playlist: Late night", "Add to playlist", "Add to favourites", "Rate"), labels(1, last = "Late night")[1])
     }
 
     @Test
@@ -46,6 +51,13 @@ class MenuActionsTest {
         val groups = labels(1, SongPlace.Queue(listOf(12L)))
         assertEquals(listOf("Remove from the queue"), groups.last())
         assertEquals(listOf("Song details"), groups[groups.size - 2])
+    }
+
+    @Test
+    fun inTheQueuePlayingAndQueueingGiveWayToItsOwnRows() {
+        // Play, Play next and Add to queue would play or queue a second copy.
+        assertEquals(listOf("Start radio"), labels(1, SongPlace.Queue(listOf(12L))).first())
+        assertEquals(listOf("Add to playlist", "Add to favourites", "Rate"), labels(2, SongPlace.Queue(listOf(12L, 13L))).first())
     }
 
     @Test
@@ -78,8 +90,25 @@ class MenuActionsTest {
         )
         assertEquals(listOf(playing + CollectionAction.StartRadio, listOf(CollectionAction.AddToPlaylist)), albumMenuActions(outside = true))
         assertEquals(listOf(playing + CollectionAction.StartRadio, listOf(CollectionAction.Favourite)), artistMenuActions())
-        assertEquals(listOf(playing, listOf(CollectionAction.Pin)), playlistMenuActions())
-        // An empty playlist has nothing to play.
-        assertEquals(listOf(listOf(CollectionAction.Pin)), playlistMenuActions(empty = true))
+        // Someone else's playlist can be played, pinned, copied and written to a file.
+        assertEquals(
+            listOf(playing, listOf(CollectionAction.Pin), listOf(CollectionAction.Duplicate, CollectionAction.Export)),
+            playlistMenuActions(),
+        )
+        // The listener's own can also be renamed, shown to others, and deleted, last.
+        assertEquals(
+            listOf(
+                playing,
+                listOf(CollectionAction.Pin),
+                listOf(CollectionAction.Rename, CollectionAction.Duplicate, CollectionAction.Export, CollectionAction.Public),
+                listOf(CollectionAction.Delete),
+            ),
+            playlistMenuActions(owns = true),
+        )
+        // An empty playlist has nothing to play or write out.
+        assertEquals(
+            listOf(listOf(CollectionAction.Pin), listOf(CollectionAction.Rename, CollectionAction.Duplicate, CollectionAction.Public), listOf(CollectionAction.Delete)),
+            playlistMenuActions(empty = true, owns = true),
+        )
     }
 }

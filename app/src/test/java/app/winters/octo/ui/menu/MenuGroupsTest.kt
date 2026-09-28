@@ -97,7 +97,7 @@ class MenuGroupsTest {
         assertEquals(
             listOf(
                 listOf(CollectionAction.Unpin),
-                listOf(CollectionAction.Rename, CollectionAction.Delete),
+                listOf(CollectionAction.Rename, CollectionAction.Duplicate, CollectionAction.Delete),
             ),
             collectionMenuGroups(playlistActions(empty = true, pin = PinSpot.First)),
         )

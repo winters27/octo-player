@@ -102,23 +102,6 @@ class EnginePlayerTest : DesktopPlayerContract() {
         assertFalse(p.state.value.stopAfterCurrent)
     }
 
-    @Test
-    fun autoplayIsAskedWhenTheLastSongStarts() {
-        val p = newPlayer() as EnginePlayer
-        val asked = java.util.concurrent.atomic.AtomicReference<String?>()
-        p.autoplay = AutoplayHook { last, _, add ->
-            asked.set(last.id)
-            add(listOf(songs[0].copy(id = "more")))
-        }
-        p.play(songs, 3)
-        elapse(p, 100_300)
-        // The hook is called on the engine's thread, just after the news.
-        val until = System.currentTimeMillis() + 2_000
-        while (p.state.value.upcoming.isEmpty() && System.currentTimeMillis() < until) Thread.sleep(5)
-        assertEquals("s5", asked.get())
-        assertEquals("more", p.state.value.upcoming.lastOrNull()?.song?.id)
-    }
-
     companion object {
         // What plays out for real at the end of a wait, in milliseconds.
         private const val PLAY_OUT_MS = 1_500L

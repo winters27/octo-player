@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.setAutoplay
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.nav.shortcutList
@@ -111,7 +112,12 @@ fun SettingsPage(app: AppState, visit: Visit) {
         }
         item(key = "playback") {
             SettingsCard("Playback") {
-                Txt("The equalizer, loudness, crossfade and speed are on the Sound page.", OctoType.bodySmall, OctoColors.TextSecondary, maxLines = 2)
+                SwitchLine(
+                    "Autoplay",
+                    "When the queue ends, similar songs keep playing: songs like it from your server, or by the same artist or in the same genre.",
+                    settings.playback.autoplay,
+                ) { on -> app.setAutoplay(on) }
+                Txt("The equalizer, loudness, crossfade and speed are on the Sound page.", OctoType.bodySmall, OctoColors.TextSecondary, Modifier.padding(top = 12.dp), maxLines = 2)
                 Row(Modifier.padding(top = 8.dp)) {
                     GlazeCapsule(OctoIcons.Sound, "Open Sound", { app.navigator.go(Page.Sound) })
                 }

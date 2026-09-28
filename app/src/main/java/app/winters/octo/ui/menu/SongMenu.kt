@@ -63,7 +63,7 @@ interface QuickSongActions {
 
 // The pages of a song's menu: its actions first, and what some of them open
 // in its place, each with a way back.
-enum class SongPage { Actions, AddToPlaylist, Rate, Share, Info }
+enum class SongPage { Actions, AddToPlaylist, AddToLastPlaylist, Rate, Share, Info }
 
 // Which song the menu is open for, if any. Any song on any screen can
 // open it: a long press on a row, or the more button in the player. It also
@@ -111,7 +111,7 @@ val LocalSongMenu = staticCompositionLocalOf<SongMenuState> { error("No song men
 
 // The choices in a song's menu, in the order shown.
 enum class SongAction {
-    PlayNext, AddToQueue, StartRadio, Download, AddToPlaylist, RemoveFromPlaylist, Select, KeepOffline, ShareFile, Share, Like,
+    PlayNext, AddToQueue, StartRadio, Download, AddToLastPlaylist, AddToPlaylist, RemoveFromPlaylist, Select, KeepOffline, ShareFile, Share, Like,
     Rate, GoToAlbum, GoToArtist, SetAsSound, DeleteFromPhone, Info,
 }
 
@@ -141,6 +141,8 @@ fun menuPlace(context: SongMenuContext, albumId: String, artistId: String): Menu
 // a copy of the song on a server that shares. A library song only on a
 // server (`offline`) can be downloaded to the phone. One with a file on the
 // phone (`phone`) can send that file, ring with it, or delete it.
+// `lastPlaylist` is whether a playlist was added to lately, offered first
+// among the ways to keep the song.
 fun songActions(
     find: Boolean,
     radio: Boolean,
@@ -148,6 +150,7 @@ fun songActions(
     offline: Boolean = false,
     place: MenuPlace = MenuPlace(),
     phone: Boolean = false,
+    lastPlaylist: Boolean = false,
 ): List<SongAction> = buildList {
     add(SongAction.PlayNext)
     add(SongAction.AddToQueue)
@@ -157,6 +160,7 @@ fun songActions(
         if (place.inPlaylist) add(SongAction.RemoveFromPlaylist)
         if (place.selectable) add(SongAction.Select)
     } else {
+        if (lastPlaylist) add(SongAction.AddToLastPlaylist)
         add(SongAction.AddToPlaylist)
         if (place.inPlaylist) add(SongAction.RemoveFromPlaylist)
         if (place.selectable) add(SongAction.Select)
@@ -180,7 +184,7 @@ fun songActions(
 // what takes it away. A hairline parts the groups.
 private val SongMenuOrder = listOf(
     listOf(SongAction.PlayNext, SongAction.AddToQueue, SongAction.StartRadio),
-    listOf(SongAction.AddToPlaylist, SongAction.Like, SongAction.Rate, SongAction.Download, SongAction.KeepOffline),
+    listOf(SongAction.AddToLastPlaylist, SongAction.AddToPlaylist, SongAction.Like, SongAction.Rate, SongAction.Download, SongAction.KeepOffline),
     listOf(SongAction.GoToAlbum, SongAction.GoToArtist),
     listOf(SongAction.Share, SongAction.ShareFile, SongAction.SetAsSound, SongAction.Info, SongAction.Select),
     listOf(SongAction.RemoveFromPlaylist, SongAction.DeleteFromPhone),
@@ -295,7 +299,7 @@ internal suspend fun playRadio(seed: TrackEntity, discovery: Discovery, playback
     }
     // Only the song itself back means the server found nothing like it.
     if (songs.size > 1) {
-        playback.playTracks(songs.map { it.id }, 0)
+        playback.playTracks(songs.map { it.id }, 0, source = "${seed.title} radio")
     } else {
         feedback.show("No similar songs found")
     }

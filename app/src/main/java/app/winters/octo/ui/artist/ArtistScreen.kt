@@ -174,11 +174,11 @@ class ArtistViewModel @AssistedInject constructor(
 
     // Plays all their songs in the order shown, or shuffled.
     fun play(shuffle: Boolean) {
-        playback.playTracks(songs.value.map { it.id }, 0, shuffle)
+        playback.playTracks(songs.value.map { it.id }, 0, shuffle, artist.value?.name)
     }
 
     fun playSong(index: Int) {
-        playback.playTracks(songs.value.map { it.id }, index)
+        playback.playTracks(songs.value.map { it.id }, index, source = artist.value?.name)
     }
 
     // Plays their most played song, then songs like it from the server.
@@ -195,7 +195,7 @@ class ArtistViewModel @AssistedInject constructor(
             }
             // Only the song itself back means the server found nothing like it.
             if (found.size > 1) {
-                playback.playTracks(found.map { it.id }, 0)
+                playback.playTracks(found.map { it.id }, 0, source = "${seed.title} radio")
             } else {
                 feedback.show("No similar songs found")
             }
@@ -223,7 +223,7 @@ class ArtistViewModel @AssistedInject constructor(
     // Plays the top songs from one of them.
     fun playTop(index: Int) {
         val songs = extras.value?.topSongs ?: return
-        playback.playTracks(songs.map { it.id }, index)
+        playback.playTracks(songs.map { it.id }, index, source = artist.value?.name)
     }
 
     @AssistedFactory

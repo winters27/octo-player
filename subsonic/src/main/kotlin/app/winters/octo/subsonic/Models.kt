@@ -215,6 +215,15 @@ data class PlaylistWithSongs(
     val readonly: Boolean = false,
 )
 
+// Where one of a playlist's songs sits on the server, for writing a
+// playlist file. Kept apart from Song so the library's copy of every song
+// does not carry its path.
+@Serializable
+data class SongPath(val id: String, val path: String? = null)
+
+@Serializable
+internal data class PlaylistPaths(val entry: List<SongPath> = emptyList())
+
 @Serializable
 data class SearchResult(
     val artist: List<Artist> = emptyList(),

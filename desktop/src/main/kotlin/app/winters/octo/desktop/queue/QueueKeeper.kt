@@ -5,6 +5,9 @@ import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.QueueEntry
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.SavedQueue
+import app.winters.octo.playback.QueueSource
+import app.winters.octo.playback.encoded
+import app.winters.octo.playback.queueSourceOf
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -42,6 +45,9 @@ data class QueueFile(
     val index: Int,
     val shuffle: Boolean = false,
     val repeat: String = RepeatMode.Off.name,
+    // Where each song came from ("you", "list:OK Computer"), for the
+    // queue's headings; missing in files saved before there were any.
+    val sources: List<String>? = null,
 )
 
 // Where in the current song playback was, kept apart from the queue so
@@ -63,18 +69,18 @@ fun queueFileOf(state: PlayerState, max: Int = SAVED_QUEUE_MAX): QueueFile? {
     if (state.queue.size <= max) {
         val position = state.queue.withIndex().associate { (i, entry) -> entry.key to i }
         val order = (state.played + current + state.upcoming).mapNotNull { position[it.key] }
-        return QueueFile(state.queue.map(QueueEntry::song), order, position[current.key] ?: 0, state.shuffle, repeat)
+        return QueueFile(state.queue.map(QueueEntry::song), order, position[current.key] ?: 0, state.shuffle, repeat, state.queue.map { it.source.encoded() })
     }
     val before = state.played.takeLast(minOf(KEEP_PLAYED, max / 4))
     val after = state.upcoming.take(max - before.size - 1)
-    val songs = (before + current + after).map(QueueEntry::song)
-    return QueueFile(songs, songs.indices.toList(), before.size, state.shuffle, repeat)
+    val kept = before + current + after
+    return QueueFile(kept.map(QueueEntry::song), kept.indices.toList(), before.size, state.shuffle, repeat, kept.map { it.source.encoded() })
 }
 
 fun QueueFile.saved(spot: QueueSpot?): SavedQueue {
     val position = spot?.takeIf { it.songId == songs.getOrNull(index)?.id }?.positionMs ?: 0
     val mode = RepeatMode.entries.firstOrNull { it.name == repeat } ?: RepeatMode.Off
-    return SavedQueue(songs, order, index, position, shuffle, mode)
+    return SavedQueue(songs, order, index, position, shuffle, mode, sources?.takeIf { it.size == songs.size }?.map(::queueSourceOf))
 }
 
 // Keeps the queue on this computer, so Octo opens where it was left:
@@ -97,7 +103,7 @@ class QueueKeeper(
         // The queue itself, once it settles.
         launch {
             player.state
-                .map { Shape((it.played + listOfNotNull(it.current) + it.upcoming).map(QueueEntry::key), it.current?.key, it.shuffle, it.repeat) }
+                .map { Shape((it.played + listOfNotNull(it.current) + it.upcoming).map { e -> e.key to e.source }, it.current?.key, it.shuffle, it.repeat) }
                 .distinctUntilChanged()
                 .drop(1)
                 .debounce(1_000)
@@ -170,9 +176,10 @@ class QueueKeeper(
         return queue.saved(spot)
     }
 
-    // What makes a queue different enough to save again: its entries in
-    // the order they play, the current one, shuffle and repeat.
-    private data class Shape(val playOrder: List<Long>, val current: Long?, val shuffle: Boolean, val repeat: RepeatMode)
+    // What makes a queue different enough to save again: its entries (and
+    // where each came from) in the order they play, the current one,
+    // shuffle and repeat.
+    private data class Shape(val playOrder: List<Pair<Long, QueueSource>>, val current: Long?, val shuffle: Boolean, val repeat: RepeatMode)
 }
 
 // Writes a file whole, through a new file moved into place, so a crash

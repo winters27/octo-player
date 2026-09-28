@@ -482,7 +482,9 @@ class OctoPlaybackService : MediaLibraryService() {
                 LIKE -> currentId.value?.takeUnless(::isFind)?.let(likes::toggle)
                 DOWNLOAD -> downloadCurrent()
                 CLOSE -> close()
-                PLAY_NEXT -> args.getStringArrayList(ARG_IDS)?.let { ids -> scope.launch { player.addNext(playable.items(ids)) } }
+                PLAY_NEXT -> args.getStringArrayList(ARG_IDS)?.let { ids ->
+                    scope.launch { player.addNext(playable.items(ids).map { it.withSource(QueueSource.You) }) }
+                }
                 else -> return super.onCustomCommand(session, controller, customCommand, args)
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -493,9 +495,10 @@ class OctoPlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
             mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> = scope.future {
-            // An album or playlist chosen in a car adds all its songs.
+            // An album or playlist chosen in a car adds all its songs. Songs
+            // added are the listener's own, for the queue's headings.
             val ids = mediaItems.flatMap { car.playFor(it.mediaId)?.first ?: listOf(it.mediaId) }
-            playable.items(ids).toMutableList()
+            playable.items(ids).map { it.withSource(QueueSource.You) }.toMutableList()
         }
 
         override fun onSetMediaItems(
@@ -520,7 +523,9 @@ class OctoPlaybackService : MediaLibraryService() {
                 return@future MediaItemsWithStartPosition(each.filterNotNull(), chosenStart(each, start), 0)
             }
             val each = playable.itemsEach(mediaItems.map { it.mediaId })
-            val resolved = each.filterNotNull()
+            // The list's name, when the app gave one, goes on every song.
+            val source = mediaItems.firstOrNull()?.requestedSource
+            val resolved = each.filterNotNull().map { if (source != null) it.withSource(source) else it }
             // Keep starting on the chosen song even if some before it are gone.
             val index = if (startIndex == C.INDEX_UNSET) C.INDEX_UNSET else chosenStart(each, startIndex)
             MediaItemsWithStartPosition(resolved, index, startPositionMs)

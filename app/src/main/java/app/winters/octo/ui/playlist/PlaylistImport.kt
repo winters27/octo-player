@@ -81,10 +81,3 @@ fun ImportNote(state: ImportState) {
         }
     }
 }
-
-// "Imported 42 of 45 songs into "Road trip"", or why nothing was.
-internal fun importSummary(report: ImportReport): String = when {
-    report.total == 0 -> "\"${report.name}\" has no songs in it."
-    report.matched == 0 -> "None of the ${report.total} songs in \"${report.name}\" are in your library."
-    else -> "Imported ${report.matched} of ${if (report.total == 1) "1 song" else "${report.total} songs"} into \"${report.name}\""
-}

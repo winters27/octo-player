@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -114,7 +115,11 @@ fun rememberPosition(player: DesktopPlayer): State<Long> {
 fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
     val state by app.player.state.collectAsState()
     val song = state.current?.song
-    FloatingGlaze(backdrop, modifier, shape = MenuShape, film = MenuFilm, frost = MenuFrost, halo = true) {
+    // Songs dragged here go to the end of the queue; the player lights
+    // while they are held over it.
+    val over = isDropOver(PlayerDrop)
+    FloatingGlaze(backdrop, modifier.dropTarget(PlayerDrop, "Add to the queue", layer = 1) { app.addToQueue(it) }, shape = MenuShape, film = MenuFilm, frost = MenuFrost, halo = true) {
+        if (over) Box(Modifier.matchParentSize().background(DropLit, MenuShape))
         Row(Modifier.fillMaxSize().padding(horizontal = Space.L), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
             Cover(
                 song?.coverArt,
@@ -133,6 +138,8 @@ fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier)
         }
     }
 }
+
+private const val PlayerDrop = "player"
 
 // The song's title (which opens its album), the artist as a link, and the
 // heart, or the "+" for a song found online.

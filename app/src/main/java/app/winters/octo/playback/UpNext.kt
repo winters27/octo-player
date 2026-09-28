@@ -5,7 +5,8 @@ import androidx.media3.common.C
 // A song in the queue as the "Up next" list shows it. `index` is where it
 // sits in the player's queue; `key` stays unique when a song is queued
 // twice, and stays with the song while others come and go. `autoplay` is a
-// song Autoplay added, not one the listener chose.
+// song Autoplay added, not one the listener chose; `source` is where it
+// came from, for the queue's headings.
 data class QueueEntry(
     val key: String,
     val index: Int,
@@ -15,6 +16,7 @@ data class QueueEntry(
     val artwork: String?,
     val durationMs: Long,
     val autoplay: Boolean = false,
+    val source: QueueSource = NoSource,
 )
 
 // Where a song sits in the queue, and the key a list draws it under.

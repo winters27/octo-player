@@ -21,44 +21,69 @@ sealed interface SongPlace {
 
 enum class SongAction {
     Play, PlayNext, AddToQueue, StartRadio,
-    AddToPlaylist, Favourite, Rate,
+    AddToLastPlaylist, AddToPlaylist, Favourite, Rate,
     GoToAlbum, GoToArtist,
     Details,
+    Move,
     RemoveFromPlaylist, RemoveFromQueue,
 }
 
 // The song menu's rows in their groups. A radio and the details are for
-// one song; so are Go to album and Go to artist. Songs found online
+// one song; so are Go to album and Go to artist. In the queue, playing
+// and queueing give way to the queue's own rows (play now, move), since
+// they would play or queue the songs a second time. Songs found online
 // (`outside`) are not in the library, so they cannot be favourites, be
-// rated or open an album or artist. A playlist's songs can come out of it
-// only when the listener's own playlist (`ownsPlaylist`).
-fun songMenuActions(count: Int, place: SongPlace, outside: Boolean = false, ownsPlaylist: Boolean = false): List<List<SongAction>> {
+// rated or open an album or artist. A playlist's songs can be moved or
+// come out of it only when the listener's own playlist (`ownsPlaylist`).
+// `lastPlaylist` is whether there is a playlist added to lately, offered
+// first among the ways to keep the songs.
+fun songMenuActions(
+    count: Int,
+    place: SongPlace,
+    outside: Boolean = false,
+    ownsPlaylist: Boolean = false,
+    lastPlaylist: Boolean = false,
+): List<List<SongAction>> {
     val one = count == 1
+    val editable = place is SongPlace.Playlist && ownsPlaylist && place.positions.isNotEmpty()
     val groups = listOf(
-        listOfNotNull(SongAction.Play, SongAction.PlayNext, SongAction.AddToQueue, SongAction.StartRadio.takeIf { one }),
-        listOfNotNull(SongAction.AddToPlaylist, SongAction.Favourite.takeIf { !outside }, SongAction.Rate.takeIf { !outside }),
+        if (place is SongPlace.Queue) {
+            listOfNotNull(SongAction.StartRadio.takeIf { one })
+        } else {
+            listOfNotNull(SongAction.Play, SongAction.PlayNext, SongAction.AddToQueue, SongAction.StartRadio.takeIf { one })
+        },
+        listOfNotNull(
+            SongAction.AddToLastPlaylist.takeIf { lastPlaylist },
+            SongAction.AddToPlaylist,
+            SongAction.Favourite.takeIf { !outside },
+            SongAction.Rate.takeIf { !outside },
+        ),
         if (one && !outside) listOf(SongAction.GoToAlbum, SongAction.GoToArtist) else emptyList(),
         listOfNotNull(SongAction.Details.takeIf { one }),
+        listOfNotNull(SongAction.Move.takeIf { editable }),
         listOfNotNull(
-            SongAction.RemoveFromPlaylist.takeIf { place is SongPlace.Playlist && ownsPlaylist && place.positions.isNotEmpty() },
+            SongAction.RemoveFromPlaylist.takeIf { editable },
             SongAction.RemoveFromQueue.takeIf { place is SongPlace.Queue && place.keys.isNotEmpty() },
         ),
     )
     return groups.filter { it.isNotEmpty() }
 }
 
-// A song row's words. `starred` is whether every picked song is a favourite.
-fun songActionLabel(action: SongAction, starred: Boolean): String = when (action) {
+// A song row's words. `starred` is whether every picked song is a
+// favourite; `last` is the name of the playlist added to last.
+fun songActionLabel(action: SongAction, starred: Boolean, last: String? = null): String = when (action) {
     SongAction.Play -> "Play"
     SongAction.PlayNext -> "Play next"
     SongAction.AddToQueue -> "Add to queue"
     SongAction.StartRadio -> "Start radio"
+    SongAction.AddToLastPlaylist -> "Add to last playlist: ${last.orEmpty()}"
     SongAction.AddToPlaylist -> "Add to playlist"
     SongAction.Favourite -> if (starred) "Remove from favourites" else "Add to favourites"
     SongAction.Rate -> "Rate"
     SongAction.GoToAlbum -> "Go to album"
     SongAction.GoToArtist -> "Go to artist"
     SongAction.Details -> "Song details"
+    SongAction.Move -> "Move"
     SongAction.RemoveFromPlaylist -> "Remove from this playlist"
     SongAction.RemoveFromQueue -> "Remove from the queue"
 }
@@ -78,6 +103,8 @@ enum class CollectionAction {
     AddToPlaylist, Favourite,
     Pin,
     GoToArtist,
+    Rename, Duplicate, Export, Public,
+    Delete,
 }
 
 private val Playing = listOf(CollectionAction.Play, CollectionAction.Shuffle, CollectionAction.PlayNext, CollectionAction.AddToQueue)
@@ -96,8 +123,17 @@ fun artistMenuActions(outside: Boolean = false): List<List<CollectionAction>> = 
     listOfNotNull(CollectionAction.Favourite.takeIf { !outside }),
 ).filter { it.isNotEmpty() }
 
-// A playlist's menu. An empty one has nothing to play, only itself to pin.
-fun playlistMenuActions(empty: Boolean = false): List<List<CollectionAction>> = listOf(
+// A playlist's menu. An empty one has nothing to play or write to a file.
+// Only the listener's own (`owns`) can be renamed, made public or private,
+// or deleted; anyone's can be copied into a new one of their own.
+fun playlistMenuActions(empty: Boolean = false, owns: Boolean = false): List<List<CollectionAction>> = listOf(
     if (empty) emptyList() else Playing,
     listOf(CollectionAction.Pin),
+    listOfNotNull(
+        CollectionAction.Rename.takeIf { owns },
+        CollectionAction.Duplicate,
+        CollectionAction.Export.takeIf { !empty },
+        CollectionAction.Public.takeIf { owns },
+    ),
+    listOfNotNull(CollectionAction.Delete.takeIf { owns }),
 ).filter { it.isNotEmpty() }
