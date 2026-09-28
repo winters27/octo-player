@@ -100,7 +100,16 @@ class SystemIntegration(
             }
         }
         instance?.onLaunch { args -> app.scope.launch { arrived(args) } }
-        if (os == DesktopOs.Windows && System.getProperty(CHECK_PLAY) == null) installedProgram()?.let { program -> app.scope.launch(Dispatchers.IO) { registerLinksOnWindows(program) } }
+        // octo:// links open the installed app (macOS knows from the app's details).
+        if (System.getProperty(CHECK_PLAY) == null) installedProgram()?.let { program ->
+            app.scope.launch(Dispatchers.IO) {
+                when (os) {
+                    DesktopOs.Windows -> registerLinksOnWindows(program)
+                    DesktopOs.Linux -> registerLinksOnLinux(program, linuxApplicationsFolder())
+                    DesktopOs.Mac -> Unit
+                }
+            }
+        }
         listenToMac()
         open(parseLaunchArgs(launchArgs))
     }

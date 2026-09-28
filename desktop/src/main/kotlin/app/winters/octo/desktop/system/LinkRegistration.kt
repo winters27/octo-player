@@ -7,9 +7,9 @@ import com.sun.jna.ptr.IntByReference
 import com.sun.jna.ptr.PointerByReference
 import com.sun.jna.win32.W32APIOptions
 
-// octo:// links open Octo. macOS learns this from the app's own details
-// and Linux from its desktop entry; on Windows the installed app tells the
-// system itself, for this user only, whenever it runs from somewhere new.
+// octo:// links open Octo. macOS learns this from the app's own details;
+// on Windows and Linux the installed app tells the system itself, for this
+// user only, whenever it runs from somewhere new.
 // Nothing is written when Octo runs from a build rather than an install,
 // or while it runs its self-check.
 
@@ -91,3 +91,43 @@ private object Registry {
         }
     }
 }
+
+// On Linux the installed app adds a hidden desktop entry for octo:// links
+// in the user's own applications folder and makes it the handler, the
+// freedesktop way. The package's own entry stays as it is.
+
+// The hidden entry's text for a program.
+fun linkDesktopEntry(program: String): String = """
+    [Desktop Entry]
+    Type=Application
+    Name=Octo
+    NoDisplay=true
+    Exec="$program" %u
+    MimeType=x-scheme-handler/octo;
+""".trimIndent() + "\n"
+
+// Writes the entry into `applications` (normally ~/.local/share/applications)
+// when it differs, and asks the system to use it. True once written.
+fun registerLinksOnLinux(program: String, applications: java.io.File, makeDefault: Boolean = true): Boolean {
+    val entry = java.io.File(applications, LINUX_LINK_ENTRY)
+    val text = linkDesktopEntry(program)
+    if (entry.isFile && runCatching { entry.readText() }.getOrNull() == text) return true
+    return runCatching {
+        applications.mkdirs()
+        entry.writeText(text)
+        if (makeDefault) {
+            val process = ProcessBuilder("xdg-mime", "default", LINUX_LINK_ENTRY, "x-scheme-handler/octo").redirectErrorStream(true).start()
+            process.inputStream.readAllBytes()
+            process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
+        }
+        true
+    }.getOrDefault(false)
+}
+
+// The user's own applications folder.
+fun linuxApplicationsFolder(env: (String) -> String? = System::getenv, home: String = System.getProperty("user.home")): java.io.File {
+    val data = env("XDG_DATA_HOME")?.takeIf(String::isNotBlank) ?: "$home/.local/share"
+    return java.io.File(data, "applications")
+}
+
+private const val LINUX_LINK_ENTRY = "octo-links.desktop"

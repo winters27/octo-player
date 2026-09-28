@@ -30,4 +30,24 @@ class LinkRegistrationTest {
         }
         assertNull(linkProgramOnWindows(key))
     }
+
+    @Test
+    fun linuxGetsAHiddenEntryForLinksOnlyOnce() {
+        val folder = kotlin.io.path.createTempDirectory("octo-apps").toFile()
+        try {
+            assertTrue(registerLinksOnLinux("/opt/octo/bin/Octo", folder, makeDefault = false))
+            val entry = java.io.File(folder, "octo-links.desktop").readText()
+            assertTrue("Exec=\"/opt/octo/bin/Octo\" %u" in entry)
+            assertTrue("MimeType=x-scheme-handler/octo;" in entry)
+            assertTrue("NoDisplay=true" in entry)
+            // The same program again changes nothing.
+            val written = java.io.File(folder, "octo-links.desktop").lastModified()
+            assertTrue(registerLinksOnLinux("/opt/octo/bin/Octo", folder, makeDefault = false))
+            assertEquals(written, java.io.File(folder, "octo-links.desktop").lastModified())
+        } finally {
+            folder.deleteRecursively()
+        }
+        assertEquals(java.io.File("/x/data", "applications"), linuxApplicationsFolder(mapOf("XDG_DATA_HOME" to "/x/data")::get, "/home/b"))
+        assertEquals(java.io.File("/home/b/.local/share", "applications"), linuxApplicationsFolder({ null }, "/home/b"))
+    }
 }
