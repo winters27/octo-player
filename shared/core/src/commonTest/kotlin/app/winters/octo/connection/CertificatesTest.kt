@@ -21,7 +21,7 @@ class CertificatesTest {
     // What openssl reports for the same file.
     private val expected = "D6:93:F0:76:D6:D6:5F:CB:02:3D:D0:52:E3:63:75:61:A6:77:2C:9C:B3:C5:1F:97:99:D3:B9:4E:3C:65:54:43"
 
-    // Stands in for the phone's trust, which never trusts a self-made certificate.
+    // Stands in for the system's trust, which never trusts a self-made certificate.
     private val distrustful = object : X509TrustManager {
         override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = throw CertificateException("no")
         override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) = throw CertificateException("no")

@@ -1,6 +1,5 @@
 package app.winters.octo.connection
 
-import android.annotation.SuppressLint
 import okhttp3.internal.tls.OkHostnameVerifier
 import java.net.Socket
 import java.security.KeyStore
@@ -31,18 +30,19 @@ fun normalizeFingerprint(text: String): String = text.lowercase().filter { it in
 // Pins are kept by host alone, in lowercase.
 fun pinKey(host: String): String = host.lowercase()
 
-// Whether a certificate the phone does not trust may be used anyway: only
+// Whether a certificate the system does not trust may be used anyway: only
 // when the user trusted exactly this certificate for exactly this host.
 fun pinAllows(pins: Map<String, String>, host: String?, fingerprint: String): Boolean =
     host != null && pins[pinKey(host)] == normalizeFingerprint(fingerprint)
 
-// The phone's own trust, with the certificates the user chose to trust
+// The system's own trust, with the certificates the user chose to trust
 // added, each for its own host only. Every certificate is first checked
 // the normal way; a pin is only looked at when that fails. A certificate
 // that fails and is not pinned is remembered by host, so the app can show
-// it and ask. It never trusts more than the phone does except for a pin
+// it and ask. It never trusts more than the system does except for a pin
 // the user made, which is why the custom trust manager is allowed here.
-@SuppressLint("CustomX509TrustManager")
+// Shared by the phone and desktop apps.
+@Suppress("CustomX509TrustManager")
 class PinningTrustManager(
     private val platform: X509TrustManager,
     private val pins: () -> Map<String, String>,
@@ -63,7 +63,7 @@ class PinningTrustManager(
         }
     }
 
-    // With no connection to say which host this is, only the phone's trust counts.
+    // With no connection to say which host this is, only the system's trust counts.
     override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) =
         platform.checkServerTrusted(chain, authType)
 
@@ -78,7 +78,7 @@ class PinningTrustManager(
         }
     }
 
-    // The app is never a server, so client checks go to the phone's trust.
+    // The app is never a server, so client checks go to the system's trust.
     override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String, socket: Socket?) =
         platform.checkClientTrusted(chain, authType)
 
@@ -107,8 +107,8 @@ class PinningHostnameVerifier(
     }
 }
 
-// The phone's own trust: the system's certificates, as the network
-// security config allows.
+// The system's own trust: its certificates, and on the phone as the
+// network security config allows.
 fun platformTrustManager(): X509TrustManager {
     val factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
     factory.init(null as KeyStore?)
