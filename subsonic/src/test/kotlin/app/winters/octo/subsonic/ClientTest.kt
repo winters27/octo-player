@@ -127,6 +127,19 @@ class ClientTest {
         assertThrowsAsync<SubsonicException.NotSubsonic> { client().ping() }
     }
 
+    // A tunnel's error page while the server behind it restarts is the
+    // server being busy, not a wrong address; a 404 still is.
+    @Test
+    fun aProxysBadGatewayIsTheServerBeingBusy() = runTest {
+        server.enqueue(MockResponse.Builder().code(502).body("<html>Bad gateway</html>").build())
+        server.enqueue(MockResponse.Builder().code(404).body("Not found").build())
+        val busy = runCatching { client().ping() }.exceptionOrNull() as SubsonicException.NotSubsonic
+        assertEquals(502, busy.status)
+        assertTrue(busy.serverBusy)
+        val wrong = runCatching { client().ping() }.exceptionOrNull() as SubsonicException.NotSubsonic
+        assertFalse(wrong.serverBusy)
+    }
+
     @Test
     fun deadServerIsUnreachable() = runTest {
         val c = client()

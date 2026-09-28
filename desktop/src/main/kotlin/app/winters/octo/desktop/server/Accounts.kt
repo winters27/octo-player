@@ -428,7 +428,8 @@ fun Throwable.userMessage(): String = when (this) {
     is SubsonicException.Unreachable ->
         "Couldn't reach the server. Check the address, and that you're on the right network."
     is SubsonicException.NotSubsonic ->
-        "That address answered, but not like a music server. Check the port."
+        if (serverBusy) "The server isn't answering right now. It may be restarting, so try again in a moment."
+        else "That address answered, but not like a music server. Check the port."
     is SubsonicException.WrongCredentials -> "Wrong username or password."
     is SubsonicException.AuthNotSupported ->
         if (code == 41) "This account can't sign in with a token. Turn on Legacy sign-in under Advanced."

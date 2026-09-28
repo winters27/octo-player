@@ -8,6 +8,8 @@ import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.secrets.secretAccount
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.subsonic.AuthMode
+import app.winters.octo.subsonic.SubsonicException
+import java.io.File
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import org.junit.After
@@ -19,7 +21,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import java.io.File
 
 // A password store that keeps secrets like the real ones do, and can be
 // made to refuse.
@@ -278,5 +279,13 @@ class AccountsTest {
         octoServer()
         val failed = accounts.test(SignInRequest(server.address, "winters", "pw", home = "http://")) as TestOutcome.Failed
         assertEquals("The home network address doesn't look like a server address.", failed.message)
+    }
+
+    @Test
+    fun aBusyServerIsNotBlamedOnThePort() {
+        val busy = SubsonicException.NotSubsonic("HTTP 502 from getAlbum", 502).userMessage()
+        assertTrue(busy, busy.startsWith("The server isn't answering right now"))
+        val wrong = SubsonicException.NotSubsonic("HTTP 404 from ping", 404).userMessage()
+        assertTrue(wrong, wrong.endsWith("Check the port."))
     }
 }

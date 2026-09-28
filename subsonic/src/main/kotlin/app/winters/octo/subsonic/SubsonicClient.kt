@@ -406,7 +406,7 @@ class SubsonicClient(
             val response = http.newCall(request).await()
             withContext(Dispatchers.IO) {
                 response.use {
-                    if (!it.isSuccessful) throw SubsonicException.NotSubsonic("HTTP ${it.code} from ${call.endpoint}")
+                    if (!it.isSuccessful) throw SubsonicException.NotSubsonic("HTTP ${it.code} from ${call.endpoint}", it.code)
                     it.body.string()
                 }
             }
@@ -444,7 +444,7 @@ class SubsonicClient(
             withContext(Dispatchers.IO) {
                 response.use {
                     if (!it.isSuccessful) {
-                        throw SubsonicException.NotSubsonic("HTTP ${it.code} from $endpoint")
+                        throw SubsonicException.NotSubsonic("HTTP ${it.code} from $endpoint", it.code)
                     }
                     it.body.string()
                 }
