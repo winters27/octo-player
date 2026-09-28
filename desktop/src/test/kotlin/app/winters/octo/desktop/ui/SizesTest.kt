@@ -11,6 +11,7 @@ class SizesTest {
     private val converted = listOf(
         "ui/Shell.kt",
         "ui/Sidebar.kt",
+        "ui/Menus.kt",
         "ui/NowPlayingBar.kt",
         "ui/InfoPanel.kt",
         "ui/FrameParts.kt",
