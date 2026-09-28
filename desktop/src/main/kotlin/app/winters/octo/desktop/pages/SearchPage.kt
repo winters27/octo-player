@@ -20,6 +20,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -66,8 +68,18 @@ const val NotInLibraryText = "Not in your library"
 fun SearchPage(app: AppState, visit: Visit) {
     val model = app.search ?: return
     val list = rememberListState(app.navigator, visit)
-    // The field has the keyboard as soon as the page opens.
-    LaunchedEffect(Unit) { runCatching { app.searchFocus.requestFocus() } }
+    // The field has the keyboard as soon as the page opens, and again on
+    // the search shortcut here, brought back into view first when the list
+    // has scrolled it away.
+    val asks = app.searchAsks
+    val opened = remember { asks }
+    LaunchedEffect(asks) {
+        if (asks != opened && list.firstVisibleItemIndex > 0) {
+            list.scrollToItem(0)
+            withFrameNanos { }
+        }
+        runCatching { app.searchFocus.requestFocus() }
+    }
     LazyColumn(state = list, contentPadding = pagePadding(LocalBottomRoom.current)) {
         item(key = "field") {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {

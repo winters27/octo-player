@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.FocusRequester
 import app.winters.octo.desktop.audio.SoundTarget
+import app.winters.octo.desktop.home.HomeStore
 import app.winters.octo.desktop.library.LibraryStore
 import app.winters.octo.desktop.lyrics.LyricsModel
 import app.winters.octo.desktop.lyrics.LyricsSources
@@ -77,6 +78,11 @@ class AppState(
     val popups = PopupHost()
     val searchFocus = FocusRequester()
 
+    // Bumped by the search shortcut, so a Search page already open brings
+    // its field back into view.
+    var searchAsks by mutableStateOf(0)
+        private set
+
     var connection by mutableStateOf<Connection?>(null)
         private set
     var library by mutableStateOf<LibraryStore?>(null)
@@ -84,6 +90,8 @@ class AppState(
     var fetches by mutableStateOf<Fetches?>(null)
         private set
     var search by mutableStateOf<SearchModel?>(null)
+        private set
+    var home by mutableStateOf<HomeStore?>(null)
         private set
 
     // The user's playlists, for the sidebar and "Add to playlist".
@@ -126,6 +134,7 @@ class AppState(
         library = store
         fetches = if (connection.acquires) Fetches(connection.client, scope, onArrived = { store.load() }) else null
         search = SearchModel(connection, { store.index }, { playlists }, scope)
+        home = HomeStore(connection, scope)
         notice = note
         starOverrides.clear()
         store.load()
@@ -143,6 +152,7 @@ class AppState(
         library = null
         fetches = null
         search = null
+        home = null
         playlists = emptyList()
         fullPlayer = false
         navigator.startOver()
@@ -296,7 +306,7 @@ class AppState(
                 if (connection == null) return false
                 fullPlayer = false
                 navigator.go(Page.Search)
-                runCatching { searchFocus.requestFocus() }
+                searchAsks++
             }
             Shortcut.Lyrics -> if (connection != null) toggleSidePanel(SidePanel.Lyrics) else return false
             Shortcut.Queue -> if (connection != null) toggleSidePanel(SidePanel.Queue) else return false
