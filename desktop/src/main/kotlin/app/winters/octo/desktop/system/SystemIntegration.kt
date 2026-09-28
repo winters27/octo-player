@@ -20,6 +20,7 @@ import app.winters.octo.desktop.window.screenAreas
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.awt.Desktop
+import java.awt.EventQueue
 import java.awt.desktop.AppReopenedListener
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
@@ -109,13 +110,26 @@ class SystemIntegration(
     }
 
     // On macOS files and links come as events, not on the command line, and
-    // a click on the Dock icon should bring a hidden window back.
+    // a click on the Dock icon should bring a hidden window back. Quitting
+    // from the menu or with Cmd+Q goes through the app's own quit, which
+    // saves and lets go of everything, before macOS ends it.
     private fun listenToMac() {
         if (os != DesktopOs.Mac || !Desktop.isDesktopSupported()) return
         val desktop = Desktop.getDesktop()
         runCatching { desktop.setOpenFileHandler { event -> app.scope.launch { open(parseLaunchArgs(event.files.map { it.path })) } } }
         runCatching { desktop.setOpenURIHandler { event -> app.scope.launch { raise(); open(parseLaunchArgs(listOf(event.uri.toString()))) } } }
         runCatching { desktop.addAppEventListener(AppReopenedListener { app.scope.launch { raise() } }) }
+        runCatching {
+            desktop.setQuitHandler { _, response ->
+                EventQueue.invokeLater {
+                    try {
+                        quit()
+                    } finally {
+                        response.performQuit()
+                    }
+                }
+            }
+        }
     }
 
     // Plays opened files as one-off songs, or follows a link.
