@@ -55,6 +55,7 @@ import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
+import app.winters.octo.design.NowPlayingBars
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
