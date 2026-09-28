@@ -51,6 +51,8 @@ import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.artistSongOrder
+import app.winters.octo.catalog.groupReleases
+import app.winters.octo.catalog.splitLines
 import app.winters.octo.catalog.isFind
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -242,6 +244,9 @@ fun ArtistScreen(
     val artist by vm.artist.collectAsStateWithLifecycle()
     val sortedAlbums by vm.albums.collectAsStateWithLifecycle()
     val albumList = sortedAlbums?.items.orEmpty()
+    // Their albums on shelves by kind when the server tagged them, as the
+    // desktop shows them; else one shelf.
+    val shelves = remember(albumList) { groupReleases(albumList, { splitLines(it.releaseTypes) }) }
     val extras by vm.extras.collectAsStateWithLifecycle()
     val top = extras?.topSongs.orEmpty()
     val about = extras?.about
@@ -318,18 +323,24 @@ fun ArtistScreen(
                 }
             }
             // Once songs come first, the albums need a name of their own.
-            // With more than one album, the line carries their sort button.
+            // With more than one album, the first line carries their sort
+            // button. Several shelves (Albums, Singles and EPs...) each
+            // have their name.
             val albumsTitle = if (top.isNotEmpty() || ownSongs.isNotEmpty()) "Albums" else null
             val order = sortedAlbums?.order
-            if (order != null && albumList.size > 1) {
-                wide("albums:title") {
-                    SortBar(SortList.ArtistAlbums, order, vm::setOrder, Modifier.padding(top = 8.dp), title = albumsTitle)
+            shelves.forEachIndexed { index, (shelf, albums) ->
+                val title = if (shelves.size > 1) shelf.title else albumsTitle
+                val key = if (index == 0) "albums:title" else "albums:${shelf.name}"
+                if (index == 0 && order != null && albumList.size > 1) {
+                    wide(key) {
+                        SortBar(SortList.ArtistAlbums, order, vm::setOrder, Modifier.padding(top = 8.dp), title = title)
+                    }
+                } else if (title != null) {
+                    wide(key) { SectionTitle(title, Modifier.padding(top = 8.dp)) }
                 }
-            } else if (albumsTitle != null && albumList.isNotEmpty()) {
-                wide("albums:title") { SectionTitle(albumsTitle, Modifier.padding(top = 8.dp)) }
-            }
-            items(albumList, key = { it.id }) { album ->
-                AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, modifier = Modifier.animateItem(), width = null)
+                items(albums, key = { it.id }) { album ->
+                    AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, modifier = Modifier.animateItem(), width = null)
+                }
             }
             about?.let { text ->
                 wide("about") {
