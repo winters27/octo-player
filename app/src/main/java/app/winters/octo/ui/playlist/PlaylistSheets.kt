@@ -334,12 +334,12 @@ private fun ConfirmAgain(question: String, plan: AddPlan, onCancel: () -> Unit, 
         Column(Modifier.width(MenuWidth).padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 18.dp)) {
             Text(question, style = OctoType.body, color = OctoColors.TextPrimary, maxLines = 3, overflow = TextOverflow.Ellipsis)
             Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                AccentButton("Add new ones", onClick = onAddNew)
-                GlazeButton("Add all", onClick = onAddAll)
+                AccentButton(ADD_NEW_ONES, onClick = onAddNew)
+                GlazeButton(addAgainChoice(plan), onClick = onAddAll)
             }
         }
     } else {
-        PopupQuestion(question, null, if (plan.songs.size == 1) "Add" else "Add again", onConfirm = onAddAll, onCancel = onCancel)
+        PopupQuestion(question, null, addAgainChoice(plan), onConfirm = onAddAll, onCancel = onCancel)
     }
 }
 

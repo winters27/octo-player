@@ -15,19 +15,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
-import java.nio.ByteBuffer
-import java.nio.charset.CharacterCodingException
-import java.nio.charset.Charset
-import java.nio.charset.CodingErrorAction
 import javax.inject.Inject
 import javax.inject.Singleton
-
-// The largest playlist file read. A playlist of 10,000 songs is about 1 MB.
-private const val MAX_FILE_BYTES = 8 * 1024 * 1024
-
-// How an import went: the playlist made, how many of the file's songs were
-// found, and the lines that were not.
-data class ImportReport(val name: String, val matched: Int, val total: Int, val missed: List<String>)
 
 // Reads playlist files the listener picks into new playlists, and writes
 // playlists out as files other players can open.
@@ -45,7 +34,7 @@ class PlaylistFiles @Inject constructor(
     suspend fun import(uri: Uri): ImportReport? = withContext(Dispatchers.IO) {
         val text = runCatching { readText(uri) }.getOrNull() ?: return@withContext null
         val entries = parseM3u(text)
-        val name = displayName(uri).substringBeforeLast('.').trim().ifEmpty { "Imported playlist" }
+        val name = playlistNameOf(displayName(uri))
         if (entries.isEmpty()) return@withContext ImportReport(name, 0, 0, emptyList())
         val match = matchM3u(entries, catalog.tracks().first(), phonePaths())
         if (match.trackIds.isNotEmpty()) store.create(name, match.trackIds)
@@ -86,20 +75,9 @@ class PlaylistFiles @Inject constructor(
         return paths
     }
 
-    // The file as text: UTF-8 when it reads as UTF-8, which M3U8 always is,
-    // otherwise Windows' Western encoding, which older M3U files often use.
-    private fun readText(uri: Uri): String? {
-        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readUpTo(MAX_FILE_BYTES) } ?: return null
-        return try {
-            Charsets.UTF_8.newDecoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT)
-                .decode(ByteBuffer.wrap(bytes))
-                .toString()
-        } catch (_: CharacterCodingException) {
-            String(bytes, Charset.forName("windows-1252"))
-        }
-    }
+    // The file as text, UTF-8 or Windows' Western encoding (see playlistText).
+    private fun readText(uri: Uri): String? =
+        context.contentResolver.openInputStream(uri)?.use { it.readUpTo(PLAYLIST_FILE_LIMIT) }?.let(::playlistText)
 
     private fun displayName(uri: Uri): String =
         runCatching {
@@ -108,11 +86,6 @@ class PlaylistFiles @Inject constructor(
             }
         }.getOrNull() ?: uri.lastPathSegment.orEmpty().substringAfterLast('/')
 }
-
-// A file name for a playlist, without characters file systems refuse. It is
-// written as UTF-8, which today's players read in an .m3u file too.
-fun playlistFileName(name: String): String =
-    name.replace(Regex("""[\\/:*?"<>|\x00-\x1F]"""), " ").trim().ifEmpty { "Playlist" } + ".m3u"
 
 private fun InputStream.readUpTo(limit: Int): ByteArray {
     val out = ByteArrayOutputStream()

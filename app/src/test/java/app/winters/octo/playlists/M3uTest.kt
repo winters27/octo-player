@@ -162,7 +162,7 @@ class M3uTest {
 
     @Test
     fun missedLinesShowWhatTheFileSaid() {
-        val missed = matchM3u(parseM3u("#EXTINF:100,A - B\nx.mp3\n#EXTINF:100,C\ny.mp3"), emptyList(), emptyMap()).missed
+        val missed = matchM3u(parseM3u("#EXTINF:100,A - B\nx.mp3\n#EXTINF:100,C\ny.mp3"), emptyList<TrackEntity>(), emptyMap()).missed
         assertEquals(listOf("A - B", "C"), missed.map { it.shown() })
     }
 
