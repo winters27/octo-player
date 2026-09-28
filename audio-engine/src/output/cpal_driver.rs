@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-use super::{DeviceEvent, Driver, OpenedOutput, OutputDevice, Renderer};
+use super::{DeviceEvent, Driver, OpenedOutput, OutputDevice, OutputFormat, Renderer};
 use crate::error::{ErrorKind, Failure};
 
 pub struct CpalDriver {
@@ -124,7 +124,8 @@ impl Driver for CpalDriver {
         stream.play().map_err(device_failure)?;
         self.stream = Some(stream);
         self.running = true;
-        Ok(OpenedOutput { rate, channels, device: info })
+        let format = OutputFormat::new(rate, channels, supported.sample_format());
+        Ok(OpenedOutput { format, device: info })
     }
 
     fn close(&mut self) {

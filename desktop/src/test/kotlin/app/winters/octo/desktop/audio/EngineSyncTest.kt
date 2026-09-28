@@ -364,7 +364,7 @@ class EngineSyncTest {
     fun devicesAreListedAndTheOneInUseShown() {
         val (p, engine) = setUp()
         engine.current = EngineDevice("spk", "Speakers", true)
-        engine.emit(EngineEvent.DeviceChanged(engine.current))
+        engine.emit(EngineEvent.DeviceChanged(engine.current, null))
         val until = System.currentTimeMillis() + 2_000
         while (p.state.value.outputs.size < 3 && System.currentTimeMillis() < until) Thread.sleep(5)
         val state = p.state.value

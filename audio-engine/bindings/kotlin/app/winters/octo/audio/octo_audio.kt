@@ -711,6 +711,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_now_playing(
     ): Int
+    external fun uniffi_octo_audio_checksum_method_engine_output_format(
+    ): Int
     external fun uniffi_octo_audio_checksum_method_engine_pause(
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_play(
@@ -813,6 +815,8 @@ internal object UniffiLib {
     external fun uniffi_octo_audio_fn_method_engine_load(`ptr`: Long,`items`: RustBuffer.ByValue,`startIndex`: Int,`startMs`: Long,`play`: Byte,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_octo_audio_fn_method_engine_now_playing(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_octo_audio_fn_method_engine_output_format(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_octo_audio_fn_method_engine_pause(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -1022,6 +1026,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_method_engine_now_playing() and 0xFFFF) != 37596) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_engine_output_format() and 0xFFFF) != 17114) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_method_engine_pause() and 0xFFFF) != 63390) {
@@ -1631,6 +1638,11 @@ public interface EngineInterface {
     fun `nowPlaying`(): TrackInfo?
     
     /**
+     * What the device playing now runs at: its rate, channels and samples.
+     */
+    fun `outputFormat`(): OutputFormat?
+    
+    /**
      * Pauses with a short fade, so it never clicks.
      */
     fun `pause`()
@@ -1948,6 +1960,22 @@ open class Engine: Disposable, AutoCloseable, EngineInterface
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_octo_audio_fn_method_engine_now_playing(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * What the device playing now runs at: its rate, channels and samples.
+     */override fun `outputFormat`(): OutputFormat? {
+            return FfiConverterOptionalTypeOutputFormat.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_engine_output_format(
         it,
         _status)
 }
@@ -3150,6 +3178,64 @@ public object FfiConverterTypeOutputDevice: FfiConverterRustBuffer<OutputDevice>
 
 
 /**
+ * What the device's stream runs at, as it was opened: the rate, the
+ * channels and the kind of samples the device is given.
+ */
+data class OutputFormat (
+    val `sampleRate`: kotlin.UInt
+    , 
+    val `channels`: kotlin.UInt
+    , 
+    /**
+     * Like "f32", "i16", "i24", "i32": float or whole numbers, and their size.
+     */
+    val `sampleFormat`: kotlin.String
+    , 
+    /**
+     * The bits in each sample, when known.
+     */
+    val `bits`: kotlin.UInt?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeOutputFormat: FfiConverterRustBuffer<OutputFormat> {
+    override fun read(buf: ByteBuffer): OutputFormat {
+        return OutputFormat(
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: OutputFormat) = (
+            FfiConverterUInt.allocationSize(value.`sampleRate`) +
+            FfiConverterUInt.allocationSize(value.`channels`) +
+            FfiConverterString.allocationSize(value.`sampleFormat`) +
+            FfiConverterOptionalUInt.allocationSize(value.`bits`)
+    )
+
+    override fun write(value: OutputFormat, buf: ByteBuffer) {
+            FfiConverterUInt.write(value.`sampleRate`, buf)
+            FfiConverterUInt.write(value.`channels`, buf)
+            FfiConverterString.write(value.`sampleFormat`, buf)
+            FfiConverterOptionalUInt.write(value.`bits`, buf)
+    }
+}
+
+
+
+/**
  * Where playback is, from the audio clock.
  */
 data class PlaybackPosition (
@@ -3785,9 +3871,11 @@ sealed class EngineEvent {
     
     /**
      * Output moved to another device, or the device list changed under it.
+     * `format` is what the device's stream runs at.
      */
     data class DeviceChanged(
-        val `device`: app.winters.octo.audio.OutputDevice?) : EngineEvent()
+        val `device`: app.winters.octo.audio.OutputDevice?, 
+        val `format`: app.winters.octo.audio.OutputFormat?) : EngineEvent()
         
     {
         
@@ -3859,6 +3947,7 @@ public object FfiConverterTypeEngineEvent : FfiConverterRustBuffer<EngineEvent>{
                 )
             10 -> EngineEvent.DeviceChanged(
                 FfiConverterOptionalTypeOutputDevice.read(buf),
+                FfiConverterOptionalTypeOutputFormat.read(buf),
                 )
             11 -> EngineEvent.Position(
                 FfiConverterString.read(buf),
@@ -3944,6 +4033,7 @@ public object FfiConverterTypeEngineEvent : FfiConverterRustBuffer<EngineEvent>{
             (
                 4UL
                 + FfiConverterOptionalTypeOutputDevice.allocationSize(value.`device`)
+                + FfiConverterOptionalTypeOutputFormat.allocationSize(value.`format`)
             )
         }
         is EngineEvent.Position -> {
@@ -4013,6 +4103,7 @@ public object FfiConverterTypeEngineEvent : FfiConverterRustBuffer<EngineEvent>{
             is EngineEvent.DeviceChanged -> {
                 buf.putInt(10)
                 FfiConverterOptionalTypeOutputDevice.write(value.`device`, buf)
+                FfiConverterOptionalTypeOutputFormat.write(value.`format`, buf)
                 Unit
             }
             is EngineEvent.Position -> {
@@ -4517,6 +4608,38 @@ public object FfiConverterOptionalTypeOutputDevice: FfiConverterRustBuffer<Outpu
         } else {
             buf.put(1)
             FfiConverterTypeOutputDevice.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeOutputFormat: FfiConverterRustBuffer<OutputFormat?> {
+    override fun read(buf: ByteBuffer): OutputFormat? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeOutputFormat.read(buf)
+    }
+
+    override fun allocationSize(value: OutputFormat?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeOutputFormat.allocationSize(value)
+        }
+    }
+
+    override fun write(value: OutputFormat?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeOutputFormat.write(value, buf)
         }
     }
 }

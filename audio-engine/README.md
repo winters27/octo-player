@@ -162,14 +162,17 @@ engine.position().positionMs          // audio clock, fractional ms
 - **Transport:** `play`, `pause`, `stop`, `seek`.
 - **Sound:** `setVolume`, `setVolumeDb`, `setMuted`, `setCrossfade`,
   `setEq`, `setReplaygain`, `setDsp`, `setSpeed(speed, pitch)`.
-- **Devices:** `devices`, `currentDevice`, `setOutputDevice(id or null)`.
+- **Devices:** `devices`, `currentDevice`, `setOutputDevice(id or null)`,
+  `outputFormat` (the rate, channels and sample format the device's stream
+  was opened with).
 - **State:** `position`, `state`, `nowPlaying`, `underruns`,
   `setPositionInterval`, `shutdown`.
 - **Also:** `equalizerPresets()`, `graphicBands()`.
 - **Events:** `TrackStarted`, `TrackEnded` (with a reason),
   `GaplessTransition`, `CrossfadeStarted`, `Buffering`, `Ready`,
-  `StateChanged`, `QueueEnded`, `Error` (with a kind), `DeviceChanged`,
-  `Position`.
+  `StateChanged`, `QueueEnded`, `Error` (with a kind), `DeviceChanged`
+  (with the device's format), `Position`. `TrackStarted` carries the song's
+  own format as decoded (codec, lossless, rate, channels, bits).
 
 Server streams arrive as signed addresses from the app, as on Android, with
 optional extra headers per item. The engine reuses the address for range
