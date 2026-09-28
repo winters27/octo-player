@@ -24,7 +24,6 @@ import app.winters.octo.desktop.ui.PageTitle
 import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.rememberListState
 import app.winters.octo.design.GlazeCapsule
-import app.winters.octo.design.LineSlider
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -63,16 +62,9 @@ fun SettingsPage(app: AppState, visit: Visit) {
                     app.settings.update { it.copy(appearance = it.appearance.copy(ambientGlow = on)) }
                 }
                 if (settings.appearance.ambientGlow) {
-                    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Txt("Strength", OctoType.bodySmall, modifier = Modifier.width(140.dp))
-                        LineSlider(
-                            fraction = { settings.appearance.glowStrength },
-                            onSeek = { value -> app.settings.update { it.copy(appearance = it.appearance.copy(glowStrength = value)) } },
-                            modifier = Modifier.weight(1f),
-                            live = true,
-                        )
-                        Txt("${(settings.appearance.glowStrength * 100).roundToInt()}%", OctoType.caption, OctoColors.TextMuted, Modifier.width(44.dp))
-                    }
+                    SliderLine("Strength", "${(settings.appearance.glowStrength * 100).roundToInt()}%", settings.appearance.glowStrength, { value ->
+                        app.settings.update { it.copy(appearance = it.appearance.copy(glowStrength = value)) }
+                    })
                 }
                 val look = settings.appearance
                 fun wash(edit: (WashPrefs) -> WashPrefs) = app.settings.update { it.copy(appearance = it.appearance.copy(wash = edit(it.appearance.wash))) }
