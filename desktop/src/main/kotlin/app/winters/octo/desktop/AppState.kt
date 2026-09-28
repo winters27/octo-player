@@ -126,7 +126,8 @@ class AppState(
         starOverrides.clear()
         store.load()
         refreshPlaylists()
-        navigator.go(Page.Home)
+        // Back and forward start afresh for this account.
+        navigator.startOver()
     }
 
     fun signOut() {
@@ -138,6 +139,7 @@ class AppState(
         search = null
         playlists = emptyList()
         fullPlayer = false
+        navigator.startOver()
     }
 
     fun refreshPlaylists() {

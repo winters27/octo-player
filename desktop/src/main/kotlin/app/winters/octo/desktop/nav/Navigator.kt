@@ -100,6 +100,16 @@ class Navigator(start: Page = Page.Home, private val limit: Int = 100) {
         return true
     }
 
+    // Forgets every page and scroll and starts again at `page`, for a
+    // different account.
+    fun startOver(page: Page = Page.Home) {
+        visits.clear()
+        scrolls.clear()
+        visits += visit(page, null)
+        at = 0
+        moves++
+    }
+
     fun scrollOf(visit: Visit): ScrollSpot = scrolls[visit.id] ?: ScrollSpot()
 
     fun keepScroll(visit: Visit, spot: ScrollSpot) {
