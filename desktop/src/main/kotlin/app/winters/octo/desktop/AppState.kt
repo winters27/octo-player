@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.FocusRequester
+import app.winters.octo.design.PopupHost
 import app.winters.octo.desktop.audio.SoundTarget
 import app.winters.octo.desktop.home.HomeStore
 import app.winters.octo.desktop.library.LibraryStore
@@ -13,12 +14,12 @@ import app.winters.octo.desktop.listening.PlayReporter
 import app.winters.octo.desktop.listening.listeningFolder
 import app.winters.octo.desktop.lyrics.LyricsModel
 import app.winters.octo.desktop.lyrics.LyricsSources
-import app.winters.octo.desktop.sound.SoundController
 import app.winters.octo.desktop.nav.Navigator
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.SEEK_STEP_MS
 import app.winters.octo.desktop.nav.Shortcut
 import app.winters.octo.desktop.nav.VOLUME_STEP
+import app.winters.octo.desktop.pages.SignInForm
 import app.winters.octo.desktop.player.DEFAULT_OUTPUT
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.SilentPlayer
@@ -26,17 +27,18 @@ import app.winters.octo.desktop.player.SleepTimer
 import app.winters.octo.desktop.player.wash.WashCovers
 import app.winters.octo.desktop.queue.QueueKeeper
 import app.winters.octo.desktop.queue.ServerQueueSync
+import app.winters.octo.desktop.search.COMMAND_MARK
 import app.winters.octo.desktop.search.Fetches
+import app.winters.octo.desktop.search.OmniboxState
 import app.winters.octo.desktop.search.SearchModel
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.Connection
-import app.winters.octo.desktop.pages.SignInForm
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.FramePrefs
-import app.winters.octo.desktop.settings.TablePrefs
 import app.winters.octo.desktop.settings.SettingsStore
-import app.winters.octo.design.PopupHost
+import app.winters.octo.desktop.settings.TablePrefs
+import app.winters.octo.desktop.sound.SoundController
 import app.winters.octo.lyrics.OnlineLyrics
 import app.winters.octo.playback.skippedLine
 import app.winters.octo.sort.SortList
@@ -45,13 +47,14 @@ import app.winters.octo.subsonic.FORM_POST_EXTENSION
 import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.ui.search.withRecent
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
-import java.io.File
 
 // The panel that can open on the right of the main area.
 enum class SidePanel(val key: String) {
@@ -149,6 +152,25 @@ class AppState(
     // menus read and set them through ratingOf and setRating (SongActions.kt).
     internal val ratingOverrides = mutableStateMapOf<String, Int>()
 
+    // The search box in the title bar: open or not, and its line.
+    val omnibox = OmniboxState()
+
+    // Keeps a search that led somewhere, as the phone does.
+    fun rememberSearch(text: String) =
+        settings.update { it.copy(recentSearches = withRecent(it.recentSearches, text)) }
+
+    fun forgetSearches() = settings.update { it.copy(recentSearches = emptyList()) }
+
+    // Opens the search box with the keyboard in it, for commands only with
+    // `commands`.
+    fun openSearch(commands: Boolean = false) {
+        fullPlayer = false
+        if (commands) search?.type(COMMAND_MARK)
+        omnibox.open = true
+        omnibox.highlight = 0
+        runCatching { searchFocus.requestFocus() }
+    }
+
     // Opens or closes the mini player; the system side sets it.
     var toggleMiniPlayer: (() -> Unit)? = null
 
@@ -165,6 +187,11 @@ class AppState(
     val queueSync = ServerQueueSync(player, settings, { connection }, scope)
 
     val mac: Boolean get() = os == DesktopOs.Mac
+
+    // The filter field of the page on screen, when it has one (the song
+    // lists' filter bar sets it while shown), so the find shortcut can go
+    // there before the title bar's search.
+    var pageFilterFocus: FocusRequester? = null
 
     init {
         if (listeningRoot != null) {
@@ -430,13 +457,14 @@ class AppState(
             Shortcut.SeekForward -> player.seekTo(player.positionMs() + SEEK_STEP_MS)
             Shortcut.VolumeUp -> setVolume(player.state.value.volume + VOLUME_STEP)
             Shortcut.VolumeDown -> setVolume(player.state.value.volume - VOLUME_STEP)
-            Shortcut.Search -> {
-                if (connection == null) return false
-                // The field is in the title bar on every page, so only the
-                // keyboard moves there.
-                fullPlayer = false
-                runCatching { searchFocus.requestFocus() }
+            Shortcut.Search -> if (connection != null) openSearch() else return false
+            // The list's own filter when the page has one, else the search box.
+            Shortcut.Filter -> when {
+                connection == null -> return false
+                pageFilterFocus != null && !fullPlayer -> runCatching { pageFilterFocus?.requestFocus() }.getOrElse { openSearch() }
+                else -> openSearch()
             }
+            Shortcut.Commands -> if (connection != null) openSearch(commands = true) else return false
             Shortcut.Lyrics -> if (connection != null) toggleSidePanel(SidePanel.Lyrics) else return false
             Shortcut.Queue -> if (connection != null) toggleSidePanel(SidePanel.Queue) else return false
             Shortcut.Info -> if (connection != null) toggleSidePanel(SidePanel.Info) else return false

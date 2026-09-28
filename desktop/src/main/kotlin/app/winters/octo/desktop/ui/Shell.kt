@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -44,6 +45,11 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isBackPressed
 import androidx.compose.ui.input.pointer.isForwardPressed
 import androidx.compose.ui.input.pointer.onPointerEvent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.Ambience
 import app.winters.octo.design.ControlHeight
@@ -96,10 +102,10 @@ import dev.chrisbanes.haze.rememberHazeState
 
 // The whole window. Behind everything, the window's colours (the playing
 // song's, blurred), which the frame frosts. Over them, one frame of dark
-// glass: the title bar across the top, the sidebar down the left, the side
-// panel down the right when open, and the player across the foot, meeting
-// at hairlines. The page is the one open surface in the middle; nothing
-// scrolls under the glass. The full player covers it all when open, with
+// glass: the title bar across the top, the sidebar down the left and the
+// side panel down the right when open, meeting at hairlines. The page is
+// the one open surface in the middle, with the player floating at its foot;
+// the page's lists leave room for it at their end. The full player covers it all when open, with
 // the title bar's buttons still over it. `frame` is null when the system
 // draws the window's frame.
 @OptIn(ExperimentalComposeUiApi::class)
@@ -107,6 +113,7 @@ import dev.chrisbanes.haze.rememberHazeState
 fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
     val backdrop = rememberHazeState()
     val pointer = remember { PointerSpot() }
+    val focus = LocalFocusManager.current
     val connection = app.connection
     val key = rememberKeyColour(app)
     CompositionLocalProvider(
@@ -124,6 +131,11 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
                 .onPointerEvent(PointerEventType.Move, PointerEventPass.Initial) { pointer.position = it.changes.first().position }
                 .onPointerEvent(PointerEventType.Press, PointerEventPass.Initial) { event ->
                     pointer.position = event.changes.first().position
+                    // A click outside the search box closes its list.
+                    if (app.omnibox.open && !app.omnibox.holds(pointer.point.x, pointer.point.y)) {
+                        app.omnibox.open = false
+                        focus.clearFocus()
+                    }
                     if (event.buttons.isBackPressed) app.navigator.back()
                     if (event.buttons.isForwardPressed) app.navigator.forward()
                 },
@@ -139,6 +151,19 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
                 AnimatedVisibility(app.fullPlayer, enter = fadeIn(), exit = fadeOut()) {
                     FullPlayer(app, Modifier.fillMaxSize(), top = FrameSize.TitleBar)
                 }
+            }
+            if (connection != null && app.omnibox.open && !app.fullPlayer) {
+                // Under the search field, centred on it.
+                val field = app.omnibox.field
+                val density = LocalDensity.current
+                val width = with(density) { FrameSize.OmniWidth.roundToPx() }
+                OmniPanel(
+                    app,
+                    backdrop,
+                    Modifier
+                        .offset { IntOffset(field.center.x - width / 2, field.bottom + Space.S.roundToPx()) }
+                        .onGloballyPositioned { app.omnibox.panel = it.windowRect() },
+                )
             }
             TitleBar(app, frame, onClose)
             PopupLayer(app.popups, backdrop)
@@ -157,6 +182,8 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState) {
     var panelWidth by remember { mutableStateOf(saved.panelWidth.dp) }
     val sideWidth = if (saved.sidebarRail) FrameSize.SidebarRail else sidebar.coerceIn(FrameSize.SidebarMin, FrameSize.SidebarMax)
     val panel = app.sidePanel
+    // The window's width, for the player's.
+    val window = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() }
     Column(Modifier.fillMaxSize()) {
         // Room for the title bar, in the frame's glass; its buttons are drawn
         // over it, last, so they stay over the full player too.
@@ -174,10 +201,16 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState) {
                 }
             }
             Seam(vertical = true)
-            CompositionLocalProvider(LocalBottomRoom provides Space.None) {
-                Column(Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
-                    app.notice?.let { Notice(it, app.noticeDetail) { app.notice = null; app.noticeDetail = null } }
-                    Box(Modifier.weight(1f)) { PageHost(app) }
+            CompositionLocalProvider(LocalBottomRoom provides FrameSize.Player + FrameSize.PlayerGap) {
+                BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
+                    Column(Modifier.fillMaxSize().clipToBounds()) {
+                        app.notice?.let { Notice(it, app.noticeDetail) { app.notice = null; app.noticeDetail = null } }
+                        Box(Modifier.weight(1f)) { PageHost(app) }
+                    }
+                    // A third of the window, in the middle of the page.
+                    val room = maxWidth - FrameSize.PlayerGap * 2
+                    val width = (window / 3).coerceIn(minOf(FrameSize.PlayerMin, room), room)
+                    PlayerBar(app, backdrop, Modifier.align(Alignment.BottomCenter).padding(bottom = FrameSize.PlayerGap).width(width).height(FrameSize.Player))
                 }
             }
             if (panel != null) {
@@ -193,8 +226,6 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState) {
                 }
             }
         }
-        Seam(vertical = false)
-        PlayerBar(app, backdrop, Modifier.fillMaxWidth().height(FrameSize.Player))
     }
 }
 
@@ -210,30 +241,10 @@ private fun TitleBar(app: AppState, frame: Frame?, onClose: () -> Unit) {
             IconAction(OctoIcons.Forward, "Forward", { app.navigator.forward() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.navigator.canGoForward)
         }
         Box(Modifier.weight(1f).fillMaxHeight().then(if (frame != null) Modifier.dragsWindow(frame) else Modifier), contentAlignment = Alignment.Center) {
-            if (app.connection != null && !app.fullPlayer) TitleSearch(app)
+            if (app.connection != null && !app.fullPlayer) OmniField(app)
         }
         if (frame != null) WindowButtons(frame, onClose)
     }
-}
-
-// The search field, in the title bar on every page. Typing shows the
-// results page; Escape clears it. Ctrl+F or Ctrl+K puts the keyboard here.
-@Composable
-private fun TitleSearch(app: AppState) {
-    val model = app.search ?: return
-    GlassField(
-        model.text,
-        { text ->
-            model.type(text)
-            if (text.isNotBlank() && app.navigator.current.page != Page.Search) app.navigator.go(Page.Search)
-        },
-        Modifier.width(FrameSize.SearchWidth).height(ControlHeight.S),
-        placeholder = "Search songs, albums, artists and playlists",
-        icon = OctoIcons.Search,
-        focusRequester = app.searchFocus,
-        onSubmit = { if (app.navigator.current.page != Page.Search) app.navigator.go(Page.Search) },
-        onEscape = { model.type("") },
-    )
 }
 
 // A single quiet line above the page, closed with its cross. When there

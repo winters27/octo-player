@@ -1,6 +1,8 @@
 package app.winters.octo.desktop.nav
 
 import androidx.compose.ui.input.key.Key
+import app.winters.octo.query.FilterPresets
+import app.winters.octo.query.LibraryQuery
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -42,6 +44,36 @@ class NavigatorTest {
         nav.go(Page.Albums)
         nav.go(Page.Albums)
         assertEquals(1 to 0, nav.depth)
+    }
+
+    @Test
+    fun filtersBelongToOneVisitAndComeBackWithIt() {
+        val nav = Navigator()
+        nav.go(Page.Songs)
+        val songs = nav.current
+        val favourites = LibraryQuery(listOf(FilterPresets.Favourites))
+        nav.keepFilter(songs, favourites)
+        assertEquals(favourites, nav.filterOf(songs))
+        nav.go(Page.Album("a1"))
+        assertEquals(LibraryQuery(), nav.filterOf(nav.current))
+        nav.back()
+        assertEquals(favourites, nav.filterOf(nav.current))
+        // The same page visited again starts unfiltered.
+        nav.go(Page.Albums)
+        nav.go(Page.Songs)
+        assertEquals(LibraryQuery(), nav.filterOf(nav.current))
+        // A visit dropped from the history takes its filters with it, and
+        // takes none after.
+        val again = nav.current
+        nav.keepFilter(again, favourites)
+        nav.back()
+        nav.go(Page.Artists)
+        assertEquals(LibraryQuery(), nav.filterOf(again))
+        nav.keepFilter(again, favourites)
+        assertEquals(LibraryQuery(), nav.filterOf(again))
+        nav.keepFilter(nav.current, favourites)
+        nav.startOver()
+        assertEquals(LibraryQuery(), nav.filterOf(nav.current))
     }
 
     @Test
@@ -137,7 +169,7 @@ class ShortcutsTest {
         assertEquals(Shortcut.SeekForward, on(Key.DirectionRight))
         assertEquals(Shortcut.VolumeUp, on(Key.DirectionUp))
         assertEquals(Shortcut.VolumeDown, on(Key.DirectionDown))
-        assertEquals(Shortcut.Search, on(Key.F, ctrl = true))
+        assertEquals(Shortcut.Filter, on(Key.F, ctrl = true))
         assertEquals(Shortcut.Lyrics, on(Key.L, ctrl = true))
         assertEquals(Shortcut.Settings, on(Key.Comma, ctrl = true))
         assertEquals(Shortcut.Back, on(Key.DirectionLeft, alt = true))
@@ -146,7 +178,7 @@ class ShortcutsTest {
 
     @Test
     fun onAMacCommandTakesCtrlsPlace() {
-        assertEquals(Shortcut.Search, on(Key.F, meta = true, mac = true))
+        assertEquals(Shortcut.Filter, on(Key.F, meta = true, mac = true))
         assertNull(on(Key.F, ctrl = true, mac = true))
         assertEquals(Shortcut.Back, on(Key.LeftBracket, meta = true, mac = true))
         assertNull("Windows keeps Ctrl", on(Key.F, meta = true))
@@ -156,7 +188,7 @@ class ShortcutsTest {
     fun whileTypingSpaceAndArrowsBelongToTheField() {
         assertNull(on(Key.Spacebar, typing = true))
         assertNull(on(Key.DirectionLeft, typing = true))
-        assertEquals(Shortcut.Search, on(Key.F, ctrl = true, typing = true))
+        assertEquals(Shortcut.Filter, on(Key.F, ctrl = true, typing = true))
         assertEquals(Shortcut.CloseLayer, on(Key.Escape, typing = true))
     }
 
@@ -178,8 +210,8 @@ class ShortcutsTest {
 
     @Test
     fun theSettingsListNamesThisSystemsKeys() {
-        assertTrue(shortcutList(mac = true).any { it.second == "Cmd+F or Cmd+K" })
-        assertTrue(shortcutList(mac = false).any { it.second == "Ctrl+F or Ctrl+K" })
+        assertTrue(shortcutList(mac = true).any { it.second == "Cmd+K" })
+        assertTrue(shortcutList(mac = false).any { it.second == "Ctrl+F" })
     }
 
     @Test
@@ -196,6 +228,8 @@ class ShortcutsTest {
     @Test
     fun theFramesShortcuts() {
         assertEquals(Shortcut.Search, on(Key.K, ctrl = true))
+        assertEquals(Shortcut.Filter, on(Key.F, ctrl = true))
+        assertEquals(Shortcut.Commands, shortcutFor(KeyPress(Key.P, ctrl = true, shift = true), mac = false, typing = true))
         assertEquals(Shortcut.Info, on(Key.I, ctrl = true))
         assertEquals(Shortcut.Sidebar, on(Key.B, ctrl = true))
         assertEquals(Shortcut.MiniPlayer, on(Key.M, meta = true, mac = true))

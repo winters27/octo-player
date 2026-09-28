@@ -27,6 +27,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import app.winters.octo.lyrics.OnlineLyrics
+import app.winters.octo.query.FilterPresets
+import app.winters.octo.query.LibraryQuery
+import app.winters.octo.query.QueryField
+import app.winters.octo.query.QueryOp
+import app.winters.octo.query.QueryRule
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.jetbrains.skia.EncodedImageFormat
@@ -212,6 +217,23 @@ class ScreenShotsTest {
                 app.navigator.go(Page.Songs)
             }
             shot("songs")
+            // Two filters on as pills, and the count of what is left.
+            SwingUtilities.invokeAndWait {
+                val rules = listOf(FilterPresets.Lossless, QueryRule(QueryField.Artist, QueryOp.Is, text = "Radiohead"))
+                app.navigator.keepFilter(app.navigator.current, LibraryQuery(rules))
+            }
+            shot("filters")
+            SwingUtilities.invokeAndWait {
+                val visit = app.navigator.current
+                showAddFilter(app, androidx.compose.ui.unit.IntRect(760, 142, 850, 170), app.navigator.filterOf(visit), { app.navigator.keepFilter(visit, it) }, app.library!!.index!!.songs)
+            }
+            shot("filters-menu")
+            SwingUtilities.invokeAndWait { app.popups.close() }
+            SwingUtilities.invokeAndWait {
+                app.navigator.keepFilter(app.navigator.current, LibraryQuery(listOf(FilterPresets.NeverPlayed), text = "karma"))
+            }
+            shot("filters-empty")
+            SwingUtilities.invokeAndWait { app.navigator.keepFilter(app.navigator.current, LibraryQuery()) }
             // A song that would not play: the notice line, with details, and its row marked.
             SwingUtilities.invokeAndWait {
                 val failed = app.library!!.index!!.songs[1]
@@ -269,6 +291,18 @@ class ScreenShotsTest {
                 app.search?.type("radiohead")
             }
             shot("search", 2_000)
+            SwingUtilities.invokeAndWait {
+                app.navigator.go(Page.Songs)
+                app.openSearch()
+                app.search?.type("radiohead")
+            }
+            shot("omnibox", 2_000)
+            SwingUtilities.invokeAndWait { app.search?.type(">sle") }
+            shot("commands")
+            SwingUtilities.invokeAndWait {
+                app.search?.type("")
+                app.omnibox.open = false
+            }
             SwingUtilities.invokeAndWait {
                 app.navigator.go(Page.Songs)
                 app.popups.showAt(androidx.compose.ui.unit.IntOffset(700, 300)) { close -> SongMenu(app, app.library!!.index!!.songs.take(1), close) }

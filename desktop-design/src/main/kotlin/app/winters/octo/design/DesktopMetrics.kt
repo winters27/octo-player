@@ -80,16 +80,25 @@ object FrameSize {
     val PanelMax = 480.dp
     val Player = 76.dp
     val PlayerCover = 56.dp
+    // The floating player: a third of the window wide, but never narrower
+    // than its controls need; its cover; and the gap around it.
+    val PlayerMin = 600.dp
+    val PlayerThumb = 40.dp
+    val PlayerGap = 16.dp
     val PlayButton = 36.dp
     val PlayButtonLarge = 44.dp
     // A menu opened from a button.
     val Menu = 280.dp
-    // The volume slider's length.
-    val Volume = 96.dp
     val PlaylistCover = 22.dp
     val SearchWidth = 360.dp
-    // The transport's column, at most; the side zones share the rest evenly.
-    val TransportMax = 640.dp
+    // The search box's list: its width, how tall it may grow, a line, and
+    // a line's picture.
+    val OmniWidth = 600.dp
+    val OmniHeight = 520.dp
+    val OmniLine = 44.dp
+    val OmniArt = 32.dp
+    // A song list's filter field.
+    val FilterWidth = 260.dp
 }
 
 // Type on the desktop: smaller and denser than the phone's, with page

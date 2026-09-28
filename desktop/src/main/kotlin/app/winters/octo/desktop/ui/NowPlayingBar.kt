@@ -4,7 +4,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -19,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -52,8 +52,11 @@ import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
 import app.winters.octo.design.LineSlider
+import app.winters.octo.design.MenuFilm
+import app.winters.octo.design.MenuFrost
 import app.winters.octo.design.MenuRow
 import app.winters.octo.design.MenuSeparator
+import app.winters.octo.design.MenuShape
 import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -63,7 +66,6 @@ import app.winters.octo.design.Scrubber
 import app.winters.octo.design.Space
 import app.winters.octo.design.Spinner
 import app.winters.octo.design.Txt
-import app.winters.octo.design.chromeFilm
 import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
@@ -102,33 +104,35 @@ fun rememberPosition(player: DesktopPlayer): State<Long> {
     return position
 }
 
-// The player, docked along the foot of the frame, in three columns: the
-// song on the left, the transport and progress in the middle, and the
-// panels, output and volume on the right. The side columns share the width
-// evenly, so the transport sits at the window's true centre whatever the
+// The player, floating in glass at the foot of the page. The top line has
+// the song on the left, the transport in the middle and the panels, volume
+// and More on the right; the progress line runs underneath. The two sides
+// share the width evenly, so the transport stays centred whatever the
 // song's title.
 @Composable
 fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
     val state by app.player.state.collectAsState()
     val song = state.current?.song
-    BoxWithConstraints(modifier.chromeFilm(backdrop)) {
-        val middle = minOf(FrameSize.TransportMax, maxWidth * 0.42f)
-        Row(Modifier.fillMaxSize().padding(horizontal = Space.L), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { SongZone(app, song) }
-            Box(Modifier.width(middle), contentAlignment = Alignment.Center) { TransportZone(app, state) }
-            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { UtilityZone(app, state) }
+    FloatingGlaze(backdrop, modifier, shape = MenuShape, film = MenuFilm, frost = MenuFrost, halo = true) {
+        Column(Modifier.fillMaxSize().padding(horizontal = Space.L, vertical = Space.S), verticalArrangement = Arrangement.Center) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { SongZone(app, song) }
+                Transport(app, state)
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { UtilityZone(app, state) }
+            }
+            ProgressLine(app, state)
         }
     }
 }
 
 // The song: its cover (which opens the full player), its title (which
-// opens its album), the artist and album as links, and the heart.
+// opens its album), the artist as a link, and the heart.
 @Composable
 private fun SongZone(app: AppState, song: Song?) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
         Cover(
             song?.coverArt,
-            Modifier.size(FrameSize.PlayerCover).clickable(enabled = song != null) { app.fullPlayer = true },
+            Modifier.size(FrameSize.PlayerThumb).clickable(enabled = song != null) { app.fullPlayer = true },
             shape = Corner.ArtMShape,
             placeholder = OctoIcons.Songs,
         )
@@ -143,13 +147,7 @@ private fun SongZone(app: AppState, song: Song?) {
                     OctoColors.TextPrimary,
                     if (album != null) Modifier.pointerHoverIcon(PointerIcon.Hand).clickable { app.navigator.go(Page.Album(album)) } else Modifier,
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    LinkText(song.displayArtist ?: song.artist.orEmpty(), song.artistId) { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }
-                    if (!song.album.isNullOrBlank()) {
-                        Txt(" · ", DesktopType.meta, OctoColors.TextMuted)
-                        LinkText(song.album.orEmpty(), song.albumId) { app.navigator.go(Page.Album(it)) }
-                    }
-                }
+                LinkText(song.displayArtist ?: song.artist.orEmpty(), song.artistId) { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }
             }
         }
         if (song != null) {
@@ -159,54 +157,57 @@ private fun SongZone(app: AppState, song: Song?) {
     }
 }
 
-// The transport over the progress line, with the time played on the left
-// and, on the right, the time left (or the song's length; a click swaps).
+// Shuffle, back, play, next and repeat.
 @Composable
-private fun TransportZone(app: AppState, state: PlayerState) {
+private fun Transport(app: AppState, state: PlayerState) {
     val song = state.current?.song
+    Row(Modifier.padding(horizontal = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
+        IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = state.shuffle)
+        IconAction(OctoIcons.Previous, "Previous", app.player::previous, size = ControlHeight.L, iconSize = IconSize.Transport, enabled = song != null)
+        PlayButton(state.playing, enabled = song != null, size = FrameSize.PlayButton, waiting = state.buffering) { app.player.togglePlay() }
+        IconAction(OctoIcons.Next, "Next", app.player::next, size = ControlHeight.L, iconSize = IconSize.Transport, enabled = song != null)
+        val repeat = state.repeat
+        IconAction(
+            if (repeat == RepeatMode.One) OctoIcons.RepeatOne else OctoIcons.Repeat,
+            when (repeat) {
+                RepeatMode.Off -> "Repeat"
+                RepeatMode.All -> "Repeat all"
+                RepeatMode.One -> "Repeat one"
+            },
+            { app.player.setRepeat(RepeatMode.entries[(repeat.ordinal + 1) % RepeatMode.entries.size]) },
+            size = ControlHeight.M,
+            iconSize = IconSize.Toolbar,
+            active = repeat != RepeatMode.Off,
+        )
+    }
+}
+
+// The progress line, with the time played on the left and, on the right,
+// the time left (or the song's length; a click swaps).
+@Composable
+private fun ProgressLine(app: AppState, state: PlayerState) {
     val position by rememberPosition(app.player)
     val settings by app.settings.state.collectAsState()
     val left = settings.frame.showTimeLeft
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
-            IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = state.shuffle)
-            IconAction(OctoIcons.Previous, "Previous", app.player::previous, size = ControlHeight.L, iconSize = IconSize.Transport, enabled = song != null)
-            PlayButton(state.playing, enabled = song != null, size = FrameSize.PlayButton, waiting = state.buffering) { app.player.togglePlay() }
-            IconAction(OctoIcons.Next, "Next", app.player::next, size = ControlHeight.L, iconSize = IconSize.Transport, enabled = song != null)
-            val repeat = state.repeat
-            IconAction(
-                if (repeat == RepeatMode.One) OctoIcons.RepeatOne else OctoIcons.Repeat,
-                when (repeat) {
-                    RepeatMode.Off -> "Repeat"
-                    RepeatMode.All -> "Repeat all"
-                    RepeatMode.One -> "Repeat one"
-                },
-                { app.player.setRepeat(RepeatMode.entries[(repeat.ordinal + 1) % RepeatMode.entries.size]) },
-                size = ControlHeight.M,
-                iconSize = IconSize.Toolbar,
-                active = repeat != RepeatMode.Off,
-            )
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
-            val duration = state.durationMs
-            // Where a drag would land, shown in place of the time while dragging.
-            var scrubbing by remember { mutableStateOf<Float?>(null) }
-            val shownMs = scrubbing?.let { (it * duration).toLong() } ?: position
-            Txt(lengthText((shownMs / 1000).toInt()).ifEmpty { "0:00" }, TimeStyle, OctoColors.TextMuted, Modifier.width(TimeWidth), align = TextAlign.End)
-            Scrubber(
-                fraction = { if (duration > 0) position.toFloat() / duration else 0f },
-                onSeek = { app.player.seekTo((it * duration).toLong()) },
-                modifier = Modifier.weight(1f),
-                onScrub = { scrubbing = it },
-            )
-            val end = if (left && duration > 0) "-" + lengthText(((duration - shownMs).coerceAtLeast(0) / 1000).toInt()).ifEmpty { "0:00" } else lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }
-            Txt(
-                end,
-                TimeStyle,
-                OctoColors.TextMuted,
-                Modifier.width(TimeWidth).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { app.updateFrame { it.copy(showTimeLeft = !left) } },
-            )
-        }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
+        val duration = state.durationMs
+        // Where a drag would land, shown in place of the time while dragging.
+        var scrubbing by remember { mutableStateOf<Float?>(null) }
+        val shownMs = scrubbing?.let { (it * duration).toLong() } ?: position
+        Txt(lengthText((shownMs / 1000).toInt()).ifEmpty { "0:00" }, TimeStyle, OctoColors.TextMuted, Modifier.width(TimeWidth), align = TextAlign.End)
+        Scrubber(
+            fraction = { if (duration > 0) position.toFloat() / duration else 0f },
+            onSeek = { app.player.seekTo((it * duration).toLong()) },
+            modifier = Modifier.weight(1f),
+            onScrub = { scrubbing = it },
+        )
+        val end = if (left && duration > 0) "-" + lengthText(((duration - shownMs).coerceAtLeast(0) / 1000).toInt()).ifEmpty { "0:00" } else lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }
+        Txt(
+            end,
+            TimeStyle,
+            OctoColors.TextMuted,
+            Modifier.width(TimeWidth).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { app.updateFrame { it.copy(showTimeLeft = !left) } },
+        )
     }
 }
 
@@ -214,31 +215,20 @@ private fun TransportZone(app: AppState, state: PlayerState) {
 private val TimeStyle = DesktopType.meta.copy(fontFeatureSettings = "tnum")
 private val TimeWidth = Space.Wide + Space.S
 
-// The song's format as a quiet line (it opens the Info tab), the panels,
-// the output, the volume, More, and the full player.
+// The panels, the volume and More.
 @Composable
 private fun UtilityZone(app: AppState, state: PlayerState) {
-    val song = state.current?.song
     Row(horizontalArrangement = Arrangement.spacedBy(Space.Xxs), verticalAlignment = Alignment.CenterVertically) {
-        formatLabel(state.format)?.let { line ->
-            Txt(
-                line,
-                DesktopType.meta.copy(fontFeatureSettings = "tnum"),
-                OctoColors.TextMuted,
-                Modifier.padding(end = Space.S).pointerHoverIcon(PointerIcon.Hand).clickable { app.showInfo(null) },
-            )
-        }
         IconAction(OctoIcons.Lyrics, "Lyrics", { app.toggleSidePanel(SidePanel.Lyrics) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Lyrics)
         IconAction(OctoIcons.Queue, "Queue", { app.toggleSidePanel(SidePanel.Queue) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Queue)
-        OutputButton(app)
-        VolumeControl(app, state.volume)
+        VolumeButton(app, state.volume)
         MoreButton(app, state)
-        IconAction(OctoIcons.Expand, "Open the player", { app.fullPlayer = !app.fullPlayer }, size = ControlHeight.M, iconSize = IconSize.Toolbar, enabled = song != null, active = app.fullPlayer)
     }
 }
 
-// What is used now and then: the sleep timer, stopping after this song,
-// the song's details and the mini player. Lit while a timer is set.
+// What is used now and then: the full player, where the sound goes, the
+// sleep timer, stopping after this song, the song's details (with its
+// format) and the mini player. Lit while a timer is set.
 @Composable
 private fun MoreButton(app: AppState, state: PlayerState) {
     var anchor by remember { mutableStateOf(IntRect.Zero) }
@@ -251,7 +241,7 @@ private fun MoreButton(app: AppState, state: PlayerState) {
     }
 }
 
-private enum class MorePage { Main, Sleep }
+private enum class MorePage { Main, Output, Sleep }
 
 @Composable
 private fun ColumnScope.MoreMenu(app: AppState, close: () -> Unit) {
@@ -260,6 +250,9 @@ private fun ColumnScope.MoreMenu(app: AppState, close: () -> Unit) {
     val sleep by app.sleep.state.collectAsState()
     when (page) {
         MorePage.Main -> {
+            MenuRow("Open the player", { app.fullPlayer = true; close() }, OctoIcons.Expand, enabled = now.current != null)
+            MenuRow("Play on", { page = MorePage.Output }, outputIcon(now.playingOn?.name), more = true, detail = now.playingOn?.name ?: "System default")
+            MenuSeparator()
             MenuRow("Sleep timer", { page = MorePage.Sleep }, OctoIcons.SleepTimer, more = true, detail = if (sleep != SleepState.Off) sleepSummary(sleep) else null)
             MenuRow(
                 "Stop after this song",
@@ -268,9 +261,10 @@ private fun ColumnScope.MoreMenu(app: AppState, close: () -> Unit) {
                 enabled = now.current != null,
             )
             MenuSeparator()
-            MenuRow("Song details", { app.showInfo(null); close() }, OctoIcons.Info, enabled = now.current != null)
+            MenuRow("Song details", { app.showInfo(null); close() }, OctoIcons.Info, enabled = now.current != null, detail = formatLabel(now.format))
             app.toggleMiniPlayer?.let { toggle -> MenuRow("Mini player", { toggle(); close() }, OctoIcons.Expand) }
         }
+        MorePage.Output -> OutputMenu(app, back = { page = MorePage.Main }, close = close)
         MorePage.Sleep -> SleepMenu(app, sleep, back = { page = MorePage.Main }, close = close)
     }
 }
@@ -314,32 +308,26 @@ fun PlayButton(playing: Boolean, enabled: Boolean, size: Dp = FrameSize.PlayButt
     }
 }
 
-// Where the sound goes: a glass menu of the system's default (followed as
-// it changes, so plugging in headphones moves the sound there) and every
-// device the engine can play to. The chosen one is ticked.
+// Where the sound goes: the system's default (followed as it changes, so
+// plugging in headphones moves the sound there) and every device the engine
+// can play to. The chosen one is ticked.
 @Composable
-private fun OutputButton(app: AppState) {
-    var anchor by remember { mutableStateOf(IntRect.Zero) }
-    val state by app.player.state.collectAsState()
-    Box(Modifier.onGloballyPositioned { anchor = it.windowRect() }) {
-        IconAction(outputIcon(state.playingOn?.name), "Output: ${state.playingOn?.name ?: "system default"}", {
-            app.popups.showUnder(anchor, width = FrameSize.Menu) { close ->
-                val now = app.player.state.value
-                MenuTitle("Play on")
-                now.outputs.forEachIndexed { index, device ->
-                    if (index == 1) MenuSeparator()
-                    MenuRow(
-                        device.name,
-                        {
-                            app.selectOutput(device.id)
-                            close()
-                        },
-                        if (device.id == now.output?.id) OctoIcons.Check else outputIcon(device.name),
-                        detail = if (index == 0) "Follows the system" else null,
-                    )
-                }
-            }
-        }, size = ControlHeight.M, iconSize = IconSize.Toolbar)
+private fun ColumnScope.OutputMenu(app: AppState, back: () -> Unit, close: () -> Unit) {
+    val now by app.player.state.collectAsState()
+    MenuRow("Back", back, OctoIcons.Back)
+    MenuSeparator()
+    MenuTitle("Play on")
+    now.outputs.forEachIndexed { index, device ->
+        if (index == 1) MenuSeparator()
+        MenuRow(
+            device.name,
+            {
+                app.selectOutput(device.id)
+                close()
+            },
+            if (device.id == now.output?.id) OctoIcons.Check else outputIcon(device.name),
+            detail = if (index == 0) "Follows the system" else null,
+        )
     }
 }
 
@@ -350,35 +338,56 @@ private fun outputIcon(name: String?): ImageVector {
     return if (pair) OctoIcons.Headphones else OctoIcons.Speaker
 }
 
-// The volume: a speaker that mutes and unmutes, and a line to drag. The
-// wheel anywhere over either turns it up or down.
+// The volume: the wheel over the speaker turns it up or down, and a click
+// opens a line to drag and Mute.
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun VolumeControl(app: AppState, volume: Float) {
-    var before by remember { mutableFloatStateOf(0.8f) }
-    Row(
-        Modifier.onPointerEvent(PointerEventType.Scroll) { event ->
-            val dy = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
-            if (dy != 0f) app.setVolume(volume - dy * 0.05f)
-        },
-        verticalAlignment = Alignment.CenterVertically,
+private fun VolumeButton(app: AppState, volume: Float) {
+    var anchor by remember { mutableStateOf(IntRect.Zero) }
+    // The volume before muting, to go back to.
+    val before = remember { mutableFloatStateOf(0.8f) }
+    Box(
+        Modifier
+            .onGloballyPositioned { anchor = it.windowRect() }
+            .onPointerEvent(PointerEventType.Scroll) { event ->
+                val dy = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+                if (dy != 0f) app.setVolume(app.player.state.value.volume - dy * 0.05f)
+            },
     ) {
         IconAction(
             if (volume <= 0.001f) OctoIcons.VolumeDown else OctoIcons.VolumeUp,
-            if (volume <= 0.001f) "Unmute" else "Mute",
-            {
-                if (volume > 0.001f) {
-                    before = volume
-                    app.setVolume(0f)
-                } else {
-                    app.setVolume(before.takeIf { it > 0.01f } ?: 0.8f)
-                }
-            },
+            "Volume ${(volume * 100).roundToInt()}%",
+            { app.popups.showUnder(anchor, width = FrameSize.Menu) { _ -> VolumeMenu(app, before) } },
             size = ControlHeight.M,
             iconSize = IconSize.Toolbar,
         )
-        LineSlider(fraction = { volume }, onSeek = app::setVolume, modifier = Modifier.width(FrameSize.Volume), live = true, hoverLabel = { "${(it * 100).toInt()}%" })
     }
+}
+
+@Composable
+private fun ColumnScope.VolumeMenu(app: AppState, before: MutableFloatState) {
+    val now by app.player.state.collectAsState()
+    val volume = now.volume
+    val muted = volume <= 0.001f
+    MenuTitle("Volume ${(volume * 100).roundToInt()}%")
+    LineSlider(
+        fraction = { app.player.state.value.volume },
+        onSeek = app::setVolume,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Space.L, vertical = Space.M),
+        live = true,
+    )
+    MenuRow(
+        if (muted) "Unmute" else "Mute",
+        {
+            if (muted) {
+                app.setVolume(before.floatValue.takeIf { it > 0.01f } ?: 0.8f)
+            } else {
+                before.floatValue = volume
+                app.setVolume(0f)
+            }
+        },
+        if (muted) OctoIcons.VolumeUp else OctoIcons.VolumeDown,
+    )
 }
 
 // A laid-out thing's bounds in the window, for opening a pop-up under it.

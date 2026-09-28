@@ -31,24 +31,30 @@ import app.winters.octo.design.TextAction
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.library.LibraryIndex
 import app.winters.octo.desktop.library.SongColumn
+import app.winters.octo.desktop.library.filteredCount
+import app.winters.octo.desktop.library.rememberFiltered
 import app.winters.octo.desktop.library.rememberSorted
 import app.winters.octo.desktop.library.sortAlbums
 import app.winters.octo.desktop.library.sortSongs
 import app.winters.octo.desktop.library.sortedByName
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
+import app.winters.octo.desktop.ui.FilterBar
 import app.winters.octo.desktop.ui.LoadingLine
 import app.winters.octo.desktop.ui.LocalBottomRoom
 import app.winters.octo.desktop.ui.MediaCard
+import app.winters.octo.desktop.ui.NoMatches
 import app.winters.octo.desktop.ui.PageTitle
 import app.winters.octo.desktop.ui.SongTable
 import app.winters.octo.desktop.ui.artistMenu
 import app.winters.octo.desktop.ui.pagePadding
+import app.winters.octo.desktop.ui.rememberShownFields
 import app.winters.octo.desktop.ui.rememberGridState
 import app.winters.octo.desktop.ui.rememberListState
 import app.winters.octo.desktop.ui.rememberLoad
 import app.winters.octo.desktop.ui.show
 import app.winters.octo.desktop.ui.windowRect
+import app.winters.octo.query.LibraryQuery
 import app.winters.octo.sort.AlbumSort
 import app.winters.octo.sort.SongSort
 import app.winters.octo.sort.SortList
@@ -58,13 +64,17 @@ import app.winters.octo.sort.sortScale
 import app.winters.octo.subsonic.Artist
 
 // Every song in the library, as a table sorted by any column; the order is
-// kept between runs.
+// kept between runs, the filters only for the visit.
 @Composable
 fun SongsPage(app: AppState, visit: Visit) {
     val list = rememberListState(app.navigator, visit)
+    val query = app.navigator.filterOf(visit)
+    val filter: (LibraryQuery) -> Unit = { app.navigator.keepFilter(visit, it) }
+    val fields = rememberShownFields(app)
     WithLibrary(app) { index ->
         val order = app.songOrder
-        val songs = rememberSorted(index.songs, order) ?: return@WithLibrary LoadingLine()
+        val sorted = rememberSorted(index.songs, order)
+        val songs = rememberFiltered(sorted, query, fields)?.songs ?: return@WithLibrary LoadingLine()
         val facts = remember(index) { libraryLine(index) }
         SongTable(
             app,
@@ -74,17 +84,21 @@ fun SongsPage(app: AppState, visit: Visit) {
             id = "songs",
             order = order,
             onSort = app::sortSongs,
-            empty = { NothingHere("No songs yet", "Once your server has music, every song shows here.") },
+            empty = {
+                if (query.filters && index.songs.isNotEmpty()) NoMatches { filter(query.cleared()) }
+                else NothingHere("No songs yet", "Once your server has music, every song shows here.")
+            },
         ) {
             item(key = "title") {
                 Row(Modifier.fillMaxWidth().padding(bottom = Space.L), verticalAlignment = Alignment.Bottom) {
-                    PageTitle("Songs", Modifier.weight(1f), detail = facts)
+                    PageTitle("Songs", Modifier.weight(1f), detail = if (query.filters) filteredCount(songs.size, index.songs.size, true) else facts)
                     Row(Modifier.padding(bottom = Space.Xl), horizontalArrangement = Arrangement.spacedBy(Space.M)) {
                         GlazeCapsule(OctoIcons.Play, "Play", { app.play(songs) }, lit = true, enabled = songs.isNotEmpty())
                         GlazeCapsule(OctoIcons.Shuffle, "Shuffle", { app.play(songs, shuffle = true) }, enabled = songs.isNotEmpty())
                     }
                 }
             }
+            if (index.songs.isNotEmpty()) item(key = "filters") { FilterBar(app, query, filter, index.songs) }
         }
     }
 }
@@ -163,29 +177,37 @@ fun FavouritesPage(app: AppState, visit: Visit) {
     val loaded = rememberLoad(connection) { connection.client.starred() }
     val list = rememberListState(app.navigator, visit)
     val grid = rememberGridState(app.navigator, visit)
-    val title: @Composable () -> Unit = {
+    val query = app.navigator.filterOf(visit)
+    val filter: (LibraryQuery) -> Unit = { app.navigator.keepFilter(visit, it) }
+    val fields = rememberShownFields(app)
+    val title: @Composable (String?) -> Unit = { detail ->
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            PageTitle("Favourites", Modifier.weight(1f))
+            PageTitle("Favourites", Modifier.weight(1f), detail = detail)
             GlazeSegments(FavouriteKind.entries, kind, { it.label }, { kind = it; app.navigator.keepTab(visit, it.name) })
         }
     }
     loaded.show(Modifier.padding(horizontal = 28.dp)) { starred ->
         when (kind) {
             FavouriteKind.Songs -> {
-                val songs = starred.song.filter(app::isStarred)
+                val all = starred.song.filter(app::isStarred)
+                val songs = rememberFiltered(all, query, fields)?.songs ?: return@show LoadingLine()
                 SongTable(
                     app,
                     songs,
                     listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Length),
                     list,
                     id = "favourites",
-                    empty = { NothingHere("No favourite songs yet", "Right-click a song and pick Add to favourites.") },
+                    empty = {
+                        if (query.filters && all.isNotEmpty()) NoMatches { filter(query.cleared()) }
+                        else NothingHere("No favourite songs yet", "Right-click a song and pick Add to favourites.")
+                    },
                 ) {
-                    item(key = "title") { title() }
+                    item(key = "title") { title(if (query.filters) filteredCount(songs.size, all.size, true) else null) }
+                    if (all.isNotEmpty()) item(key = "filters") { FilterBar(app, query, filter, all) }
                 }
             }
             FavouriteKind.Albums, FavouriteKind.Artists -> LazyVerticalGrid(GridCells.Adaptive(GridCard), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
-                header { title() }
+                header { title(null) }
                 if (kind == FavouriteKind.Albums) {
                     val albums = starred.album.filter { app.isAlbumStarred(it.id, it.starred) }
                     if (albums.isEmpty()) header { NothingHere("No favourite albums yet") }
@@ -204,9 +226,12 @@ fun FavouritesPage(app: AppState, visit: Visit) {
 @Composable
 fun HistoryPage(app: AppState, visit: Visit) {
     val list = rememberListState(app.navigator, visit)
+    val query = app.navigator.filterOf(visit)
+    val filter: (LibraryQuery) -> Unit = { app.navigator.keepFilter(visit, it) }
+    val fields = rememberShownFields(app)
     WithLibrary(app) { index ->
         var order by remember { mutableStateOf(SortOrder(SongSort.RecentlyPlayed, descending = true)) }
-        val songs = rememberSorted(index.history, order) ?: return@WithLibrary LoadingLine()
+        val songs = rememberFiltered(rememberSorted(index.history, order), query, fields)?.songs ?: return@WithLibrary LoadingLine()
         SongTable(
             app,
             songs,
@@ -215,9 +240,13 @@ fun HistoryPage(app: AppState, visit: Visit) {
             id = "history",
             order = order,
             onSort = { order = it },
-            empty = { NothingHere("No history yet", "Your server hasn't recorded any plays, or doesn't share them.") },
+            empty = {
+                if (query.filters && index.history.isNotEmpty()) NoMatches { filter(query.cleared()) }
+                else NothingHere("No history yet", "Your server hasn't recorded any plays, or doesn't share them.")
+            },
         ) {
-            item(key = "title") { PageTitle("Recently played") }
+            item(key = "title") { PageTitle("Recently played", detail = if (query.filters) filteredCount(songs.size, index.history.size, true) else null) }
+            if (index.history.isNotEmpty()) item(key = "filters") { FilterBar(app, query, filter, index.history) }
         }
     }
 }
