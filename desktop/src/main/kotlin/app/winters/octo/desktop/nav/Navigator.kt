@@ -22,9 +22,14 @@ sealed interface Page {
     data class Album(val id: String) : Page
     data class Artist(val id: String, val name: String = "") : Page
     data class Genre(val name: String) : Page
-    data class Folder(val id: String, val name: String) : Page
+    // `trail` is the folders above it, from the top, when it was opened
+    // from one of them; `focus` a song to show in it ("Show in folder").
+    data class Folder(val id: String, val name: String, val trail: List<FolderStep> = emptyList(), val focus: String? = null) : Page
     data class Playlist(val id: String) : Page
 }
+
+// One folder on the way down to another, for the breadcrumbs.
+data class FolderStep(val id: String, val name: String)
 
 // The sidebar's items. Settings sits at the bottom; playlists are listed
 // under their own heading.
