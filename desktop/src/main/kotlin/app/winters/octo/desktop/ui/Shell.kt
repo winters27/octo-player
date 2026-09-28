@@ -26,7 +26,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -77,6 +79,7 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.PopupLayer
+import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
@@ -128,7 +131,7 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
                                 .clipToBounds(),
                         ) {
                             Column(Modifier.fillMaxSize()) {
-                                app.notice?.let { Notice(it) { app.notice = null } }
+                                app.notice?.let { Notice(it, app.noticeDetail) { app.notice = null; app.noticeDetail = null } }
                                 Box(Modifier.weight(1f)) { PageHost(app) }
                             }
                         }
@@ -199,16 +202,18 @@ private fun TitleBar(app: AppState, frame: Frame?, onClose: () -> Unit) {
     }
 }
 
-// A single quiet line above the page, closed with its cross.
+// A single quiet line above the page, closed with its cross. When there
+// is more to say (the engine's own words for a failure), Details shows it.
 @Composable
-private fun Notice(text: String, onClose: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(start = PageSide, end = PageSide, top = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Txt(text, OctoType.bodySmall, OctoColors.TextSecondary, Modifier.weight(1f), maxLines = 2)
-        IconAction(OctoIcons.Close, "Dismiss", onClose, size = 28.dp, iconSize = 14.dp, tint = OctoColors.TextSecondary)
+private fun Notice(text: String, detail: String?, onClose: () -> Unit) {
+    var open by remember(text) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(start = PageSide, end = PageSide, top = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Txt(text, OctoType.bodySmall, OctoColors.TextSecondary, Modifier.weight(1f), maxLines = 2)
+            if (detail != null) TextAction(if (open) "Hide details" else "Details", { open = !open })
+            IconAction(OctoIcons.Close, "Dismiss", onClose, size = 28.dp, iconSize = 14.dp, tint = OctoColors.TextSecondary)
+        }
+        if (open && detail != null) Txt(detail, OctoType.caption, OctoColors.TextMuted, maxLines = 4)
     }
 }
 

@@ -48,11 +48,12 @@ import app.winters.octo.desktop.library.SongColumn
 import app.winters.octo.desktop.library.TableSelection
 import app.winters.octo.desktop.library.clicking
 import app.winters.octo.desktop.library.lengthText
-import app.winters.octo.desktop.library.serverTime
+import app.winters.octo.server.serverTime
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.OctoTooltip
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.Separator
 import app.winters.octo.design.Txt
@@ -240,8 +241,11 @@ private fun SongCell(app: AppState, column: SongColumn, index: Int, song: Song, 
             else Txt(number(index, song), OctoType.caption, muted)
         SongColumn.Title -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (covers) Cover(song.coverArt, Modifier.size(34.dp), shape = RoundedCornerShape(5.dp), placeholder = OctoIcons.Songs)
-            Txt(song.title, OctoType.bodySmall, if (isCurrent) OctoColors.Accent else OctoColors.TextPrimary)
+            val failed = app.failedSongs[song.id]
+            Txt(song.title, OctoType.bodySmall, if (isCurrent) OctoColors.Accent else if (failed != null) muted else OctoColors.TextPrimary)
             if (app.isStarred(song)) Glyph(OctoIcons.Liked, size = 12.dp, tint = OctoColors.TextSecondary)
+            // A song that would not play this time says why on hover.
+            if (failed != null) OctoTooltip(failed) { Glyph(OctoIcons.Info, size = 13.dp, tint = OctoColors.SignalOrange) }
         }
         SongColumn.Artist -> LinkText(song.displayArtist ?: song.artist.orEmpty(), song.artistId) { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }
         SongColumn.Album -> LinkText(song.album.orEmpty(), song.albumId) { app.navigator.go(Page.Album(it)) }

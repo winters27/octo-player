@@ -20,11 +20,6 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// A play only counts once enough of the song was heard: half of it or four
-// minutes, whichever comes first, and never for clips under 30 seconds.
-fun countsAsPlay(playedMs: Long, durationMs: Long): Boolean =
-    durationMs >= 30_000 && playedMs >= minOf(durationMs / 2, 240_000)
-
 // Looks up songs by id, keeping the order asked for and dropping any the
 // catalog no longer has. SQLite limits how many ids fit in one query.
 suspend fun CatalogDao.tracksByIds(ids: List<String>): List<TrackEntity> {

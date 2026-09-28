@@ -1,25 +1,42 @@
 package app.winters.octo.desktop.pages
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.nav.Visit
+import app.winters.octo.desktop.queue.ResumeOffer
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.desktop.ui.LocalBottomRoom
+import app.winters.octo.desktop.ui.LocalKeyColour
 import app.winters.octo.desktop.ui.MediaCard
 import app.winters.octo.desktop.ui.PageTitle
 import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.rememberListState
 import app.winters.octo.desktop.ui.FailedLine
 import app.winters.octo.desktop.ui.LoadingLine
+import app.winters.octo.design.GlazeCapsule
+import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.OctoType
 import app.winters.octo.design.Spinner
+import app.winters.octo.design.Txt
 import app.winters.octo.subsonic.RadioStation
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.launch
@@ -38,6 +55,7 @@ fun HomePage(app: AppState, visit: Visit) {
     var starting by remember { mutableStateOf<String?>(null) }
     LazyColumn(state = list, contentPadding = pagePadding(LocalBottomRoom.current)) {
         item(key = "title") { PageTitle("Home") }
+        app.queueSync.offer?.let { offer -> item(key = "resume") { ResumeCard(app, offer) } }
         when {
             home == null && failure != null -> item(key = "failed") { FailedLine(failure, store::retry) }
             home == null -> item(key = "loading") { LoadingLine() }
@@ -80,4 +98,26 @@ private fun StationCard(station: RadioStation, starting: Boolean, onPlay: () -> 
         badge = if (starting) ({ Spinner(size = 22.dp) }) else null,
         modifier = Modifier,
     )
+}
+
+// A queue saved on another device (the phone, most often), offered once:
+// Resume loads it paused where it was left; Not now puts it away.
+@Composable
+private fun ResumeCard(app: AppState, offer: ResumeOffer) {
+    val key = LocalKeyColour.current
+    val shape = RoundedCornerShape(14.dp)
+    Row(
+        Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(top = 8.dp, bottom = 4.dp).settingsSurface(shape, key).padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Cover(offer.remote.current?.coverArt, Modifier.size(56.dp), shape = RoundedCornerShape(8.dp), placeholder = OctoIcons.Songs)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Txt(offer.device?.let { "Pick up where you left off on $it" } ?: "Pick up where you left off", OctoType.caption, OctoColors.TextMuted)
+            Txt(offer.title, OctoType.label)
+            offer.artist?.let { Txt(it, OctoType.bodySmall, OctoColors.TextSecondary) }
+        }
+        GlazeCapsule(null, "Not now", { app.queueSync.dismiss(offer) })
+        GlazeCapsule(OctoIcons.Play, "Resume", { app.queueSync.take(offer) }, lit = true)
+    }
 }

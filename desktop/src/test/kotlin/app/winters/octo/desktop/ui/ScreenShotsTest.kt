@@ -61,6 +61,8 @@ class ScreenShotsTest {
             server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"p1","name":"Late night","songCount":12},{"id":"p2","name":"Running","songCount":40}]}""")
             server.answer("getAlbum", """"album":{"id":"a1","name":"OK Computer","artist":"Radiohead","artistId":"r1","year":1997,"songCount":7,"song":[$songs]}""")
             server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly"},{"id":"st2","name":"Rock mix"}]}""")
+            // The phone's queue, saved on the server, for Home's pick-up card.
+            server.answer("getPlayQueue", """"playQueue":{"entry":[${songs}],"current":"s3","position":61000,"changed":"2026-09-28T10:00:00Z","changedBy":"Pixel 9"}""")
             server.answer("getLyricsBySongId", """"lyricsList":{"structuredLyrics":[{"lang":"en","synced":true,"line":[{"start":0,"value":"Karma police"},{"start":4000,"value":"Arrest this man"},{"start":8000,"value":"He talks in maths"}]}]}""")
 
             // A made-up cover, and a quiet tone for every song, so the engine
@@ -129,6 +131,18 @@ class ScreenShotsTest {
                 app.navigator.go(Page.Songs)
             }
             shot("songs")
+            // A song that would not play: the notice line, with details, and its row marked.
+            SwingUtilities.invokeAndWait {
+                val failed = app.library!!.index!!.songs[1]
+                app.failedSongs[failed.id] = "That song isn't on the server any more."
+                app.notice = "Skipped ${failed.title}. That song isn't on the server any more."
+                app.noticeDetail = "HTTP 404 from the server for the song's address"
+            }
+            shot("failure")
+            SwingUtilities.invokeAndWait {
+                app.notice = null
+                app.noticeDetail = null
+            }
             SwingUtilities.invokeAndWait {
                 app.toggleSidePanel(SidePanel.Lyrics)
                 app.navigator.go(Page.Album("a1"))

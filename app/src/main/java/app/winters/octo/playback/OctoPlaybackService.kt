@@ -383,11 +383,18 @@ class OctoPlaybackService : MediaLibraryService() {
 
         // While music plays, a song that cannot, like a stream with no
         // connection or a file that is gone, is skipped instead of stopping
-        // the music. Once every song in the queue has failed, it stops.
+        // the music, and one line says which and why. Once every song in the
+        // queue has failed, it stops.
         override fun onPlayerError(error: PlaybackException) {
             if (!player.playWhenReady) return
             failedInARow++
-            if (failedInARow >= player.mediaItemCount || !player.hasNextMediaItem()) return
+            val title = player.currentMediaItem?.mediaMetadata?.title?.toString()?.takeIf(String::isNotBlank) ?: "a song"
+            val why = playFailureOf(error).words
+            if (failedInARow >= player.mediaItemCount || !player.hasNextMediaItem()) {
+                feedback.show(stoppedLine(title, why))
+                return
+            }
+            feedback.show(skippedLine(title, why))
             scope.launch {
                 player.seekToNextMediaItem()
                 player.prepare()

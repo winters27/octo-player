@@ -10,11 +10,14 @@ import app.winters.octo.audio.ReplayGainSettings
 import app.winters.octo.desktop.player.DEFAULT_OUTPUT
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.OutputDevice
+import app.winters.octo.desktop.player.PlayProblem
 import app.winters.octo.desktop.player.PlayQueue
 import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.QueueEntry
 import app.winters.octo.desktop.player.RESTART_AFTER_MS
 import app.winters.octo.desktop.player.RepeatMode
+import app.winters.octo.desktop.player.SavedQueue
+import app.winters.octo.playback.PlayFailure
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -71,8 +74,15 @@ class EnginePlayer(
     // changes only override it when the engine stops by itself.
     private var playing = false
     private var buffering = false
-    private var problem: String? = null
+    private var problem: PlayProblem? = null
     private var stopAfter = false
+
+    // Times round the current entry by repeat one, the entry they count
+    // for, and the entry the engine last said had started (null after a
+    // jump or a load, so the start that follows is not taken for a repeat).
+    private var rounds = 0
+    private var roundsOf: Long? = null
+    private var lastStarted: Long? = null
 
     // The entry keys the engine's queue holds, in its order.
     private var mirror: List<Long> = emptyList()
@@ -362,6 +372,21 @@ class EnginePlayer(
         }
     }
 
+    override fun restore(saved: SavedQueue) {
+        synchronized(lock) {
+            shuffle = saved.shuffle
+            queue.restore(saved.songs, saved.order, saved.index, saved.shuffle)
+            playing = false
+            buffering = false
+            stopAfter = false
+            problem = null
+            engine.setStopAfterCurrent(false)
+            load(startMs = saved.positionMs.coerceAtLeast(0), play = false)
+        }
+        // Repeat goes to the engine as well, and publishes.
+        setRepeat(saved.repeat)
+    }
+
     override fun close() {
         background.shutdownNow()
         engine.close()
@@ -372,6 +397,7 @@ class EnginePlayer(
     // The engine's queue from scratch: every entry in play order, starting
     // at the current one.
     private fun load(startMs: Long, play: Boolean) {
+        lastStarted = null
         val current = queue.currentEntry
         if (current == null) {
             mirror = emptyList()
@@ -394,6 +420,7 @@ class EnginePlayer(
         val current = queue.currentEntry ?: return load(0, false)
         val index = mirror.indexOf(current.key)
         if (index < 0) return load(startMs = 0, play = play)
+        lastStarted = null
         engine.skipTo(index)
         if (play) engine.play()
         expect(current.key)
@@ -459,7 +486,8 @@ class EnginePlayer(
                     stopAfter = false
                 }
                 is EngineEvent.Error -> {
-                    problem = plainWords(event.kind)
+                    val failed = keyOfItem(event.itemId)?.let { key -> queue.songs.firstOrNull { it.key == key } }
+                    problem = PlayProblem(plainWords(event.kind), failed?.song, event.message.takeIf(String::isNotBlank))
                     if (keyOfItem(event.itemId) == expecting) expecting = null
                 }
                 is EngineEvent.Position -> {
@@ -501,7 +529,11 @@ class EnginePlayer(
         if (queue.currentEntry?.key != key) {
             queue.jumpTo(key)
             lastShown = 0
+        } else if (key == lastStarted) {
+            // The same entry started again by itself: repeat one.
+            rounds++
         }
+        lastStarted = key
         if (pending?.key != key) pending = null
         problem = null
         val now = queue.currentEntry ?: return null
@@ -544,11 +576,18 @@ class EnginePlayer(
     }
 
     private fun publish() {
+        val key = queue.currentEntry?.key
+        if (key != roundsOf) {
+            roundsOf = key
+            rounds = 0
+        }
         val outputs = listOf(defaultOutput()) + devices
         _state.value = PlayerState(
             queue = queue.songs,
             current = queue.currentEntry,
             upcoming = queue.upcoming,
+            played = queue.played,
+            rounds = rounds,
             playing = playing,
             shuffle = shuffle,
             repeat = repeat,
@@ -578,13 +617,13 @@ class EnginePlayer(
 // sounds like the middle rather than nearly full.
 fun loudness(volume: Float): Float = volume.coerceIn(0f, 1f).let { it * it }
 
-// Why a song would not play, in plain words.
+// Why a song would not play, in plain words, the same as the phone's.
 fun plainWords(kind: ErrorKind): String = when (kind) {
-    ErrorKind.NOT_FOUND -> "That song isn't on the server any more."
-    ErrorKind.HTTP -> "The server wouldn't send that song."
-    ErrorKind.NETWORK -> "Couldn't reach the server to play that song."
-    ErrorKind.UNSUPPORTED -> "Octo can't play that kind of file."
-    ErrorKind.DECODE -> "That song's file is damaged."
-    ErrorKind.DEVICE -> "The sound device stopped working. Pick another output."
-    else -> "That song couldn't play."
-}
+    ErrorKind.NOT_FOUND -> PlayFailure.Missing
+    ErrorKind.HTTP -> PlayFailure.Refused
+    ErrorKind.NETWORK -> PlayFailure.Unreachable
+    ErrorKind.UNSUPPORTED -> PlayFailure.Unsupported
+    ErrorKind.DECODE -> PlayFailure.Damaged
+    ErrorKind.DEVICE -> PlayFailure.Device
+    else -> PlayFailure.Other
+}.words

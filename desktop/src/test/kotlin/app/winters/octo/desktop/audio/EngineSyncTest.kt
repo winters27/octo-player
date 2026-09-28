@@ -7,6 +7,7 @@ import app.winters.octo.audio.PlaybackState
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.player.DEFAULT_OUTPUT
 import app.winters.octo.desktop.player.RepeatMode
+import app.winters.octo.desktop.player.SavedQueue
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SongReplayGain
 import org.junit.Assert.assertEquals
@@ -250,10 +251,51 @@ class EngineSyncTest {
         val (p, engine) = setUp()
         p.play(songs)
         engine.emit(EngineEvent.Error(ErrorKind.NETWORK, "timed out", itemId(p.key("s1"))))
-        assertEquals("Couldn't reach the server to play that song.", p.state.value.problem)
+        assertEquals("Couldn't reach the server to play that song.", p.state.value.problem?.words)
         engine.emit(EngineEvent.TrackStarted(itemId(p.key("s2")), 1u, null))
         assertEquals("s2", p.state.value.current?.song?.id)
         assertNull(p.state.value.problem)
+    }
+
+    @Test
+    fun aFailureNamesTheSongAndKeepsTheEnginesWords() {
+        val (p, engine) = setUp()
+        p.play(songs)
+        engine.emit(EngineEvent.Error(ErrorKind.NOT_FOUND, "404 from server", itemId(p.key("s1"))))
+        val problem = p.state.value.problem!!
+        assertEquals("s1", problem.song?.id)
+        assertEquals("404 from server", problem.detail)
+    }
+
+    @Test
+    fun repeatOneCountsEachTimeRound() {
+        val (p, engine) = setUp()
+        p.setRepeat(RepeatMode.One)
+        p.play(songs)
+        val s1 = itemId(p.key("s1"))
+        engine.emit(EngineEvent.TrackStarted(s1, 1u, null))
+        assertEquals("the first start is not a repeat", 0, p.state.value.rounds)
+        engine.emit(EngineEvent.TrackStarted(s1, 2u, null))
+        engine.emit(EngineEvent.TrackStarted(s1, 3u, null))
+        assertEquals(2, p.state.value.rounds)
+        p.next()
+        engine.emit(EngineEvent.TrackStarted(itemId(p.key("s2")), 4u, null))
+        assertEquals("a new song starts at nought", 0, p.state.value.rounds)
+    }
+
+    @Test
+    fun aSavedQueueComesBackPausedWhereItWasLeft() {
+        val (p, engine) = setUp()
+        p.restore(SavedQueue(songs, listOf(4, 3, 2, 1, 0), index = 2, positionMs = 42_000, shuffle = true, repeat = RepeatMode.All))
+        val state = p.state.value
+        assertEquals("s3", state.current?.song?.id)
+        assertFalse(state.playing)
+        assertTrue(state.shuffle)
+        assertEquals(RepeatMode.All, state.repeat)
+        assertEquals(listOf("s2", "s1"), state.upcoming.map { it.song.id })
+        assertEquals(listOf("s5", "s4"), state.played.map { it.song.id })
+        assertEquals("load 5 at 2 from 42000 paused", engine.calls.first { it.startsWith("load") })
+        assertEquals(42_000, p.positionMs())
     }
 
     @Test

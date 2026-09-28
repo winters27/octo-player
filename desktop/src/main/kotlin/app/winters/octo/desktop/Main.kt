@@ -64,6 +64,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.debounce
 import okhttp3.OkHttpClient
 import java.awt.Dimension
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -102,7 +104,7 @@ fun main(args: Array<String>) {
             var made: AppState? = null
             // Server songs are signed with whoever is signed in when they queue.
             val opened = openPlayer(settings, scope, { made?.connection?.client }) { made?.connection?.headers.orEmpty() }
-            AppState(settings, accounts, http, scope, os, opened.player, restored = restored).also {
+            AppState(settings, accounts, http, scope, os, opened.player, restored = restored, listeningRoot = places.config).also {
                 made = it
                 opened.problem?.let { problem -> it.notice = problem }
             }
@@ -134,6 +136,7 @@ fun main(args: Array<String>) {
         fun keepPlace() = settings.update { it.copy(window = floating.copy(maximized = maximizedNow())) }
         fun close() {
             keepPlace()
+            app.beforeQuit()
             settings.flush()
             system.close()
             app.player.close()
@@ -173,6 +176,10 @@ fun main(args: Array<String>) {
                 if (own != null && os == DesktopOs.Windows) roundWindowsCorners(window)
                 if (own != null && spot.maximized) own.maximize()
                 system.watch(window)
+                // Coming back to Octo is when a queue from the phone is worth a look.
+                window.addWindowFocusListener(object : WindowAdapter() {
+                    override fun windowGainedFocus(e: WindowEvent?) = app.queueSync.check()
+                })
                 system.focusWindow = {
                     windowState.isMinimized = false
                     window.isVisible = true
