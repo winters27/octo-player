@@ -99,15 +99,30 @@ class OmniboxState {
     // The last full answer, shown while a newer search is on its way.
     var lastFound by mutableStateOf<SearchFound?>(null)
 
-    // Where the field and the list are in the window, so a click anywhere
-    // else closes the list.
+    // Where the field, the list and the rail's search button are in the
+    // window, so a click anywhere else closes the list. The button toggles
+    // the list itself.
     var field by mutableStateOf(IntRect.Zero)
     var panel by mutableStateOf(IntRect.Zero)
+    var trigger by mutableStateOf(IntRect.Zero)
 
-    fun holds(x: Int, y: Int) = field.contains(IntOffset(x, y)) || panel.contains(IntOffset(x, y))
+    fun holds(x: Int, y: Int) = listOf(field, panel, trigger).any { it.contains(IntOffset(x, y)) }
 
     fun move(step: Int, count: Int) {
         if (count == 0) return
         highlight = (highlight + step).mod(count)
     }
 }
+
+// Where the list goes for a field at `field`: under it after `gap`, lined
+// up with its start, `width` wide but never past the window's right edge
+// less `margin`.
+fun omniPanelPlace(field: IntRect, width: Int, window: Int, gap: Int, margin: Int): IntRect {
+    val fits = (window - field.left - margin).coerceAtLeast(field.width)
+    val wide = minOf(width, fits)
+    return IntRect(field.left, field.bottom + gap, field.left + wide, field.bottom + gap)
+}
+
+// Where the rail's floating field goes: beside the search button, `gap`
+// to its right, its top level with the button's.
+fun railFieldPlace(trigger: IntRect, gap: Int): IntOffset = IntOffset(trigger.right + gap, trigger.top)

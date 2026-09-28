@@ -348,7 +348,17 @@ class ScreenShotsTest {
                 app.navigator.go(Page.RecentlyAdded)
             }
             shot("rail")
-            SwingUtilities.invokeAndWait { app.updateFrame { it.copy(sidebarRail = false) } }
+            // The rail's search floats out beside its button.
+            SwingUtilities.invokeAndWait {
+                app.openSearch()
+                app.search?.type("radiohead")
+            }
+            shot("rail-search", 2_000)
+            SwingUtilities.invokeAndWait {
+                app.search?.type("")
+                app.omnibox.open = false
+                app.updateFrame { it.copy(sidebarRail = false) }
+            }
             SwingUtilities.invokeAndWait {
                 app.navigator.go(Page.Search)
                 app.search?.type("radiohead")

@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -39,7 +38,6 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalFocusManager
-import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FloatingGlaze
@@ -53,6 +51,7 @@ import app.winters.octo.design.MenuFrost
 import app.winters.octo.design.MenuShape
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.RowHeight
 import app.winters.octo.design.Separator
 import app.winters.octo.design.Space
 import app.winters.octo.design.TextAction
@@ -77,17 +76,18 @@ import kotlinx.coroutines.launch
 // or artist).
 enum class OmniHow { Main, Queue, Next, GoTo }
 
-// The search field in the title bar. Focusing it opens the list under it;
-// the arrows move through the list and Enter chooses, with Shift, Ctrl or
-// Alt for other ways; Escape closes the list, and again clears the field.
+// The search field at the top of the sidebar. Focusing it opens the list
+// under it; the arrows move through the list and Enter chooses, with
+// Shift, Ctrl or Alt for other ways; Escape closes the list, and again
+// clears the field. Empty, it shows the shortcut that reaches it.
 @Composable
-fun OmniField(app: AppState) {
+fun OmniField(app: AppState, modifier: Modifier = Modifier) {
     val model = app.search ?: return
     val box = app.omnibox
     val focus = LocalFocusManager.current
     val lines = rememberOmniLines(app)
     Box(
-        Modifier
+        modifier
             .onGloballyPositioned { box.field = it.windowRect() }
             .onFocusChanged { if (it.hasFocus) box.open = true }
             .onPreviewKeyEvent { event ->
@@ -122,11 +122,12 @@ fun OmniField(app: AppState) {
                 box.open = true
                 box.highlight = 0
             },
-            Modifier.width(FrameSize.SearchWidth).height(ControlHeight.S),
-            placeholder = "Search, or type > for commands",
+            Modifier.fillMaxWidth().height(RowHeight.Nav),
+            placeholder = "Search",
             icon = OctoIcons.Search,
             focusRequester = app.searchFocus,
             onEscape = { model.type("") },
+            trailing = if (model.text.isEmpty()) ({ Txt(if (app.mac) "⌘K" else "Ctrl+K", DesktopType.meta, OctoColors.TextMuted, Modifier.padding(end = Space.S)) }) else null,
         )
     }
 }
@@ -186,7 +187,7 @@ fun OmniPanel(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier)
     }
     // The menus' floating glass: the window's colours frosted behind a dark
     // film, so the page under it never shows through.
-    FloatingGlaze(backdrop, modifier.width(FrameSize.OmniWidth), shape = MenuShape, film = MenuFilm, frost = MenuFrost, halo = true) {
+    FloatingGlaze(backdrop, modifier, shape = MenuShape, film = MenuFilm, frost = MenuFrost, halo = true) {
     Column(Modifier.fillMaxWidth().padding(vertical = Space.S)) {
         val loading = model.state is SearchState.Looking && box.lastFound == null
         when {
@@ -223,7 +224,7 @@ fun OmniPanel(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier)
         if (sections.isNotEmpty()) {
             Separator(Modifier.padding(top = Space.S))
             Txt(
-                if (model.text.trim().startsWith(">")) "Enter runs it" else "Enter plays or opens · Shift+Enter adds to the queue · Ctrl+Enter plays next · Alt+Enter goes to its album",
+                if (model.text.trim().startsWith(">")) "Enter runs it" else "Enter plays or opens · Shift+Enter adds to the queue · Ctrl+Enter plays next · Alt+Enter opens its album",
                 DesktopType.meta,
                 OctoColors.TextMuted,
                 Modifier.padding(start = Space.L, end = Space.L, top = Space.S),
