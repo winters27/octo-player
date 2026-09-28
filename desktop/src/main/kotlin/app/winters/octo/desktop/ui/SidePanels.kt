@@ -234,6 +234,7 @@ fun QueueList(app: AppState, modifier: Modifier = Modifier.fillMaxSize()) {
                 app,
                 picked.map { it.song },
                 close,
+                outside = app.anyOutside(picked.map { it.song }),
                 place = SongPlace.Queue(keys),
                 extra = if (keys.isEmpty()) null else ({ QueueMoves(app, picked, keys, close) }),
             )

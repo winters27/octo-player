@@ -43,4 +43,38 @@ class SongFactsTest {
     fun aFileOnThisComputerSaysSo() {
         assertEquals("A file on this computer", facts(Song("file:abc", "Local"))["Source"])
     }
+
+    // A song Octo found online, as it sends one: how it streams, no file.
+    private val online = Song(
+        "mXFKjv7oqx1HTOzoJP1nk3", "One Woman (Album Version)", artist = "Randy Rogers Band", suffix = "m4a",
+        contentType = "audio/mp4", bitRate = 128, duration = 245, isrc = listOf("USUM70813712"), isExternal = true,
+    )
+
+    private fun outsideFacts(song: Song) =
+        songFacts(song, "Your server (Octo)", ZoneOffset.UTC, Locale.UK, outside = true).associate { it.label to it.value }
+
+    @Test
+    fun aSongFoundOnlineIsNotSaidToBeOnTheServer() {
+        val f = outsideFacts(online)
+        assertEquals("Found online", f["Source"])
+        assertEquals("AAC, 128 kbps", f["Streams as"])
+        assertEquals("4:05", f["Length"])
+        assertEquals("USUM70813712", f["ISRC"])
+        // Nothing that describes a file on the server.
+        listOf("Format", "File type", "Bitrate", "Sample rate", "Bit depth", "File size", "Added", "Rating").forEach {
+            assertFalse("$it should not show", it in f)
+        }
+        assertFalse("Plays" in f)
+    }
+
+    @Test
+    fun aSongFoundOnlineCountsItsPlaysOnceItHasSome() {
+        assertEquals("3", outsideFacts(online.copy(playCount = 3))["Plays"])
+    }
+
+    @Test
+    fun evenFileFactsSentForASongFoundOnlineAreLeftOut() {
+        val f = outsideFacts(online.copy(size = 9_000_000, created = "2026-09-28T10:00:00Z", bitDepth = 16, samplingRate = 44_100))
+        listOf("File size", "Added", "Bit depth", "Sample rate").forEach { assertFalse("$it should not show", it in f) }
+    }
 }
