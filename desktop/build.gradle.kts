@@ -165,6 +165,30 @@ dependencies {
     testImplementation(libs.mockwebserver)
 }
 
+// The audio files Octo opens, and their types.
+val audioTypes = listOf(
+    "mp3" to "audio/mpeg",
+    "flac" to "audio/flac",
+    "m4a" to "audio/mp4",
+    "aac" to "audio/aac",
+    "ogg" to "audio/ogg",
+    "oga" to "audio/ogg",
+    "opus" to "audio/opus",
+    "wav" to "audio/wav",
+    "aiff" to "audio/aiff",
+    "aif" to "audio/aiff",
+)
+
+// A copy of the icon for each audio type, named for it: macOS puts every
+// type's icon in the app by file name, and one name used twice stops the
+// build.
+val fileIcons = layout.buildDirectory.dir("generated/fileIcons")
+val makeFileIcons by tasks.registering(Sync::class) {
+    audioTypes.forEach { (extension, _) -> from(file("icons/octo.icns")) { rename { "audio-$extension.icns" } } }
+    into(fileIcons)
+}
+tasks.matching { it.name == "createDistributable" || it.name.startsWith("package") }.configureEach { dependsOn(makeFileIcons) }
+
 compose.desktop {
     application {
         mainClass = "app.winters.octo.desktop.MainKt"
@@ -243,20 +267,11 @@ compose.desktop {
                 appCategory = "AudioVideo"
                 shortcut = true
             }
-            // "Open with Octo" for audio files, on every system.
-            listOf(
-                "mp3" to "audio/mpeg",
-                "flac" to "audio/flac",
-                "m4a" to "audio/mp4",
-                "aac" to "audio/aac",
-                "ogg" to "audio/ogg",
-                "oga" to "audio/ogg",
-                "opus" to "audio/opus",
-                "wav" to "audio/wav",
-                "aiff" to "audio/aiff",
-                "aif" to "audio/aiff",
-            ).forEach { (extension, mime) ->
-                fileAssociation(mime, extension, "Audio file", file("icons/octo.png"), file("icons/octo.ico"), file("icons/octo.icns"))
+            // "Open with Octo" for audio files, on every system. macOS keeps
+            // each type's icon in the app under its own name, so each gets
+            // its own copy (made by makeFileIcons).
+            audioTypes.forEach { (extension, mime) ->
+                fileAssociation(mime, extension, "Audio file", file("icons/octo.png"), file("icons/octo.ico"), fileIcons.get().file("audio-$extension.icns").asFile)
             }
         }
     }

@@ -171,6 +171,7 @@ class SingleInstance private constructor(
         // and how many it reads at once.
         private const val READ_DEADLINE_MS = 1_000L
         private const val MAX_READING = 4
+        private const val WAITING_CONNECTIONS = 50
         private const val CLOSE_WAIT_MS = 500L
         const val LOCK_FILE = "instance.lock"
         const val ADDRESS_FILE = "instance.port"
@@ -217,7 +218,9 @@ class SingleInstance private constructor(
 
         private fun listen(channel: FileChannel, lock: FileLock, addressFile: File): Claim {
             val server = try {
-                ServerSocket(0, 8, InetAddress.getLoopbackAddress())
+                // Room for many waiting connections: Windows refuses any past
+                // this count, which would turn a launch away.
+                ServerSocket(0, WAITING_CONNECTIONS, InetAddress.getLoopbackAddress())
             } catch (e: IOException) {
                 lock.release()
                 channel.close()
