@@ -44,7 +44,8 @@ import javax.swing.SwingUtilities
 // Times the library work and the Songs table on made-up libraries of 20,000
 // and 100,000 songs, and writes what it found to build/perf/perf.txt. It
 // only runs when asked: OCTO_PERF=1 ./gradlew :desktop:test --tests '*LibraryPerfTest*'.
-// OCTO_PERF_HEAP sets the test's heap limit (2g when not given).
+// OCTO_PERF_HEAP sets the test's heap limit (2g when not given), and
+// OCTO_PERF_JVM adds JVM options, for trying the app's heap options.
 class LibraryPerfTest {
     @get:Rule val folder = TemporaryFolder()
 
@@ -65,11 +66,13 @@ class LibraryPerfTest {
         say("Octo library performance, ${LocalDateTime.now().withNano(0)}")
         say("JVM ${runtime.vmVendor} ${runtime.vmName} ${System.getProperty("java.version")}, ${Runtime.getRuntime().availableProcessors()} cores, max heap ${Runtime.getRuntime().maxMemory() / MB} MB")
         say("Times are the median of $RUNS runs after $WARMUPS warm-ups, in milliseconds.")
+        say("JVM options: ${runtime.inputArguments.filter { it.startsWith("-X") }.joinToString(" ")}")
         // The heap first, before anything is drawn, since a drawn table
         // keeps hold of the last library it showed.
         say("")
         for (size in SIZES) weigh(size)
         for (size in SIZES) measure(size)
+        System.getenv("OCTO_PERF_IDLE")?.toIntOrNull()?.let(::idle)
         val out = File("build/perf").apply { mkdirs() }
         File(out, "perf.txt").writeText(lines.joinToString("\n", postfix = "\n"))
         println("sink $sink")
@@ -174,6 +177,26 @@ class LibraryPerfTest {
         say("Heap used after GC with the table drawn (the whole test process): ${withUi / MB} MB")
         SwingUtilities.invokeAndWait { scene.close() }
         scope.cancel()
+    }
+
+    // With OCTO_PERF_IDLE=<seconds>: a 100,000 song library is loaded and
+    // sorted every way, as clicking through the columns does, and then left
+    // alone, to see how much heap the JVM keeps committed while nothing
+    // happens. That is what the app's heap options are chosen by.
+    private fun idle(seconds: Int) {
+        val memory = ManagementFactory.getMemoryMXBean()
+        fun heap() = memory.heapMemoryUsage.let { "${it.used / MB} MB used, ${it.committed / MB} MB committed" }
+        say("")
+        say("== Idle for $seconds s with 100,000 songs loaded ==")
+        val index = LibraryIndex.of(madeUpLibrary(100_000))
+        repeat(3) { for (sort in SONG_SORTS) sink += sortSongs(index.songs, SortList.Songs.default.picking(sort)).size }
+        say("After sorting: ${heap()}")
+        val step = 5
+        for (at in step..seconds step step) {
+            Thread.sleep(step * 1_000L)
+            if (at % 30 == 0 || at == seconds) say("  after $at s idle: ${heap()}")
+        }
+        sink += index.songs.size
     }
 
     private fun time(name: String, block: () -> Int) {

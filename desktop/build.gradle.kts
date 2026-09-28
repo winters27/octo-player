@@ -167,10 +167,12 @@ dependencies {
 
 // The performance harness (OCTO_PERF=1, perf/LibraryPerfTest.kt) runs each
 // time it is asked for, with room for a library of 100,000 songs.
-// OCTO_PERF_HEAP tries it under another heap limit.
+// OCTO_PERF_HEAP tries it under another heap limit, and OCTO_PERF_JVM
+// with other JVM options (space between them).
 if (providers.environmentVariable("OCTO_PERF").orNull == "1") {
     tasks.test {
         maxHeapSize = providers.environmentVariable("OCTO_PERF_HEAP").orNull ?: "2g"
+        providers.environmentVariable("OCTO_PERF_JVM").orNull?.let { jvmArgs(it.split(" ").filter(String::isNotBlank)) }
         outputs.upToDateWhen { false }
     }
 }
