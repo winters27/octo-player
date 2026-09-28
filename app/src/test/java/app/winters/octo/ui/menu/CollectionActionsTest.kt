@@ -34,6 +34,14 @@ class CollectionActionsTest {
     }
 
     @Test
+    fun anAlbumRadioFollowsWhatPlaysAndNeedsAServer() {
+        assertEquals(
+            listOf(Play, Shuffle, PlayNext, AddToQueue, StartRadio, AddToPlaylist, AddToFavourites, PinToHome, GoToArtist),
+            albumActions(canDownload = false, radio = true),
+        )
+    }
+
+    @Test
     fun anArtistRadioNeedsAServer() {
         assertEquals(listOf(Play, Shuffle, PlayNext, AddToQueue, StartRadio, AddToFavourites, PinToHome), artistActions(radio = true))
         assertEquals(listOf(Play, Shuffle, PlayNext, AddToQueue, AddToFavourites, PinToHome), artistActions(radio = false))

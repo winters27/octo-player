@@ -87,14 +87,16 @@ private fun AlbumMenu(target: CollectionTarget.Album, state: CollectionMenuState
     val kept by vm.kept.collectAsStateWithLifecycle()
     val favourites by vm.favouriteAlbums.collectAsStateWithLifecycle()
     val pinned by vm.pinned.collectAsStateWithLifecycle()
+    val radio by vm.radio.collectAsStateWithLifecycle()
     val shown = album ?: return
     val waiting = tracks.filter { !it.onPhone && it.id !in kept }.map { it.id }
     val pin = PinKey(PinKind.Album, target.id)
-    val actions = albumActions(canDownload = waiting.isNotEmpty(), favourite = target.id in favourites, pin = pinSpot(pinned, pin))
+    val actions = albumActions(canDownload = waiting.isNotEmpty(), favourite = target.id in favourites, pin = pinSpot(pinned, pin), radio = radio)
     CollectionActionsPage(shown.title, shown.artist, { Artwork(shown.artwork, 40.dp, shape = RoundedCornerShape(6.dp)) }, target, actions, state, vm) { action ->
         when (action) {
             CollectionAction.Download -> vm.download(waiting)
             CollectionAction.GoToArtist -> onOpen(ArtistRoute(shown.artistId))
+            CollectionAction.StartRadio -> vm.startAlbumRadio(target.id)
             else -> favouriteOrPin(action, vm, FavouriteKind.Album, pin)
         }
     }
