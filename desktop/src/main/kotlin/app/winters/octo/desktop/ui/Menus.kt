@@ -60,6 +60,8 @@ import app.winters.octo.desktop.playlists.movesAnything
 import app.winters.octo.desktop.renamePlaylist
 import app.winters.octo.desktop.setPlaylistPublic
 import app.winters.octo.desktop.settings.DesktopOs
+import app.winters.octo.desktop.system.JumpKind
+import app.winters.octo.desktop.system.JumpTarget
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.Txt
 import app.winters.octo.playlists.playlistFileName
@@ -238,7 +240,8 @@ fun ColumnScope.AlbumMenu(app: AppState, album: Album, close: () -> Unit, outsid
         return
     }
     MenuTitle(album.name)
-    albumMenuActions(outside).forEachIndexed { index, group ->
+    val jumpList = app.jumpList
+    albumMenuActions(outside, jumpList = jumpList != null).forEachIndexed { index, group ->
         if (index > 0) MenuSeparator()
         group.forEach { action ->
             when (action) {
@@ -248,6 +251,11 @@ fun ColumnScope.AlbumMenu(app: AppState, album: Album, close: () -> Unit, outsid
                     MenuRow(if (starred) "Remove from favourites" else "Add to favourites", { app.setAlbumStarred(album.id, !starred); close() }, if (starred) OctoIcons.Liked else OctoIcons.Like)
                 }
                 CollectionAction.GoToArtist -> MenuRow("Go to artist", { album.artistId?.let { app.navigator.go(Page.Artist(it, album.artist)) }; close() }, OctoIcons.Artist, enabled = !album.artistId.isNullOrEmpty())
+                CollectionAction.JumpList -> if (jumpList != null) {
+                    val target = JumpTarget(JumpKind.Album, album.id, album.name, album.displayArtist ?: album.artist.ifBlank { null })
+                    val pinned = jumpList.isPinned(target)
+                    MenuRow(if (pinned) "Unpin from jump list" else "Pin to jump list", { jumpList.setPinned(target, !pinned); close() }, OctoIcons.Pin)
+                }
                 else -> CollectionRow(app, action, songs, close) { choosing = true }
             }
         }

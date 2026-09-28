@@ -40,6 +40,9 @@ class SystemIntegration(
     places: AppPlaces,
     val os: DesktopOs,
     private val instance: SingleInstance?,
+    // Started with --tray (at sign-in, when asked to): the window waits in
+    // the tray until opened from there.
+    startInTray: Boolean = false,
 ) : AutoCloseable {
     val controls: SystemMediaControls = when (os) {
         DesktopOs.Windows -> NativeMediaControls.load("System media controls") ?: NoMediaControls()
@@ -75,7 +78,7 @@ class SystemIntegration(
         private set
 
     // The main window: shown or hidden in the tray, and in front or not.
-    var windowVisible by mutableStateOf(true)
+    var windowVisible by mutableStateOf(!(startInTray && trayAvailable))
         private set
     private var windowInFront = true
 
@@ -89,8 +92,12 @@ class SystemIntegration(
     // Closing the window keeps Octo in the tray, when there is a tray.
     val closesToTray: Boolean get() = trayAvailable && app.settings.current.system.closeToTray
 
+    // The Windows taskbar button, jump list and starting at sign-in.
+    val shell = ShellIntegration(app, os, places.config)
+
     fun start(launchArgs: List<String>) {
         session.start { works -> mediaKeysWork = works }
+        shell.start()
         // The system bus can be slow to answer, so it is reached off the window's thread.
         sleepWatch?.let { watch -> app.scope.launch(Dispatchers.IO) { watch.start { event -> app.scope.launch { session.handle(event) } } } }
         app.scope.launch {
@@ -114,9 +121,10 @@ class SystemIntegration(
         open(parseLaunchArgs(launchArgs))
     }
 
-    // A later launch handed its command line over.
+    // A later launch handed its command line over. One that only plays
+    // from the jump list, or starts in the tray, leaves the window be.
     private fun arrived(args: List<String>) {
-        raise()
+        if (launchWantsWindow(args)) raise()
         open(parseLaunchArgs(args))
     }
 
@@ -150,7 +158,9 @@ class SystemIntegration(
                 is LaunchRequest.OpenFiles -> app.play(request.files.map(::openedFileSong))
                 is LaunchRequest.OpenLink -> {
                     val page = pageForLink(request.link)
+                    val play = playLinkOf(request.link)
                     when {
+                        play != null -> shell.play(play.first, play.second)
                         page == null -> app.notice = "Octo doesn't know that link."
                         app.connection == null -> app.notice = "Sign in to open that link."
                         else -> {
@@ -202,8 +212,10 @@ class SystemIntegration(
         }
     }
 
-    // Follows the window's focus, for the notices.
+    // Follows the window's focus, for the notices, and takes on its
+    // taskbar button.
     fun watch(window: java.awt.Window) {
+        shell.attach(window)
         window.addWindowFocusListener(object : WindowAdapter() {
             override fun windowGainedFocus(e: WindowEvent?) {
                 windowInFront = true
@@ -243,6 +255,7 @@ class SystemIntegration(
     // quitting starts its own Octo instead of being taken and lost.
     override fun close() {
         runCatching { instance?.close() }
+        runCatching { shell.close() }
         runCatching { session.close() }
         runCatching { sleepWatch?.close() }
         runCatching { notifier?.close() }
