@@ -37,6 +37,8 @@ data class AppSettings(
     val sidePanel: String? = null,
     // The frame: sidebar and panel sizes, and what the sidebar shows.
     val frame: FramePrefs = FramePrefs(),
+    // The last searches that led somewhere, newest first.
+    val recentSearches: List<String> = emptyList(),
     // Each song table's columns and widths, by the table's name, and how
     // tall rows are everywhere.
     val tables: Map<String, TablePrefs> = emptyMap(),

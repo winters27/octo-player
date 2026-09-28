@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -44,6 +45,10 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isBackPressed
 import androidx.compose.ui.input.pointer.isForwardPressed
 import androidx.compose.ui.input.pointer.onPointerEvent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.Ambience
 import app.winters.octo.design.ControlHeight
@@ -107,6 +112,7 @@ import dev.chrisbanes.haze.rememberHazeState
 fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
     val backdrop = rememberHazeState()
     val pointer = remember { PointerSpot() }
+    val focus = LocalFocusManager.current
     val connection = app.connection
     val key = rememberKeyColour(app)
     CompositionLocalProvider(
@@ -124,6 +130,11 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
                 .onPointerEvent(PointerEventType.Move, PointerEventPass.Initial) { pointer.position = it.changes.first().position }
                 .onPointerEvent(PointerEventType.Press, PointerEventPass.Initial) { event ->
                     pointer.position = event.changes.first().position
+                    // A click outside the search box closes its list.
+                    if (app.omnibox.open && !app.omnibox.holds(pointer.point.x, pointer.point.y)) {
+                        app.omnibox.open = false
+                        focus.clearFocus()
+                    }
                     if (event.buttons.isBackPressed) app.navigator.back()
                     if (event.buttons.isForwardPressed) app.navigator.forward()
                 },
@@ -139,6 +150,19 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
                 AnimatedVisibility(app.fullPlayer, enter = fadeIn(), exit = fadeOut()) {
                     FullPlayer(app, Modifier.fillMaxSize(), top = FrameSize.TitleBar)
                 }
+            }
+            if (connection != null && app.omnibox.open && !app.fullPlayer) {
+                // Under the search field, centred on it.
+                val field = app.omnibox.field
+                val density = LocalDensity.current
+                val width = with(density) { FrameSize.OmniWidth.roundToPx() }
+                OmniPanel(
+                    app,
+                    backdrop,
+                    Modifier
+                        .offset { IntOffset(field.center.x - width / 2, field.bottom + Space.S.roundToPx()) }
+                        .onGloballyPositioned { app.omnibox.panel = it.windowRect() },
+                )
             }
             TitleBar(app, frame, onClose)
             PopupLayer(app.popups, backdrop)
@@ -210,30 +234,10 @@ private fun TitleBar(app: AppState, frame: Frame?, onClose: () -> Unit) {
             IconAction(OctoIcons.Forward, "Forward", { app.navigator.forward() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.navigator.canGoForward)
         }
         Box(Modifier.weight(1f).fillMaxHeight().then(if (frame != null) Modifier.dragsWindow(frame) else Modifier), contentAlignment = Alignment.Center) {
-            if (app.connection != null && !app.fullPlayer) TitleSearch(app)
+            if (app.connection != null && !app.fullPlayer) OmniField(app)
         }
         if (frame != null) WindowButtons(frame, onClose)
     }
-}
-
-// The search field, in the title bar on every page. Typing shows the
-// results page; Escape clears it. Ctrl+F or Ctrl+K puts the keyboard here.
-@Composable
-private fun TitleSearch(app: AppState) {
-    val model = app.search ?: return
-    GlassField(
-        model.text,
-        { text ->
-            model.type(text)
-            if (text.isNotBlank() && app.navigator.current.page != Page.Search) app.navigator.go(Page.Search)
-        },
-        Modifier.width(FrameSize.SearchWidth).height(ControlHeight.S),
-        placeholder = "Search songs, albums, artists and playlists",
-        icon = OctoIcons.Search,
-        focusRequester = app.searchFocus,
-        onSubmit = { if (app.navigator.current.page != Page.Search) app.navigator.go(Page.Search) },
-        onEscape = { model.type("") },
-    )
 }
 
 // A single quiet line above the page, closed with its cross. When there

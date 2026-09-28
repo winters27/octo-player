@@ -172,6 +172,18 @@ class ScreenShotsTest {
             shot("search", 2_000)
             SwingUtilities.invokeAndWait {
                 app.navigator.go(Page.Songs)
+                app.openSearch()
+                app.search?.type("radiohead")
+            }
+            shot("omnibox", 2_000)
+            SwingUtilities.invokeAndWait { app.search?.type(">sle") }
+            shot("commands")
+            SwingUtilities.invokeAndWait {
+                app.search?.type("")
+                app.omnibox.open = false
+            }
+            SwingUtilities.invokeAndWait {
+                app.navigator.go(Page.Songs)
                 app.popups.showAt(androidx.compose.ui.unit.IntOffset(700, 300)) { close -> SongMenu(app, app.library!!.index!!.songs.take(1), close) }
             }
             shot("menu")
