@@ -227,6 +227,7 @@ fun PlaylistSheetsHost(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel = hil
                         OctoIcons.Delete,
                         "Delete",
                         opensPage = true,
+                        destructive = true,
                         onClick = { sheets.show(PlaylistSheet.Delete(sheet.id, sheet.name, sheet.onServer)) },
                     )
                 }

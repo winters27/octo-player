@@ -6,7 +6,9 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
@@ -31,6 +33,7 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import org.jetbrains.skia.FilterBlurMode
 import org.jetbrains.skia.MaskFilter
@@ -43,6 +46,9 @@ import org.jetbrains.skia.PaintStrokeCap
 // pointer. By default the value is only sent when the drag ends, so
 // scrubbing a song does not stutter it; `live` sends it all along, for
 // volume. `wheelStep`, when set, lets the mouse wheel move it by that much.
+// `look` Jewel draws it as the settings slider instead, filled with
+// `fill`; `steps` snaps it to that many equal steps and marks them, and
+// `valueLabel` puts the value in a bubble above the thumb while dragging.
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun LineSlider(
@@ -53,17 +59,27 @@ fun LineSlider(
     wheelStep: Float? = null,
     color: Color = Color.White,
     trackColor: Color = Color.White.copy(alpha = 0.22f),
+    look: SliderLook = SliderLook.Glow,
+    fill: Color = OctoColors.Accent,
+    steps: Int = 0,
+    valueLabel: ((Float) -> String)? = null,
+    interactionSource: MutableInteractionSource? = null,
 ) {
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
     val seek by rememberUpdatedState(onSeek)
     val current by rememberUpdatedState(fraction)
-    val interaction = remember { MutableInteractionSource() }
+    val interaction = interactionSource ?: remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
+    // A drag started by someone else on the same interactions (a preview)
+    // shows as one too.
+    val draggedElsewhere by interaction.collectIsDraggedAsState()
+    val held = dragging || draggedElsewhere
+    var drag by remember { mutableStateOf<DragInteraction.Start?>(null) }
 
-    val thickness by animateDpAsState(if (dragging || hovered) 5.dp else 3.dp, spring(0.6f, 300f), label = "track")
-    val thumb = thumbSize(hovered, dragging)
-    val glowAlpha by animateFloatAsState(if (dragging) 0.7f else 0.35f, spring(1f, 200f), label = "glow")
+    val thickness by animateDpAsState(if (held || hovered) 5.dp else 3.dp, spring(0.6f, 300f), label = "track")
+    val thumb = thumbSize(hovered, held)
+    val glowAlpha by animateFloatAsState(if (held) 0.7f else 0.35f, spring(1f, 200f), label = "glow")
     val glowPaint = remember {
         Paint().apply {
             isAntiAlias = true
@@ -71,43 +87,56 @@ fun LineSlider(
             strokeCap = PaintStrokeCap.ROUND
         }
     }
+    val jewel = if (look == SliderLook.Jewel) rememberJewelLook(hovered, held) else null
+    val followed = if (look == SliderLook.Jewel) rememberFollowedFraction(fraction, dragging) else null
+    val measurer = if (valueLabel != null) rememberTextMeasurer() else null
 
     Box(
         modifier
-            .height(24.dp)
+            .height(if (look == SliderLook.Jewel) 22.dp else 24.dp)
             .hoverable(interaction)
             .pointerHoverIcon(PointerIcon.Hand)
             .then(
                 if (wheelStep != null) {
                     Modifier.onPointerEvent(PointerEventType.Scroll) { event ->
                         val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
-                        if (delta != 0f) seek((current() - delta * wheelStep).coerceIn(0f, 1f))
+                        if (delta != 0f) seek(snapToSteps(current() - delta * wheelStep, steps))
                     }
                 } else {
                     Modifier
                 },
             )
             .pointerInput(Unit) {
-                detectTapGestures { seek((it.x / size.width).coerceIn(0f, 1f)) }
+                detectTapGestures { seek(snapToSteps(it.x / size.width, steps)) }
             }
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragStart = {
                         dragging = true
-                        dragFraction = (it.x / size.width).coerceIn(0f, 1f)
+                        dragFraction = snapToSteps(it.x / size.width, steps)
+                        drag = DragInteraction.Start().also(interaction::tryEmit)
                     },
                     onDragEnd = {
                         seek(dragFraction)
                         dragging = false
+                        drag?.let { interaction.tryEmit(DragInteraction.Stop(it)) }
                     },
-                    onDragCancel = { dragging = false },
+                    onDragCancel = {
+                        dragging = false
+                        drag?.let { interaction.tryEmit(DragInteraction.Cancel(it)) }
+                    },
                 ) { change, _ ->
-                    dragFraction = (change.position.x / size.width).coerceIn(0f, 1f)
+                    dragFraction = snapToSteps(change.position.x / size.width, steps)
                     if (live) seek(dragFraction)
                 }
             }
             .drawBehind {
                 val y = size.height / 2
+                if (jewel != null) {
+                    val shown = if (dragging) dragFraction else followed?.value ?: current()
+                    drawJewelSlider(y, shown, jewel, fill, steps, valueLabel?.invoke(shown), measurer)
+                    return@drawBehind
+                }
                 val stroke = thickness.toPx()
                 // Read here, while drawing, so a moving value only redraws.
                 val end = size.width * (if (dragging) dragFraction else current().coerceIn(0f, 1f))

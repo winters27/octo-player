@@ -1,5 +1,6 @@
 package app.winters.octo.design
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -73,7 +74,15 @@ fun GlassField(
     // A field that leaves while focused must not leave the window thinking
     // someone is still typing.
     DisposableEffect(Unit) { onDispose { if (focused) typing.focused(false) } }
-    GlazeInset(fill = Color.Black.copy(alpha = 0.30f), shape = FieldShape, modifier = modifier.height(40.dp)) {
+    // While typing, a thin accent ring fades in round the field.
+    val ring by animateFloatAsState(if (focused) 1f else 0f, octoTween(motionScale(), OctoDuration.Card), label = "field ring")
+    GlazeInset(
+        fill = Color.Black.copy(alpha = 0.30f),
+        shape = FieldShape,
+        modifier = modifier
+            .height(40.dp)
+            .focusRing(FieldShape, { ring }, width = 1.5.dp, color = OctoColors.Accent.copy(alpha = 0.60f)),
+    ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,

@@ -3,6 +3,10 @@ package app.winters.octo.ui.common
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +29,7 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,7 +44,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.GlazeSelected
+import app.winters.octo.design.MenuRowHeight
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.menuRowPress
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 
@@ -101,18 +108,31 @@ private fun MenuLine(drawn: Boolean) {
     )
 }
 
+// A row under the finger (or a mouse) shows the quiet accent-tinted pill,
+// at once, in place of a ripple.
+@Composable
+private fun rowHeld(interaction: MutableInteractionSource): Boolean {
+    val pressed by interaction.collectIsPressedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
+    return pressed || hovered
+}
+
 @Composable
 private fun MenuOption(option: Choice, selected: Boolean, pickable: Boolean, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val held = rowHeld(interaction)
     Box(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp)
+            .heightIn(min = MenuRowHeight.Touch)
+            .menuRowPress(OptionShape) { if (held && !selected) 1f else 0f }
             .clip(OptionShape)
+            .hoverable(interaction)
             .then(
                 if (pickable) {
-                    Modifier.selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+                    Modifier.selectable(selected = selected, interactionSource = interaction, indication = null, role = Role.RadioButton, onClick = onClick)
                 } else {
-                    Modifier.clickable(role = Role.Button, onClick = onClick)
+                    Modifier.clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
                 },
             ),
         contentAlignment = Alignment.CenterStart,
@@ -177,7 +197,9 @@ fun GlassMenuSeparator() {
 
 // One action in a glass menu: a white icon, what it does, and a line about
 // it when there is one. One that cannot be chosen right now is dimmed. One
-// that `opensPage` shows a small chevron, since it leads on.
+// that `opensPage` shows a small chevron, since it leads on. A
+// `destructive` one (deleting, removing) says so in soft red words; its
+// icon stays white like every other.
 @Composable
 fun GlassMenuAction(
     @DrawableRes icon: Int?,
@@ -187,13 +209,18 @@ fun GlassMenuAction(
     detail: String? = null,
     enabled: Boolean = true,
     opensPage: Boolean = false,
+    destructive: Boolean = false,
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val held = rowHeld(interaction)
     Row(
         modifier
             .fillMaxWidth()
-            .heightIn(min = 46.dp)
+            .heightIn(min = MenuRowHeight.Touch)
+            .menuRowPress(OptionShape) { if (held && enabled) 1f else 0f }
             .clip(OptionShape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .hoverable(interaction, enabled = enabled)
+            .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -207,7 +234,15 @@ fun GlassMenuAction(
             )
         }
         Column(Modifier.weight(1f)) {
-            Text(label, style = OctoType.bodySmall, color = if (enabled) OctoColors.TextPrimary else OctoColors.TextMuted)
+            Text(
+                label,
+                style = OctoType.bodySmall,
+                color = when {
+                    !enabled -> OctoColors.TextMuted
+                    destructive -> OctoColors.Destructive
+                    else -> OctoColors.TextPrimary
+                },
+            )
             detail?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
         }
         if (opensPage) {
@@ -245,12 +280,16 @@ fun GlassMenuHeader(title: String, subtitle: String?, picture: @Composable () ->
 // page's name. The chevron goes back to the page before.
 @Composable
 fun GlassMenuBack(title: String, onBack: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val held = rowHeld(interaction)
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = 44.dp)
+            .heightIn(min = MenuRowHeight.Touch)
+            .menuRowPress(OptionShape) { if (held) 1f else 0f }
             .clip(OptionShape)
-            .clickable(role = Role.Button, onClickLabel = "Back", onClick = onBack)
+            .hoverable(interaction)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClickLabel = "Back", onClick = onBack)
             .padding(start = 6.dp, end = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),

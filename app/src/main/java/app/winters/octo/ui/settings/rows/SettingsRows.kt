@@ -46,6 +46,7 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.SliderLook
 import app.winters.octo.design.glassPanel
 import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.common.choiceAnchor
@@ -213,6 +214,7 @@ fun SliderRow(
                 fraction = fraction,
                 onSeek = onSeek,
                 live = true,
+                look = SliderLook.Jewel,
                 modifier = Modifier.semantics { contentDescription = title },
             )
         }
