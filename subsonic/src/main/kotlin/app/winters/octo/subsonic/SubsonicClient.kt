@@ -215,6 +215,11 @@ class SubsonicClient(
     suspend fun playlist(id: String): PlaylistWithSongs =
         get("getPlaylist", mapOf("id" to id), "playlist", PlaylistWithSongs.serializer())
 
+    // Where a playlist's songs sit on the server, in its order, for a
+    // playlist file. A server that keeps its paths to itself sends none.
+    suspend fun playlistPaths(id: String): List<SongPath> =
+        get("getPlaylist", mapOf("id" to id), "playlist", PlaylistPaths.serializer()).entry
+
     // Songs like this one, for a radio that starts from it. On Octo these
     // mix library songs with songs found online.
     suspend fun similarSongs(id: String, count: Int = 50): List<Song> =
