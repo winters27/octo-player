@@ -12,7 +12,8 @@ import java.io.File
 
 // Set to a WAV path, the app plays that file through the real player once
 // its window is up, prints what the engine says, and closes: a check that
-// sound comes out on this machine, with a tone instead of anyone's music.
+// the engine opens the output and its clock runs on this machine. It plays
+// at no volume, so nobody hears it; the whole path to the device still runs.
 // `./gradlew :desktop:run -Pocto.checkPlay=build/check/tone.wav` makes the
 // tone there first if it is missing.
 const val CHECK_PLAY = "octo.checkPlay"
@@ -25,6 +26,9 @@ suspend fun checkSound(app: AppState, file: File, close: () -> Unit) {
     val engine = (player as? EnginePlayer)?.engine
     println("check: version ${System.getProperty("octo.version") ?: "not stamped"}")
     println("check: playing ${file.absolutePath} on ${if (engine == null) "the silent player" else "the audio engine"}")
+    // Silent, and only for this run: the player's own volume, not the
+    // listener's saved one.
+    player.setVolume(0f)
     player.play(listOf(Song(LOCAL_PREFIX + file.absolutePath, "Test tone", duration = CHECK_SECONDS + 2)))
     var first: Long? = null
     var last = 0L
