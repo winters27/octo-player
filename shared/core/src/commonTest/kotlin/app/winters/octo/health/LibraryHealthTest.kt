@@ -388,6 +388,6 @@ class LibraryHealthTest {
         val words = HealthCheck.entries.flatMap { listOf(it.title(), it.meaning(), it.advice()) } +
             AlbumDifference.entries.map { AlbumDifferenceValues(it, listOf("a", "b")).words() } +
             DuplicateBasis.entries.map { it.words() } + BestReason.entries.map { it.words("FLAC") } + HEALTH_ALL_CLEAR
-        words.forEach { assertFalse(it, it.contains('—') || it.contains('–')) }
+        words.forEach { assertFalse(it, it.contains('\u2014') || it.contains('\u2013')) }
     }
 }
