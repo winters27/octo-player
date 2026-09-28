@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.library
 
 import app.winters.octo.catalog.naturalSortKey
+import app.winters.octo.server.serverTime
 import app.winters.octo.sort.AlbumSort
 import app.winters.octo.sort.Listening
 import app.winters.octo.sort.SongSort
@@ -9,8 +10,6 @@ import app.winters.octo.sort.byListening
 import app.winters.octo.sort.sortedByKey
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Song
-import java.time.Instant
-import java.time.OffsetDateTime
 
 // The columns of a song table. Each sortable one orders by the shared sort
 // option of the same meaning, so a column runs its first way just as that
@@ -38,14 +37,6 @@ enum class SongColumn(val title: String, val sort: SongSort?) {
 fun SortOrder.clicking(column: SongColumn): SortOrder {
     val option = column.sort ?: return this
     return if (by == option) copy(descending = !descending) else picking(option)
-}
-
-// When a song came in, or was last played, in milliseconds, from the
-// server's ISO date. Unreadable dates count as missing.
-fun serverTime(text: String?): Long? {
-    if (text.isNullOrBlank()) return null
-    return runCatching { Instant.parse(text).toEpochMilli() }.getOrNull()
-        ?: runCatching { OffsetDateTime.parse(text).toInstant().toEpochMilli() }.getOrNull()
 }
 
 // Each name's sort key, worked out once per sort. Working it out on every
