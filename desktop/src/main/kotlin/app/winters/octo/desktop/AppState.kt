@@ -22,6 +22,7 @@ import app.winters.octo.desktop.nav.VOLUME_STEP
 import app.winters.octo.desktop.player.DEFAULT_OUTPUT
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.SilentPlayer
+import app.winters.octo.desktop.player.SleepTimer
 import app.winters.octo.desktop.player.wash.WashCovers
 import app.winters.octo.desktop.queue.QueueKeeper
 import app.winters.octo.desktop.queue.ServerQueueSync
@@ -82,6 +83,9 @@ class AppState(
 ) {
     // The Sound page's settings, kept on the engine; none for the silent player.
     val sound: SoundController? = (player as? SoundTarget)?.let { SoundController(it, settings, scope) }
+
+    // The sleep timer: a countdown with a fade, or stop after some songs.
+    val sleep = SleepTimer(player, scope)
 
     // The lyrics of the song playing, for the side panel and the full player.
     val lyrics = LyricsModel(player, LyricsSources({ connection }, http, lyricsLibrary, settings), settings, scope)
