@@ -17,6 +17,7 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.audio.CHECK_PLAY
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
+import app.winters.octo.desktop.settings.systemReducesMotion
 import app.winters.octo.desktop.window.screenAreas
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -186,9 +187,13 @@ class SystemIntegration(
 
     fun toggleMiniPlayer() = setMiniPlayer(!miniPlayerOpen)
 
+    // The mini player stands in for the window: opening it puts the window
+    // away, and closing it brings the window back.
     fun setMiniPlayer(open: Boolean) {
+        if (open == miniPlayerOpen) return
         miniPlayerOpen = open
         app.settings.update { it.copy(system = it.system.copy(miniPlayerOpen = open)) }
+        if (open) hideWindow() else raise()
     }
 
     fun onTray(action: TrayAction) {
@@ -201,6 +206,9 @@ class SystemIntegration(
             TrayAction.Quit -> quit()
         }
     }
+
+    // Whether the system asks for less motion, read once, for the mini player.
+    private val systemCalm by lazy { systemReducesMotion(os) }
 
     // Follows the window's focus, for the notices.
     fun watch(window: java.awt.Window) {
@@ -226,15 +234,15 @@ class SystemIntegration(
         }
         if (miniPlayerOpen) {
             val spot = placeMiniPlayer(app.settings.current.system.miniPlayer, screenAreas())
+            val settings by app.settings.state.collectAsState()
             MiniPlayerWindow(
-                player = app.player,
-                covers = app.connection?.client,
+                app = app,
                 spot = spot,
                 os = os,
                 icon = windowIcon,
                 onMoved = { moved -> app.settings.update { it.copy(system = it.system.copy(miniPlayer = moved)) } },
-                onOpenOcto = ::raise,
                 onClose = { setMiniPlayer(false) },
+                reduceMotion = settings.appearance.calmMotion || systemCalm,
             )
         }
     }

@@ -14,4 +14,8 @@ data class SystemPrefs(
     // Whether the mini player was open, and where it was.
     val miniPlayerOpen: Boolean = false,
     val miniPlayer: WindowSpot? = null,
+    // The mini player stays above other windows (the pin in it), and what
+    // it shows under its header when tall enough: "lyrics", "queue" or none.
+    val miniPlayerOnTop: Boolean = true,
+    val miniPlayerPanel: String? = null,
 )
