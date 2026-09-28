@@ -111,6 +111,22 @@ class ScreenShotsTest {
                 songJson("ok${index + 1}", title, artist = "Radiohead", album = "OK Computer", albumId = "a1", duration = 200 + index * 11).dropLast(1) +
                     ""","artistId":"r1","coverArt":"al-a1","parent":"d-a1","path":"Radiohead/OK Computer/$disc-${"%02d".format(track)} $title.flac","suffix":"flac","contentType":"audio/flac","bitDepth":24,"samplingRate":96000,"track":$track,"discNumber":$disc,"playCount":${(index * 7) % 23},"year":1997,"genre":"Alternative"}"""
             }.joinToString(",")
+            // Amnesiac as Octo lists it for a listener who has two of its
+            // songs: every track in album order, the rest found online.
+            val amnesiacTitles = listOf("Packt Like Sardines in a Crushd Tin Box", "Pyramid Song", "Pulk/Pull Revolving Doors", "You and Whose Army?", "I Might Be Wrong", "Knives Out", "Morning Bell/Amnesiac", "Dollars and Cents", "Hunting Bears", "Like Spinning Plates", "Life in a Glasshouse")
+            val amnesiacOwned = setOf(2, 6)
+            val amnesiacSongs = amnesiacTitles.mapIndexed { index, title ->
+                val track = index + 1
+                val file = if (track in amnesiacOwned) {
+                    ""","path":"Radiohead/Amnesiac/${"%02d".format(track)} $title.flac","suffix":"flac","contentType":"audio/flac","bitDepth":16,"samplingRate":44100,"size":${30_000_000 + track * 1_000_000},"created":"2026-09-2${track % 9}T10:00:00Z","playCount":${track * 2},"isExternal":false"""
+                } else {
+                    ""","suffix":"m4a","contentType":"audio/mp4","bitRate":128,"isrc":["GBAYE01000${"%02d".format(track)}"],"isExternal":true"""
+                }
+                songJson("am$track", title, artist = "Radiohead", album = "Amnesiac", albumId = "a9", duration = 190 + index * 13).dropLast(1) +
+                    ""","artistId":"r1","coverArt":"al-a9","track":$track,"discNumber":1,"year":2001,"genre":"Alternative"$file}"""
+            }
+            // The two in the library are in its copy too.
+            val amnesiacMine = amnesiacSongs.filterIndexed { index, _ -> index + 1 in amnesiacOwned }.joinToString(",")
             val demoTitles = listOf("I Promise", "Man of War", "Lift", "Lull", "Meeting in the Aisle", "Melatonin", "A Reminder", "Polyethylene", "Pearly", "Palo Alto", "How I Made My Millions", "Airbag (Live)")
             val folderSongs = okSongs + "," + demoTitles.mapIndexed { index, title ->
                 songJson("ok${index + 13}", title, artist = "Radiohead", album = "OK Computer", albumId = "a1", duration = 190 + index * 9).dropLast(1) +
@@ -139,10 +155,15 @@ class ScreenShotsTest {
             server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[{"name":"songLyrics","versions":[1]},{"name":"octoAcquisitions","versions":[1]}]""", type = "octo")
             server.answer("getAlbumList2", """"albumList2":{"album":[$albums]}""")
             server.answer("getArtists", """"artists":{"index":[{"name":"R","artist":[{"id":"r1","name":"Radiohead","albumCount":9},{"id":"r2","name":"Portishead","albumCount":3,"coverArt":"ar-r2"},{"id":"r3","name":"Massive Attack","albumCount":2,"coverArt":"ar-r3"},{"id":"r4","name":"Björk","albumCount":2,"coverArt":"ar-r4"}]}]}""")
-            server.answer("search3", """"searchResult3":{"song":[$songs,$older],"album":[{"id":"a1","name":"OK Computer","artist":"Radiohead"}],"artist":[{"id":"r1","name":"Radiohead"}]}""")
+            server.answer("search3", """"searchResult3":{"song":[$songs,$older,$okSongs,$amnesiacMine],"album":[{"id":"a1","name":"OK Computer","artist":"Radiohead"}],"artist":[{"id":"r1","name":"Radiohead"}]}""")
             server.answer("getStarred2", """"starred2":{"album":[{"id":"a5","name":"Album number 5","artist":"Radiohead","starred":"2026-09-01T00:00:00Z"},{"id":"a8","name":"Album number 8","artist":"Radiohead","starred":"2026-09-10T00:00:00Z"}]}""")
             server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"p1","name":"Late night","songCount":12},{"id":"p2","name":"Running","songCount":40}]}""")
-            server.answer("getAlbum", """"album":{"id":"a1","name":"OK Computer","artist":"Radiohead","artistId":"r1","year":1997,"songCount":12,"coverArt":"al-a1","genres":[{"name":"Alternative"}],"releaseTypes":["Album"],"discTitles":[{"disc":1,"title":"OK Computer"},{"disc":2,"title":"The other side"}],"song":[$okSongs]}""")
+            server.answerBy("getAlbum") { request ->
+                when (request.url.queryParameter("id")) {
+                    "a9" -> server.ok(""""album":{"id":"a9","name":"Amnesiac","artist":"Radiohead","artistId":"r1","year":2001,"songCount":11,"coverArt":"al-a9","genres":[{"name":"Alternative"}],"releaseTypes":["Album"],"song":[${amnesiacSongs.joinToString(",")}]}""")
+                    else -> server.ok(""""album":{"id":"a1","name":"OK Computer","artist":"Radiohead","artistId":"r1","year":1997,"songCount":12,"coverArt":"al-a1","genres":[{"name":"Alternative"}],"releaseTypes":["Album"],"discTitles":[{"disc":1,"title":"OK Computer"},{"disc":2,"title":"The other side"}],"song":[$okSongs]}""")
+                }
+            }
             server.answer("getPlaylist", """"playlist":{"id":"p1","name":"Late night","owner":"winters","comment":"For the drive home after midnight","public":false,"songCount":12,"entry":[$songs]}""")
             server.answer("getArtist", """"artist":{"id":"r1","name":"Radiohead","albumCount":10,"album":[$releases]}""")
             server.answer("getArtistInfo2", """"artistInfo2":{"biography":"$biography","similarArtist":[$similar]}""")
@@ -181,18 +202,18 @@ class ScreenShotsTest {
                 CompositionLocalProvider(LocalTyping provides TypingState()) { Shell(app, null) {} }
             }
             // Draws for a while and saves the picture; with no name, only draws.
-            fun shot(name: String?, settleMs: Long = 1_500) {
+            fun shot(name: String?, settleMs: Long = 1_500, on: ImageComposeScene = scene) {
                 val begin = System.currentTimeMillis()
                 val end = begin + settleMs
                 // The scene's clock follows real time, so animations finish
                 // however long a frame takes to draw off screen.
                 var t = 0L
                 while (System.currentTimeMillis() < end) {
-                    SwingUtilities.invokeAndWait { scene.render(t) }
+                    SwingUtilities.invokeAndWait { on.render(t) }
                     Thread.sleep(30)
                     t = (System.currentTimeMillis() - begin) * 1_000_000
                 }
-                val image = scene.render(t)
+                val image = on.render(t)
                 if (name != null) File(out, "$name.png").writeBytes(image.encodeToData(EncodedImageFormat.PNG)!!.bytes)
             }
             // Turns the mouse wheel over the page, `clicks` times, then moves
@@ -452,6 +473,43 @@ class ScreenShotsTest {
                 app.play(listOf(Song("x9", "A song found online", artist = "Someone new", duration = 200)))
             }
             shot("player-outside", 2_000)
+            // An album Octo lists whole though the library has only two of
+            // its songs: every song in order, a check on the two, the "+" on
+            // the rest, and a line saying how much is in.
+            SwingUtilities.invokeAndWait {
+                app.player.pause()
+                app.navigator.go(Page.Album("a9"))
+            }
+            shot("album-partial", 2_000)
+            // The same on a wide window, where the row's end is far from
+            // the titles: the marks sit beside the numbers.
+            val wide = ImageComposeScene(1980, 900, Density(1f)) {
+                CompositionLocalProvider(LocalTyping provides TypingState()) { Shell(app, null) {} }
+            }
+            shot("album-partial-wide", 2_000, wide)
+            // Two of them asked for: one on its way, one arrived.
+            server.answer("star")
+            server.answer("getAcquisitions", """"acquisitions":{"acquisition":[{"id":"am1","state":"downloading","progress":0.4,"startedAt":"2026-09-28T10:00:00Z"},{"id":"am3","state":"done","startedAt":"2026-09-28T10:00:00Z"}]}""", type = "octo")
+            SwingUtilities.invokeAndWait {
+                app.fetches!!.request("am1")
+                app.fetches!!.request("am3")
+            }
+            shot("album-partial-adding", 3_000)
+            shot("album-partial-adding-wide", 1_500, wide)
+            wide.close()
+            // One of its songs found online: the menu leaves out what only a
+            // library song has, and its details say where it plays from.
+            val online = runBlocking { app.connection!!.client.album("a9") }.song.first { it.id == "am4" }
+            SwingUtilities.invokeAndWait {
+                app.popups.showAt(androidx.compose.ui.unit.IntOffset(700, 400)) { close -> SongMenu(app, listOf(online), close, outside = app.anyOutside(listOf(online))) }
+            }
+            shot("menu-outside")
+            SwingUtilities.invokeAndWait {
+                app.popups.close()
+                app.showInfo(online)
+                app.showSidePanel(SidePanel.Info)
+            }
+            shot("info-outside", 2_000)
             scene.close()
             player.close()
         }

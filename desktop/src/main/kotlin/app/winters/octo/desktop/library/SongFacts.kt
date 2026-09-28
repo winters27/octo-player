@@ -14,8 +14,17 @@ import java.util.Locale
 data class SongFact(val label: String, val value: String, val copyable: Boolean = false)
 
 // Everything the server says about a song, in the phone's words and order,
-// leaving out what is not known. `server` names where it plays from.
-fun songFacts(song: Song, server: String?, zone: ZoneId = ZoneId.systemDefault(), locale: Locale = Locale.getDefault()): List<SongFact> = buildList {
+// leaving out what is not known. `server` names where it plays from. A
+// song found online (`outside`) is not a file on the server, so it says
+// how it streams instead, and nothing a file would have: no date added,
+// size, bit depth or rating, and no plays until it has some.
+fun songFacts(
+    song: Song,
+    server: String?,
+    zone: ZoneId = ZoneId.systemDefault(),
+    locale: Locale = Locale.getDefault(),
+    outside: Boolean = false,
+): List<SongFact> = buildList {
     fun add(label: String, value: String?, copyable: Boolean = false) {
         if (!value.isNullOrBlank()) add(SongFact(label, value, copyable))
     }
@@ -38,19 +47,26 @@ fun songFacts(song: Song, server: String?, zone: ZoneId = ZoneId.systemDefault()
     add("Comment", song.comment)
 
     add("Length", lengthText(song.duration).takeIf { song.duration > 0 })
-    add("Format", formatName(song.suffix))
-    add("File type", song.contentType)
-    add("Bitrate", song.bitRate?.takeIf { it > 0 }?.let { "$it kbps" })
-    add("Sample rate", song.samplingRate?.takeIf { it > 0 }?.let { sampleRateText(it, locale) })
-    add("Bit depth", song.bitDepth?.takeIf { it > 0 }?.let { "$it-bit" })
-    add("File size", song.size?.takeIf { it > 0 }?.let { sizeText(it, locale) })
-    add("Source", if (isOpenedFile(song.id)) "A file on this computer" else server ?: "Your server")
+    val bitrate = song.bitRate?.takeIf { it > 0 }?.let { "$it kbps" }
+    if (outside) {
+        add("Streams as", listOfNotNull(formatName(song.suffix), bitrate).joinToString(", "))
+        add("Source", "Found online")
+    } else {
+        add("Format", formatName(song.suffix))
+        add("File type", song.contentType)
+        add("Bitrate", bitrate)
+        add("Sample rate", song.samplingRate?.takeIf { it > 0 }?.let { sampleRateText(it, locale) })
+        add("Bit depth", song.bitDepth?.takeIf { it > 0 }?.let { "$it-bit" })
+        add("File size", song.size?.takeIf { it > 0 }?.let { sizeText(it, locale) })
+        add("Source", if (isOpenedFile(song.id)) "A file on this computer" else server ?: "Your server")
+    }
 
     val dates = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT).withLocale(locale).withZone(zone)
-    add("Added", serverTime(song.created)?.let { dates.format(Instant.ofEpochMilli(it)) })
-    add("Plays", "%,d".format(locale, song.playCount ?: 0))
+    if (!outside) add("Added", serverTime(song.created)?.let { dates.format(Instant.ofEpochMilli(it)) })
+    val plays = song.playCount ?: 0
+    if (!outside || plays > 0) add("Plays", "%,d".format(locale, plays))
     add("Last played", serverTime(song.played)?.let { dates.format(Instant.ofEpochMilli(it)) })
-    add("Rating", song.userRating?.takeIf { it > 0 }?.let { if (it == 1) "1 star" else "$it stars" })
+    if (!outside) add("Rating", song.userRating?.takeIf { it > 0 }?.let { if (it == 1) "1 star" else "$it stars" })
 
     val gain = song.replayGain
     add("Track gain", gain?.trackGain?.let { gainText(it, locale) })

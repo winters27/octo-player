@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -29,52 +30,115 @@ import app.winters.octo.ambient.PageArtwork
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.isFind
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.elevation3
+import app.winters.octo.discovery.Discovery
+import app.winters.octo.discovery.DownloadState
+import app.winters.octo.discovery.Downloads
+import app.winters.octo.discovery.wholeAlbum
 import app.winters.octo.listening.FavouriteKind
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.BackButton
+import app.winters.octo.ui.common.CHECK_SETTLE_MS
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.FavouriteHeart
+import app.winters.octo.ui.common.LocalAdoptedFinds
 import app.winters.octo.ui.common.Pickable
 import app.winters.octo.ui.common.PlayRow
+import app.winters.octo.ui.common.QuietAction
 import app.winters.octo.ui.common.QuietActions
 import app.winters.octo.ui.common.Refreshable
 import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.SongLead
 import app.winters.octo.ui.common.SongRow
+import app.winters.octo.ui.common.addMissingLabel
+import app.winters.octo.ui.common.albumLibraryNote
 import app.winters.octo.ui.common.asLength
+import app.winters.octo.ui.common.isOutsideLibrary
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.common.songs
 import app.winters.octo.ui.menu.SongMenuContext
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
 import app.winters.octo.ui.nav.GenreRoute
+import app.winters.octo.subsonic.SubsonicException
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 @HiltViewModel(assistedFactory = AlbumViewModel.Factory::class)
 class AlbumViewModel @AssistedInject constructor(
     @Assisted private val id: String,
     dao: CatalogDao,
     private val playback: PlaybackConnection,
+    private val discovery: Discovery,
+    private val downloads: Downloads,
 ) : ViewModel() {
     val album: StateFlow<AlbumEntity?> =
         dao.album(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-    val tracks: StateFlow<List<TrackEntity>> =
+
+    // The album's songs in the library.
+    val library: StateFlow<List<TrackEntity>> =
         dao.albumTracks(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // The album as the server lists it, once asked: an Octo server lists the
+    // songs the library lacks too. Empty until then, or when it cannot say.
+    private val server = MutableStateFlow<List<TrackEntity>>(emptyList())
+
+    // The album whole: the library's songs, and in their places the songs
+    // found online, which play through the server and can be added.
+    val tracks: StateFlow<List<TrackEntity>> = combine(library, server, downloads.adoptions) { library, server, adoptions ->
+        wholeAlbum(library, server, adoptions.orEmpty())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // How each song asked for is getting on.
+    val downloadStates: StateFlow<Map<String, DownloadState>> = downloads.states
+
+    init {
+        // Asked once the library's songs are known, then again when a song
+        // from here arrives in the library, once its check has landed.
+        viewModelScope.launch {
+            askServer(library.first { it.isNotEmpty() })
+            downloads.arrived.drop(1).collectLatest {
+                delay(CHECK_SETTLE_MS)
+                if (server.value.any { isFind(it.id) }) askServer(library.value)
+            }
+        }
+    }
+
+    private suspend fun askServer(songs: List<TrackEntity>) {
+        try {
+            discovery.libraryAlbum(songs.map { it.id })?.let { server.value = it }
+        } catch (e: SubsonicException) {
+            // Offline or refused: the library's songs are the album for now.
+        }
+    }
+
+    // Has the server add every song here it lacks and not yet asked for.
+    fun addMissing() {
+        val waiting = tracks.value.filter { isFind(it.id) && downloads.state(it.id) == DownloadState.None }
+        viewModelScope.launch { waiting.forEach { downloads.request(it) } }
+    }
 
     // The artist's other albums, for the foot of the page.
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -88,7 +152,11 @@ class AlbumViewModel @AssistedInject constructor(
     // Plays the album from one of its songs.
     fun play(index: Int) = playback.playTracks(tracks.value.map { it.id }, index, source = album.value?.title)
 
-    fun shuffle() = playback.playAlbum(id, shuffle = true)
+    // Shuffles the album whole, songs found online too, when it has any.
+    fun shuffle() {
+        val all = tracks.value
+        if (all.any { isFind(it.id) }) playback.playTracks(all.map { it.id }, shuffle = true, source = album.value?.title) else playback.playAlbum(id, shuffle = true)
+    }
 
     @AssistedFactory
     interface Factory {
@@ -107,6 +175,11 @@ fun AlbumScreen(
 ) {
     val album by vm.album.collectAsStateWithLifecycle()
     val tracks by vm.tracks.collectAsStateWithLifecycle()
+    val library by vm.library.collectAsStateWithLifecycle()
+    val states by vm.downloadStates.collectAsStateWithLifecycle()
+    // Whether the album holds songs found online, so every row says which
+    // songs are in the library.
+    val mixed = tracks.any { isFind(it.id) }
     val moreByArtist by vm.moreByArtist.collectAsStateWithLifecycle()
     PageArtwork(AlbumRoute(id), album?.artwork)
 
@@ -125,8 +198,8 @@ fun AlbumScreen(
                             artist = a.artist,
                             details = listOfNotNull(
                                 a.year?.toString(),
-                                songs(a.songCount),
-                                (a.durationMs / 1000).toInt().asLength(),
+                                songs(if (mixed) tracks.size else a.songCount),
+                                (if (mixed) (tracks.sumOf { it.durationMs } / 1000).toInt() else (a.durationMs / 1000).toInt()).asLength(),
                             ).joinToString(" • "),
                             onArtist = { onOpen(ArtistRoute(a.artistId)) },
                             onPlay = { vm.play(0) },
@@ -136,15 +209,16 @@ fun AlbumScreen(
                             more = {
                                 QuietActions {
                                     AlbumShareButton(id, a.title)
-                                    AlbumDownloadButton(tracks)
+                                    AlbumDownloadButton(library)
                                 }
+                                if (mixed) MissingSongs(tracks, states, vm::addMissing)
                             },
                         )
                     }
                 }
                 // The genre and the songs' average rating, when known.
-                val genre = albumGenre(tracks)
-                val average = averageRating(tracks)
+                val genre = albumGenre(library)
+                val average = averageRating(library)
                 if (album != null && (genre != null || average != null)) {
                     item(key = "about") { AlbumAbout(genre, average) { onOpen(GenreRoute(it)) } }
                 }
@@ -162,11 +236,15 @@ fun AlbumScreen(
                     }
                     items(onDisc, key = { it.id }) { track ->
                         // Only say who is singing when it is not the album's artist.
+                        // In an album mixing in songs found online, each row
+                        // says after its number whether the song is in the
+                        // library, as the desktop's album does.
                         SongRow(
                             track,
                             SongLead.Number(track.trackNo),
                             subtitle = { it.artist.takeIf { artist -> artist != album?.artist } },
                             menuContext = menuContext,
+                            ownership = mixed,
                         ) { vm.play(tracks.indexOf(track)) }
                     }
                 }
@@ -178,6 +256,35 @@ fun AlbumScreen(
             }
         }
         BackButton(onBack)
+    }
+}
+
+// Under an album that has only some of its songs in the library: how many
+// are in, and the plus that adds the rest (each one not asked for yet).
+@Composable
+private fun MissingSongs(tracks: List<TrackEntity>, states: Map<String, DownloadState>, onAdd: () -> Unit) {
+    val adopted = LocalAdoptedFinds.current
+    val outside = tracks.count { isOutsideLibrary(it.id, adopted) }
+    val askable = tracks.count { isFind(it.id) && (states[it.id] ?: DownloadState.None) == DownloadState.None }
+    val note = albumLibraryNote(tracks.size, outside)
+    QuietActions {
+        QuietAction(
+            OctoIcons.AddToLibrary,
+            if (askable > 0) addMissingLabel(askable) else "Adding",
+            onClick = onAdd,
+            enabled = askable > 0,
+        )
+        if (note != null) {
+            Text(
+                note,
+                style = OctoType.caption,
+                color = OctoColors.TextMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.End,
+                modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+            )
+        }
     }
 }
 

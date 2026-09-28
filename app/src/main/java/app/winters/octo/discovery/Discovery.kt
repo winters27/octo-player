@@ -15,6 +15,7 @@ import app.winters.octo.data.SessionState
 import app.winters.octo.playback.tracksByIds
 import app.winters.octo.server.serverSourceId
 import app.winters.octo.subsonic.Album
+import app.winters.octo.subsonic.OCTO_ACQUISITIONS
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
@@ -106,6 +107,23 @@ class Discovery @Inject constructor(
             onlineArtwork(sourceId, album.coverArt),
         )
         return OnlineAlbumPage(info, resolve(client, sourceId, album.song))
+    }
+
+    // A library album as the server lists it now, found from its songs
+    // (`trackIds`): the library's songs and, as finds, the ones it lacks
+    // (see outsideAlbumSongs), in the server's order. Null when no Octo
+    // server is signed in (only Octo lists songs outside the library) or
+    // none of the songs came from it.
+    suspend fun libraryAlbum(trackIds: List<String>): List<TrackEntity>? {
+        val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return null
+        val octo = session.serverType.equals("octo", ignoreCase = true) || session.extensions.any { it.startsWith("$OCTO_ACQUISITIONS:") }
+        if (!octo) return null
+        val (client, sourceId) = server() ?: return null
+        val copies = trackIds.chunked(900).flatMap { sources.copiesOf(it) }.filter { it.sourceId == sourceId }
+        val albumRow = copies.groupingBy { it.albumId }.eachCount().maxByOrNull { it.value }?.key ?: return null
+        val native = sources.albumNativeId(albumRow) ?: return null
+        val sent = client.album(native).song
+        return outsideAlbumSongs(sent, resolve(client, sourceId, sent))
     }
 
     suspend fun artist(id: String): OnlineArtistPage? {

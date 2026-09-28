@@ -53,8 +53,10 @@ private const val STALE_MS = 6 * 60 * 60 * 1000L
 // the next start copies the library again whatever its age. Copies made
 // before this was kept count as version 1; version 2 keeps genres, credits,
 // original years, MusicBrainz ids and the other details; version 3 keeps
-// each album's release types, for the artist page's shelves.
-private const val ROWS_VERSION = 3
+// each album's release types, for the artist page's shelves; version 4
+// leaves out songs the server marks as outside the library, which a
+// download that arrived could bring in with its album.
+private const val ROWS_VERSION = 4
 
 // Keeps a copy of the signed-in server's library beside the phone's music:
 // copied after signing in, at app start when the last copy is old, and when

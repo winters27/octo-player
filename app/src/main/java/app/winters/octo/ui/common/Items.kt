@@ -212,6 +212,27 @@ fun songSubtitle(track: TrackEntity): String =
 private val AddButtonSize = 40.dp
 private val AddIconSize = 22.dp
 
+// The column just after a song's number, in a list mixing library songs
+// with songs found online: a lit check for a song in the library, the add
+// button for one that is not, which turns into the check once it is in.
+private val OwnershipWidth = 32.dp
+
+@Composable
+private fun OwnershipMark(track: TrackEntity) {
+    Box(Modifier.width(OwnershipWidth), contentAlignment = Alignment.Center) {
+        if (isOutsideLibrary(track.id)) {
+            AddToLibraryButton(track, size = OwnershipWidth, iconSize = 20.dp)
+        } else {
+            Icon(
+                painterResource(OctoIcons.Check),
+                contentDescription = "In your library",
+                tint = OctoColors.Accent,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
 // A song line; tapping it plays it. `subtitle` is the line under the title,
 // for the song the row shows. `trailing` goes after the length, such as a
 // drag handle. `menuContext` says what page the row is on, for its menu. In
@@ -226,7 +247,9 @@ private val AddIconSize = 22.dp
 // Once a find is in the library, its row becomes the library song's row in
 // place: after the check has its moment when that happens in view, or
 // straight away when it already had. The swipe and the menu are then the
-// library song's, and so is what plays.
+// library song's, and so is what plays. With `ownership`, every row has a
+// mark just after its number instead: a check for a library song, the add
+// button for a find (an album with songs found online).
 @Composable
 fun SongRow(
     track: TrackEntity,
@@ -238,6 +261,7 @@ fun SongRow(
     swipeToPlayNext: Boolean = true,
     offerAdd: Boolean = false,
     librarySpace: Boolean = offerAdd,
+    ownership: Boolean = false,
     onClick: (() -> Unit)? = null,
 ) {
     val swap = if (isFind(track.id)) rememberFindSwap(track.id, offerAdd, LocalReduceMotion.current) else null
@@ -246,7 +270,7 @@ fun SongRow(
     val nowId = LocalNowPlayingId.current.trackId
     val isNow = nowId == track.id || nowId == song.id
     val face: @Composable (TrackEntity) -> Unit = { shown ->
-        SongFace(shown, lead, subtitle(shown), trailing, offerAdd, librarySpace, selectKey, isNow)
+        SongFace(shown, lead, subtitle(shown), trailing, offerAdd, librarySpace, selectKey, isNow, ownership)
     }
     if (swipeToPlayNext) {
         val menu = LocalSongMenu.current
@@ -354,6 +378,7 @@ private fun SongFace(
     librarySpace: Boolean,
     selectKey: String,
     isNow: Boolean,
+    ownership: Boolean = false,
 ) {
     val sign = rowAddSign(track.id, LocalAdoptedFinds.current, offerAdd)
     val end: (@Composable () -> Unit)? = when (rowEnd(sign, librarySpace, hasTrailing = trailing != null)) {
@@ -389,6 +414,7 @@ private fun SongFace(
                 }
             }
         }
+        if (ownership) OwnershipMark(track)
         Column(Modifier.weight(1f)) {
             Text(track.title, style = OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (!subtitle.isNullOrEmpty()) {

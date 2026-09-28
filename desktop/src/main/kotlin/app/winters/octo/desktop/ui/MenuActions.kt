@@ -21,7 +21,7 @@ sealed interface SongPlace {
 
 enum class SongAction {
     Play, PlayNext, AddToQueue, StartRadio,
-    AddToLastPlaylist, AddToPlaylist, Favourite, Rate,
+    AddToLibrary, AddToLastPlaylist, AddToPlaylist, Favourite, Rate,
     GoToAlbum, GoToArtist, ShowInFolder,
     Details,
     Move,
@@ -33,7 +33,8 @@ enum class SongAction {
 // and queueing give way to the queue's own rows (play now, move), since
 // they would play or queue the songs a second time. Songs found online
 // (`outside`) are not in the library, so they cannot be favourites, be
-// rated or open an album or artist. A playlist's songs can be moved or
+// rated or open an album or artist; where the server can fetch them
+// (`canAdd`) they can be added to it. A playlist's songs can be moved or
 // come out of it only when the listener's own playlist (`ownsPlaylist`).
 // `lastPlaylist` is whether there is a playlist added to lately, offered
 // first among the ways to keep the songs. Show in folder needs the server
@@ -45,6 +46,7 @@ fun songMenuActions(
     ownsPlaylist: Boolean = false,
     lastPlaylist: Boolean = false,
     inFolder: Boolean = false,
+    canAdd: Boolean = false,
 ): List<List<SongAction>> {
     val one = count == 1
     val editable = place is SongPlace.Playlist && ownsPlaylist && place.positions.isNotEmpty()
@@ -55,6 +57,7 @@ fun songMenuActions(
             listOfNotNull(SongAction.Play, SongAction.PlayNext, SongAction.AddToQueue, SongAction.StartRadio.takeIf { one })
         },
         listOfNotNull(
+            SongAction.AddToLibrary.takeIf { outside && canAdd },
             SongAction.AddToLastPlaylist.takeIf { lastPlaylist },
             SongAction.AddToPlaylist,
             SongAction.Favourite.takeIf { !outside },
@@ -78,6 +81,7 @@ fun songActionLabel(action: SongAction, starred: Boolean, last: String? = null):
     SongAction.PlayNext -> "Play next"
     SongAction.AddToQueue -> "Add to queue"
     SongAction.StartRadio -> "Start radio"
+    SongAction.AddToLibrary -> "Add to your library"
     SongAction.AddToLastPlaylist -> "Add to last playlist: ${last.orEmpty()}"
     SongAction.AddToPlaylist -> "Add to playlist"
     SongAction.Favourite -> if (starred) "Remove from favourites" else "Add to favourites"

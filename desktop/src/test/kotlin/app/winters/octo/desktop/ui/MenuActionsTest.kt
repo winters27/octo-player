@@ -81,6 +81,17 @@ class MenuActionsTest {
     }
 
     @Test
+    fun songsFoundOnlineCanBeAddedWhereTheServerFetchesThem() {
+        assertEquals(
+            listOf("Add to your library", "Add to playlist"),
+            songMenuActions(1, SongPlace.Library, outside = true, canAdd = true).map { group -> group.map { songActionLabel(it, false) } }[1],
+        )
+        // Not for library songs, nor on a server that cannot fetch.
+        assertEquals(false, songMenuActions(1, SongPlace.Library, canAdd = true).flatten().contains(SongAction.AddToLibrary))
+        assertEquals(false, songMenuActions(1, SongPlace.Library, outside = true).flatten().contains(SongAction.AddToLibrary))
+    }
+
+    @Test
     fun ratingWordsMatchThePhone() {
         assertNull(starsLabel(0))
         assertEquals("1 star", starsLabel(1))

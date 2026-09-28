@@ -16,9 +16,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
+import app.winters.octo.design.IconSize
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.Separator
@@ -50,7 +52,10 @@ fun InfoPanel(app: AppState, modifier: Modifier = Modifier) {
     val server = app.connection?.server?.let { saved ->
         saved.serverType?.replaceFirstChar { it.uppercase() }?.let { "Your server ($it)" } ?: "Your server"
     }
-    val facts = songFacts(song, server)
+    // A song found online is not on the server: its facts say how it
+    // streams, and the head offers to add it to the library.
+    val outside = isOutside(app, song)
+    val facts = songFacts(song, server, outside = outside)
     LazyColumn(modifier, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.M, bottom = Space.Xl)) {
         if (picked != null) {
             item(key = "back") {
@@ -60,7 +65,7 @@ fun InfoPanel(app: AppState, modifier: Modifier = Modifier) {
                 }
             }
         }
-        item(key = "head") { Head(app, song) }
+        item(key = "head") { Head(app, song, outside) }
         if (picked == null) {
             item(key = "now") {
                 Column(Modifier.padding(vertical = Space.M), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
@@ -83,15 +88,22 @@ fun InfoPanel(app: AppState, modifier: Modifier = Modifier) {
 
 private val FactLabelWidth = Space.Wide * 2 + Space.Xl
 
-// The cover and the names, each name opening its page.
+// The cover and the names, each name opening its page. A song found online
+// says it is not in the library, beside the "+" that adds it.
 @Composable
-private fun Head(app: AppState, song: Song) {
+private fun Head(app: AppState, song: Song, outside: Boolean) {
     Row(Modifier.fillMaxWidth().padding(bottom = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
         Cover(song.coverArt, Modifier.size(FrameSize.PlayerCover + Space.Section), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
             Txt(song.title, DesktopType.emphasis, maxLines = 2)
             LinkText(song.displayArtist ?: song.artist.orEmpty(), song.artistId) { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }
             LinkText(song.album.orEmpty(), song.albumId) { app.navigator.go(Page.Album(it)) }
+            if (outside) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
+                    Txt("Not in your library", DesktopType.meta, OctoColors.TextMuted)
+                    FetchButton(app, song, ControlHeight.S, IconSize.Table, tint = OctoColors.TextSecondary)
+                }
+            }
         }
     }
 }

@@ -62,6 +62,10 @@ interface SourceDao {
     )
     suspend fun libraryLinks(sourceId: String, serverIds: List<String>): List<ServerLink>
 
+    // A source album's own id on its source, by the id the library keeps.
+    @Query("SELECT nativeId FROM source_album WHERE id = :id")
+    suspend fun albumNativeId(id: String): String?
+
     // Which of these server album ids are in the library.
     @Query("SELECT nativeId FROM source_album WHERE sourceId = :sourceId AND nativeId IN (:serverIds)")
     suspend fun knownAlbums(sourceId: String, serverIds: List<String>): List<String>

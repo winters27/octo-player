@@ -24,23 +24,48 @@ import app.winters.octo.design.OctoTooltip
 import app.winters.octo.design.ProgressRing
 import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.library.LibraryIndex
 import app.winters.octo.desktop.library.LibraryState
+import app.winters.octo.desktop.library.isOutsideSong
+import app.winters.octo.desktop.library.outsideIds
 import app.winters.octo.desktop.search.FetchPhase
 import app.winters.octo.desktop.search.phaseText
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.flow.MutableStateFlow
 
-// Whether a song is one the server found online rather than one in the
-// library: only on a server that can fetch songs, and only once the library
-// has been read. Once a fetched song arrives and the library is read again,
-// it is in the library.
+// The library once read, kept up to date, or null until then.
 @Composable
-fun isOutside(app: AppState, song: Song): Boolean {
+private fun rememberLibraryIndex(app: AppState): LibraryIndex? {
     val library = app.library
     val state by remember(library) { library?.state ?: MutableStateFlow(LibraryState.Idle) }.collectAsState()
-    val index = (state as? LibraryState.Ready)?.index
+    return (state as? LibraryState.Ready)?.index
+}
+
+// Whether a song is one the server found online rather than one in the
+// library (see isOutsideSong). A song with no mark from the server that
+// arrives in the library once fetched stops being outside when the
+// library is read again.
+@Composable
+fun isOutside(app: AppState, song: Song): Boolean {
+    val index = rememberLibraryIndex(app)
     val canFetch = app.fetches != null
-    return remember(song.id, index, canFetch) { canFetch && index != null && !index.holds(song) }
+    return remember(song, index, canFetch) { isOutsideSong(song, index, canFetch) }
+}
+
+// The ids of a list's songs that are outside the library.
+@Composable
+fun rememberOutside(app: AppState, songs: List<Song>): Set<String> {
+    val index = rememberLibraryIndex(app)
+    val canFetch = app.fetches != null
+    return remember(songs, index, canFetch) { outsideIds(songs, index, canFetch) }
+}
+
+// The same, as things stand, for a menu opened on some songs: whether any
+// of them is outside the library.
+fun AppState.anyOutside(songs: List<Song>): Boolean {
+    val index = library?.index
+    val canFetch = fetches != null
+    return songs.any { isOutsideSong(it, index, canFetch) }
 }
 
 // The "+" that has the server add a song found online to the library: a
@@ -82,6 +107,28 @@ fun FetchButton(
                 FetchPhase.Adding -> ProgressRing(1f, size = iconSize)
                 FetchPhase.Done -> Glyph(OctoIcons.Check, size = iconSize, tint = OctoColors.Accent)
                 is FetchPhase.Failed -> Glyph(OctoIcons.Info, size = iconSize, tint = OctoColors.Error)
+            }
+        }
+    }
+}
+
+// A song row's word on where the song is, in a list that mixes library
+// songs with songs found online: a check lit in the key colour for one in
+// the library, and for one that is not, a quiet "+" that adds it. Once
+// the "+" has brought the song in, the row has the lit check too.
+@Composable
+fun LibraryMark(app: AppState, song: Song, outside: Boolean) {
+    val fetches = app.fetches
+    val phases by remember(fetches) { fetches?.phases ?: MutableStateFlow(emptyMap()) }.collectAsState()
+    if (outside && phases[song.id] != FetchPhase.Done) {
+        FetchButton(app, song, ControlHeight.S, IconSize.Table, tint = OctoColors.TextMuted)
+    } else {
+        OctoTooltip("In your library") {
+            Box(
+                Modifier.size(ControlHeight.S).semantics { contentDescription = "In your library" },
+                contentAlignment = Alignment.Center,
+            ) {
+                Glyph(OctoIcons.Check, size = IconSize.Toolbar, tint = LocalKeyColour.current)
             }
         }
     }

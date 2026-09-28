@@ -136,6 +136,10 @@ data class Song(
     // it, and the file's path in the library, when the server shares it.
     val parent: String? = null,
     val path: String? = null,
+    // Octo's mark for a song that is not a file in the library: one it
+    // found online, which it can stream or download. Such a song has no
+    // path, size or date added.
+    val isExternal: Boolean = false,
 )
 
 @Serializable

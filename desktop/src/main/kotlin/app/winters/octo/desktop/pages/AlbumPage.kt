@@ -1,17 +1,28 @@
 package app.winters.octo.desktop.pages
 
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import app.winters.octo.design.Corner
+import app.winters.octo.design.DesktopType
+import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.TextAction
+import app.winters.octo.design.Txt
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.library.Cover
+import app.winters.octo.desktop.library.LibraryShare
 import app.winters.octo.desktop.library.SongColumn
+import app.winters.octo.desktop.library.askableSongs
 import app.winters.octo.desktop.library.discHeadings
 import app.winters.octo.desktop.library.formatSummary
+import app.winters.octo.desktop.library.libraryShareOf
 import app.winters.octo.desktop.library.sortAlbums
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
@@ -19,6 +30,7 @@ import app.winters.octo.desktop.ui.AlbumMenu
 import app.winters.octo.desktop.ui.LinkText
 import app.winters.octo.desktop.ui.PageSide
 import app.winters.octo.desktop.ui.SongTable
+import app.winters.octo.desktop.ui.rememberOutside
 import app.winters.octo.desktop.ui.rememberListState
 import app.winters.octo.desktop.ui.rememberLoad
 import app.winters.octo.desktop.ui.show
@@ -28,6 +40,7 @@ import app.winters.octo.subsonic.AlbumWithSongs
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 
 // An album and the artist's other albums, as the page shows them.
 class AlbumView(val album: AlbumWithSongs, val others: List<Album>)
@@ -58,7 +71,14 @@ fun AlbumPage(app: AppState, visit: Visit, id: String) {
         val album = view.album
         val songs = album.song
         val headings = remember(album) { discHeadings(songs, album.discTitles) }
-        val format = remember(album) { formatSummary(songs) }
+        // Octo lists every song of an album, those the library lacks too:
+        // they play through Octo like the rest, and the table marks them.
+        val outside = rememberOutside(app, songs)
+        val fetches = app.fetches
+        val phases by remember(fetches) { fetches?.phases ?: MutableStateFlow(emptyMap()) }.collectAsState()
+        val share = remember(songs, outside, phases, fetches) { libraryShareOf(songs, outside, phases, canFetch = fetches != null) }
+        // The format of the files in the library, not of the streams.
+        val format = remember(album, outside) { formatSummary(songs.filterNot { it.id in outside }) }
         // An album found online is not in the library: no heart, since on
         // Octo a star would fetch the whole album.
         val inLibrary = app.library?.index?.hasAlbum(album.id) ?: true
@@ -100,6 +120,7 @@ fun AlbumPage(app: AppState, visit: Visit, id: String) {
                         picture = { Cover(album.coverArt, it, shape = Corner.ArtLShape, online = !inLibrary) },
                         subtitle = { LinkText(artistName, album.artistId) { app.navigator.go(Page.Artist(it, album.artist)) } },
                         facts = albumFacts(app, album, songs.size, songs.sumOf { it.duration }, format),
+                        note = share?.let { { LibraryNote(it) { askableSongs(songs, outside, phases).forEach { song -> fetches?.request(song.id) } } } },
                     ) {
                         PlayAndShuffle({ app.play(songs) }, { app.play(songs, shuffle = true) }, enabled = songs.isNotEmpty())
                         if (inLibrary) {
@@ -112,6 +133,16 @@ fun AlbumPage(app: AppState, visit: Visit, id: String) {
                 }
             }
         }
+    }
+}
+
+// How much of an album is in the library, under its facts, with a way to
+// add the rest.
+@Composable
+private fun LibraryNote(share: LibraryShare, addRest: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Txt(share.line, DesktopType.meta, OctoColors.TextSecondary)
+        share.action?.let { TextAction(it, addRest, icon = OctoIcons.AddToLibrary) }
     }
 }
 

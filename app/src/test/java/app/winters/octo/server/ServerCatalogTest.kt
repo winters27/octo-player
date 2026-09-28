@@ -64,6 +64,14 @@ class ServerCatalogTest {
         Song(id = id, title = "Song $id", albumId = "al1", discNumber = disc, track = track, duration = 200)
 
     @Test
+    fun aSongOutsideTheLibraryIsNotKept() {
+        // Octo lists an album's missing tracks with it, marked.
+        val online = song.copy(id = "s2", title = "Found online", isExternal = true, path = null, size = null, created = null)
+        val catalog = buildServerCatalog(source, Library(listOf(song, online), listOf(album), emptyList()))
+        assertEquals(listOf("s1"), catalog.tracks.map { it.nativeId })
+    }
+
+    @Test
     fun aSongMapsToItsRow() {
         val catalog = buildServerCatalog(source, Library(listOf(song), listOf(album), emptyList()))
         val expected = SourceTrackEntity(

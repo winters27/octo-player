@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.artistSongs
+import app.winters.octo.desktop.library.isOutsideSong
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.playlistSongs
 import app.winters.octo.desktop.ratingOf
@@ -100,7 +101,8 @@ fun ColumnScope.SongMenu(
                 MenuSeparator()
             }
             val last = app.lastPlaylists().firstOrNull()
-            songMenuActions(songs.size, place, outside, owns, lastPlaylist = last != null, inFolder = !one?.parent.isNullOrEmpty()).forEachIndexed { index, group ->
+            val fetches = app.fetches
+            songMenuActions(songs.size, place, outside, owns, lastPlaylist = last != null, inFolder = !one?.parent.isNullOrEmpty(), canAdd = fetches != null).forEachIndexed { index, group ->
                 if (index > 0) MenuSeparator()
                 group.forEach { action ->
                     val label = songActionLabel(action, starred, last?.name)
@@ -109,6 +111,12 @@ fun ColumnScope.SongMenu(
                         SongAction.PlayNext -> MenuRow(label, { app.playNext(songs); close() }, OctoIcons.PlayNext)
                         SongAction.AddToQueue -> MenuRow(label, { app.addToQueue(songs); close() }, OctoIcons.AddToQueue)
                         SongAction.StartRadio -> MenuRow(label, { one?.let(app::startRadio); close() }, OctoIcons.Radio)
+                        // Asks for the picked songs the library does not have.
+                        SongAction.AddToLibrary -> MenuRow(label, {
+                            val index = app.library?.index
+                            songs.filter { isOutsideSong(it, index, canFetch = true) }.forEach { fetches?.request(it.id) }
+                            close()
+                        }, OctoIcons.AddToLibrary)
                         SongAction.AddToLastPlaylist -> MenuRow(label, {
                             start = last
                             page = MenuPage.Playlists
