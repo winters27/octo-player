@@ -440,7 +440,7 @@ class ScreenShotsTest {
             }
             // A section picked in the list beside the page: Lyrics, scrolled
             // to and marked.
-            tap(290f, 248f)
+            tap(290f, 278f)
             shot("settings-jump")
             SwingUtilities.invokeAndWait {
                 app.navigator.go(Page.Sound)
