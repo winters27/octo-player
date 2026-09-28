@@ -142,7 +142,7 @@ fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier)
 private const val PlayerDrop = "player"
 
 // The song's title (which opens its album), the artist as a link, and the
-// heart.
+// heart, or the "+" for a song found online.
 @Composable
 private fun SongZone(app: AppState, song: Song?) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
@@ -160,7 +160,11 @@ private fun SongZone(app: AppState, song: Song?) {
                 LinkText(song.displayArtist ?: song.artist.orEmpty(), song.artistId) { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }
             }
         }
-        if (song != null) {
+        // A song found online can't be a favourite; its "+" adds it to the
+        // library instead.
+        if (song != null && isOutside(app, song)) {
+            FetchButton(app, song, ControlHeight.M, IconSize.Toolbar, tint = OctoColors.TextPrimary)
+        } else if (song != null) {
             val starred = app.isStarred(song)
             IconAction(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favourites" else "Add to favourites", { app.setStarred(listOf(song), !starred) }, size = ControlHeight.M, iconSize = IconSize.Toolbar)
         }
