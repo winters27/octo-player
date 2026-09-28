@@ -38,6 +38,7 @@ val sharedDesignFiles = listOf(
     "Glyphs.kt",
     "IconAccents.kt",
     "Materials.kt",
+    "NowPlayingBars.kt",
     "OctoColors.kt",
     "OctoMotion.kt",
     "OctoSwitch.kt",

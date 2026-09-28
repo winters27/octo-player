@@ -52,8 +52,9 @@ private const val STALE_MS = 6 * 60 * 60 * 1000L
 // Raised whenever a copy learns to keep something new from the server, so
 // the next start copies the library again whatever its age. Copies made
 // before this was kept count as version 1; version 2 keeps genres, credits,
-// original years, MusicBrainz ids and the other details.
-private const val ROWS_VERSION = 2
+// original years, MusicBrainz ids and the other details; version 3 keeps
+// each album's release types, for the artist page's shelves.
+private const val ROWS_VERSION = 3
 
 // Keeps a copy of the signed-in server's library beside the phone's music:
 // copied after signing in, at app start when the last copy is old, and when
@@ -258,6 +259,9 @@ class ServerSync @Inject constructor(
         duration = duration,
         year = year,
         genre = genre,
+        releaseTypes = releaseTypes,
+        isCompilation = isCompilation,
+        discTitles = discTitles,
     )
 
     private companion object {

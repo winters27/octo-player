@@ -137,6 +137,7 @@ fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
             durationMs = if (recount) albumTracks.sumOf { it.durationMs } else base.durationMs,
             addedAt = earliestAdded(listOf(base.addedAt) + extras.map { it.addedAt }),
             artwork = base.artwork ?: extras.firstNotNullOfOrNull { it.artwork },
+            releaseTypes = base.releaseTypes.ifEmpty { extras.firstOrNull { it.releaseTypes.isNotEmpty() }?.releaseTypes.orEmpty() },
         )
     }
 

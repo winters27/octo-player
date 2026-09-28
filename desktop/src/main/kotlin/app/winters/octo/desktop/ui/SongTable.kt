@@ -90,6 +90,7 @@ import app.winters.octo.design.IconSize
 import app.winters.octo.design.MenuRow
 import app.winters.octo.design.MenuSeparator
 import app.winters.octo.design.MenuTitle
+import app.winters.octo.design.NowPlayingBars
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoTooltip
@@ -199,6 +200,9 @@ fun SongTable(
     // not on every word from the player.
     val currentId by remember(app.player) { app.player.state.map { it.current?.song?.id }.distinctUntilChanged() }
         .collectAsState(app.player.state.value.current?.song?.id)
+    // Whether it is sounding, for the playing row's bars to move or rest.
+    val sounding by remember(app.player) { app.player.state.map { it.playing }.distinctUntilChanged() }
+        .collectAsState(app.player.state.value.playing)
     val focus = remember { FocusRequester() }
     val lists = LocalListFocus.current
     var hasFocus by remember { mutableStateOf(false) }
@@ -350,6 +354,7 @@ fun SongTable(
                 SongRow(
                     app, row, index, shown, rowHeight,
                     playing = row.song.id == currentId,
+                    sounding = row.song.id == currentId && sounding,
                     picked = row.key in selection.picked,
                     focused = hasFocus && selection.focus == row.key,
                     covers = showCovers,
@@ -532,6 +537,8 @@ private fun SongRow(
     shown: List<SongColumn>,
     height: Dp,
     playing: Boolean,
+    // Only the playing row: whether it is sounding now or paused.
+    sounding: Boolean,
     picked: Boolean,
     focused: Boolean,
     covers: Boolean,
@@ -588,7 +595,6 @@ private fun SongRow(
     ) {
         when {
             picked -> GlazeSelected(Modifier.matchParentSize(), Corner.RowShape)
-            playing -> Box(Modifier.matchParentSize().background(key.copy(alpha = PlayingTint), Corner.RowShape))
             hovered -> Box(Modifier.matchParentSize().background(HoverFill, Corner.RowShape))
         }
         if (focused) Box(Modifier.matchParentSize().border(FocusLine, OctoColors.FocusRing, Corner.RowShape))
@@ -596,7 +602,7 @@ private fun SongRow(
         Row(Modifier.fillMaxWidth().padding(horizontal = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ColumnGap)) {
             shown.forEach { column ->
                 Box(cell(this, column), contentAlignment = if (specOf(column).endAligned) Alignment.CenterEnd else Alignment.CenterStart) {
-                    SongCell(app, column, index, row.song, playing, hovered, covers, heartInTitle, number, onPlay)
+                    SongCell(app, column, index, row.song, playing, sounding, hovered, covers, heartInTitle, number, onPlay)
                 }
             }
             Box(Modifier.width(RowEnd).onGloballyPositioned { moreAnchor = it.windowRect() }, contentAlignment = Alignment.Center) {
@@ -608,7 +614,6 @@ private fun SongRow(
     }
 }
 
-private const val PlayingTint = 0.10f
 private val FocusLine = Space.Xxs / 2
 
 @Composable
@@ -618,6 +623,7 @@ private fun SongCell(
     index: Int,
     song: Song,
     playing: Boolean,
+    sounding: Boolean,
     hovered: Boolean,
     covers: Boolean,
     heartInTitle: Boolean,
@@ -628,8 +634,12 @@ private fun SongCell(
     val numbers = DesktopType.table.copy(fontFeatureSettings = "tnum")
     when (column) {
         SongColumn.Number -> when {
+            // Under the pointer, the playing row pauses and carries on
+            // rather than starting the song again.
+            hovered && playing -> IconAction(if (sounding) OctoIcons.Pause else OctoIcons.Play, if (sounding) "Pause" else "Play", app.player::togglePlay, size = ControlHeight.S, iconSize = IconSize.Table)
             hovered -> IconAction(OctoIcons.Play, "Play from here", onPlay, size = ControlHeight.S, iconSize = IconSize.Table)
-            playing -> Glyph(OctoIcons.Lossless, size = IconSize.Table, tint = OctoColors.Accent)
+            // The song playing: the bars move while it sounds, rest while paused.
+            playing -> NowPlayingBars(sounding, Modifier.size(IconSize.Inline))
             else -> Txt(number(index, song), numbers, muted, align = TextAlign.End)
         }
         SongColumn.Title -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs)) {
@@ -638,11 +648,7 @@ private fun SongCell(
             Txt(
                 song.title,
                 DesktopType.tableTitle,
-                when {
-                    playing -> OctoColors.Accent
-                    failed != null -> muted
-                    else -> OctoColors.TextPrimary
-                },
+                if (failed != null) muted else OctoColors.TextPrimary,
                 Modifier.weight(1f, fill = false),
             )
             if (heartInTitle && app.isStarred(song)) Glyph(OctoIcons.Liked, size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextSecondary)

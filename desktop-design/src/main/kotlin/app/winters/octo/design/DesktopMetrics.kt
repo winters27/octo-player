@@ -85,6 +85,8 @@ object FrameSize {
     val PlayerMin = 600.dp
     val PlayerThumb = 56.dp
     val PlayerGap = 16.dp
+    // A wide card on a page, at most, so its buttons stay near its words.
+    val CardMax = 640.dp
     val PlayButton = 36.dp
     val PlayButtonLarge = 44.dp
     // A menu opened from a button.

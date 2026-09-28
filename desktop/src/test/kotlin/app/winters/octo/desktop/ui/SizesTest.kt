@@ -19,6 +19,14 @@ class SizesTest {
         "ui/FilterBar.kt",
         "library/SongFilters.kt",
         "ui/SidePanels.kt",
+        "pages/AlbumPage.kt",
+        "pages/ArtistPage.kt",
+        "pages/GenrePages.kt",
+        "pages/FolderPages.kt",
+        "pages/EntityParts.kt",
+        "pages/HomePage.kt",
+        "pages/ShelfPage.kt",
+        "pages/HistoryPage.kt",
     )
 
     private val root = File("src/main/kotlin/app/winters/octo/desktop")

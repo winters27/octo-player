@@ -100,7 +100,7 @@ fun ColumnScope.SongMenu(
                 MenuSeparator()
             }
             val last = app.lastPlaylists().firstOrNull()
-            songMenuActions(songs.size, place, outside, owns, lastPlaylist = last != null).forEachIndexed { index, group ->
+            songMenuActions(songs.size, place, outside, owns, lastPlaylist = last != null, inFolder = !one?.parent.isNullOrEmpty()).forEachIndexed { index, group ->
                 if (index > 0) MenuSeparator()
                 group.forEach { action ->
                     val label = songActionLabel(action, starred, last?.name)
@@ -124,6 +124,7 @@ fun ColumnScope.SongMenu(
                         )
                         SongAction.GoToAlbum -> MenuRow(label, { one?.albumId?.let { app.navigator.go(Page.Album(it)) }; close() }, OctoIcons.Album, enabled = !one?.albumId.isNullOrEmpty())
                         SongAction.GoToArtist -> MenuRow(label, { one?.artistId?.let { app.navigator.go(Page.Artist(it, one.artist.orEmpty())) }; close() }, OctoIcons.Artist, enabled = !one?.artistId.isNullOrEmpty())
+                        SongAction.ShowInFolder -> MenuRow(label, { one?.parent?.let { app.navigator.go(Page.Folder(it, "", focus = one.id)) }; close() }, OctoIcons.Folder)
                         SongAction.Details -> MenuRow(label, { app.showInfo(one); close() }, OctoIcons.Info)
                         SongAction.Move -> MenuRow(label, { page = MenuPage.Move }, OctoIcons.Sort, more = true)
                         SongAction.RemoveFromPlaylist -> MenuRow(label, {

@@ -2,6 +2,7 @@ package app.winters.octo.desktop.home
 
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.subsonic.Album
+import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -24,7 +25,8 @@ class HomeDataTest {
         val home = loadHome(server.connection())
         assertEquals(listOf("a1", "a2"), home.recentlyAdded.map { it.id })
         val types = server.calls.map { it.url.queryParameter("type") }.filterNotNull().toSet()
-        assertEquals(setOf("newest", "recent", "frequent", "random"), types)
+        assertEquals("no random shelf: Home shows only what the library says", setOf("newest", "recent", "frequent"), types)
+        assertTrue("favourites come from the starred list", "getStarred2" in server.endpoints())
     }
 
     @Test
@@ -59,15 +61,14 @@ class HomeDataTest {
     }
 
     @Test
-    fun theRandomPickStaysUntilNewAlbumsComeIn() {
-        fun shelf(vararg ids: String) = ids.map { Album(it) }
-        val shown = HomeData(recentlyAdded = shelf("n1"), random = shelf("r1", "r2"))
-        val again = HomeData(recentlyAdded = shelf("n1"), mostPlayed = shelf("m1"), random = shelf("r3"))
-        val kept = keepRandom(shown, again)
-        assertEquals(listOf("r1", "r2"), kept.random.map { it.id })
-        assertEquals("the other shelves are fresh", listOf("m1"), kept.mostPlayed.map { it.id })
-        val newer = HomeData(recentlyAdded = shelf("n2", "n1"), random = shelf("r3"))
-        assertEquals(listOf("r3"), keepRandom(shown, newer).random.map { it.id })
-        assertEquals(listOf("r3"), keepRandom(null, again).random.map { it.id })
+    fun favouritesShowTheNewestFavouriteFirst() {
+        val albums = listOf(Album("old", starred = "2024-01-01T00:00:00Z"), Album("new", starred = "2026-09-01T00:00:00Z"), Album("undated", starred = "yes"))
+        assertEquals(listOf("new", "old", "undated"), newestFavourites(albums).map { it.id })
+    }
+
+    @Test
+    fun pinnedPlaylistsComeFirstInTheOrderTheyWerePinned() {
+        val playlists = listOf(Playlist("a"), Playlist("b"), Playlist("c"), Playlist("d"))
+        assertEquals(listOf("c", "a", "b", "d"), pinnedFirst(playlists, listOf("c", "a", "gone")).map { it.id })
     }
 }

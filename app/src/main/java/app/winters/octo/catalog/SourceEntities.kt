@@ -95,6 +95,8 @@ data class SourceAlbumEntity(
     val durationMs: Long,
     val addedAt: Long,
     val artwork: String?,
+    // What kind of release it is, one word a line, as the server tags it.
+    @ColumnInfo(defaultValue = "") val releaseTypes: String = "",
 )
 
 @Entity(tableName = "source_artist", indices = [Index("sourceId")])
@@ -110,7 +112,7 @@ data class SourceArtistEntity(
 )
 
 fun AlbumEntity.toSource() = SourceAlbumEntity(
-    id, sourceId, nativeId, title, searchKey, sortKey, artist, artistId, year, songCount, durationMs, addedAt, artwork,
+    id, sourceId, nativeId, title, searchKey, sortKey, artist, artistId, year, songCount, durationMs, addedAt, artwork, releaseTypes,
 )
 
 fun ArtistEntity.toSource() = SourceArtistEntity(id, sourceId, name, searchKey, sortKey, albumCount, songCount, artwork)

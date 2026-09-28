@@ -3,6 +3,7 @@ package app.winters.octo.server
 import app.winters.octo.catalog.SourceAlbumEntity
 import app.winters.octo.catalog.SourceArtistEntity
 import app.winters.octo.catalog.SourceTrackEntity
+import app.winters.octo.catalog.joinLines
 import app.winters.octo.catalog.relinkKey
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Artist
@@ -194,6 +195,15 @@ class ServerCatalogTest {
             artwork = "server:$source|al-al1_6aafffab",
         )
         assertEquals(listOf(expected), catalog.albums)
+    }
+
+    @Test
+    fun anAlbumKeepsItsReleaseTypesForTheArtistsShelves() {
+        val live = album.copy(releaseTypes = listOf("Album", " Live ", ""))
+        val row = buildServerCatalog(source, Library(listOf(song), listOf(live), emptyList())).albums.single()
+        assertEquals(joinLines(listOf("Album", "Live")), row.releaseTypes)
+        // Not tagged, nothing kept.
+        assertEquals("", buildServerCatalog(source, Library(listOf(song), listOf(album), emptyList())).albums.single().releaseTypes)
     }
 
     @Test

@@ -20,7 +20,7 @@ fun queueNameFor(page: Page, songs: List<Song>, playlistName: (String) -> String
         Page.History -> "Recently played"
         Page.RecentlyAdded -> "Recently added"
         Page.Search -> album ?: "Search"
-        is Page.Album, Page.Home, Page.Albums, Page.Artists, Page.Genres, Page.Folders, Page.Settings, Page.Sound -> album
+        is Page.Album, is Page.Shelf, Page.Home, Page.Albums, Page.Artists, Page.Genres, Page.Folders, Page.Settings, Page.Sound -> album
     }
 }
 

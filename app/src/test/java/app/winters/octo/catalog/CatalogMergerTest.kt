@@ -138,6 +138,18 @@ class CatalogMergerTest {
     }
 
     @Test
+    fun theServersReleaseTypesFillWhatThePhoneLacks() {
+        val serverSide = server(
+            tracks = listOf(track("s1", "server", "One Dance", "server:album"), track("s2", "server", "Hotline Bling", "server:album")),
+            albums = listOf(album("server:album", "server", songs = 2).copy(releaseTypes = joinLines(listOf("Album", "Compilation")))),
+            artists = listOf(artist("server:artist", "server")),
+        )
+        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        assertEquals("device:album", merged.albums.single().id)
+        assertEquals(joinLines(listOf("Album", "Compilation")), merged.albums.single().releaseTypes)
+    }
+
+    @Test
     fun songsOfDifferentLengthsAreDifferentSongs() {
         val serverSide = server(
             tracks = listOf(track("s1", "server", "One Dance", "server:album", ms = 260_000)),

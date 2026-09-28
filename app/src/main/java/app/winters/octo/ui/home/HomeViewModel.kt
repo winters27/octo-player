@@ -19,6 +19,7 @@ import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.Station
 import app.winters.octo.favourites.PinStore
 import app.winters.octo.favourites.PinnedItem
+import app.winters.octo.home.Rediscovery
 import app.winters.octo.listening.PlayHistory
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.server.ServerSync
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -68,6 +70,13 @@ class HomeViewModel @Inject constructor(
     val mostPlayed: StateFlow<List<TrackEntity>> =
         history.tracks.map { byPlayCount(it, 20) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // Albums worth going back to, from the library's own plays: not played
+    // in six months, never finished, never played.
+    val rediscovery: StateFlow<Rediscovery<AlbumEntity>> =
+        combine(dao.albums(), history.tracks) { albums, played -> homeRediscovery(albums, played, System.currentTimeMillis()) }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Rediscovery())
 
     val recent: StateFlow<List<AlbumEntity>?> =
         dao.recentAlbums(20).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
