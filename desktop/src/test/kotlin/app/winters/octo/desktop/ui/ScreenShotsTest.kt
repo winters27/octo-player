@@ -3,6 +3,7 @@ package app.winters.octo.desktop.ui
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.unit.Density
+import app.winters.octo.desktop.AddQuestion
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.audio.EnginePlayer
 import app.winters.octo.desktop.audio.LocalOrServer
@@ -27,6 +28,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import app.winters.octo.lyrics.OnlineLyrics
+import app.winters.octo.ui.playlist.planAdd
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.jetbrains.skia.EncodedImageFormat
@@ -61,6 +63,7 @@ class ScreenShotsTest {
             server.answer("search3", """"searchResult3":{"song":[$songs],"album":[{"id":"a1","name":"OK Computer","artist":"Radiohead"}],"artist":[{"id":"r1","name":"Radiohead"}]}""")
             server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"p1","name":"Late night","songCount":12},{"id":"p2","name":"Running","songCount":40}]}""")
             server.answer("getAlbum", """"album":{"id":"a1","name":"OK Computer","artist":"Radiohead","artistId":"r1","year":1997,"songCount":7,"song":[$songs]}""")
+            server.answer("getPlaylist", """"playlist":{"id":"p1","name":"Late night","owner":"winters","comment":"For the drive home after midnight","public":false,"songCount":12,"entry":[$songs]}""")
             server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly"},{"id":"st2","name":"Rock mix"}]}""")
             // The phone's queue, saved on the server, for Home's pick-up card.
             server.answer("getPlayQueue", """"playQueue":{"entry":[${songs}],"current":"s3","position":61000,"changed":"2026-09-28T10:00:00Z","changedBy":"Pixel 9"}""")
@@ -179,6 +182,32 @@ class ScreenShotsTest {
                 app.popups.showAt(androidx.compose.ui.unit.IntOffset(700, 300)) { close -> ArtistMenu(app, "r1", "Radiohead", null, close) }
             }
             shot("menu-artist")
+            // A playlist's page, then its menu, then the chooser asking about
+            // songs already on a playlist, then the new playlist form.
+            SwingUtilities.invokeAndWait {
+                app.popups.close()
+                app.navigator.go(Page.Playlist("p1"))
+            }
+            shot("playlist", 2_000)
+            SwingUtilities.invokeAndWait {
+                app.popups.showAt(androidx.compose.ui.unit.IntOffset(560, 250)) { close -> PlaylistMenu(app, app.playlists.first(), close) }
+            }
+            shot("playlist-menu")
+            SwingUtilities.invokeAndWait {
+                val picked = app.library!!.index!!.songs.take(5)
+                val question = AddQuestion(
+                    app.playlists.first(),
+                    planAdd(picked.map { it.id }, picked.take(2).map { it.id }.toSet()),
+                    picked,
+                )
+                app.popups.showAt(androidx.compose.ui.unit.IntOffset(700, 300)) { close -> AddAgainMenu(app, question, close) { } }
+            }
+            shot("duplicates")
+            SwingUtilities.invokeAndWait {
+                app.popups.close()
+                newPlaylist(app)
+            }
+            shot("new-playlist")
             SwingUtilities.invokeAndWait {
                 app.popups.close()
                 app.navigator.go(Page.Settings)
