@@ -153,8 +153,9 @@ engine.setCrossfade(6000u)
 engine.position().positionMs          // audio clock, fractional ms
 ```
 
-- **Queue:** `load`, `playNext`, `enqueue`, `replaceUpcoming`, `skipTo`,
-  `skipNext`, `setRepeat`, `setStopAfterCurrent`, `queue`.
+- **Queue:** `load`, `playNext`, `enqueue`, `replaceUpcoming`,
+  `replaceQueue`, `skipTo`, `skipNext`, `setRepeat`, `setStopAfterCurrent`,
+  `queue`.
 - **Transport:** `play`, `pause`, `stop`, `seek`.
 - **Sound:** `setVolume`, `setVolumeDb`, `setMuted`, `setCrossfade`,
   `setEq`, `setReplaygain`, `setDsp`, `setSpeed(speed, pitch)`.

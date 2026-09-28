@@ -721,6 +721,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_queue(
     ): Int
+    external fun uniffi_octo_audio_checksum_method_engine_replace_queue(
+    ): Int
     external fun uniffi_octo_audio_checksum_method_engine_replace_upcoming(
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_seek(
@@ -820,6 +822,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_octo_audio_fn_method_engine_queue(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_octo_audio_fn_method_engine_replace_queue(`ptr`: Long,`items`: RustBuffer.ByValue,`current`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     external fun uniffi_octo_audio_fn_method_engine_replace_upcoming(`ptr`: Long,`items`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_octo_audio_fn_method_engine_seek(`ptr`: Long,`positionMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1031,7 +1035,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_octo_audio_checksum_method_engine_queue() and 0xFFFF) != 45348) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_octo_audio_checksum_method_engine_replace_upcoming() and 0xFFFF) != 11448) {
+    if ((lib.uniffi_octo_audio_checksum_method_engine_replace_queue() and 0xFFFF) != 34454) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_engine_replace_upcoming() and 0xFFFF) != 5259) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_method_engine_seek() and 0xFFFF) != 46784) {
@@ -1636,8 +1643,19 @@ public interface EngineInterface {
     fun `queue`(): QueueSnapshot
     
     /**
+     * Replaces the whole queue, in the order it plays, around the playing
+     * song, which carries on untouched. The playing song is found in
+     * `items` by its id, and `current` is its place when it is not there.
+     * Songs already queued keep what the engine has for them, so the next
+     * one stays lined up for a gapless join or a crossfade. For shuffling,
+     * reordering and every other change to the queue.
+     */
+    fun `replaceQueue`(`items`: List<QueueItem>, `current`: kotlin.UInt)
+    
+    /**
      * Replaces everything after the playing song, which carries on
-     * untouched. For reordering, removing and shuffling.
+     * untouched. The songs before it stay as they are, so a new shuffle
+     * or order that moves them belongs in `replace_queue`.
      */
     fun `replaceUpcoming`(`items`: List<QueueItem>)
     
@@ -2000,8 +2018,32 @@ open class Engine: Disposable, AutoCloseable, EngineInterface
 
     
     /**
+     * Replaces the whole queue, in the order it plays, around the playing
+     * song, which carries on untouched. The playing song is found in
+     * `items` by its id, and `current` is its place when it is not there.
+     * Songs already queued keep what the engine has for them, so the next
+     * one stays lined up for a gapless join or a crossfade. For shuffling,
+     * reordering and every other change to the queue.
+     */
+    @Throws(EngineException::class)override fun `replaceQueue`(`items`: List<QueueItem>, `current`: kotlin.UInt)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_engine_replace_queue(
+        it,
+        
+        FfiConverterSequenceTypeQueueItem.lower(`items`),
+        FfiConverterUInt.lower(`current`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * Replaces everything after the playing song, which carries on
-     * untouched. For reordering, removing and shuffling.
+     * untouched. The songs before it stay as they are, so a new shuffle
+     * or order that moves them belongs in `replace_queue`.
      */
     @Throws(EngineException::class)override fun `replaceUpcoming`(`items`: List<QueueItem>)
         = 
