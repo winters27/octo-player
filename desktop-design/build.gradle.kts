@@ -2,9 +2,9 @@
 // phone app, for Compose on the desktop JVM.
 //
 // The Android design module stays an Android library, untouched. Its files
-// that use nothing but Compose and Haze (the tokens for colour, type,
-// motion and shape, the glaze and the other materials, panels, the artwork
-// rim, and the controls: buttons, chrome buttons and groups, the switch,
+// that use nothing but Compose and Haze (the tokens for colour, motion
+// and shape, the glaze and the other materials, panels, the artwork rim,
+// and the controls: buttons, chrome buttons and groups, the switch,
 // segmented tabs, sliders, the scrubber, tooltips) are compiled here as
 // they are, from the same source files, so the two apps cannot drift
 // apart. The icons are the same Material Symbols vector files,
@@ -21,7 +21,8 @@ kotlin { jvmToolchain(17) }
 
 // The Android design files that compile unchanged on the desktop. A file
 // added here must not import anything from Android; the build fails loudly
-// if one does.
+// if one does. OctoType.kt is not among them: the desktop keeps the same
+// type names at its own sizes, in DesktopMetrics.kt.
 val sharedDesignFiles = listOf(
     "AccentButton.kt",
     "Artwork.kt",
@@ -43,7 +44,6 @@ val sharedDesignFiles = listOf(
     "OctoMotion.kt",
     "OctoSwitch.kt",
     "OctoTokens.kt",
-    "OctoType.kt",
     "Scrubber.kt",
     "Sliders.kt",
     "Spinner.kt",

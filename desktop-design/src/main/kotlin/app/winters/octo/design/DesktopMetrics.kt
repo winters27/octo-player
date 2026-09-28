@@ -1,6 +1,12 @@
 package app.winters.octo.design
 
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.FontHinting
+import androidx.compose.ui.text.FontRasterizationSettings
+import androidx.compose.ui.text.FontSmoothing
+import androidx.compose.ui.text.PlatformParagraphStyle
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -36,10 +42,10 @@ object ControlHeight {
 
 // How tall a row in a list is, by density. Roomy adds the cover.
 object RowHeight {
-    val Compact = 32.dp
-    val Regular = 40.dp
-    val Roomy = 52.dp
-    val Nav = 30.dp
+    val Compact = 34.dp
+    val Regular = 44.dp
+    val Roomy = 56.dp
+    val Nav = 36.dp
 }
 
 // Icon sizes: beside words, in a table, in a toolbar, in the transport.
@@ -103,17 +109,50 @@ object FrameSize {
     val FilterWidth = 260.dp
 }
 
-// Type on the desktop: smaller and denser than the phone's, with page
-// titles that orient rather than announce.
+// How the desktop draws text: grey smoothing, glyphs fitted to the pixel
+// grid, and placed between pixels so words keep their spacing. On Windows
+// this is what renders sharpest. Colour (subpixel) smoothing is not used:
+// the window never says how its screen's pixels are laid out, so it falls
+// back to a softer grey, and on glass it would fringe. Fitting to the grid
+// is what makes small text crisp; turned off, it blurs.
+@OptIn(ExperimentalTextApi::class)
+val TextDrawing = FontRasterizationSettings(
+    smoothing = FontSmoothing.AntiAlias,
+    hinting = FontHinting.Normal,
+    subpixelPositioning = true,
+    autoHintingForced = false,
+)
+
+// Every desktop text style starts here, so all of it is drawn the same way.
+@OptIn(ExperimentalTextApi::class)
+private val DesktopText = TextStyle(platformStyle = PlatformTextStyle(null, PlatformParagraphStyle(TextDrawing)))
+
+// Type on the desktop: denser than the phone's, with page titles that
+// orient rather than announce. Whole pixel sizes, which the grid fitting
+// draws cleanest.
 object DesktopType {
-    val label = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
-    val meta = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Normal)
-    val table = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Normal)
-    val tableTitle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium)
-    val body = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Normal)
-    val emphasis = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-    val section = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Bold)
-    val pageTitle = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp)
+    val label = DesktopText.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+    val meta = DesktopText.copy(fontSize = 13.sp, fontWeight = FontWeight.Normal)
+    val table = DesktopText.copy(fontSize = 14.sp, fontWeight = FontWeight.Normal)
+    val tableTitle = DesktopText.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium)
+    val body = DesktopText.copy(fontSize = 15.sp, fontWeight = FontWeight.Normal)
+    val emphasis = DesktopText.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+    val section = DesktopText.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold)
+    val pageTitle = DesktopText.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp)
+}
+
+// The phone's type names, at the desktop's sizes. The shared controls and
+// the pages that name these read them here, so every word on the desktop
+// is drawn the same way and a step up from the phone's small print.
+object OctoType {
+    val display = DesktopText.copy(fontSize = 34.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp)
+    val title = DesktopText.copy(fontSize = 26.sp, fontWeight = FontWeight.Black)
+    val headline = DesktopText.copy(fontSize = 21.sp, fontWeight = FontWeight.Bold)
+    val section = DesktopText.copy(fontSize = 19.sp, fontWeight = FontWeight.Bold)
+    val body = DesktopText.copy(fontSize = 17.sp, fontWeight = FontWeight.Medium)
+    val bodySmall = DesktopType.body
+    val caption = DesktopType.meta
+    val label = DesktopText.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
 }
 
 // The window's colours: the playing song's cover, blurred far past
