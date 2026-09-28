@@ -35,12 +35,40 @@ pub enum DeviceEvent {
     Rerouted,
 }
 
+/// What the device's stream runs at, as it was opened: the rate, the
+/// channels and the kind of samples the device is given.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct OutputFormat {
+    pub sample_rate: u32,
+    pub channels: u32,
+    /// Like "f32", "i16", "i24", "i32": float or whole numbers, and their size.
+    pub sample_format: String,
+    /// The bits in each sample, when known.
+    pub bits: Option<u32>,
+}
+
+impl OutputFormat {
+    pub fn new(sample_rate: u32, channels: u16, sample_format: cpal::SampleFormat) -> Self {
+        Self {
+            sample_rate,
+            channels: channels as u32,
+            sample_format: sample_format.to_string(),
+            bits: Some(sample_format.bits_per_sample()),
+        }
+    }
+}
+
 /// What an opened device runs at.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OpenedOutput {
-    pub rate: u32,
-    pub channels: u16,
+    pub format: OutputFormat,
     pub device: OutputDevice,
+}
+
+impl OpenedOutput {
+    pub fn rate(&self) -> u32 {
+        self.format.sample_rate
+    }
 }
 
 /// A way to reach sound devices: the real one, or a silent one for tests.

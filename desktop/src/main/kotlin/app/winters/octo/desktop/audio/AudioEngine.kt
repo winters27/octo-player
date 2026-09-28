@@ -10,6 +10,7 @@ import app.winters.octo.audio.QueueItem
 import app.winters.octo.audio.ReplayGainSettings
 import app.winters.octo.audio.TrustedCertificate
 import app.winters.octo.audio.OutputDevice as EngineDevice
+import app.winters.octo.audio.OutputFormat as EngineFormat
 import app.winters.octo.audio.RepeatMode as EngineRepeat
 
 // Where the engine's clock says the listener is: which queue item, how far
@@ -62,6 +63,9 @@ interface AudioEngine : AutoCloseable {
     fun devices(): List<EngineDevice>
 
     fun currentDevice(): EngineDevice?
+
+    // What the open device runs at, once one is open.
+    fun outputFormat(): EngineFormat?
 
     fun heard(): Heard
 
@@ -141,6 +145,8 @@ class NativeAudioEngine(private val engine: Engine) : AudioEngine {
     override fun devices(): List<EngineDevice> = ifOpen(emptyList()) { engine.devices() }
 
     override fun currentDevice(): EngineDevice? = ifOpen(null) { engine.currentDevice() }
+
+    override fun outputFormat(): EngineFormat? = ifOpen(null) { engine.outputFormat() }
 
     override fun heard(): Heard = ifOpen(lastHeard) {
         val p = engine.position()

@@ -9,9 +9,9 @@ use crossbeam_channel::{Sender, bounded, unbounded};
 
 use crate::decode::TrackInfo;
 use crate::error::{EngineError, ErrorKind};
-use crate::output::OutputDevice;
 use crate::output::cpal_driver::CpalDriver;
 use crate::output::null::NullDriver;
+use crate::output::{OutputDevice, OutputFormat};
 use crate::pace::Pace;
 use crate::player::{Command, Driven, Shared};
 use crate::sound::model::{DspSettings, EqPreset, EqSettings, ReplayGainSettings};
@@ -152,8 +152,10 @@ pub enum EngineEvent {
         item_id: Option<String>,
     },
     /// Output moved to another device, or the device list changed under it.
+    /// `format` is what the device's stream runs at.
     DeviceChanged {
         device: Option<OutputDevice>,
+        format: Option<OutputFormat>,
     },
     /// Sent at the interval asked for with `set_position_interval`.
     Position {
@@ -341,6 +343,11 @@ impl Engine {
     /// The device playing now.
     pub fn current_device(&self) -> Option<OutputDevice> {
         self.shared.status().device
+    }
+
+    /// What the device playing now runs at: its rate, channels and samples.
+    pub fn output_format(&self) -> Option<OutputFormat> {
+        self.shared.status().format
     }
 
     /// Where playback is, from the audio clock.

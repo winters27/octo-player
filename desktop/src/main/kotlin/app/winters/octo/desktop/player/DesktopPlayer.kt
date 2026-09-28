@@ -40,6 +40,14 @@ data class PlayerState(
     // The device sound goes to now; while following the system's default,
     // `output` is the default and this says which device that is.
     val playingOn: OutputDevice? = null,
+    // The current song's format and the device's, for the player bar's
+    // label and the Info panel (see formatLabel and outputSentence).
+    val format: PlayFormat? = null,
+    // The sleep timer's fade on top of the volume, from 1 (none) to 0.
+    val fade: Float = 1f,
+    // How many songs have played to their end by themselves since the
+    // player started (not skipped), for the sleep timer to count.
+    val ended: Int = 0,
 )
 
 // Why a song could not play: in plain words for the listener, the song if
@@ -116,6 +124,11 @@ interface DesktopPlayer : AutoCloseable {
 
     // Pauses at the end of the song playing, once.
     fun setStopAfterCurrent(on: Boolean) {}
+
+    // Turns the sound down by a factor on top of the volume, from 1 (as
+    // set) to 0, for the sleep timer's fade. The volume the listener set
+    // stays as it is.
+    fun setFade(fade: Float)
 
     // Puts a saved queue back, paused where it was left.
     fun restore(saved: SavedQueue)

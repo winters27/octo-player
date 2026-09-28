@@ -77,6 +77,20 @@ class EnginePlayerTest : DesktopPlayerContract() {
     }
 
     @Test
+    fun theStateSaysWhatTheSongAndTheDeviceAre() {
+        val p = newPlayer() as EnginePlayer
+        p.play(songs)
+        val until = System.currentTimeMillis() + 5_000
+        while ((p.state.value.format?.song?.bits == null || p.state.value.format?.output == null) && System.currentTimeMillis() < until) Thread.sleep(10)
+        val format = p.state.value.format!!
+        // The tone is a 48 kHz 16-bit mono WAV; the silent device takes
+        // 48 kHz stereo floats.
+        assertEquals(app.winters.octo.desktop.player.SongFormat("pcm", true, 48_000, 16, 1), format.song)
+        assertEquals(app.winters.octo.desktop.player.DeviceFormat(48_000, 2, 32, float = true), format.output)
+        assertFalse(format.resampled)
+    }
+
+    @Test
     fun stopAfterCurrentPausesAtTheNextSong() {
         val p = newPlayer()
         p.play(songs)

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::{DeviceEvent, Driver, OpenedOutput, OutputDevice, Renderer};
+use super::{DeviceEvent, Driver, OpenedOutput, OutputDevice, OutputFormat, Renderer};
 use crate::error::Failure;
 
 /// Everything the null device played, interleaved in its channel count.
@@ -118,7 +118,9 @@ impl Driver for NullDriver {
                 }
             })
             .map_err(|e| Failure::new(crate::error::ErrorKind::Device, e.to_string()))?;
-        Ok(OpenedOutput { rate: self.rate, channels: self.channels, device: self.device() })
+        // Takes floats, as most systems' shared mixers do.
+        let format = OutputFormat::new(self.rate, self.channels, cpal::SampleFormat::F32);
+        Ok(OpenedOutput { format, device: self.device() })
     }
 
     fn close(&mut self) {

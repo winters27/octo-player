@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use crate::api::{EndReason, Engine, EngineEvent, EngineListener, PlaybackState, QueueItem, RepeatMode};
 use crate::error::ErrorKind;
-use crate::output::DeviceEvent;
 use crate::output::null::{Capture, NullDriver};
+use crate::output::{DeviceEvent, OutputFormat};
 use crate::testing::fixtures::*;
 
 const RATE: u32 = 48_000;
@@ -531,5 +531,34 @@ fn a_server_with_a_trusted_certificate_plays() {
     let story = events.story();
     let trusted: Vec<&String> = story.iter().filter(|line| line.contains("trusted")).collect();
     assert_eq!(trusted, ["start trusted", "end trusted Finished"], "{story:?}");
+    engine.shutdown();
+}
+
+#[test]
+fn says_what_the_device_runs_at_and_what_the_song_is() {
+    let dir = temp_dir();
+    let a = dir.join("a.flac");
+    write_flac(&a, 44_100, 2, &sine(300.0, 44_100, 2, 0, 44_100, 0.3), &[]);
+    let (engine, events, _) = engine(1.0);
+    assert_eq!(engine.output_format(), None, "no device opened yet");
+    engine.load(vec![item("a", &a)], 0, 0, true).unwrap();
+
+    let opened =
+        events.wait_for("device", Duration::from_secs(5), |e| matches!(e, EngineEvent::DeviceChanged { .. }));
+    let want = OutputFormat { sample_rate: RATE, channels: 2, sample_format: "f32".into(), bits: Some(32) };
+    let EngineEvent::DeviceChanged { device, format } = opened else { unreachable!() };
+    assert_eq!(device.map(|d| d.name), Some("No sound".into()));
+    assert_eq!(format.as_ref(), Some(&want));
+    assert_eq!(engine.output_format(), Some(want));
+
+    // The song's own format comes with its start, before any resampling.
+    let started =
+        events.wait_for("start", Duration::from_secs(5), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    let EngineEvent::TrackStarted { info: Some(info), .. } = started else {
+        panic!("no song info: {started:?}")
+    };
+    assert_eq!(info.codec, "flac");
+    assert!(info.lossless);
+    assert_eq!((info.sample_rate, info.channels, info.bits_per_sample), (44_100, 2, Some(16)));
     engine.shutdown();
 }
