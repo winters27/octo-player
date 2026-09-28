@@ -87,6 +87,7 @@ import app.winters.octo.desktop.pages.FoldersPage
 import app.winters.octo.desktop.pages.GenrePage
 import app.winters.octo.desktop.pages.GenresPage
 import app.winters.octo.desktop.pages.HistoryPage
+import app.winters.octo.desktop.pages.LibraryHealthPage
 import app.winters.octo.desktop.pages.HomePage
 import app.winters.octo.desktop.pages.PlaylistPage
 import app.winters.octo.desktop.pages.RecentlyAddedPage
@@ -320,6 +321,7 @@ private fun PageHost(app: AppState) {
             Page.Favourites -> FavouritesPage(app, visit)
             Page.History -> HistoryPage(app, visit)
             Page.RecentlyAdded -> RecentlyAddedPage(app, visit)
+            Page.LibraryHealth -> LibraryHealthPage(app, visit)
             Page.Settings -> SettingsPage(app, visit)
             Page.Sound -> SoundPage(app, visit)
             is Page.Album -> AlbumPage(app, visit, page.id)

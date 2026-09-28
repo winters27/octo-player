@@ -27,6 +27,10 @@ import kotlinx.serialization.Serializable
 @Serializable data object FoldersRoute : NavKey
 @Serializable data object PlaylistsRoute : NavKey
 
+// What is worth fixing in the library's files, and one check's songs.
+@Serializable data object LibraryHealthRoute : NavKey
+@Serializable data class HealthCheckRoute(val check: String) : NavKey
+
 // Liked songs: the Favourites page, opened on its songs. The way in for
 // anything that means hearted songs, and what a back stack saved when this
 // was a page of its own still lands on.

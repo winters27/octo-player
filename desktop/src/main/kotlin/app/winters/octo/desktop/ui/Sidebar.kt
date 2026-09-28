@@ -71,6 +71,7 @@ private val LibraryPlaces = listOf(
     Place(Page.Artists, "Artists", OctoIcons.Artist),
     Place(Page.Genres, "Genres", OctoIcons.Genres),
     Place(Page.Folders, "Folders", OctoIcons.Folder),
+    Place(Page.LibraryHealth, "Library health", OctoIcons.Check),
 )
 
 private val YourPlaces = listOf(

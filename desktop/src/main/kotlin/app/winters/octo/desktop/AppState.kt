@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.FocusRequester
 import app.winters.octo.design.PopupHost
 import app.winters.octo.desktop.audio.SoundTarget
+import app.winters.octo.desktop.health.HealthModel
 import app.winters.octo.desktop.home.HomeStore
 import app.winters.octo.desktop.library.LibraryStore
 import app.winters.octo.desktop.listening.PlayReporter
@@ -125,6 +126,9 @@ class AppState(
         private set
     var home by mutableStateOf<HomeStore?>(null)
         private set
+
+    // The Library health page's report and removals, for this sign-in.
+    val health = HealthModel({ connection?.client }, scope)
 
     // The user's playlists, for the sidebar and "Add to playlist".
     var playlists by mutableStateOf<List<Playlist>>(emptyList())
@@ -261,6 +265,7 @@ class AppState(
         fetches = if (connection.acquires) Fetches(connection.client, scope, onArrived = { store.load() }) else null
         search = SearchModel(connection, { store.index }, { playlists }, scope)
         home = HomeStore(connection, scope)
+        health.forget()
         notice = note
         noticeDetail = null
         starOverrides.clear()
@@ -304,6 +309,7 @@ class AppState(
         fetches = null
         search = null
         home = null
+        health.forget()
         playlists = emptyList()
         fullPlayer = false
         navigator.startOver()
