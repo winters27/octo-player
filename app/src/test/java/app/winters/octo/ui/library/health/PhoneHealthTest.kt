@@ -78,10 +78,12 @@ class PhoneHealthTest {
 
     @Test
     fun theSongOnThePhoneAndOnTheServerIsNotACopy() {
-        val tracks = listOf(track("t1", "Holocene"))
-        val copies = listOf(copy("p", "Holocene", merged = "t1", source = "device"), copy("s", "Holocene", merged = "t1"))
+        // Joined into one library song, or kept as two, it is never a copy.
+        val joined = listOf(copy("p", "Holocene", merged = "t1", source = "device"), copy("s", "Holocene", merged = "t1"))
+        val apart = listOf(copy("p", "Holocene", merged = "tp", source = "device"), copy("s", "Holocene", merged = "ts"))
 
-        assertTrue(phoneHealth(tracks, emptyList(), copies).report.duplicates.isEmpty())
+        assertTrue(phoneHealth(listOf(track("t1", "Holocene")), emptyList(), joined).report.duplicates.isEmpty())
+        assertTrue(phoneHealth(listOf(track("tp", "Holocene", source = "device"), track("ts", "Holocene")), emptyList(), apart).report.duplicates.isEmpty())
     }
 
     @Test
