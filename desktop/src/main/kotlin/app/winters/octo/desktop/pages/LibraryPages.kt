@@ -194,7 +194,7 @@ fun FoldersPage(app: AppState, visit: Visit) {
     loaded.show(Modifier.padding(horizontal = 28.dp)) { top ->
         SongTable(app, top.songs, listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Length), list, covers = false) {
             item(key = "title") { PageTitle("Folders") }
-            if (top.folders.isEmpty() && top.songs.isEmpty()) item(key = "empty") { NothingHere("No folders", "This server doesn't list its folders.") }
+            if (top.folders.isEmpty() && top.songs.isEmpty()) item(key = "no-folders") { NothingHere("No folders", "This server doesn't list its folders.") }
             items(top.folders, key = { "f:${it.id}" }) { folder -> FolderRow(folder.name) { app.navigator.go(Page.Folder(folder.id, folder.name)) } }
         }
     }

@@ -100,6 +100,27 @@ class LibraryTest {
     }
 
     @Test
+    fun keepsOnceWhatShiftedPagesListTwice() = runTest {
+        // Something added mid-read pushes the last of one page onto the next.
+        serve { endpoint, request ->
+            val offset = request.url.queryParameter("offset") ?: request.url.queryParameter("songOffset")
+            when (endpoint) {
+                "getAlbumList2" -> if (offset == "0") albums("a1", "a2") else albums("a2")
+                "getArtists" -> fixture("getArtists")
+                "search3" -> when (offset) {
+                    "0" -> songs("s1", "s2")
+                    "2" -> songs("s2", "s3")
+                    else -> songs()
+                }
+                else -> error("Unexpected $endpoint")
+            }
+        }
+        val library = client().readLibrary(page = 2)
+        assertEquals(listOf("a1", "a2"), library.albums.map { it.id })
+        assertEquals(listOf("s1", "s2", "s3"), library.songs.map { it.id })
+    }
+
+    @Test
     fun withoutAnEmptySearchSongsComeAlbumByAlbum() = runTest {
         serve { endpoint, request ->
             when (endpoint) {
