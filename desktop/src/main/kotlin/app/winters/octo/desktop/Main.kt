@@ -113,14 +113,15 @@ fun main(args: Array<String>) {
                 opened.problem?.let { problem -> it.notice = problem }
             }
         }
+        val system = remember { SystemIntegration(app, places, os, instance) }
         System.getProperty(CHECK_PLAY)?.let { path -> LaunchedEffect(Unit) {
                 checkSound(app, File(path)) {
+                    system.close()
                     app.player.close()
                     exitApplication()
                 }
             }
         }
-        val system = remember { SystemIntegration(app, places, os, instance) }
         setSingletonImageLoaderFactory { context -> coverLoader(context, http, places.cache) }
         val spot = remember { placeWindow(settings.current.window, screenAreas()) }
         // Windows and Linux get the app's own glass frame unless the

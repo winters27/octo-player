@@ -71,6 +71,25 @@ interface AudioEngine : AutoCloseable {
 // The Rust engine behind the interface. Every call returns at once; the
 // engine does the work on its own threads.
 class NativeAudioEngine(private val engine: Engine) : AudioEngine {
+    // Once closed, calls do nothing and questions get the last answer: the
+    // window can draw a frame, and the media controls hear a last change,
+    // after the engine is gone on the way out.
+    @Volatile
+    private var closed = false
+
+    @Volatile
+    private var lastHeard = Heard(null, 0.0, null)
+
+    private inline fun <T> ifOpen(otherwise: T, call: () -> T): T {
+        if (closed) return otherwise
+        return try {
+            call()
+        } catch (e: IllegalStateException) {
+            // Closed on another thread while this call was on its way.
+            if (closed) otherwise else throw e
+        }
+    }
+
     override fun setListener(listener: (EngineEvent) -> Unit) {
         engine.setListener(
             object : EngineListener {
@@ -79,53 +98,54 @@ class NativeAudioEngine(private val engine: Engine) : AudioEngine {
         )
     }
 
-    override fun load(items: List<QueueItem>, startIndex: Int, startMs: Long, play: Boolean) =
-        engine.load(items, startIndex.coerceAtLeast(0).toUInt(), startMs.coerceAtLeast(0).toULong(), play)
+    override fun load(items: List<QueueItem>, startIndex: Int, startMs: Long, play: Boolean) = ifOpen(Unit) { engine.load(items, startIndex.coerceAtLeast(0).toUInt(), startMs.coerceAtLeast(0).toULong(), play) }
 
-    override fun replaceUpcoming(items: List<QueueItem>) = engine.replaceUpcoming(items)
+    override fun replaceUpcoming(items: List<QueueItem>) = ifOpen(Unit) { engine.replaceUpcoming(items) }
 
-    override fun skipTo(index: Int) = engine.skipTo(index.coerceAtLeast(0).toUInt())
+    override fun skipTo(index: Int) = ifOpen(Unit) { engine.skipTo(index.coerceAtLeast(0).toUInt()) }
 
-    override fun play() = engine.play()
+    override fun play() = ifOpen(Unit) { engine.play() }
 
-    override fun pause() = engine.pause()
+    override fun pause() = ifOpen(Unit) { engine.pause() }
 
-    override fun stop() = engine.stop()
+    override fun stop() = ifOpen(Unit) { engine.stop() }
 
-    override fun seek(positionMs: Long) = engine.seek(positionMs.coerceAtLeast(0).toULong())
+    override fun seek(positionMs: Long) = ifOpen(Unit) { engine.seek(positionMs.coerceAtLeast(0).toULong()) }
 
-    override fun setVolume(linear: Float) = engine.setVolume(linear)
+    override fun setVolume(linear: Float) = ifOpen(Unit) { engine.setVolume(linear) }
 
-    override fun setRepeat(mode: EngineRepeat) = engine.setRepeat(mode)
+    override fun setRepeat(mode: EngineRepeat) = ifOpen(Unit) { engine.setRepeat(mode) }
 
-    override fun setStopAfterCurrent(on: Boolean) = engine.setStopAfterCurrent(on)
+    override fun setStopAfterCurrent(on: Boolean) = ifOpen(Unit) { engine.setStopAfterCurrent(on) }
 
-    override fun setCrossfade(ms: Int) = engine.setCrossfade(ms.coerceAtLeast(0).toUInt())
+    override fun setCrossfade(ms: Int) = ifOpen(Unit) { engine.setCrossfade(ms.coerceAtLeast(0).toUInt()) }
 
-    override fun setEq(eq: EqSettings) = engine.setEq(eq)
+    override fun setEq(eq: EqSettings) = ifOpen(Unit) { engine.setEq(eq) }
 
-    override fun setReplayGain(settings: ReplayGainSettings) = engine.setReplaygain(settings)
+    override fun setReplayGain(settings: ReplayGainSettings) = ifOpen(Unit) { engine.setReplaygain(settings) }
 
-    override fun setDsp(dsp: DspSettings) = engine.setDsp(dsp)
+    override fun setDsp(dsp: DspSettings) = ifOpen(Unit) { engine.setDsp(dsp) }
 
-    override fun setSpeed(speed: Float, pitch: Float) = engine.setSpeed(speed, pitch)
+    override fun setSpeed(speed: Float, pitch: Float) = ifOpen(Unit) { engine.setSpeed(speed, pitch) }
 
-    override fun setOutputDevice(id: String?) = engine.setOutputDevice(id)
+    override fun setOutputDevice(id: String?) = ifOpen(Unit) { engine.setOutputDevice(id) }
 
-    override fun devices(): List<EngineDevice> = engine.devices()
+    override fun devices(): List<EngineDevice> = ifOpen(emptyList()) { engine.devices() }
 
-    override fun currentDevice(): EngineDevice? = engine.currentDevice()
+    override fun currentDevice(): EngineDevice? = ifOpen(null) { engine.currentDevice() }
 
-    override fun heard(): Heard {
+    override fun heard(): Heard = ifOpen(lastHeard) {
         val p = engine.position()
-        return Heard(p.itemId, p.positionMs, p.durationMs?.toLong())
+        Heard(p.itemId, p.positionMs, p.durationMs?.toLong()).also { lastHeard = it }
     }
 
-    override fun state(): PlaybackState = engine.state()
+    override fun state(): PlaybackState = ifOpen(PlaybackState.IDLE) { engine.state() }
 
-    override fun setPositionInterval(ms: Int) = engine.setPositionInterval(ms.coerceAtLeast(0).toUInt())
+    override fun setPositionInterval(ms: Int) = ifOpen(Unit) { engine.setPositionInterval(ms.coerceAtLeast(0).toUInt()) }
 
     override fun close() {
+        if (closed) return
+        closed = true
         engine.shutdown()
         engine.close()
     }
