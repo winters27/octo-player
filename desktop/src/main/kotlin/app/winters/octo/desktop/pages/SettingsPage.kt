@@ -28,6 +28,7 @@ import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.desktop.settings.Appearance
 import app.winters.octo.desktop.settings.WashPrefs
 import app.winters.octo.desktop.system.SystemRows
+import app.winters.octo.desktop.system.TaskbarAndStartupRows
 import app.winters.octo.desktop.ui.LocalSoftwareDrawing
 import kotlin.math.roundToInt
 
@@ -47,7 +48,10 @@ fun SettingsPage(app: AppState, visit: Visit) {
             PageSection("playback", "Playback") { PlaybackRows(app, settings) },
             PageSection("listening", "Listening") { ListeningRows(app, settings) },
             PageSection("lyrics", "Lyrics") { LyricsRows(app, settings) },
-            PageSection("system", "System") { SystemRows(app) },
+            PageSection("system", "System") {
+                SystemRows(app)
+                TaskbarAndStartupRows(app)
+            },
             PageSection("keys", "Keyboard") { KeyRows(app) },
             PageSection("about", "About") { Rows { InfoRow("Version", null, appVersion()) } },
         ),

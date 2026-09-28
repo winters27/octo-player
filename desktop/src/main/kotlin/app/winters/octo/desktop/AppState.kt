@@ -47,6 +47,8 @@ import app.winters.octo.desktop.settings.FramePrefs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.settings.TablePrefs
 import app.winters.octo.desktop.sound.SoundController
+import app.winters.octo.desktop.system.JumpListHooks
+import app.winters.octo.desktop.system.jumpTargetFor
 import app.winters.octo.lyrics.OnlineLyrics
 import app.winters.octo.playback.skippedLine
 import app.winters.octo.sort.SortList
@@ -184,6 +186,10 @@ class AppState(
 
     // Opens or closes the mini player; the system side sets it.
     var toggleMiniPlayer: (() -> Unit)? = null
+
+    // The Windows jump list, told what is played; null where there is none.
+    // The system side sets it.
+    var jumpList: JumpListHooks? = null
 
     // Songs that could not play this run, by id, with why, for their rows.
     val failedSongs = mutableStateMapOf<String, String>()
@@ -372,8 +378,10 @@ class AppState(
     // the page it was played from names it (queueNameFor).
     fun play(songs: List<Song>, start: Int = 0, shuffle: Boolean = false, source: String? = null) {
         if (songs.isEmpty()) return
-        val name = source ?: queueNameFor(navigator.current.page, songs) { id -> playlists.firstOrNull { it.id == id }?.name ?: liveLists.byId(id)?.name }
+        val listName = { id: String -> playlists.firstOrNull { it.id == id }?.name ?: liveLists.byId(id)?.name }
+        val name = source ?: queueNameFor(navigator.current.page, songs, listName)
         player.play(songs, if (shuffle) (songs.indices).random() else start, shuffle, QueueSource.Played(name))
+        jumpList?.let { list -> jumpTargetFor(navigator.current.page, songs, listName)?.let(list::played) }
     }
 
     fun playNext(songs: List<Song>) = player.playNext(songs)

@@ -48,6 +48,7 @@ import app.winters.octo.desktop.system.LocalSystem
 import app.winters.octo.desktop.system.SingleInstance
 import app.winters.octo.desktop.system.SystemIntegration
 import app.winters.octo.desktop.system.letRunningOctoComeForward
+import app.winters.octo.desktop.system.startsInTray
 import app.winters.octo.desktop.ui.ListFocus
 import app.winters.octo.desktop.ui.LocalListFocus
 import app.winters.octo.desktop.ui.LocalSoftwareDrawing
@@ -114,7 +115,7 @@ fun main(args: Array<String>) {
                 opened.problem?.let { problem -> it.notice = problem }
             }
         }
-        val system = remember { SystemIntegration(app, places, os, instance).also { app.toggleMiniPlayer = it::toggleMiniPlayer } }
+        val system = remember { SystemIntegration(app, places, os, instance, startsInTray(args.toList())).also { app.toggleMiniPlayer = it::toggleMiniPlayer } }
         System.getProperty(CHECK_PLAY)?.let { path -> LaunchedEffect(Unit) {
                 checkSound(app, File(path)) {
                     system.close()

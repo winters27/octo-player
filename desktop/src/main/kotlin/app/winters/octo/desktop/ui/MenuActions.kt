@@ -108,7 +108,7 @@ fun sharedRating(ratings: List<Int>): Int? = ratings.distinct().singleOrNull()
 enum class CollectionAction {
     Play, Shuffle, PlayNext, AddToQueue, StartRadio,
     AddToPlaylist, Favourite,
-    Pin,
+    Pin, JumpList,
     GoToArtist,
     Rename, Duplicate, Export, Public,
     Delete,
@@ -117,10 +117,11 @@ enum class CollectionAction {
 private val Playing = listOf(CollectionAction.Play, CollectionAction.Shuffle, CollectionAction.PlayNext, CollectionAction.AddToQueue)
 
 // An album's menu. One found online has no favourite heart (on Octo a star
-// would download it) and no artist page to open.
-fun albumMenuActions(outside: Boolean = false): List<List<CollectionAction>> = listOf(
+// would download it), no artist page to open and no place in the jump list.
+// `jumpList` is whether there is a jump list to pin it to (Windows).
+fun albumMenuActions(outside: Boolean = false, jumpList: Boolean = false): List<List<CollectionAction>> = listOf(
     Playing + CollectionAction.StartRadio,
-    listOfNotNull(CollectionAction.AddToPlaylist, CollectionAction.Favourite.takeIf { !outside }),
+    listOfNotNull(CollectionAction.AddToPlaylist, CollectionAction.Favourite.takeIf { !outside }, CollectionAction.JumpList.takeIf { jumpList && !outside }),
     listOfNotNull(CollectionAction.GoToArtist.takeIf { !outside }),
 ).filter { it.isNotEmpty() }
 
