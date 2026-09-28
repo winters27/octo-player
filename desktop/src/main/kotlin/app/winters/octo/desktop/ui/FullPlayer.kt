@@ -133,6 +133,9 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
                             SidePanel.Queue -> Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f), RoundedCornerShape(20.dp)).padding(top = 8.dp)) {
                                 QueueList(app)
                             }
+                            SidePanel.Info -> Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f), RoundedCornerShape(20.dp)).padding(top = 8.dp)) {
+                                InfoPanel(app, Modifier.fillMaxSize())
+                            }
                         }
                     }
                 }
@@ -143,6 +146,7 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
             if (app.playerPanel == SidePanel.Lyrics) LyricsMenuButton(app, tint = ink)
             IconAction(OctoIcons.Lyrics, "Lyrics", { app.togglePlayerPanel(SidePanel.Lyrics) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Lyrics, tint = ink)
             IconAction(OctoIcons.Queue, "Queue", { app.togglePlayerPanel(SidePanel.Queue) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Queue, tint = ink)
+            IconAction(OctoIcons.Info, "Song details", { app.togglePlayerPanel(SidePanel.Info) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Info, tint = ink)
             IconAction(OctoIcons.Collapse, "Close the player", { app.fullPlayer = false }, size = 36.dp, iconSize = 20.dp, tint = ink)
         }
     }

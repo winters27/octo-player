@@ -1,25 +1,29 @@
 package app.winters.octo.desktop.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -27,24 +31,25 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.onPointerEvent
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
-import app.winters.octo.desktop.AppState
-import app.winters.octo.desktop.SidePanel
-import app.winters.octo.desktop.library.Cover
-import app.winters.octo.desktop.library.lengthText
-import app.winters.octo.desktop.nav.Page
-import app.winters.octo.desktop.player.DesktopPlayer
-import app.winters.octo.desktop.player.RepeatMode
-import app.winters.octo.desktop.system.MiniPlayerButton
+import app.winters.octo.design.ControlHeight
+import app.winters.octo.design.Corner
+import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FloatingGlaze
+import app.winters.octo.design.FrameSize
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.GlazeLight
+import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconAction
+import app.winters.octo.design.IconSize
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.MenuRow
 import app.winters.octo.design.MenuSeparator
@@ -52,17 +57,27 @@ import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
-import app.winters.octo.design.Scrubber
 import app.winters.octo.design.PauseGlyph
-import app.winters.octo.design.Glyph
+import app.winters.octo.design.Scrubber
+import app.winters.octo.design.Space
+import app.winters.octo.design.Spinner
 import app.winters.octo.design.Txt
+import app.winters.octo.design.chromeFilm
 import app.winters.octo.design.hoverLift
+import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.SidePanel
+import app.winters.octo.desktop.library.Cover
+import app.winters.octo.desktop.library.formatLine
+import app.winters.octo.desktop.library.lengthText
+import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.player.DesktopPlayer
+import app.winters.octo.desktop.player.PlayerState
+import app.winters.octo.desktop.player.RepeatMode
+import app.winters.octo.desktop.system.MiniPlayerButton
+import app.winters.octo.subsonic.Song
 import dev.chrisbanes.haze.HazeState
-import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
-
-val BarHeight = 84.dp
-val BarShape = RoundedCornerShape(22.dp)
+import kotlinx.coroutines.delay
 
 // Where the song is, read from the player a few times a second, for the
 // time and the progress line. It is read while paused too, so a seek then
@@ -81,98 +96,177 @@ fun rememberPosition(player: DesktopPlayer): State<Long> {
     return position
 }
 
-// The glass bar along the foot of the window: the song on the left, the
-// transport and progress in the middle, and on the right lyrics, the queue,
-// the output, volume and the full player.
+// The player, docked along the foot of the frame, in three columns: the
+// song on the left, the transport and progress in the middle, and the
+// panels, output and volume on the right. The side columns share the width
+// evenly, so the transport sits at the window's true centre whatever the
+// song's title.
 @Composable
-fun NowPlayingBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
+fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
     val state by app.player.state.collectAsState()
     val song = state.current?.song
-    val position by rememberPosition(app.player)
-    FloatingGlaze(backdrop, modifier, shape = BarShape) {
-        Row(Modifier.fillMaxWidth().fillMaxHeight().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            // The song.
-            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Cover(
-                    song?.coverArt,
-                    Modifier.size(56.dp).clickable(enabled = song != null) { app.fullPlayer = true },
-                    shape = RoundedCornerShape(8.dp),
-                    placeholder = OctoIcons.Songs,
-                )
-                Column(Modifier.weight(1f, fill = false)) {
-                    Txt(
-                        song?.title ?: "Nothing playing",
-                        OctoType.label,
-                        if (song != null) OctoColors.TextPrimary else OctoColors.TextMuted,
-                        Modifier.clickable(enabled = song != null) { app.fullPlayer = true },
-                    )
-                    if (song != null) {
-                        LinkText(song.displayArtist ?: song.artist.orEmpty(), song.artistId) { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }
-                    }
-                }
-                if (song != null) {
-                    val starred = app.isStarred(song)
-                    IconAction(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favourites" else "Add to favourites", { app.setStarred(listOf(song), !starred) }, size = 32.dp, iconSize = 18.dp)
-                }
-            }
-            // Transport and progress.
-            Column(Modifier.widthIn(min = 360.dp, max = 560.dp).weight(1.3f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = 32.dp, iconSize = 18.dp, active = state.shuffle)
-                    IconAction(OctoIcons.Previous, "Previous", app.player::previous, enabled = song != null)
-                    PlayButton(state.playing, enabled = song != null) { app.player.togglePlay() }
-                    IconAction(OctoIcons.Next, "Next", app.player::next, enabled = song != null)
-                    val repeat = state.repeat
-                    IconAction(
-                        if (repeat == RepeatMode.One) OctoIcons.RepeatOne else OctoIcons.Repeat,
-                        when (repeat) {
-                            RepeatMode.Off -> "Repeat"
-                            RepeatMode.All -> "Repeat all"
-                            RepeatMode.One -> "Repeat one"
-                        },
-                        { app.player.setRepeat(RepeatMode.entries[(repeat.ordinal + 1) % RepeatMode.entries.size]) },
-                        size = 32.dp,
-                        iconSize = 18.dp,
-                        active = repeat != RepeatMode.Off,
-                    )
-                }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    val duration = state.durationMs
-                    // Where a drag would land, shown in place of the time while dragging.
-                    var scrubbing by remember { mutableStateOf<Float?>(null) }
-                    val shownMs = scrubbing?.let { (it * duration).toLong() } ?: position
-                    Txt(lengthText((shownMs / 1000).toInt()).ifEmpty { "0:00" }, OctoType.caption, OctoColors.TextMuted, Modifier.width(44.dp), align = TextAlign.End)
-                    Scrubber(
-                        fraction = { if (duration > 0) position.toFloat() / duration else 0f },
-                        onSeek = { app.player.seekTo((it * duration).toLong()) },
-                        modifier = Modifier.weight(1f),
-                        onScrub = { scrubbing = it },
-                    )
-                    Txt(lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }, OctoType.caption, OctoColors.TextMuted, Modifier.width(44.dp))
-                }
-            }
-            // Panels, output, volume and the full player.
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                IconAction(OctoIcons.Lyrics, "Lyrics", { app.toggleSidePanel(SidePanel.Lyrics) }, size = 34.dp, iconSize = 19.dp, active = app.sidePanel == SidePanel.Lyrics)
-                IconAction(OctoIcons.Queue, "Queue", { app.toggleSidePanel(SidePanel.Queue) }, size = 34.dp, iconSize = 19.dp, active = app.sidePanel == SidePanel.Queue)
-                OutputButton(app)
-                VolumeControl(app, state.volume)
-                MiniPlayerButton()
-                IconAction(OctoIcons.Expand, "Open the player", { app.fullPlayer = !app.fullPlayer }, size = 34.dp, iconSize = 20.dp, enabled = song != null, active = app.fullPlayer)
-            }
+    BoxWithConstraints(modifier.chromeFilm(backdrop)) {
+        val middle = minOf(FrameSize.TransportMax, maxWidth * 0.42f)
+        Row(Modifier.fillMaxSize().padding(horizontal = Space.L), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { SongZone(app, song) }
+            Box(Modifier.width(middle), contentAlignment = Alignment.Center) { TransportZone(app, state) }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { UtilityZone(app, state) }
         }
     }
 }
 
-// Play and pause: the one control in the glaze, a lit glass circle.
+// The song: its cover (which opens the full player), its title (which
+// opens its album), the artist and album as links, and the heart.
 @Composable
-fun PlayButton(playing: Boolean, enabled: Boolean, size: androidx.compose.ui.unit.Dp = 44.dp, onClick: () -> Unit) {
+private fun SongZone(app: AppState, song: Song?) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
+        Cover(
+            song?.coverArt,
+            Modifier.size(FrameSize.PlayerCover).clickable(enabled = song != null) { app.fullPlayer = true },
+            shape = Corner.ArtMShape,
+            placeholder = OctoIcons.Songs,
+        )
+        Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
+            if (song == null) {
+                Txt("Nothing playing", DesktopType.emphasis, OctoColors.TextMuted)
+            } else {
+                val album = song.albumId?.takeIf(String::isNotBlank)
+                Txt(
+                    song.title,
+                    DesktopType.emphasis,
+                    OctoColors.TextPrimary,
+                    if (album != null) Modifier.pointerHoverIcon(PointerIcon.Hand).clickable { app.navigator.go(Page.Album(album)) } else Modifier,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LinkText(song.displayArtist ?: song.artist.orEmpty(), song.artistId) { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }
+                    if (!song.album.isNullOrBlank()) {
+                        Txt(" · ", DesktopType.meta, OctoColors.TextMuted)
+                        LinkText(song.album.orEmpty(), song.albumId) { app.navigator.go(Page.Album(it)) }
+                    }
+                }
+            }
+        }
+        if (song != null) {
+            val starred = app.isStarred(song)
+            IconAction(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favourites" else "Add to favourites", { app.setStarred(listOf(song), !starred) }, size = ControlHeight.M, iconSize = IconSize.Toolbar)
+        }
+    }
+}
+
+// The transport over the progress line, with the time played on the left
+// and, on the right, the time left (or the song's length; a click swaps).
+@Composable
+private fun TransportZone(app: AppState, state: PlayerState) {
+    val song = state.current?.song
+    val position by rememberPosition(app.player)
+    val settings by app.settings.state.collectAsState()
+    val left = settings.frame.showTimeLeft
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
+            IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = state.shuffle)
+            IconAction(OctoIcons.Previous, "Previous", app.player::previous, size = ControlHeight.L, iconSize = IconSize.Transport, enabled = song != null)
+            PlayButton(state.playing, enabled = song != null, size = FrameSize.PlayButton, waiting = state.buffering) { app.player.togglePlay() }
+            IconAction(OctoIcons.Next, "Next", app.player::next, size = ControlHeight.L, iconSize = IconSize.Transport, enabled = song != null)
+            val repeat = state.repeat
+            IconAction(
+                if (repeat == RepeatMode.One) OctoIcons.RepeatOne else OctoIcons.Repeat,
+                when (repeat) {
+                    RepeatMode.Off -> "Repeat"
+                    RepeatMode.All -> "Repeat all"
+                    RepeatMode.One -> "Repeat one"
+                },
+                { app.player.setRepeat(RepeatMode.entries[(repeat.ordinal + 1) % RepeatMode.entries.size]) },
+                size = ControlHeight.M,
+                iconSize = IconSize.Toolbar,
+                active = repeat != RepeatMode.Off,
+            )
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
+            val duration = state.durationMs
+            // Where a drag would land, shown in place of the time while dragging.
+            var scrubbing by remember { mutableStateOf<Float?>(null) }
+            val shownMs = scrubbing?.let { (it * duration).toLong() } ?: position
+            Txt(lengthText((shownMs / 1000).toInt()).ifEmpty { "0:00" }, TimeStyle, OctoColors.TextMuted, Modifier.width(TimeWidth), align = TextAlign.End)
+            Scrubber(
+                fraction = { if (duration > 0) position.toFloat() / duration else 0f },
+                onSeek = { app.player.seekTo((it * duration).toLong()) },
+                modifier = Modifier.weight(1f),
+                onScrub = { scrubbing = it },
+            )
+            val end = if (left && duration > 0) "-" + lengthText(((duration - shownMs).coerceAtLeast(0) / 1000).toInt()).ifEmpty { "0:00" } else lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }
+            Txt(
+                end,
+                TimeStyle,
+                OctoColors.TextMuted,
+                Modifier.width(TimeWidth).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { app.updateFrame { it.copy(showTimeLeft = !left) } },
+            )
+        }
+    }
+}
+
+// Times in figures of one width, so the line never shifts as they change.
+private val TimeStyle = DesktopType.meta.copy(fontFeatureSettings = "tnum")
+private val TimeWidth = Space.Wide + Space.S
+
+// The song's format as a quiet line (it opens the Info tab), the panels,
+// the output, the volume, More, and the full player.
+@Composable
+private fun UtilityZone(app: AppState, state: PlayerState) {
+    val song = state.current?.song
+    Row(horizontalArrangement = Arrangement.spacedBy(Space.Xxs), verticalAlignment = Alignment.CenterVertically) {
+        song?.let(::formatLine)?.let { line ->
+            Txt(
+                line,
+                DesktopType.meta.copy(fontFeatureSettings = "tnum"),
+                OctoColors.TextMuted,
+                Modifier.padding(end = Space.S).pointerHoverIcon(PointerIcon.Hand).clickable { app.showInfo(null) },
+            )
+        }
+        IconAction(OctoIcons.Lyrics, "Lyrics", { app.toggleSidePanel(SidePanel.Lyrics) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Lyrics)
+        IconAction(OctoIcons.Queue, "Queue", { app.toggleSidePanel(SidePanel.Queue) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Queue)
+        OutputButton(app)
+        VolumeControl(app, state.volume)
+        MoreButton(app, state)
+        IconAction(OctoIcons.Expand, "Open the player", { app.fullPlayer = !app.fullPlayer }, size = ControlHeight.M, iconSize = IconSize.Toolbar, enabled = song != null, active = app.fullPlayer)
+    }
+}
+
+// What is used now and then: stopping after this song, the mini player,
+// and the song's details.
+@Composable
+private fun MoreButton(app: AppState, state: PlayerState) {
+    var anchor by remember { mutableStateOf(IntRect.Zero) }
+    Box(Modifier.onGloballyPositioned { anchor = it.windowRect() }) {
+        IconAction(OctoIcons.More, "More", {
+            app.popups.showUnder(anchor, width = FrameSize.Menu) { close ->
+                val now = app.player.state.value
+                MenuRow(
+                    "Stop after this song",
+                    { app.player.setStopAfterCurrent(!now.stopAfterCurrent); close() },
+                    if (now.stopAfterCurrent) OctoIcons.Check else OctoIcons.Pause,
+                    enabled = now.current != null,
+                )
+                MenuSeparator()
+                MenuRow("Song details", { app.showInfo(null); close() }, OctoIcons.Info, enabled = now.current != null)
+                app.toggleMiniPlayer?.let { toggle -> MenuRow("Mini player", { toggle(); close() }, OctoIcons.Expand) }
+            }
+        }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = state.stopAfterCurrent)
+    }
+}
+
+// Play and pause: the one control in the glaze, a lit glass circle. While
+// waiting for sound, a spinner turns inside it.
+@Composable
+fun PlayButton(playing: Boolean, enabled: Boolean, size: Dp = FrameSize.PlayButtonLarge, waiting: Boolean = false, onClick: () -> Unit) {
     Glaze(
-        Modifier.size(size).hoverLift(androidx.compose.foundation.shape.CircleShape, clickable = enabled).clickable(enabled = enabled, onClick = onClick),
+        Modifier.size(size).hoverLift(CircleShape, clickable = enabled).clickable(enabled = enabled, onClick = onClick),
         light = GlazeLight.Lifted,
     ) {
-        if (playing) PauseGlyph(OctoColors.TextPrimary, size = size * 0.42f)
-        else Glyph(OctoIcons.Play, size = size * 0.55f)
+        when {
+            waiting && playing -> Spinner(size = size * 0.5f)
+            playing -> PauseGlyph(OctoColors.TextPrimary, size = size * 0.42f)
+            else -> Glyph(OctoIcons.Play, size = size * 0.55f)
+        }
     }
 }
 
@@ -185,7 +279,7 @@ private fun OutputButton(app: AppState) {
     val state by app.player.state.collectAsState()
     Box(Modifier.onGloballyPositioned { anchor = it.windowRect() }) {
         IconAction(outputIcon(state.playingOn?.name), "Output: ${state.playingOn?.name ?: "system default"}", {
-            app.popups.showUnder(anchor, width = 300.dp) { close ->
+            app.popups.showUnder(anchor, width = FrameSize.Menu) { close ->
                 val now = app.player.state.value
                 MenuTitle("Play on")
                 now.outputs.forEachIndexed { index, device ->
@@ -201,7 +295,7 @@ private fun OutputButton(app: AppState) {
                     )
                 }
             }
-        }, size = 34.dp, iconSize = 19.dp)
+        }, size = ControlHeight.M, iconSize = IconSize.Toolbar)
     }
 }
 
@@ -236,10 +330,10 @@ private fun VolumeControl(app: AppState, volume: Float) {
                     app.setVolume(before.takeIf { it > 0.01f } ?: 0.8f)
                 }
             },
-            size = 34.dp,
-            iconSize = 19.dp,
+            size = ControlHeight.M,
+            iconSize = IconSize.Toolbar,
         )
-        LineSlider(fraction = { volume }, onSeek = app::setVolume, modifier = Modifier.width(96.dp), live = true, hoverLabel = { "${(it * 100).toInt()}%" })
+        LineSlider(fraction = { volume }, onSeek = app::setVolume, modifier = Modifier.width(FrameSize.Volume), live = true, hoverLabel = { "${(it * 100).toInt()}%" })
     }
 }
 

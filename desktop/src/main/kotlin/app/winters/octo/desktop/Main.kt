@@ -109,7 +109,7 @@ fun main(args: Array<String>) {
                 opened.problem?.let { problem -> it.notice = problem }
             }
         }
-        val system = remember { SystemIntegration(app, places, os, instance) }
+        val system = remember { SystemIntegration(app, places, os, instance).also { app.toggleMiniPlayer = it::toggleMiniPlayer } }
         System.getProperty(CHECK_PLAY)?.let { path -> LaunchedEffect(Unit) {
                 checkSound(app, File(path)) {
                     system.close()

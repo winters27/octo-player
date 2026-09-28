@@ -50,7 +50,8 @@ class ScreenShotsTest {
         val out = File("build/shots").apply { mkdirs() }
         FakeServer().use { server ->
             val songs = (1..14).joinToString(",") { i ->
-                songJson("s$i", listOf("Karma Police", "Airbag", "Lucky", "No Surprises", "Let Down", "Paranoid Android", "Subterranean Homesick Alien", "Exit Music", "Electioneering", "Climbing Up the Walls", "Fitter Happier", "The Tourist", "Everything In Its Right Place", "Idioteque")[i - 1], artist = if (i % 3 == 0) "Portishead" else "Radiohead", album = if (i < 8) "OK Computer" else "Kid A", albumId = if (i < 8) "a1" else "a2", duration = 180 + i * 7)
+                songJson("s$i", listOf("Karma Police", "Airbag", "Lucky", "No Surprises", "Let Down", "Paranoid Android", "Subterranean Homesick Alien", "Exit Music", "Electioneering", "Climbing Up the Walls", "Fitter Happier", "The Tourist", "Everything In Its Right Place", "Idioteque")[i - 1], artist = if (i % 3 == 0) "Portishead" else "Radiohead", album = if (i < 8) "OK Computer" else "Kid A", albumId = if (i < 8) "a1" else "a2", duration = 180 + i * 7).dropLast(1) +
+                    ""","suffix":"flac","contentType":"audio/flac","bitDepth":24,"samplingRate":96000,"size":${48_000_000 + i * 1_000_000},"playCount":${i * 3},"genre":"Alternative","year":1997,"track":$i,"discNumber":1,"bpm":${70 + i},"created":"2026-08-0${1 + i % 9}T10:00:00Z","played":"2026-09-27T21:${10 + i}:00Z","replayGain":{"trackGain":-7.4,"trackPeak":0.998,"albumGain":-8.1,"albumPeak":1.0}}"""
             }
             val albums = (1..12).joinToString(",") { """{"id":"a$it","name":"Album number $it","artist":"Radiohead","artistId":"r1","year":${1990 + it},"songCount":10}""" }
             server.answer("ping", type = "octo")
@@ -143,6 +144,8 @@ class ScreenShotsTest {
                 app.notice = null
                 app.noticeDetail = null
             }
+            SwingUtilities.invokeAndWait { app.showSidePanel(SidePanel.Info) }
+            shot("info")
             SwingUtilities.invokeAndWait {
                 app.toggleSidePanel(SidePanel.Lyrics)
                 app.navigator.go(Page.Album("a1"))
@@ -153,6 +156,12 @@ class ScreenShotsTest {
                 app.navigator.go(Page.Albums)
             }
             shot("albums")
+            SwingUtilities.invokeAndWait {
+                app.updateFrame { it.copy(sidebarRail = true) }
+                app.navigator.go(Page.RecentlyAdded)
+            }
+            shot("rail")
+            SwingUtilities.invokeAndWait { app.updateFrame { it.copy(sidebarRail = false) } }
             SwingUtilities.invokeAndWait {
                 app.navigator.go(Page.Search)
                 app.search?.type("radiohead")

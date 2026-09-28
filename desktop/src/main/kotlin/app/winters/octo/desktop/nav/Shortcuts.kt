@@ -12,6 +12,9 @@ enum class Shortcut {
     Search,
     Lyrics,
     Queue,
+    Info,
+    Sidebar,
+    MiniPlayer,
     Settings,
     Back,
     Forward,
@@ -33,9 +36,12 @@ fun shortcutFor(press: KeyPress, mac: Boolean, typing: Boolean): Shortcut? {
     val command = if (mac) press.meta else press.ctrl
     val plain = !press.ctrl && !press.alt && !press.meta
     return when {
-        command && !press.alt && press.key == Key.F -> Shortcut.Search
+        command && !press.alt && (press.key == Key.F || press.key == Key.K) -> Shortcut.Search
         command && !press.alt && press.key == Key.L -> Shortcut.Lyrics
         command && !press.alt && press.key == Key.U -> Shortcut.Queue
+        command && !press.alt && press.key == Key.I -> Shortcut.Info
+        command && !press.alt && press.key == Key.B -> Shortcut.Sidebar
+        command && !press.alt && press.key == Key.M -> Shortcut.MiniPlayer
         command && !press.alt && press.key == Key.Comma -> Shortcut.Settings
         // Back and forward: Cmd with the brackets on a Mac, as browsers do
         // there, and Alt with the arrows below, when not typing.
@@ -67,9 +73,12 @@ fun shortcutList(mac: Boolean): List<Pair<String, String>> {
         "Play or pause" to "Space",
         "Back or forward 5 seconds" to "Left / Right",
         "Volume up or down" to "Up / Down",
-        "Search" to "$command+F",
+        "Search" to "$command+F or $command+K",
         "Show lyrics" to "$command+L",
         "Show the queue" to "$command+U",
+        "Show the song's details" to "$command+I",
+        "Fold the sidebar to its icons" to "$command+B",
+        "Mini player" to "$command+M",
         "Settings" to "$command+,",
         "Previous or next page" to if (mac) "Cmd+[ / Cmd+] or mouse buttons" else "Alt+Left / Alt+Right or mouse buttons",
         "Close a menu or the player" to "Esc",

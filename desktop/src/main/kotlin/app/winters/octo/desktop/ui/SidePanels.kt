@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,6 +31,21 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.unit.dp
+import app.winters.octo.design.ControlHeight
+import app.winters.octo.design.FloatingGlaze
+import app.winters.octo.design.GlazeSegments
+import app.winters.octo.design.Glyph
+import app.winters.octo.design.IconAction
+import app.winters.octo.design.IconSize
+import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.OctoType
+import app.winters.octo.design.Separator
+import app.winters.octo.design.Space
+import app.winters.octo.design.TextAction
+import app.winters.octo.design.Txt
+import app.winters.octo.design.chromeFilm
+import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.library.Cover
@@ -37,41 +53,40 @@ import app.winters.octo.desktop.library.lengthText
 import app.winters.octo.desktop.lyrics.LyricsMenuButton
 import app.winters.octo.desktop.lyrics.LyricsView
 import app.winters.octo.desktop.player.QueueEntry
-import app.winters.octo.design.FloatingGlaze
-import app.winters.octo.design.Glyph
-import app.winters.octo.design.IconAction
-import app.winters.octo.design.OctoColors
-import app.winters.octo.design.OctoIcons
-import app.winters.octo.design.OctoType
-import app.winters.octo.design.Separator
-import app.winters.octo.design.TextAction
-import app.winters.octo.design.Txt
-import app.winters.octo.design.hoverLift
 import dev.chrisbanes.haze.HazeState
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
-val SidePanelWidth = 340.dp
-
-// The panel on the right: the queue or the lyrics, in glass.
+// The panel down the right of the frame, in its glass: the queue, the
+// lyrics, or the song's details, on tabs, so it can stay open while the
+// listener browses. The tab's own action (Clear, the lyrics menu) sits
+// beside the tabs.
 @Composable
-fun SidePanelView(app: AppState, panel: SidePanel, backdrop: HazeState, modifier: Modifier = Modifier) {
+fun ContextPanel(app: AppState, panel: SidePanel, backdrop: HazeState, modifier: Modifier = Modifier) {
     val playing by app.player.state.collectAsState()
-    FloatingGlaze(backdrop, modifier, shape = SidebarShape) {
-        Column(Modifier.fillMaxSize().padding(top = 14.dp)) {
-            Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Txt(if (panel == SidePanel.Queue) "Queue" else "Lyrics", OctoType.headline, modifier = Modifier.weight(1f))
-                if (panel == SidePanel.Queue) TextAction("Clear", { app.player.clear() }, enabled = playing.queue.isNotEmpty())
-                if (panel == SidePanel.Lyrics) LyricsMenuButton(app)
-                IconAction(OctoIcons.Close, "Close", { app.toggleSidePanel(panel) }, size = 32.dp, iconSize = 18.dp)
-            }
-            when (panel) {
-                SidePanel.Queue -> QueueList(app)
-                SidePanel.Lyrics -> LyricsView(app, Modifier.fillMaxSize())
-            }
+    Column(modifier.chromeFilm(backdrop).padding(top = Space.M)) {
+        Row(Modifier.fillMaxWidth().padding(start = Space.L, end = Space.S), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
+            GlazeSegments(SidePanel.entries, panel, { it.title }, app::showSidePanel)
+            Spacer(Modifier.weight(1f))
+            if (panel == SidePanel.Queue) TextAction("Clear", { app.player.clear() }, enabled = playing.queue.isNotEmpty())
+            if (panel == SidePanel.Lyrics) LyricsMenuButton(app)
+            IconAction(OctoIcons.Close, "Close", { app.showSidePanel(null) }, size = ControlHeight.M, iconSize = IconSize.Toolbar)
+        }
+        when (panel) {
+            SidePanel.Queue -> QueueList(app)
+            SidePanel.Lyrics -> LyricsView(app, Modifier.fillMaxSize())
+            SidePanel.Info -> InfoPanel(app, Modifier.fillMaxSize())
         }
     }
 }
+
+// What each tab is called.
+private val SidePanel.title: String
+    get() = when (this) {
+        SidePanel.Queue -> "Queue"
+        SidePanel.Lyrics -> "Lyrics"
+        SidePanel.Info -> "Info"
+    }
 
 // The queue: the song playing, then the songs to come in the order they
 // will play. Drag a song by its handle to move it; the cross takes it out;

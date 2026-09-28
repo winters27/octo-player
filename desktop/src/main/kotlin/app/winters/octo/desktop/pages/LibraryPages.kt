@@ -54,6 +54,7 @@ import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.design.glassPanel
 import app.winters.octo.design.hoverLift
+import app.winters.octo.sort.AlbumSort
 import app.winters.octo.sort.SortList
 import app.winters.octo.sort.SortOrder
 import app.winters.octo.sort.SongSort
@@ -101,6 +102,19 @@ fun AlbumsPage(app: AppState, visit: Visit) {
                     SortButton(app, SortList.Albums, order, app::sortAlbums)
                 }
             }
+            items(albums, key = { it.id }) { AlbumCard(app, it) }
+        }
+    }
+}
+
+// The newest albums first, as the server dates them.
+@Composable
+fun RecentlyAddedPage(app: AppState, visit: Visit) {
+    val grid = rememberGridState(app.navigator, visit)
+    WithLibrary(app) { index ->
+        val albums = remember(index) { sortAlbums(index.albums, SortOrder(AlbumSort.RecentlyAdded, descending = true)) }
+        LazyVerticalGrid(GridCells.Adaptive(GridCard), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
+            header { PageTitle("Recently added", detail = "${albums.size} albums, newest first") }
             items(albums, key = { it.id }) { AlbumCard(app, it) }
         }
     }
@@ -300,7 +314,7 @@ fun HistoryPage(app: AppState, visit: Visit) {
             onSort = { order = it },
             empty = { NothingHere("No history yet", "Your server hasn't recorded any plays, or doesn't share them.") },
         ) {
-            item(key = "title") { PageTitle("History") }
+            item(key = "title") { PageTitle("Recently played") }
         }
     }
 }

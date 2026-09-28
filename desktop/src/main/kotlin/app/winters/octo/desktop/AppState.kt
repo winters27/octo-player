@@ -32,6 +32,7 @@ import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.pages.SignInForm
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.desktop.settings.DesktopOs
+import app.winters.octo.desktop.settings.FramePrefs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.design.PopupHost
 import app.winters.octo.lyrics.OnlineLyrics
@@ -54,6 +55,7 @@ import java.io.File
 enum class SidePanel(val key: String) {
     Queue("queue"),
     Lyrics("lyrics"),
+    Info("info"),
     ;
 
     companion object {
@@ -137,6 +139,9 @@ class AppState(
 
     // Hearts set or cleared here, shown before the server's lists catch up.
     private val starOverrides = mutableStateMapOf<String, Boolean>()
+
+    // Opens or closes the mini player; the system side sets it.
+    var toggleMiniPlayer: (() -> Unit)? = null
 
     // Songs that could not play this run, by id, with why, for their rows.
     val failedSongs = mutableStateMapOf<String, String>()
@@ -247,9 +252,31 @@ class AppState(
         }
     }
 
-    fun toggleSidePanel(panel: SidePanel) {
-        sidePanel = if (sidePanel == panel) null else panel
-        settings.update { it.copy(sidePanel = sidePanel?.key) }
+    fun toggleSidePanel(panel: SidePanel) = showSidePanel(if (sidePanel == panel) null else panel)
+
+    // Opens the panel on a tab, or closes it with null.
+    fun showSidePanel(panel: SidePanel?) {
+        sidePanel = panel
+        settings.update { it.copy(sidePanel = panel?.key) }
+    }
+
+    // A song whose details the Info tab shows instead of the playing one's,
+    // until it is let go.
+    var infoSong by mutableStateOf<Song?>(null)
+
+    fun showInfo(song: Song?) {
+        infoSong = song
+        showSidePanel(SidePanel.Info)
+    }
+
+    // The frame's own settings, changed as the listener drags and folds it.
+    fun updateFrame(change: (FramePrefs) -> FramePrefs) =
+        settings.update { it.copy(frame = change(it.frame)) }
+
+    fun isPinned(playlistId: String) = playlistId in settings.current.frame.pinnedPlaylists
+
+    fun setPinned(playlistId: String, pinned: Boolean) = updateFrame { frame ->
+        frame.copy(pinnedPlaylists = if (pinned) (frame.pinnedPlaylists - playlistId) + playlistId else frame.pinnedPlaylists - playlistId)
     }
 
     // Playing and queueing.
@@ -382,12 +409,16 @@ class AppState(
             Shortcut.VolumeDown -> setVolume(player.state.value.volume - VOLUME_STEP)
             Shortcut.Search -> {
                 if (connection == null) return false
+                // The field is in the title bar on every page, so only the
+                // keyboard moves there.
                 fullPlayer = false
-                navigator.go(Page.Search)
-                searchAsks++
+                runCatching { searchFocus.requestFocus() }
             }
             Shortcut.Lyrics -> if (connection != null) toggleSidePanel(SidePanel.Lyrics) else return false
             Shortcut.Queue -> if (connection != null) toggleSidePanel(SidePanel.Queue) else return false
+            Shortcut.Info -> if (connection != null) toggleSidePanel(SidePanel.Info) else return false
+            Shortcut.Sidebar -> if (connection != null) updateFrame { it.copy(sidebarRail = !it.sidebarRail) } else return false
+            Shortcut.MiniPlayer -> toggleMiniPlayer?.invoke() ?: return false
             Shortcut.Settings -> {
                 if (connection == null) return false
                 fullPlayer = false

@@ -32,8 +32,11 @@ data class AppSettings(
     val songSort: String? = null,
     // How the Albums page is ordered, the same way.
     val albumSort: String? = null,
-    // The panel open on the right: "queue", "lyrics", or none.
+    // The panel open on the right, by its tab: "queue", "lyrics", "info",
+    // or none.
     val sidePanel: String? = null,
+    // The frame: sidebar and panel sizes, and what the sidebar shows.
+    val frame: FramePrefs = FramePrefs(),
     // The equalizer, loudness and the rest of the Sound page.
     val sound: SoundPrefs = SoundPrefs(),
     // Where lyrics come from, and their timing.
@@ -46,6 +49,23 @@ data class AppSettings(
     // not, as SHA-256 fingerprints by host. Each counts only for its host.
     // Not secret: a fingerprint only names a certificate.
     val trustedCertificates: Map<String, String> = emptyMap(),
+)
+
+// The frame around the page, as the listener left it.
+@Serializable
+data class FramePrefs(
+    // The sidebar's width in dp, and whether it is folded to its icons.
+    val sidebarWidth: Float = 224f,
+    val sidebarRail: Boolean = false,
+    // The side panel's width in dp.
+    val panelWidth: Float = 328f,
+    // Sidebar groups folded shut, by name ("library", "yours", "playlists").
+    val foldedGroups: Set<String> = emptySet(),
+    // Playlists kept at the top of the sidebar's list, by id, in order.
+    val pinnedPlaylists: List<String> = emptyList(),
+    // Whether the time on the right counts down (the time left) or shows
+    // the song's length.
+    val showTimeLeft: Boolean = true,
 )
 
 // What the server hears about listening here. Both are on unless switched
