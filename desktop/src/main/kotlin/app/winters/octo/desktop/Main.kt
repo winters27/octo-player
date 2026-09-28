@@ -48,9 +48,9 @@ import app.winters.octo.desktop.ui.Shell
 import app.winters.octo.desktop.window.Frame
 import app.winters.octo.desktop.window.MIN_HEIGHT
 import app.winters.octo.desktop.window.MIN_WIDTH
-import app.winters.octo.desktop.window.ScreenArea
 import app.winters.octo.desktop.window.placeWindow
 import app.winters.octo.desktop.window.roundWindowsCorners
+import app.winters.octo.desktop.window.screenAreas
 import app.winters.octo.desktop.window.seeThroughMacTitleBar
 import app.winters.octo.design.LocalTyping
 import app.winters.octo.design.ProvideWindowLook
@@ -63,21 +63,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.debounce
 import okhttp3.OkHttpClient
 import java.awt.Dimension
-import java.awt.GraphicsEnvironment
-import java.awt.Toolkit
 import java.io.File
 import java.util.concurrent.TimeUnit
-
-// The usable part of every screen, without taskbars and menu bars.
-private fun screenAreas(): List<ScreenArea> = runCatching {
-    val toolkit = Toolkit.getDefaultToolkit()
-    GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices.map { device ->
-        val config = device.defaultConfiguration
-        val b = config.bounds
-        val i = toolkit.getScreenInsets(config)
-        ScreenArea((b.x + i.left).toFloat(), (b.y + i.top).toFloat(), (b.width - i.left - i.right).toFloat(), (b.height - i.top - i.bottom).toFloat())
-    }
-}.getOrDefault(emptyList())
 
 private fun appIcon(): Painter? = runCatching {
     val bytes = AppState::class.java.getResourceAsStream("/octo-icon.png")!!.use { it.readBytes() }

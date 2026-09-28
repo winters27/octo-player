@@ -2,6 +2,7 @@ package app.winters.octo.desktop.system
 
 import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.QueueEntry
+import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.subsonic.Song
 import org.freedesktop.dbus.DBusPath
 import org.freedesktop.dbus.types.Variant
@@ -77,5 +78,19 @@ class MprisObjectTest {
         mpris.Set(Mpris.PLAYER, "Volume", Variant(3.0))
         mpris.Set(Mpris.PLAYER, "Rate", 2.0)
         assertEquals(listOf(SystemEvent.SetVolume(0.25f), SystemEvent.SetVolume(1f)), heard)
+    }
+
+    @Test
+    fun shuffleAndRepeatCanBeSetAndAreShown() {
+        mpris.Set(Mpris.PLAYER, "Shuffle", Variant(true))
+        mpris.Set(Mpris.PLAYER, "LoopStatus", "Track")
+        mpris.Set(Mpris.PLAYER, "LoopStatus", "Sometimes")
+        mpris.Set(Mpris.PLAYER, "Rate", 0.0)
+        assertEquals(listOf(SystemEvent.SetShuffle(true), SystemEvent.SetRepeat(RepeatMode.One), SystemEvent.Pause), heard)
+        mpris.update(now)
+        mpris.updateModes(shuffle = true, repeat = RepeatMode.All)
+        val player = mpris.GetAll(Mpris.PLAYER)
+        assertEquals(true, player["Shuffle"]?.value)
+        assertEquals("Playlist", player["LoopStatus"]?.value)
     }
 }

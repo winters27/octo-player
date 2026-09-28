@@ -16,11 +16,11 @@ import androidx.compose.ui.window.isTraySupported
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
-import app.winters.octo.desktop.window.ScreenArea
+import app.winters.octo.desktop.window.screenAreas
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.awt.Desktop
-import java.awt.GraphicsEnvironment
-import java.awt.Toolkit
+import java.awt.EventQueue
 import java.awt.desktop.AppReopenedListener
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
@@ -89,8 +89,9 @@ class SystemIntegration(
     val closesToTray: Boolean get() = trayAvailable && app.settings.current.system.closeToTray
 
     fun start(launchArgs: List<String>) {
-        mediaKeysWork = session.start()
-        sleepWatch?.start { event -> app.scope.launch { session.handle(event) } }
+        session.start { works -> mediaKeysWork = works }
+        // The system bus can be slow to answer, so it is reached off the window's thread.
+        sleepWatch?.let { watch -> app.scope.launch(Dispatchers.IO) { watch.start { event -> app.scope.launch { session.handle(event) } } } }
         app.scope.launch {
             app.player.state.collect { state ->
                 val notice = notices.noticeFor(nowPlayingOf(state), app.settings.current.system.nowPlayingNotices, windowVisible && windowInFront)
@@ -109,13 +110,26 @@ class SystemIntegration(
     }
 
     // On macOS files and links come as events, not on the command line, and
-    // a click on the Dock icon should bring a hidden window back.
+    // a click on the Dock icon should bring a hidden window back. Quitting
+    // from the menu or with Cmd+Q goes through the app's own quit, which
+    // saves and lets go of everything, before macOS ends it.
     private fun listenToMac() {
         if (os != DesktopOs.Mac || !Desktop.isDesktopSupported()) return
         val desktop = Desktop.getDesktop()
         runCatching { desktop.setOpenFileHandler { event -> app.scope.launch { open(parseLaunchArgs(event.files.map { it.path })) } } }
         runCatching { desktop.setOpenURIHandler { event -> app.scope.launch { raise(); open(parseLaunchArgs(listOf(event.uri.toString()))) } } }
         runCatching { desktop.addAppEventListener(AppReopenedListener { app.scope.launch { raise() } }) }
+        runCatching {
+            desktop.setQuitHandler { _, response ->
+                EventQueue.invokeLater {
+                    try {
+                        quit()
+                    } finally {
+                        response.performQuit()
+                    }
+                }
+            }
+        }
     }
 
     // Plays opened files as one-off songs, or follows a link.
@@ -214,24 +228,15 @@ class SystemIntegration(
         }
     }
 
+    // The listener for later launches goes first, so a launch made while
+    // quitting starts its own Octo instead of being taken and lost.
     override fun close() {
+        runCatching { instance?.close() }
         runCatching { session.close() }
         runCatching { sleepWatch?.close() }
         runCatching { notifier?.close() }
-        runCatching { instance?.close() }
     }
 }
-
-// The usable part of every screen, without taskbars and menu bars.
-fun screenAreas(): List<ScreenArea> = runCatching {
-    val toolkit = Toolkit.getDefaultToolkit()
-    GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices.map { device ->
-        val config = device.defaultConfiguration
-        val b = config.bounds
-        val i = toolkit.getScreenInsets(config)
-        ScreenArea((b.x + i.left).toFloat(), (b.y + i.top).toFloat(), (b.width - i.left - i.right).toFloat(), (b.height - i.top - i.bottom).toFloat())
-    }
-}.getOrDefault(emptyList())
 
 // A picture from the app's resources.
 fun picture(resource: String): Painter? = runCatching {

@@ -22,7 +22,15 @@ data class NowPlaying(
     // Previous always works with a song in: it goes back or starts over.
     val canPrevious: Boolean,
     val canNext: Boolean,
-)
+    // How fast the song plays, 1 for as recorded.
+    val speed: Float = 1f,
+    // Waiting for sound while playing: the place does not move on.
+    val buffering: Boolean = false,
+) {
+    // How fast the place in the song moves on right now: 0 while paused or
+    // waiting for sound.
+    val rate: Double get() = if (playing && !buffering) speed.toDouble() else 0.0
+}
 
 // What the system shows for the player's state, or null with nothing in.
 fun nowPlayingOf(state: PlayerState): NowPlaying? {
@@ -44,5 +52,7 @@ fun nowPlayingOf(state: PlayerState): NowPlaying? {
         playing = state.playing,
         canPrevious = true,
         canNext = state.upcoming.isNotEmpty() || (state.repeat == RepeatMode.All && state.queue.isNotEmpty()),
+        speed = state.speed.takeIf { it.isFinite() && it > 0f } ?: 1f,
+        buffering = state.buffering,
     )
 }

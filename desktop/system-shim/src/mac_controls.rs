@@ -137,7 +137,13 @@ fn artwork(bytes: &[u8]) -> Option<Retained<AnyObject>> {
     Some(Retained::into_super(Retained::into_super(artwork)))
 }
 
-pub fn set_playback(status: Status, position_ms: i64, can_previous: bool, can_next: bool) -> Result<(), i32> {
+pub fn set_playback(
+    status: Status,
+    position_ms: i64,
+    can_previous: bool,
+    can_next: bool,
+    rate: f64,
+) -> Result<(), i32> {
     on_main(move |now| unsafe {
         let center = MPRemoteCommandCenter::sharedCommandCenter();
         center.previousTrackCommand().setEnabled(can_previous);
@@ -146,7 +152,7 @@ pub fn set_playback(status: Status, position_ms: i64, can_previous: bool, can_ne
         if let Some(info) = &now.info {
             let elapsed = crate::seconds(crate::clamp_position(position_ms, now.duration_ms));
             info.insert(MPNowPlayingInfoPropertyElapsedPlaybackTime, &*NSNumber::new_f64(elapsed));
-            info.insert(MPNowPlayingInfoPropertyPlaybackRate, &*NSNumber::new_f64(crate::rate(status)));
+            info.insert(MPNowPlayingInfoPropertyPlaybackRate, &*NSNumber::new_f64(rate));
             playing_center.setNowPlayingInfo(Some(info));
         }
         playing_center.setPlaybackState(match status {

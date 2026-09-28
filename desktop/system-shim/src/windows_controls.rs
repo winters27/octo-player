@@ -164,7 +164,13 @@ fn timeline(controls: &Controls, position_ms: i64) -> windows::core::Result<()> 
     controls.smtc.UpdateTimelineProperties(&line)
 }
 
-pub fn set_playback(status: Status, position_ms: i64, can_previous: bool, can_next: bool) -> Result<(), i32> {
+pub fn set_playback(
+    status: Status,
+    position_ms: i64,
+    can_previous: bool,
+    can_next: bool,
+    rate: f64,
+) -> Result<(), i32> {
     with_controls(|controls| {
         let smtc = &controls.smtc;
         smtc.SetPlaybackStatus(match status {
@@ -174,6 +180,10 @@ pub fn set_playback(status: Status, position_ms: i64, can_previous: bool, can_ne
         })?;
         smtc.SetIsPreviousEnabled(can_previous)?;
         smtc.SetIsNextEnabled(can_next)?;
+        // The speed, kept as it was while paused or waiting for sound.
+        if rate > 0.0 {
+            smtc.SetPlaybackRate(rate)?;
+        }
         timeline(controls, position_ms)
     })
 }

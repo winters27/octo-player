@@ -86,6 +86,22 @@ fun parseLaunchArgs(args: List<String>, isFile: (File) -> Boolean = File::isFile
     return (if (playable.isEmpty()) emptyList() else listOf(LaunchRequest.OpenFiles(playable))) + links
 }
 
+// A launch's command line made ready to hand to the running Octo, which
+// started in another folder: file paths are made whole from `folder`, where
+// this launch started. Options, links and addresses stay as typed.
+fun absoluteLaunchArgs(args: List<String>, folder: File? = null): List<String> = args.map { raw ->
+    val arg = raw.trim()
+    when {
+        arg.isEmpty() || arg.startsWith("-") || ADDRESS_START.containsMatchIn(arg) -> raw
+        folder == null -> File(arg).absolutePath
+        else -> File(arg).takeIf { it.isAbsolute }?.path ?: File(folder, arg).absolutePath
+    }
+}
+
+// The start of an address like "octo:", "file:" or "https:". Two letters at
+// least, so a Windows drive like "C:" still reads as a file.
+private val ADDRESS_START = Regex("^[A-Za-z][A-Za-z0-9+.-]+:")
+
 // The page an octo:// link names: octo://album/<id>, octo://artist/<id>,
 // octo://playlist/<id>, or octo://search. Null for anything else.
 fun pageForLink(link: String): Page? {

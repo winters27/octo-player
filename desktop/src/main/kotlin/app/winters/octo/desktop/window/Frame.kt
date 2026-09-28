@@ -38,12 +38,19 @@ import androidx.compose.ui.window.WindowState
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
+import app.winters.octo.desktop.settings.WindowSpot
 import java.awt.Cursor
+import java.awt.Dimension
+import java.awt.EventQueue
 import java.awt.GraphicsEnvironment
 import java.awt.MouseInfo
 import java.awt.Rectangle
 import java.awt.Toolkit
 import java.awt.Window
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
 
 val TitleBarHeight = 40.dp
 
@@ -59,22 +66,60 @@ class Frame(private val window: Window, private val state: WindowState) {
     var maximized by mutableStateOf(false)
         private set
 
-    // Where the window was before it filled the screen.
+    // Where the window was before it filled the screen, and the screen area
+    // it fills.
     private var restoreTo: Rectangle? = null
+    private var filled: Rectangle? = null
+
+    init {
+        // A filled window follows its screen: moved to another one by the
+        // system, a screen unplugged, or the resolution or taskbar changed.
+        window.addComponentListener(object : ComponentAdapter() {
+            override fun componentMoved(e: ComponentEvent?) = refitLater()
+
+            override fun componentResized(e: ComponentEvent?) = refitLater()
+        })
+        window.addWindowListener(object : WindowAdapter() {
+            override fun windowActivated(e: WindowEvent?) = refitLater()
+        })
+        window.addPropertyChangeListener("graphicsConfiguration") { refitLater() }
+    }
 
     fun toggleMaximized() = if (maximized) restore() else maximize()
 
     fun maximize() {
         if (maximized) return
         restoreTo = window.bounds
-        window.bounds = usableArea()
+        fill(usableArea())
         maximized = true
     }
 
+    private fun fill(area: Rectangle) {
+        filled = area
+        window.bounds = area
+    }
+
+    // Back to the size and place it had, or onto the screen it is on now
+    // when most of that place is on no screen any more.
     fun restore() {
         if (!maximized) return
-        restoreTo?.let { window.bounds = it }
+        restoreTo?.let { before ->
+            val min = window.minimumSize
+            val spot = restoreSpot(before.toSpot(), screenAreas(), usableArea().toArea(), min.width.toFloat(), min.height.toFloat())
+            window.bounds = Rectangle(spot.x.toInt(), spot.y.toInt(), spot.width.toInt(), spot.height.toInt())
+        }
         maximized = false
+    }
+
+    // Fills the screen again only when its usable area changed, so bounds
+    // the system rounds a little never set it off again and again.
+    private fun refitLater() {
+        if (!maximized) return
+        EventQueue.invokeLater {
+            if (!maximized) return@invokeLater
+            val area = usableArea()
+            if (area != filled) fill(area)
+        }
     }
 
     fun minimize() {
@@ -113,27 +158,11 @@ class Frame(private val window: Window, private val state: WindowState) {
     }
 
     // Resizes from an edge or corner while dragged: `dx`/`dy` say which
-    // sides move (-1 the left or top, 1 the right or bottom).
+    // sides move (-1 the left or top, 1 the right or bottom). The size stays
+    // between the window's least and most.
     fun resize(from: Rectangle, startPointer: java.awt.Point, dx: Int, dy: Int) {
         val now = MouseInfo.getPointerInfo()?.location ?: return
-        val min = window.minimumSize
-        var x = from.x
-        var y = from.y
-        var w = from.width
-        var h = from.height
-        val mx = now.x - startPointer.x
-        val my = now.y - startPointer.y
-        if (dx > 0) w = maxOf(min.width, from.width + mx)
-        if (dx < 0) {
-            w = maxOf(min.width, from.width - mx)
-            x = from.x + from.width - w
-        }
-        if (dy > 0) h = maxOf(min.height, from.height + my)
-        if (dy < 0) {
-            h = maxOf(min.height, from.height - my)
-            y = from.y + from.height - h
-        }
-        window.bounds = Rectangle(x, y, w, h)
+        window.bounds = resizedBounds(from, now.x - startPointer.x, now.y - startPointer.y, dx, dy, window.minimumSize, window.maximumSize)
     }
 
     val bounds: Rectangle get() = window.bounds
@@ -141,6 +170,45 @@ class Frame(private val window: Window, private val state: WindowState) {
     // Whether the system says it is maximized, for a window with the system frame.
     val systemMaximized: Boolean get() = state.placement == WindowPlacement.Maximized
 }
+
+// A window's bounds once an edge or corner has moved by `mx`/`my`: `dx`/`dy`
+// say which sides move (-1 the left or top, 1 the right or bottom). The
+// size stays between `min` and `max`, and the side not dragged stays put.
+fun resizedBounds(from: Rectangle, mx: Int, my: Int, dx: Int, dy: Int, min: Dimension, max: Dimension): Rectangle {
+    fun keep(size: Int, least: Int, most: Int) = size.coerceIn(least, maxOf(least, most))
+    var x = from.x
+    var y = from.y
+    var w = from.width
+    var h = from.height
+    if (dx > 0) w = keep(from.width + mx, min.width, max.width)
+    if (dx < 0) {
+        w = keep(from.width - mx, min.width, max.width)
+        x = from.x + from.width - w
+    }
+    if (dy > 0) h = keep(from.height + my, min.height, max.height)
+    if (dy < 0) {
+        h = keep(from.height - my, min.height, max.height)
+        y = from.y + from.height - h
+    }
+    return Rectangle(x, y, w, h)
+}
+
+// The usable part of every screen, without taskbars and menu bars, with the
+// main screen first.
+fun screenAreas(): List<ScreenArea> = runCatching {
+    val toolkit = Toolkit.getDefaultToolkit()
+    val system = GraphicsEnvironment.getLocalGraphicsEnvironment()
+    mainFirst(system.screenDevices.toList(), system.defaultScreenDevice).map { device ->
+        val config = device.defaultConfiguration
+        val b = config.bounds
+        val i = toolkit.getScreenInsets(config)
+        ScreenArea((b.x + i.left).toFloat(), (b.y + i.top).toFloat(), (b.width - i.left - i.right).toFloat(), (b.height - i.top - i.bottom).toFloat())
+    }
+}.getOrDefault(emptyList())
+
+private fun Rectangle.toSpot() = WindowSpot(x.toFloat(), y.toFloat(), width.toFloat(), height.toFloat())
+
+private fun Rectangle.toArea() = ScreenArea(x.toFloat(), y.toFloat(), width.toFloat(), height.toFloat())
 
 // The draggable part of the title bar: drag to move, double click to fill
 // the screen or come back.

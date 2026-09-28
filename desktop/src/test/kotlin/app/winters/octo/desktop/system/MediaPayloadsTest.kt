@@ -79,10 +79,32 @@ class MediaPayloadsTest {
     fun smtcAndNowPlayingGetTheSongAndItsState() {
         val now = nowPlayingOf(state())!!
         assertEquals(NativeTrack("Weightless", "Marconi Union", "Ambient Works", "Various", 480_000), nativeTrackOf(now))
-        assertEquals(NativePlayback(NativeStatus.Playing, 61_000, canPrevious = true, canNext = true), nativePlaybackOf(now, 61_000))
+        assertEquals(NativePlayback(NativeStatus.Playing, 61_000, canPrevious = true, canNext = true, rate = 1.0), nativePlaybackOf(now, 61_000))
         val paused = nowPlayingOf(state(playing = false))!!
         assertEquals(NativeStatus.Paused, nativePlaybackOf(paused, 0).status)
         assertEquals(NativeStatus.Stopped, nativePlaybackOf(null, 0).status)
+    }
+
+    @Test
+    fun theTimeMovesOnAtTheSongsSpeedAndStandsStillWhileWaiting() {
+        assertEquals(1.5, nativePlaybackOf(nowPlayingOf(state().copy(speed = 1.5f)), 0).rate, 0.0)
+        assertEquals("paused", 0.0, nativePlaybackOf(nowPlayingOf(state(playing = false).copy(speed = 1.5f)), 0).rate, 0.0)
+        assertEquals("waiting for sound", 0.0, nativePlaybackOf(nowPlayingOf(state().copy(buffering = true)), 0).rate, 0.0)
+        assertEquals("nothing playing", 0.0, nativePlaybackOf(null, 0).rate, 0.0)
+        assertEquals("a speed that makes no sense is taken as 1", 1f, nowPlayingOf(state().copy(speed = Float.NaN))!!.speed)
+    }
+
+    @Test
+    fun mprisShowsTheSpeedShuffleAndRepeat() {
+        val fast = Mpris.playerProperties(nowPlayingOf(state().copy(speed = 1.5f)), 1.0, shuffle = true, repeat = RepeatMode.All)
+        assertEquals(1.5, fast["Rate"])
+        assertEquals(true, fast["Shuffle"])
+        assertEquals("Playlist", fast["LoopStatus"])
+        assertTrue(fast["MinimumRate"] as Double <= 1.0 && fast["MaximumRate"] as Double >= 1.5)
+        assertEquals("paused keeps its rate; the status says it is paused", 1.5, Mpris.playerProperties(nowPlayingOf(state(playing = false).copy(speed = 1.5f)), 1.0)["Rate"])
+        assertEquals(listOf("None", "Playlist", "Track"), RepeatMode.entries.map(Mpris::loopStatus))
+        RepeatMode.entries.forEach { assertEquals(it, Mpris.repeatOf(Mpris.loopStatus(it))) }
+        assertNull(Mpris.repeatOf("Sometimes"))
     }
 
     @Test
