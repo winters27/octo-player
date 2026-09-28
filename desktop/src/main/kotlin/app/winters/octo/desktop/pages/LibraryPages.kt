@@ -53,6 +53,7 @@ import app.winters.octo.desktop.ui.LocalBottomRoom
 import app.winters.octo.desktop.ui.MediaCard
 import app.winters.octo.desktop.ui.PageTitle
 import app.winters.octo.desktop.ui.SongTable
+import app.winters.octo.desktop.ui.artistMenu
 import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.rememberGridState
 import app.winters.octo.desktop.ui.rememberListState
@@ -155,6 +156,7 @@ fun ArtistCard(app: AppState, artist: Artist, outside: Boolean = false) {
         if (artist.albumCount > 0) (if (artist.albumCount == 1) "1 album" else "${artist.albumCount} albums") else null,
         artist.coverArt,
         onOpen = { app.navigator.go(Page.Artist(artist.id, artist.name)) },
+        onMenu = artistMenu(app, artist, outside),
         round = true,
         online = outside,
     )

@@ -116,6 +116,9 @@ import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.player.PlayFormat
 import app.winters.octo.desktop.player.formatLabel
 import app.winters.octo.desktop.player.libraryFormat
+import app.winters.octo.desktop.ratingOf
+import app.winters.octo.desktop.removeFromPlaylist
+import app.winters.octo.desktop.removeFromQueue
 import app.winters.octo.desktop.settings.TablePrefs
 import app.winters.octo.server.serverTime
 import app.winters.octo.sort.SortOrder
@@ -171,6 +174,9 @@ fun SongTable(
     // A heading above a row, like a disc's name on an album.
     groupTitle: (Int) -> String? = { null },
     padding: PaddingValues = pagePadding(LocalBottomRoom.current),
+    // Where picked rows live, for the menu's removals and the Delete key:
+    // a playlist says which of its places they are.
+    place: (List<TableRow>) -> SongPlace = { SongPlace.Library },
     empty: @Composable () -> Unit = {},
     footer: LazyListScope.() -> Unit = {},
     header: LazyListScope.() -> Unit = {},
@@ -205,8 +211,25 @@ fun SongTable(
         if (at >= 0) app.play(songs, at)
     }
     fun openMenu(at: IntOffset) {
-        val chosenSongs = picked().ifEmpty { return }
-        app.popups.showAt(at) { close -> SongMenu(app, chosenSongs, close) }
+        val rowsPicked = selection.of(rows).ifEmpty { return }
+        val where = place(rowsPicked)
+        app.popups.showAt(at) { close -> SongMenu(app, rowsPicked.map(TableRow::song), close, place = where) }
+    }
+    // Delete takes the picked rows out of the playlist or the queue they
+    // are in; in the library it does nothing.
+    fun removePicked(): Boolean {
+        val rowsPicked = selection.of(rows).ifEmpty { return false }
+        when (val where = place(rowsPicked)) {
+            is SongPlace.Playlist -> {
+                val playlist = app.playlists.firstOrNull { it.id == where.id } ?: return false
+                if (!app.canEdit(playlist)) return false
+                app.removeFromPlaylist(where.id, where.positions)
+            }
+            is SongPlace.Queue -> app.removeFromQueue(where.keys)
+            SongPlace.Library -> return false
+        }
+        selection.clear()
+        return true
     }
     // Brings a row into view after the keyboard moved to it.
     fun reveal(key: String) {
@@ -252,6 +275,7 @@ fun SongTable(
                 }
                 true
             }
+            event.key == Key.Delete || (app.mac && event.key == Key.Backspace) -> removePicked()
             event.key == Key.Escape && selection.picked.isNotEmpty() -> {
                 selection.clear()
                 true
@@ -342,7 +366,7 @@ fun SongTable(
             footer()
         }
         if (selection.picked.size > 1) {
-            PickedBar(app, selection.picked.size, ::picked, { selection.clear() }, Modifier.align(Alignment.BottomCenter).padding(bottom = Space.Xl))
+            PickedBar(app, selection.picked.size, ::picked, { place(selection.of(rows)) }, { selection.clear() }, Modifier.align(Alignment.BottomCenter).padding(bottom = Space.Xl))
         }
     }
 }
@@ -588,7 +612,9 @@ private fun SongCell(
         SongColumn.Added -> Txt(dateText(song.created), numbers, muted)
         SongColumn.Played -> Txt(dateText(song.played), numbers, muted)
         SongColumn.Plays -> Txt(song.playCount?.takeIf { it > 0 }?.toString().orEmpty(), numbers, muted, align = TextAlign.End)
-        SongColumn.Rating -> Stars(song.userRating ?: 0)
+        // Shown only: rating is in the menu, where a stray click cannot set
+        // it (on an Octo server one star can take a song out of the library).
+        SongColumn.Rating -> Stars(app.ratingOf(song))
         SongColumn.Format -> Txt(formatLabel(PlayFormat(libraryFormat(song), null)).orEmpty(), numbers, muted)
         SongColumn.Bpm -> Txt(song.bpm?.takeIf { it > 0 }?.toString().orEmpty(), numbers, muted, align = TextAlign.End)
         SongColumn.Size -> Txt(song.size?.takeIf { it > 0 }?.let { sizeText(it) }.orEmpty(), numbers, muted, align = TextAlign.End)
@@ -622,7 +648,7 @@ private fun Stars(rating: Int) {
 // While several rows are picked: how many, and what can be done with them
 // all at once, over the foot of the table.
 @Composable
-private fun PickedBar(app: AppState, count: Int, picked: () -> List<Song>, clear: () -> Unit, modifier: Modifier) {
+private fun PickedBar(app: AppState, count: Int, picked: () -> List<Song>, place: () -> SongPlace, clear: () -> Unit, modifier: Modifier) {
     var anchor by remember { mutableStateOf(IntRect.Zero) }
     Glaze(modifier.onGloballyPositioned { anchor = it.windowRect() }, shape = Corner.PanelShape, light = GlazeLight.Lifted) {
         Row(Modifier.padding(horizontal = Space.L, vertical = Space.S), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
@@ -630,7 +656,7 @@ private fun PickedBar(app: AppState, count: Int, picked: () -> List<Song>, clear
             TextAction("Play", { app.play(picked()) })
             TextAction("Play next", { app.playNext(picked()) })
             TextAction("Add to queue", { app.addToQueue(picked()) })
-            IconAction(OctoIcons.More, "More for these songs", { app.popups.showUnder(anchor) { close -> SongMenu(app, picked(), close) } }, size = ControlHeight.S, iconSize = IconSize.Table)
+            IconAction(OctoIcons.More, "More for these songs", { app.popups.showUnder(anchor) { close -> SongMenu(app, picked(), close, place = place()) } }, size = ControlHeight.S, iconSize = IconSize.Table)
             IconAction(OctoIcons.Close, "Let go of the picked songs", clear, size = ControlHeight.S, iconSize = IconSize.Table)
         }
     }

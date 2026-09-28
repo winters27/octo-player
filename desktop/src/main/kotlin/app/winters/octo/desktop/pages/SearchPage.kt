@@ -57,6 +57,7 @@ import app.winters.octo.desktop.ui.ShelfCardWidth
 import app.winters.octo.desktop.ui.SongMenu
 import app.winters.octo.desktop.ui.onRightClick
 import app.winters.octo.desktop.ui.pagePadding
+import app.winters.octo.desktop.ui.playlistMenu
 import app.winters.octo.desktop.ui.rememberListState
 import app.winters.octo.subsonic.Song
 
@@ -116,7 +117,7 @@ private fun LazyListScope.results(app: AppState, state: SearchState.Done) {
         item(key = "playlists-title") { SectionTitle("Playlists", action = seeAll(library.morePlaylists, SearchFilter.Playlists)) { model.pick(SearchFilter.Playlists) } }
         items(library.playlists, key = { "pl:${it.id}" }) { playlist ->
             Row(
-                Modifier.fillMaxWidth().height(44.dp).hoverLift(RoundedCornerShape(8.dp)).clickable { app.navigator.go(Page.Playlist(playlist.id)) }.padding(horizontal = 10.dp),
+                Modifier.fillMaxWidth().height(44.dp).hoverLift(RoundedCornerShape(8.dp)).onRightClick(playlistMenu(app, playlist)).clickable { app.navigator.go(Page.Playlist(playlist.id)) }.padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {

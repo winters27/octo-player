@@ -4,21 +4,22 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import app.winters.octo.design.IconAction
+import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.OctoType
+import app.winters.octo.design.Txt
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.library.SongColumn
 import app.winters.octo.desktop.library.sortAlbums
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.ui.LinkText
+import app.winters.octo.desktop.ui.SongPlace
 import app.winters.octo.desktop.ui.SongTable
 import app.winters.octo.desktop.ui.rememberListState
 import app.winters.octo.desktop.ui.rememberLoad
 import app.winters.octo.desktop.ui.show
-import app.winters.octo.design.IconAction
-import app.winters.octo.design.OctoColors
-import app.winters.octo.design.OctoIcons
-import app.winters.octo.design.OctoType
-import app.winters.octo.design.Txt
 import app.winters.octo.sort.SortList
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Song
@@ -162,6 +163,7 @@ fun PlaylistPage(app: AppState, visit: Visit, id: String) {
             listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Favourite, SongColumn.Length),
             list,
             id = "playlist",
+            place = { picked -> SongPlace.Playlist(id, picked.map { it.position }) },
             empty = { NothingHere("This playlist is empty", "Right-click songs anywhere and pick Add to playlist.") },
         ) {
             item(key = "head") {
