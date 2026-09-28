@@ -40,6 +40,7 @@ import app.winters.octo.desktop.library.lengthText
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.RepeatMode
+import app.winters.octo.desktop.system.MiniPlayerButton
 import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.GlazeLight
@@ -51,6 +52,7 @@ import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.Scrubber
 import app.winters.octo.design.PauseGlyph
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.Txt
@@ -134,14 +136,16 @@ fun NowPlayingBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modif
                     )
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Txt(lengthText((position / 1000).toInt()).ifEmpty { "0:00" }, OctoType.caption, OctoColors.TextMuted, Modifier.width(44.dp), align = TextAlign.End)
                     val duration = state.durationMs
-                    LineSlider(
+                    // Where a drag would land, shown in place of the time while dragging.
+                    var scrubbing by remember { mutableStateOf<Float?>(null) }
+                    val shownMs = scrubbing?.let { (it * duration).toLong() } ?: position
+                    Txt(lengthText((shownMs / 1000).toInt()).ifEmpty { "0:00" }, OctoType.caption, OctoColors.TextMuted, Modifier.width(44.dp), align = TextAlign.End)
+                    Scrubber(
                         fraction = { if (duration > 0) position.toFloat() / duration else 0f },
                         onSeek = { app.player.seekTo((it * duration).toLong()) },
                         modifier = Modifier.weight(1f),
-                        // The time a click would jump to, over the pointer.
-                        hoverLabel = if (duration > 0) { at -> lengthText(((at * duration) / 1000).toInt()).ifEmpty { "0:00" } } else null,
+                        onScrub = { scrubbing = it },
                     )
                     Txt(lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }, OctoType.caption, OctoColors.TextMuted, Modifier.width(44.dp))
                 }
@@ -152,6 +156,7 @@ fun NowPlayingBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modif
                 IconAction(OctoIcons.Queue, "Queue", { app.toggleSidePanel(SidePanel.Queue) }, size = 34.dp, iconSize = 19.dp, active = app.sidePanel == SidePanel.Queue)
                 OutputButton(app)
                 VolumeControl(app, state.volume)
+                MiniPlayerButton()
                 IconAction(OctoIcons.Expand, "Open the player", { app.fullPlayer = !app.fullPlayer }, size = 34.dp, iconSize = 20.dp, enabled = song != null, active = app.fullPlayer)
             }
         }

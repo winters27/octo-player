@@ -33,6 +33,7 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.ui.windowRect
 import app.winters.octo.design.GlassField
 import app.winters.octo.design.GlazeCapsule
+import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.MenuRow
 import app.winters.octo.design.MenuSeparator
@@ -84,7 +85,7 @@ fun LyricsView(app: AppState, modifier: Modifier = Modifier, textColor: Color = 
                         offsetMs = offset,
                         outputOffsetMs = outputOffset,
                         look = LyricsLook(),
-                        calm = settings.appearance.calmMotion,
+                        calm = LocalReduceMotion.current,
                         onSeek = app.player::seekTo,
                         textColor = textColor,
                     )

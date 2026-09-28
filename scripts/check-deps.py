@@ -1,5 +1,6 @@
 """Checks every version in gradle/libs.versions.toml against the newest
-stable release on Google's Maven and Maven Central, plus the Gradle wrapper.
+stable release on Google's Maven and Maven Central, plus the Gradle wrapper
+and the Rust crates of the desktop app's system library (crates.io).
 
 Run from the repo root: python scripts/check-deps.py
 Exit code 1 when anything is behind.
@@ -16,6 +17,8 @@ PLUGIN_ARTIFACTS = {
     "com.android.application": ("com.android.tools.build", "gradle"),
     "com.android.library": ("com.android.tools.build", "gradle"),
 }
+# Rust manifests checked here; the audio engine has its own checker.
+CARGO_MANIFESTS = ["desktop/system-shim/Cargo.toml"]
 
 
 def numeric(version: str) -> tuple:
@@ -61,7 +64,32 @@ def main() -> int:
     mark = "" if numeric(current) <= numeric(wrapper) else f"  <-- newer: {current}"
     behind += bool(mark)
     print(f"{'gradle':16} {wrapper:12} wrapper{mark}")
+    behind += check_crates()
     return 1 if behind else 0
+
+
+def newest_crate(name: str) -> str | None:
+    request = urllib.request.Request(f"https://crates.io/api/v1/crates/{name}", headers={"User-Agent": "octo-check-deps"})
+    crate = json.load(urllib.request.urlopen(request, timeout=20))["crate"]
+    return crate.get("max_stable_version") or crate.get("newest_version")
+
+
+# Every dependency in the Cargo manifests, including the per-system ones.
+def check_crates() -> int:
+    behind = 0
+    for path in CARGO_MANIFESTS:
+        data = tomllib.load(open(path, "rb"))
+        tables = [data.get("dependencies", {})] + [t.get("dependencies", {}) for t in data.get("target", {}).values()]
+        for table in tables:
+            for name, spec in table.items():
+                have = spec if isinstance(spec, str) else spec.get("version")
+                if have is None:
+                    continue
+                latest = newest_crate(name)
+                mark = "" if latest is None or numeric(latest) <= numeric(have) else f"  <-- newer: {latest}"
+                behind += bool(mark)
+                print(f"{name:22} {have:12} crates.io{mark}")
+    return behind
 
 
 if __name__ == "__main__":

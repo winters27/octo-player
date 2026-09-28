@@ -5,9 +5,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,11 +29,15 @@ import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -49,10 +55,11 @@ import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
-import app.winters.octo.design.GlazeSelected
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.SelectedRow
+import app.winters.octo.design.rememberPressSqueeze
 import app.winters.octo.discovery.OnlineAlbum
 import app.winters.octo.discovery.OnlineArtist
 import app.winters.octo.discovery.shownLengthMs
@@ -67,10 +74,19 @@ private const val MoreOptions = "More options"
 private val RowShape = RoundedCornerShape(12.dp)
 
 // Opens the menu on a long press, with a little buzz, floating beside
-// what was held.
-private fun Modifier.pressOrHold(haptics: HapticFeedback, spot: PressSpot, onClick: () -> Unit, onLongClick: (() -> Unit)?): Modifier {
-    if (onLongClick == null) return clickable(onClick = onClick)
-    return pressSpot(spot).combinedClickable(
+// what was held. Held down, it gives a little and springs back.
+private fun Modifier.pressOrHold(haptics: HapticFeedback, spot: PressSpot, onClick: () -> Unit, onLongClick: (() -> Unit)?): Modifier = composed {
+    val interaction = remember { MutableInteractionSource() }
+    val squeeze by rememberPressSqueeze(interaction)
+    val indication = LocalIndication.current
+    val squeezed = Modifier.graphicsLayer {
+        scaleX = squeeze
+        scaleY = squeeze
+    }
+    if (onLongClick == null) return@composed squeezed.clickable(interactionSource = interaction, indication = indication, onClick = onClick)
+    squeezed.pressSpot(spot).combinedClickable(
+        interactionSource = interaction,
+        indication = indication,
         onClick = onClick,
         onLongClickLabel = MoreOptions,
         onLongClick = {
@@ -260,9 +276,18 @@ private fun SongLine(
     val selection = LocalSongSelection.current
     val selecting = selection?.active == true
     val picked = selection?.isPicked(selectKey) == true
-    Box {
-        // A picked song sits in a darker pill.
-        if (picked) GlazeSelected(Modifier.matchParentSize().padding(horizontal = 8.dp, vertical = 2.dp), RowShape)
+    val interaction = remember { MutableInteractionSource() }
+    val squeeze by rememberPressSqueeze(interaction)
+    Box(
+        Modifier.graphicsLayer {
+            // Held down, the row gives a little and springs back.
+            scaleX = squeeze
+            scaleY = squeeze
+        },
+    ) {
+        // A picked song sits in the selected row's pill: the darker pill,
+        // lightly tinted with the accent.
+        if (picked) SelectedRow(Modifier.matchParentSize().padding(horizontal = 8.dp, vertical = 2.dp), RowShape)
         Box(
             Modifier
                 .fillMaxWidth()
@@ -270,6 +295,8 @@ private fun SongLine(
                 // press opens the song's menu.
                 .pressSpot(LocalPressSpot.current)
                 .combinedClickable(
+                    interactionSource = interaction,
+                    indication = LocalIndication.current,
                     onClick = { if (selecting) selection.toggle(selectKey) else onClick?.invoke() },
                     onLongClickLabel = MoreOptions,
                     onLongClick = {

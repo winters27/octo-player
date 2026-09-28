@@ -4,6 +4,8 @@ import app.winters.octo.audio.HttpHeader
 import app.winters.octo.audio.QueueItem
 import app.winters.octo.audio.ReplayGainInfo
 import app.winters.octo.desktop.player.QueueEntry
+import app.winters.octo.desktop.system.isOpenedFile
+import app.winters.octo.desktop.system.openedFileOf
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 
@@ -35,7 +37,13 @@ const val LOCAL_PREFIX = "local:"
 // Files on this computer by path, and everything else from the server.
 class LocalOrServer(private val server: SongSources) : SongSources {
     override fun addressOf(song: Song): SongAddress? =
-        if (song.id.startsWith(LOCAL_PREFIX)) SongAddress(song.id.removePrefix(LOCAL_PREFIX)) else server.addressOf(song)
+        when {
+            song.id.startsWith(LOCAL_PREFIX) -> SongAddress(song.id.removePrefix(LOCAL_PREFIX))
+            // A file opened from the system (a double click, a drop): the
+            // file itself, or the address it was opened from.
+            isOpenedFile(song.id) -> openedFileOf(song.id)?.let { SongAddress(it.path?.absolutePath ?: it.uri) }
+            else -> server.addressOf(song)
+        }
 }
 
 // The engine's name for a queue entry, handed back in its events.

@@ -18,6 +18,7 @@ import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.nav.shortcutList
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.WashPrefs
+import app.winters.octo.desktop.system.SystemSettingsCard
 import app.winters.octo.desktop.ui.LocalBottomRoom
 import app.winters.octo.desktop.ui.PageTitle
 import app.winters.octo.desktop.ui.pagePadding
@@ -111,6 +112,7 @@ fun SettingsPage(app: AppState, visit: Visit) {
                 }
             }
         }
+        item(key = "system") { SystemSettingsCard(app) }
         item(key = "keys") {
             SettingsCard("Keyboard shortcuts") {
                 shortcutList(app.mac).forEachIndexed { index, (what, keys) ->

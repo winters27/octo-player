@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.settings
 
 import app.winters.octo.sound.SoundSettings
+import app.winters.octo.desktop.system.SystemPrefs
 import app.winters.octo.subsonic.AuthMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,6 +34,8 @@ data class AppSettings(
     val sound: SoundPrefs = SoundPrefs(),
     // Where lyrics come from, and their timing.
     val lyrics: LyricsPrefs = LyricsPrefs(),
+    // The tray, notifications and the mini player.
+    val system: SystemPrefs = SystemPrefs(),
 )
 
 // Lyrics settings, by song id (the server's) and by output device id.

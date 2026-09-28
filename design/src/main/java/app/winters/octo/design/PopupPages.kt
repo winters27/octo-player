@@ -94,17 +94,18 @@ fun <T> rememberPopupPages(first: T): PopupPages<T> = remember { PopupPages(firs
 fun <T> PopupPager(pages: PopupPages<T>, modifier: Modifier = Modifier, content: @Composable (page: T, canGoBack: Boolean) -> Unit) {
     val animatorsOff = remember { !ValueAnimator.areAnimatorsEnabled() }
     val still = LocalReduceMotion.current || animatorsOff
+    val motion = motionScale()
     AnimatedContent(
         targetState = pages.trail,
         modifier = modifier,
         contentKey = { it.opening to it.pages },
         transitionSpec = {
             if (still) {
-                fadeIn(tween(120)) togetherWith fadeOut(tween(90)) using SizeTransform(clip = true) { _, _ -> snap() }
+                fadeIn(octoTween(motion, OctoDuration.Swap)) togetherWith fadeOut(octoTween(motion, OctoDuration.Press)) using SizeTransform(clip = true) { _, _ -> snap() }
             } else {
                 val way = if (targetState.deeper) 1 else -1
-                val enter = slideInHorizontally(OctoMotion.calm()) { width -> way * width / 3 } + fadeIn(tween(180, delayMillis = 40))
-                val exit = slideOutHorizontally(OctoMotion.calm()) { width -> -way * width / 3 } + fadeOut(tween(110))
+                val enter = slideInHorizontally(OctoMotion.calm()) { width -> way * width / 3 } + fadeIn(tween(motion.ms(OctoDuration.Fill), delayMillis = 40, easing = OctoEasing.Spring))
+                val exit = slideOutHorizontally(OctoMotion.calm()) { width -> -way * width / 3 } + fadeOut(octoTween(motion, OctoDuration.Press))
                 enter togetherWith exit using SizeTransform(clip = true) { _, _ -> OctoMotion.calm<IntSize>() }
             }
         },

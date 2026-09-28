@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.design.ArtworkShape
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoShapes
 import app.winters.octo.design.artworkRim
 import coil3.compose.AsyncImage
 
@@ -65,10 +66,11 @@ fun Artwork(
     }
 }
 
-// Artwork that fills the width it is given, square.
+// Artwork that fills the width it is given, square, with the rounder
+// corners a card's picture takes.
 @Composable
 fun ArtworkFill(ref: String?, modifier: Modifier = Modifier, outside: Boolean = false) {
     BoxWithConstraints(modifier.fillMaxWidth().aspectRatio(1f)) {
-        Artwork(ref, maxWidth, outside = outside)
+        Artwork(ref, maxWidth, shape = OctoShapes.ArtM, outside = outside)
     }
 }

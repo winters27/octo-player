@@ -17,6 +17,7 @@ import app.winters.octo.design.LineSlider
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.SliderLook
 import app.winters.octo.design.Txt
 import app.winters.octo.design.glassPanel
 
@@ -81,6 +82,7 @@ internal fun SliderLine(
             live = live,
             onRelease = onRelease,
             wheelStep = wheelStep,
+            look = SliderLook.Jewel,
         )
         Txt(reading, OctoType.caption.copy(fontFeatureSettings = "tnum"), OctoColors.TextSecondary, Modifier.width(72.dp))
     }

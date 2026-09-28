@@ -52,6 +52,7 @@ import app.winters.octo.desktop.player.wash.ImmersiveWash
 import app.winters.octo.desktop.player.wash.WashCover
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.LineSlider
+import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -107,7 +108,7 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
             paceBpm(song.bpm, wash.useBpm),
             wash.fps,
             wash.speed / 100f,
-            moving = wash.moving && !look.calmMotion,
+            moving = wash.moving && !LocalReduceMotion.current,
             dolly = { dolly.value },
         )
         BoxWithConstraints(Modifier.fillMaxSize().padding(start = 56.dp, end = 40.dp, top = top + 48.dp, bottom = 32.dp)) {
