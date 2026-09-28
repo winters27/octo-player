@@ -15,6 +15,11 @@ data class PlayerState(
     val current: QueueEntry? = null,
     // The entries still to come, in the order they will play.
     val upcoming: List<QueueEntry> = emptyList(),
+    // The entries already played before the current one, in play order.
+    val played: List<QueueEntry> = emptyList(),
+    // How many times the current entry has started over by itself (repeat
+    // one), so each time round counts as its own play.
+    val rounds: Int = 0,
     val playing: Boolean = false,
     val shuffle: Boolean = false,
     val repeat: RepeatMode = RepeatMode.Off,
@@ -24,8 +29,8 @@ data class PlayerState(
     // The output in use, and the ones there are.
     val output: OutputDevice? = null,
     val outputs: List<OutputDevice> = emptyList(),
-    // Why the last song could not play, in plain words, if it could not.
-    val problem: String? = null,
+    // Why the last song could not play, if it could not.
+    val problem: PlayProblem? = null,
     // Waiting for sound (the network, or a song opening) while playing.
     val buffering: Boolean = false,
     // Pauses once the song playing ends, a single time.
@@ -35,6 +40,22 @@ data class PlayerState(
     // The device sound goes to now; while following the system's default,
     // `output` is the default and this says which device that is.
     val playingOn: OutputDevice? = null,
+)
+
+// Why a song could not play: in plain words for the listener, the song if
+// it was one song's fault, and the engine's own words for the details.
+data class PlayProblem(val words: String, val song: Song? = null, val detail: String? = null)
+
+// A queue put aside to come back to: the songs in queue order, the queue
+// positions in the order they play, which one is current and how far into
+// it, and the shuffle and repeat it had.
+data class SavedQueue(
+    val songs: List<Song>,
+    val order: List<Int>,
+    val index: Int,
+    val positionMs: Long = 0,
+    val shuffle: Boolean = false,
+    val repeat: RepeatMode = RepeatMode.Off,
 )
 
 // What the desktop app needs from whatever plays its music. The screens
@@ -95,6 +116,9 @@ interface DesktopPlayer : AutoCloseable {
 
     // Pauses at the end of the song playing, once.
     fun setStopAfterCurrent(on: Boolean) {}
+
+    // Puts a saved queue back, paused where it was left.
+    fun restore(saved: SavedQueue)
 }
 
 // The output that follows whatever the system uses.

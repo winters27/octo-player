@@ -40,6 +40,18 @@ abstract class DesktopPlayerContract {
     }
 
     @Test
+    fun aRestoredQueueWaitsWhereItWasLeft() {
+        val p = newPlayer()
+        p.restore(SavedQueue(songs, songs.indices.toList(), index = 1, positionMs = 30_000, repeat = RepeatMode.All))
+        assertEquals("s2", p.now())
+        assertFalse(p.state.value.playing)
+        assertEquals(RepeatMode.All, p.state.value.repeat)
+        assertEquals(listOf("s1"), p.state.value.played.map { it.song.id })
+        assertEquals(listOf("s3", "s4", "s5"), p.coming())
+        assertNear(30_000, p.positionMs())
+    }
+
+    @Test
     fun timeMovesOnlyWhilePlaying() {
         val p = newPlayer()
         p.play(songs)

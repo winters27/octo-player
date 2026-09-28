@@ -34,6 +34,9 @@ class SilentPlayer(
     private var repeat = RepeatMode.Off
     private var level = volume.coerceIn(0f, 1f)
     private var stopAfter = false
+    // Times round the current entry by repeat one, and which entry that is.
+    private var rounds = 0
+    private var roundsOf: Long? = null
 
     private val _state = MutableStateFlow(PlayerState(volume = level, output = system, outputs = listOf(system)))
     override val state: StateFlow<PlayerState> = _state
@@ -80,6 +83,7 @@ class SilentPlayer(
                 if (repeat == RepeatMode.One) {
                     anchorMs = 0
                     since = endedAt
+                    rounds++
                 } else {
                     val next = queue.nextPosition(repeat)
                     if (next == null) {
@@ -235,6 +239,16 @@ class SilentPlayer(
         }
     }
 
+    override fun restore(saved: SavedQueue) {
+        synchronized(lock) {
+            shuffle = saved.shuffle
+            repeat = saved.repeat
+            stopAfter = false
+            queue.restore(saved.songs, saved.order, saved.index, saved.shuffle)
+            restartAt(saved.positionMs.coerceIn(0, durationMs().coerceAtLeast(0)), play = false)
+        }
+    }
+
     override fun close() {
         ticker?.cancel()
     }
@@ -247,10 +261,17 @@ class SilentPlayer(
     }
 
     private fun publish() {
+        val key = queue.currentEntry?.key
+        if (key != roundsOf) {
+            roundsOf = key
+            rounds = 0
+        }
         _state.value = PlayerState(
             queue = queue.songs,
             current = queue.currentEntry,
             upcoming = queue.upcoming,
+            played = queue.played,
+            rounds = rounds,
             playing = running,
             shuffle = shuffle,
             repeat = repeat,

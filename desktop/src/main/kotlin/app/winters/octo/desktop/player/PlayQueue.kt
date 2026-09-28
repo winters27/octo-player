@@ -58,6 +58,18 @@ class PlayQueue(private val random: Random = Random.Default) {
         order = if (shuffle) shuffledAround(current) else IntArray(entries.size) { it }
     }
 
+    // Puts back a queue saved earlier: the songs in queue order, the play
+    // order, and the current position. Unshuffled, or with a play order
+    // that does not fit the songs, they play in queue order.
+    fun restore(songs: List<Song>, playOrder: List<Int>, start: Int, shuffle: Boolean) {
+        entries.clear()
+        songs.forEach { entries += QueueEntry(nextKey++, it) }
+        current = if (entries.isEmpty()) -1 else start.coerceIn(0, entries.lastIndex)
+        val fits = playOrder.size == entries.size && playOrder.sorted() == entries.indices.toList()
+        shuffled = shuffle && fits
+        order = if (shuffled) playOrder.toIntArray() else IntArray(entries.size) { it }
+    }
+
     fun setShuffle(on: Boolean) {
         if (on == shuffled) return
         shuffled = on
