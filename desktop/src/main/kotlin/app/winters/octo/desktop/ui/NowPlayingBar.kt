@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -111,7 +112,15 @@ fun rememberPosition(player: DesktopPlayer): State<Long> {
 fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
     val state by app.player.state.collectAsState()
     val song = state.current?.song
-    BoxWithConstraints(modifier.chromeFilm(backdrop)) {
+    // Songs dragged here go to the end of the queue; the bar lights while
+    // they are held over it.
+    val over = isDropOver(PlayerDrop)
+    BoxWithConstraints(
+        modifier
+            .chromeFilm(backdrop)
+            .dropTarget(PlayerDrop, "Add to the queue") { app.addToQueue(it) }
+            .then(if (over) Modifier.background(DropLit) else Modifier),
+    ) {
         val middle = minOf(FrameSize.TransportMax, maxWidth * 0.42f)
         Row(Modifier.fillMaxSize().padding(horizontal = Space.L), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { SongZone(app, song) }
@@ -120,6 +129,8 @@ fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier)
         }
     }
 }
+
+private const val PlayerDrop = "player"
 
 // The song: its cover (which opens the full player), its title (which
 // opens its album), the artist and album as links, and the heart.

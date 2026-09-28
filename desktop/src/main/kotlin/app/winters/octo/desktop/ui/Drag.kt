@@ -124,5 +124,8 @@ fun DragLabel(drag: DragState) {
     }
 }
 
+// A place lit while songs are held over it: a wash of the accent.
+val DropLit = OctoColors.Accent.copy(alpha = 0.14f)
+
 // The label sits just below and right of the pointer, in pixels.
 private const val LabelOffset = 14
