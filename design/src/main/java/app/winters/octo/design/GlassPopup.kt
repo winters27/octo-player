@@ -2,7 +2,6 @@ package app.winters.octo.design
 
 import android.animation.ValueAnimator
 import android.view.WindowManager
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.rememberTransition
@@ -130,7 +129,7 @@ val PopupFilm = Color.Black.copy(alpha = 0.52f)
 const val PopupFrost = 24f
 
 // How long it takes to grow in or shrink away.
-private const val POPUP_MS = 160
+private const val POPUP_MS = OctoDuration.Swap
 
 // What the pop-up remembers between layouts without asking for another:
 // the side it opened on, where it landed, and the card's bounds for telling
@@ -176,6 +175,7 @@ fun GlassPopup(
     // Phones with animations switched off, or Reduce motion, get it at once.
     val animatorsOff = remember(visible) { !ValueAnimator.areAnimatorsEnabled() }
     val still = LocalReduceMotion.current || animatorsOff
+    val motion = motionScale()
     val placing = remember { PopupPlacing() }
     // A fresh opening picks its side afresh.
     if (visible && state.isIdle && !state.currentState) placing.keepAbove = null
@@ -199,16 +199,21 @@ fun GlassPopup(
         val bottom = maxOf(navigation, keyboard)
         val transition = rememberTransition(state, label = "glass popup")
         val shown by transition.animateFloat(
-            transitionSpec = { tween(if (still) 0 else POPUP_MS, easing = FastOutSlowInEasing) },
+            // With motion reduced it fades in half the time; with the
+            // phone's animations off, Compose makes it instant.
+            transitionSpec = { tween(motion.ms(POPUP_MS), easing = OctoEasing.Spring) },
             label = "glass popup shown",
         ) { if (it) 1f else 0f }
         Layout(
             content = {
+                // The menu plate's halo and inner hairline keep its words
+                // legible over a busy page, on the same floating glass.
                 FloatingGlaze(
                     backdrop = backdrop,
                     shape = PopupShape,
                     film = PopupFilm,
                     frost = PopupFrost,
+                    halo = true,
                     modifier = modifier
                         .graphicsLayer {
                             // With motion reduced it only fades.
