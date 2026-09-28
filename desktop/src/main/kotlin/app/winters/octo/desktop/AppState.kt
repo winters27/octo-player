@@ -34,6 +34,7 @@ import app.winters.octo.desktop.pages.SignInForm
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.FramePrefs
+import app.winters.octo.desktop.settings.TablePrefs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.design.PopupHost
 import app.winters.octo.lyrics.OnlineLyrics
@@ -276,6 +277,10 @@ class AppState(
     // The frame's own settings, changed as the listener drags and folds it.
     fun updateFrame(change: (FramePrefs) -> FramePrefs) =
         settings.update { it.copy(frame = change(it.frame)) }
+
+    // One song table's own columns and widths, changed from its heading.
+    fun updateTable(id: String, change: (TablePrefs) -> TablePrefs) =
+        settings.update { it.copy(tables = it.tables + (id to change(it.tables[id] ?: TablePrefs()))) }
 
     fun isPinned(playlistId: String) = playlistId in settings.current.frame.pinnedPlaylists
 

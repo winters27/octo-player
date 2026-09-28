@@ -42,8 +42,9 @@ fun AlbumPage(app: AppState, visit: Visit, id: String) {
         SongTable(
             app,
             songs,
-            listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Length, SongColumn.Plays),
+            listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Plays, SongColumn.Favourite, SongColumn.Length),
             list,
+            id = "album",
             covers = false,
             number = { index, song -> song.track?.toString() ?: "${index + 1}" },
             groupTitle = { index ->
@@ -118,8 +119,9 @@ fun ArtistPage(app: AppState, visit: Visit, id: String, name: String) {
         SongTable(
             app,
             artist.top,
-            listOf(SongColumn.Number, SongColumn.Title, SongColumn.Album, SongColumn.Length, SongColumn.Plays),
+            listOf(SongColumn.Number, SongColumn.Title, SongColumn.Album, SongColumn.Plays, SongColumn.Favourite, SongColumn.Length),
             list,
+            id = "artist",
         ) {
             item(key = "head") {
                 ListHeader(
@@ -157,8 +159,9 @@ fun PlaylistPage(app: AppState, visit: Visit, id: String) {
         SongTable(
             app,
             songs,
-            listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Length),
+            listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Favourite, SongColumn.Length),
             list,
+            id = "playlist",
             empty = { NothingHere("This playlist is empty", "Right-click songs anywhere and pick Add to playlist.") },
         ) {
             item(key = "head") {

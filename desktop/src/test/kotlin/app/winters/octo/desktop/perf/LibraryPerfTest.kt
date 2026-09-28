@@ -14,6 +14,7 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.library.LibraryIndex
 import app.winters.octo.desktop.library.SongColumn
 import app.winters.octo.desktop.library.sortAlbums
+import app.winters.octo.desktop.library.rememberSorted
 import app.winters.octo.desktop.library.sortSongs
 import app.winters.octo.desktop.library.sortedByName
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
@@ -138,7 +139,8 @@ class LibraryPerfTest {
         val scene = ImageComposeScene(1440, 900, Density(1f)) {
             CompositionLocalProvider(LocalTyping provides TypingState()) {
                 // As the Songs page does: the sort runs in composition.
-                val songs = remember(order) { sortSongs(index.songs, order) }
+                // As the pages do: sorted off the window's thread.
+                val songs = rememberSorted(index.songs, order) ?: emptyList()
                 SongTable(app, songs, columns, list, Modifier.fillMaxSize(), order = order, onSort = { order = it })
             }
         }
@@ -166,8 +168,8 @@ class LibraryPerfTest {
         val p95 = times[(times.size * 95 / 100).coerceAtMost(times.size - 1)] / 1e6
         say("First frame of the Songs table: ${ms(first / 1e6)} ms")
         say("Scrolling the Songs table, $FRAMES frames of ${SCROLL_PX.toInt()} px: mean ${ms(mean)} ms, p95 ${ms(p95)} ms, worst ${ms(times.last() / 1e6)} ms")
-        // A click on a column heading: the new order is sorted while the
-        // frame is drawn.
+        // A click on a column heading: the frame that follows, while the new
+        // order is worked out away from the window's thread.
         val clicks = listOf(SongSort.Artist, SongSort.RecentlyAdded, SongSort.MostPlayed, SongSort.Album, SongSort.Title).map { sort ->
             SwingUtilities.invokeAndWait { order = SortList.Songs.default.picking(sort) }
             frame() / 1e6

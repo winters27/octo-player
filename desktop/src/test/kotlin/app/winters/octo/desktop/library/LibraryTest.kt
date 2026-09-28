@@ -144,54 +144,58 @@ class SongSortingTest {
 }
 
 class SelectionTest {
+    // Ten rows, known by keys "0" to "9".
+    private val order = (0..9).map { "$it" }
+
     @Test
     fun aClickPicksOneRow() {
         val s = TableSelection()
-        s.click(3, toggle = false, range = false)
-        s.click(5, toggle = false, range = false)
-        assertEquals(setOf(5), s.picked)
+        s.click("3", toggle = false, range = false, order = order)
+        s.click("5", toggle = false, range = false, order = order)
+        assertEquals(setOf("5"), s.picked)
     }
 
     @Test
     fun ctrlAddsAndTakesAway() {
         val s = TableSelection()
-        s.click(1, false, false)
-        s.click(4, toggle = true, range = false)
-        assertEquals(setOf(1, 4), s.picked)
-        s.click(1, toggle = true, range = false)
-        assertEquals(setOf(4), s.picked)
+        s.click("1", false, false, order = order)
+        s.click("4", toggle = true, range = false, order = order)
+        assertEquals(setOf("1", "4"), s.picked)
+        s.click("1", toggle = true, range = false, order = order)
+        assertEquals(setOf("4"), s.picked)
     }
 
     @Test
     fun shiftPicksTheRunFromTheLastClick() {
         val s = TableSelection()
-        s.click(6, false, false)
-        s.click(2, toggle = false, range = true)
-        assertEquals(setOf(2, 3, 4, 5, 6), s.picked)
+        s.click("6", false, false, order = order)
+        s.click("2", toggle = false, range = true, order = order)
+        assertEquals(setOf("2", "3", "4", "5", "6"), s.picked)
         // The run still starts where the plain click was.
-        s.click(8, toggle = false, range = true)
-        assertEquals(setOf(6, 7, 8), s.picked)
-        s.click(0, toggle = true, range = true)
-        assertEquals(setOf(0, 1, 2, 3, 4, 5, 6, 7, 8), s.picked)
+        s.click("8", toggle = false, range = true, order = order)
+        assertEquals(setOf("6", "7", "8"), s.picked)
+        s.click("0", toggle = true, range = true, order = order)
+        assertEquals(setOf("0", "1", "2", "3", "4", "5", "6", "7", "8"), s.picked)
     }
 
     @Test
     fun aRightClickOutsideTheSelectionActsOnThatRowAlone() {
         val s = TableSelection()
-        s.click(1, false, false)
-        s.click(3, true, false)
-        s.pickForMenu(3)
-        assertEquals(setOf(1, 3), s.picked)
-        s.pickForMenu(7)
-        assertEquals(setOf(7), s.picked)
+        s.click("1", false, false, order = order)
+        s.click("3", true, false, order = order)
+        s.pickForMenu("3")
+        assertEquals(setOf("1", "3"), s.picked)
+        s.pickForMenu("7")
+        assertEquals(setOf("7"), s.picked)
     }
 
     @Test
     fun thePickedRowsComeOutInTableOrder() {
         val s = TableSelection()
-        s.click(2, false, false)
-        s.click(0, true, false)
-        assertEquals(listOf("a", "c"), s.of(listOf("a", "b", "c")))
+        s.click("2", false, false, order = order)
+        s.click("0", true, false, order = order)
+        val rows = listOf("0", "1", "2").map { TableRow(it, app.winters.octo.subsonic.Song(it), it.toInt()) }
+        assertEquals(listOf("0", "2"), s.of(rows).map { it.key })
     }
 }
 

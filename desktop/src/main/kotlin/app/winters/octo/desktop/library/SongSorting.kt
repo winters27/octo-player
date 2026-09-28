@@ -20,15 +20,24 @@ enum class SongColumn(val title: String, val sort: SongSort?) {
     Title("Title", SongSort.Title),
     Artist("Artist", SongSort.Artist),
     Album("Album", SongSort.Album),
+    Genre("Genre", null),
+    Composer("Composer", null),
     Year("Year", SongSort.Year),
-    Length("Length", SongSort.Length),
-    Plays("Plays", SongSort.MostPlayed),
     Added("Added", SongSort.RecentlyAdded),
     Played("Last played", SongSort.RecentlyPlayed),
+    Plays("Plays", SongSort.MostPlayed),
+    Rating("Rating", SongSort.Rating),
+    Format("Format", null),
+    Bpm("BPM", null),
+    Size("Size", null),
+    Favourite("Favourite", SongSort.Liked),
+    Length("Length", SongSort.Length),
     ;
 
     companion object {
         fun of(sort: SongSort): SongColumn? = entries.firstOrNull { it.sort == sort }
+
+        fun named(name: String): SongColumn? = entries.firstOrNull { it.name == name }
     }
 }
 

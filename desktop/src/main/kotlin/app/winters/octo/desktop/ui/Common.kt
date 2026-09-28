@@ -233,3 +233,12 @@ fun Modifier.swallowClicks(): Modifier = pointerInput(Unit) {
 
 @Composable
 fun Gap(width: Dp) = Box(Modifier.width(width))
+
+// Whether a list (a song table) has the keyboard, so the window leaves the
+// arrow keys and Enter to it.
+@Stable
+class ListFocus {
+    var active by mutableStateOf(false)
+}
+
+val LocalListFocus = staticCompositionLocalOf { ListFocus() }

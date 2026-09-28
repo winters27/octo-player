@@ -37,6 +37,10 @@ data class AppSettings(
     val sidePanel: String? = null,
     // The frame: sidebar and panel sizes, and what the sidebar shows.
     val frame: FramePrefs = FramePrefs(),
+    // Each song table's columns and widths, by the table's name, and how
+    // tall rows are everywhere.
+    val tables: Map<String, TablePrefs> = emptyMap(),
+    val density: String = "regular",
     // The equalizer, loudness and the rest of the Sound page.
     val sound: SoundPrefs = SoundPrefs(),
     // Where lyrics come from, and their timing.
@@ -49,6 +53,15 @@ data class AppSettings(
     // not, as SHA-256 fingerprints by host. Each counts only for its host.
     // Not secret: a fingerprint only names a certificate.
     val trustedCertificates: Map<String, String> = emptyMap(),
+)
+
+// A song table as the listener set it up: the columns shown, in order (by
+// their names), and the widths of any they dragged, in dp. Empty means the
+// table's own choice.
+@Serializable
+data class TablePrefs(
+    val columns: List<String> = emptyList(),
+    val widths: Map<String, Float> = emptyMap(),
 )
 
 // The frame around the page, as the listener left it.
