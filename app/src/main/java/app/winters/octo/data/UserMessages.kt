@@ -10,7 +10,7 @@ fun Throwable.userMessage(): String = when (this) {
         "That address answered, but not like a music server. Check the port."
     is SubsonicException.WrongCredentials -> "Wrong username or password."
     is SubsonicException.AuthNotSupported ->
-        if (code == 41) "This account can't sign in with a token. Turn on \"Use legacy password\" under Advanced."
+        if (code == 41) "This account can't sign in with a token. Turn on Legacy sign-in under Advanced."
         else "The server doesn't take this way of signing in."
     is SubsonicException.NotFound -> "That isn't on the server any more."
     is SubsonicException.Server -> "The server said: $message"

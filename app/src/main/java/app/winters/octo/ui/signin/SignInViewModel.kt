@@ -7,8 +7,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.winters.octo.connection.LEGACY_UNSAFE_MESSAGE
+import app.winters.octo.connection.LegacyRetry
 import app.winters.octo.connection.isHeaderName
 import app.winters.octo.connection.isHeaderValue
+import app.winters.octo.connection.legacyRetry
 import app.winters.octo.connection.pinKey
 import app.winters.octo.data.HeaderDraft
 import app.winters.octo.data.SessionRepository
@@ -164,7 +167,22 @@ class SignInViewModel @Inject constructor(private val sessions: SessionRepositor
                     signedIn = true
                 }
                 is SignInError.Untrusted -> question = failed
-                else -> error = failed.userMessage()
+                else -> {
+                    // A server that cannot check tokens gets the password
+                    // itself where that is safe, and the switch shows it.
+                    val retry = (failed as? SignInError.Failed)?.cause
+                    val url = normalizeServerUrl(address)
+                    when (if (url == null) LegacyRetry.None else legacyRetry(retry, mode, url)) {
+                        LegacyRetry.Retry -> {
+                            legacyPassword = true
+                            busy = false
+                            submit()
+                            return@launch
+                        }
+                        LegacyRetry.Unsafe -> error = LEGACY_UNSAFE_MESSAGE
+                        LegacyRetry.None -> error = failed.userMessage()
+                    }
+                }
             }
             busy = false
         }
