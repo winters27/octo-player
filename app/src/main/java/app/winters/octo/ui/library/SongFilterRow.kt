@@ -49,7 +49,13 @@ import app.winters.octo.ui.common.choiceAnchor
 // darker pill; a tap turns it off. Rating, Genre and Year ask which first.
 // Picking one on a field that already has a filter replaces it.
 @Composable
-internal fun SongFilterRow(query: LibraryQuery, choices: SongChoices, onChange: (LibraryQuery) -> Unit) {
+internal fun SongFilterRow(
+    query: LibraryQuery,
+    choices: SongChoices,
+    onChange: (LibraryQuery) -> Unit,
+    // Keeps these filters as a live list.
+    onSaveAsLive: (() -> Unit)? = null,
+) {
     val keyboard = LocalSoftwareKeyboardController.current
     val sheet = LocalChoiceSheet.current
     fun toggle(rule: QueryRule) = onChange(if (rule in query.rules) query.without(rule) else query.setting(rule))
@@ -85,6 +91,7 @@ internal fun SongFilterRow(query: LibraryQuery, choices: SongChoices, onChange: 
             modifier = Modifier.padding(top = 12.dp),
         ) {
             if (query.filters) item(key = "clear") { QuietButton("Clear all") { onChange(query.cleared()) } }
+            if (query.filters && onSaveAsLive != null) item(key = "save-live") { QuietButton("Save as live list", onSaveAsLive) }
             items(FilterPresets.simple, key = { it.toString() }) { rule -> FilterChip(rule.label(), rule in query.rules) { toggle(rule) } }
             item(key = "rating") { FilterChip(rating.first?.label() ?: "Rating", rating.first != null, Modifier.choiceAnchor(sheet), rating.second) }
             if (choices.genres.isNotEmpty() || genre.first != null) {
@@ -98,9 +105,10 @@ internal fun SongFilterRow(query: LibraryQuery, choices: SongChoices, onChange: 
 }
 
 // One filter as a filled chip, no border: the darker pill with white words
-// while on, a faint fill with quieter words while off.
+// while on, a faint fill with quieter words while off. Live lists show
+// their rules the same way.
 @Composable
-private fun FilterChip(text: String, on: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun FilterChip(text: String, on: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(
         modifier
             .heightIn(min = 36.dp)

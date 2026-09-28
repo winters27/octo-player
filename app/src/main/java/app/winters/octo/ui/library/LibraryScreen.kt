@@ -39,6 +39,7 @@ import androidx.navigation3.runtime.NavKey
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.livelists.liveListQueryFrom
 import app.winters.octo.sort.SortList
 import app.winters.octo.sort.Sorted
 import app.winters.octo.ui.common.AlbumCard
@@ -49,12 +50,12 @@ import app.winters.octo.ui.common.EmptyLibraryNote
 import app.winters.octo.ui.common.LetterRail
 import app.winters.octo.ui.common.Pickable
 import app.winters.octo.ui.common.PlayRow
-import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.RAIL_MIN_ITEMS
 import app.winters.octo.ui.common.Refreshable
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
+import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.SortButton
 import app.winters.octo.ui.common.TitleWithSort
@@ -73,6 +74,7 @@ import app.winters.octo.ui.nav.FavouritesRoute
 import app.winters.octo.ui.nav.FoldersRoute
 import app.winters.octo.ui.nav.GenresRoute
 import app.winters.octo.ui.nav.HistoryRoute
+import app.winters.octo.ui.nav.LiveListEditRoute
 import app.winters.octo.ui.nav.PlaylistsRoute
 import app.winters.octo.ui.nav.SongsRoute
 
@@ -210,7 +212,7 @@ fun ArtistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: LibraryViewM
 // Every song, in the chosen order, which the filter row above narrows. A
 // tap plays the list as shown from that song.
 @Composable
-fun SongsScreen(onBack: () -> Unit, vm: LibraryViewModel = hiltViewModel()) {
+fun SongsScreen(onBack: () -> Unit, onOpen: (NavKey) -> Unit = {}, vm: LibraryViewModel = hiltViewModel()) {
     val songs by vm.songs.collectAsStateWithLifecycle()
     val shown by vm.shownSongs.collectAsStateWithLifecycle()
     val query by vm.songFilter.collectAsStateWithLifecycle()
@@ -222,7 +224,9 @@ fun SongsScreen(onBack: () -> Unit, vm: LibraryViewModel = hiltViewModel()) {
         PlayButtons(shown, "song", vm::playSongs, details = if (query.filters) filteredCount(shown?.items?.size ?: 0, all) else null)
     }) {
         Loaded(songs) { _ ->
-            SongFilterRow(query, choices, vm::filterSongs)
+            SongFilterRow(query, choices, vm::filterSongs) {
+                onOpen(LiveListEditRoute(start = liveListQueryFrom(emptyList(), query, songs?.order)))
+            }
             val list = shown
             when {
                 list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

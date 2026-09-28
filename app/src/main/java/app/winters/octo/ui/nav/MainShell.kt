@@ -84,6 +84,8 @@ import app.winters.octo.ui.playlist.LocalPlaylistSheets
 import app.winters.octo.ui.playlist.PlaylistScreen
 import app.winters.octo.ui.playlist.PlaylistSheets
 import app.winters.octo.ui.playlist.PlaylistSheetsHost
+import app.winters.octo.ui.livelists.LiveListEditScreen
+import app.winters.octo.ui.livelists.LiveListScreen
 import app.winters.octo.ui.playlist.PlaylistsScreen
 import app.winters.octo.ui.search.SearchScreen
 import app.winters.octo.ui.server.LocalShareSheet
@@ -175,6 +177,8 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         playerOpen = false
         stack.add(key)
     }
+    // A live list's options can open its editor.
+    playlistSheets.editLiveList = { id -> openFromMenu(LiveListEditRoute(id)) }
 
     CompositionLocalProvider(
         LocalHaze provides haze,
@@ -218,7 +222,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             entry<OnlineArtistRoute> { OnlineArtistScreen(it.id, open, back) }
                             entry<AlbumsRoute> { AlbumsScreen(open, back) }
                             entry<ArtistsRoute> { ArtistsScreen(open, back) }
-                            entry<SongsRoute> { SongsScreen(back) }
+                            entry<SongsRoute> { SongsScreen(back, open) }
                             entry<GenresRoute> { GenresScreen(open, back) }
                             entry<GenreRoute> { GenreScreen(it.name, open, back) }
                             entry<FoldersRoute> { FoldersScreen(back) }
@@ -228,6 +232,14 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             entry<FavouritesRoute> { FavouritesScreen(open, back, openingSegment(it)) }
                             entry<DownloadsRoute> { DownloadsScreen(back) }
                             entry<PlaylistRoute> { PlaylistScreen(it.id, back) }
+                            entry<LiveListRoute> { LiveListScreen(it.id, back) }
+                            // Once saved, a new live list's screen takes the editor's place.
+                            entry<LiveListEditRoute> { route ->
+                                LiveListEditScreen(route.id, route.start, back, onSaved = { saved ->
+                                    stack.removeLastOrNull()
+                                    if (route.id == null) open(LiveListRoute(saved))
+                                })
+                            }
                             entry<SignInRoute> { SignInScreen(back) }
                             entry<EditConnectionRoute> { SignInScreen(back, editing = true) }
                             entry<OctoAdminRoute> { OctoAdminScreen(back) }

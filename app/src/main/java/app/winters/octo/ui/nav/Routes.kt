@@ -2,6 +2,7 @@ package app.winters.octo.ui.nav
 
 import androidx.navigation3.runtime.NavKey
 import app.winters.octo.ui.settings.SettingsPage
+import app.winters.octo.query.LibraryQuery
 import kotlinx.serialization.Serializable
 
 @Serializable data object HomeRoute : NavKey
@@ -37,6 +38,13 @@ import kotlinx.serialization.Serializable
 @Serializable data class FavouritesRoute(val albums: Boolean = false) : NavKey
 @Serializable data object DownloadsRoute : NavKey
 @Serializable data class PlaylistRoute(val id: String) : NavKey
+
+// A live list: songs picked by rules, kept on the phone.
+@Serializable data class LiveListRoute(val id: String) : NavKey
+
+// A live list's editor: an existing one by `id`, or a new one, begun from
+// `start` (a page's filters) when given.
+@Serializable data class LiveListEditRoute(val id: String? = null, val start: LibraryQuery? = null) : NavKey
 @Serializable data object SignInRoute : NavKey
 
 // The sign-in form, starting from the saved connection to change it.

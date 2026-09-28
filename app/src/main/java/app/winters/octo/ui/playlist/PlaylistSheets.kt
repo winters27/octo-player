@@ -46,6 +46,8 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.PopupPager
 import app.winters.octo.design.PopupPages
+import app.winters.octo.livelists.LiveListSongs
+import app.winters.octo.livelists.LiveListStore
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.playlists.PlaylistFiles
@@ -65,6 +67,8 @@ import app.winters.octo.ui.common.PopupNameForm
 import app.winters.octo.ui.common.PopupQuestion
 import app.winters.octo.ui.common.rememberOpenedBeside
 import app.winters.octo.ui.common.songs
+import app.winters.octo.ui.livelists.liveCopyMessage
+import app.winters.octo.ui.livelists.nothingToCopy
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
@@ -98,6 +102,12 @@ sealed interface PlaylistSheet {
     ) : PlaylistSheet
     data class Rename(val id: String, val name: String) : PlaylistSheet
     data class Delete(val id: String, val name: String, val onServer: Boolean = false) : PlaylistSheet
+
+    // A live list's options: edit its rules, rename, copy, save what it
+    // holds now as a playlist, delete (asked).
+    data class LiveOptions(val id: String, val name: String) : PlaylistSheet
+    data class LiveRename(val id: String, val name: String) : PlaylistSheet
+    data class LiveDelete(val id: String, val name: String) : PlaylistSheet
 }
 
 class PlaylistSheets {
@@ -121,6 +131,9 @@ class PlaylistSheets {
     fun close() {
         open = null
     }
+
+    // Opens a live list's editor, set by the screen that can navigate.
+    var editLiveList: ((String) -> Unit)? = null
 }
 
 val LocalPlaylistSheets = staticCompositionLocalOf<PlaylistSheets> { error("No playlist sheets") }
@@ -133,6 +146,8 @@ class PlaylistSheetsViewModel @Inject constructor(
     private val userDao: UserDao,
     private val feedback: Feedback,
     private val recent: RecentPlaylists,
+    private val liveLists: LiveListStore,
+    private val liveSongs: LiveListSongs,
 ) : ViewModel() {
     val playlists: StateFlow<List<PlaylistSummary>> =
         store.playlists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -174,6 +189,38 @@ class PlaylistSheetsViewModel @Inject constructor(
     }
 
     fun saveToServer(id: String) = store.saveToServer(id)
+
+    // Live lists.
+
+    fun renameLive(id: String, name: String) {
+        viewModelScope.launch { liveLists.rename(id, name) }
+    }
+
+    fun deleteLive(id: String) {
+        viewModelScope.launch { liveLists.remove(id) }
+    }
+
+    fun duplicateLive(id: String) {
+        viewModelScope.launch {
+            val list = liveLists.byId(id) ?: return@launch
+            feedback.show(copiedMessage(liveLists.duplicate(list).name))
+        }
+    }
+
+    // A playlist of the songs the live list holds now: a copy, which does
+    // not change with the rules.
+    fun copyLive(id: String) {
+        viewModelScope.launch {
+            val list = liveLists.byId(id) ?: return@launch
+            val songs = liveSongs.now(list)
+            if (songs.isEmpty()) {
+                feedback.show(nothingToCopy(list.name))
+                return@launch
+            }
+            store.create(list.name, songs.map { it.id })
+            feedback.show(liveCopyMessage(list.name, songs.size))
+        }
+    }
 
     // Downloads the playlist's songs that are only on a server, once.
     fun download(id: String) = offline.downloadPlaylist(id)
@@ -252,6 +299,38 @@ fun PlaylistSheetsHost(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel = hil
                 })
                 is PlaylistSheet.Delete -> ConfirmDelete(sheet.name, sheet.onServer, onCancel = back ?: sheets::close) {
                     vm.delete(sheet.id)
+                    sheets.close()
+                }
+                is PlaylistSheet.LiveOptions -> GlassMenuPage(header = { GlassMenuHeading(sheet.name) }) {
+                    sheets.editLiveList?.let { edit ->
+                        GlassMenuAction(OctoIcons.Filter, "Edit rules", onClick = {
+                            sheets.close()
+                            edit(sheet.id)
+                        })
+                    }
+                    GlassMenuAction(OctoIcons.Rename, "Rename", opensPage = true, onClick = { sheets.show(PlaylistSheet.LiveRename(sheet.id, sheet.name)) })
+                    GlassMenuAction(OctoIcons.AddToPlaylist, "Duplicate", onClick = {
+                        vm.duplicateLive(sheet.id)
+                        sheets.close()
+                    })
+                    GlassMenuAction(OctoIcons.Playlists, "Save a copy as a playlist", onClick = {
+                        vm.copyLive(sheet.id)
+                        sheets.close()
+                    })
+                    GlassMenuAction(
+                        OctoIcons.Delete,
+                        "Delete",
+                        opensPage = true,
+                        destructive = true,
+                        onClick = { sheets.show(PlaylistSheet.LiveDelete(sheet.id, sheet.name)) },
+                    )
+                }
+                is PlaylistSheet.LiveRename -> PopupNameForm("Rename live list", "Live list name", "Save", onBack = back, initial = sheet.name, onDone = { name ->
+                    vm.renameLive(sheet.id, name)
+                    sheets.close()
+                })
+                is PlaylistSheet.LiveDelete -> ConfirmDelete(sheet.name, onServer = false, onCancel = back ?: sheets::close) {
+                    vm.deleteLive(sheet.id)
                     sheets.close()
                 }
             }

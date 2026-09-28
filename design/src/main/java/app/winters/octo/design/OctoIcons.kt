@@ -59,6 +59,8 @@ object OctoIcons {
 
     // How a list is ordered, and which way it runs.
     val Sort = R.drawable.sym_sort
+    // Rules: filters, and the mark of a live list.
+    val Filter = R.drawable.sym_filter_list
     val Ascending = R.drawable.sym_arrow_upward
     val Descending = R.drawable.sym_arrow_downward
 
