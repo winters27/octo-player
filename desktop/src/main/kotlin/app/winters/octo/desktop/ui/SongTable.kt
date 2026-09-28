@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -177,14 +178,19 @@ fun SongTable(
     // table need not.
     covers: Boolean = true,
     number: (Int, Song) -> String = { index, _ -> "${index + 1}" },
-    // A heading above a row, like a disc's name on an album.
+    // A heading above a row, like a disc's name on an album, and a line
+    // under it.
     groupTitle: (Int) -> String? = { null },
+    groupDetail: (Int) -> String? = { null },
     padding: PaddingValues = pagePadding(LocalBottomRoom.current),
     // Where picked rows live, for the menu's removals and the Delete key:
     // a playlist says which of its places they are.
     place: (List<TableRow>) -> SongPlace = { SongPlace.Library },
     // What the rows do with songs dropped on them, if anything.
     rowDrop: RowDrop? = null,
+    // A first group of the page's own rows in the song menu, for the songs
+    // picked, or null for none.
+    menuExtra: ((List<Song>, () -> Unit) -> (@Composable ColumnScope.() -> Unit)?)? = null,
     empty: @Composable () -> Unit = {},
     footer: LazyListScope.() -> Unit = {},
     header: LazyListScope.() -> Unit = {},
@@ -230,7 +236,7 @@ fun SongTable(
         val rowsPicked = selection.of(rows).ifEmpty { return }
         val where = place(rowsPicked)
         val picked = rowsPicked.map(TableRow::song)
-        app.popups.showAt(at) { close -> SongMenu(app, picked, close, outside = picked.any { it.id in outside }, place = where) }
+        app.popups.showAt(at) { close -> SongMenu(app, picked, close, outside = picked.any { it.id in outside }, place = where, extra = menuExtra?.invoke(picked, close)) }
     }
     // Delete takes the picked rows out of the playlist or the queue they
     // are in; in the library it does nothing.
@@ -355,7 +361,9 @@ fun SongTable(
             }
             itemsIndexed(rows, key = { _, row -> RowKey + row.key }) { index, row ->
                 groupTitle(index)?.let { title ->
-                    Txt(title, DesktopType.emphasis, OctoColors.TextSecondary, Modifier.padding(start = Space.M, top = if (index == 0) Space.Xs else Space.Xl, bottom = Space.S))
+                    val detail = groupDetail(index)
+                    Txt(title, DesktopType.emphasis, OctoColors.TextSecondary, Modifier.padding(start = Space.M, top = if (index == 0) Space.Xs else Space.Xl, bottom = if (detail == null) Space.S else Space.None))
+                    if (detail != null) Txt(detail, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(start = Space.M, top = Space.Xxs, bottom = Space.S))
                 }
                 SongRow(
                     app, row, index, shown, rowHeight,
