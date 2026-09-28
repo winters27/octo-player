@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -69,6 +70,7 @@ import app.winters.octo.desktop.window.TitleBarHeight
 import app.winters.octo.desktop.window.TitleStrip
 import app.winters.octo.desktop.window.WindowButtons
 import app.winters.octo.desktop.window.dragsWindow
+import app.winters.octo.player.immersive.WashTuning
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.LocalPopups
 import app.winters.octo.design.OctoColors
@@ -91,10 +93,12 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
     val backdrop = rememberHazeState()
     val pointer = remember { PointerSpot() }
     val connection = app.connection
+    val key = rememberKeyColour(app)
     CompositionLocalProvider(
         LocalPopups provides app.popups,
         LocalPointer provides pointer,
         LocalCovers provides connection?.client,
+        LocalKeyColour provides key,
     ) {
         Box(
             Modifier
@@ -114,9 +118,7 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
             // The stage: everything the glass frosts.
             Box(Modifier.fillMaxSize().hazeSource(backdrop)) {
                 AmbientGlow(app)
-                if (connection == null) {
-                    Box(Modifier.fillMaxSize().padding(top = top)) { SignInPage(app) }
-                } else {
+                if (connection != null) {
                     val end = if (panel != null) SidePanelWidth + Margin * 2 else Margin
                     CompositionLocalProvider(LocalBottomRoom provides BarHeight + Margin * 2) {
                         Box(
@@ -133,7 +135,9 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
                     }
                 }
             }
-            // The glass.
+            // The glass. The sign-in card frosts the colours behind it, so it
+            // sits here, over the stage.
+            if (connection == null) Box(Modifier.fillMaxSize().padding(top = top)) { SignInPage(app, backdrop) }
             if (connection != null) {
                 Sidebar(
                     app,
@@ -235,16 +239,42 @@ private fun PageHost(app: AppState) {
     }
 }
 
+// The key colour: the main colour of the playing song's cover, or Octo's
+// own while nothing with a cover plays.
+@Composable
+private fun rememberKeyColour(app: AppState): Color {
+    val state by app.player.state.collectAsState()
+    val settings by app.settings.state.collectAsState()
+    val coverId = state.current?.song?.coverArt
+    val connection = app.connection
+    val wash = settings.appearance.wash
+    val tuning = WashTuning(wash.contrast, wash.saturation / 100f, wash.brightnessCap / 100f)
+    val key by produceState(OctoKey, coverId, connection, tuning) {
+        value = if (coverId == null || connection == null) OctoKey else app.washCovers.prepare(connection.client, coverId, tuning).keyColour()
+    }
+    return key
+}
+
 // A soft wash of the playing song's colours across the top of the window:
 // its cover, blurred far past recognition and kept faint. Garnish, and off
-// when the listener turns it off.
+// when the listener turns it off. With no cover to show, Octo's own
+// colours stand in, still and very dim, so the glass has something behind
+// it. Before signing in they move, behind the sign-in card.
 @Composable
 private fun BoxScope.AmbientGlow(app: AppState) {
     val settings by app.settings.state.collectAsState()
     val look = settings.appearance
     val state by app.player.state.collectAsState()
     val cover = state.current?.song?.coverArt
-    if (!look.ambientGlow || cover == null || app.connection == null) return
+    if (app.connection == null) {
+        OctoAmbience(app, moving = true, veil = 0.2f)
+        return
+    }
+    if (!look.ambientGlow) return
+    if (cover == null) {
+        OctoAmbience(app, moving = false, veil = 0.8f - 0.3f * look.glowStrength.coerceIn(0f, 1f))
+        return
+    }
     Box(
         Modifier
             .fillMaxWidth()

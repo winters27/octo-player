@@ -10,13 +10,16 @@ import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
 import okhttp3.OkHttpClient
 import java.util.concurrent.CopyOnWriteArrayList
+import javax.net.ssl.SSLSocketFactory
 
 // A pretend Subsonic server for tests: each endpoint answers with the body
 // given for it, wrapped as a Subsonic answer, and every call is recorded.
-// Nothing here ever reaches a real server.
-class FakeServer : AutoCloseable {
+// Nothing here ever reaches a real server. With `tls` it speaks https,
+// with whatever certificate that holds.
+class FakeServer(tls: SSLSocketFactory? = null) : AutoCloseable {
     private val server = MockWebServer()
     private val answers = HashMap<String, String>()
+    private val rules = HashMap<String, (RecordedRequest) -> String>()
     private val files = HashMap<String, ByteArray>()
     val calls = CopyOnWriteArrayList<RecordedRequest>()
 
@@ -28,11 +31,13 @@ class FakeServer : AutoCloseable {
                 synchronized(files) { files[endpoint] }?.let { bytes ->
                     return MockResponse.Builder().body(okio.Buffer().write(bytes)).build()
                 }
+                synchronized(rules) { rules[endpoint] }?.let { rule -> return MockResponse.Builder().body(rule(request)).build() }
                 val body = synchronized(answers) { answers[endpoint] }
                     ?: return MockResponse.Builder().body(error(70, "not found")).build()
                 return MockResponse.Builder().body(body).build()
             }
         }
+        if (tls != null) server.useHttps(tls)
         server.start()
     }
 
@@ -50,6 +55,19 @@ class FakeServer : AutoCloseable {
     fun file(endpoint: String, bytes: ByteArray) {
         synchronized(files) { files[endpoint] = bytes }
     }
+
+    // Answers `endpoint` by looking at each request: `ok` for an answer
+    // like `answer` gives, `failed` for an error.
+    fun answerBy(endpoint: String, rule: (RecordedRequest) -> String) {
+        synchronized(rules) { rules[endpoint] = rule }
+    }
+
+    fun ok(payload: String = "", type: String = "navidrome"): String {
+        val extra = if (payload.isEmpty()) "" else ",$payload"
+        return """{"subsonic-response":{"status":"ok","version":"1.16.1","type":"$type","serverVersion":"0.58.0","openSubsonic":true$extra}}"""
+    }
+
+    fun failed(code: Int, message: String) = error(code, message)
 
     fun fail(endpoint: String, code: Int, message: String) {
         synchronized(answers) { answers[endpoint] = error(code, message) }

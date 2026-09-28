@@ -25,8 +25,9 @@ import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Rect
 
 // A cover made ready for the background: the 512 square the wash draws
-// from, and whether words over it should be dark (a light wash).
-class WashCover(val key: String, val square: Image, val darkWords: Boolean)
+// from, whether words over it should be dark (a light wash), and its main
+// colour as ARGB, which tints the app's glass while it plays.
+class WashCover(val key: String, val square: Image, val darkWords: Boolean, val main: Int = 0)
 
 // The pixels of a 512 square, as ARGB, and back.
 private val SquareInfo = ImageInfo(WashSize, WashSize, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
@@ -103,7 +104,7 @@ class WashCovers(private val http: OkHttpClient) {
             out.allocPixels(SquareInfo)
             out.installPixels(SquareInfo, bytes, WashSize * 4)
             out.setImmutable()
-            return WashCover(key, Image.makeFromBitmap(out), washIsLight(prepareColor(dominant, tuning)))
+            return WashCover(key, Image.makeFromBitmap(out), washIsLight(prepareColor(dominant, tuning)), dominant)
         }
 
         // For music without a cover: three quiet colours, blended corner to
