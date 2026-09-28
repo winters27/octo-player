@@ -7,7 +7,6 @@ import app.winters.octo.catalog.TrackEntity
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
 
@@ -46,32 +45,12 @@ fun recentHistory(local: List<PlayedAt>, server: List<ServerPlayedTrack>, limit:
 
 // Plays under a heading per day: Today, Yesterday, the weekday for the
 // rest of the week, then the date, with the year once it is not this one.
-// The plays come newest first and keep that order.
-fun historyDays(plays: List<HistoryPlay>, now: Long, zone: ZoneId, locale: Locale = Locale.getDefault()): List<HistoryDay> {
-    val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
-    val days = mutableListOf<HistoryDay>()
-    var day: LocalDate? = null
-    var bunch = mutableListOf<HistoryPlay>()
-    for (play in plays) {
-        val date = Instant.ofEpochMilli(play.at).atZone(zone).toLocalDate()
-        if (date != day) {
-            day?.let { days += HistoryDay(dayLabel(it, today, locale), bunch) }
-            day = date
-            bunch = mutableListOf()
-        }
-        bunch += play
-    }
-    day?.let { days += HistoryDay(dayLabel(it, today, locale), bunch) }
-    return days
-}
+// The plays come newest first and keep that order. The headings are shared
+// with the desktop.
+fun historyDays(plays: List<HistoryPlay>, now: Long, zone: ZoneId, locale: Locale = Locale.getDefault()): List<HistoryDay> =
+    byPlayDay(plays, { it.at }, now, zone, locale).map { HistoryDay(it.heading, it.items) }
 
-fun dayLabel(day: LocalDate, today: LocalDate, locale: Locale = Locale.getDefault()): String = when {
-    day == today -> "Today"
-    day == today.minusDays(1) -> "Yesterday"
-    day.isAfter(today.minusDays(7)) && !day.isAfter(today) -> day.format(DateTimeFormatter.ofPattern("EEEE", locale))
-    day.year == today.year -> day.format(DateTimeFormatter.ofPattern("MMMM d", locale))
-    else -> day.format(DateTimeFormatter.ofPattern("MMMM d, yyyy", locale))
-}
+fun dayLabel(day: LocalDate, today: LocalDate, locale: Locale = Locale.getDefault()): String = playDayHeading(day, today, locale)
 
 // How far back "most played" looks.
 enum class HistoryRange(val label: String) {

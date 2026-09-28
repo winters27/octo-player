@@ -65,6 +65,7 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
     val mostPlayed by vm.mostPlayed.collectAsStateWithLifecycle()
     val pinned by vm.pinned.collectAsStateWithLifecycle()
     val favouriteAlbums by vm.favouriteAlbums.collectAsStateWithLifecycle()
+    val rediscovery by vm.rediscovery.collectAsStateWithLifecycle()
 
     LifecycleResumeEffect(Unit) {
         vm.onShown()
@@ -92,6 +93,9 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
                     shelf("Favourite albums", favouriteAlbums, onOpen, onTitle = { onOpen(FavouritesRoute(albums = true)) })
                     songShelf("Most played", mostPlayed, vm::play, onTitle = { onOpen(HistoryRoute(mostPlayed = true)) })
                     shelf("Something different", vm.surprise, onOpen)
+                    shelf("Not played in 6 months", rediscovery.notPlayedLately, onOpen)
+                    shelf("Albums you never finished", rediscovery.neverFinished, onOpen)
+                    shelf("Unplayed albums", rediscovery.neverPlayed, onOpen)
                     if (vm.artists.isNotEmpty()) {
                         item { SectionTitle("Artists", Modifier.padding(top = 18.dp)) }
                         item {
