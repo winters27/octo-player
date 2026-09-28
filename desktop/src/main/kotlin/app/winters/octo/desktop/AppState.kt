@@ -19,6 +19,7 @@ import app.winters.octo.desktop.nav.VOLUME_STEP
 import app.winters.octo.desktop.player.DEFAULT_OUTPUT
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.SilentPlayer
+import app.winters.octo.desktop.player.wash.WashCovers
 import app.winters.octo.desktop.search.Fetches
 import app.winters.octo.desktop.search.SearchModel
 import app.winters.octo.desktop.server.Accounts
@@ -89,6 +90,18 @@ class AppState(
         private set
 
     var fullPlayer by mutableStateOf(false)
+
+    // What the full player shows beside the cover: the lyrics, the queue,
+    // or nothing.
+    var playerPanel by mutableStateOf<SidePanel?>(SidePanel.Lyrics)
+        private set
+
+    fun togglePlayerPanel(panel: SidePanel) {
+        playerPanel = if (playerPanel == panel) null else panel
+    }
+
+    // Covers made ready for the full player's background.
+    val washCovers = WashCovers(http)
 
     // One quiet line at the top of the main area, for something the
     // listener should know once (never a stack of toasts).

@@ -17,6 +17,7 @@ import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.nav.shortcutList
 import app.winters.octo.desktop.settings.DesktopOs
+import app.winters.octo.desktop.settings.WashPrefs
 import app.winters.octo.desktop.ui.LocalBottomRoom
 import app.winters.octo.desktop.ui.PageTitle
 import app.winters.octo.desktop.ui.pagePadding
@@ -72,6 +73,17 @@ fun SettingsPage(app: AppState, visit: Visit) {
                         Txt("${(settings.appearance.glowStrength * 100).roundToInt()}%", OctoType.caption, OctoColors.TextMuted, Modifier.width(44.dp))
                     }
                 }
+                val look = settings.appearance
+                fun wash(edit: (WashPrefs) -> WashPrefs) = app.settings.update { it.copy(appearance = it.appearance.copy(wash = edit(it.appearance.wash))) }
+                SwitchLine("Calm motion", "The player's background holds still, and lyrics move without springs or blooms.", look.calmMotion) { on ->
+                    app.settings.update { it.copy(appearance = it.appearance.copy(calmMotion = on)) }
+                }
+                SwitchLine("Moving player background", "The cover's colours drift slowly behind the full player.", look.wash.moving) { on -> wash { it.copy(moving = on) } }
+                if (look.wash.moving && !look.calmMotion) {
+                    SliderLine("Drift speed", "${look.wash.speed}%", (look.wash.speed - 5) / 95f, { x -> wash { it.copy(speed = (5 + x * 95).roundToInt()) } }, live = false)
+                    SwitchLine("Follow the song's tempo", "Faster songs drift a little faster, when the server knows their tempo.", look.wash.useBpm) { on -> wash { it.copy(useBpm = on) } }
+                }
+                SliderLine("Background brightness", "${look.wash.brightnessCap}%", (look.wash.brightnessCap - 20) / 80f, { x -> wash { it.copy(brightnessCap = (20 + x * 80).roundToInt()) } }, live = false)
                 if (app.os != DesktopOs.Mac) {
                     SwitchLine("Use the system title bar", "The window's own frame instead of Octo's glass one. Takes effect the next time Octo opens.", settings.systemTitleBar) { on ->
                         app.settings.update { it.copy(systemTitleBar = on) }

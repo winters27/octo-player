@@ -4,6 +4,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.unit.Density
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.audio.EnginePlayer
+import app.winters.octo.desktop.audio.LocalOrServer
+import app.winters.octo.desktop.audio.NativeAudioEngine
+import app.winters.octo.desktop.audio.ServerSongs
+import app.winters.octo.desktop.audio.writeSine
+import app.winters.octo.desktop.lyrics.openLyricsMenu
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.nav.Page
@@ -19,6 +25,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
+import app.winters.octo.lyrics.OnlineLyrics
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.jetbrains.skia.EncodedImageFormat
 import org.junit.Assume.assumeTrue
@@ -30,7 +38,8 @@ import javax.swing.SwingUtilities
 
 // Draws the whole window off screen against a pretend server and saves
 // pictures of the main pages, for looking at the layout without a display.
-// It only runs when asked: OCTO_SHOTS=1 ./gradlew :desktop:test
+// It only runs when asked: OCTO_SHOTS=1 ./gradlew :desktop:test. The
+// player is the real audio engine on its silent device.
 class ScreenShotsTest {
     @get:Rule val folder = TemporaryFolder()
 
@@ -53,21 +62,35 @@ class ScreenShotsTest {
             server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly"},{"id":"st2","name":"Rock mix"}]}""")
             server.answer("getLyricsBySongId", """"lyricsList":{"structuredLyrics":[{"lang":"en","synced":true,"line":[{"start":0,"value":"Karma police"},{"start":4000,"value":"Arrest this man"},{"start":8000,"value":"He talks in maths"}]}]}""")
 
+            // A made-up cover, and a quiet tone for every song, so the engine
+            // really plays (on its silent device) and the lyrics move.
+            server.file("getCoverArt", madeUpCover())
+            val tone = File(folder.root, "tone.wav").also { writeSine(it, seconds = 30) }
+            server.file("stream", tone.readBytes())
+
             val settings = SettingsStore(File(folder.root, "settings.json"))
+            // Never the real online lyrics library.
+            settings.update { it.copy(lyrics = it.lyrics.copy(online = false)) }
             val http = OkHttpClient()
             val accounts = Accounts(settings, SessionOnlySecrets(), http)
             lateinit var app: AppState
-            SwingUtilities.invokeAndWait { app = AppState(settings, accounts, http, CoroutineScope(SupervisorJob() + Dispatchers.Main), DesktopOs.Windows) }
+            val player = EnginePlayer(NativeAudioEngine.open(silent = true), LocalOrServer(ServerSongs { app.connection?.client }))
+            SwingUtilities.invokeAndWait {
+                app = AppState(settings, accounts, http, CoroutineScope(SupervisorJob() + Dispatchers.Main), DesktopOs.Windows, player, OnlineLyrics(http, server.address.toHttpUrl()))
+            }
             val scene = ImageComposeScene(1440, 900, Density(1f)) {
                 CompositionLocalProvider(LocalTyping provides TypingState()) { Shell(app, null) {} }
             }
             fun shot(name: String, settleMs: Long = 1_500) {
-                val end = System.currentTimeMillis() + settleMs
+                val begin = System.currentTimeMillis()
+                val end = begin + settleMs
+                // The scene's clock follows real time, so animations finish
+                // however long a frame takes to draw off screen.
                 var t = 0L
                 while (System.currentTimeMillis() < end) {
                     SwingUtilities.invokeAndWait { scene.render(t) }
-                    t += 16_000_000
                     Thread.sleep(30)
+                    t = (System.currentTimeMillis() - begin) * 1_000_000
                 }
                 val image = scene.render(t)
                 File(out, "$name.png").writeBytes(image.encodeToData(EncodedImageFormat.PNG)!!.bytes)
@@ -108,7 +131,41 @@ class ScreenShotsTest {
                 app.navigator.go(Page.Settings)
             }
             shot("settings")
+            SwingUtilities.invokeAndWait { app.navigator.go(Page.Sound) }
+            shot("sound")
+            SwingUtilities.invokeAndWait {
+                app.navigator.go(Page.Songs)
+                app.toggleSidePanel(SidePanel.Lyrics)
+            }
+            shot("lyrics", 2_500)
+            SwingUtilities.invokeAndWait {
+                openLyricsMenu(app, app.lyrics.state.value.song!!, androidx.compose.ui.unit.IntRect(1380, 60, 1412, 92))
+            }
+            shot("lyrics-menu")
+            SwingUtilities.invokeAndWait {
+                app.popups.close()
+                app.fullPlayer = true
+            }
+            shot("player", 4_000)
+            SwingUtilities.invokeAndWait { app.togglePlayerPanel(SidePanel.Queue) }
+            shot("player-queue")
             scene.close()
+            player.close()
         }
+    }
+
+    // A cover of soft coloured shapes, as a PNG.
+    private fun madeUpCover(): ByteArray {
+        val surface = org.jetbrains.skia.Surface.makeRasterN32Premul(300, 300)
+        val canvas = surface.canvas
+        canvas.clear(0xFF1B2A4A.toInt())
+        val paint = org.jetbrains.skia.Paint()
+        paint.color = 0xFFE0703A.toInt()
+        canvas.drawCircle(90f, 100f, 90f, paint)
+        paint.color = 0xFF3AA6A0.toInt()
+        canvas.drawCircle(220f, 200f, 110f, paint)
+        paint.color = 0xFFF2D06B.toInt()
+        canvas.drawRect(org.jetbrains.skia.Rect.makeXYWH(40f, 210f, 120f, 60f), paint)
+        return surface.makeImageSnapshot().encodeToData(EncodedImageFormat.PNG)!!.bytes
     }
 }

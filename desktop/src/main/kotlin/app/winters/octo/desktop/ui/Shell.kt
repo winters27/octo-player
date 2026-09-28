@@ -156,17 +156,20 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
                     )
                 }
                 AnimatedVisibility(app.fullPlayer, enter = fadeIn(), exit = fadeOut()) {
-                    FullPlayer(app, Modifier.fillMaxSize().padding(top = top, bottom = BarHeight + Margin * 2))
+                    FullPlayer(app, Modifier.fillMaxSize(), top = top)
                 }
-                NowPlayingBar(
-                    app,
-                    backdrop,
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(Margin)
-                        .fillMaxWidth()
-                        .height(BarHeight),
-                )
+                // The full player has its own controls.
+                if (!app.fullPlayer) {
+                    NowPlayingBar(
+                        app,
+                        backdrop,
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(Margin)
+                            .fillMaxWidth()
+                            .height(BarHeight),
+                    )
+                }
             }
             TitleBar(app, frame, onClose)
             PopupLayer(app.popups, backdrop)
@@ -255,32 +258,5 @@ private fun BoxScope.AmbientGlow(app: AppState) {
         )
         // Fades into the page below, so there is no edge.
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, OctoColors.Background))))
-    }
-}
-
-// The player filling the stage: the cover large, with the song's names,
-// over its own blurred colours. The bar below keeps the controls.
-@Composable
-private fun FullPlayer(app: AppState, modifier: Modifier) {
-    val state by app.player.state.collectAsState()
-    val song = state.current?.song ?: return
-    Box(modifier.background(OctoColors.Background.copy(alpha = 0.94f))) {
-        Cover(song.coverArt, Modifier.fillMaxSize().blur(140.dp, BlurredEdgeTreatment.Unbounded).alpha(0.35f), shape = RoundedCornerShape(0.dp))
-        BoxWithConstraints(Modifier.fillMaxSize().padding(48.dp)) {
-            val side = minOf(460.dp, maxHeight * 0.85f, maxWidth * 0.45f)
-            Row(
-                Modifier.fillMaxSize(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(48.dp, Alignment.CenterHorizontally),
-            ) {
-                Cover(song.coverArt, Modifier.size(side), shape = RoundedCornerShape(14.dp), placeholder = OctoIcons.Songs)
-                Column(Modifier.widthIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Txt(song.title, OctoType.display, maxLines = 3)
-                    Txt(song.displayArtist ?: song.artist.orEmpty(), OctoType.headline, OctoColors.TextSecondary)
-                    song.album?.let { Txt(it, OctoType.body, OctoColors.TextMuted) }
-                }
-            }
-        }
-        IconAction(OctoIcons.Collapse, "Close the player", { app.fullPlayer = false }, Modifier.align(Alignment.TopEnd).padding(16.dp))
     }
 }

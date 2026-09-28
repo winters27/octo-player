@@ -23,7 +23,11 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.style.TextAlign
@@ -42,6 +46,7 @@ import app.winters.octo.design.GlazeLight
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.MenuRow
+import app.winters.octo.design.MenuSeparator
 import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -96,7 +101,7 @@ fun NowPlayingBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modif
                         song?.title ?: "Nothing playing",
                         OctoType.label,
                         if (song != null) OctoColors.TextPrimary else OctoColors.TextMuted,
-                        Modifier.clickable(enabled = song?.albumId != null) { song?.albumId?.let { app.navigator.go(Page.Album(it)) } },
+                        Modifier.clickable(enabled = song != null) { app.fullPlayer = true },
                     )
                     if (song != null) {
                         LinkText(song.displayArtist ?: song.artist.orEmpty(), song.artistId) { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }
@@ -135,6 +140,8 @@ fun NowPlayingBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modif
                         fraction = { if (duration > 0) position.toFloat() / duration else 0f },
                         onSeek = { app.player.seekTo((it * duration).toLong()) },
                         modifier = Modifier.weight(1f),
+                        // The time a click would jump to, over the pointer.
+                        hoverLabel = if (duration > 0) { at -> lengthText(((at * duration) / 1000).toInt()).ifEmpty { "0:00" } } else null,
                     )
                     Txt(lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }, OctoType.caption, OctoColors.TextMuted, Modifier.width(44.dp))
                 }
@@ -163,30 +170,55 @@ fun PlayButton(playing: Boolean, enabled: Boolean, size: androidx.compose.ui.uni
     }
 }
 
-// Where the sound goes. The placeholder player has only the system's
-// default; the engine lists the real outputs here.
+// Where the sound goes: a glass menu of the system's default (followed as
+// it changes, so plugging in headphones moves the sound there) and every
+// device the engine can play to. The chosen one is ticked.
 @Composable
 private fun OutputButton(app: AppState) {
     var anchor by remember { mutableStateOf(IntRect.Zero) }
+    val state by app.player.state.collectAsState()
     Box(Modifier.onGloballyPositioned { anchor = it.windowRect() }) {
-        IconAction(OctoIcons.Speaker, "Output", {
-            app.popups.showUnder(anchor) { close ->
-                val state = app.player.state.value
+        IconAction(outputIcon(state.playingOn?.name), "Output: ${state.playingOn?.name ?: "system default"}", {
+            app.popups.showUnder(anchor, width = 300.dp) { close ->
+                val now = app.player.state.value
                 MenuTitle("Play on")
-                state.outputs.forEach { device ->
-                    MenuRow(device.name, { app.selectOutput(device.id); close() }, OctoIcons.Speaker, detail = if (device.id == state.output?.id) "In use" else null)
+                now.outputs.forEachIndexed { index, device ->
+                    if (index == 1) MenuSeparator()
+                    MenuRow(
+                        device.name,
+                        {
+                            app.selectOutput(device.id)
+                            close()
+                        },
+                        if (device.id == now.output?.id) OctoIcons.Check else outputIcon(device.name),
+                        detail = if (index == 0) "Follows the system" else null,
+                    )
                 }
             }
         }, size = 34.dp, iconSize = 19.dp)
     }
 }
 
-// The volume: a speaker that mutes and unmutes, and a line to drag or
-// scroll.
+// Headphones for a device named like a pair, a speaker otherwise.
+private fun outputIcon(name: String?): ImageVector {
+    val lower = name.orEmpty().lowercase()
+    val pair = listOf("headphone", "headset", "earbud", "airpods", "buds", "earphone").any { it in lower }
+    return if (pair) OctoIcons.Headphones else OctoIcons.Speaker
+}
+
+// The volume: a speaker that mutes and unmutes, and a line to drag. The
+// wheel anywhere over either turns it up or down.
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun VolumeControl(app: AppState, volume: Float) {
     var before by remember { mutableFloatStateOf(0.8f) }
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.onPointerEvent(PointerEventType.Scroll) { event ->
+            val dy = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+            if (dy != 0f) app.setVolume(volume - dy * 0.05f)
+        },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         IconAction(
             if (volume <= 0.001f) OctoIcons.VolumeDown else OctoIcons.VolumeUp,
             if (volume <= 0.001f) "Unmute" else "Mute",
@@ -201,7 +233,7 @@ private fun VolumeControl(app: AppState, volume: Float) {
             size = 34.dp,
             iconSize = 19.dp,
         )
-        LineSlider(fraction = { volume }, onSeek = app::setVolume, modifier = Modifier.width(96.dp), live = true, wheelStep = 0.05f)
+        LineSlider(fraction = { volume }, onSeek = app::setVolume, modifier = Modifier.width(96.dp), live = true, hoverLabel = { "${(it * 100).toInt()}%" })
     }
 }
 
