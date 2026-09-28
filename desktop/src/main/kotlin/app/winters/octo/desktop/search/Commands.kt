@@ -33,6 +33,7 @@ fun commandsFor(app: AppState): List<Command> = buildList {
     page("Favourites", Page.Favourites, "liked starred hearts")
     page("Recently played", Page.History, "history")
     page("Recently added", Page.RecentlyAdded, "new")
+    page("Library health", Page.LibraryHealth, "duplicates missing tags problems")
     page("Sound", Page.Sound, "equalizer eq loudness crossfade")
     page("Settings", Page.Settings, "preferences options")
 
