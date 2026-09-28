@@ -24,6 +24,11 @@ import app.winters.octo.desktop.discord.DiscordSync
 import app.winters.octo.desktop.discord.discordActivityFor
 import app.winters.octo.desktop.discord.discordAppId
 import app.winters.octo.desktop.discord.discordPipes
+import app.winters.octo.desktop.hotkeys.GlobalShortcuts
+import app.winters.octo.desktop.hotkeys.HotkeyAction
+import app.winters.octo.desktop.hotkeys.HotkeyBackend
+import app.winters.octo.desktop.nav.VOLUME_STEP
+import app.winters.octo.desktop.ui.anyOutside
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -49,6 +54,9 @@ class SystemIntegration(
     places: AppPlaces,
     val os: DesktopOs,
     private val instance: SingleInstance?,
+    // Where global shortcuts are claimed; the system's own unless a test
+    // hands in a pretend one.
+    hotkeys: HotkeyBackend? = null,
 ) : AutoCloseable {
     val controls: SystemMediaControls = when (os) {
         DesktopOs.Windows -> NativeMediaControls.load("System media controls") ?: NoMediaControls()
@@ -87,6 +95,9 @@ class SystemIntegration(
     var discordConnected by mutableStateOf(false)
         private set
 
+    // Keys that reach Octo from any app (Windows only for now).
+    val shortcuts = if (hotkeys != null) GlobalShortcuts(app.settings, app.scope, os, ::onShortcut, hotkeys) else GlobalShortcuts(app.settings, app.scope, os, ::onShortcut)
+
     // Whether the media keys reach Octo, for the settings page.
     var mediaKeysWork by mutableStateOf(false)
         private set
@@ -109,6 +120,7 @@ class SystemIntegration(
     fun start(launchArgs: List<String>) {
         session.start { works -> mediaKeysWork = works }
         startDiscord()
+        shortcuts.start()
         // The system bus can be slow to answer, so it is reached off the window's thread.
         sleepWatch?.let { watch -> app.scope.launch(Dispatchers.IO) { watch.start { event -> app.scope.launch { session.handle(event) } } } }
         app.scope.launch {
@@ -234,6 +246,33 @@ class SystemIntegration(
         }
     }
 
+    // A global shortcut was pressed.
+    private fun onShortcut(action: HotkeyAction) {
+        val player = app.player
+        when (action) {
+            HotkeyAction.PlayPause -> player.togglePlay()
+            HotkeyAction.Next -> player.next()
+            HotkeyAction.Previous -> player.previous()
+            HotkeyAction.VolumeUp -> app.setVolume((player.state.value.volume + VOLUME_STEP).coerceAtMost(1f))
+            HotkeyAction.VolumeDown -> app.setVolume((player.state.value.volume - VOLUME_STEP).coerceAtLeast(0f))
+            HotkeyAction.ShowHide -> if (windowVisible && windowInFront) putWindowAway() else raise()
+            HotkeyAction.MiniPlayer -> toggleMiniPlayer()
+            HotkeyAction.Like -> player.state.value.current?.song?.let { song ->
+                if (!isOpenedFile(song.id) && !app.anyOutside(listOf(song))) app.setStarred(listOf(song), !app.isStarred(song))
+            }
+        }
+    }
+
+    // Hides the window in the tray where there is one, and to the taskbar
+    // where there is not, so it can always be found again.
+    private fun putWindowAway() {
+        if (trayAvailable) {
+            hideWindow()
+        } else {
+            (mainWindow as? java.awt.Frame)?.let { it.extendedState = it.extendedState or java.awt.Frame.ICONIFIED }
+        }
+    }
+
     fun onTray(action: TrayAction) {
         when (action) {
             TrayAction.PlayPause -> app.player.togglePlay()
@@ -245,11 +284,14 @@ class SystemIntegration(
         }
     }
 
+    private var mainWindow: java.awt.Window? = null
+
     // Whether the system asks for less motion, read once, for the mini player.
     private val systemCalm by lazy { systemReducesMotion(os) }
 
     // Follows the window's focus, for the notices.
     fun watch(window: java.awt.Window) {
+        mainWindow = window
         window.addWindowFocusListener(object : WindowAdapter() {
             override fun windowGainedFocus(e: WindowEvent?) {
                 windowInFront = true
@@ -293,6 +335,7 @@ class SystemIntegration(
         runCatching { sleepWatch?.close() }
         runCatching { notifier?.close() }
         runCatching { discord?.close() }
+        runCatching { shortcuts.close() }
     }
 }
 

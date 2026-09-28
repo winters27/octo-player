@@ -169,6 +169,10 @@ fun main(args: Array<String>) {
             undecorated = custom,
             onPreviewKeyEvent = { event ->
                 if (event.type != KeyEventType.KeyDown) return@Window false
+                // New keys for a global shortcut, being pressed in Settings.
+                if (system.shortcuts.recording != null) {
+                    return@Window system.shortcuts.pressed((event.nativeKeyEvent as? java.awt.event.KeyEvent)?.keyCode ?: 0, event.isCtrlPressed, event.isAltPressed, event.isShiftPressed, event.isMetaPressed)
+                }
                 val press = KeyPress(event.key, event.isCtrlPressed, event.isAltPressed, event.isShiftPressed, event.isMetaPressed)
                 val shortcut = shortcutFor(press, app.mac, typing.active, lists.active) ?: return@Window false
                 app.perform(shortcut)
