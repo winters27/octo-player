@@ -143,6 +143,10 @@ fun albumLibraryNote(songs: Int, outside: Int): String? = when {
     else -> "${songs - outside} of $songs in your library"
 }
 
+// The words for adding the songs of an album the library lacks, as the
+// desktop says them.
+fun addMissingLabel(count: Int): String = if (count == 1) "Add the missing song" else "Add the $count missing songs"
+
 // How big the mark is for artwork of a given side: an eighth of it, never
 // so small the plus blurs, nor big enough to crowd a large cover.
 private const val MarkShare = 0.125f

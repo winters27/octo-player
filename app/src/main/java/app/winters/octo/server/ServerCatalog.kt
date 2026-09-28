@@ -47,7 +47,9 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
     fun art(coverId: String?) = coverId?.takeIf(String::isNotEmpty)?.let { ArtworkRef.Server(sourceId, it).encode() }
 
     // A library that changes while it is read can repeat a song across pages.
-    val songs = library.songs.distinctBy { it.id }
+    // A song the server marks as outside the library (Octo lists an album's
+    // missing tracks with it) is not a library song, so it is not kept.
+    val songs = library.songs.filterNot { it.isExternal }.distinctBy { it.id }
 
     // A song whose album was added after the album list was read still
     // gets an album, made from its songs.

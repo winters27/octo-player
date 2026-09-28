@@ -212,6 +212,20 @@ fun songSubtitle(track: TrackEntity): String =
 private val AddButtonSize = 40.dp
 private val AddIconSize = 22.dp
 
+// In a list mixing library songs with songs found online, a library song's
+// row has this check where a find's add button is.
+@Composable
+fun InLibraryMark() {
+    Box(Modifier.width(AddButtonSize), contentAlignment = Alignment.Center) {
+        Icon(
+            painterResource(OctoIcons.Check),
+            contentDescription = "In your library",
+            tint = OctoColors.TextSecondary,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
 // A song line; tapping it plays it. `subtitle` is the line under the title,
 // for the song the row shows. `trailing` goes after the length, such as a
 // drag handle. `menuContext` says what page the row is on, for its menu. In

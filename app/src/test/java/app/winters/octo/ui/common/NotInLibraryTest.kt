@@ -24,6 +24,13 @@ class NotInLibraryTest {
     }
 
     @Test
+    fun addingAnAlbumsMissingSongsSaysHowMany() {
+        assertEquals("Add the missing song", addMissingLabel(1))
+        assertEquals("Add the 9 missing songs", addMissingLabel(9))
+        assertEquals("2 of 11 in your library", albumLibraryNote(11, 9))
+    }
+
+    @Test
     fun onlyFinishedDownloadsCountAsInTheLibrary() {
         val phases = mapOf(
             "find:a" to DownloadPhase.Done,

@@ -26,6 +26,13 @@ class LibraryMatchingTest {
     }
 
     @Test
+    fun aSongTheServerMarksAsOutsideIsAFindWhateverAnOldLinkSays() {
+        val online = song("s1", "One More Time", "Daft Punk").copy(isExternal = true)
+        val out = resolveSongs(listOf(online), "server:x", mapOf("s1" to "p1"), emptyList(), 0)
+        assertEquals("find:s1", (out.single() as Resolved.Found).song.id)
+    }
+
+    @Test
     fun theSameSongOnThePhoneWinsOverAStream() {
         val phone = track("p9", "Digital Love", "Daft Punk", ms = 301_000)
         val out = resolveSongs(listOf(song("s9", "Digital Love", "Daft Punk")), "server:x", emptyMap(), listOf(phone), 0)

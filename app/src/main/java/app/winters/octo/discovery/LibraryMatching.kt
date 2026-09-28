@@ -79,9 +79,10 @@ fun OnlineSongEntity.asTrack() = TrackEntity(
 )
 
 // Sorts out what the server sent. A song the library has from the server is
-// that library song. A song with the same title and artist as a library song
-// is that song too, so a copy on the phone plays instead of a stream.
-// Anything else was found online.
+// that library song, unless the server marks it as outside the library (a
+// link left by an older copy is not trusted then). A song with the same
+// title and artist as a library song is that song too, so a copy on the
+// phone plays instead of a stream. Anything else was found online.
 fun resolveSongs(
     songs: List<Song>,
     sourceId: String,
@@ -91,7 +92,7 @@ fun resolveSongs(
 ): List<Resolved> {
     val byTitle = TitleIndex(library, { it.title }, { it.artist })
     return songs.map { song ->
-        links[song.id]?.let { return@map Resolved.InLibrary(it) }
+        if (!song.isExternal) links[song.id]?.let { return@map Resolved.InLibrary(it) }
         val length = knownLengthMs(song)
         val same = byTitle.candidates(song.title, song.artist.orEmpty()).firstOrNull { sameSong(song.title, song.artist.orEmpty(), length, it) }
         if (same != null) Resolved.InLibrary(same.id) else Resolved.Found(song.toFind(sourceId, now))
