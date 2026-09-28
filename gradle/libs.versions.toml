@@ -24,6 +24,7 @@ mediarouter = "1.8.1"
 palette = "1.0.0"
 reorderable = "3.1.0"
 jna = "5.19.1"
+dbusJava = "5.2.2"
 junit = "4.13.2"
 androidxTestRunner = "1.7.0"
 androidxTestJunit = "1.3.0"
@@ -70,6 +71,8 @@ androidx-palette = { group = "androidx.palette", name = "palette-ktx", version.r
 reorderable = { group = "sh.calvin.reorderable", name = "reorderable", version.ref = "reorderable" }
 taglib = { group = "io.github.kyant0", name = "taglib", version.ref = "taglib" }
 jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna" }
+dbus-java-core = { group = "com.github.hypfvieh", name = "dbus-java-core", version.ref = "dbusJava" }
+dbus-java-transport-unixsocket = { group = "com.github.hypfvieh", name = "dbus-java-transport-native-unixsocket", version.ref = "dbusJava" }
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
 coil-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
