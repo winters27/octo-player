@@ -54,7 +54,9 @@ val LocalTyping = staticCompositionLocalOf { TypingState() }
 private val FieldShape = RoundedCornerShape(12.dp)
 
 // A text field set into the glass: a dark inset with a white caret, a
-// muted hint while empty, and an optional icon at the start. Enter calls
+// muted hint while empty, and an optional icon at the start. `leading` and
+// `trailing` hold small controls inside the field, before and after the
+// text (a choice of scheme, a button that shows a password). Enter calls
 // `onSubmit`; Escape calls `onEscape`.
 @Composable
 fun GlassField(
@@ -68,6 +70,8 @@ fun GlassField(
     onSubmit: (() -> Unit)? = null,
     onEscape: (() -> Unit)? = null,
     enabled: Boolean = true,
+    leading: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val typing = LocalTyping.current
     var focused by remember { mutableStateOf(false) }
@@ -84,11 +88,13 @@ fun GlassField(
             .focusRing(FieldShape, { ring }, width = 1.5.dp, color = OctoColors.Accent.copy(alpha = 0.60f)),
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            // A control inside sits closer to the edge, as far in as it is from the top.
+            Modifier.fillMaxWidth().padding(start = if (leading != null) 6.dp else 12.dp, end = if (trailing != null) 4.dp else 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (icon != null) Glyph(icon, size = 18.dp, tint = OctoColors.TextMuted)
+            leading?.invoke()
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                 if (value.isEmpty()) Txt(placeholder, OctoType.bodySmall, OctoColors.TextMuted)
                 BasicTextField(
@@ -129,6 +135,7 @@ fun GlassField(
                         },
                 )
             }
+            trailing?.invoke()
         }
     }
 }
