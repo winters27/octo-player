@@ -220,7 +220,8 @@ fun MediaCard(
 // A card's width in a shelf that scrolls sideways.
 val ShelfCardWidth = 176.dp
 
-// A blank that swallows clicks, so a click on empty space does nothing.
+// A blank that swallows clicks and the wheel, so a click or scroll on empty
+// space does nothing, and nothing lying under it hears them.
 fun Modifier.swallowClicks(): Modifier = pointerInput(Unit) {
     awaitEachGesture { awaitFirstDown(requireUnconsumed = false) }
 }
