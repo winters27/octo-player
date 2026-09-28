@@ -1,54 +1,53 @@
 package app.winters.octo.desktop.system
 
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.winters.octo.desktop.AppState
-import app.winters.octo.desktop.pages.SettingsCard
-import app.winters.octo.desktop.pages.SwitchLine
-import app.winters.octo.desktop.pages.cardLine
+import app.winters.octo.desktop.pages.InfoRow
+import app.winters.octo.desktop.pages.Rows
+import app.winters.octo.desktop.pages.SwitchRow
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconPath
 import app.winters.octo.design.IconSource
-import app.winters.octo.design.OctoColors
-import app.winters.octo.design.OctoType
-import app.winters.octo.design.Txt
 
-// The settings for how Octo fits into the system: the tray, notifications
-// and the mini player, and whether the media keys reach it.
+// How Octo fits into the system: the tray, notifications, the mini player,
+// the window's frame, and whether the media keys reach it.
 @Composable
-fun SystemSettingsCard(app: AppState) {
-    val system = LocalSystem.current ?: return
+fun SystemRows(app: AppState) {
+    val system = LocalSystem.current
     val settings by app.settings.state.collectAsState()
     val prefs = settings.system
-    val tray = if (system.os == DesktopOs.Mac) "menu bar" else "tray"
-    SettingsCard("System") {
-        if (system.trayAvailable) {
-            SwitchLine(
+    val mac = app.os == DesktopOs.Mac
+    val tray = if (mac) "menu bar" else "tray"
+    Rows {
+        if (system?.trayAvailable == true) {
+            SwitchRow(
                 "Keep playing when the window closes",
-                "Octo stays in the $tray. Open Octo again, or use its $tray icon, to bring the window back.",
+                "Octo stays in the $tray, for music while the window is out of the way. Open it again from there.",
                 prefs.closeToTray,
             ) { on -> app.settings.update { it.copy(system = it.system.copy(closeToTray = on)) } }
         }
-        if (system.notificationsAvailable) {
-            SwitchLine("Now playing notifications", "A notification with each new song, while Octo's window is not in front.", prefs.nowPlayingNotices) { on ->
+        if (system?.notificationsAvailable == true) {
+            SwitchRow("Now playing notifications", "A notice with each new song, while Octo's window is behind others.", prefs.nowPlayingNotices) { on ->
                 app.settings.update { it.copy(system = it.system.copy(nowPlayingNotices = on)) }
             }
         }
-        SwitchLine("Mini player", "A small window that stays above the others.", system.miniPlayerOpen) { on -> system.setMiniPlayer(on) }
-        Row(Modifier.fillMaxWidth().cardLine().padding(vertical = 10.dp)) {
-            Txt("Media keys", OctoType.bodySmall, OctoColors.TextMuted, Modifier.width(160.dp))
-            Txt(
-                if (system.mediaKeysWork) "Working, through ${system.controls.label}" else "Not available on this system",
-                OctoType.bodySmall,
-                modifier = Modifier.weight(1f),
+        if (system != null) {
+            SwitchRow("Mini player", "A small window that stays above the others, for while you work.", system.miniPlayerOpen) { on -> system.setMiniPlayer(on) }
+        }
+        if (!mac) {
+            SwitchRow("Use the system title bar", "Your system's own window frame in place of Octo's. Takes effect the next time Octo opens.", settings.systemTitleBar) { on ->
+                app.settings.update { it.copy(systemTitleBar = on) }
+            }
+        }
+        if (system != null) {
+            InfoRow(
+                "Media keys",
+                "Play, pause and skip from your keyboard and the system's media controls.",
+                if (system.mediaKeysWork) "Working" else "Not available here",
             )
         }
     }

@@ -13,7 +13,6 @@ import app.winters.octo.data.HeaderDraft
 import app.winters.octo.data.resolveHeaders
 import app.winters.octo.desktop.secrets.SecretStore
 import app.winters.octo.desktop.secrets.SecretStoreException
-import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.secrets.secretAccount
 import app.winters.octo.desktop.settings.SavedServer
 import app.winters.octo.desktop.settings.SettingsStore
@@ -247,9 +246,9 @@ class Accounts(
         }
     }
 
-    // Where the password is kept, for the settings page.
-    val storeLabel: String
-        get() = if (settings.current.server?.rememberSignIn == false) SessionOnlySecrets().label else secrets.label
+    // Whether the sign-in outlasts this run of Octo, for the settings page.
+    val remembersSignIn: Boolean
+        get() = settings.current.server?.rememberSignIn != false && secrets.lasting
 
     // The password and headers of this run, for a store that cannot keep
     // them or a password that is not to be remembered.

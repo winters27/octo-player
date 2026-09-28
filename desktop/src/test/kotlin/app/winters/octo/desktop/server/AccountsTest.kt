@@ -86,6 +86,7 @@ class AccountsTest {
         val saved = settings.current.server!!
         assertEquals("correct horse", secrets.kept[secretAccount("winters", saved.address)])
         assertFalse(settingsFile.readText().contains("correct horse"))
+        assertTrue("the settings page says so", accounts.remembersSignIn)
     }
 
     @Test
@@ -180,7 +181,7 @@ class AccountsTest {
         assertFalse("the choice is remembered", settings.current.server!!.rememberSignIn)
         assertNotNull("usable for this run", accounts.restore())
         assertNull("gone next run", Accounts(SettingsStore(settingsFile), secrets, OkHttpClient()).restore())
-        assertEquals("Kept only while Octo is open", accounts.storeLabel)
+        assertFalse("the settings page says so", accounts.remembersSignIn)
     }
 
     @Test
