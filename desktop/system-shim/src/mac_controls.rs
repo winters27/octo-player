@@ -34,6 +34,8 @@ use crate::{
 #[derive(Default)]
 struct Now {
     started: bool,
+    // The song's length, to keep positions inside it.
+    duration_ms: i64,
     info: Option<Retained<NSMutableDictionary<NSString, AnyObject>>>,
     targets: Vec<(Retained<MPRemoteCommand>, Retained<AnyObject>)>,
     observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
@@ -108,7 +110,7 @@ pub fn set_track(track: &Track) -> Result<(), i32> {
         info.insert(MPMediaItemPropertyAlbumArtist, &*NSString::from_str(&track.album_artist));
         info.insert(
             MPMediaItemPropertyPlaybackDuration,
-            &*NSNumber::new_f64(track.duration_ms as f64 / 1000.0),
+            &*NSNumber::new_f64(crate::seconds(track.duration_ms)),
         );
         info.insert(MPNowPlayingInfoPropertyElapsedPlaybackTime, &*NSNumber::new_f64(0.0));
         info.insert(MPNowPlayingInfoPropertyPlaybackRate, &*NSNumber::new_f64(0.0));
@@ -117,6 +119,7 @@ pub fn set_track(track: &Track) -> Result<(), i32> {
         }
         MPNowPlayingInfoCenter::defaultCenter().setNowPlayingInfo(Some(&info));
         now.info = Some(info);
+        now.duration_ms = track.duration_ms;
     });
     Ok(())
 }
@@ -141,12 +144,9 @@ pub fn set_playback(status: Status, position_ms: i64, can_previous: bool, can_ne
         center.nextTrackCommand().setEnabled(can_next);
         let playing_center = MPNowPlayingInfoCenter::defaultCenter();
         if let Some(info) = &now.info {
-            info.insert(
-                MPNowPlayingInfoPropertyElapsedPlaybackTime,
-                &*NSNumber::new_f64(position_ms as f64 / 1000.0),
-            );
-            let rate = if status == Status::Playing { 1.0 } else { 0.0 };
-            info.insert(MPNowPlayingInfoPropertyPlaybackRate, &*NSNumber::new_f64(rate));
+            let elapsed = crate::seconds(crate::clamp_position(position_ms, now.duration_ms));
+            info.insert(MPNowPlayingInfoPropertyElapsedPlaybackTime, &*NSNumber::new_f64(elapsed));
+            info.insert(MPNowPlayingInfoPropertyPlaybackRate, &*NSNumber::new_f64(crate::rate(status)));
             playing_center.setNowPlayingInfo(Some(info));
         }
         playing_center.setPlaybackState(match status {

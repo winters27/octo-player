@@ -90,6 +90,26 @@ impl Status {
     }
 }
 
+/// Milliseconds as Windows timeline ticks of 100 nanoseconds.
+pub fn ticks(ms: i64) -> i64 {
+    ms.max(0).saturating_mul(10_000)
+}
+
+/// Milliseconds as the seconds macOS's Now Playing wants.
+pub fn seconds(ms: i64) -> f64 {
+    ms.max(0) as f64 / 1000.0
+}
+
+/// How fast Now Playing should move the time on by itself.
+pub fn rate(status: Status) -> f64 {
+    if status == Status::Playing { 1.0 } else { 0.0 }
+}
+
+/// A place in the song, kept inside it when its length is known.
+pub fn clamp_position(position_ms: i64, duration_ms: i64) -> i64 {
+    if duration_ms > 0 { position_ms.clamp(0, duration_ms) } else { position_ms.max(0) }
+}
+
 /// The song to show.
 #[derive(Clone, Debug, Default)]
 pub struct Track {
@@ -229,5 +249,41 @@ pub unsafe extern "C" fn octo_system_describe_sessions(buffer: *mut u8, capacity
         }
         Ok(Err(code)) => code as i64,
         Err(_) => PANICKED as i64,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_ticks_are_ten_thousand_to_the_millisecond() {
+        assert_eq!(ticks(1), 10_000);
+        assert_eq!(ticks(200_000), 2_000_000_000);
+        assert_eq!(ticks(-5), 0);
+    }
+
+    #[test]
+    fn mac_gets_seconds_and_a_rate() {
+        assert_eq!(seconds(42_500), 42.5);
+        assert_eq!(rate(Status::Playing), 1.0);
+        assert_eq!(rate(Status::Paused), 0.0);
+        assert_eq!(rate(Status::Stopped), 0.0);
+    }
+
+    #[test]
+    fn positions_stay_inside_the_song() {
+        assert_eq!(clamp_position(250_000, 200_000), 200_000);
+        assert_eq!(clamp_position(-1, 200_000), 0);
+        assert_eq!(clamp_position(90_000, 0), 90_000);
+    }
+
+    #[test]
+    fn status_codes_match_the_app() {
+        assert_eq!(Status::from_code(1), Some(Status::Stopped));
+        assert_eq!(Status::from_code(2), Some(Status::Playing));
+        assert_eq!(Status::from_code(3), Some(Status::Paused));
+        assert_eq!(Status::from_code(0), None);
+        assert_eq!(octo_system_set_playback(9, 0, 0, 0), BAD_ARGUMENT);
     }
 }

@@ -118,7 +118,7 @@ fn connect(window: HWND) -> windows::core::Result<Controls> {
 const TICKS_PER_MS: i64 = 10_000;
 
 fn span(ms: i64) -> TimeSpan {
-    TimeSpan { Duration: ms.max(0) * TICKS_PER_MS }
+    TimeSpan { Duration: crate::ticks(ms) }
 }
 
 pub fn set_track(track: &Track) -> Result<(), i32> {
@@ -160,7 +160,7 @@ fn timeline(controls: &Controls, position_ms: i64) -> windows::core::Result<()> 
     line.SetEndTime(span(end))?;
     line.SetMinSeekTime(span(0))?;
     line.SetMaxSeekTime(span(end))?;
-    line.SetPosition(span(if end > 0 { position_ms.min(end) } else { position_ms }))?;
+    line.SetPosition(span(crate::clamp_position(position_ms, end)))?;
     controls.smtc.UpdateTimelineProperties(&line)
 }
 
@@ -213,20 +213,28 @@ fn describe() -> windows::core::Result<String> {
     let sessions = manager.GetSessions()?;
     let mut lines = Vec::new();
     for session in &sessions {
-        let about = session.TryGetMediaPropertiesAsync()?.join()?;
-        let status = session.GetPlaybackInfo()?.PlaybackStatus()?;
-        let line = session.GetTimelineProperties()?;
-        lines.push(format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-            session.SourceAppUserModelId()?,
-            about.Title()?,
-            about.Artist()?,
-            about.AlbumTitle()?,
-            status.0,
-            line.Position()?.Duration / TICKS_PER_MS,
-            line.EndTime()?.Duration / TICKS_PER_MS,
-            if about.Thumbnail().is_ok() { 1 } else { 0 },
-        ));
+        let app = session.SourceAppUserModelId().map(|s| s.to_string()).unwrap_or_default();
+        // An app with nothing to show yet answers "not ready"; it gets a
+        // line with just its name.
+        let described = (|| -> windows::core::Result<String> {
+            let about = session.TryGetMediaPropertiesAsync()?.join()?;
+            let status = session.GetPlaybackInfo()?.PlaybackStatus()?;
+            let line = session.GetTimelineProperties()?;
+            Ok(format!(
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                about.Title()?,
+                about.Artist()?,
+                about.AlbumTitle()?,
+                status.0,
+                line.Position()?.Duration / TICKS_PER_MS,
+                line.EndTime()?.Duration / TICKS_PER_MS,
+                if about.Thumbnail().is_ok() { 1 } else { 0 },
+            ))
+        })();
+        lines.push(match described {
+            Ok(fields) => format!("{app}\t{fields}"),
+            Err(e) => format!("{app}\t(nothing to read: {:#x})", e.code().0),
+        });
     }
     Ok(lines.join("\n"))
 }
