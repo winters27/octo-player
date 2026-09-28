@@ -5,7 +5,8 @@ import app.winters.octo.player.immersive.WashTuning
 import app.winters.octo.player.immersive.applyColorMatrix
 import app.winters.octo.player.immersive.capBrightness
 import app.winters.octo.player.immersive.washColorMatrix
-import app.winters.octo.player.immersive.washDarkWords
+import app.winters.octo.player.immersive.WashRange
+import app.winters.octo.player.immersive.washRange
 import app.winters.octo.player.immersive.washPeak
 import app.winters.octo.subsonic.SubsonicClient
 import kotlinx.coroutines.Dispatchers
@@ -25,10 +26,17 @@ import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Rect
 
 // A cover made ready for the background: the 512 square the wash draws
-// from, whether words over it should be dark (a light wash), its main
-// colour as ARGB, which tints the app's glass while it plays, and the
-// brightest the wash over it gets (`washPeak`), for words on the pages.
-class WashCover(val key: String, val square: Image, val darkWords: Boolean, val main: Int = 0, val peak: Int = 0xFF000000.toInt())
+// from, the darkest and brightest patches of it (`washRange`), from which
+// the words over it take their colour, its main colour as ARGB, which
+// tints the app's glass while it plays, and the brightest the wash over it
+// gets (`washPeak`), for words on the pages.
+class WashCover(
+    val key: String,
+    val square: Image,
+    val range: WashRange,
+    val main: Int = 0,
+    val peak: Int = 0xFF000000.toInt(),
+)
 
 // The pixels of a 512 square, as ARGB, and back.
 private val SquareInfo = ImageInfo(WashSize, WashSize, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
@@ -105,7 +113,7 @@ class WashCovers(private val http: OkHttpClient) {
             out.allocPixels(SquareInfo)
             out.installPixels(SquareInfo, bytes, WashSize * 4)
             out.setImmutable()
-            return WashCover(key, Image.makeFromBitmap(out), washDarkWords(dominant, tuning), dominant, washPeak(pixels))
+            return WashCover(key, Image.makeFromBitmap(out), washRange(pixels, WashSize), dominant, washPeak(pixels))
         }
 
         // For music without a cover: three quiet colours, blended corner to

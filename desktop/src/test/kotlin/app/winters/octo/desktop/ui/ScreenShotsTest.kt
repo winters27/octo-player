@@ -526,16 +526,17 @@ class ScreenShotsTest {
         }
     }
 
-    // The window with the Immersive ambience, over a dark cover and over
-    // the brightest ones (yellow, white, green), on the pages where words
-    // sit straight on it; then the glow over the same yellow, and Settings.
-    // Saved as immersive-*.png.
+    // The window with the Immersive ambience, over a dark cover, a teal one
+    // with a dark shape, and the brightest ones (yellow, white, green), on
+    // the pages where words sit straight on it; then the glow over the same
+    // yellow, Settings, and the full player over each cover with either
+    // ambience. Saved as immersive-*.png.
     @Test
     fun drawTheImmersiveAmbience() {
         assumeTrue(System.getenv("OCTO_SHOTS") == "1")
         val out = File("build/shots").apply { mkdirs() }
         FakeServer().use { server ->
-            val kinds = listOf("dark", "yellow", "white", "green")
+            val kinds = listOf("dark", "teal", "yellow", "white", "green")
             val songs = kinds.flatMapIndexed { k, kind ->
                 (1..4).map { n ->
                     val i = k * 4 + n
@@ -547,7 +548,8 @@ class ScreenShotsTest {
                 """{"id":"a-$kind","name":"A $kind record","artist":"The ${kind.replaceFirstChar { it.uppercase() }}s","artistId":"r-$kind","year":2020,"songCount":4,"duration":900,"coverArt":"c-$kind","created":"2026-09-01T10:00:00Z"}"""
             }
             server.answer("ping", type = "octo")
-            server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[]""", type = "octo")
+            server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[{"name":"songLyrics","versions":[1]}]""", type = "octo")
+            server.answer("getLyricsBySongId", """"lyricsList":{"structuredLyrics":[{"lang":"en","synced":true,"line":[{"start":0,"value":"Karma police"},{"start":1000,"value":"Arrest this man"},{"start":60000,"value":"He talks in maths"}]}]}""")
             server.answer("getAlbumList2", """"albumList2":{"album":[$albums]}""")
             server.answer("getArtists", """"artists":{"index":[]}""")
             server.answer("search3", """"searchResult3":{"song":[$songs]}""")
@@ -607,6 +609,20 @@ class ScreenShotsTest {
             shot("glow-yellow-songs")
             SwingUtilities.invokeAndWait { app.navigator.go(Page.Settings) }
             shot("settings-glow")
+            // The full player over each cover, its lyrics beside it: with the
+            // glow on the page, then with Immersive.
+            for (style in listOf(AmbienceStyle.Glow, AmbienceStyle.Immersive)) {
+                SwingUtilities.invokeAndWait { app.settings.update { it.copy(appearance = it.appearance.copy(ambience = style)) } }
+                for (kind in kinds) {
+                    SwingUtilities.invokeAndWait {
+                        val list = app.library!!.index!!.songs.filter { it.albumId == "a-$kind" }.sortedBy { it.track }
+                        app.play(list, 0)
+                        app.fullPlayer = true
+                    }
+                    shot("player-$kind-${style.name.lowercase()}", 3_000)
+                }
+            }
+            SwingUtilities.invokeAndWait { app.fullPlayer = false }
             scene.close()
         }
     }
@@ -618,6 +634,7 @@ class ScreenShotsTest {
             "yellow" -> 0xFFFFE000 to 0xFFFF8A00
             "white" -> 0xFFFFFFFF to 0xFFF2EAD8
             "green" -> 0xFF00FF40 to 0xFFB0FF00
+            "teal" -> 0xFF3AA6A0 to 0xFF1B2A4A
             else -> 0xFF101830 to 0xFF8A1C3C
         }
         val surface = org.jetbrains.skia.Surface.makeRasterN32Premul(300, 300)
