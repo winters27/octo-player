@@ -49,6 +49,13 @@ class MenuActionsTest {
     }
 
     @Test
+    fun inTheQueuePlayingAndQueueingGiveWayToItsOwnRows() {
+        // Play, Play next and Add to queue would play or queue a second copy.
+        assertEquals(listOf("Start radio"), labels(1, SongPlace.Queue(listOf(12L))).first())
+        assertEquals(listOf("Add to playlist", "Add to favourites", "Rate"), labels(2, SongPlace.Queue(listOf(12L, 13L))).first())
+    }
+
+    @Test
     fun songsFoundOnlineAreNotFavouritedRatedOrOpened() {
         assertEquals(
             listOf(
