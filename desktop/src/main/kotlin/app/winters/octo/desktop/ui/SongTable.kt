@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -38,6 +39,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -46,6 +48,7 @@ import androidx.compose.ui.awt.awtEventOrNull
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -65,6 +68,8 @@ import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -204,6 +209,7 @@ fun SongTable(
     val rowHeight = rowHeightFor(settings.density)
     val showCovers = covers && settings.density == "roomy"
     val pointer = LocalPointer.current
+    val drag = LocalDrag.current
 
     fun picked(): List<Song> = selection.of(rows).map(TableRow::song)
     fun playFrom(key: String) {
@@ -357,6 +363,15 @@ fun SongTable(
                         }
                     },
                     onPlay = { playFrom(row.key) },
+                    // Dragging a picked row carries every picked song;
+                    // any other row carries itself, and is picked.
+                    onDragStart = { at ->
+                        if (row.key !in selection.picked) selection.click(row.key, toggle = false, range = false, order = keys)
+                        drag.start(picked(), at)
+                    },
+                    onDrag = drag::move,
+                    onDragEnd = { drag.drop() },
+                    onDragCancel = drag::cancel,
                     onMore = { at ->
                         selection.pickForMenu(row.key)
                         openMenu(at)
@@ -518,9 +533,20 @@ private fun SongRow(
     cell: (RowScope, SongColumn) -> Modifier,
     onPress: (primary: Boolean, toggle: Boolean, range: Boolean) -> Unit,
     onPlay: () -> Unit,
+    onDragStart: (Offset) -> Unit,
+    onDrag: (Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
     onMore: (IntOffset) -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
+    // Where the row is in the window, to follow a drag in window terms, and
+    // the latest drag callbacks (the gesture is set up once per row).
+    var placed by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val dragStart by rememberUpdatedState(onDragStart)
+    val dragMove by rememberUpdatedState(onDrag)
+    val dragEnd by rememberUpdatedState(onDragEnd)
+    val dragCancel by rememberUpdatedState(onDragCancel)
     val hovered by interaction.collectIsHoveredAsState()
     val key = LocalKeyColour.current
     var moreAnchor by remember { mutableStateOf(IntRect.Zero) }
@@ -529,6 +555,17 @@ private fun SongRow(
             .fillMaxWidth()
             .height(height)
             .hoverable(interaction)
+            .onGloballyPositioned { placed = it }
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { local -> placed?.let { dragStart(it.localToWindow(local)) } },
+                    onDragEnd = { dragEnd() },
+                    onDragCancel = { dragCancel() },
+                ) { change, _ ->
+                    change.consume()
+                    placed?.let { dragMove(it.localToWindow(change.position)) }
+                }
+            }
             .onPointerEvent(PointerEventType.Press) { event ->
                 val keys = event.keyboardModifiers
                 val toggle = if (app.mac) keys.isMetaPressed else keys.isCtrlPressed

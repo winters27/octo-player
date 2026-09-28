@@ -107,6 +107,7 @@ import dev.chrisbanes.haze.rememberHazeState
 fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
     val backdrop = rememberHazeState()
     val pointer = remember { PointerSpot() }
+    val drag = remember { DragState() }
     val connection = app.connection
     val key = rememberKeyColour(app)
     CompositionLocalProvider(
@@ -114,6 +115,7 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
         LocalPointer provides pointer,
         LocalCovers provides connection?.client,
         LocalKeyColour provides key,
+        LocalDrag provides drag,
     ) {
         Box(
             Modifier
@@ -142,6 +144,7 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
             }
             TitleBar(app, frame, onClose)
             PopupLayer(app.popups, backdrop)
+            DragLabel(drag)
             if (frame != null) ResizeEdges(frame)
         }
     }
