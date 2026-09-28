@@ -22,7 +22,7 @@ sealed interface SongPlace {
 enum class SongAction {
     Play, PlayNext, AddToQueue, StartRadio,
     AddToPlaylist, Favourite, Rate,
-    GoToAlbum, GoToArtist,
+    GoToAlbum, GoToArtist, ShowInFolder,
     Details,
     RemoveFromPlaylist, RemoveFromQueue,
 }
@@ -31,13 +31,14 @@ enum class SongAction {
 // one song; so are Go to album and Go to artist. Songs found online
 // (`outside`) are not in the library, so they cannot be favourites, be
 // rated or open an album or artist. A playlist's songs can come out of it
-// only when the listener's own playlist (`ownsPlaylist`).
-fun songMenuActions(count: Int, place: SongPlace, outside: Boolean = false, ownsPlaylist: Boolean = false): List<List<SongAction>> {
+// only when the listener's own playlist (`ownsPlaylist`). Show in folder
+// needs the server to have said which folder the song is in (`inFolder`).
+fun songMenuActions(count: Int, place: SongPlace, outside: Boolean = false, ownsPlaylist: Boolean = false, inFolder: Boolean = false): List<List<SongAction>> {
     val one = count == 1
     val groups = listOf(
         listOfNotNull(SongAction.Play, SongAction.PlayNext, SongAction.AddToQueue, SongAction.StartRadio.takeIf { one }),
         listOfNotNull(SongAction.AddToPlaylist, SongAction.Favourite.takeIf { !outside }, SongAction.Rate.takeIf { !outside }),
-        if (one && !outside) listOf(SongAction.GoToAlbum, SongAction.GoToArtist) else emptyList(),
+        if (one && !outside) listOfNotNull(SongAction.GoToAlbum, SongAction.GoToArtist, SongAction.ShowInFolder.takeIf { inFolder }) else emptyList(),
         listOfNotNull(SongAction.Details.takeIf { one }),
         listOfNotNull(
             SongAction.RemoveFromPlaylist.takeIf { place is SongPlace.Playlist && ownsPlaylist && place.positions.isNotEmpty() },
@@ -58,6 +59,7 @@ fun songActionLabel(action: SongAction, starred: Boolean): String = when (action
     SongAction.Rate -> "Rate"
     SongAction.GoToAlbum -> "Go to album"
     SongAction.GoToArtist -> "Go to artist"
+    SongAction.ShowInFolder -> "Show in folder"
     SongAction.Details -> "Song details"
     SongAction.RemoveFromPlaylist -> "Remove from this playlist"
     SongAction.RemoveFromQueue -> "Remove from the queue"

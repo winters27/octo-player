@@ -23,6 +23,14 @@ class MenuActionsTest {
     }
 
     @Test
+    fun aSongInAKnownFolderCanBeShownThere() {
+        assertEquals(listOf("Go to album", "Go to artist", "Show in folder"), songMenuActions(1, SongPlace.Library, inFolder = true)[2].map { songActionLabel(it, false) })
+        // Not for several songs, nor one found online.
+        assertEquals(false, songMenuActions(3, SongPlace.Library, inFolder = true).flatten().contains(SongAction.ShowInFolder))
+        assertEquals(false, songMenuActions(1, SongPlace.Library, outside = true, inFolder = true).flatten().contains(SongAction.ShowInFolder))
+    }
+
+    @Test
     fun severalSongsHaveNoRadioDetailsOrGoTo() {
         assertEquals(
             listOf(
