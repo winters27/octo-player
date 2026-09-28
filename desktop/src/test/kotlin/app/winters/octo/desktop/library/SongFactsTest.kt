@@ -1,12 +1,9 @@
 package app.winters.octo.desktop.library
 
-import app.winters.octo.desktop.ui.playingNow
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SongReplayGain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.ZoneOffset
 import java.util.Locale
@@ -45,21 +42,5 @@ class SongFactsTest {
     @Test
     fun aFileOnThisComputerSaysSo() {
         assertEquals("A file on this computer", facts(Song("file:abc", "Local"))["Source"])
-    }
-
-    @Test
-    fun theFormatLineIsShort() {
-        assertEquals("FLAC 24/96", formatLine(flac))
-        assertEquals("FLAC 16/44.1", formatLine(Song("a", suffix = "flac", samplingRate = 44_100)))
-        assertEquals("MP3 320", formatLine(Song("b", suffix = "mp3", bitRate = 320)))
-        assertEquals("AAC", formatLine(Song("c", suffix = "m4a")))
-        assertNull(formatLine(Song("d")))
-    }
-
-    @Test
-    fun playingNowNamesTheFormatAndTheDevice() {
-        val line = playingNow(flac, "Speakers")
-        assertTrue(line, line.startsWith("Playing FLAC, lossless, 24-bit, 96 kHz on Speakers"))
-        assertEquals("Playing.", playingNow(Song("x"), null))
     }
 }

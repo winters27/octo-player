@@ -146,6 +146,9 @@ class ScreenShotsTest {
             }
             SwingUtilities.invokeAndWait { app.showSidePanel(SidePanel.Info) }
             shot("info")
+            SwingUtilities.invokeAndWait { app.sleep.start(30) }
+            shot("sleep")
+            SwingUtilities.invokeAndWait { app.sleep.cancel() }
             SwingUtilities.invokeAndWait {
                 app.toggleSidePanel(SidePanel.Lyrics)
                 app.navigator.go(Page.Album("a1"))

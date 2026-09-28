@@ -16,12 +16,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import app.winters.octo.desktop.AppState
-import app.winters.octo.desktop.library.Cover
-import app.winters.octo.desktop.library.formatName
-import app.winters.octo.desktop.library.sampleRateText
-import app.winters.octo.desktop.library.songFacts
-import app.winters.octo.desktop.nav.Page
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
@@ -31,6 +25,12 @@ import app.winters.octo.design.Separator
 import app.winters.octo.design.Space
 import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
+import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.library.Cover
+import app.winters.octo.desktop.library.songFacts
+import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.player.outputSentence
+import app.winters.octo.desktop.player.songFormatWords
 import app.winters.octo.subsonic.Song
 
 // The song's details: the one playing, or one picked with Song details,
@@ -63,7 +63,10 @@ fun InfoPanel(app: AppState, modifier: Modifier = Modifier) {
         item(key = "head") { Head(app, song) }
         if (picked == null) {
             item(key = "now") {
-                Txt(playingNow(song, state.playingOn?.name), DesktopType.meta, OctoColors.TextSecondary, Modifier.padding(vertical = Space.M), maxLines = 3)
+                Column(Modifier.padding(vertical = Space.M), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
+                    songFormatWords(state.format)?.let { Txt(it, DesktopType.meta, OctoColors.TextSecondary, maxLines = 2) }
+                    outputSentence(state.format, state.playingOn?.name)?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted, maxLines = 3) }
+                }
                 Separator()
             }
         }
@@ -91,17 +94,4 @@ private fun Head(app: AppState, song: Song) {
             LinkText(song.album.orEmpty(), song.albumId) { app.navigator.go(Page.Album(it)) }
         }
     }
-}
-
-// How the song is playing, in a sentence: its format and where the sound
-// goes, as far as the server and the system say.
-fun playingNow(song: Song, device: String?): String {
-    val format = listOfNotNull(
-        formatName(song.suffix),
-        song.bitDepth?.takeIf { it > 0 }?.let { "$it-bit" },
-        song.samplingRate?.takeIf { it > 0 }?.let { sampleRateText(it) },
-        song.bitRate?.takeIf { it > 0 && formatName(song.suffix)?.endsWith("lossless") != true }?.let { "$it kbps" },
-    ).joinToString(", ")
-    val where = device?.let { " on $it" }.orEmpty()
-    return if (format.isEmpty()) "Playing$where." else "Playing $format$where."
 }

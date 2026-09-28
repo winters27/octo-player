@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -67,13 +68,18 @@ import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.library.Cover
-import app.winters.octo.desktop.library.formatLine
 import app.winters.octo.desktop.library.lengthText
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.RepeatMode
+import app.winters.octo.desktop.player.formatLabel
 import app.winters.octo.desktop.system.MiniPlayerButton
+import app.winters.octo.playback.SLEEP_EXTENSIONS
+import app.winters.octo.playback.SLEEP_MINUTES
+import app.winters.octo.playback.SLEEP_SONG_COUNTS
+import app.winters.octo.playback.SleepState
+import app.winters.octo.playback.sleepSummary
 import app.winters.octo.subsonic.Song
 import dev.chrisbanes.haze.HazeState
 import kotlin.math.roundToInt
@@ -214,7 +220,7 @@ private val TimeWidth = Space.Wide + Space.S
 private fun UtilityZone(app: AppState, state: PlayerState) {
     val song = state.current?.song
     Row(horizontalArrangement = Arrangement.spacedBy(Space.Xxs), verticalAlignment = Alignment.CenterVertically) {
-        song?.let(::formatLine)?.let { line ->
+        formatLabel(state.format)?.let { line ->
             Txt(
                 line,
                 DesktopType.meta.copy(fontFeatureSettings = "tnum"),
@@ -231,26 +237,64 @@ private fun UtilityZone(app: AppState, state: PlayerState) {
     }
 }
 
-// What is used now and then: stopping after this song, the mini player,
-// and the song's details.
+// What is used now and then: the sleep timer, stopping after this song,
+// the song's details and the mini player. Lit while a timer is set.
 @Composable
 private fun MoreButton(app: AppState, state: PlayerState) {
     var anchor by remember { mutableStateOf(IntRect.Zero) }
+    val sleep by app.sleep.state.collectAsState()
+    val timing = sleep != SleepState.Off
     Box(Modifier.onGloballyPositioned { anchor = it.windowRect() }) {
-        IconAction(OctoIcons.More, "More", {
-            app.popups.showUnder(anchor, width = FrameSize.Menu) { close ->
-                val now = app.player.state.value
-                MenuRow(
-                    "Stop after this song",
-                    { app.player.setStopAfterCurrent(!now.stopAfterCurrent); close() },
-                    if (now.stopAfterCurrent) OctoIcons.Check else OctoIcons.Pause,
-                    enabled = now.current != null,
-                )
-                MenuSeparator()
-                MenuRow("Song details", { app.showInfo(null); close() }, OctoIcons.Info, enabled = now.current != null)
-                app.toggleMiniPlayer?.let { toggle -> MenuRow("Mini player", { toggle(); close() }, OctoIcons.Expand) }
-            }
-        }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = state.stopAfterCurrent)
+        IconAction(OctoIcons.More, if (timing) "More (sleep timer: ${sleepSummary(sleep)})" else "More", {
+            app.popups.showUnder(anchor, width = FrameSize.Menu) { close -> MoreMenu(app, close) }
+        }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = timing || state.stopAfterCurrent)
+    }
+}
+
+private enum class MorePage { Main, Sleep }
+
+@Composable
+private fun ColumnScope.MoreMenu(app: AppState, close: () -> Unit) {
+    var page by remember { mutableStateOf(MorePage.Main) }
+    val now by app.player.state.collectAsState()
+    val sleep by app.sleep.state.collectAsState()
+    when (page) {
+        MorePage.Main -> {
+            MenuRow("Sleep timer", { page = MorePage.Sleep }, OctoIcons.SleepTimer, more = true, detail = if (sleep != SleepState.Off) sleepSummary(sleep) else null)
+            MenuRow(
+                "Stop after this song",
+                { app.player.setStopAfterCurrent(!now.stopAfterCurrent); close() },
+                if (now.stopAfterCurrent) OctoIcons.Check else OctoIcons.Pause,
+                enabled = now.current != null,
+            )
+            MenuSeparator()
+            MenuRow("Song details", { app.showInfo(null); close() }, OctoIcons.Info, enabled = now.current != null)
+            app.toggleMiniPlayer?.let { toggle -> MenuRow("Mini player", { toggle(); close() }, OctoIcons.Expand) }
+        }
+        MorePage.Sleep -> SleepMenu(app, sleep, back = { page = MorePage.Main }, close = close)
+    }
+}
+
+// The phone's sleep choices: a length, the end of this song, or after a
+// few songs; and while one runs, more time or off.
+@Composable
+private fun ColumnScope.SleepMenu(app: AppState, sleep: SleepState, back: () -> Unit, close: () -> Unit) {
+    MenuRow("Back", back, OctoIcons.Back)
+    MenuSeparator()
+    if (sleep != SleepState.Off) {
+        MenuTitle("Stopping: ${sleepSummary(sleep)}")
+        if (sleep is SleepState.Counting) {
+            SLEEP_EXTENSIONS.forEach { minutes -> MenuRow("Add $minutes minutes", { app.sleep.extend(minutes); close() }, OctoIcons.SleepTimer) }
+        }
+        MenuRow("Turn off", { app.sleep.cancel(); close() }, OctoIcons.Close)
+        MenuSeparator()
+    }
+    SLEEP_MINUTES.forEach { minutes ->
+        MenuRow(if (minutes == 60) "1 hour" else "$minutes minutes", { app.sleep.start(minutes); close() })
+    }
+    MenuRow("At the end of this song", { app.sleep.endOfSong(); close() }, enabled = app.player.state.value.current != null)
+    SLEEP_SONG_COUNTS.filter { it > 1 }.forEach { count ->
+        MenuRow("After $count songs", { app.sleep.afterSongs(count); close() }, enabled = app.player.state.value.current != null)
     }
 }
 

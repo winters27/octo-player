@@ -87,18 +87,3 @@ fun sizeText(bytes: Long, locale: Locale = Locale.getDefault()): String = when {
 
 // A gain in decibels with its sign, like "-7.2 dB".
 fun gainText(db: Float, locale: Locale = Locale.getDefault()): String = "%+.1f dB".format(locale, db)
-
-// The short line under the player's controls: the codec and, for a
-// lossless file, its depth and rate ("FLAC 24/96"), or for a lossy one
-// its bitrate ("MP3 320"). Null when the server says nothing useful.
-fun formatLine(song: Song): String? {
-    val lower = song.suffix?.lowercase()?.takeIf(String::isNotBlank) ?: return null
-    val name = formatName(lower)?.substringBefore(",") ?: return null
-    val lossless = formatName(lower)?.endsWith("lossless") == true
-    val rate = song.samplingRate?.takeIf { it > 0 }?.let { hz -> if (hz % 1000 == 0) "${hz / 1000}" else "%.1f".format(Locale.ROOT, hz / 1000.0) }
-    return when {
-        lossless && rate != null -> "$name ${song.bitDepth?.takeIf { it > 0 } ?: 16}/$rate"
-        !lossless && (song.bitRate ?: 0) > 0 -> "$name ${song.bitRate}"
-        else -> name
-    }
-}
