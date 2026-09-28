@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.pages.SettingsCard
 import app.winters.octo.desktop.pages.SwitchLine
+import app.winters.octo.desktop.pages.cardLine
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconPath
@@ -42,7 +43,7 @@ fun SystemSettingsCard(app: AppState) {
             }
         }
         SwitchLine("Mini player", "A small window that stays above the others.", system.miniPlayerOpen) { on -> system.setMiniPlayer(on) }
-        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Row(Modifier.fillMaxWidth().cardLine().padding(vertical = 10.dp)) {
             Txt("Media keys", OctoType.bodySmall, OctoColors.TextMuted, Modifier.width(160.dp))
             Txt(
                 if (system.mediaKeysWork) "Working, through ${system.controls.label}" else "Not available on this system",

@@ -27,7 +27,6 @@ import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
-import app.winters.octo.design.Separator
 import app.winters.octo.design.Txt
 import kotlin.math.roundToInt
 
@@ -112,9 +111,8 @@ fun SettingsPage(app: AppState, visit: Visit) {
         }
         item(key = "keys") {
             SettingsCard("Keyboard shortcuts") {
-                shortcutList(app.mac).forEachIndexed { index, (what, keys) ->
-                    if (index > 0) Separator()
-                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                shortcutList(app.mac).forEach { (what, keys) ->
+                    Row(Modifier.fillMaxWidth().cardLine().padding(vertical = 10.dp)) {
                         Txt(what, OctoType.bodySmall, modifier = Modifier.weight(1f))
                         Txt(keys, OctoType.bodySmall, OctoColors.TextSecondary)
                     }
