@@ -12,11 +12,6 @@ import okhttp3.HttpUrl
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import java.io.IOException
-import java.io.InterruptedIOException
-import java.net.ConnectException
-import java.net.NoRouteToHostException
-import java.net.SocketTimeoutException
-import java.net.UnknownHostException
 import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -106,12 +101,4 @@ class ConnectionSecurity @Inject constructor(@ApplicationContext context: Contex
             throw e
         }
     }
-}
-
-// A failure to reach the address at all, as opposed to a cancelled call
-// or a server that answered badly.
-fun isConnectionError(e: IOException): Boolean = when (e) {
-    is ConnectException, is NoRouteToHostException, is UnknownHostException, is SocketTimeoutException -> true
-    is InterruptedIOException -> e.message == "timeout"
-    else -> false
 }

@@ -84,6 +84,11 @@ object OctoIcons {
     // written the web's way, above the viewport, so it is moved down.
     val Home by lazy { drawn("home", HOME_PATH).toImageVector(shiftY = 960f) }
 
+    // An open eye and a crossed one: show or hide a password. The same
+    // rounded filled symbols, written the web's way like Home.
+    val Reveal by lazy { drawn("visibility", REVEAL_PATH).toImageVector(shiftY = 960f) }
+    val Conceal by lazy { drawn("visibility_off", CONCEAL_PATH).toImageVector(shiftY = 960f) }
+
     // Settings: a cog with a round hole, drawn to the set's proportions.
     val Settings by lazy { IconSource("settings", 24f, 24f, 960f, 960f, listOf(IconPath(cogPath(), evenOdd = true))).toImageVector() }
 
@@ -100,6 +105,21 @@ private const val HOME_PATH =
     "M160-200v-360q0-19 8.5-36t23.5-28l240-180q21-16 48-16t48 16l240 180q15 11 23.5 28t8.5 36v360q0 33-23.5 56.5T720-120H600" +
         "q-17 0-28.5-11.5T560-160v-200q0-17-11.5-28.5T520-400h-80q-17 0-28.5 11.5T400-360v200q0 17-11.5 28.5T360-120H240" +
         "q-33 0-56.5-23.5T160-200Z"
+
+private const val REVEAL_PATH =
+    "M607.5-372.5Q660-425 660-500t-52.5-127.5Q555-680 480-680t-127.5 52.5Q300-575 300-500t52.5 127.5Q405-320 480-320t127.5-52.5Z" +
+        "m-204-51Q372-455 372-500t31.5-76.5Q435-608 480-608t76.5 31.5Q588-545 588-500t-31.5 76.5Q525-392 480-392t-76.5-31.5Z" +
+        "M235.5-272Q125-344 61-462q-5-9-7.5-18.5T51-500q0-10 2.5-19.5T61-538q64-118 174.5-190T480-800q134 0 244.5 72T899-538" +
+        "q5 9 7.5 18.5T909-500q0 10-2.5 19.5T899-462q-64 118-174.5 190T480-200q-134 0-244.5-72Z"
+
+private const val CONCEAL_PATH =
+    "M764-84 624-222q-35 11-71 16.5t-73 5.5q-134 0-245-72T61-462q-5-9-7.5-18.5T51-500q0-10 2.5-19.5T61-538q22-39 47-76t58-66" +
+        "l-83-84q-11-11-11-27.5T84-820q11-11 28-11t28 11l680 680q11 11 11.5 27.5T820-84q-11 11-28 11t-28-11Z" +
+        "M480-320q11 0 21-1t20-4L305-541q-3 10-4 20t-1 21q0 75 52.5 127.5T480-320Z" +
+        "m0-480q134 0 245.5 72.5T900-537q5 8 7.5 17.5T910-500q0 10-2 19.5t-7 17.5q-19 37-42.5 70T806-331q-14 14-33 13t-33-15" +
+        "l-80-80q-7-7-9-16.5t1-19.5q4-13 6-25t2-26q0-75-52.5-127.5T480-680q-14 0-26 2t-25 6q-10 3-20 1t-17-9l-33-33" +
+        "q-19-19-12.5-44t31.5-32q25-5 50.5-8t51.5-3Z" +
+        "m79 226q11 13 18.5 28.5T587-513q1 8-6 11t-13-3l-82-82q-6-6-2.5-13t11.5-7q19 2 35 10.5t29 22.5Z"
 
 // A square frame 480 wide with 44 thick sides.
 private const val MAXIMIZE_PATH =
@@ -157,5 +177,6 @@ val allIcons: List<Pair<String, () -> ImageVector>> = listOf(
     "Forward" to { OctoIcons.Forward }, "Expand" to { OctoIcons.Expand }, "Collapse" to { OctoIcons.Collapse },
     "Home" to { OctoIcons.Home }, "Settings" to { OctoIcons.Settings }, "Minimize" to { OctoIcons.Minimize },
     "Maximize" to { OctoIcons.Maximize }, "Restore" to { OctoIcons.Restore }, "Check" to { OctoIcons.Check },
-    "Playback" to { OctoIcons.Playback }, "Sound" to { OctoIcons.Sound },
+    "Playback" to { OctoIcons.Playback }, "Sound" to { OctoIcons.Sound }, "Reveal" to { OctoIcons.Reveal },
+    "Conceal" to { OctoIcons.Conceal },
 )

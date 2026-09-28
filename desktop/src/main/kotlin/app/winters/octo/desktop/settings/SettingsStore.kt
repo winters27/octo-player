@@ -40,6 +40,10 @@ data class AppSettings(
     val lyrics: LyricsPrefs = LyricsPrefs(),
     // The tray, notifications and the mini player.
     val system: SystemPrefs = SystemPrefs(),
+    // Certificates the listener chose to trust although the system does
+    // not, as SHA-256 fingerprints by host. Each counts only for its host.
+    // Not secret: a fingerprint only names a certificate.
+    val trustedCertificates: Map<String, String> = emptyMap(),
 )
 
 // Lyrics settings, by song id (the server's) and by output device id.
@@ -88,7 +92,8 @@ data class WindowSpot(
     val maximized: Boolean = false,
 )
 
-// The server signed in to, without its password.
+// The server signed in to, without its password. The values of its extra
+// headers are secrets too, so only their names are kept here.
 @Serializable
 data class SavedServer(
     val address: String,
@@ -99,6 +104,12 @@ data class SavedServer(
     val openSubsonic: Boolean = false,
     // The OpenSubsonic extensions it listed, as "name:version".
     val extensions: List<String> = emptyList(),
+    // An address used instead while it answers, on the home network.
+    val home: String? = null,
+    val headerNames: List<String> = emptyList(),
+    // Whether the password is kept in the system's store, or only while
+    // the app is open.
+    val rememberSignIn: Boolean = true,
 )
 
 @Serializable

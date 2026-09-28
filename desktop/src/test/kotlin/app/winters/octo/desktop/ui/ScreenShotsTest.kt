@@ -15,6 +15,7 @@ import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.server.Accounts
+import app.winters.octo.desktop.server.CertificateQuestion
 import app.winters.octo.desktop.server.SignInOutcome
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
@@ -95,7 +96,29 @@ class ScreenShotsTest {
                 val image = scene.render(t)
                 File(out, "$name.png").writeBytes(image.encodeToData(EncodedImageFormat.PNG)!!.bytes)
             }
-            shot("signin", 500)
+            // The sign-in, filled in; then asking about a certificate; then
+            // with Advanced open.
+            SwingUtilities.invokeAndWait {
+                app.signInForm.typeAddress("192.168.1.20:4533")
+                app.signInForm.username = "winters"
+                app.signInForm.password = "pw"
+            }
+            shot("signin", 2_000)
+            SwingUtilities.invokeAndWait {
+                app.signInForm.typeAddress("music.example.com")
+                app.signInForm.question = CertificateQuestion("music.example.com", "d693f076d6d65fcb023dd052e3637561a6772c9cb3c51f9799d3b94e3c655443")
+            }
+            shot("signin-certificate")
+            SwingUtilities.invokeAndWait {
+                app.popups.close()
+                app.signInForm.result = null
+                app.signInForm.advancedOpen = true
+                app.signInForm.home = "192.168.1.20:4533"
+                app.signInForm.addHeader()
+                app.signInForm.setHeaderName(0, "X-Access-Token")
+                app.signInForm.setHeaderValue(0, "secret")
+            }
+            shot("signin-advanced")
             val done = runBlocking { accounts.signIn(server.address, "winters", "pw") } as SignInOutcome.Done
             SwingUtilities.invokeAndWait { app.signedIn(done.connection) }
             shot("home", 3_000)

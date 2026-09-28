@@ -232,8 +232,8 @@ private fun Advanced(vm: SignInViewModel) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         SwitchRow(
-            "Use legacy password",
-            "Sends the password itself, for servers that check it against a directory and can't take a token. Use it over https.",
+            "Legacy sign-in",
+            "Only for older servers that reject the normal sign-in.",
             checked = vm.legacyPassword && !vm.useApiKey,
             enabled = !vm.useApiKey,
         ) { vm.legacyPassword = it }

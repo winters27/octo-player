@@ -33,6 +33,7 @@ import app.winters.octo.desktop.nav.KeyPress
 import app.winters.octo.desktop.nav.shortcutFor
 import app.winters.octo.desktop.secrets.SecretStore
 import app.winters.octo.desktop.server.Accounts
+import app.winters.octo.desktop.server.ServerSecurity
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
@@ -80,11 +81,14 @@ fun main(args: Array<String>) {
     if (claim is SingleInstance.Claim.HandedOver) return
     val instance = (claim as? SingleInstance.Claim.First)?.instance
     val settings = SettingsStore(File(places.config, SettingsStore.FILE_NAME), SettingsStore.APP_WRITE_DELAY_MS)
-    val http = OkHttpClient.Builder()
+    // One client for everything, set up for the signed-in server's headers
+    // and the certificates the listener trusted.
+    val security = ServerSecurity(settings)
+    val http = security.install(OkHttpClient.Builder())
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
-    val accounts = Accounts(settings, SecretStore.forSystem(), http)
+    val accounts = Accounts(settings, SecretStore.forSystem(), http, security)
     // Read here, before the window, since the password store can wait on
     // the listener (a locked keyring asks to be unlocked).
     val restored = accounts.restore()
@@ -97,7 +101,7 @@ fun main(args: Array<String>) {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
             var made: AppState? = null
             // Server songs are signed with whoever is signed in when they queue.
-            val opened = openPlayer(settings, scope) { made?.connection?.client }
+            val opened = openPlayer(settings, scope, { made?.connection?.client }) { made?.connection?.headers.orEmpty() }
             AppState(settings, accounts, http, scope, os, opened.player, restored = restored).also {
                 made = it
                 opened.problem?.let { problem -> it.notice = problem }

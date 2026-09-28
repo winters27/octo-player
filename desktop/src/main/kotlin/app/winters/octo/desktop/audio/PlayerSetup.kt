@@ -15,12 +15,17 @@ class OpenedPlayer(val player: DesktopPlayer, val problem: String?)
 // A machine where the engine's library will not load (a system it was not
 // built for, say) still gets a working app: the silent player keeps the
 // queue and time, and one line says why there is no sound.
-fun openPlayer(settings: SettingsStore, scope: CoroutineScope, client: () -> SubsonicClient?): OpenedPlayer {
+fun openPlayer(
+    settings: SettingsStore,
+    scope: CoroutineScope,
+    client: () -> SubsonicClient?,
+    headers: () -> Map<String, String> = { emptyMap() },
+): OpenedPlayer {
     val playback = settings.current.playback
     return try {
         val engine = NativeAudioEngine.open()
         val device = playback.outputDevice?.takeUnless { it == DEFAULT_OUTPUT }
-        OpenedPlayer(EnginePlayer(engine, LocalOrServer(ServerSongs(client)), volume = playback.volume, device = device), null)
+        OpenedPlayer(EnginePlayer(engine, LocalOrServer(ServerSongs(headers, client)), volume = playback.volume, device = device), null)
     } catch (e: Throwable) {
         if (e is VirtualMachineError) throw e
         OpenedPlayer(

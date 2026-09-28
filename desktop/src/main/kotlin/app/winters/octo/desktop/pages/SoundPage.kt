@@ -40,7 +40,6 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.PopupPadding
-import app.winters.octo.design.Separator
 import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.playback.FASTEST_SPEED
@@ -163,7 +162,6 @@ private fun EqualizerCard(app: AppState, sound: SoundController) {
             OctoColors.TextMuted,
         )
         if (parametric) FilterEditor(settings, selected, sound) { chosen = it }
-        Separator(Modifier.padding(vertical = 6.dp))
         SwitchLine(
             "Automatic preamp",
             "Lowers the level by the curve's highest boost, so boosting never distorts.",

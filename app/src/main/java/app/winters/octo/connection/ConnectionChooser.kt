@@ -17,15 +17,6 @@ import okhttp3.HttpUrl
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// Which of the server's addresses is in use.
-enum class Place { Home, Away }
-
-// Home only when a home address is set, the phone is on a local network
-// (Wi-Fi or a cable), and the home address answered just now. Anything
-// else uses the main address, which works from anywhere.
-fun choosePlace(hasHome: Boolean, onLocalNetwork: Boolean, homeAnswered: Boolean): Place =
-    if (hasHome && onLocalNetwork && homeAnswered) Place.Home else Place.Away
-
 // A connection error asks for a new check at most this often, so a burst
 // of failed cover loads does not become a burst of pings.
 private const val ERROR_RECHECK_MS = 5_000L

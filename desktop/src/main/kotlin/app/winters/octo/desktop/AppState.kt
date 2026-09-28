@@ -25,6 +25,7 @@ import app.winters.octo.desktop.search.Fetches
 import app.winters.octo.desktop.search.SearchModel
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.Connection
+import app.winters.octo.desktop.pages.SignInForm
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
@@ -84,6 +85,10 @@ class AppState(
         private set
 
     var connection by mutableStateOf<Connection?>(null)
+        private set
+
+    // The sign-in page's fields, started from the server signed in to last.
+    var signInForm by mutableStateOf(SignInForm(accounts.last))
         private set
     var library by mutableStateOf<LibraryStore?>(null)
         private set
@@ -148,6 +153,7 @@ class AppState(
         // The server is forgotten at once; the password store is left to
         // finish off the window's thread.
         scope.launch(start = CoroutineStart.UNDISPATCHED) { accounts.signOut() }
+        signInForm = SignInForm(accounts.last)
         connection = null
         library = null
         fetches = null

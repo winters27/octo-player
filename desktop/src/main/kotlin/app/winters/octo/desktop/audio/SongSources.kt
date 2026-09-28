@@ -21,12 +21,16 @@ fun interface SongSources {
 
 // Songs from the signed-in server, as the phone streams them: the file as
 // it is ("format=raw", the original quality), at an address signed the way
-// every other call is. The engine reuses the address for range requests
-// and reconnects, so it is signed when the song is queued.
-class ServerSongs(private val client: () -> SubsonicClient?) : SongSources {
+// every other call is, with the server's extra headers. The engine reuses
+// the address for range requests and reconnects, so it is signed when the
+// song is queued.
+class ServerSongs(
+    private val headers: () -> Map<String, String> = { emptyMap() },
+    private val client: () -> SubsonicClient?,
+) : SongSources {
     override fun addressOf(song: Song): SongAddress? {
         val server = client() ?: return null
-        return SongAddress(server.url("stream", mapOf("id" to song.id, "format" to "raw")).toString())
+        return SongAddress(server.url("stream", mapOf("id" to song.id, "format" to "raw")).toString(), headers())
     }
 }
 
