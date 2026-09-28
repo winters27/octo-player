@@ -40,34 +40,17 @@ import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.playback.MAX_SLEEP_MINUTES
+import app.winters.octo.playback.SLEEP_EXTENSIONS
+import app.winters.octo.playback.SLEEP_MINUTES
+import app.winters.octo.playback.SLEEP_SONG_COUNTS
 import app.winters.octo.playback.SleepState
+import app.winters.octo.playback.sleepSummary
 import app.winters.octo.playback.speedLabel
 import app.winters.octo.ui.common.asClock
-import app.winters.octo.ui.common.songs
-
-// The lengths offered, in minutes.
-private val SleepChoices = listOf(5, 15, 30, 45, 60)
-
-// What a running countdown can be lengthened by, in minutes.
-private val SleepExtensions = listOf(5, 10)
-
-// How many songs the music can stop after, the one playing included.
-private val SongChoices = listOf(1, 2, 3, 5)
-
-// A timer in words, for the sheet and the sleep button.
-fun sleepSummary(state: SleepState): String = when (state) {
-    SleepState.Off -> "Off"
-    is SleepState.Counting -> "${((state.remainingMs + 59_999) / 60_000).toInt()} min left"
-    SleepState.EndOfSong -> "At the end of this song"
-    is SleepState.Songs -> "After ${songs(state.left)}"
-    is SleepState.AfterSong -> "After ${state.title}"
-}
 
 // How wide the card for time is: room for three buttons in a row.
 internal val TimeCardWidth = 320.dp
-
-// The longest custom timer: twelve hours.
-private const val MAX_SLEEP_MINUTES = 720
 
 // The sleep timer, a page of a glass card beside its button: how long until
 // the music stops, or after how many songs, and the time left once one is
@@ -117,7 +100,7 @@ fun SleepPage(model: PlayerViewModel, onDone: () -> Unit, onOpenSpeed: () -> Uni
             if (state is SleepState.Counting) {
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SleepExtensions.forEach { minutes ->
+                    SLEEP_EXTENSIONS.forEach { minutes ->
                         GlazeButton("+$minutes min", onClick = { model.extendSleep(minutes) })
                     }
                 }
@@ -128,7 +111,7 @@ fun SleepPage(model: PlayerViewModel, onDone: () -> Unit, onOpenSpeed: () -> Uni
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            SleepChoices.forEach { minutes ->
+            SLEEP_MINUTES.forEach { minutes ->
                 GlazeButton(if (minutes == 60) "1 hour" else "$minutes min", onClick = {
                     model.sleepIn(minutes)
                     onDone()
@@ -143,7 +126,7 @@ fun SleepPage(model: PlayerViewModel, onDone: () -> Unit, onOpenSpeed: () -> Uni
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            SongChoices.forEach { count ->
+            SLEEP_SONG_COUNTS.forEach { count ->
                 GlazeButton(if (count == 1) "This song" else "$count songs", onClick = {
                     model.sleepAfterSongs(count)
                     onDone()
