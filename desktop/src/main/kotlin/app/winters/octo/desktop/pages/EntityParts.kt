@@ -64,8 +64,9 @@ fun rememberIndex(app: AppState): LibraryIndex? {
 }
 
 // The top of an album, artist or genre page: its picture, what it is, its
-// name, a line under the name (an artist to open), a line of facts, and
-// its actions. Compact, since the page is for the list under it.
+// name, a line under the name (an artist to open), a line of facts, a
+// quiet note under them when there is one, and its actions. Compact, since
+// the page is for the list under it.
 @Composable
 fun EntityHeader(
     kind: String,
@@ -73,6 +74,7 @@ fun EntityHeader(
     picture: @Composable (Modifier) -> Unit,
     subtitle: @Composable (() -> Unit)? = null,
     facts: List<Fact> = emptyList(),
+    note: @Composable (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit,
 ) {
     Row(Modifier.fillMaxWidth().padding(bottom = Space.Xl), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.Page)) {
@@ -82,6 +84,7 @@ fun EntityHeader(
             Txt(title, DesktopType.pageTitle, maxLines = 2)
             subtitle?.invoke()
             if (facts.isNotEmpty()) FactLine(facts)
+            note?.invoke()
             Row(Modifier.padding(top = Space.L), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M), content = actions)
         }
     }

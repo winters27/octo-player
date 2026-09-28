@@ -216,6 +216,10 @@ fun SongTable(
     val showCovers = covers && settings.density == "roomy"
     val pointer = LocalPointer.current
     val drag = LocalDrag.current
+    // Songs found online, not in the library. A list that has any says, on
+    // every row, which songs are in the library and which are not.
+    val outside = rememberOutside(app, songs)
+    val marks = outside.isNotEmpty()
 
     fun picked(): List<Song> = selection.of(rows).map(TableRow::song)
     fun playFrom(key: String) {
@@ -225,7 +229,8 @@ fun SongTable(
     fun openMenu(at: IntOffset) {
         val rowsPicked = selection.of(rows).ifEmpty { return }
         val where = place(rowsPicked)
-        app.popups.showAt(at) { close -> SongMenu(app, rowsPicked.map(TableRow::song), close, place = where) }
+        val picked = rowsPicked.map(TableRow::song)
+        app.popups.showAt(at) { close -> SongMenu(app, picked, close, outside = picked.any { it.id in outside }, place = where) }
     }
     // Delete takes the picked rows out of the playlist or the queue they
     // are in; in the library it does nothing.
@@ -318,7 +323,8 @@ fun SongTable(
             .onPreviewKeyEvent(::onKey)
             .focusable(),
     ) {
-        val usable = maxWidth - padding.calculateStartPadding(LayoutDirection.Ltr) - padding.calculateEndPadding(LayoutDirection.Ltr) - Space.M * 2
+        val usable = maxWidth - padding.calculateStartPadding(LayoutDirection.Ltr) - padding.calculateEndPadding(LayoutDirection.Ltr) - Space.M * 2 -
+            (if (marks) RowEnd + ColumnGap else Space.None)
         val shown = remember(chosen, usable, prefs) { fitColumns(chosen, usable, prefs) }
         val favouriteShown = SongColumn.Favourite in shown
         // The heading sits on a plate only while rows pass under it.
@@ -337,7 +343,7 @@ fun SongTable(
             }
             stickyHeader(key = HeaderKey) {
                 HeaderRow(
-                    app, id, shown, chosen, columns, order, onSort, stuck,
+                    app, id, shown, chosen, columns, order, onSort, stuck, marks,
                     cell = ::cell,
                     widthNow = ::widthOf,
                     onDrag = { column, change -> dragging[column] = ((dragging[column] ?: widthOf(column, prefs)) + change).coerceAtLeast(specOf(column).min) },
@@ -359,6 +365,8 @@ fun SongTable(
                     focused = hasFocus && selection.focus == row.key,
                     covers = showCovers,
                     heartInTitle = !favouriteShown,
+                    outside = row.song.id in outside,
+                    marks = marks,
                     number = number,
                     cell = ::cell,
                     onPress = { primary, toggle, range ->
@@ -393,7 +401,11 @@ fun SongTable(
             footer()
         }
         if (selection.picked.size > 1) {
-            PickedBar(app, selection.picked.size, ::picked, { place(selection.of(rows)) }, { selection.clear() }, Modifier.align(Alignment.BottomCenter).padding(bottom = Space.Xl))
+            PickedBar(
+                app, selection.picked.size, ::picked, { place(selection.of(rows)) }, { selection.clear() },
+                Modifier.align(Alignment.BottomCenter).padding(bottom = Space.Xl),
+                outside = { picked -> picked.any { it.id in outside } },
+            )
         }
     }
 }
@@ -441,6 +453,8 @@ private fun HeaderRow(
     order: SortOrder?,
     onSort: ((SortOrder) -> Unit)?,
     stuck: Boolean,
+    // Whether the rows carry a library mark before their end.
+    marks: Boolean,
     cell: (RowScope, SongColumn) -> Modifier,
     widthNow: (SongColumn) -> Dp,
     onDrag: (SongColumn, Dp) -> Unit,
@@ -479,6 +493,7 @@ private fun HeaderRow(
                     }
                 }
             }
+            if (marks) Box(Modifier.width(RowEnd))
             Box(Modifier.width(RowEnd), contentAlignment = Alignment.Center) {
                 IconAction(OctoIcons.More, "Choose columns", openColumns, size = ControlHeight.S, iconSize = IconSize.Table, tint = OctoColors.TextMuted)
             }
@@ -527,7 +542,8 @@ private fun androidx.compose.foundation.layout.ColumnScope.ColumnsMenu(app: AppS
 // One song: the picked ones on the darker pill, the playing one tinted with
 // the key colour and marked in the number column, the keyboard's row
 // ringed. Under the pointer, the number becomes a play button and a More
-// button shows at the end.
+// button shows at the end. In a list mixing library songs with songs found
+// online (`marks`), a mark before the end says which this one is.
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun SongRow(
@@ -543,6 +559,9 @@ private fun SongRow(
     focused: Boolean,
     covers: Boolean,
     heartInTitle: Boolean,
+    // Found online, not in the library.
+    outside: Boolean,
+    marks: Boolean,
     number: (Int, Song) -> String,
     cell: (RowScope, SongColumn) -> Modifier,
     onPress: (primary: Boolean, toggle: Boolean, range: Boolean) -> Unit,
@@ -602,8 +621,11 @@ private fun SongRow(
         Row(Modifier.fillMaxWidth().padding(horizontal = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ColumnGap)) {
             shown.forEach { column ->
                 Box(cell(this, column), contentAlignment = if (specOf(column).endAligned) Alignment.CenterEnd else Alignment.CenterStart) {
-                    SongCell(app, column, index, row.song, playing, sounding, hovered, covers, heartInTitle, number, onPlay)
+                    SongCell(app, column, index, row.song, playing, sounding, hovered, covers, heartInTitle, outside, number, onPlay)
                 }
+            }
+            if (marks) {
+                Box(Modifier.width(RowEnd), contentAlignment = Alignment.Center) { LibraryMark(app, row.song, outside) }
             }
             Box(Modifier.width(RowEnd).onGloballyPositioned { moreAnchor = it.windowRect() }, contentAlignment = Alignment.Center) {
                 if (hovered || picked) {
@@ -627,6 +649,9 @@ private fun SongCell(
     hovered: Boolean,
     covers: Boolean,
     heartInTitle: Boolean,
+    // A song found online has no heart, rating, plays or file format here:
+    // those belong to a song in the library.
+    outside: Boolean,
     number: (Int, Song) -> String,
     onPlay: () -> Unit,
 ) {
@@ -651,7 +676,7 @@ private fun SongCell(
                 if (failed != null) muted else OctoColors.TextPrimary,
                 Modifier.weight(1f, fill = false),
             )
-            if (heartInTitle && app.isStarred(song)) Glyph(OctoIcons.Liked, size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextSecondary)
+            if (heartInTitle && !outside && app.isStarred(song)) Glyph(OctoIcons.Liked, size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextSecondary)
             // A song that would not play this time says why on hover.
             if (failed != null) OctoTooltip(failed) { Glyph(OctoIcons.Info, size = IconSize.Inline - Space.Xxs, tint = OctoColors.SignalOrange) }
         }
@@ -665,14 +690,14 @@ private fun SongCell(
         SongColumn.Year -> Txt(song.year?.takeIf { it > 0 }?.toString().orEmpty(), numbers, muted, align = TextAlign.End)
         SongColumn.Added -> Txt(dateText(song.created), numbers, muted)
         SongColumn.Played -> Txt(dateText(song.played), numbers, muted)
-        SongColumn.Plays -> Txt(song.playCount?.takeIf { it > 0 }?.toString().orEmpty(), numbers, muted, align = TextAlign.End)
+        SongColumn.Plays -> if (!outside) Txt(song.playCount?.takeIf { it > 0 }?.toString().orEmpty(), numbers, muted, align = TextAlign.End)
         // Shown only: rating is in the menu, where a stray click cannot set
         // it (on an Octo server one star can take a song out of the library).
-        SongColumn.Rating -> Stars(app.ratingOf(song))
-        SongColumn.Format -> Txt(formatLabel(PlayFormat(libraryFormat(song), null)).orEmpty(), numbers, muted)
+        SongColumn.Rating -> if (!outside) Stars(app.ratingOf(song))
+        SongColumn.Format -> if (!outside) Txt(formatLabel(PlayFormat(libraryFormat(song), null)).orEmpty(), numbers, muted)
         SongColumn.Bpm -> Txt(song.bpm?.takeIf { it > 0 }?.toString().orEmpty(), numbers, muted, align = TextAlign.End)
         SongColumn.Size -> Txt(song.size?.takeIf { it > 0 }?.let { sizeText(it) }.orEmpty(), numbers, muted, align = TextAlign.End)
-        SongColumn.Favourite -> {
+        SongColumn.Favourite -> if (!outside) {
             val starred = app.isStarred(song)
             if (starred || hovered) {
                 IconAction(
@@ -702,7 +727,16 @@ private fun Stars(rating: Int) {
 // While several rows are picked: how many, and what can be done with them
 // all at once, over the foot of the table.
 @Composable
-private fun PickedBar(app: AppState, count: Int, picked: () -> List<Song>, place: () -> SongPlace, clear: () -> Unit, modifier: Modifier) {
+private fun PickedBar(
+    app: AppState,
+    count: Int,
+    picked: () -> List<Song>,
+    place: () -> SongPlace,
+    clear: () -> Unit,
+    modifier: Modifier,
+    // Whether any of these songs is found online, not in the library.
+    outside: (List<Song>) -> Boolean,
+) {
     var anchor by remember { mutableStateOf(IntRect.Zero) }
     Glaze(modifier.onGloballyPositioned { anchor = it.windowRect() }, shape = Corner.PanelShape, light = GlazeLight.Lifted) {
         Row(Modifier.padding(horizontal = Space.L, vertical = Space.S), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
@@ -710,7 +744,10 @@ private fun PickedBar(app: AppState, count: Int, picked: () -> List<Song>, place
             TextAction("Play", { app.play(picked()) })
             TextAction("Play next", { app.playNext(picked()) })
             TextAction("Add to queue", { app.addToQueue(picked()) })
-            IconAction(OctoIcons.More, "More for these songs", { app.popups.showUnder(anchor) { close -> SongMenu(app, picked(), close, place = place()) } }, size = ControlHeight.S, iconSize = IconSize.Table)
+            IconAction(OctoIcons.More, "More for these songs", {
+                val songs = picked()
+                app.popups.showUnder(anchor) { close -> SongMenu(app, songs, close, outside = outside(songs), place = place()) }
+            }, size = ControlHeight.S, iconSize = IconSize.Table)
             IconAction(OctoIcons.Close, "Let go of the picked songs", clear, size = ControlHeight.S, iconSize = IconSize.Table)
         }
     }
