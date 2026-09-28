@@ -14,4 +14,8 @@ data class SystemPrefs(
     // Whether the mini player was open, and where it was.
     val miniPlayerOpen: Boolean = false,
     val miniPlayer: WindowSpot? = null,
+    // Windows only: start Octo when the listener signs in, and whether it
+    // then starts hidden in the tray.
+    val startWithWindows: Boolean = false,
+    val startInTray: Boolean = false,
 )
