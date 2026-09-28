@@ -36,6 +36,7 @@ import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
@@ -62,6 +63,9 @@ class AppState(
     val player: DesktopPlayer = SilentPlayer(scope = scope, volume = settings.current.playback.volume),
     // The online lyrics library; tests give one at a pretend address.
     lyricsLibrary: OnlineLyrics = OnlineLyrics(http),
+    // The saved server, read from the password store before the window
+    // opens, since the store can keep the caller waiting.
+    restored: Connection? = accounts.restore(),
 ) {
     // The Sound page's settings, kept on the engine; none for the silent player.
     val sound: SoundController? = (player as? SoundTarget)?.let { SoundController(it, settings, scope) }
@@ -113,7 +117,7 @@ class AppState(
     val mac: Boolean get() = os == DesktopOs.Mac
 
     init {
-        accounts.restore()?.let(::signedIn)
+        restored?.let(::signedIn)
     }
 
     fun signedIn(connection: Connection, note: String? = null) {
@@ -132,7 +136,9 @@ class AppState(
 
     fun signOut() {
         player.clear()
-        accounts.signOut()
+        // The server is forgotten at once; the password store is left to
+        // finish off the window's thread.
+        scope.launch(start = CoroutineStart.UNDISPATCHED) { accounts.signOut() }
         connection = null
         library = null
         fetches = null
