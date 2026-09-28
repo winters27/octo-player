@@ -51,11 +51,7 @@ data class BackgroundPrefs(
     val prepared: Boolean get() = mode != BackgroundMode.Classic
 }
 
-val BrightnessCapRange = 20..100
-val SaturationRange = 0..300
-val ContrastRange = 0.5f..2f
-val FpsChoices = listOf(30, 60, 90, 120)
-val SpeedRange = 5..100
+// The ranges and frame rates offered are in shared core (WashReading.kt).
 
 // The player's colours with the words' colour decided for this background:
 // the light or dark test on the adjusted main colour, or white over the

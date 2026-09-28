@@ -11,4 +11,4 @@ val DarkInk = Color(0xFF141416)
 // The colour for the player's words over a background made from a cover
 // whose main colour is this: dark over a light wash, white otherwise.
 fun washContent(dominant: Int?, tuning: WashTuning): Color =
-    if (dominant != null && washIsLight(prepareColor(dominant, tuning))) DarkInk else Color.White
+    if (washDarkWords(dominant, tuning)) DarkInk else Color.White

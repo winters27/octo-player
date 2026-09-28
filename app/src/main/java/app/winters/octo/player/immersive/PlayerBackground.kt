@@ -87,13 +87,6 @@ class BackgroundViewModel @Inject constructor(
 fun drawnMode(mode: BackgroundMode, sdk: Int): BackgroundMode =
     if (mode == BackgroundMode.Default && sdk < Build.VERSION_CODES.TIRAMISU) BackgroundMode.Artwork else mode
 
-// How far out the background starts on the way in, and ends on the way
-// out, as a share of its full size.
-const val DollyStart = 0.9f
-
-// The dolly as a scale: `dolly` runs from 0 (out) to 1 (in).
-fun dollyScale(dolly: Float): Float = DollyStart + (1f - DollyStart) * dolly
-
 // The full player's background, by the chosen mode. `dolly` is read only
 // while drawing, for the way in and out.
 @Composable
