@@ -13,10 +13,12 @@ import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.readLibrary
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // A genre, with how many songs and albums the library has in it.
 data class GenreCount(val name: String, val songs: Int, val albums: Int)
@@ -33,8 +35,9 @@ class LibraryIndex(val songs: List<Song>, val albums: List<Album>, val artists: 
     private val byIsrc = IsrcIndex(songs) { it.isrc }
 
     // Every genre, with its counts, A to Z. A song's genres are its
-    // OpenSubsonic list when it has one, else its single genre.
-    val genres: List<GenreCount> by lazy {
+    // OpenSubsonic list when it has one, else its single genre. Worked out
+    // with the rest of the index, away from the window's thread.
+    val genres: List<GenreCount> = run {
         val songCounts = HashMap<String, Int>()
         val albumSets = HashMap<String, HashSet<String>>()
         val names = HashMap<String, String>()
@@ -72,7 +75,7 @@ class LibraryIndex(val songs: List<Song>, val albums: List<Album>, val artists: 
     }
 
     // Songs that have been played, most recently first.
-    val history: List<Song> by lazy { recentlyPlayed(songs) }
+    val history: List<Song> = recentlyPlayed(songs)
 
     companion object {
         fun of(library: Library) = LibraryIndex(library.songs, library.albums, library.artists)
@@ -89,8 +92,13 @@ sealed interface LibraryState {
     class Failed(val message: String) : LibraryState
 }
 
-// Reads the library from the server, once, and again on request.
-class LibraryStore(private val client: SubsonicClient, private val scope: CoroutineScope) {
+// Reads the library from the server, once, and again on request. The
+// reading, the passes that drop repeats and the index are all done away
+// from the window's thread (a big library takes over a second); only the
+// finished index is handed back to the state the pages read.
+class LibraryStore(private val read: suspend () -> Library, private val scope: CoroutineScope) {
+    constructor(client: SubsonicClient, scope: CoroutineScope) : this({ client.readLibrary() }, scope)
+
     private val _state = MutableStateFlow<LibraryState>(LibraryState.Idle)
     val state: StateFlow<LibraryState> = _state
     private var job: Job? = null
@@ -103,7 +111,7 @@ class LibraryStore(private val client: SubsonicClient, private val scope: Corout
         if (previous == null) _state.value = LibraryState.Loading
         job = scope.launch {
             _state.value = try {
-                LibraryState.Ready(LibraryIndex.of(client.readLibrary()))
+                LibraryState.Ready(withContext(Dispatchers.Default) { LibraryIndex.of(read()) })
             } catch (e: SubsonicException) {
                 // A failed refresh keeps what was read before.
                 previous?.let { LibraryState.Ready(it) } ?: LibraryState.Failed(e.userMessage())
