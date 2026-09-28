@@ -2,11 +2,20 @@ package app.winters.octo.playback
 
 import androidx.media3.common.C
 import androidx.media3.common.Format
+import androidx.media3.common.MimeTypes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class QualityTest {
+    @Test
+    fun theOutputsRateShowsOnlyWhenItDiffers() {
+        val hiRes = audioQuality(MimeTypes.AUDIO_FLAC, null, C.ENCODING_PCM_24BIT, 96_000, 0)!!
+        assertEquals("FLAC · 24-bit · 96 kHz · plays at 48 kHz", hiRes.playingAt(48_000).full)
+        assertEquals("FLAC · 24-bit · 96 kHz", hiRes.playingAt(96_000).full)
+        assertEquals("FLAC · 24-bit · 96 kHz", hiRes.playingAt(null).full)
+    }
+
     @Test
     fun cdQualityFlacIsLossless() {
         val quality = audioQuality("audio/flac", "audio/flac", C.ENCODING_PCM_16BIT, 44_100, Format.NO_VALUE)!!
