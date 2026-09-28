@@ -13,8 +13,9 @@ import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconPath
 import app.winters.octo.design.IconSource
 
-// How Octo fits into the system: the tray, notifications, the mini player,
-// the window's frame, and whether the media keys reach it.
+// How Octo fits into the system: the tray, notifications, the window's
+// frame, and whether the media keys reach it. The mini player and Discord
+// have groups of their own below (MoreSystemRows.kt).
 @Composable
 fun SystemRows(app: AppState) {
     val system = LocalSystem.current
@@ -34,9 +35,6 @@ fun SystemRows(app: AppState) {
             SwitchRow("Now playing notifications", "A notice with each new song, while Octo's window is behind others.", prefs.nowPlayingNotices) { on ->
                 app.settings.update { it.copy(system = it.system.copy(nowPlayingNotices = on)) }
             }
-        }
-        if (system != null) {
-            SwitchRow("Mini player", "A small window that stays above the others, for while you work.", system.miniPlayerOpen) { on -> system.setMiniPlayer(on) }
         }
         if (!mac) {
             SwitchRow("Use the system title bar", "Your system's own window frame in place of Octo's. Takes effect the next time Octo opens.", settings.systemTitleBar) { on ->

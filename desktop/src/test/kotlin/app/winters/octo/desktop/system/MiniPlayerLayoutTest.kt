@@ -1,12 +1,22 @@
 package app.winters.octo.desktop.system
 
+import app.winters.octo.desktop.discord.DiscordPrefs
+import app.winters.octo.desktop.hotkeys.HotkeyPrefs
+import app.winters.octo.desktop.settings.AppSettings
+import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.settings.WindowSpot
 import app.winters.octo.desktop.window.ScreenArea
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.File
 
 class MiniPlayerLayoutTest {
+    @get:Rule val folder = TemporaryFolder()
+
     private val screens = listOf(ScreenArea(0f, 0f, 1920f, 1040f), ScreenArea(1920f, 0f, 1280f, 1024f))
 
     @Test
@@ -77,5 +87,37 @@ class MiniPlayerLayoutTest {
         assertEquals(MiniPanel.Queue, "Queue".toMiniPanel())
         assertEquals(null, (null as String?).toMiniPanel())
         assertEquals(null, "karaoke".toMiniPanel())
+    }
+
+    // The mini player's, Discord's and the global shortcuts' settings, away
+    // from their defaults, read back the same; and a file from before them
+    // gets the defaults: everything off, the mini player pinned on top.
+    @Test
+    fun theNewSettingsSurviveARestart() {
+        val file = File(folder.root, "octo/${SettingsStore.FILE_NAME}")
+        val changed = AppSettings(
+            system = SystemPrefs(
+                miniPlayerOpen = true,
+                miniPlayer = WindowSpot(2400f, 200f, MINI_PANEL_WIDTH, MINI_PANEL_OPEN_HEIGHT),
+                miniPlayerOnTop = false,
+                miniPlayerPanel = "queue",
+            ),
+            discord = DiscordPrefs(on = true, openedFiles = true),
+            hotkeys = HotkeyPrefs(on = true, keys = mapOf("next" to "Ctrl+Alt+F9", "like" to "")),
+        )
+        SettingsStore(file).update { changed }
+        assertEquals(changed, SettingsStore(file).current)
+
+        val old = File(folder.root, "old/${SettingsStore.FILE_NAME}").apply {
+            parentFile.mkdirs()
+            writeText("""{"system":{"closeToTray":true,"miniPlayerOpen":true}}""")
+        }
+        val read = SettingsStore(old).current
+        assertTrue(read.system.miniPlayerOnTop)
+        assertEquals(null, read.system.miniPlayerPanel)
+        assertFalse("Discord is off until asked", read.discord.on)
+        assertFalse(read.discord.openedFiles)
+        assertFalse("global shortcuts are off until asked", read.hotkeys.on)
+        assertTrue(read.hotkeys.keys.isEmpty())
     }
 }
