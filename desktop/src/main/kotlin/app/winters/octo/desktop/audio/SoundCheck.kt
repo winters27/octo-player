@@ -5,6 +5,7 @@ import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import okhttp3.Request
 import java.io.File
 
 // Set to a WAV path, the app plays that file through the real player once
@@ -20,6 +21,7 @@ suspend fun checkSound(app: AppState, file: File, close: () -> Unit) {
     if (!file.exists()) withContext(Dispatchers.IO) { writeSine(file, seconds = CHECK_SECONDS + 2) }
     val player = app.player
     val engine = (player as? EnginePlayer)?.engine
+    println("check: version ${System.getProperty("octo.version") ?: "not stamped"}")
     println("check: playing ${file.absolutePath} on ${if (engine == null) "the silent player" else "the audio engine"}")
     player.play(listOf(Song(LOCAL_PREFIX + file.absolutePath, "Test tone", duration = CHECK_SECONDS + 2)))
     var first: Long? = null
@@ -35,5 +37,20 @@ suspend fun checkSound(app: AppState, file: File, close: () -> Unit) {
     val moved = engine != null && start != null && last - start >= 1_000
     println(if (moved) "check: sound is playing, the clock moved ${last - start} ms" else "check: FAILED, the engine did not play")
     player.pause()
+    println(secureCheck(app))
     close()
 }
+
+// The installers carry a trimmed Java runtime; a part missing from it
+// shows only when an https server is reached, so the check reaches one.
+private suspend fun secureCheck(app: AppState): String = withContext(Dispatchers.IO) {
+    try {
+        val request = Request.Builder().url(SECURE_CHECK_URL).head().build()
+        app.http.newCall(request).execute().use { "check: https works (${it.protocol}, HTTP ${it.code})" }
+    } catch (e: Exception) {
+        "check: FAILED, https did not work: $e"
+    }
+}
+
+// The online lyrics library, which the app reaches anyway.
+private const val SECURE_CHECK_URL = "https://lrclib.net/"

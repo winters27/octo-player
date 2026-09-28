@@ -11,6 +11,13 @@ plugins {
 
 kotlin { jvmToolchain(17) }
 
+// The version the installers carry and the app shows. Windows only
+// replaces an installed Octo with a higher version, so every build handed
+// out must count up: a test build passes -PoctoBuild=<commit count>, as the
+// phone's test builds do, and becomes 1.0.<count>. Raise the first two
+// numbers for a release.
+val desktopVersion = "1.0.${(findProperty("octoBuild") as String?)?.toIntOrNull() ?: 0}"
+
 // The phone app's icon, for the window and the taskbar, and the rounded one
 // made from it for the tray.
 val shareIcon by tasks.registering(Sync::class) {
@@ -161,6 +168,7 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "app.winters.octo.desktop.MainKt"
+        jvmArgs("-Docto.version=$desktopVersion")
         // `-Pocto.checkPlay=build/check/tone.wav` plays a made-up tone once
         // the window opens and prints what the engine says (audio/SoundCheck.kt).
         providers.gradleProperty("octo.checkPlay").orNull?.let { jvmArgs("-Docto.checkPlay=${file(it).absolutePath}") }
@@ -187,7 +195,7 @@ compose.desktop {
             targetFormats(TargetFormat.Msi, TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "Octo"
             // The installers need a first number above 0 (macOS insists).
-            packageVersion = "1.0.0"
+            packageVersion = desktopVersion
             description = "A music player for Subsonic, Navidrome and Octo servers"
             vendor = "Winters"
             copyright = "Copyright Winters. Licensed under the GPL, version 3 or later."
@@ -252,4 +260,15 @@ compose.desktop {
             }
         }
     }
+}
+
+// The app as a zip that runs from wherever it is unpacked, installing
+// nothing: build/compose/binaries/main/zip/Octo-<version>-<system>.zip.
+val packagePortableZip by tasks.registering(Zip::class) {
+    group = "compose desktop"
+    description = "Packs the app into a zip that runs without installing."
+    dependsOn("createDistributable")
+    from(layout.buildDirectory.dir("compose/binaries/main/app"))
+    archiveFileName = "Octo-$desktopVersion-$jnaFolder.zip"
+    destinationDirectory = layout.buildDirectory.dir("compose/binaries/main/zip")
 }

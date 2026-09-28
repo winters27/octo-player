@@ -14,6 +14,7 @@ import androidx.compose.ui.window.ApplicationScope
 import androidx.compose.ui.window.TrayState
 import androidx.compose.ui.window.isTraySupported
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.audio.CHECK_PLAY
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.window.screenAreas
@@ -99,6 +100,7 @@ class SystemIntegration(
             }
         }
         instance?.onLaunch { args -> app.scope.launch { arrived(args) } }
+        if (os == DesktopOs.Windows && System.getProperty(CHECK_PLAY) == null) installedProgram()?.let { program -> app.scope.launch(Dispatchers.IO) { registerLinksOnWindows(program) } }
         listenToMac()
         open(parseLaunchArgs(launchArgs))
     }

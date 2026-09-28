@@ -105,6 +105,11 @@ fun SettingsPage(app: AppState, visit: Visit) {
             }
         }
         item(key = "system") { SystemSettingsCard(app) }
+        item(key = "about") {
+            SettingsCard("About") {
+                InfoLine("Version", appVersion())
+            }
+        }
         item(key = "keys") {
             SettingsCard("Keyboard shortcuts") {
                 shortcutList(app.mac).forEachIndexed { index, (what, keys) ->
@@ -119,3 +124,7 @@ fun SettingsPage(app: AppState, visit: Visit) {
     }
 }
 
+
+// The version the build stamped, or "Development build" when run from source
+// without it.
+fun appVersion(): String = System.getProperty("octo.version")?.takeIf(String::isNotBlank) ?: "Development build"
