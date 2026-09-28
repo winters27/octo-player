@@ -178,7 +178,7 @@ private fun ColumnScope.AddFilterMenu(query: LibraryQuery, onChange: (LibraryQue
             MenuSeparator()
             for (stars in 5 downTo 1) {
                 val rule = FilterPresets.ratingAtLeast(stars)
-                MenuRow(starWords(stars), { pick(rule) }, checked = on(rule))
+                MenuRow(FilterPresets.ratingWords(stars), { pick(rule) }, checked = on(rule))
             }
         }
         FilterPage.Genre -> {
@@ -198,13 +198,6 @@ private fun ColumnScope.AddFilterMenu(query: LibraryQuery, onChange: (LibraryQue
             }
         }
     }
-}
-
-// "5 stars", "4 stars or more".
-fun starWords(stars: Int): String = when (stars) {
-    5 -> "5 stars"
-    1 -> "1 star or more"
-    else -> "$stars stars or more"
 }
 
 // What a filtered list says when nothing is left, with the way back.

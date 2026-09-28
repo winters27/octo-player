@@ -1,6 +1,5 @@
 package app.winters.octo.desktop.library
 
-import app.winters.octo.desktop.ui.starWords
 import app.winters.octo.query.FilterPresets
 import app.winters.octo.query.LibraryQuery
 import app.winters.octo.subsonic.Song
@@ -53,10 +52,5 @@ class SongFiltersTest {
         assertEquals("2,835 songs", filteredCount(120, 2_835, filtered = false))
         assertEquals("120 of 2,835 songs", filteredCount(120, 2_835, filtered = true))
         assertEquals("0 of 1 song", filteredCount(0, 1, filtered = true))
-    }
-
-    @Test
-    fun ratingChoicesInWords() {
-        assertEquals(listOf("5 stars", "4 stars or more", "3 stars or more", "2 stars or more", "1 star or more"), (5 downTo 1).map(::starWords))
     }
 }

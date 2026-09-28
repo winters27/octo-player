@@ -247,6 +247,11 @@ class LibraryQueryTest {
     }
 
     @Test
+    fun ratingChoicesInWords() {
+        assertEquals(listOf("5 stars", "4 stars or more", "3 stars or more", "2 stars or more", "1 star or more"), (5 downTo 1).map(FilterPresets::ratingWords))
+    }
+
+    @Test
     fun spansInWords() {
         assertEquals(listOf("day", "week", "2 weeks", "month", "6 months", "year", "2 years", "10 days"), listOf(1, 7, 14, 30, 180, 365, 730, 10).map(::spanWords))
     }

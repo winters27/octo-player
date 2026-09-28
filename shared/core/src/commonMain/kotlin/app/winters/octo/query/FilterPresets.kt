@@ -19,6 +19,14 @@ object FilterPresets {
 
     fun ratingAtLeast(stars: Int) = QueryRule(QueryField.Rating, QueryOp.AtLeast, number = stars.toLong())
 
+    // How a choice of ratingAtLeast reads in a list: "5 stars", "4 stars or
+    // more".
+    fun ratingWords(stars: Int): String = when (stars) {
+        5 -> "5 stars"
+        1 -> "1 star or more"
+        else -> "$stars stars or more"
+    }
+
     fun genre(name: String) = QueryRule(QueryField.Genre, QueryOp.Is, text = name)
 
     // A decade, from the year it starts: 1990 is 1990 to 1999.
