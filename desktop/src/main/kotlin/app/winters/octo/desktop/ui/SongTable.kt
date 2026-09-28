@@ -255,7 +255,7 @@ fun SongTable(
         }
     }
     fun onKey(event: KeyEvent): Boolean {
-        if (event.type != KeyEventType.KeyDown || rows.isEmpty()) return false
+        if (event.type != KeyEventType.KeyDown || rows.isEmpty() || !hasFocus) return false
         val command = if (app.mac) event.isMetaPressed else event.isCtrlPressed
         val page = (state.layoutInfo.visibleItemsInfo.size - 2).coerceAtLeast(1)
         fun move(step: Int): Boolean {
@@ -303,9 +303,11 @@ fun SongTable(
     BoxWithConstraints(
         modifier
             .focusRequester(focus)
+            // The table's own focus, not a field in its heading (a filter),
+            // so typing there never moves the rows.
             .onFocusChanged {
-                hasFocus = it.hasFocus
-                lists.active = it.hasFocus
+                hasFocus = it.isFocused
+                lists.active = it.isFocused
             }
             .onPreviewKeyEvent(::onKey)
             .focusable(),

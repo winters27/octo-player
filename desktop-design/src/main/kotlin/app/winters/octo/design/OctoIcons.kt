@@ -70,6 +70,8 @@ object OctoIcons {
     val Appearance by sym("sym_palette")
     val Library by sym("sym_library_music")
     val Search by sym("sym_search")
+    val Add by sym("sym_add")
+    val Filter by sym("sym_filter_list")
     val Speaker by sym("sym_speaker")
     val Headphones by sym("sym_headphones")
 
@@ -178,5 +180,5 @@ val allIcons: List<Pair<String, () -> ImageVector>> = listOf(
     "Home" to { OctoIcons.Home }, "Settings" to { OctoIcons.Settings }, "Minimize" to { OctoIcons.Minimize },
     "Maximize" to { OctoIcons.Maximize }, "Restore" to { OctoIcons.Restore }, "Check" to { OctoIcons.Check },
     "Playback" to { OctoIcons.Playback }, "Sound" to { OctoIcons.Sound }, "Reveal" to { OctoIcons.Reveal },
-    "Conceal" to { OctoIcons.Conceal },
+    "Conceal" to { OctoIcons.Conceal }, "Add" to { OctoIcons.Add }, "Filter" to { OctoIcons.Filter },
 )

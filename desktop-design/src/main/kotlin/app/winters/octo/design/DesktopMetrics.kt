@@ -88,6 +88,14 @@ object FrameSize {
     val Volume = 96.dp
     val PlaylistCover = 22.dp
     val SearchWidth = 360.dp
+    // The search box's list: its width, how tall it may grow, a line, and
+    // a line's picture.
+    val OmniWidth = 600.dp
+    val OmniHeight = 520.dp
+    val OmniLine = 44.dp
+    val OmniArt = 32.dp
+    // A song list's filter field.
+    val FilterWidth = 260.dp
     // The transport's column, at most; the side zones share the rest evenly.
     val TransportMax = 640.dp
 }

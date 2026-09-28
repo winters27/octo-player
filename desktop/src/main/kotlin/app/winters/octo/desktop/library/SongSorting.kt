@@ -1,6 +1,8 @@
 package app.winters.octo.desktop.library
 
 import app.winters.octo.catalog.naturalSortKey
+import app.winters.octo.query.SubsonicSongs
+import app.winters.octo.query.sortSongsBy
 import app.winters.octo.server.serverTime
 import app.winters.octo.sort.AlbumSort
 import app.winters.octo.sort.Listening
@@ -56,38 +58,10 @@ private class SortKeys {
     fun of(text: String?): String = known.getOrPut(text.orEmpty()) { naturalSortKey(text.orEmpty()) }
 }
 
-// An album's songs in the album's own order: disc, then track.
-private fun inAlbum(keys: SortKeys): Comparator<Song> = compareBy<Song>({ keys.of(it.album) }, { it.albumId.orEmpty() }, { it.discNumber ?: 0 }, { it.track ?: 0 }, { keys.of(it.title) }, { it.id })
-
-private fun byTitle(keys: SortKeys): Comparator<Song> = compareBy({ keys.of(it.title) }, { keys.of(it.artist) }, { it.id })
-
-// Songs in the chosen order, with the same keys and tie-breaks the phone's
-// song lists use: names by their sort key (so "The Beatles" files under B),
-// missing years and dates last whichever way, an album's songs kept in
-// album order among ties, and plays by the shared listening order.
-fun sortSongs(songs: List<Song>, order: SortOrder): List<Song> {
-    val by = order.by as? SongSort ?: return songs
-    val down = order.descending
-    val keys = SortKeys()
-    val inAlbum = inAlbum(keys)
-    val byTitle = byTitle(keys)
-    return when (by) {
-        SongSort.Title -> sortedByKey(songs, down, { keys.of(it.title) }, byTitle)
-        SongSort.Artist -> sortedByKey(songs, down, { keys.of(it.artist) }, inAlbum)
-        SongSort.Album -> sortedByKey(songs, down, { keys.of(it.album) }, compareBy<Song> { keys.of(it.artist) }.then(inAlbum))
-        SongSort.Year -> sortedByKey(songs, down, { it.year?.takeIf { y -> y > 0 } }, inAlbum)
-        SongSort.Length -> sortedByKey(songs, down, { it.duration.takeIf { d -> d > 0 } }, byTitle)
-        SongSort.RecentlyAdded -> sortedByKey(songs, down, { serverTime(it.created) }, inAlbum)
-        SongSort.MostPlayed, SongSort.RecentlyPlayed -> {
-            val base = sortedByKey(songs, false, { keys.of(it.title) }, byTitle)
-            val listening = songs.associate { it.id to Listening((it.playCount ?: 0).toInt(), serverTime(it.played) ?: 0) }
-            byListening(base, { it.id }, listening, mostPlayed = by == SongSort.MostPlayed, descending = down)
-        }
-        SongSort.Rating -> sortedByKey(songs, down, { it.userRating?.takeIf { r -> r > 0 } }, byTitle)
-        SongSort.Liked, SongSort.DateLiked -> sortedByKey(songs, down, { serverTime(it.starred) }, byTitle)
-        SongSort.FolderOrder -> if (down) songs.reversed() else songs
-    }
-}
+// Songs in the chosen order, the shared way (names by their sort key,
+// missing years and dates last, an album's songs in album order among
+// ties, plays by the listening order), which live lists order by too.
+fun sortSongs(songs: List<Song>, order: SortOrder): List<Song> = sortSongsBy(songs, order, SubsonicSongs)
 
 // Albums in the chosen order, by the shared album orders: names by their
 // sort key, missing years and dates last, plays by the listening order.

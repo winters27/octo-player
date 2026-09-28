@@ -2,8 +2,10 @@ package app.winters.octo.desktop.nav
 
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import app.winters.octo.query.LibraryQuery
 
 // Every page the main area can show.
 sealed interface Page {
@@ -48,6 +50,8 @@ fun sidebarItemOf(page: Page): SidebarItem? = when (page) {
 // keeps two scroll positions; `item` is what the sidebar shows lit.
 data class Visit(val id: Long, val page: Page, val item: SidebarItem?)
 
+private val NoFilter = LibraryQuery()
+
 // Where a list was scrolled to: the first row showing and how far into it.
 data class ScrollSpot(val index: Int = 0, val offset: Int = 0)
 
@@ -62,6 +66,10 @@ class Navigator(start: Page = Page.Home, private val limit: Int = 100) {
     // have two (a list and a grid).
     private val scrolls = HashMap<Pair<Long, String>, ScrollSpot>()
     private val tabs = HashMap<Long, String>()
+
+    // Each visit's filters on its list, so Back returns to the list as it
+    // was filtered. Only while the app runs; nothing is saved.
+    private val filters = mutableStateMapOf<Long, LibraryQuery>()
 
     // Bumped on every move, so the screen redraws.
     private var moves by mutableStateOf(0)
@@ -110,6 +118,7 @@ class Navigator(start: Page = Page.Home, private val limit: Int = 100) {
         visits.clear()
         scrolls.clear()
         tabs.clear()
+        filters.clear()
         visits += visit(page, null)
         at = 0
         moves++
@@ -128,9 +137,18 @@ class Navigator(start: Page = Page.Home, private val limit: Int = 100) {
         if (visits.any { it.id == visit.id }) tabs[visit.id] = tab
     }
 
+    // The filters a visit's list is under; none at first.
+    fun filterOf(visit: Visit): LibraryQuery = filters[visit.id] ?: NoFilter
+
+    fun keepFilter(visit: Visit, query: LibraryQuery) {
+        if (visits.none { it.id == visit.id }) return
+        if (query == NoFilter) filters.remove(visit.id) else filters[visit.id] = query
+    }
+
     private fun forget(visit: Visit) {
         scrolls.keys.removeAll { it.first == visit.id }
         tabs.remove(visit.id)
+        filters.remove(visit.id)
     }
 
     // A page opened from another keeps that page's sidebar item lit, unless
