@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.player
 
+import app.winters.octo.playback.NoSource
+import app.winters.octo.playback.QueueSource
 import app.winters.octo.subsonic.Song
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -323,5 +325,221 @@ abstract class DesktopPlayerContract {
         elapse(p, 100_300)
         assertEquals("s3", p.now())
         assertEquals(1, p.state.value.ended)
+    }
+
+    // ---- Where songs came from, and taking edits back ----
+
+    private val album = QueueSource.Played("OK Computer")
+    private val you = QueueSource.You
+
+    private fun DesktopPlayer.keyOf(id: String) = state.value.queue.first { it.song.id == id }.key
+    private fun DesktopPlayer.comingFrom() = state.value.upcoming.map { it.song.id to it.source }
+
+    @Test
+    fun songsKnowWhereTheyCameFrom() {
+        val p = newPlayer()
+        p.play(songs, 0, source = album)
+        p.playNext(extra.take(1))
+        p.addToQueue(extra.drop(1))
+        assertEquals(album, p.state.value.current?.source)
+        assertEquals(
+            listOf("x" to you, "s2" to album, "s3" to album, "s4" to album, "s5" to album, "y" to you),
+            p.comingFrom(),
+        )
+    }
+
+    @Test
+    fun songsARadioOrAutoplayAddAreNotTheListeners() {
+        val p = newPlayer()
+        val radio = QueueSource.Played("Song 1 radio")
+        p.play(songs.take(1), source = radio)
+        p.addToQueue(extra.take(1), radio)
+        p.addToQueue(extra.drop(1), QueueSource.Autoplay)
+        assertEquals(listOf("x" to radio, "y" to QueueSource.Autoplay), p.comingFrom())
+        // Nothing the listener did to take back.
+        assertFalse(p.state.value.canUndo)
+        assertFalse(p.undo())
+    }
+
+    @Test
+    fun aPlainPlayHasNoSourceToName() {
+        val p = newPlayer()
+        p.play(songs)
+        assertEquals(NoSource, p.state.value.current?.source)
+    }
+
+    @Test
+    fun takingSongsOutCanBeUndone() {
+        val p = newPlayer()
+        p.play(songs, source = album)
+        p.remove(listOf(p.keyOf("s2"), p.keyOf("s4")))
+        assertEquals(listOf("s3", "s5"), p.coming())
+        assertTrue(p.state.value.canUndo)
+        assertTrue(p.undo())
+        assertEquals(listOf("s2", "s3", "s4", "s5"), p.coming())
+        assertEquals(album, p.state.value.upcoming.first().source)
+        assertFalse(p.state.value.canUndo)
+        assertFalse("nothing more to take back", p.undo())
+    }
+
+    @Test
+    fun clearingWhatIsToComeKeepsTheSongPlaying() {
+        val p = newPlayer()
+        p.play(songs, 1)
+        p.clearUpcoming()
+        assertEquals("s2", p.now())
+        assertTrue(p.state.value.playing)
+        assertEquals(emptyList<String>(), p.coming())
+        assertEquals(listOf("s1"), p.state.value.played.map { it.song.id })
+        assertTrue(p.undo())
+        assertEquals("s2", p.now())
+        assertEquals(listOf("s3", "s4", "s5"), p.coming())
+    }
+
+    @Test
+    fun theSongsPlayedCanBeTakenOutAndPutBack() {
+        val p = newPlayer()
+        p.play(songs, 2)
+        p.removePlayed()
+        assertEquals(emptyList<QueueEntry>(), p.state.value.played)
+        assertEquals("s3", p.now())
+        assertTrue(p.undo())
+        assertEquals(listOf("s1", "s2"), p.state.value.played.map { it.song.id })
+        assertEquals("s3", p.now())
+    }
+
+    @Test
+    fun editsComeBackMostRecentFirst() {
+        val p = newPlayer()
+        p.play(songs)
+        p.playNext(extra.take(1))
+        p.move(listOf(p.keyOf("s5")), before = p.keyOf("s2"))
+        assertEquals(listOf("x", "s5", "s2", "s3", "s4"), p.coming())
+        assertTrue(p.undo())
+        assertEquals(listOf("x", "s2", "s3", "s4", "s5"), p.coming())
+        assertTrue(p.undo())
+        assertEquals(listOf("s2", "s3", "s4", "s5"), p.coming())
+        assertFalse(p.undo())
+        assertEquals("s1", p.now())
+    }
+
+    @Test
+    fun anUndoNeverActsOnAQueueChangedSince() {
+        val p = newPlayer()
+        p.play(songs)
+        p.remove(p.keyOf("s3"))
+        p.setShuffle(true)
+        assertFalse(p.state.value.canUndo)
+        assertFalse(p.undo())
+        assertEquals(3, p.coming().size)
+        // A new queue starts with nothing to take back.
+        p.remove(p.keyOf("s2"))
+        p.play(songs)
+        assertFalse(p.undo())
+    }
+
+    @Test
+    fun takingOutTheSongPlayingAndUndoingKeepsTheNextPlaying() {
+        val p = newPlayer()
+        p.play(songs, 1)
+        p.remove(p.state.value.current!!.key)
+        assertEquals("s3", p.now())
+        assertTrue(p.undo())
+        assertEquals("the song playing now plays on", "s3", p.now())
+        assertEquals(listOf("s1", "s2"), p.state.value.played.map { it.song.id })
+        assertEquals(listOf("s4", "s5"), p.coming())
+    }
+
+    @Test
+    fun aMovedSongJoinsTheRunItLandsIn() {
+        val p = newPlayer()
+        p.play(songs, source = album)
+        p.playNext(extra)
+        // Dragged in among the listener's own, it becomes theirs.
+        p.move(listOf(p.keyOf("s4")), before = p.keyOf("y"))
+        assertEquals(listOf("x" to you, "s4" to you, "y" to you, "s2" to album, "s3" to album, "s5" to album), p.comingFrom())
+        // And one of theirs dragged in among the album's joins the album.
+        p.move(listOf(p.keyOf("x")), before = p.keyOf("s3"))
+        assertEquals(listOf("s4" to you, "y" to you, "s2" to album, "x" to album, "s3" to album, "s5" to album), p.comingFrom())
+        // At the edge between the two, a song keeps its own.
+        p.move(listOf(p.keyOf("s5")), before = p.keyOf("s2"))
+        assertEquals("s5" to album, p.comingFrom()[2])
+    }
+
+    @Test
+    fun pickedSongsMoveTogetherAndInTheirOrder() {
+        val p = newPlayer()
+        p.play(songs)
+        p.move(listOf(p.keyOf("s5"), p.keyOf("s3")), before = null)
+        assertEquals(listOf("s2", "s4", "s3", "s5"), p.coming())
+        p.move(listOf(p.keyOf("s3"), p.keyOf("s5")), before = p.keyOf("s2"))
+        assertEquals(listOf("s3", "s5", "s2", "s4"), p.coming())
+        // The song playing never moves, and nothing goes before it.
+        p.move(listOf(p.keyOf("s1")), before = null)
+        assertEquals("s1", p.now())
+        assertEquals(listOf("s3", "s5", "s2", "s4"), p.coming())
+    }
+
+    @Test
+    fun aSongAlreadyPlayedCanComeBackNext() {
+        val p = newPlayer()
+        p.play(songs, 2)
+        p.move(listOf(p.keyOf("s1")), before = p.state.value.upcoming.first().key)
+        assertEquals("s3", p.now())
+        assertEquals(listOf("s1", "s4", "s5"), p.coming())
+        assertEquals(listOf("s2"), p.state.value.played.map { it.song.id })
+    }
+
+    @Test
+    fun movesWhileShuffledChangeOnlyThePlayOrder() {
+        val p = newPlayer()
+        p.play(songs, 0, shuffle = true)
+        val before = p.coming()
+        p.move(listOf(p.keyOf(before.last())), before = p.keyOf(before.first()))
+        assertEquals(listOf(before.last()) + before.dropLast(1), p.coming())
+        assertEquals(listOf("s1", "s2", "s3", "s4", "s5"), p.state.value.queue.map { it.song.id })
+        assertTrue(p.undo())
+        assertEquals(before, p.coming())
+    }
+
+    @Test
+    fun songsDroppedInLandWhereTheyWereDroppedAsTheListeners() {
+        val p = newPlayer()
+        p.play(songs, source = album)
+        p.insert(extra, before = p.keyOf("s4"))
+        assertEquals(listOf("s2", "s3", "x", "y", "s4", "s5"), p.coming())
+        assertEquals(you, p.comingFrom()[2].second)
+        p.insert(listOf(Song("z", "Z", duration = 100)), before = null)
+        assertEquals("z", p.coming().last())
+        assertTrue(p.undo())
+        assertTrue(p.undo())
+        assertEquals(listOf("s2", "s3", "s4", "s5"), p.coming())
+    }
+
+    @Test
+    fun songsDroppedInWhileShuffledPlayWhereTheyWereDropped() {
+        val p = newPlayer()
+        p.play(songs, 0, shuffle = true)
+        val before = p.coming()
+        p.insert(extra, before = p.keyOf(before[1]))
+        assertEquals(listOf(before[0], "x", "y") + before.drop(1), p.coming())
+    }
+
+    @Test
+    fun songsDroppedIntoAnEmptyQueueWaitToBePlayed() {
+        val p = newPlayer()
+        p.insert(extra, before = null)
+        assertEquals("x", p.now())
+        assertFalse(p.state.value.playing)
+        // Taking that back empties the queue again.
+        assertTrue(p.undo())
+        assertNull(p.now())
+    }
+
+    @Test
+    fun aSavedQueueKeepsWhereItsSongsCameFrom() {
+        val p = newPlayer()
+        p.restore(SavedQueue(songs, songs.indices.toList(), index = 0, sources = listOf(album, you, you, album, album)))
+        assertEquals(listOf("s2" to you, "s3" to you, "s4" to album, "s5" to album), p.comingFrom())
     }
 }
