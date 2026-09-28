@@ -165,6 +165,16 @@ dependencies {
     testImplementation(libs.mockwebserver)
 }
 
+// The performance harness (OCTO_PERF=1, perf/LibraryPerfTest.kt) runs each
+// time it is asked for, with room for a library of 100,000 songs.
+// OCTO_PERF_HEAP tries it under another heap limit.
+if (providers.environmentVariable("OCTO_PERF").orNull == "1") {
+    tasks.test {
+        maxHeapSize = providers.environmentVariable("OCTO_PERF_HEAP").orNull ?: "2g"
+        outputs.upToDateWhen { false }
+    }
+}
+
 // The audio files Octo opens, and their types.
 val audioTypes = listOf(
     "mp3" to "audio/mpeg",
