@@ -264,7 +264,7 @@ class EnginePlayer(
                 // Songs put into an empty queue wait to be played.
                 load(startMs = 0, play = false)
             } else {
-                syncUpcoming()
+                syncQueue()
             }
             publish()
         }
@@ -280,7 +280,7 @@ class EnginePlayer(
                     jump(play = playing)
                 }
             } else {
-                syncUpcoming()
+                syncQueue()
             }
             publish()
         }
@@ -301,7 +301,7 @@ class EnginePlayer(
         synchronized(lock) {
             shuffle = on
             queue.setShuffle(on)
-            syncUpcoming()
+            syncQueue()
             publish()
         }
     }
@@ -380,7 +380,7 @@ class EnginePlayer(
             engine.load(emptyList(), 0, 0, false)
             return
         }
-        val ordered = queue.playOrder.map { queue.songs[it] }
+        val ordered = inPlayOrder()
         mirror = ordered.map { it.key }
         engine.load(ordered.map { queueItem(it, sources) }, mirror.indexOf(current.key), startMs, play)
         expect(current.key)
@@ -388,8 +388,8 @@ class EnginePlayer(
     }
 
     // Moves the engine to the current entry: a skip within its queue when
-    // it holds the entry, then the songs to come brought in line; a fresh
-    // load when it does not.
+    // it holds the entry, then its queue brought in line; a fresh load when
+    // it does not.
     private fun jump(play: Boolean) {
         val current = queue.currentEntry ?: return load(0, false)
         val index = mirror.indexOf(current.key)
@@ -398,18 +398,29 @@ class EnginePlayer(
         if (play) engine.play()
         expect(current.key)
         setPending(current.key, 0)
-        syncUpcoming()
+        syncQueue()
     }
 
-    // Gives the engine the songs to come, when they differ from what it has.
-    private fun syncUpcoming() {
+    // Gives the engine the whole queue in play order, when it differs from
+    // what it has. Only the whole queue will do: the songs before the
+    // current one change too when the shuffle does, and repeat all goes
+    // round to the first of them. The engine finds the song it plays in the
+    // new list by its id, so it carries on even when it moved to the next
+    // song a moment before the news of it reached here.
+    private fun syncQueue() {
         val current = queue.currentEntry ?: return
-        val index = mirror.indexOf(current.key)
-        if (index < 0) return load(startMs = positionMsLocked(), play = playing)
-        val upcoming = queue.upcoming
-        if (mirror.drop(index + 1) == upcoming.map { it.key }) return
-        engine.replaceUpcoming(upcoming.map { queueItem(it, sources) })
-        mirror = mirror.take(index + 1) + upcoming.map { it.key }
+        if (current.key !in mirror) return load(startMs = positionMsLocked(), play = playing)
+        val ordered = inPlayOrder()
+        val keys = ordered.map { it.key }
+        if (keys == mirror) return
+        engine.replaceQueue(ordered.map { queueItem(it, sources) }, keys.indexOf(current.key))
+        mirror = keys
+    }
+
+    // Every entry, in the order they play.
+    private fun inPlayOrder(): List<QueueEntry> {
+        val songs = queue.songs
+        return queue.playOrder.map { songs[it] }
     }
 
     private fun positionMsLocked(): Long = pending?.ms ?: lastShown
@@ -418,6 +429,9 @@ class EnginePlayer(
         expecting = key
         expectingSince = clock()
     }
+
+    // A jump's song is awaited, and not for so long that it never came.
+    private fun stillExpecting(): Boolean = expecting != null && clock() - expectingSince < EXPECT_MS
 
     private fun setPending(key: Long, ms: Long) {
         pending = Pending(key, ms, clock())
@@ -453,8 +467,9 @@ class EnginePlayer(
                     when {
                         key == expecting -> expecting = null
                         // Heard on another song with no word of it
-                        // starting: follow it.
-                        expecting == null && key != queue.currentEntry?.key -> runningOut = started(key)
+                        // starting, and nothing awaited (or the song a
+                        // jump went for never came): follow it.
+                        key != queue.currentEntry?.key && !stillExpecting() -> runningOut = started(key)
                         else -> return
                     }
                 }
@@ -477,7 +492,11 @@ class EnginePlayer(
         // News from a queue since replaced.
         if (key == null || queue.songs.none { it.key == key }) return null
         val waiting = expecting
-        if (waiting != null && key != waiting && clock() - expectingSince < EXPECT_MS) return null
+        if (waiting != null && key != waiting) {
+            if (stillExpecting()) return null
+            // The song a jump went for never came: what is heard wins.
+            expecting = null
+        }
         if (key == waiting) expecting = null
         if (queue.currentEntry?.key != key) {
             queue.jumpTo(key)

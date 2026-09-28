@@ -47,6 +47,7 @@ pub enum Command {
     PlayNext(Vec<QueueItem>),
     Enqueue(Vec<QueueItem>),
     ReplaceUpcoming(Vec<QueueItem>),
+    ReplaceQueue { items: Vec<QueueItem>, current: usize },
     SkipTo(usize),
     SkipNext,
     Play,
@@ -229,6 +230,9 @@ struct Player {
     silent_since: Option<Instant>,
     device_running: bool,
     last_default_check: Instant,
+    // Where the song was when the device was lost and none would open, to
+    // carry on from there once one does.
+    lost_at: Option<Moment>,
     infos: HashMap<u64, TrackInfo>,
     block: Vec<f32>,
     markers: Vec<Marker>,
@@ -270,6 +274,7 @@ pub fn run(driven: Driven) {
         silent_since: None,
         device_running: false,
         last_default_check: Instant::now(),
+        lost_at: None,
         infos: HashMap::new(),
         block: vec![0.0; 2048],
         markers: Vec::new(),
@@ -326,11 +331,12 @@ impl Player {
             }
             Command::ReplaceUpcoming(items) => {
                 let keep = self.current.map(|c| c + 1).unwrap_or(0).min(self.queue.len());
-                self.queue.truncate(keep);
-                let entries: Vec<Entry> = items.into_iter().map(|i| self.entry(i)).collect();
+                let old = self.queue.split_off(keep);
+                let entries = self.reuse_entries(old, items);
                 self.queue.extend(entries);
                 self.queue_changed();
             }
+            Command::ReplaceQueue { items, current } => self.replace_queue(items, current),
             Command::SkipTo(index) => {
                 if index < self.queue.len() {
                     self.current = Some(index);
@@ -392,8 +398,10 @@ impl Player {
             }
             Command::SetOutputDevice(id) => {
                 self.device_choice = id;
-                if self.out.is_some() {
-                    self.reopen_output();
+                // Also when the device was lost and none opened since, if
+                // there is a song to carry on with.
+                if self.out.is_some() || self.mixer.is_some() {
+                    self.reopen_output(true);
                 }
             }
             Command::Devices(reply) => {
@@ -408,6 +416,50 @@ impl Player {
         let key = self.next_key;
         self.next_key += 1;
         Entry { key, item, failed: false }
+    }
+
+    // Entries for items coming into the queue. An item whose id one of the
+    // `old` entries has keeps that entry's key, and whether it failed, so
+    // the song playing and the one lined up after it carry on untouched.
+    fn reuse_entries(&mut self, old: Vec<Entry>, items: Vec<QueueItem>) -> Vec<Entry> {
+        let mut known: HashMap<String, Entry> = HashMap::new();
+        for e in old {
+            known.entry(e.item.id.clone()).or_insert(e);
+        }
+        items
+            .into_iter()
+            .map(|mut item| match known.remove(&item.id) {
+                Some(e) => {
+                    if item.duration_ms.is_none() {
+                        item.duration_ms = e.item.duration_ms;
+                    }
+                    Entry { key: e.key, item, failed: e.failed }
+                }
+                None => self.entry(item),
+            })
+            .collect()
+    }
+
+    // Replaces the whole queue around the playing song, which carries on
+    // untouched. It is found in the new list by its id, since the engine
+    // may have moved on to the next song before the app heard of it;
+    // `current` is used only when it is not there.
+    fn replace_queue(&mut self, items: Vec<QueueItem>, current: usize) {
+        if items.is_empty() {
+            self.load(items, 0, 0, false);
+            return;
+        }
+        let playing = self
+            .mixer
+            .as_ref()
+            .and_then(|m| m.lane())
+            .map(|l| l.current().key())
+            .or_else(|| self.current_entry().map(|e| e.key));
+        let old = std::mem::take(&mut self.queue);
+        self.queue = self.reuse_entries(old, items);
+        let found = playing.and_then(|k| self.index_of(k));
+        self.current = Some(found.unwrap_or(current.min(self.queue.len() - 1)));
+        self.queue_changed();
     }
 
     fn index_of(&self, key: u64) -> Option<usize> {
@@ -490,8 +542,14 @@ impl Player {
     fn start_current(&mut self, secs: f64, transition: Transition, reason: EndReason) {
         let Some(index) = self.current else { return };
         if !self.ensure_output() {
+            // With a song already loaded, carry on with this one once a
+            // device opens.
+            if self.mixer.is_some() {
+                self.hold_place(Some(Moment { key: self.queue[index].key, secs }));
+            }
             return;
         }
+        self.lost_at = None;
         let previous = self.heard.and_then(|k| self.index_of(k));
         let loudness = self.loudness(index, previous);
         let deck = self.open_deck(index, secs);
@@ -533,6 +591,12 @@ impl Player {
                 self.current = Some(0);
             }
             self.start_current(0.0, Transition::Start, EndReason::Finished);
+            return;
+        }
+        if self.out.is_none() {
+            // The device was lost: open one again, carrying on from where
+            // the song was heard.
+            self.reopen_output(true);
             return;
         }
         self.wake_device();
@@ -583,6 +647,9 @@ impl Player {
             m.seek(secs);
         }
         self.mix_state = MixState::Waiting;
+        if self.out.is_none() {
+            self.hold_place(Some(Moment { key, secs }));
+        }
         self.flush_output(Moment { key, secs });
     }
 
@@ -919,12 +986,14 @@ impl Player {
     // Opens the device if it is not open. False if there is none.
     fn ensure_output(&mut self) -> bool {
         if self.out.is_none() {
-            self.open_output();
+            self.open_output(true);
         }
         self.out.is_some()
     }
 
-    fn open_output(&mut self) {
+    // Opens the chosen device, or the default. `report` sends an error
+    // when none opens; the quiet retries after a lost device leave it out.
+    fn open_output(&mut self, report: bool) {
         let choice = self.device_choice.clone();
         let result = self.try_open(choice.as_deref());
         let result = match result {
@@ -940,9 +1009,10 @@ impl Player {
                 self.lock_status().device = device.clone();
                 self.emit(EngineEvent::DeviceChanged { device });
             }
-            Err(e) => {
+            Err(e) if report => {
                 self.emit(EngineEvent::Error { kind: e.kind, message: e.message, item_id: None });
             }
+            Err(e) => log::info!("still no sound device: {e}"),
         }
     }
 
@@ -969,16 +1039,23 @@ impl Player {
     }
 
     // Moves to another device (or the new default), carrying on from what
-    // was heard.
-    fn reopen_output(&mut self) {
-        let heard = self.shared.timeline.at(self.shared.heard_frame());
+    // was heard; with no device open, since it was lost, from what was
+    // heard last.
+    fn reopen_output(&mut self, report: bool) {
+        let heard = self.shared.timeline.at(self.shared.heard_frame()).or(self.lost_at);
         self.driver.close();
         self.out = None;
         *self.shared.output.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        self.open_output();
-        if self.out.is_none() || self.mixer.is_none() || self.ended {
+        self.open_output(report);
+        if self.mixer.is_none() || self.ended {
+            self.lost_at = None;
             return;
         }
+        if self.out.is_none() {
+            self.hold_place(heard);
+            return;
+        }
+        self.lost_at = None;
         // The ring and its clock start over on the new device.
         self.shared.timeline.clear();
         self.mixer = None;
@@ -988,6 +1065,16 @@ impl Player {
             self.start_current(secs, Transition::Seek, EndReason::Skipped);
         } else {
             self.start_current(0.0, Transition::Start, EndReason::Skipped);
+        }
+    }
+
+    // With no device open: keeps where the song is, to carry on from there
+    // once one opens, and shows it as the position meanwhile.
+    fn hold_place(&mut self, moment: Option<Moment>) {
+        self.lost_at = moment;
+        self.shared.timeline.clear();
+        if let Some(m) = moment {
+            self.shared.timeline.hold(0, m);
         }
     }
 
@@ -1005,7 +1092,7 @@ impl Player {
             match event {
                 DeviceEvent::Lost(why) => {
                     log::warn!("sound device lost: {why}");
-                    self.reopen_output();
+                    self.reopen_output(true);
                 }
                 DeviceEvent::Rerouted => {
                     let device = self.driver.default_device();
@@ -1014,7 +1101,19 @@ impl Player {
                 }
             }
         }
-        let Some(out) = &self.out else { return };
+        let Some(out) = &self.out else {
+            // Lost, and no device would open: try again now and then while
+            // a song is meant to be playing, without a fresh error each time.
+            if self.playing
+                && self.mixer.is_some()
+                && !self.ended
+                && self.last_default_check.elapsed() > DEFAULT_DEVICE_CHECK
+            {
+                self.last_default_check = Instant::now();
+                self.reopen_output(false);
+            }
+            return;
+        };
         // Following the system default: move when it changes.
         if self.device_choice.is_none() && self.last_default_check.elapsed() > DEFAULT_DEVICE_CHECK {
             self.last_default_check = Instant::now();
@@ -1024,7 +1123,7 @@ impl Player {
                 && default.id != current
             {
                 log::info!("default device is now {}", default.name);
-                self.reopen_output();
+                self.reopen_output(true);
                 return;
             }
         }

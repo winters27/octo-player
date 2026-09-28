@@ -22,6 +22,7 @@ pub struct NullDriver {
     stop: Arc<AtomicBool>,
     running: Arc<AtomicBool>,
     events: Arc<Mutex<Vec<DeviceEvent>>>,
+    refuse: Arc<AtomicBool>,
 }
 
 impl NullDriver {
@@ -34,6 +35,7 @@ impl NullDriver {
             stop: Arc::new(AtomicBool::new(false)),
             running: Arc::new(AtomicBool::new(false)),
             events: Arc::new(Mutex::new(Vec::new())),
+            refuse: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -52,6 +54,12 @@ impl NullDriver {
     /// A handle to report device trouble, as a test.
     pub fn events(&self) -> Arc<Mutex<Vec<DeviceEvent>>> {
         self.events.clone()
+    }
+
+    /// A handle to make the device refuse to open while set, as a test, the
+    /// way an unplugged one does.
+    pub fn refusal(&self) -> Arc<AtomicBool> {
+        self.refuse.clone()
     }
 
     fn device(&self) -> OutputDevice {
@@ -74,6 +82,9 @@ impl Driver for NullDriver {
         make: &mut dyn FnMut(u32, u16) -> Renderer,
     ) -> Result<OpenedOutput, Failure> {
         self.close();
+        if self.refuse.load(Ordering::Acquire) {
+            return Err(Failure::new(crate::error::ErrorKind::Device, "no sound device"));
+        }
         let mut renderer = make(self.rate, self.channels);
         let stop = Arc::new(AtomicBool::new(false));
         self.stop = stop.clone();

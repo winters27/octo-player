@@ -212,9 +212,23 @@ impl Engine {
     }
 
     /// Replaces everything after the playing song, which carries on
-    /// untouched. For reordering, removing and shuffling.
+    /// untouched. The songs before it stay as they are, so a new shuffle
+    /// or order that moves them belongs in `replace_queue`.
     pub fn replace_upcoming(&self, items: Vec<QueueItem>) -> Result<(), EngineError> {
         self.send(Command::ReplaceUpcoming(items))
+    }
+
+    /// Replaces the whole queue, in the order it plays, around the playing
+    /// song, which carries on untouched. The playing song is found in
+    /// `items` by its id, and `current` is its place when it is not there.
+    /// Songs already queued keep what the engine has for them, so the next
+    /// one stays lined up for a gapless join or a crossfade. For shuffling,
+    /// reordering and every other change to the queue.
+    pub fn replace_queue(&self, items: Vec<QueueItem>, current: u32) -> Result<(), EngineError> {
+        if !items.is_empty() && current as usize >= items.len() {
+            return Err(invalid("current index past the end of the queue"));
+        }
+        self.send(Command::ReplaceQueue { items, current: current as usize })
     }
 
     pub fn skip_to(&self, index: u32) -> Result<(), EngineError> {

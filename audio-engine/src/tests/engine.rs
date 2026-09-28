@@ -1,11 +1,13 @@
 //! The whole engine, playing through the silent device.
 
 use std::path::Path;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::api::{EndReason, Engine, EngineEvent, EngineListener, PlaybackState, QueueItem};
+use crate::api::{EndReason, Engine, EngineEvent, EngineListener, PlaybackState, QueueItem, RepeatMode};
 use crate::error::ErrorKind;
+use crate::output::DeviceEvent;
 use crate::output::null::{Capture, NullDriver};
 use crate::testing::fixtures::*;
 
@@ -25,6 +27,33 @@ impl EngineListener for Recorder {
 impl Recorder {
     fn all(&self) -> Vec<EngineEvent> {
         self.events.lock().unwrap().clone()
+    }
+
+    // Songs starting, songs ending, joins and the end of the queue, in order.
+    fn story(&self) -> Vec<String> {
+        self.all()
+            .iter()
+            .filter_map(|e| match e {
+                EngineEvent::TrackStarted { item_id, .. } => Some(format!("start {item_id}")),
+                EngineEvent::TrackEnded { item_id, reason } => Some(format!("end {item_id} {reason:?}")),
+                EngineEvent::GaplessTransition { from_id, to_id } => {
+                    Some(format!("gapless {from_id} {to_id}"))
+                }
+                EngineEvent::QueueEnded => Some("queue end".into()),
+                EngineEvent::Error { item_id, .. } => Some(format!("error {item_id:?}")),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn starts(&self) -> Vec<String> {
+        self.all()
+            .iter()
+            .filter_map(|e| match e {
+                EngineEvent::TrackStarted { item_id, .. } => Some(item_id.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     fn wait_for(&self, what: &str, timeout: Duration, found: impl Fn(&EngineEvent) -> bool) -> EngineEvent {
@@ -316,5 +345,159 @@ fn pause_resume_skip_and_stop() {
     );
     std::thread::sleep(Duration::from_millis(30));
     assert_eq!(engine.state(), PlaybackState::Idle);
+    engine.shutdown();
+}
+
+#[test]
+fn the_same_songs_given_again_keep_the_next_one_lined_up() {
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 2, 0.3));
+    write_wav(&b, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize / 2, 0.3));
+    let (engine, events, _) = engine(2.0);
+    engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
+    events.wait_for("start", Duration::from_secs(5), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    // By now b is lined up and read. With its file gone, only the song
+    // already lined up can still play.
+    std::thread::sleep(Duration::from_millis(150));
+    std::fs::remove_file(&b).unwrap();
+    engine.replace_upcoming(vec![item("b", &b)]).unwrap();
+    engine.replace_queue(vec![item("a", &a), item("b", &b)], 0).unwrap();
+    events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
+    assert_eq!(
+        events.story(),
+        ["start a", "end a Finished", "gapless a b", "start b", "end b Finished", "queue end"]
+    );
+    engine.shutdown();
+}
+
+#[test]
+fn a_new_order_keeps_the_song_playing_and_plays_on_in_the_new_order() {
+    let dir = temp_dir();
+    let songs: Vec<QueueItem> = ["a", "b", "c", "d"]
+        .iter()
+        .map(|id| {
+            let path = dir.join(format!("{id}.wav"));
+            write_wav(&path, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 3, 0.3));
+            item(id, &path)
+        })
+        .collect();
+    let (engine, events, _) = engine(4.0);
+    engine.load(songs.clone(), 2, 0, true).unwrap();
+    events.wait_for("start c", Duration::from_secs(5), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    let before = engine.position();
+    // The index given is stale on purpose: the playing song is found by id.
+    let [a, b, c, d] = [0, 1, 2, 3].map(|i| songs[i].clone());
+    engine.replace_queue(vec![d, a, c, b], 0).unwrap();
+    std::thread::sleep(Duration::from_millis(30));
+    let after = engine.position();
+    assert_eq!(after.item_id.as_deref(), Some("c"));
+    assert!(after.position_ms >= before.position_ms, "went back from {before:?} to {after:?}");
+    let queue = engine.queue();
+    assert_eq!(queue.item_ids, ["d", "a", "c", "b"]);
+    assert_eq!(queue.current_index, Some(2));
+    events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
+    assert_eq!(
+        events.story(),
+        ["start c", "end c Finished", "gapless c b", "start b", "end b Finished", "queue end"]
+    );
+    engine.shutdown();
+}
+
+#[test]
+fn repeat_all_goes_round_the_new_order() {
+    let dir = temp_dir();
+    let songs: Vec<QueueItem> = ["a", "b", "c"]
+        .iter()
+        .map(|id| {
+            let path = dir.join(format!("{id}.wav"));
+            write_wav(&path, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 2, 0.3));
+            item(id, &path)
+        })
+        .collect();
+    let (engine, events, _) = engine(4.0);
+    engine.set_repeat(RepeatMode::All).unwrap();
+    engine.load(songs.clone(), 0, 0, true).unwrap();
+    events.wait_for("start a", Duration::from_secs(5), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    let [a, b, c] = [0, 1, 2].map(|i| songs[i].clone());
+    engine.replace_queue(vec![c, a, b], 1).unwrap();
+    let until = Instant::now() + Duration::from_secs(10);
+    while events.starts().len() < 4 {
+        assert!(Instant::now() < until, "{:?}", events.all());
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(events.starts()[..4], ["a", "b", "c", "a"]);
+    engine.shutdown();
+}
+
+#[test]
+fn a_lost_device_that_will_not_reopen_carries_on_once_one_does() {
+    let dir = temp_dir();
+    let a = dir.join("a.wav");
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 20, 0.3));
+    let driver = NullDriver::new(RATE, 2);
+    let (trouble, refuse) = (driver.events(), driver.refusal());
+    let engine = Engine::with_driver(Box::new(move || Box::new(driver)));
+    let events = Arc::new(Recorder::default());
+    engine.set_listener(events.clone());
+    engine.load(vec![item("a", &a)], 0, 0, true).unwrap();
+    events.wait_for("start", Duration::from_secs(5), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    std::thread::sleep(Duration::from_millis(300));
+
+    let device_errors = || {
+        events
+            .all()
+            .iter()
+            .filter(|e| matches!(e, EngineEvent::Error { kind: ErrorKind::Device, .. }))
+            .count()
+    };
+    // Unplugged, with nothing else to play to. Answers where it stopped.
+    let unplug = || {
+        refuse.store(true, Ordering::Release);
+        trouble.lock().unwrap().push(DeviceEvent::Lost("unplugged".into()));
+        std::thread::sleep(Duration::from_millis(100));
+        let held = engine.position();
+        assert_eq!(held.item_id.as_deref(), Some("a"));
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(engine.position().position_ms, held.position_ms, "the place is held");
+        held.position_ms
+    };
+    // Carries on from the place held, not from the start.
+    let carries_on_from = |held: f64| {
+        let until = Instant::now() + Duration::from_secs(5);
+        let moved = loop {
+            let p = engine.position();
+            if p.position_ms > held + 50.0 {
+                break p;
+            }
+            assert!(Instant::now() < until, "never carried on from {held}; got {:?}", events.all());
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(moved.item_id.as_deref(), Some("a"));
+        assert!(moved.position_ms < held + 400.0, "from {held} to {}", moved.position_ms);
+    };
+
+    // Back when Play is pressed.
+    let held = unplug();
+    assert!(held > 250.0, "{held}");
+    assert_eq!(device_errors(), 1);
+    refuse.store(false, Ordering::Release);
+    engine.play().unwrap();
+    carries_on_from(held);
+
+    // Back when an output is chosen.
+    let held = unplug();
+    refuse.store(false, Ordering::Release);
+    engine.set_output_device(None).unwrap();
+    carries_on_from(held);
+
+    // Back by itself, trying again now and then without an error each time.
+    let held = unplug();
+    std::thread::sleep(Duration::from_millis(2_500));
+    assert_eq!(engine.position().position_ms, held);
+    assert_eq!(device_errors(), 3);
+    refuse.store(false, Ordering::Release);
+    carries_on_from(held);
+    assert_eq!(device_errors(), 3);
     engine.shutdown();
 }
