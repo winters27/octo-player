@@ -1,160 +1,203 @@
 package app.winters.octo.desktop.pages
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import app.winters.octo.design.DesktopType
+import app.winters.octo.design.LocalReduceMotion
+import app.winters.octo.design.OctoColors
+import app.winters.octo.design.RowHeight
+import app.winters.octo.design.Space
+import app.winters.octo.design.Txt
 import app.winters.octo.desktop.AppState
-import app.winters.octo.desktop.setAutoplay
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.nav.shortcutList
+import app.winters.octo.desktop.server.Connection
+import app.winters.octo.desktop.server.OCTO_LYRICS
+import app.winters.octo.desktop.setAutoplay
 import app.winters.octo.desktop.settings.AmbienceMotion
 import app.winters.octo.desktop.settings.AmbienceStyle
+import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.desktop.settings.Appearance
-import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.WashPrefs
-import app.winters.octo.desktop.system.SystemSettingsCard
-import app.winters.octo.desktop.ui.LocalBottomRoom
+import app.winters.octo.desktop.system.SystemRows
 import app.winters.octo.desktop.ui.LocalSoftwareDrawing
-import app.winters.octo.desktop.ui.PageTitle
-import app.winters.octo.desktop.ui.pagePadding
-import app.winters.octo.desktop.ui.rememberListState
-import app.winters.octo.design.GlazeCapsule
-import app.winters.octo.design.LocalReduceMotion
-import app.winters.octo.design.OctoColors
-import app.winters.octo.design.OctoIcons
-import app.winters.octo.design.OctoType
-import app.winters.octo.design.Txt
 import kotlin.math.roundToInt
 
-// Settings: the server, how the app looks, playback, and the keyboard
-// shortcuts. Every change is saved at once to the settings file.
+// Settings: the account, how Octo looks, playback, listening, lyrics, how
+// it fits into the system, and the keyboard shortcuts, each a section in
+// the list beside the page. Every change is saved at once.
 @Composable
 fun SettingsPage(app: AppState, visit: Visit) {
     val settings by app.settings.state.collectAsState()
-    val list = rememberListState(app.navigator, visit)
-    LazyColumn(state = list, contentPadding = pagePadding(LocalBottomRoom.current)) {
-        item(key = "title") { PageTitle("Settings") }
-        item(key = "server") {
-            SettingsCard("Server") {
-                val connection = app.connection
-                val server = connection?.server
-                if (server != null) {
-                    InfoLine("Address", server.address)
-                    InfoLine("Signed in as", server.username)
-                    InfoLine("Server", listOfNotNull(server.serverType?.replaceFirstChar { it.uppercase() }, server.serverVersion).joinToString(" ").ifEmpty { "Subsonic" })
-                    InfoLine("Extensions", server.extensions.map { it.substringBefore(':') }.distinct().joinToString(", ").ifEmpty { "None listed" })
-                    InfoLine("Password kept in", app.accounts.storeLabel)
-                }
-                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    GlazeCapsule(null, "Read the library again", { app.library?.load(); app.refreshPlaylists() })
-                    GlazeCapsule(null, "Sign out", app::signOut)
-                }
+    SectionedPage(
+        app,
+        visit,
+        "Settings",
+        listOf(
+            PageSection("account", "Account") { AccountRows(app) },
+            PageSection("look", "Appearance") { AppearanceGroups(app, settings) },
+            PageSection("playback", "Playback") { PlaybackRows(app, settings) },
+            PageSection("listening", "Listening") { ListeningRows(app, settings) },
+            PageSection("lyrics", "Lyrics") { LyricsRows(app, settings) },
+            PageSection("system", "System") { SystemRows(app) },
+            PageSection("keys", "Keyboard") { KeyRows(app) },
+            PageSection("about", "About") { Rows { InfoRow("Version", null, appVersion()) } },
+        ),
+    )
+}
+
+// The server signed in to: where it is and who is signed in, what it
+// offers, and reading its library again.
+@Composable
+private fun AccountRows(app: AppState) {
+    val connection = app.connection
+    Rows {
+        if (connection == null) {
+            SettingRow("Not signed in", null)
+            return@Rows
+        }
+        val server = connection.server
+        val kept = if (app.accounts.remembersSignIn) "Octo keeps you signed in on this computer." else "You'll sign in again the next time Octo opens."
+        SettingRow(server.address.removeSuffix("/"), "Signed in as ${server.username}. $kept") {
+            RowAction("Sign out", app::signOut)
+        }
+        val name = listOfNotNull(server.serverType?.replaceFirstChar { it.uppercase() }, server.serverVersion).joinToString(" ").ifEmpty { "Subsonic server" }
+        SettingRow(name, serverOffers(connection))
+        ActionRow("Read the library again", "When music added to the server hasn't shown up here yet.", "Read again", {
+            app.library?.load()
+            app.refreshPlaylists()
+        })
+    }
+}
+
+// What the server brings beyond the music, in plain words.
+internal fun serverOffers(connection: Connection): String? =
+    serverOffers(lyrics = connection.lyricsByIdOn || connection.supports(OCTO_LYRICS), adds = connection.acquires)
+
+internal fun serverOffers(lyrics: Boolean, adds: Boolean): String? {
+    val offers = listOfNotNull(if (lyrics) "synced lyrics" else null, if (adds) "adding songs you find online to your library" else null)
+    return if (offers.isEmpty()) null else "Offers ${offers.joinToString(" and ")}."
+}
+
+// The window's background, then the full player's, then how much moves.
+// Each tuning line shows only while it has something to change.
+@Composable
+private fun AppearanceGroups(app: AppState, settings: AppSettings) {
+    val look = settings.appearance
+    fun appearance(edit: (Appearance) -> Appearance) = app.settings.update { it.copy(appearance = edit(it.appearance)) }
+    fun wash(edit: (WashPrefs) -> WashPrefs) = appearance { it.copy(wash = edit(it.wash)) }
+    val chosen = ambienceOf(look)
+    Group("Window background") {
+        ChoiceRow("Ambience", ambienceHelp(chosen), listOf(null, AmbienceStyle.Glow, AmbienceStyle.Immersive), chosen, ::ambienceName) { style ->
+            appearance { withAmbience(it, style) }
+        }
+        if (chosen != null) {
+            SliderRow("Strength", "Turn it down if the colours pull your eye from the page.", "${(look.glowStrength * 100).roundToInt()}%", look.glowStrength, { value ->
+                appearance { it.copy(glowStrength = value) }
+            })
+        }
+        if (chosen == AmbienceStyle.Immersive) {
+            val detail = when {
+                LocalSoftwareDrawing.current -> "Holds still here: this computer draws Octo without its graphics card."
+                LocalReduceMotion.current -> "Holds still while motion is reduced, by Calm motion or your system."
+                else -> motionHelp(look.ambienceMotion)
+            }
+            ChoiceRow("Movement", detail, AmbienceMotion.entries, look.ambienceMotion, ::motionName) { motion ->
+                appearance { it.copy(ambienceMotion = motion) }
             }
         }
-        item(key = "look") {
-            SettingsCard("Appearance") {
-                val look = settings.appearance
-                fun appearance(edit: (Appearance) -> Appearance) = app.settings.update { it.copy(appearance = edit(it.appearance)) }
-                // Off, or one of the two looks; null stands for off.
-                val chosen = if (look.ambientGlow) look.ambience else null
-                ChoiceLine("Ambience", ambienceHelp(chosen), listOf(null, AmbienceStyle.Glow, AmbienceStyle.Immersive), chosen, ::ambienceName) { style ->
-                    appearance { if (style == null) it.copy(ambientGlow = false) else it.copy(ambientGlow = true, ambience = style) }
-                }
-                if (look.ambientGlow) {
-                    SliderLine("Strength", "${(look.glowStrength * 100).roundToInt()}%", look.glowStrength, { value ->
-                        appearance { it.copy(glowStrength = value) }
-                    })
-                }
-                if (chosen == AmbienceStyle.Immersive) {
-                    val detail = when {
-                        LocalSoftwareDrawing.current -> "Holds still here: this computer draws Octo without its graphics card."
-                        LocalReduceMotion.current -> "Holds still while motion is reduced, by Calm motion or your system."
-                        else -> motionHelp(look.ambienceMotion)
-                    }
-                    ChoiceLine("Movement", detail, AmbienceMotion.entries, look.ambienceMotion, ::motionName) { motion ->
-                        appearance { it.copy(ambienceMotion = motion) }
-                    }
-                }
-                fun wash(edit: (WashPrefs) -> WashPrefs) = app.settings.update { it.copy(appearance = it.appearance.copy(wash = edit(it.appearance.wash))) }
-                SwitchLine("Calm motion", "The player's background and the window's colours hold still, and lyrics move without springs or blooms.", look.calmMotion) { on ->
-                    app.settings.update { it.copy(appearance = it.appearance.copy(calmMotion = on)) }
-                }
-                SwitchLine("Moving player background", "The cover's colours drift slowly behind the full player.", look.wash.moving) { on -> wash { it.copy(moving = on) } }
-                if (look.wash.moving && !look.calmMotion) {
-                    SliderLine("Drift speed", "${look.wash.speed}%", (look.wash.speed - 5) / 95f, { x -> wash { it.copy(speed = (5 + x * 95).roundToInt()) } }, live = false)
-                    SwitchLine("Follow the song's tempo", "Faster songs drift a little faster, when the server knows their tempo.", look.wash.useBpm) { on -> wash { it.copy(useBpm = on) } }
-                }
-                SliderLine("Background brightness", "${look.wash.brightnessCap}%", (look.wash.brightnessCap - 20) / 80f, { x -> wash { it.copy(brightnessCap = (20 + x * 80).roundToInt()) } }, live = false)
-                if (app.os != DesktopOs.Mac) {
-                    SwitchLine("Use the system title bar", "The window's own frame instead of Octo's glass one. Takes effect the next time Octo opens.", settings.systemTitleBar) { on ->
-                        app.settings.update { it.copy(systemTitleBar = on) }
-                    }
-                }
+    }
+    Group("Full player") {
+        SwitchRow("Moving background", "The cover's colours drift behind the full player. Off holds them still, easier on a laptop's battery.", look.wash.moving) { on ->
+            wash { it.copy(moving = on) }
+        }
+        if (look.wash.moving && !look.calmMotion) {
+            SliderRow("Drift speed", "How fast the colours move.", "${look.wash.speed}%", (look.wash.speed - 5) / 95f, { x ->
+                wash { it.copy(speed = (5 + x * 95).roundToInt()) }
+            }, live = false)
+            SwitchRow("Move with the beat", "Slow songs drift slower and quick ones faster, when the server knows their tempo.", look.wash.useBpm) { on ->
+                wash { it.copy(useBpm = on) }
             }
         }
-        item(key = "lyrics") {
-            SettingsCard("Lyrics") {
-                SwitchLine(
-                    "Look lyrics up online",
-                    "When your server and the song file have none, ask LRCLIB, sending only the song's title, artist, album and length.",
-                    settings.lyrics.online,
-                ) { on ->
-                    app.settings.update { it.copy(lyrics = it.lyrics.copy(online = on)) }
-                    app.lyrics.state.value.song?.let { song -> app.lyrics.sources.refresh(song.id) }
-                }
-            }
+        SliderRow("Brightness cap", "Turn it down if bright covers make the words hard to read.", "${look.wash.brightnessCap}%", (look.wash.brightnessCap - 20) / 80f, { x ->
+            wash { it.copy(brightnessCap = (20 + x * 80).roundToInt()) }
+        }, live = false)
+    }
+    Group("Motion") {
+        SwitchRow("Calm motion", "For less movement: backgrounds hold still, and lyrics move without springs or blooms.", look.calmMotion) { on ->
+            appearance { it.copy(calmMotion = on) }
         }
-        item(key = "listening") {
-            SettingsCard("Listening") {
-                SwitchLine(
-                    "Tell the server what you play",
-                    "Plays count on your server, so play counts and recently played stay right in every app that uses it. Leave on unless another app already reports this computer's plays.",
-                    settings.listening.reportPlays,
-                ) { on -> app.settings.update { it.copy(listening = it.listening.copy(reportPlays = on)) } }
-                SwitchLine(
-                    "Carry the queue between devices",
-                    "Keeps what you're listening to on your server, so Octo on your phone can pick it up, and Home here offers the phone's.",
-                    settings.listening.syncQueue,
-                ) { on -> app.settings.update { it.copy(listening = it.listening.copy(syncQueue = on)) } }
-            }
+    }
+}
+
+// The window's ambience as one choice, null being off.
+internal fun ambienceOf(look: Appearance): AmbienceStyle? = if (look.ambientGlow) look.ambience else null
+
+// The ambience chosen, kept as the switch and the look it had before, so
+// turning it back on returns the same look.
+internal fun withAmbience(look: Appearance, style: AmbienceStyle?): Appearance =
+    if (style == null) look.copy(ambientGlow = false) else look.copy(ambientGlow = true, ambience = style)
+
+@Composable
+private fun PlaybackRows(app: AppState, settings: AppSettings) {
+    Rows {
+        SwitchRow("Autoplay", "When the queue ends, similar songs keep playing: from your server, or by the same artist or in the same genre.", settings.playback.autoplay) { on ->
+            app.setAutoplay(on)
         }
-        item(key = "playback") {
-            SettingsCard("Playback") {
-                SwitchLine(
-                    "Autoplay",
-                    "When the queue ends, similar songs keep playing: songs like it from your server, or by the same artist or in the same genre.",
-                    settings.playback.autoplay,
-                ) { on -> app.setAutoplay(on) }
-                Txt("The equalizer, loudness, crossfade and speed are on the Sound page.", OctoType.bodySmall, OctoColors.TextSecondary, Modifier.padding(top = 12.dp), maxLines = 2)
-                Row(Modifier.padding(top = 8.dp)) {
-                    GlazeCapsule(OctoIcons.Sound, "Open Sound", { app.navigator.go(Page.Sound) })
-                }
-            }
+        ActionRow("Equalizer, loudness, crossfade and speed", "On the Sound page.", "Open Sound", { app.navigator.go(Page.Sound) })
+    }
+}
+
+@Composable
+private fun ListeningRows(app: AppState, settings: AppSettings) {
+    val listening = settings.listening
+    Rows {
+        SwitchRow(
+            "Tell the server what you play",
+            "Keeps play counts and recently played right in every app. Turn off if another app already reports this computer's plays.",
+            listening.reportPlays,
+        ) { on -> app.settings.update { it.copy(listening = it.listening.copy(reportPlays = on)) } }
+        SwitchRow(
+            "Carry the queue between devices",
+            "Pick up on your phone where you left off here, and here where you left off on your phone.",
+            listening.syncQueue,
+        ) { on -> app.settings.update { it.copy(listening = it.listening.copy(syncQueue = on)) } }
+    }
+}
+
+@Composable
+private fun LyricsRows(app: AppState, settings: AppSettings) {
+    Rows {
+        SwitchRow(
+            "Find lyrics online",
+            "When your server and the song have none, ask LRCLIB, sending only the title, artist, album and length.",
+            settings.lyrics.online,
+        ) { on ->
+            app.settings.update { it.copy(lyrics = it.lyrics.copy(online = on)) }
+            app.lyrics.state.value.song?.let { song -> app.lyrics.sources.refresh(song.id) }
         }
-        item(key = "system") { SystemSettingsCard(app) }
-        item(key = "about") {
-            SettingsCard("About") {
-                InfoLine("Version", appVersion())
-            }
-        }
-        item(key = "keys") {
-            SettingsCard("Keyboard shortcuts") {
-                shortcutList(app.mac).forEach { (what, keys) ->
-                    Row(Modifier.fillMaxWidth().cardLine().padding(vertical = 10.dp)) {
-                        Txt(what, OctoType.bodySmall, modifier = Modifier.weight(1f))
-                        Txt(keys, OctoType.bodySmall, OctoColors.TextSecondary)
-                    }
-                }
+    }
+}
+
+// Each shortcut and its keys, in short lines.
+@Composable
+private fun KeyRows(app: AppState) {
+    Rows {
+        shortcutList(app.mac).forEach { (what, keys) ->
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = RowHeight.Regular).padding(horizontal = Space.M, vertical = Space.S),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Txt(what, DesktopType.body, modifier = Modifier.weight(1f).padding(end = Space.Xl), maxLines = 2)
+                Txt(keys, DesktopType.meta.copy(fontFeatureSettings = "tnum"), OctoColors.TextSecondary, maxLines = 2)
             }
         }
     }
@@ -167,11 +210,11 @@ private fun ambienceName(style: AmbienceStyle?): String = when (style) {
     AmbienceStyle.Immersive -> "Immersive"
 }
 
-// What each ambience choice looks like, for the line under its name.
+// When each ambience choice is the one to pick.
 private fun ambienceHelp(style: AmbienceStyle?): String = when (style) {
-    null -> "The plain dark background."
+    null -> "The plain dark background, for the fewest distractions."
     AmbienceStyle.Glow -> "A soft glow of the playing song's colours across the top of the window."
-    AmbienceStyle.Immersive -> "The full player's wash of the cover's colours, behind the whole window."
+    AmbienceStyle.Immersive -> "The cover's colours behind the whole window, as in the full player."
 }
 
 private fun motionName(motion: AmbienceMotion): String = when (motion) {

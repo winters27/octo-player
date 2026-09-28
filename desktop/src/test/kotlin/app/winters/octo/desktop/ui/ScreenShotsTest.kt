@@ -41,6 +41,12 @@ import app.winters.octo.query.QueryOp
 import app.winters.octo.query.QueryRule
 import app.winters.octo.ui.playlist.planAdd
 import app.winters.octo.subsonic.Song
+import app.winters.octo.sound.EqMode
+import app.winters.octo.sound.EqPresets
+import app.winters.octo.sound.ReplayGainMode
+import app.winters.octo.ui.sound.withMode
+import app.winters.octo.ui.sound.withNewFilter
+import app.winters.octo.ui.sound.withPreset
 import java.io.File
 import javax.swing.SwingUtilities
 import kotlinx.coroutines.CoroutineScope
@@ -219,13 +225,13 @@ class ScreenShotsTest {
             }
             // Turns the mouse wheel over the page, `clicks` times, then moves
             // the pointer off the page so no row is lit under it.
-            fun wheel(clicks: Int) {
+            fun wheel(clicks: Int, on: ImageComposeScene = scene) {
                 repeat(clicks) {
                     SwingUtilities.invokeAndWait {
-                        scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Scroll, androidx.compose.ui.geometry.Offset(660f, 500f), scrollDelta = androidx.compose.ui.geometry.Offset(0f, 1f))
+                        on.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Scroll, androidx.compose.ui.geometry.Offset(660f, 500f), scrollDelta = androidx.compose.ui.geometry.Offset(0f, 1f))
                     }
                 }
-                SwingUtilities.invokeAndWait { scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Move, androidx.compose.ui.geometry.Offset(1270f, 600f)) }
+                SwingUtilities.invokeAndWait { on.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Move, androidx.compose.ui.geometry.Offset(1270f, 600f)) }
             }
             // The sign-in, filled in; then asking about a certificate; then
             // with Advanced open.
@@ -416,9 +422,57 @@ class ScreenShotsTest {
                 app.popups.close()
                 app.navigator.go(Page.Settings)
             }
+            // Settings and Sound, at the top, part way down and at the foot,
+            // then the same on a wide window.
             shot("settings")
-            SwingUtilities.invokeAndWait { app.navigator.go(Page.Sound) }
+            wheel(6)
+            shot("settings-middle")
+            wheel(60)
+            shot("settings-bottom")
+            // A press and release at a spot, a frame drawn after each.
+            fun tap(x: Float, y: Float) {
+                listOf(PointerEventType.Move, PointerEventType.Press, PointerEventType.Release).forEach { type ->
+                    SwingUtilities.invokeAndWait {
+                        scene.sendPointerEvent(type, Offset(x, y), buttons = PointerButtons(isPrimaryPressed = type == PointerEventType.Press), button = PointerButton.Primary)
+                        scene.render()
+                    }
+                }
+            }
+            // A section picked in the list beside the page: Lyrics, scrolled
+            // to and marked.
+            tap(400f, 278f)
+            shot("settings-jump")
+            SwingUtilities.invokeAndWait {
+                app.navigator.go(Page.Sound)
+                app.sound?.update { withPreset(it, EqPresets.first { preset -> preset.name == "Bass Boost" }).copy(eqEnabled = true, replayGain = ReplayGainMode.Smart) }
+            }
             shot("sound")
+            wheel(6)
+            shot("sound-middle")
+            wheel(60)
+            shot("sound-bottom")
+            // The equalizer's free filters, with one chosen, from the list.
+            SwingUtilities.invokeAndWait { app.sound?.update { withNewFilter(withMode(it, EqMode.Parametric)) } }
+            tap(400f, 163f)
+            shot("sound-parametric")
+            SwingUtilities.invokeAndWait { app.sound?.update { withPreset(withMode(it, EqMode.Graphic), EqPresets.first { preset -> preset.name == "Bass Boost" }) } }
+            val wideSettings = ImageComposeScene(1980, 900, Density(1f)) {
+                CompositionLocalProvider(LocalTyping provides TypingState()) { Shell(app, null) {} }
+            }
+            shot("sound-wide", on = wideSettings)
+            wheel(60, wideSettings)
+            shot("sound-wide-bottom", on = wideSettings)
+            SwingUtilities.invokeAndWait { app.navigator.go(Page.Settings) }
+            shot("settings-wide", on = wideSettings)
+            wheel(8, wideSettings)
+            shot("settings-wide-middle", on = wideSettings)
+            wideSettings.close()
+            // The narrowest window: the list of sections is left out.
+            val narrow = ImageComposeScene(960, 640, Density(1f)) {
+                CompositionLocalProvider(LocalTyping provides TypingState()) { Shell(app, null) {} }
+            }
+            shot("settings-narrow", on = narrow)
+            narrow.close()
             SwingUtilities.invokeAndWait {
                 app.navigator.go(Page.Songs)
                 app.toggleSidePanel(SidePanel.Lyrics)

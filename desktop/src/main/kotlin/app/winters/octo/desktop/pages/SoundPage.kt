@@ -2,11 +2,9 @@ package app.winters.octo.desktop.pages
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -18,17 +16,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.IntRect
-import androidx.compose.ui.unit.dp
-import app.winters.octo.desktop.AppState
-import app.winters.octo.desktop.nav.Visit
-import app.winters.octo.desktop.settings.PlaybackPrefs
-import app.winters.octo.desktop.sound.EqCurve
-import app.winters.octo.desktop.sound.SoundController
-import app.winters.octo.desktop.ui.LocalBottomRoom
-import app.winters.octo.desktop.ui.PageTitle
-import app.winters.octo.desktop.ui.pagePadding
-import app.winters.octo.desktop.ui.rememberListState
-import app.winters.octo.desktop.ui.windowRect
+import app.winters.octo.design.ControlHeight
+import app.winters.octo.design.DesktopType
+import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlassField
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.GlazeSegments
@@ -38,10 +28,17 @@ import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoSwitch
-import app.winters.octo.design.OctoType
 import app.winters.octo.design.PopupPadding
+import app.winters.octo.design.SettingsSize
+import app.winters.octo.design.Space
 import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
+import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.nav.Visit
+import app.winters.octo.desktop.settings.PlaybackPrefs
+import app.winters.octo.desktop.sound.EqCurve
+import app.winters.octo.desktop.sound.SoundController
+import app.winters.octo.desktop.ui.windowRect
 import app.winters.octo.playback.FASTEST_SPEED
 import app.winters.octo.playback.PITCH_RANGE_SEMITONES
 import app.winters.octo.playback.SLOWEST_SPEED
@@ -89,88 +86,106 @@ private val FallbackRange = -12f..6f
 private val ReplayGainModes = listOf(ReplayGainMode.Off, ReplayGainMode.Track, ReplayGainMode.Album, ReplayGainMode.Smart)
 private val ReplayGainHelp = mapOf(
     ReplayGainMode.Off to "Songs play at the level they were made.",
-    ReplayGainMode.Track to "Evens out volume between songs.",
+    ReplayGainMode.Track to "Evens out volume between songs, for shuffles and mixes.",
     ReplayGainMode.Album to "Keeps an album's quiet and loud songs as the artist made them.",
     ReplayGainMode.Smart to "Album while you play an album in order, otherwise song.",
 )
 
 private val FilterTypes = listOf(FilterType.Peak, FilterType.LowShelf, FilterType.HighShelf)
 
-// Sound: the equalizer with its curve, loudness, balance, crossfade and
-// speed, for the output playing now (or every output). Everything is heard
-// as it moves and saved to the settings file.
+// Sound: which output it is for, the equalizer, loudness, balance,
+// crossfade and speed, and a correction for headphones, each a section in
+// the list beside the page. Everything is heard as it moves and saved.
 @Composable
 fun SoundPage(app: AppState, visit: Visit) {
-    val list = rememberListState(app.navigator, visit)
     val controller = app.sound
     val playerState by app.player.state.collectAsState()
     val all by app.settings.state.collectAsState()
-    LazyColumn(state = list, contentPadding = pagePadding(LocalBottomRoom.current)) {
-        item(key = "title") { PageTitle("Sound") }
-        if (controller == null) {
-            item(key = "none") {
-                SettingsCard("No sound engine") {
-                    Txt("Octo's sound engine couldn't start on this computer, so there is nothing to shape.", OctoType.bodySmall, OctoColors.TextSecondary, maxLines = 3)
-                }
-            }
-            return@LazyColumn
-        }
-        item(key = "output") {
-            val device = playerState.playingOn?.name ?: "this computer"
-            SettingsCard(if (all.sound.perOutput) "Sound for $device" else "Sound for every output") {
-                SwitchLine(
-                    "Each output keeps its own sound",
-                    "Speakers, headphones and each USB device remember their own settings, and switch with them.",
-                    all.sound.perOutput,
-                    controller::setPerOutput,
-                )
-            }
-        }
-        item(key = "eq") { EqualizerCard(app, controller) }
-        item(key = "loudness") { LoudnessCard(controller) }
-        item(key = "balance") { BalanceCard(controller) }
-        item(key = "playback") { PlaybackCard(app, all.playback) }
-        item(key = "correction") { CorrectionCard(controller) }
+    if (controller == null) {
+        SectionedPage(
+            app,
+            visit,
+            "Sound",
+            listOf(
+                PageSection("none", "No sound engine") {
+                    Rows { SettingRow("Nothing to shape", "Octo's sound engine couldn't start on this computer.") }
+                },
+            ),
+        )
+        return
     }
+    val eq by controller.current.collectAsState()
+    val device = playerState.playingOn?.name ?: "this computer"
+    SectionedPage(
+        app,
+        visit,
+        "Sound",
+        listOf(
+            PageSection("output", "Output", detail = if (all.sound.perOutput) "These settings are for $device." else "These settings are for every output.") {
+                Rows {
+                    SwitchRow(
+                        "Each output keeps its own sound",
+                        "Speakers, headphones and each USB device remember their own settings, and switch with them.",
+                        all.sound.perOutput,
+                        controller::setPerOutput,
+                    )
+                }
+            },
+            PageSection("eq", "Equalizer", trailing = { OctoSwitch(eq.eqEnabled, { on -> controller.update { it.copy(eqEnabled = on) } }) }) {
+                Equalizer(app, controller)
+            },
+            PageSection("loudness", "Loudness") { LoudnessRows(controller) },
+            PageSection("balance", "Balance") { BalanceRows(controller) },
+            PageSection("playback", "Crossfade and speed") { PlaybackRows(app, all.playback) },
+            PageSection("correction", "Headphone correction") { CorrectionRows(controller) },
+        ),
+    )
 }
 
+// Presets first, then the kind of curve, the curve itself, and the level
+// before it.
 @Composable
-private fun EqualizerCard(app: AppState, sound: SoundController) {
+private fun Equalizer(app: AppState, sound: SoundController) {
     val settings by sound.current.collectAsState()
     var chosen by remember { mutableIntStateOf(0) }
     val selected = chosen.coerceIn(0, (settings.filters.size - 1).coerceAtLeast(0))
     val parametric = settings.mode == EqMode.Parametric
-    SettingsCard("Equalizer", trailing = { OctoSwitch(settings.eqEnabled, { on -> sound.update { it.copy(eqEnabled = on) } }) }) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            GlazeSegments(listOf(EqMode.Graphic, EqMode.Parametric), settings.mode, { if (it == EqMode.Graphic) "Ten bands" else "Free filters" }, { mode ->
-                sound.update { withMode(it, mode) }
-            })
-            Box(Modifier.weight(1f))
-            if (!parametric) PresetButton(app, sound, settings)
+    Rows {
+        if (!parametric) {
+            SettingRow("Preset", "Start from a shape, then drag the bands to taste.") { PresetButton(app, sound, settings) }
         }
-        EqCurve(
-            settings,
-            selected,
-            onSelect = { chosen = it },
-            onPreview = sound::preview,
-            onSettle = sound::settle,
-            modifier = Modifier.padding(vertical = 8.dp),
+        ChoiceRow(
+            "Bands",
+            if (parametric) "Filters placed anywhere, for correcting a room or a pair of headphones." else "Ten fixed bands, the simplest way to shape the sound.",
+            listOf(EqMode.Graphic, EqMode.Parametric),
+            settings.mode,
+            { if (it == EqMode.Graphic) "Ten bands" else "Free filters" },
+            { mode -> sound.update { withMode(it, mode) } },
         )
-        Txt(
-            if (parametric) "Drag a point to move a filter; the wheel nudges its gain, a double click sets it flat." else "Drag a band up or down; the wheel nudges it, a double click sets it flat.",
-            OctoType.caption,
-            OctoColors.TextMuted,
-        )
-        if (parametric) FilterEditor(settings, selected, sound) { chosen = it }
-        SwitchLine(
-            "Automatic preamp",
-            "Lowers the level by the curve's highest boost, so boosting never distorts.",
-            settings.autoPreamp,
-        ) { on -> sound.update { it.copy(autoPreamp = on) } }
+    }
+    EqCurve(
+        settings,
+        selected,
+        onSelect = { chosen = it },
+        onPreview = sound::preview,
+        onSettle = sound::settle,
+        modifier = Modifier.padding(horizontal = Space.M).padding(top = Space.S),
+        plotHeight = SettingsSize.EqPlot,
+    )
+    Txt(
+        if (parametric) "Drag a point to move a filter; the wheel nudges its gain, a double click sets it flat." else "Drag a band up or down; the wheel nudges it, a double click sets it flat.",
+        DesktopType.meta,
+        OctoColors.TextMuted,
+        Modifier.padding(horizontal = Space.M).padding(bottom = Space.S),
+    )
+    if (parametric) FilterEditor(settings, selected, sound) { chosen = it }
+    Rows {
+        SwitchRow("Automatic preamp", "Lowers the level by the curve's highest boost, so boosting never distorts.", settings.autoPreamp) { on ->
+            sound.update { it.copy(autoPreamp = on) }
+        }
         if (!settings.autoPreamp) {
-            DbSlider("Preamp", settings.preampDb, PreampRange, sound) { s, db -> s.copy(preampDb = db) }
+            DbSlider("Preamp", "Lower it if a boosted curve distorts.", settings.preampDb, PreampRange, sound) { s, db -> s.copy(preampDb = db) }
         }
-        InfoLine("Level now", readDb(remember(settings) { settings.effectivePreampDb() }))
     }
 }
 
@@ -181,7 +196,7 @@ private fun PresetButton(app: AppState, sound: SoundController, settings: SoundS
     var anchor by remember { mutableStateOf(IntRect.Zero) }
     Box(Modifier.onGloballyPositioned { anchor = it.windowRect() }) {
         GlazeCapsule(OctoIcons.Sound, presetLabel(settings), {
-            app.popups.showUnder(anchor, width = 280.dp) { close ->
+            app.popups.showUnder(anchor, width = FrameSize.Menu) { close ->
                 MenuTitle("Presets")
                 // Watched, so a preset deleted here leaves the list at once.
                 val saved by app.settings.state.collectAsState()
@@ -195,7 +210,7 @@ private fun PresetButton(app: AppState, sound: SoundController, settings: SoundS
                                 close()
                             }, if (preset.name == now.preset) OctoIcons.Check else null)
                         }
-                        if (preset.name in own) TextAction("Delete", { sound.deletePreset(preset.name) }, Modifier.padding(end = 10.dp))
+                        if (preset.name in own) TextAction("Delete", { sound.deletePreset(preset.name) }, Modifier.padding(end = Space.M))
                     }
                 }
                 MenuSeparator()
@@ -204,7 +219,7 @@ private fun PresetButton(app: AppState, sound: SoundController, settings: SoundS
                     app.popups.showCentred { done -> SavePreset(sound, done) }
                 }, OctoIcons.AddToLibrary)
             }
-        }, height = 34.dp)
+        }, height = ControlHeight.M)
     }
 }
 
@@ -219,13 +234,13 @@ private fun SavePreset(sound: SoundController, close: () -> Unit) {
                 close()
             }
         })
-        if (name.isNotBlank() && !sound.canSaveAs(name)) Txt("A built-in preset has that name.", OctoType.caption, OctoColors.TextMuted)
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (name.isNotBlank() && !sound.canSaveAs(name)) Txt("A built-in preset has that name.", DesktopType.meta, OctoColors.TextMuted)
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.M)) {
             GlazeCapsule(null, "Save", {
                 sound.savePreset(name)
                 close()
-            }, enabled = sound.canSaveAs(name), height = 34.dp)
-            GlazeCapsule(null, "Cancel", close, height = 34.dp)
+            }, enabled = sound.canSaveAs(name), height = ControlHeight.M)
+            GlazeCapsule(null, "Cancel", close, height = ControlHeight.M)
         }
     }
 }
@@ -235,24 +250,25 @@ private fun SavePreset(sound: SoundController, close: () -> Unit) {
 @Composable
 private fun FilterEditor(settings: SoundSettings, selected: Int, sound: SoundController, onChoose: (Int) -> Unit) {
     val filter = settings.filters.getOrNull(selected)
-    Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Rows {
         if (filter == null) {
-            Txt("No filters yet. Add one, then drag it on the curve.", OctoType.caption, OctoColors.TextMuted)
+            SettingRow("No filters yet", "Add one, then drag it on the curve.")
         } else {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Txt("Filter ${selected + 1} of ${settings.filters.size}", OctoType.label, modifier = Modifier.weight(1f))
-                GlazeSegments(FilterTypes, filter.type, { typeName(it) }, { type -> sound.update { edit(it, selected) { f -> f.copy(type = type) } } })
+            ChoiceRow("Filter ${selected + 1} of ${settings.filters.size}", null, FilterTypes, filter.type, ::typeName) { type ->
+                sound.update { edit(it, selected) { f -> f.copy(type = type) } }
             }
             val logHz = ln(MAX_HZ / MIN_HZ)
-            SliderLine(
+            SliderRow(
                 "Frequency",
+                null,
                 readHz(filter.frequency),
                 ln(filter.frequency / MIN_HZ) / logHz,
                 { x -> sound.preview { edit(it, selected) { f -> f.copy(frequency = tidyHz(MIN_HZ * (MAX_HZ / MIN_HZ).pow(x))) } } },
                 onRelease = sound::settle,
             )
-            SliderLine(
+            SliderRow(
                 "Gain",
+                null,
                 readDb(filter.gainDb),
                 (filter.gainDb + 12f) / 24f,
                 { x -> sound.preview { edit(it, selected) { f -> f.copy(gainDb = cleanGain(x * 24f - 12f)) } } },
@@ -260,21 +276,25 @@ private fun FilterEditor(settings: SoundSettings, selected: Int, sound: SoundCon
                 wheelStep = 0.5f / 24f,
             )
             val logQ = ln(MAX_Q / MIN_Q)
-            SliderLine(
+            SliderRow(
                 "Width (Q)",
+                "Lower is wider.",
                 String.format(Locale.ROOT, "%.2f", filter.q),
                 ln(filter.q / MIN_Q) / logQ,
                 { x -> sound.preview { edit(it, selected) { f -> f.copy(q = MIN_Q * (MAX_Q / MIN_Q).pow(x)) } } },
                 onRelease = sound::settle,
             )
         }
-        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            GlazeCapsule(OctoIcons.AddToLibrary, "Add filter", {
+        SettingRow(
+            if (settings.filters.size < MAX_FILTERS) "Filters" else "Filters, all $MAX_FILTERS in use",
+            null,
+        ) {
+            RowAction("Add filter", {
                 val next = settings.filters.size
                 sound.update { withNewFilter(it).copy(eqEnabled = true) }
                 onChoose(next)
-            }, enabled = settings.filters.size < MAX_FILTERS, height = 34.dp)
-            if (filter != null) GlazeCapsule(OctoIcons.Delete, "Delete filter", { sound.update { withoutFilter(it, selected) } }, height = 34.dp)
+            }, enabled = settings.filters.size < MAX_FILTERS, icon = OctoIcons.AddToLibrary)
+            if (filter != null) RowAction("Delete filter", { sound.update { withoutFilter(it, selected) } }, icon = OctoIcons.Delete)
         }
     }
 }
@@ -293,10 +313,11 @@ private fun typeName(type: FilterType) = when (type) {
 
 // A level in decibels on a slider, heard as it moves.
 @Composable
-private fun DbSlider(label: String, value: Float, range: ClosedFloatingPointRange<Float>, sound: SoundController, set: (SoundSettings, Float) -> SoundSettings) {
+private fun DbSlider(label: String, caption: String?, value: Float, range: ClosedFloatingPointRange<Float>, sound: SoundController, set: (SoundSettings, Float) -> SoundSettings) {
     val span = range.endInclusive - range.start
-    SliderLine(
+    SliderRow(
         label,
+        caption,
         readDb(value),
         (value - range.start) / span,
         { x -> sound.preview { set(it, tenths(range.start + x * span)) } },
@@ -308,10 +329,10 @@ private fun DbSlider(label: String, value: Float, range: ClosedFloatingPointRang
 private fun tenths(db: Float): Float = (db * 10f).roundToInt() / 10f
 
 @Composable
-private fun LoudnessCard(sound: SoundController) {
+private fun LoudnessRows(sound: SoundController) {
     val settings by sound.current.collectAsState()
-    SettingsCard("Loudness") {
-        GlazeSegments(ReplayGainModes, settings.replayGain, {
+    Rows {
+        ChoiceRow("Match loudness", ReplayGainHelp.getValue(settings.replayGain), ReplayGainModes, settings.replayGain, {
             when (it) {
                 ReplayGainMode.Off -> "Off"
                 ReplayGainMode.Track -> "Song"
@@ -319,26 +340,28 @@ private fun LoudnessCard(sound: SoundController) {
                 ReplayGainMode.Smart -> "Smart"
             }
         }, { mode -> sound.update { it.copy(replayGain = mode) } })
-        Txt(ReplayGainHelp.getValue(settings.replayGain), OctoType.caption, OctoColors.TextMuted)
         if (settings.replayGain != ReplayGainMode.Off) {
-            DbSlider("Preamp", settings.replayGainPreampDb, ReplayGainPreampRange, sound) { s, db -> s.copy(replayGainPreampDb = db) }
-            DbSlider("Songs without loudness info", settings.replayGainFallbackDb, FallbackRange, sound) { s, db -> s.copy(replayGainFallbackDb = db) }
-            SwitchLine("Prevent clipping", "Turns a song down rather than letting a boost distort it.", settings.preventClipping) { on ->
+            DbSlider("Preamp", "Raise it if matched songs sound too quiet.", settings.replayGainPreampDb, ReplayGainPreampRange, sound) { s, db -> s.copy(replayGainPreampDb = db) }
+            DbSlider("Songs without loudness info", "The level for songs that were never measured.", settings.replayGainFallbackDb, FallbackRange, sound) { s, db ->
+                s.copy(replayGainFallbackDb = db)
+            }
+            SwitchRow("Prevent clipping", "Turns a song down rather than letting a boost distort it.", settings.preventClipping) { on ->
                 sound.update { it.copy(preventClipping = on) }
             }
         }
-        SwitchLine("Limiter", "Catches any peak that would still distort, just below full volume.", settings.limiter) { on ->
+        SwitchRow("Limiter", "Catches any peak that would still distort, just below full volume.", settings.limiter) { on ->
             sound.update { it.copy(limiter = on) }
         }
     }
 }
 
 @Composable
-private fun BalanceCard(sound: SoundController) {
+private fun BalanceRows(sound: SoundController) {
     val settings by sound.current.collectAsState()
-    SettingsCard("Balance") {
-        SliderLine(
+    Rows {
+        SliderRow(
             "Left and right",
+            "Shift the sound toward one ear.",
             readBalance(settings.balance),
             (settings.balance + 1f) / 2f,
             { x ->
@@ -349,7 +372,7 @@ private fun BalanceCard(sound: SoundController) {
             onRelease = sound::settle,
             wheelStep = 0.05f,
         )
-        SwitchLine("Mono", "Both ears hear the same thing. Handy with one earbud.", settings.mono) { on ->
+        SwitchRow("Mono", "Both ears hear the same thing. Handy with one earbud.", settings.mono) { on ->
             sound.update { it.copy(mono = on) }
         }
     }
@@ -367,31 +390,33 @@ private fun readBalance(balance: Float): String {
 
 // Crossfade, speed and pitch: for every output, not one at a time.
 @Composable
-private fun PlaybackCard(app: AppState, playback: PlaybackPrefs) {
+private fun PlaybackRows(app: AppState, playback: PlaybackPrefs) {
     fun change(edit: (PlaybackPrefs) -> PlaybackPrefs) = app.settings.update { it.copy(playback = edit(it.playback)) }
-    SettingsCard("Crossfade and speed") {
-        SliderLine(
+    Rows {
+        SliderRow(
             "Crossfade",
+            "Each song fades into the next. Songs from one album played in order still run straight on.",
             if (playback.crossfadeSeconds == 0) "Off" else "${playback.crossfadeSeconds} s",
             playback.crossfadeSeconds / 12f,
             { x -> change { it.copy(crossfadeSeconds = (x * 12).roundToInt()) } },
             live = false,
             wheelStep = 1f / 12f,
         )
-        Txt("Songs from one album played in order still run straight into each other.", OctoType.caption, OctoColors.TextMuted)
-        SliderLine(
+        SliderRow(
             "Speed",
+            "How fast music plays.",
             speedLabel(playback.speed),
             speedFraction(playback.speed),
             { x -> change { it.copy(speed = speedAt(x)) } },
             live = false,
             wheelStep = 0.05f / (FASTEST_SPEED - SLOWEST_SPEED),
         )
-        SwitchLine("Keep the pitch", "Voices stay where they are at other speeds. Off, they rise and fall like a record.", playback.keepPitch) { on ->
+        SwitchRow("Keep the pitch", "Voices stay where they are at other speeds. Off, they rise and fall like a record.", playback.keepPitch) { on ->
             change { it.copy(keepPitch = on) }
         }
-        SliderLine(
+        SliderRow(
             "Pitch",
+            "Shifts every song up or down, in semitones.",
             semitonesLabel(playback.pitchSemitones),
             semitonesFraction(playback.pitchSemitones),
             { x -> change { it.copy(pitchSemitones = semitonesAt(x)) } },
@@ -399,7 +424,9 @@ private fun PlaybackCard(app: AppState, playback: PlaybackPrefs) {
             wheelStep = 1f / (2 * PITCH_RANGE_SEMITONES),
         )
         if (playback.speed != 1f || !playback.keepPitch || playback.pitchSemitones != 0) {
-            Row { TextAction("Back to normal", { change { it.copy(speed = 1f, keepPitch = true, pitchSemitones = 0) } }) }
+            ActionRow("Speed or pitch changed", "Every song plays this way until it is set back.", "Back to normal", {
+                change { it.copy(speed = 1f, keepPitch = true, pitchSemitones = 0) }
+            })
         }
     }
 }
@@ -407,40 +434,37 @@ private fun PlaybackCard(app: AppState, playback: PlaybackPrefs) {
 // A correction for the headphones in use, read from a ParametricEQ.txt
 // file, and the whole curve written out as one.
 @Composable
-private fun CorrectionCard(sound: SoundController) {
+private fun CorrectionRows(sound: SoundController) {
     val settings by sound.current.collectAsState()
-    var problem by remember { mutableStateOf<String?>(null) }
+    // Why the last import or export did not work, shown on its row.
+    var importProblem by remember { mutableStateOf<String?>(null) }
+    var exportProblem by remember { mutableStateOf<String?>(null) }
     val correction = settings.correction
-    SettingsCard("Headphone correction") {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                Txt(correction?.name ?: "None", OctoType.bodySmall)
-                Txt(
-                    when {
-                        correction == null -> "Evens out how your headphones colour the sound."
-                        correction.source == ParametricEqFile.IMPORTED -> "Imported from a file"
-                        else -> "Measured by ${correction.source}"
-                    },
-                    OctoType.caption,
-                    OctoColors.TextMuted,
-                )
+    Rows {
+        if (correction != null) {
+            SettingRow(
+                correction.name,
+                if (correction.source == ParametricEqFile.IMPORTED) "Imported from a file." else "Measured by ${correction.source}.",
+            ) {
+                RowAction("Remove", { sound.update { it.copy(correction = null) } })
             }
-            if (correction != null) TextAction("Remove", { sound.update { it.copy(correction = null) } })
         }
-        problem?.let { Txt(it, OctoType.caption, OctoColors.TextMuted) }
-        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            GlazeCapsule(null, "Import correction", {
-                val file = chooseFile("Choose a ParametricEQ.txt file", save = false) ?: return@GlazeCapsule
+        ActionRow(
+            if (correction == null) "Import a correction" else "Import another",
+            importProblem ?: "Evens out how your headphones colour the sound, from a ParametricEQ.txt file made for them.",
+            "Import",
+            {
+                val file = chooseFile("Choose a ParametricEQ.txt file", save = false) ?: return@ActionRow
                 val read = runCatching { ParametricEqFile.correction(file.name, file.readText()) }.getOrNull()
-                problem = if (read == null) "That file has no filters Octo can read." else null
+                importProblem = if (read == null) "That file has no filters Octo can read." else null
                 if (read != null) sound.update { it.copy(eqEnabled = true, correction = read) }
-            }, height = 34.dp)
-            GlazeCapsule(null, "Export my curve", {
-                val file = chooseFile("Save the curve", save = true, suggested = "Octo ParametricEQ.txt") ?: return@GlazeCapsule
-                val on = settings.copy(eqEnabled = true)
-                problem = if (runCatching { file.writeText(ParametricEqFile.write(on.effectivePreampDb(), on.activeFilters())) }.isSuccess) null else "The file could not be saved."
-            }, height = 34.dp)
-        }
+            },
+        )
+        ActionRow("Export my curve", exportProblem ?: "Saves the equalizer as a ParametricEQ.txt file, for another app or device.", "Export", {
+            val file = chooseFile("Save the curve", save = true, suggested = "Octo ParametricEQ.txt") ?: return@ActionRow
+            val on = settings.copy(eqEnabled = true)
+            exportProblem = if (runCatching { file.writeText(ParametricEqFile.write(on.effectivePreampDb(), on.activeFilters())) }.isSuccess) null else "The file could not be saved."
+        })
     }
 }
 

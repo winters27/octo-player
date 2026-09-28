@@ -1,5 +1,11 @@
 package app.winters.octo.desktop.settings
 
+import app.winters.octo.desktop.system.SystemPrefs
+import app.winters.octo.sound.EqFilter
+import app.winters.octo.sound.EqMode
+import app.winters.octo.sound.FilterType
+import app.winters.octo.sound.ReplayGainMode
+import app.winters.octo.sound.SoundSettings
 import app.winters.octo.subsonic.AuthMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -24,6 +30,50 @@ class SettingsStoreTest {
             playback = PlaybackPrefs(volume = 0.3f, crossfadeSeconds = 6, outputDevice = "usb:dac", speed = 1.25f, keepPitch = false, pitchSemitones = -2),
             songSort = "Year:desc",
             sidePanel = "queue",
+        )
+        SettingsStore(file()).update { changed }
+        assertEquals(changed, SettingsStore(file()).current)
+    }
+
+    // Every setting the Settings and Sound pages change, away from its
+    // default, reads back the same.
+    @Test
+    fun everySettingOnTheSettingsAndSoundPagesSurvivesARestart() {
+        val changed = AppSettings(
+            systemTitleBar = true,
+            appearance = Appearance(
+                ambientGlow = true,
+                glowStrength = 0.3f,
+                calmMotion = true,
+                wash = WashPrefs(moving = false, speed = 60, useBpm = false, brightnessCap = 35),
+                ambience = AmbienceStyle.Immersive,
+                ambienceMotion = AmbienceMotion.Still,
+            ),
+            playback = PlaybackPrefs(crossfadeSeconds = 4, speed = 0.75f, keepPitch = false, pitchSemitones = 3, autoplay = false),
+            lyrics = LyricsPrefs(online = false),
+            listening = ListeningPrefs(reportPlays = false, syncQueue = false),
+            system = SystemPrefs(closeToTray = true, nowPlayingNotices = true, miniPlayerOpen = true),
+            sound = SoundPrefs(
+                perOutput = true,
+                profiles = mapOf(
+                    "usb:dac" to SoundSettings(
+                        eqEnabled = true,
+                        mode = EqMode.Parametric,
+                        filters = listOf(EqFilter(FilterType.LowShelf, 90f, 3f, 0.7f)),
+                        preset = null,
+                        preampDb = -3f,
+                        autoPreamp = false,
+                        replayGain = ReplayGainMode.Smart,
+                        replayGainPreampDb = 2f,
+                        replayGainFallbackDb = -4f,
+                        preventClipping = false,
+                        limiter = false,
+                        balance = -0.2f,
+                        mono = true,
+                    ),
+                ),
+                presets = listOf(SavedCurve("Mine", List(10) { it.toFloat() })),
+            ),
         )
         SettingsStore(file()).update { changed }
         assertEquals(changed, SettingsStore(file()).current)

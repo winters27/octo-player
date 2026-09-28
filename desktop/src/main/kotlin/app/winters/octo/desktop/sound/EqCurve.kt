@@ -44,6 +44,7 @@ import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.winters.octo.design.OctoColors
@@ -158,6 +159,7 @@ fun EqCurve(
     onPreview: ((SoundSettings) -> SoundSettings) -> Unit,
     onSettle: () -> Unit,
     modifier: Modifier = Modifier,
+    plotHeight: Dp = PlotHeight,
 ) {
     val measurer = rememberTextMeasurer()
     val latest by rememberUpdatedState(settings)
@@ -177,7 +179,7 @@ fun EqCurve(
     val lit by animateFloatAsState(if (settings.eqEnabled) 1f else 0f, tween(250), label = "curve light")
     val line = lerp(Muted, Color.White, lit)
 
-    BoxWithConstraints(modifier.fillMaxWidth().height(PlotHeight + LabelBand)) {
+    BoxWithConstraints(modifier.fillMaxWidth().height(plotHeight + LabelBand)) {
         val density = androidx.compose.ui.platform.LocalDensity.current
         val plot = Plot(constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat(), density)
         val points = nodes.mapIndexed { i, node -> Offset(plot.x(node.hz), plot.y(nodeDb[i])) }
