@@ -169,7 +169,7 @@ class ShortcutsTest {
         assertEquals(Shortcut.SeekForward, on(Key.DirectionRight))
         assertEquals(Shortcut.VolumeUp, on(Key.DirectionUp))
         assertEquals(Shortcut.VolumeDown, on(Key.DirectionDown))
-        assertEquals(Shortcut.Search, on(Key.F, ctrl = true))
+        assertEquals(Shortcut.Filter, on(Key.F, ctrl = true))
         assertEquals(Shortcut.Lyrics, on(Key.L, ctrl = true))
         assertEquals(Shortcut.Settings, on(Key.Comma, ctrl = true))
         assertEquals(Shortcut.Back, on(Key.DirectionLeft, alt = true))
@@ -178,7 +178,7 @@ class ShortcutsTest {
 
     @Test
     fun onAMacCommandTakesCtrlsPlace() {
-        assertEquals(Shortcut.Search, on(Key.F, meta = true, mac = true))
+        assertEquals(Shortcut.Filter, on(Key.F, meta = true, mac = true))
         assertNull(on(Key.F, ctrl = true, mac = true))
         assertEquals(Shortcut.Back, on(Key.LeftBracket, meta = true, mac = true))
         assertNull("Windows keeps Ctrl", on(Key.F, meta = true))
@@ -188,7 +188,7 @@ class ShortcutsTest {
     fun whileTypingSpaceAndArrowsBelongToTheField() {
         assertNull(on(Key.Spacebar, typing = true))
         assertNull(on(Key.DirectionLeft, typing = true))
-        assertEquals(Shortcut.Search, on(Key.F, ctrl = true, typing = true))
+        assertEquals(Shortcut.Filter, on(Key.F, ctrl = true, typing = true))
         assertEquals(Shortcut.CloseLayer, on(Key.Escape, typing = true))
     }
 
@@ -210,8 +210,8 @@ class ShortcutsTest {
 
     @Test
     fun theSettingsListNamesThisSystemsKeys() {
-        assertTrue(shortcutList(mac = true).any { it.second == "Cmd+K or Cmd+F" })
-        assertTrue(shortcutList(mac = false).any { it.second == "Ctrl+K or Ctrl+F" })
+        assertTrue(shortcutList(mac = true).any { it.second == "Cmd+K" })
+        assertTrue(shortcutList(mac = false).any { it.second == "Ctrl+F" })
     }
 
     @Test
@@ -228,6 +228,7 @@ class ShortcutsTest {
     @Test
     fun theFramesShortcuts() {
         assertEquals(Shortcut.Search, on(Key.K, ctrl = true))
+        assertEquals(Shortcut.Filter, on(Key.F, ctrl = true))
         assertEquals(Shortcut.Commands, shortcutFor(KeyPress(Key.P, ctrl = true, shift = true), mac = false, typing = true))
         assertEquals(Shortcut.Info, on(Key.I, ctrl = true))
         assertEquals(Shortcut.Sidebar, on(Key.B, ctrl = true))

@@ -458,6 +458,12 @@ class AppState(
             Shortcut.VolumeUp -> setVolume(player.state.value.volume + VOLUME_STEP)
             Shortcut.VolumeDown -> setVolume(player.state.value.volume - VOLUME_STEP)
             Shortcut.Search -> if (connection != null) openSearch() else return false
+            // The list's own filter when the page has one, else the search box.
+            Shortcut.Filter -> when {
+                connection == null -> return false
+                pageFilterFocus != null && !fullPlayer -> runCatching { pageFilterFocus?.requestFocus() }.getOrElse { openSearch() }
+                else -> openSearch()
+            }
             Shortcut.Commands -> if (connection != null) openSearch(commands = true) else return false
             Shortcut.Lyrics -> if (connection != null) toggleSidePanel(SidePanel.Lyrics) else return false
             Shortcut.Queue -> if (connection != null) toggleSidePanel(SidePanel.Queue) else return false

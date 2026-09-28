@@ -10,6 +10,7 @@ enum class Shortcut {
     VolumeUp,
     VolumeDown,
     Search,
+    Filter,
     Commands,
     Lyrics,
     Queue,
@@ -42,7 +43,8 @@ fun shortcutFor(press: KeyPress, mac: Boolean, typing: Boolean, list: Boolean = 
     val plain = !press.ctrl && !press.alt && !press.meta
     return when {
         command && press.shift && !press.alt && press.key == Key.P -> Shortcut.Commands
-        command && !press.alt && (press.key == Key.F || press.key == Key.K) -> Shortcut.Search
+        command && !press.alt && press.key == Key.K -> Shortcut.Search
+        command && !press.alt && press.key == Key.F -> Shortcut.Filter
         command && !press.alt && press.key == Key.L -> Shortcut.Lyrics
         command && !press.alt && press.key == Key.U -> Shortcut.Queue
         command && !press.alt && press.key == Key.I -> Shortcut.Info
@@ -80,7 +82,8 @@ fun shortcutList(mac: Boolean): List<Pair<String, String>> {
         "Play or pause" to "Space",
         "Back or forward 5 seconds" to "Left / Right",
         "Volume up or down" to "Up / Down",
-        "Search" to "$command+K or $command+F",
+        "Search" to "$command+K",
+        "Filter the list you are on (or search, where there is none)" to "$command+F",
         "Commands" to "$command+Shift+P, or type > in the search box",
         "Show lyrics" to "$command+L",
         "Show the queue" to "$command+U",
