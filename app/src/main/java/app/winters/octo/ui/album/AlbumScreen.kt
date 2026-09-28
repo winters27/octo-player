@@ -46,7 +46,6 @@ import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.CHECK_SETTLE_MS
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.FavouriteHeart
-import app.winters.octo.ui.common.InLibraryMark
 import app.winters.octo.ui.common.LocalAdoptedFinds
 import app.winters.octo.ui.common.Pickable
 import app.winters.octo.ui.common.PlayRow
@@ -237,15 +236,15 @@ fun AlbumScreen(
                     }
                     items(onDisc, key = { it.id }) { track ->
                         // Only say who is singing when it is not the album's artist.
-                        // In an album mixing in songs found online, a library
-                        // song has a check where a find has its add button.
+                        // In an album mixing in songs found online, each row
+                        // says after its number whether the song is in the
+                        // library, as the desktop's album does.
                         SongRow(
                             track,
                             SongLead.Number(track.trackNo),
                             subtitle = { it.artist.takeIf { artist -> artist != album?.artist } },
-                            trailing = if (mixed && !isFind(track.id)) ({ InLibraryMark() }) else null,
                             menuContext = menuContext,
-                            offerAdd = mixed,
+                            ownership = mixed,
                         ) { vm.play(tracks.indexOf(track)) }
                     }
                 }
