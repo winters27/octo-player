@@ -168,7 +168,7 @@ private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Bo
         ) {
             if (selected) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
             Row(Modifier.padding(horizontal = if (rail) Space.None else Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
-                Glyph(icon, size = IconSize.Toolbar - Space.Xxs, tint = if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary)
+                Glyph(icon, size = IconSize.Toolbar, tint = if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary)
                 if (!rail) Txt(label, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary)
             }
         }

@@ -101,7 +101,7 @@ class SettingsStoreTest {
     fun theFrameIsKeptAndAnOldFileGetsItsDefaults() {
         file().apply { parentFile.mkdirs() }.writeText("""{"sidePanel":"info"}""")
         val old = SettingsStore(file(), 0).current
-        assertEquals(224f, old.frame.sidebarWidth)
+        assertEquals(240f, old.frame.sidebarWidth)
         assertTrue(old.frame.showTimeLeft)
         val store = SettingsStore(file(), 0)
         store.update { it.copy(frame = it.frame.copy(sidebarRail = true, panelWidth = 400f, pinnedPlaylists = listOf("p2", "p1"), foldedGroups = setOf("library"))) }

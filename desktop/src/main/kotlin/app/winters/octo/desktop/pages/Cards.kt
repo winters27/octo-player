@@ -150,7 +150,7 @@ internal fun SliderLine(
     wheelStep: Float? = null,
 ) {
     Row(Modifier.fillMaxWidth().cardLine().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Txt(label, OctoType.bodySmall, modifier = Modifier.width(150.dp))
+        Txt(label, OctoType.bodySmall, modifier = Modifier.width(176.dp))
         LineSlider(
             fraction = { fraction },
             onSeek = onChange,

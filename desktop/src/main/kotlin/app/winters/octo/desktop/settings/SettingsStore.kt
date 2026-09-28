@@ -73,7 +73,7 @@ data class TablePrefs(
 @Serializable
 data class FramePrefs(
     // The sidebar's width in dp, and whether it is folded to its icons.
-    val sidebarWidth: Float = 224f,
+    val sidebarWidth: Float = 240f,
     val sidebarRail: Boolean = false,
     // The side panel's width in dp.
     val panelWidth: Float = 328f,

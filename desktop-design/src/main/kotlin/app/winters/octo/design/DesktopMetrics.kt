@@ -77,8 +77,8 @@ object Corner {
 object FrameSize {
     val TitleBar = 40.dp
     val Hairline = 1.dp
-    val Sidebar = 224.dp
-    val SidebarMin = 184.dp
+    val Sidebar = 240.dp
+    val SidebarMin = 200.dp
     val SidebarMax = 320.dp
     val SidebarRail = 64.dp
     val Panel = 328.dp
@@ -88,7 +88,7 @@ object FrameSize {
     val PlayerCover = 56.dp
     // The floating player: a third of the window wide, but never narrower
     // than its controls need; its cover; and the gap around it.
-    val PlayerMin = 600.dp
+    val PlayerMin = 640.dp
     val PlayerThumb = 56.dp
     val PlayerGap = 16.dp
     // A wide card on a page, at most, so its buttons stay near its words.
@@ -97,14 +97,15 @@ object FrameSize {
     val PlayButtonLarge = 44.dp
     // A menu opened from a button.
     val Menu = 280.dp
-    val PlaylistCover = 22.dp
+    val PlaylistCover = 32.dp
+    // The search field floated out beside the rail.
     val SearchWidth = 360.dp
     // The search box's list: its width, how tall it may grow, a line, and
     // a line's picture.
-    val OmniWidth = 600.dp
-    val OmniHeight = 520.dp
-    val OmniLine = 44.dp
-    val OmniArt = 32.dp
+    val OmniWidth = 640.dp
+    val OmniHeight = 580.dp
+    val OmniLine = 50.dp
+    val OmniArt = 36.dp
     // A song list's filter field.
     val FilterWidth = 260.dp
 }
