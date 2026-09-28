@@ -34,6 +34,7 @@ import app.winters.octo.desktop.pages.SignInForm
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.FramePrefs
+import app.winters.octo.desktop.settings.TablePrefs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.design.PopupHost
 import app.winters.octo.lyrics.OnlineLyrics
@@ -144,6 +145,10 @@ class AppState(
     // Hearts set or cleared here, shown before the server's lists catch up.
     private val starOverrides = mutableStateMapOf<String, Boolean>()
 
+    // Ratings set here, from 0 (none) to 5 stars, shown the same way. The
+    // menus read and set them through ratingOf and setRating (SongActions.kt).
+    internal val ratingOverrides = mutableStateMapOf<String, Int>()
+
     // Opens or closes the mini player; the system side sets it.
     var toggleMiniPlayer: (() -> Unit)? = null
 
@@ -201,6 +206,7 @@ class AppState(
         notice = note
         noticeDetail = null
         starOverrides.clear()
+        ratingOverrides.clear()
         failedSongs.clear()
         startListening(connection)
         store.load()
@@ -276,6 +282,10 @@ class AppState(
     // The frame's own settings, changed as the listener drags and folds it.
     fun updateFrame(change: (FramePrefs) -> FramePrefs) =
         settings.update { it.copy(frame = change(it.frame)) }
+
+    // One song table's own columns and widths, changed from its heading.
+    fun updateTable(id: String, change: (TablePrefs) -> TablePrefs) =
+        settings.update { it.copy(tables = it.tables + (id to change(it.tables[id] ?: TablePrefs()))) }
 
     fun isPinned(playlistId: String) = playlistId in settings.current.frame.pinnedPlaylists
 
@@ -384,6 +394,15 @@ class AppState(
 
     // Songs of an album, for the menus on album cards.
     suspend fun albumSongs(id: String): List<Song> = connection?.client?.album(id)?.song.orEmpty()
+
+    // Whether the listener can change a playlist: their own, and not one
+    // the server keeps for itself.
+    fun canEdit(playlist: Playlist): Boolean =
+        !playlist.readonly && (playlist.owner == null || playlist.owner == connection?.client?.username)
+
+    // Whether the server takes playlist changes in a form body.
+    internal val formPost: Boolean
+        get() = connection?.server?.extensions?.any { it.startsWith("$FORM_POST_EXTENSION:") } == true
 
     // Sort orders kept between runs.
 

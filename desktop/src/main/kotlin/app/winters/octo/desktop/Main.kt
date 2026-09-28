@@ -25,6 +25,9 @@ import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import app.winters.octo.design.LocalTyping
+import app.winters.octo.design.ProvideWindowLook
+import app.winters.octo.design.TypingState
 import app.winters.octo.desktop.audio.CHECK_PLAY
 import app.winters.octo.desktop.audio.checkSound
 import app.winters.octo.desktop.audio.openPlayer
@@ -45,6 +48,8 @@ import app.winters.octo.desktop.system.LocalSystem
 import app.winters.octo.desktop.system.SingleInstance
 import app.winters.octo.desktop.system.SystemIntegration
 import app.winters.octo.desktop.system.letRunningOctoComeForward
+import app.winters.octo.desktop.ui.ListFocus
+import app.winters.octo.desktop.ui.LocalListFocus
 import app.winters.octo.desktop.ui.Shell
 import app.winters.octo.desktop.window.Frame
 import app.winters.octo.desktop.window.MIN_HEIGHT
@@ -53,21 +58,18 @@ import app.winters.octo.desktop.window.placeWindow
 import app.winters.octo.desktop.window.roundWindowsCorners
 import app.winters.octo.desktop.window.screenAreas
 import app.winters.octo.desktop.window.seeThroughMacTitleBar
-import app.winters.octo.design.LocalTyping
-import app.winters.octo.design.ProvideWindowLook
-import app.winters.octo.design.TypingState
 import coil3.compose.setSingletonImageLoaderFactory
+import java.awt.Dimension
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
+import java.io.File
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.debounce
 import okhttp3.OkHttpClient
-import java.awt.Dimension
-import java.awt.event.WindowAdapter
-import java.awt.event.WindowEvent
-import java.io.File
-import java.util.concurrent.TimeUnit
 
 private fun appIcon(): Painter? = runCatching {
     val bytes = AppState::class.java.getResourceAsStream("/octo-icon.png")!!.use { it.readBytes() }
@@ -129,6 +131,7 @@ fun main(args: Array<String>) {
             size = DpSize(spot.width.dp, spot.height.dp),
         )
         val typing = remember { TypingState() }
+        val lists = remember { ListFocus() }
         var frame by remember { mutableStateOf<Frame?>(null) }
         // Where the window last was at its own size, for the next run.
         var floating by remember { mutableStateOf(spot.copy(maximized = false)) }
@@ -164,7 +167,7 @@ fun main(args: Array<String>) {
             onPreviewKeyEvent = { event ->
                 if (event.type != KeyEventType.KeyDown) return@Window false
                 val press = KeyPress(event.key, event.isCtrlPressed, event.isAltPressed, event.isShiftPressed, event.isMetaPressed)
-                val shortcut = shortcutFor(press, app.mac, typing.active) ?: return@Window false
+                val shortcut = shortcutFor(press, app.mac, typing.active, lists.active) ?: return@Window false
                 app.perform(shortcut)
             },
         ) {
@@ -201,7 +204,7 @@ fun main(args: Array<String>) {
             }
             val look by app.settings.state.collectAsState()
             ProvideWindowLook(reduceMotion = look.appearance.calmMotion || systemCalm) {
-                CompositionLocalProvider(LocalTyping provides typing, LocalSystem provides system) {
+                CompositionLocalProvider(LocalTyping provides typing, LocalSystem provides system, LocalListFocus provides lists) {
                     AudioDropZone(system::openFiles) { Shell(app, own, ::closeWindow) }
                 }
             }

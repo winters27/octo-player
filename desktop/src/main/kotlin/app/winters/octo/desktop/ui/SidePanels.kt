@@ -152,7 +152,7 @@ private fun QueueRow(
             .fillMaxWidth()
             .height(52.dp)
             .hoverLift(RoundedCornerShape(10.dp), clickable = false, lifted = lifted)
-            .onRightClick { app.popups.showAt(pointer.point) { close -> SongMenu(app, listOf(song), close) } }
+            .onRightClick { app.popups.showAt(pointer.point) { close -> SongMenu(app, listOf(song), close, place = SongPlace.Queue(listOf(entry.key))) } }
             .onPointerEvent(PointerEventType.Press) {
                 val now = System.currentTimeMillis()
                 if (now - clicks.at < 400 && !playing) app.player.skipTo(entry.key)

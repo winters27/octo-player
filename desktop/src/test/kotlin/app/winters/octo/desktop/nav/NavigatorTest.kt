@@ -183,6 +183,17 @@ class ShortcutsTest {
     }
 
     @Test
+    fun aTableWithTheKeyboardKeepsItsKeys() {
+        fun inList(key: Key) = shortcutFor(KeyPress(key), mac = false, typing = false, list = true)
+        assertNull(inList(Key.DirectionUp))
+        assertNull(inList(Key.DirectionDown))
+        assertNull(inList(Key.Enter))
+        // Seeking with Left and Right, and Space, still work over a list.
+        assertEquals(Shortcut.SeekForward, inList(Key.DirectionRight))
+        assertEquals(Shortcut.PlayPause, inList(Key.Spacebar))
+    }
+
+    @Test
     fun theFramesShortcuts() {
         assertEquals(Shortcut.Search, on(Key.K, ctrl = true))
         assertEquals(Shortcut.Info, on(Key.I, ctrl = true))

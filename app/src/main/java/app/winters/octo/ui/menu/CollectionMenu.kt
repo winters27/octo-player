@@ -99,8 +99,11 @@ private fun MutableList<CollectionAction>.pin(spot: PinSpot) {
 
 // An album can be downloaded when some of its songs are only on a server
 // and not downloaded yet.
-fun albumActions(canDownload: Boolean, favourite: Boolean = false, pin: PinSpot = PinSpot.None): List<CollectionAction> = buildList {
+// A radio needs a server signed in; the desktop offers one from an album
+// too, started from its most played song.
+fun albumActions(canDownload: Boolean, favourite: Boolean = false, pin: PinSpot = PinSpot.None, radio: Boolean = false): List<CollectionAction> = buildList {
     addAll(Playing)
+    if (radio) add(CollectionAction.StartRadio)
     add(CollectionAction.AddToPlaylist)
     if (canDownload) add(CollectionAction.Download)
     favourite(favourite)
@@ -224,6 +227,19 @@ class CollectionMenuViewModel @Inject constructor(
 
     // A radio from the artist's most played song, or their first song when
     // none has been played yet.
+    // A radio from an album: its most played song here, else its first.
+    fun startAlbumRadio(albumId: String) {
+        viewModelScope.launch {
+            val played = history.tracks.first().filter { it.track.albumId == albumId }
+            val seed = byPlayCount(played, 1).firstOrNull() ?: catalog.albumTracks(albumId).first().firstOrNull()
+            if (seed == null) {
+                feedback.show("No songs to start a radio from")
+                return@launch
+            }
+            playRadio(seed, discovery, playback, feedback, "this album")
+        }
+    }
+
     fun startRadio(artistId: String) {
         viewModelScope.launch {
             val played = history.tracks.first().filter { it.track.artistId == artistId }

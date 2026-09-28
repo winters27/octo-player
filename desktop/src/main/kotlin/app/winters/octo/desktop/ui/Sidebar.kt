@@ -39,7 +39,6 @@ import app.winters.octo.design.GlazeSelected
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
-import app.winters.octo.design.MenuRow
 import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -171,8 +170,8 @@ private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Bo
     if (rail) OctoTooltip(label) { row() } else row()
 }
 
-// A playlist with its small cover; right-click pins it to the top, or lets
-// it go. On the rail, the cover alone.
+// A playlist with its small cover; right-click opens its menu, to play it
+// or pin it to the top. On the rail, the cover alone.
 @Composable
 private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, rail: Boolean, pinned: Boolean) {
     val pointer = LocalPointer.current
@@ -182,12 +181,7 @@ private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, ra
                 .fillMaxWidth()
                 .height(RowHeight.Nav + Space.Xs)
                 .hoverLift(Corner.ControlShape, lifted = false)
-                .onRightClick {
-                    app.popups.showAt(pointer.point) { close ->
-                        MenuTitle(playlist.name)
-                        MenuRow(if (pinned) "Unpin from the top" else "Pin to the top", { app.setPinned(playlist.id, !pinned); close() }, OctoIcons.Pin)
-                    }
-                }
+                .onRightClick { app.popups.showAt(pointer.point) { close -> PlaylistMenu(app, playlist, close) } }
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { app.navigator.go(Page.Playlist(playlist.id)) },
             contentAlignment = if (rail) Alignment.Center else Alignment.CenterStart,
         ) {

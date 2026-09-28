@@ -25,23 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
-import app.winters.octo.desktop.AppState
-import app.winters.octo.desktop.library.SongColumn
-import app.winters.octo.desktop.library.sortAlbums
-import app.winters.octo.desktop.library.sortSongs
-import app.winters.octo.desktop.library.sortedByName
-import app.winters.octo.desktop.nav.Page
-import app.winters.octo.desktop.nav.Visit
-import app.winters.octo.desktop.ui.LocalBottomRoom
-import app.winters.octo.desktop.ui.MediaCard
-import app.winters.octo.desktop.ui.PageTitle
-import app.winters.octo.desktop.ui.SongTable
-import app.winters.octo.desktop.ui.pagePadding
-import app.winters.octo.desktop.ui.rememberGridState
-import app.winters.octo.desktop.ui.rememberListState
-import app.winters.octo.desktop.ui.rememberLoad
-import app.winters.octo.desktop.ui.show
-import app.winters.octo.desktop.ui.windowRect
+import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.GlazeSegments
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.MenuRow
@@ -50,14 +34,36 @@ import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.Space
 import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.design.glassPanel
 import app.winters.octo.design.hoverLift
+import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.library.LibraryIndex
+import app.winters.octo.desktop.library.SongColumn
+import app.winters.octo.desktop.library.rememberSorted
+import app.winters.octo.desktop.library.sortAlbums
+import app.winters.octo.desktop.library.sortSongs
+import app.winters.octo.desktop.library.sortedByName
+import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.nav.Visit
+import app.winters.octo.desktop.ui.LoadingLine
+import app.winters.octo.desktop.ui.LocalBottomRoom
+import app.winters.octo.desktop.ui.MediaCard
+import app.winters.octo.desktop.ui.PageTitle
+import app.winters.octo.desktop.ui.SongTable
+import app.winters.octo.desktop.ui.artistMenu
+import app.winters.octo.desktop.ui.pagePadding
+import app.winters.octo.desktop.ui.rememberGridState
+import app.winters.octo.desktop.ui.rememberListState
+import app.winters.octo.desktop.ui.rememberLoad
+import app.winters.octo.desktop.ui.show
+import app.winters.octo.desktop.ui.windowRect
 import app.winters.octo.sort.AlbumSort
+import app.winters.octo.sort.SongSort
 import app.winters.octo.sort.SortList
 import app.winters.octo.sort.SortOrder
-import app.winters.octo.sort.SongSort
 import app.winters.octo.sort.directionChoices
 import app.winters.octo.sort.sortScale
 import app.winters.octo.subsonic.Artist
@@ -69,17 +75,27 @@ fun SongsPage(app: AppState, visit: Visit) {
     val list = rememberListState(app.navigator, visit)
     WithLibrary(app) { index ->
         val order = app.songOrder
-        val songs = remember(index, order) { sortSongs(index.songs, order) }
+        val songs = rememberSorted(index.songs, order) ?: return@WithLibrary LoadingLine()
+        val facts = remember(index) { libraryLine(index) }
         SongTable(
             app,
             songs,
-            listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Year, SongColumn.Length, SongColumn.Plays, SongColumn.Added),
+            listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Added, SongColumn.Favourite, SongColumn.Length),
             list,
+            id = "songs",
             order = order,
             onSort = app::sortSongs,
-            empty = { NothingHere("No songs yet") },
+            empty = { NothingHere("No songs yet", "Once your server has music, every song shows here.") },
         ) {
-            item(key = "title") { PageTitle("Songs", detail = "${songs.size} songs") }
+            item(key = "title") {
+                Row(Modifier.fillMaxWidth().padding(bottom = Space.L), verticalAlignment = Alignment.Bottom) {
+                    PageTitle("Songs", Modifier.weight(1f), detail = facts)
+                    Row(Modifier.padding(bottom = Space.Xl), horizontalArrangement = Arrangement.spacedBy(Space.M)) {
+                        GlazeCapsule(OctoIcons.Play, "Play", { app.play(songs) }, lit = true, enabled = songs.isNotEmpty())
+                        GlazeCapsule(OctoIcons.Shuffle, "Shuffle", { app.play(songs, shuffle = true) }, enabled = songs.isNotEmpty())
+                    }
+                }
+            }
         }
     }
 }
@@ -140,6 +156,7 @@ fun ArtistCard(app: AppState, artist: Artist, outside: Boolean = false) {
         if (artist.albumCount > 0) (if (artist.albumCount == 1) "1 album" else "${artist.albumCount} albums") else null,
         artist.coverArt,
         onOpen = { app.navigator.go(Page.Artist(artist.id, artist.name)) },
+        onMenu = artistMenu(app, artist, outside),
         round = true,
         online = outside,
     )
@@ -180,13 +197,14 @@ fun GenrePage(app: AppState, visit: Visit, name: String) {
     WithLibrary(app) { index ->
         var order by remember { mutableStateOf(SortList.GenreSongs.default) }
         val all = remember(index, name) { index.songsInGenre(name) }
-        val songs = remember(all, order) { sortSongs(all, order) }
+        val songs = rememberSorted(all, order) ?: return@WithLibrary LoadingLine()
         val albums = remember(index, name) { index.albumsInGenre(name) }
         SongTable(
             app,
             songs,
-            listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Year, SongColumn.Length),
+            listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Year, SongColumn.Favourite, SongColumn.Length),
             list,
+            id = "genre",
             order = order,
             onSort = { order = it },
         ) {
@@ -206,7 +224,7 @@ fun FoldersPage(app: AppState, visit: Visit) {
     val loaded = rememberLoad(connection) { connection.client.indexes() }
     val list = rememberListState(app.navigator, visit)
     loaded.show(Modifier.padding(horizontal = 28.dp)) { top ->
-        SongTable(app, top.songs, listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Length), list, covers = false) {
+        SongTable(app, top.songs, listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Length), list, id = "folder", covers = false) {
             item(key = "title") { PageTitle("Folders") }
             if (top.folders.isEmpty() && top.songs.isEmpty()) item(key = "no-folders") { NothingHere("No folders", "This server doesn't list its folders.") }
             items(top.folders, key = { "f:${it.id}" }) { folder -> FolderRow(folder.name) { app.navigator.go(Page.Folder(folder.id, folder.name)) } }
@@ -226,6 +244,7 @@ fun FolderPage(app: AppState, visit: Visit, id: String, name: String) {
             folder.songs,
             listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Length),
             list,
+            id = "folder",
             covers = false,
             number = { index, song -> song.track?.toString() ?: "${index + 1}" },
         ) {
@@ -277,6 +296,7 @@ fun FavouritesPage(app: AppState, visit: Visit) {
                     songs,
                     listOf(SongColumn.Number, SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Length),
                     list,
+                    id = "favourites",
                     empty = { NothingHere("No favourite songs yet", "Right-click a song and pick Add to favourites.") },
                 ) {
                     item(key = "title") { title() }
@@ -304,12 +324,13 @@ fun HistoryPage(app: AppState, visit: Visit) {
     val list = rememberListState(app.navigator, visit)
     WithLibrary(app) { index ->
         var order by remember { mutableStateOf(SortOrder(SongSort.RecentlyPlayed, descending = true)) }
-        val songs = remember(index, order) { sortSongs(index.history, order) }
+        val songs = rememberSorted(index.history, order) ?: return@WithLibrary LoadingLine()
         SongTable(
             app,
             songs,
-            listOf(SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Plays, SongColumn.Played),
+            listOf(SongColumn.Title, SongColumn.Artist, SongColumn.Album, SongColumn.Plays, SongColumn.Played, SongColumn.Length),
             list,
+            id = "history",
             order = order,
             onSort = { order = it },
             empty = { NothingHere("No history yet", "Your server hasn't recorded any plays, or doesn't share them.") },
@@ -342,4 +363,20 @@ fun SortButton(app: AppState, list: SortList, order: SortOrder, onPick: (SortOrd
             }
         }
     }, Modifier.onGloballyPositioned { anchor = it.windowRect() }, icon = OctoIcons.Sort)
+}
+
+// "2,835 songs · 182 albums · 143 artists · 6 d 14 h", from what the
+// library holds.
+fun libraryLine(index: LibraryIndex): String {
+    val seconds = index.songs.sumOf { it.duration.toLong() }
+    val days = seconds / 86_400
+    val hours = (seconds % 86_400) / 3_600
+    val minutes = (seconds % 3_600) / 60
+    val length = when {
+        days > 0 -> "$days d $hours h"
+        hours > 0 -> "$hours h $minutes min"
+        else -> "$minutes min"
+    }
+    fun count(n: Int, one: String) = "%,d %s".format(n, if (n == 1) one else one + "s")
+    return listOf(count(index.songs.size, "song"), count(index.albums.size, "album"), count(index.artists.size, "artist"), length).joinToString(" · ")
 }

@@ -32,7 +32,11 @@ data class KeyPress(
 
 // The app's shortcuts. "Command" is Cmd on a Mac and Ctrl elsewhere. While
 // someone types in a text field, Space and the arrows belong to the field.
-fun shortcutFor(press: KeyPress, mac: Boolean, typing: Boolean): Shortcut? {
+// A list has the keyboard: its rows take the arrows up and down, the page
+// keys, Home, End and Enter.
+private val ListKeys = setOf(Key.DirectionUp, Key.DirectionDown, Key.PageUp, Key.PageDown, Key.MoveHome, Key.MoveEnd, Key.Enter)
+
+fun shortcutFor(press: KeyPress, mac: Boolean, typing: Boolean, list: Boolean = false): Shortcut? {
     val command = if (mac) press.meta else press.ctrl
     val plain = !press.ctrl && !press.alt && !press.meta
     return when {
@@ -49,6 +53,7 @@ fun shortcutFor(press: KeyPress, mac: Boolean, typing: Boolean): Shortcut? {
         mac && press.meta && press.key == Key.RightBracket -> Shortcut.Forward
         press.key == Key.Escape -> Shortcut.CloseLayer
         typing -> null
+        list && press.key in ListKeys -> null
         // In a text field Alt (Option on a Mac) with the arrows moves by
         // words, so these only go back and forward outside one.
         press.alt && !press.ctrl && !press.meta && press.key == Key.DirectionLeft -> Shortcut.Back
