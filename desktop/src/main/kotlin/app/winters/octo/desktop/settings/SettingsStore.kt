@@ -6,11 +6,15 @@ import app.winters.octo.subsonic.AuthMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 // Everything the desktop app remembers between runs, as one JSON file in
 // the settings folder. Every field has a default, so a file from an older
@@ -149,10 +153,16 @@ private val json = Json {
 }
 
 // Reads and writes the settings file. A write goes to a temporary file
-// first and then replaces the old one in a single move, so a crash never
-// leaves half a file. A file that cannot be read is set aside, never
-// deleted, and the app starts from the defaults.
-class SettingsStore(private val file: File) {
+// first, is flushed to the disk, and then replaces the old one in a single
+// move, so neither a crash nor a power cut leaves half a file. A file that
+// is not valid settings is set aside, never deleted, and the app starts
+// from the defaults.
+//
+// With `writeDelayMs`, changes are kept in memory at once and written a
+// moment later, together, off the caller's thread: a slider dragged for a
+// second is one write, not sixty. Whatever is waiting is written when the
+// app ends.
+class SettingsStore(private val file: File, private val writeDelayMs: Long = 0) {
     private val lock = Any()
     private val _state = MutableStateFlow(read())
 
@@ -160,20 +170,66 @@ class SettingsStore(private val file: File) {
 
     val current: AppSettings get() = _state.value
 
+    // The settings changed since the file was last written, if any.
+    private var unsaved: AppSettings? = null
+    private val writer = if (writeDelayMs > 0) {
+        Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "octo-settings").apply { isDaemon = true } }
+    } else {
+        null
+    }
+
+    init {
+        if (writer != null) Runtime.getRuntime().addShutdownHook(Thread({ flush() }, "octo-settings-exit"))
+    }
+
     fun update(change: (AppSettings) -> AppSettings) {
         synchronized(lock) {
             val next = change(_state.value)
             if (next == _state.value) return
             _state.value = next
-            write(next)
+            if (writer == null) {
+                write(next)
+                return
+            }
+            val waiting = unsaved != null
+            unsaved = next
+            if (!waiting) writer.schedule(::flush, writeDelayMs, TimeUnit.MILLISECONDS)
+        }
+    }
+
+    // Writes what is waiting now. A write that fails is tried again later.
+    fun flush() {
+        synchronized(lock) {
+            val settings = unsaved ?: return
+            if (write(settings)) {
+                unsaved = null
+            } else {
+                runCatching { writer?.schedule(::flush, RETRY_MS, TimeUnit.MILLISECONDS) }
+            }
         }
     }
 
     private fun read(): AppSettings {
         if (!file.exists()) return AppSettings()
+        // Another program (a sync tool, a virus scanner) can hold the file
+        // for a moment; that is not a broken file.
+        var text: String? = null
+        for (attempt in 1..READ_ATTEMPTS) {
+            text = try {
+                file.readText()
+            } catch (e: IOException) {
+                if (attempt < READ_ATTEMPTS) Thread.sleep(RETRY_READ_MS)
+                null
+            }
+            if (text != null) break
+        }
+        if (text == null) return AppSettings()
         return try {
-            json.decodeFromString(AppSettings.serializer(), file.readText())
-        } catch (e: Exception) {
+            json.decodeFromString(AppSettings.serializer(), text)
+        } catch (e: SerializationException) {
+            setAside()
+            AppSettings()
+        } catch (e: IllegalArgumentException) {
             setAside()
             AppSettings()
         }
@@ -184,22 +240,34 @@ class SettingsStore(private val file: File) {
         runCatching { Files.move(file.toPath(), aside.toPath()) }
     }
 
-    private fun write(settings: AppSettings) {
-        try {
+    // True once the file holds these settings.
+    private fun write(settings: AppSettings): Boolean {
+        return try {
             file.parentFile?.mkdirs()
             val temp = File(file.parentFile, file.name + ".tmp")
-            temp.writeText(json.encodeToString(AppSettings.serializer(), settings))
+            FileOutputStream(temp).use { out ->
+                out.write(json.encodeToString(AppSettings.serializer(), settings).toByteArray(Charsets.UTF_8))
+                out.fd.sync()
+            }
             try {
                 Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
             } catch (e: IOException) {
                 Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
             }
+            true
         } catch (e: IOException) {
-            // The settings stay in memory for this run; the next change tries again.
+            // The settings stay in memory; the next write tries again.
+            false
         }
     }
 
     companion object {
         const val FILE_NAME = "settings.json"
+
+        // How long the app waits to write changes, so a drag is one write.
+        const val APP_WRITE_DELAY_MS = 400L
+        private const val RETRY_MS = 2_000L
+        private const val READ_ATTEMPTS = 3
+        private const val RETRY_READ_MS = 150L
     }
 }

@@ -219,19 +219,24 @@ fun EqCurve(
                         val node = nodesOf(start)[index]
                         held = index
                         down.consume()
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            if (!change.pressed) break
-                            if (change.positionChange() != Offset.Zero) {
-                                val gain = cleanGain(node.gainDb - (change.position.y - down.position.y) / area.pxPerDb)
-                                val hz = if (free) area.hz(area.x(node.hz) + change.position.x - down.position.x).roundToInt().toFloat() else null
-                                preview { moveNode(it, index, hz, gain) }
-                                change.consume()
+                        // Settled however the drag ends, even when the page
+                        // closes under it, so no half-made change is left.
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) break
+                                if (change.positionChange() != Offset.Zero) {
+                                    val gain = cleanGain(node.gainDb - (change.position.y - down.position.y) / area.pxPerDb)
+                                    val hz = if (free) area.hz(area.x(node.hz) + change.position.x - down.position.x).roundToInt().toFloat() else null
+                                    preview { moveNode(it, index, hz, gain) }
+                                    change.consume()
+                                }
                             }
+                        } finally {
+                            held = null
+                            settle()
                         }
-                        held = null
-                        settle()
                     }
                 },
         ) {

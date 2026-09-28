@@ -121,7 +121,14 @@ class LyricsSources(
     private val online: OnlineLyrics,
     private val settings: SettingsStore,
 ) {
-    private val answers = HashMap<String, LyricsAnswer>()
+    // Answers already found, for the server signed in to and whether the
+    // online library could be asked, so neither change shows an old answer.
+    private data class AnswerKey(val server: String?, val online: Boolean, val songId: String)
+
+    private val answers = HashMap<AnswerKey, LyricsAnswer>()
+
+    private fun keyFor(songId: String) =
+        AnswerKey(settings.current.server?.let { "${it.username}@${it.address}" }, prefs.online, songId)
     private val _revisions = MutableStateFlow<Map<String, Int>>(emptyMap())
     val revisions: StateFlow<Map<String, Int>> = _revisions
 
@@ -132,9 +139,10 @@ class LyricsSources(
 
     suspend fun answerFor(song: Song): LyricsAnswer {
         if (song.id in prefs.hidden) return LyricsAnswer.Hidden
-        synchronized(answers) { answers[song.id] }?.let { return it }
+        val key = keyFor(song.id)
+        synchronized(answers) { answers[key] }?.let { return it }
         val answer = search(song)
-        if (answer != LyricsAnswer.Failed) synchronized(answers) { answers[song.id] = answer }
+        if (answer != LyricsAnswer.Failed) synchronized(answers) { answers[key] = answer }
         return answer
     }
 
@@ -278,8 +286,14 @@ class LyricsSources(
                 LyricsOption(LyricsPick.OnServer(copy.id), "From ${lyricsSourceName(copy.source)}", "${copy.title} by ${copy.artist}", serverKindOf(copy.kind), copy.preview.take(2))
             }
         }
+        // The online library only when the listener allows it.
+        if (!prefs.online) return emptyList()
         return online.search(query).map { it.option() }
     }
+
+    // Whether the chooser has anywhere to search: the server's sources, or
+    // the online library when it may be asked.
+    fun canSearch(): Boolean = serverDecides() || prefs.online
 
     // Uses these lyrics for the song from now on. A server copy (or
     // "Automatic") is sent to the server, for every app, and clears this
@@ -319,7 +333,7 @@ class LyricsSources(
 
     // Asks for the song's lyrics again.
     fun refresh(songId: String) {
-        synchronized(answers) { answers.remove(songId) }
+        synchronized(answers) { answers.keys.removeAll { it.songId == songId } }
         _revisions.update { it + (songId to (it[songId] ?: 0) + 1) }
     }
 

@@ -92,7 +92,7 @@ fun main(args: Array<String>) {
     val claim = SingleInstance.claim(places.config, args.toList(), beforeHandover = ::letRunningOctoComeForward)
     if (claim is SingleInstance.Claim.HandedOver) return
     val instance = (claim as? SingleInstance.Claim.First)?.instance
-    val settings = SettingsStore(File(places.config, SettingsStore.FILE_NAME))
+    val settings = SettingsStore(File(places.config, SettingsStore.FILE_NAME), SettingsStore.APP_WRITE_DELAY_MS)
     val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -140,6 +140,7 @@ fun main(args: Array<String>) {
         fun keepPlace() = settings.update { it.copy(window = floating.copy(maximized = maximizedNow())) }
         fun close() {
             keepPlace()
+            settings.flush()
             system.close()
             app.player.close()
             exitApplication()

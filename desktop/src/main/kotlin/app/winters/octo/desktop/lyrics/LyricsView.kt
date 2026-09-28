@@ -236,25 +236,29 @@ private fun LyricsChooser(app: AppState, song: Song, close: () -> Unit) {
     MenuTitle("Choose lyrics")
     PopupPadding {
         if (onServer) Txt("Lyrics picked from your server show on all your devices and apps.", OctoType.caption, OctoColors.TextMuted, maxLines = 2)
-        GlassField(
-            query,
-            { query = it },
-            placeholder = if (onServer) "Search by title, or artist - title" else "Search LRCLIB by title or artist",
-            icon = OctoIcons.Search,
-            onSubmit = {
-                if (query.isNotBlank()) {
-                    searching = true
-                    scope.launch {
-                        searched = try {
-                            Result.success(sources.searchFor(song, query))
-                        } catch (e: IOException) {
-                            Result.failure(e)
+        // No search box when there is nowhere to search: online lookups
+        // off, on a server that does not keep lyrics choices.
+        if (sources.canSearch()) {
+            GlassField(
+                query,
+                { query = it },
+                placeholder = if (onServer) "Search by title, or artist - title" else "Search LRCLIB by title or artist",
+                icon = OctoIcons.Search,
+                onSubmit = {
+                    if (query.isNotBlank()) {
+                        searching = true
+                        scope.launch {
+                            searched = try {
+                                Result.success(sources.searchFor(song, query))
+                            } catch (e: IOException) {
+                                Result.failure(e)
+                            }
+                            searching = false
                         }
-                        searching = false
                     }
-                }
-            },
-        )
+                },
+            )
+        }
         problem?.let { Txt(it, OctoType.caption, OctoColors.TextMuted) }
     }
     fun pick(option: LyricsOption) {

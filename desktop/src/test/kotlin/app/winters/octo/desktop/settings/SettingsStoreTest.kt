@@ -80,6 +80,17 @@ class SettingsStoreTest {
     }
 
     @Test
+    fun aDragIsOneWriteAndNothingWaitingIsLost() {
+        val store = SettingsStore(file(), writeDelayMs = 60_000)
+        repeat(60) { step -> store.update { it.copy(playback = it.playback.copy(volume = step / 100f)) } }
+        // Kept in memory at once, not yet written.
+        assertEquals(0.59f, store.current.playback.volume)
+        assertFalse(file().exists())
+        store.flush()
+        assertEquals(0.59f, SettingsStore(file()).current.playback.volume)
+    }
+
+    @Test
     fun systemsAreToldApartByName() {
         assertEquals(DesktopOs.Windows, currentOs("Windows 11"))
         assertEquals(DesktopOs.Mac, currentOs("Mac OS X"))
