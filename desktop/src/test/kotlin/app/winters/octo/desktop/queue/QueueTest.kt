@@ -7,6 +7,7 @@ import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.songJson
+import app.winters.octo.playback.QueueSource
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,6 +56,27 @@ class QueueTest {
         assertEquals(1, saved.index)
         assertEquals(1, saved.order.first())
         assertTrue(saved.shuffle)
+    }
+
+    @Test
+    fun whereEachSongCameFromIsSavedAndComesBack() = runBlocking {
+        val folder = File(temp.root, "sources")
+        val album = QueueSource.Played("OK Computer")
+        val first = SilentPlayer(clock = { now })
+        first.play(songs, 0, source = album)
+        first.playNext(listOf(Song("x", "X", duration = 100)))
+        QueueKeeper(first, scope, Dispatchers.Unconfined).apply { this.folder = folder }.saveNow()
+
+        val second = SilentPlayer(clock = { now })
+        QueueKeeper(second, scope, Dispatchers.Unconfined).apply { this.folder = folder }.restore()
+        assertEquals(
+            first.state.value.upcoming.map { it.song.id to it.source },
+            second.state.value.upcoming.map { it.song.id to it.source },
+        )
+        assertEquals(QueueSource.You, second.state.value.upcoming.first().source)
+        // A file saved before sources were kept reads as lists with no name.
+        val old = QueueFile(songs, songs.indices.toList(), 0).saved(null)
+        assertNull(old.sources)
     }
 
     @Test
