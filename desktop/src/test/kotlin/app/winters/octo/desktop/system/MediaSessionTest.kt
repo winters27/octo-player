@@ -1,8 +1,17 @@
 package app.winters.octo.desktop.system
 
+import app.winters.octo.desktop.player.DesktopPlayer
+import app.winters.octo.desktop.player.PlayerState
+import app.winters.octo.desktop.player.QueueEntry
+import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.subsonic.Song
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -13,6 +22,11 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.system.measureTimeMillis
 
 // Media controls that only write down what they were told.
 class FakeControls(private val works: Boolean = true) : SystemMediaControls {
@@ -42,9 +56,22 @@ class FakeControls(private val works: Boolean = true) : SystemMediaControls {
         calls += "volume $volume"
     }
 
+    override fun showModes(shuffle: Boolean, repeat: RepeatMode) {
+        calls += "modes $shuffle $repeat"
+    }
+
     override fun close() {
         closed = true
     }
+}
+
+// A player whose state and place the test sets by hand.
+private class HandPlayer : DesktopPlayer by SilentPlayer() {
+    val flow = MutableStateFlow(PlayerState())
+    var position = 0L
+    override val state: StateFlow<PlayerState> get() = flow
+
+    override fun positionMs() = position
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -55,10 +82,95 @@ class MediaSessionTest {
 
     private fun TestScope.session(controls: FakeControls, others: (SystemEvent) -> Unit = {}): Pair<SilentPlayer, MediaSession> {
         val player = SilentPlayer(clock = { clock })
-        val session = MediaSession(player, controls, covers, backgroundScope, others, clock = { clock }, checkEveryMs = 1_000, refreshEveryMs = 5_000)
+        return player to started(player, controls, others)
+    }
+
+    private fun TestScope.started(player: DesktopPlayer, controls: FakeControls, others: (SystemEvent) -> Unit = {}): MediaSession {
+        val session = MediaSession(
+            player, controls, covers, backgroundScope, others,
+            clock = { clock }, checkEveryMs = 1_000, refreshEveryMs = 5_000, startOn = EmptyCoroutineContext,
+        )
         session.start()
         runCurrent()
-        return player to session
+        return session
+    }
+
+    private fun playing(speed: Float = 1f, buffering: Boolean = false): PlayerState {
+        val entry = QueueEntry(1, songs[0])
+        return PlayerState(queue = listOf(entry), current = entry, playing = true, durationMs = 100_000, speed = speed, buffering = buffering)
+    }
+
+    @Test
+    fun theTimeMovesOnAtTheSongsSpeed() = runTest(UnconfinedTestDispatcher()) {
+        val controls = FakeControls()
+        val player = HandPlayer()
+        val session = started(player, controls)
+        player.flow.value = playing(speed = 1.5f)
+        runCurrent()
+        controls.calls.clear()
+        clock += 4_000
+        player.position = 6_000
+        session.check()
+        assertTrue("playing at 1.5x is not a jump", controls.calls.isEmpty())
+        clock += 1_000
+        player.position = 7_500
+        session.check()
+        assertEquals(listOf("playback playing at 7"), controls.calls)
+    }
+
+    @Test
+    fun waitingForSoundIsNotAJump() = runTest(UnconfinedTestDispatcher()) {
+        val controls = FakeControls()
+        val player = HandPlayer()
+        val session = started(player, controls)
+        player.flow.value = playing(buffering = true)
+        runCurrent()
+        controls.calls.clear()
+        repeat(6) {
+            clock += 1_000
+            session.check()
+        }
+        assertTrue("the place stands still while waiting", controls.calls.isEmpty())
+        player.flow.value = playing()
+        runCurrent()
+        assertEquals("once sound comes the place is told again", listOf("playback playing at 0 jumped"), controls.calls)
+    }
+
+    @Test
+    fun shuffleAndRepeatAreShownAndCanBeSet() = runTest(UnconfinedTestDispatcher()) {
+        val controls = FakeControls()
+        val (player, _) = session(controls)
+        player.play(songs)
+        runCurrent()
+        controls.calls.clear()
+        controls.events!!(SystemEvent.SetShuffle(true))
+        runCurrent()
+        assertTrue(player.state.value.shuffle)
+        assertEquals("modes true Off", controls.calls.last())
+        controls.events!!(SystemEvent.SetRepeat(RepeatMode.One))
+        runCurrent()
+        assertEquals(RepeatMode.One, player.state.value.repeat)
+        assertEquals("modes true One", controls.calls.last())
+    }
+
+    @Test
+    fun startingNeverWaitsForTheSystem() {
+        val answer = CountDownLatch(1)
+        val heard = LinkedBlockingQueue<Boolean>()
+        val slow = object : SystemMediaControls by FakeControls() {
+            override fun start(events: (SystemEvent) -> Unit): Boolean {
+                answer.await(10, TimeUnit.SECONDS)
+                return true
+            }
+        }
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val session = MediaSession(SilentPlayer(), slow, null, scope)
+        val took = measureTimeMillis { session.start { heard += it } }
+        assertTrue("start came back at once, not after $took ms", took < 1_000)
+        answer.countDown()
+        assertEquals(true, heard.poll(5, TimeUnit.SECONDS))
+        session.close()
+        scope.cancel()
     }
 
     @Test

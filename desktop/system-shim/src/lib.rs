@@ -38,7 +38,7 @@ mod platform {
     pub fn set_track(_: &Track) -> Result<(), i32> {
         Err(crate::NOT_SUPPORTED)
     }
-    pub fn set_playback(_: Status, _: i64, _: bool, _: bool) -> Result<(), i32> {
+    pub fn set_playback(_: Status, _: i64, _: bool, _: bool, _: f64) -> Result<(), i32> {
         Err(crate::NOT_SUPPORTED)
     }
     pub fn clear() -> Result<(), i32> {
@@ -100,9 +100,11 @@ pub fn seconds(ms: i64) -> f64 {
     ms.max(0) as f64 / 1000.0
 }
 
-/// How fast Now Playing should move the time on by itself.
-pub fn rate(status: Status) -> f64 {
-    if status == Status::Playing { 1.0 } else { 0.0 }
+/// How fast Now Playing should move the time on by itself: the song's
+/// speed while playing, and 0 while paused or waiting for sound (a speed
+/// of 0 while playing).
+pub fn rate(status: Status, speed: f64) -> f64 {
+    if status == Status::Playing && speed.is_finite() { speed.max(0.0) } else { 0.0 }
 }
 
 /// A place in the song, kept inside it when its length is known.
@@ -150,7 +152,7 @@ unsafe fn text(value: *const c_char) -> String {
 /// Which version of these calls the library offers.
 #[unsafe(no_mangle)]
 pub extern "C" fn octo_system_version() -> i32 {
-    1
+    2
 }
 
 /// Starts listening to the system: its media buttons, and sleep and wake.
@@ -197,8 +199,8 @@ pub unsafe extern "C" fn octo_system_set_track(
     })
 }
 
-/// Shows whether the song plays, where it is, and which buttons work.
-/// `status` is 1 stopped, 2 playing, 3 paused.
+/// Shows whether the song plays, where it is, and which buttons work, at
+/// the speed it was recorded. `status` is 1 stopped, 2 playing, 3 paused.
 #[unsafe(no_mangle)]
 pub extern "C" fn octo_system_set_playback(
     status: i32,
@@ -206,9 +208,29 @@ pub extern "C" fn octo_system_set_playback(
     can_previous: i32,
     can_next: i32,
 ) -> i32 {
+    octo_system_set_playback_at_rate(status, position_ms, can_previous, can_next, 1.0)
+}
+
+/// The same, with `rate`: how fast the place moves on while playing (1.5
+/// at one and a half times the speed, 0 while waiting for sound). Since
+/// version 2.
+#[unsafe(no_mangle)]
+pub extern "C" fn octo_system_set_playback_at_rate(
+    status: i32,
+    position_ms: i64,
+    can_previous: i32,
+    can_next: i32,
+    rate: f64,
+) -> i32 {
     guarded(|| {
         let status = Status::from_code(status).ok_or(BAD_ARGUMENT)?;
-        platform::set_playback(status, position_ms.max(0), can_previous != 0, can_next != 0)
+        platform::set_playback(
+            status,
+            position_ms.max(0),
+            can_previous != 0,
+            can_next != 0,
+            crate::rate(status, rate),
+        )
     })
 }
 
@@ -266,9 +288,18 @@ mod tests {
     #[test]
     fn mac_gets_seconds_and_a_rate() {
         assert_eq!(seconds(42_500), 42.5);
-        assert_eq!(rate(Status::Playing), 1.0);
-        assert_eq!(rate(Status::Paused), 0.0);
-        assert_eq!(rate(Status::Stopped), 0.0);
+        assert_eq!(rate(Status::Playing, 1.0), 1.0);
+        assert_eq!(rate(Status::Playing, 1.5), 1.5);
+        assert_eq!(rate(Status::Playing, 0.0), 0.0, "waiting for sound");
+        assert_eq!(rate(Status::Playing, f64::NAN), 0.0);
+        assert_eq!(rate(Status::Paused, 1.5), 0.0);
+        assert_eq!(rate(Status::Stopped, 1.0), 0.0);
+    }
+
+    #[test]
+    fn the_rate_call_checks_its_status_too() {
+        assert_eq!(octo_system_set_playback_at_rate(9, 0, 0, 0, 1.5), BAD_ARGUMENT);
+        assert_eq!(octo_system_version(), 2);
     }
 
     #[test]

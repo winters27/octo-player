@@ -1,5 +1,9 @@
 package app.winters.octo.desktop.system
 
+import app.winters.octo.desktop.player.RepeatMode
+import app.winters.octo.playback.FASTEST_SPEED
+import app.winters.octo.playback.SLOWEST_SPEED
+
 // What each system's media controls are handed for the song playing. These
 // are plain values, worked out here so they can be tested anywhere; the
 // system-specific code only passes them on.
@@ -17,12 +21,14 @@ data class NativeTrack(
     val durationMs: Long,
 )
 
-// Where the song is, and which buttons work.
+// Where the song is, which buttons work, and how fast the place moves on
+// (0 while paused or waiting for sound).
 data class NativePlayback(
     val status: NativeStatus,
     val positionMs: Long,
     val canPrevious: Boolean,
     val canNext: Boolean,
+    val rate: Double,
 )
 
 fun nativeTrackOf(now: NowPlaying) = NativeTrack(
@@ -42,11 +48,12 @@ fun nativePlaybackOf(now: NowPlaying?, positionMs: Long) = NativePlayback(
     positionMs = clampPosition(positionMs, now?.durationMs ?: 0),
     canPrevious = now?.canPrevious == true,
     canNext = now?.canNext == true,
+    rate = now?.rate ?: 0.0,
 )
 
 // The library converts for each system: to ticks of 100 nanoseconds on
-// Windows, and on macOS to seconds with a rate of 1 while playing and 0
-// while paused, from which Now Playing moves the time on by itself.
+// Windows, and on macOS to seconds with the rate, from which Now Playing
+// moves the time on by itself.
 
 // Linux: the MPRIS player's properties. Times are in microseconds there.
 object Mpris {
@@ -70,6 +77,15 @@ object Mpris {
 
     fun micros(ms: Long): Long = ms * 1000
 
+    // Repeat as MPRIS's LoopStatus, and back. Anything else is not a mode.
+    fun loopStatus(repeat: RepeatMode): String = when (repeat) {
+        RepeatMode.Off -> "None"
+        RepeatMode.All -> "Playlist"
+        RepeatMode.One -> "Track"
+    }
+
+    fun repeatOf(loopStatus: String): RepeatMode? = RepeatMode.entries.firstOrNull { loopStatus(it) == loopStatus }
+
     // The Metadata property, as plain Kotlin values: strings, lists of
     // strings, Longs and Ints. The D-Bus side wraps each in a variant.
     // `artUrl` is a file:// address, never the server's signed one.
@@ -89,15 +105,22 @@ object Mpris {
         return out
     }
 
-    // Every Player property but Metadata and Position, as plain values.
-    fun playerProperties(now: NowPlaying?, volume: Double): Map<String, Any> = linkedMapOf(
+    // Every Player property but Metadata and Position, as plain values. The
+    // rate is the song's speed even while paused, which MPRIS shows by the
+    // status instead.
+    fun playerProperties(
+        now: NowPlaying?,
+        volume: Double,
+        shuffle: Boolean = false,
+        repeat: RepeatMode = RepeatMode.Off,
+    ): Map<String, Any> = linkedMapOf(
         "PlaybackStatus" to status(now),
-        "LoopStatus" to "None",
-        "Rate" to 1.0,
-        "Shuffle" to false,
+        "LoopStatus" to loopStatus(repeat),
+        "Rate" to (now?.speed ?: 1f).toDouble(),
+        "Shuffle" to shuffle,
         "Volume" to volume.coerceIn(0.0, 1.0),
-        "MinimumRate" to 1.0,
-        "MaximumRate" to 1.0,
+        "MinimumRate" to SLOWEST_SPEED.toDouble(),
+        "MaximumRate" to FASTEST_SPEED.toDouble(),
         "CanGoNext" to (now?.canNext == true),
         "CanGoPrevious" to (now?.canPrevious == true),
         "CanPlay" to (now != null),

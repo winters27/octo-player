@@ -17,6 +17,7 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.window.ScreenArea
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.awt.Desktop
 import java.awt.GraphicsEnvironment
@@ -89,8 +90,9 @@ class SystemIntegration(
     val closesToTray: Boolean get() = trayAvailable && app.settings.current.system.closeToTray
 
     fun start(launchArgs: List<String>) {
-        mediaKeysWork = session.start()
-        sleepWatch?.start { event -> app.scope.launch { session.handle(event) } }
+        session.start { works -> mediaKeysWork = works }
+        // The system bus can be slow to answer, so it is reached off the window's thread.
+        sleepWatch?.let { watch -> app.scope.launch(Dispatchers.IO) { watch.start { event -> app.scope.launch { session.handle(event) } } } }
         app.scope.launch {
             app.player.state.collect { state ->
                 val notice = notices.noticeFor(nowPlayingOf(state), app.settings.current.system.nowPlayingNotices, windowVisible && windowInFront)

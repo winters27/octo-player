@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.system
 
 import app.winters.octo.desktop.player.DesktopPlayer
+import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.subsonic.SubsonicClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +14,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.security.MessageDigest
+import kotlin.coroutines.CoroutineContext
 import kotlin.math.abs
 
 // Finds the cover of a song for the system's player.
@@ -85,10 +87,14 @@ class MediaSession(
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
     private val checkEveryMs: Long = 1_000,
     private val refreshEveryMs: Long = 5_000,
+    // Where the system is first reached, which can take seconds; the tests
+    // pass their own.
+    private val startOn: CoroutineContext = Dispatchers.IO,
 ) : AutoCloseable {
     private var shown: NowPlaying? = null
     private var coverJob: Job? = null
     private var volumeShown: Float? = null
+    private var modesShown: Pair<Boolean, RepeatMode>? = null
     private val jobs = ArrayList<Job>()
 
     // Where the song was when last told, and when, to notice jumps.
@@ -98,16 +104,18 @@ class MediaSession(
     var started = false
         private set
 
-    fun start(): Boolean {
-        started = controls.start { event -> scope.launch { handle(event) } }
-        jobs += scope.launch { player.state.collect { update() } }
+    // Reaches the system off the window's thread, then keeps it in step.
+    // `onStarted` hears, in `scope`, whether the system took Octo on.
+    fun start(onStarted: (Boolean) -> Unit = {}) {
         jobs += scope.launch {
+            started = withContext(startOn) { controls.start { event -> scope.launch { handle(event) } } }
+            onStarted(started)
+            launch { player.state.collect { update() } }
             while (isActive) {
                 delay(checkEveryMs)
                 check()
             }
         }
-        return started
     }
 
     // Brings the system up to date with the player.
@@ -116,6 +124,11 @@ class MediaSession(
         if (volumeShown != state.volume) {
             volumeShown = state.volume
             controls.showVolume(state.volume)
+        }
+        val modes = state.shuffle to state.repeat
+        if (modesShown != modes) {
+            modesShown = modes
+            controls.showModes(modes.first, modes.second)
         }
         val now = nowPlayingOf(state)
         val before = shown
@@ -131,12 +144,14 @@ class MediaSession(
             showTrack(now)
             tell(now, jumped = false)
         } else if (before != now) {
-            tell(now, jumped = false)
+            // After waiting for sound the song is behind where a system
+            // moving the time on by itself thinks it is.
+            tell(now, jumped = before.buffering && !now.buffering)
         }
     }
 
     // What the system shows about a song, apart from playing and paused.
-    private fun NowPlaying.trackFields() = copy(playing = false, canPrevious = false, canNext = false)
+    private fun NowPlaying.trackFields() = copy(playing = false, canPrevious = false, canNext = false, speed = 1f, buffering = false)
 
     private fun showTrack(now: NowPlaying) {
         coverJob?.cancel()
@@ -162,14 +177,15 @@ class MediaSession(
 
     // Once a second: a jump the player made on its own (a seek from the
     // window) is told at once; otherwise the place is refreshed now and then
-    // for systems that do not move the time on by themselves.
+    // for systems that do not move the time on by themselves. The place
+    // moves on at the song's speed, and not at all while waiting for sound.
     fun check() {
         val now = shown ?: return
         val position = player.positionMs()
-        val expected = if (now.playing) toldPosition + (clock() - toldAt) else toldPosition
+        val expected = toldPosition + ((clock() - toldAt) * now.rate).toLong()
         when {
             abs(position - expected) > JUMP_MS -> tell(now, jumped = true)
-            now.playing && clock() - toldAt >= refreshEveryMs -> tell(now, jumped = false)
+            now.rate > 0 && clock() - toldAt >= refreshEveryMs -> tell(now, jumped = false)
         }
     }
 
@@ -184,6 +200,8 @@ class MediaSession(
             SystemEvent.Stop -> player.pause()
             is SystemEvent.SeekTo -> player.seekTo(event.positionMs)
             is SystemEvent.SeekBy -> player.seekTo((player.positionMs() + event.offsetMs).coerceAtLeast(0))
+            is SystemEvent.SetShuffle -> player.setShuffle(event.on)
+            is SystemEvent.SetRepeat -> player.setRepeat(event.mode)
             SystemEvent.Sleep -> {
                 if (player.state.value.playing) player.pause()
                 others(event)

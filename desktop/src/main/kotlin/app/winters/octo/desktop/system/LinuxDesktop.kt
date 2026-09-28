@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.system
 
+import app.winters.octo.desktop.player.RepeatMode
 import org.freedesktop.dbus.DBusPath
 import org.freedesktop.dbus.annotations.DBusInterfaceName
 import org.freedesktop.dbus.connections.impl.DBusConnection
@@ -78,6 +79,8 @@ class MprisObject(
     private var now: NowPlaying? = null
     private var artUrl: String? = null
     private var volume = 1.0
+    private var shuffle = false
+    private var repeat = RepeatMode.Off
 
     override fun getObjectPath(): String = Mpris.OBJECT_PATH
 
@@ -88,9 +91,14 @@ class MprisObject(
 
     fun updateVolume(volume: Double) = synchronized(lock) { this.volume = volume }
 
+    fun updateModes(shuffle: Boolean, repeat: RepeatMode) = synchronized(lock) {
+        this.shuffle = shuffle
+        this.repeat = repeat
+    }
+
     // The Player properties as sent, Metadata and Position included.
     fun playerProperties(): Map<String, Any> = synchronized(lock) {
-        Mpris.playerProperties(now, volume) + mapOf(
+        Mpris.playerProperties(now, volume, shuffle, repeat) + mapOf(
             "Metadata" to Mpris.metadata(now, artUrl),
             "Position" to Mpris.micros(positionMs()),
         )
@@ -130,10 +138,17 @@ class MprisObject(
         return variantOf(all[propertyName] ?: return null as A) as A
     }
 
+    // The volume, shuffle and repeat can be set. A rate of 0 means pause, as
+    // the specification says; other rates are left to the app's own setting.
     override fun <A : Any?> Set(interfaceName: String, propertyName: String, value: A) {
-        if (interfaceName != Mpris.PLAYER || propertyName != "Volume") return
+        if (interfaceName != Mpris.PLAYER) return
         val raw = (value as? Variant<*>)?.value ?: value
-        (raw as? Number)?.let { events(SystemEvent.SetVolume(it.toFloat().coerceIn(0f, 1f))) }
+        when (propertyName) {
+            "Volume" -> (raw as? Number)?.let { events(SystemEvent.SetVolume(it.toFloat().coerceIn(0f, 1f))) }
+            "Shuffle" -> (raw as? Boolean)?.let { events(SystemEvent.SetShuffle(it)) }
+            "LoopStatus" -> (raw as? String)?.let(Mpris::repeatOf)?.let { events(SystemEvent.SetRepeat(it)) }
+            "Rate" -> (raw as? Number)?.takeIf { it.toDouble() == 0.0 }?.let { events(SystemEvent.Pause) }
+        }
     }
 
     override fun GetAll(interfaceName: String): Map<String, Variant<*>> = when (interfaceName) {
@@ -185,6 +200,11 @@ class LinuxMediaControls(private val positionMs: () -> Long) : SystemMediaContro
         announce()
     }
 
+    override fun showModes(shuffle: Boolean, repeat: RepeatMode) = later {
+        player?.updateModes(shuffle, repeat)
+        announce()
+    }
+
     // Tells listeners which properties changed since the last time.
     private fun announce() {
         val bus = connection ?: return
@@ -202,7 +222,8 @@ class LinuxMediaControls(private val positionMs: () -> Long) : SystemMediaContro
             connection = null
         }
         worker.shutdown()
-        runCatching { worker.awaitTermination(2, TimeUnit.SECONDS) }
+        // Octo is quitting, so the bus gets a moment to let go, no more.
+        runCatching { worker.awaitTermination(QUIT_WAIT_MS, TimeUnit.MILLISECONDS) }
     }
 
     private fun later(call: () -> Unit) {

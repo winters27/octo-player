@@ -19,6 +19,9 @@ internal interface SystemLibrary : Library {
 
     fun octo_system_set_playback(status: Int, positionMs: Long, canPrevious: Int, canNext: Int): Int
 
+    // Version 2 on: the same, with how fast the place moves on.
+    fun octo_system_set_playback_at_rate(status: Int, positionMs: Long, canPrevious: Int, canNext: Int, rate: Double): Int
+
     fun octo_system_clear(): Int
 
     fun octo_system_stop()
@@ -70,6 +73,9 @@ class NativeMediaControls internal constructor(
     // Held here so the JVM never frees it while the library can call it.
     private var callback: EventCallback? = null
 
+    // Whether the library takes a rate, which an older one does not.
+    private val takesRate = runCatching { library.octo_system_version() >= 2 }.getOrDefault(false)
+
     override fun start(events: (SystemEvent) -> Unit): Boolean {
         val listener = EventCallback { kind, value -> systemEventOf(kind, value)?.let(events) }
         callback = listener
@@ -87,8 +93,14 @@ class NativeMediaControls internal constructor(
 
     override fun showPlayback(now: NowPlaying, positionMs: Long, jumped: Boolean) {
         val playback = nativePlaybackOf(now, positionMs)
+        val previous = if (playback.canPrevious) 1 else 0
+        val next = if (playback.canNext) 1 else 0
         later {
-            library.octo_system_set_playback(playback.status.code, playback.positionMs, if (playback.canPrevious) 1 else 0, if (playback.canNext) 1 else 0)
+            if (takesRate) {
+                library.octo_system_set_playback_at_rate(playback.status.code, playback.positionMs, previous, next, playback.rate)
+            } else {
+                library.octo_system_set_playback(playback.status.code, playback.positionMs, previous, next)
+            }
         }
     }
 
@@ -111,7 +123,8 @@ class NativeMediaControls internal constructor(
     override fun close() {
         later { library.octo_system_stop() }
         worker.shutdown()
-        runCatching { worker.awaitTermination(2, TimeUnit.SECONDS) }
+        // Octo is quitting, so the system gets a moment to let go, no more.
+        runCatching { worker.awaitTermination(QUIT_WAIT_MS, TimeUnit.MILLISECONDS) }
     }
 
     private fun later(call: () -> Unit) {
