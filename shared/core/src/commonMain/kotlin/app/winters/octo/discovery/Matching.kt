@@ -43,22 +43,48 @@ fun sameArtist(a: String, b: String): Boolean = SongIdentity.artistsAgree(a, b)
 fun versionOf(title: String): Set<String> = SongIdentity.distinctVersions(SongIdentity.parseTitle(title))
 
 // The same song by the same artist, and the same kind of recording. Lengths
-// only count when both are known.
-fun sameSong(title: String, artist: String, lengthMs: Long, otherTitle: String, otherArtist: String, otherLengthMs: Long): Boolean =
+// only count when both are known. ISRCs, when both sides have them and
+// share one, make it the same recording whatever the titles say.
+fun sameSong(
+    title: String,
+    artist: String,
+    lengthMs: Long,
+    otherTitle: String,
+    otherArtist: String,
+    otherLengthMs: Long,
+    isrcs: List<String> = emptyList(),
+    otherIsrcs: List<String> = emptyList(),
+): Boolean =
     SongIdentity.same(
-        SongRef(title, artist, secondsOf(lengthMs)),
-        SongRef(otherTitle, otherArtist, secondsOf(otherLengthMs)),
+        SongRef(title, artist, secondsOf(lengthMs), isrcs),
+        SongRef(otherTitle, otherArtist, secondsOf(otherLengthMs), otherIsrcs),
         WithinTenSeconds,
     ).isSame
 
 // The same recording by the same artist, lengths not compared.
-fun sameRecording(titleA: String, artistA: String, titleB: String, artistB: String): Boolean =
-    SongIdentity.same(titleA, artistA, titleB, artistB, SongMatchOptions.AnyLength).isSame
+fun sameRecording(
+    titleA: String,
+    artistA: String,
+    titleB: String,
+    artistB: String,
+    isrcsA: List<String> = emptyList(),
+    isrcsB: List<String> = emptyList(),
+): Boolean =
+    SongIdentity.same(SongRef(titleA, artistA, isrcs = isrcsA), SongRef(titleB, artistB, isrcs = isrcsB), SongMatchOptions.AnyLength).isSame
 
 // The same song by the same artist in any version: a live take or a remix
 // counts too.
-fun sameSongAnyVersion(titleA: String, artistA: String, titleB: String, artistB: String): Boolean =
-    SongIdentity.same(titleA, artistA, titleB, artistB, SongMatchOptions.AnyLength).verdict != SongVerdict.Different
+fun sameSongAnyVersion(
+    titleA: String,
+    artistA: String,
+    titleB: String,
+    artistB: String,
+    isrcsA: List<String> = emptyList(),
+    isrcsB: List<String> = emptyList(),
+): Boolean {
+    val match = SongIdentity.same(SongRef(titleA, artistA, isrcs = isrcsA), SongRef(titleB, artistB, isrcs = isrcsB), SongMatchOptions.AnyLength)
+    return match.verdict != SongVerdict.Different
+}
 
 private fun secondsOf(ms: Long): Double? = if (ms > 0) ms / 1000.0 else null
 
@@ -76,6 +102,22 @@ class TitleIndex<T>(private val items: List<T>, title: (T) -> String, artist: (T
 
     fun candidates(title: String, artist: String): List<T> =
         SongIdentity.titleLookupKeys(title, artist).flatMap { byKey[it].orEmpty() }.distinct().sorted().map(items::get)
+}
+
+// Songs by every valid ISRC they carry, for the songs a title lookup cannot
+// find: the same recording under a title in another script or language.
+// What it finds keeps the list's order.
+class IsrcIndex<T>(private val items: List<T>, isrcs: (T) -> List<String>) {
+    private val byIsrc = HashMap<String, MutableList<Int>>()
+
+    init {
+        items.forEachIndexed { index, item ->
+            SongIdentity.isrcs(isrcs(item)).forEach { byIsrc.getOrPut(it) { mutableListOf() } += index }
+        }
+    }
+
+    fun candidates(isrcs: List<String>): List<T> =
+        if (byIsrc.isEmpty()) emptyList() else SongIdentity.isrcs(isrcs).flatMap { byIsrc[it].orEmpty() }.distinct().sorted().map(items::get)
 }
 
 // What the player receives for a server song, from its type or its file ending.
