@@ -160,7 +160,7 @@ class ShellPerfTest {
             // scroll into view.
             frames.settle { app.navigator.go(Page.Albums) }
             val covers = server.calls.count { it.url.pathSegments.last() == "getCoverArt" }
-            val albums = frames.scroll(SCROLL_FRAMES)
+            val albums = frames.scroll(ALBUM_SCROLL_FRAMES)
             frames.settle(quietMs = 1_000)
             val fetched = server.calls.count { it.url.pathSegments.last() == "getCoverArt" } - covers
             say("Scrolling Albums, ${albums.count} frames: mean ${ms(albums.mean)} ms, p95 ${ms(albums.p95)} ms, worst ${ms(albums.worst)} ms; $fetched covers fetched")
@@ -450,6 +450,9 @@ class ShellPerfTest {
         const val KB = 1024
         const val FRAME_NANOS = 16_666_667L
         const val SCROLL_FRAMES = 600
+
+        // Long enough to pass most of 2,000 albums' covers.
+        const val ALBUM_SCROLL_FRAMES = 2_400
         const val KEY_GAP_MS = 120L
         const val SEARCH_PAUSE_MS = 250
         const val IDLE_SECONDS = 10
