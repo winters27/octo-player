@@ -175,7 +175,7 @@ fun coverWords(spec: CoverSpec, side: Int, setter: CoverTypesetter, book: CoverB
 
     val t = layout.title
     val top = s * t.top
-    val lineText = spec.line?.trim()?.takeIf { it.isNotEmpty() && side >= layout.line.showFromPx }
+    val lineText = spec.line?.trim()?.takeIf { it.isNotEmpty() && side >= layout.line.showFromPx && !nameSaysWhatItIs(name) }
     val lineRoom = if (lineText == null) 0f else max(s * t.wrapSize, t.wrapMinPx) * layout.line.shareOfTitle * layout.line.lineHeight
     val room = floor - top - lineRoom
     val look = CoverType(0f, t.weight, t.tracking, coverLineHeight(coverScript(name), t.lineHeight), 1)
@@ -196,6 +196,16 @@ fun coverWords(spec: CoverSpec, side: Int, setter: CoverTypesetter, book: CoverB
     }
     return out + listOfNotNull(foot)
 }
+
+// Whether a name already ends with the word the second line would add ("Road
+// Trip Playlist", "Your Mix"), so the cover leaves that line out, as the
+// server's covers do. Only a whole last word counts: "Mixtape" does not.
+fun nameSaysWhatItIs(name: String): Boolean {
+    val last = name.trim().split(Regex("""[^\p{L}\p{N}]+""")).lastOrNull { it.isNotEmpty() } ?: return false
+    return last.lowercase() in KindWords
+}
+
+private val KindWords = setOf("mix", "mixes", "radio", "radios", "station", "stations", "playlist", "playlists")
 
 // The colour with this opacity.
 internal fun alpha(argb: Int, a: Float): Int = ((a.coerceIn(0f, 1f) * 255).roundToInt() shl 24) or (argb and 0xFFFFFF)
