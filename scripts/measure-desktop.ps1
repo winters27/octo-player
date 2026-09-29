@@ -25,6 +25,12 @@
 #                     the Octo in use shares.
 #   -Warm <n>         warm starts after the first (default 2)
 #   -IdleSeconds <n>  seconds sampled idle, shown and again minimised (default 30)
+#   -QuietSeconds <n> how long the processor must stay under 2% of a core for
+#                     the app to count as settled (default 8). A start waits
+#                     on the server for a few seconds at a time, and 3 s of
+#                     quiet there once passed for settled, so the work after
+#                     it was counted as idle (9% of a core, all of it the
+#                     start's own work).
 #   -Out <file>       also write the results as CSV
 #   -AllowInstalled   measure the installed Octo's own folder even when its
 #                     build does not know OCTO_PROFILE_DIR (it shares the
@@ -42,7 +48,7 @@
 # so for those the two registry values are saved first and put back after.
 #
 # What it prints, per start: the time to the window, the time until the app
-# went quiet (processor under 2% of a core for 3 seconds in a row), and while
+# went quiet (processor under 2% of a core for -QuietSeconds in a row), and while
 # idle the working set (memory in RAM), private bytes (memory committed to
 # the app, what Task Manager's "Commit size" shows), threads, handles and
 # processor use as a share of one core; the same again minimised.
@@ -54,6 +60,7 @@ param(
     [switch]$WithLibrary,
     [int]$Warm = 2,
     [int]$IdleSeconds = 30,
+    [int]$QuietSeconds = 8,
     [int]$WindowTimeoutSeconds = 90,
     [int]$SettleTimeoutSeconds = 120,
     [string]$Out = "",
@@ -204,12 +211,18 @@ function Get-Sample([int]$ProcessId) {
 }
 
 # Sums up samples taken a second apart: memory as the mean and the most,
-# processor time as a share of one core over the whole stretch.
+# processor time as a share of one core over the whole stretch, and the
+# busiest second, which shows a burst the mean hides.
 function Measure-Samples($Samples) {
     $list = @($Samples)
     if ($list.Count -lt 2) { throw "Need at least two samples" }
     $seconds = ($list[-1].At - $list[0].At).TotalSeconds
     $cpu = ($list[-1].CpuMs - $list[0].CpuMs) / 10.0 / $seconds
+    $peak = 0.0
+    for ($i = 1; $i -lt $list.Count; $i++) {
+        $span = ($list[$i].At - $list[$i - 1].At).TotalSeconds
+        if ($span -gt 0) { $peak = [math]::Max($peak, ($list[$i].CpuMs - $list[$i - 1].CpuMs) / 10.0 / $span) }
+    }
     $mb = 1MB
     [pscustomobject]@{
         Seconds = [math]::Round($seconds, 1)
@@ -219,6 +232,7 @@ function Measure-Samples($Samples) {
         Threads = [math]::Round(($list | Measure-Object Threads -Average).Average)
         Handles = [math]::Round(($list | Measure-Object Handles -Average).Average)
         CpuPercentOfCore = [math]::Round($cpu, 2)
+        CpuPeakPercentOfCore = [math]::Round($peak, 2)
     }
 }
 
@@ -318,7 +332,7 @@ function Measure-Start($Info, [string]$Folder, [string]$Kind, [int]$Seconds) {
         $process = Resolve-App $launcher $clock $WindowTimeoutSeconds
         $window = Wait-Window $process $clock $WindowTimeoutSeconds
         if ($null -eq $window) { throw "No window within $WindowTimeoutSeconds s" }
-        $settled = Wait-Quiet $process.Id $clock -TimeoutSeconds $SettleTimeoutSeconds
+        $settled = Wait-Quiet $process.Id $clock -QuietSeconds $QuietSeconds -TimeoutSeconds $SettleTimeoutSeconds
         $shown = Measure-Idle $process.Id $Seconds
         $process.Refresh()
         [void][OctoMeasure.Win]::ShowWindow($process.MainWindowHandle, 6)
@@ -331,6 +345,7 @@ function Measure-Start($Info, [string]$Folder, [string]$Kind, [int]$Seconds) {
             IdleWorkingSetMB = $shown.WorkingSetMB
             IdlePrivateMB = $shown.PrivateMB
             IdleCpuPctCore = $shown.CpuPercentOfCore
+            IdleCpuPeakPct = $shown.CpuPeakPercentOfCore
             Threads = $shown.Threads
             Handles = $shown.Handles
             MinWorkingSetMB = $minimised.WorkingSetMB
@@ -375,6 +390,7 @@ function Invoke-SelfTest {
     Check "sums: working set most" ($sum.WorkingSetMaxMB -eq 420)
     Check "sums: private mean" ($sum.PrivateMB -eq 710)
     Check "sums: processor, 100 ms in 10 s is 1% of a core" ($sum.CpuPercentOfCore -eq 1)
+    Check "sums: the busiest second, 50 ms in 5 s is 1%" ($sum.CpuPeakPercentOfCore -eq 1)
 
     # Sampling a real process: this one.
     $own = Measure-Idle $PID 2
@@ -464,8 +480,8 @@ for ($run = 0; $run -le $Warm; $run++) {
 
 Write-Host ""
 Write-Host "Octo $($info.Version), idle $IdleSeconds s shown and $IdleSeconds s minimised per start ($(if ($WithLibrary) { 'signed in' } else { 'signed out' }))"
-$results | Format-Table -AutoSize Start, WindowS, SettledS, IdleWorkingSetMB, IdlePrivateMB, IdleCpuPctCore, Threads, Handles, MinWorkingSetMB, MinPrivateMB, MinCpuPctCore | Out-String -Width 200 | Write-Host
-Write-Host "WindowS: seconds to a visible window. SettledS: seconds until the processor stayed under 2% of a core for 3 s."
+$results | Format-Table -AutoSize Start, WindowS, SettledS, IdleWorkingSetMB, IdlePrivateMB, IdleCpuPctCore, IdleCpuPeakPct, Threads, Handles, MinWorkingSetMB, MinPrivateMB, MinCpuPctCore | Out-String -Width 200 | Write-Host
+Write-Host "WindowS: seconds to a visible window. SettledS: seconds until the processor stayed under 2% of a core for $QuietSeconds s. IdleCpuPeakPct: the busiest second while idle."
 Write-Host "WorkingSet: memory in RAM. Private: memory committed to the app (Task Manager's Commit size). CpuPctCore: share of one core."
 if ($Out) {
     $results | Export-Csv -NoTypeInformation -Path $Out

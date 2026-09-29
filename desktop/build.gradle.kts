@@ -133,6 +133,28 @@ val shareAudioEngine = tasks.register<Sync>("shareAudioEngine") {
     into(layout.buildDirectory.dir("generated/audioEngine"))
 }
 
+// On Windows the installed app keeps the engine, the system library and
+// JNA's own library as plain files in its folder (the app resources,
+// $APPDIR/resources), and Main points JNA there. From inside a jar JNA
+// copies each one to a new temporary file at every start, 6.5 MB of it,
+// which the virus scanner then reads again before it may load (about 250
+// ms a start measured, more on a first start). `run` and the tests still
+// find them on the class path.
+val packsNatives = hostName.startsWith("windows")
+val shareAppNatives by tasks.registering(Sync::class) {
+    if (packsNatives) {
+        from(shareAudioEngine) { include("$jnaFolder/*") }
+        from(shareSystemShim) { include("$jnaFolder/*") }
+        from(configurations.runtimeClasspath.map { jars -> jars.filter { it.name.startsWith("jna-") }.map { zipTree(it) } }) { include("com/sun/jna/$jnaFolder/*") }
+        eachFile { path = "common/$name" }
+        includeEmptyDirs = false
+    }
+    into(layout.buildDirectory.dir("generated/appNatives"))
+}
+if (packsNatives) {
+    tasks.jar { exclude("$jnaFolder/**") }
+}
+
 // The phone app's word-by-word lyrics layout, which uses nothing from
 // Android, compiled here from the same file so the two apps lay lyrics out
 // alike. The drawing around it is ported in lyrics/FlowingLyrics.kt.
@@ -274,6 +296,8 @@ compose.desktop {
             // and last: appimagetool Octo.AppDir Octo-1.0.0-x86_64.AppImage
             targetFormats(TargetFormat.Msi, TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "Octo"
+            // Files beside the jars: the native libraries (shareAppNatives).
+            appResourcesRootDir.set(layout.dir(shareAppNatives.map { it.destinationDir }))
             // The installers need a first number above 0 (macOS insists).
             packageVersion = packageNumbers
             description = "A music player for Subsonic, Navidrome and Octo servers"
@@ -347,6 +371,20 @@ compose.desktop {
     }
 }
 
+// The JDK's security providers and the modules they live in; any other
+// name listed (the JDK's own, in java.base) always stays.
+val providerModules = mapOf(
+    "SunEC" to "jdk.crypto.ec",
+    "SunJGSS" to "java.security.jgss",
+    "SunSASL" to "java.security.sasl",
+    "XMLDSig" to "java.xml.crypto",
+    "SunPCSC" to "java.smartcardio",
+    "JdkLDAP" to "java.naming",
+    "JdkSASL" to "jdk.security.jgss",
+    "SunMSCAPI" to "jdk.crypto.mscapi",
+    "SunPKCS11" to "jdk.crypto.cryptoki",
+)
+
 // A class data sharing (CDS) archive in the packaged runtime: the Java
 // classes every start loads, parsed once here into a file the JVM maps at
 // start, as a full JDK ships one (jlink leaves it out of a trimmed runtime).
@@ -357,6 +395,26 @@ compose.desktop {
 tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJLinkTask>().configureEach {
     doLast {
         val runtime = destinationDir.get().asFile
+        // The security providers the runtime lists, cut to those it carries.
+        // Asked for one that is missing, the JVM looks through every
+        // provider on the class path instead, which starts the updater's
+        // crypto library as a provider and checks its signed jar: 350 ms of
+        // every start, on the thread before the window (measured).
+        val release = File(runtime, "release").readText()
+        val modules = Regex("MODULES=\"([^\"]*)\"").find(release)?.groupValues?.get(1)?.split(' ')?.toSet().orEmpty()
+        val security = File(runtime, "conf/security/java.security")
+        if (modules.isNotEmpty() && security.isFile) {
+            val lines = security.readLines()
+            val listed = Regex("""security\.provider\.\d+=(\S+).*""")
+            var number = 0
+            security.writeText(
+                lines.mapNotNull { line ->
+                    val name = listed.matchEntire(line)?.groupValues?.get(1) ?: return@mapNotNull line
+                    val module = providerModules[name]
+                    if (module != null && module !in modules) null else "security.provider.${++number}=${line.substringAfter('=')}"
+                }.joinToString("\n", postfix = "\n"),
+            )
+        }
         val exe = if (hostName.startsWith("windows")) "java.exe" else "java"
         val lent = File(runtime, "bin/$exe")
         File(javaHome.get(), "bin/$exe").copyTo(lent, overwrite = true)
