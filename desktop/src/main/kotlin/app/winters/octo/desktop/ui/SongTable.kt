@@ -46,10 +46,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.awtEventOrNull
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -111,6 +113,7 @@ import app.winters.octo.desktop.library.SongColumn
 import app.winters.octo.desktop.library.TableRow
 import app.winters.octo.desktop.library.TableSelection
 import app.winters.octo.desktop.library.chosenColumns
+import app.winters.octo.desktop.library.columnWidths
 import app.winters.octo.desktop.library.clicking
 import app.winters.octo.desktop.library.fitColumns
 import app.winters.octo.desktop.library.lengthText
@@ -314,10 +317,6 @@ fun SongTable(
             else -> false
         }
     }
-    fun widthOf(column: SongColumn): Dp = dragging[column] ?: widthOf(column, prefs)
-    fun cell(scope: RowScope, column: SongColumn): Modifier =
-        with(scope) { if (column == SongColumn.Title) Modifier.weight(1f) else Modifier.width(widthOf(column)) }
-
     BoxWithConstraints(
         modifier
             .focusRequester(focus)
@@ -333,6 +332,11 @@ fun SongTable(
         val usable = maxWidth - padding.calculateStartPadding(LayoutDirection.Ltr) - padding.calculateEndPadding(LayoutDirection.Ltr) - Space.M * 2 -
             (if (marks) MarkWidth + ColumnGap else Space.None)
         val shown = remember(chosen, usable, prefs) { fitColumns(chosen, usable, prefs) }
+        val widths = remember(shown, usable, prefs) { columnWidths(shown, usable, prefs) }
+        // A column's width now: while its edge is dragged, where the drag has got to.
+        fun widthOf(column: SongColumn): Dp = dragging[column] ?: widths[column] ?: widthOf(column, prefs)
+        fun cell(scope: RowScope, column: SongColumn): Modifier =
+            with(scope) { if (column == SongColumn.Title) Modifier.weight(1f) else Modifier.width(widthOf(column)) }
         val favouriteShown = SongColumn.Favourite in shown
         // The heading sits on a plate only while rows pass under it.
         val stuck by remember {
@@ -350,10 +354,10 @@ fun SongTable(
             }
             stickyHeader(key = HeaderKey) {
                 HeaderRow(
-                    app, id, shown, chosen, columns, order, onSort, stuck, marks,
+                    app, id, shown, chosen, columns, order, onSort, stuck, marks, padding,
                     cell = ::cell,
                     widthNow = ::widthOf,
-                    onDrag = { column, change -> dragging[column] = ((dragging[column] ?: widthOf(column, prefs)) + change).coerceAtLeast(specOf(column).min) },
+                    onDrag = { column, change -> dragging[column] = (widthOf(column) + change).coerceAtLeast(specOf(column).min) },
                     onDragEnd = { column ->
                         dragging[column]?.let { width -> app.updateTable(id) { it.copy(widths = it.widths + (column.name to width.value)) } }
                         dragging.remove(column)
@@ -412,7 +416,8 @@ fun SongTable(
         if (selection.picked.size > 1) {
             PickedBar(
                 app, selection.picked.size, ::picked, { place(selection.of(rows)) }, { selection.clear() },
-                Modifier.align(Alignment.BottomCenter).padding(bottom = Space.Xl),
+                // Just above the floating player, never under it.
+                Modifier.align(Alignment.BottomCenter).padding(bottom = LocalBottomRoom.current + Space.M),
                 outside = { picked -> picked.any { it.id in outside } },
             )
         }
@@ -470,6 +475,9 @@ private fun HeaderRow(
     stuck: Boolean,
     // Whether the rows carry a library mark before their end.
     marks: Boolean,
+    // The list's own margins, which the stuck heading's plate reaches over,
+    // so no row shows above it or beside it while passing under.
+    margins: PaddingValues,
     cell: (RowScope, SongColumn) -> Modifier,
     widthNow: (SongColumn) -> Dp,
     onDrag: (SongColumn, Dp) -> Unit,
@@ -477,7 +485,7 @@ private fun HeaderRow(
 ) {
     var anchor by remember { mutableStateOf(IntRect.Zero) }
     val openColumns = { app.popups.showUnder(anchor, width = ColumnsMenuWidth) { close -> ColumnsMenu(app, id, chosen, defaults, close) } }
-    Column(Modifier.fillMaxWidth().then(if (stuck) Modifier.background(StuckFill) else Modifier)) {
+    Column(Modifier.fillMaxWidth().then(if (stuck) Modifier.stuckPlate(margins) else Modifier)) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -517,7 +525,17 @@ private fun HeaderRow(
     }
 }
 
-private val StuckFill = OctoColors.Background.copy(alpha = 0.92f)
+// Nearly solid, so rows passing under it do not show through as a ghost.
+private val StuckFill = OctoColors.Background.copy(alpha = 0.97f)
+
+// The stuck heading's plate: under the heading, and over the list's top and
+// side margins beside and above it.
+private fun Modifier.stuckPlate(margins: PaddingValues): Modifier = drawBehind {
+    val top = margins.calculateTopPadding().toPx()
+    val start = margins.calculateStartPadding(LayoutDirection.Ltr).toPx()
+    val end = margins.calculateEndPadding(LayoutDirection.Ltr).toPx()
+    drawRect(StuckFill, topLeft = Offset(-start, -top), size = Size(size.width + start + end, size.height + top))
+}
 private val ColumnsMenuWidth = FrameSize.Menu
 
 // The columns to show, each with its place, the row height, and the way
