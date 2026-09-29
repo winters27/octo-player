@@ -3,6 +3,9 @@ package app.winters.octo.desktop.search
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.pages.addServer
+import app.winters.octo.desktop.pages.switchServer
+import app.winters.octo.desktop.settings.name
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.ui.newLiveList
 import app.winters.octo.desktop.ui.newPlaylist
@@ -71,6 +74,13 @@ fun commandsFor(app: AppState): List<Command> = buildList {
     state.outputs.forEach { device ->
         if (device.id != state.output?.id) add(Command("Play on ${device.name}", output, "output device speakers headphones sound") { app.selectOutput(device.id) })
     }
+
+    // Every other kept server, to switch to in one go.
+    val servers = "Servers"
+    app.accounts.servers.filter { it.id != app.connection?.server?.id }.forEach { server ->
+        add(Command("Switch to ${server.name}", servers, "server change account ${server.username}") { switchServer(app, server.id) })
+    }
+    add(Command("Add a server", servers, "new server account connect") { addServer(app) })
 
     val library = "Library"
     add(Command("New playlist", library, "create make") { newPlaylist(app) })

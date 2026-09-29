@@ -21,9 +21,13 @@ import okhttp3.HttpUrl
 // What the sign-in page holds while someone fills it in, as the phone's
 // sign-in keeps it: the address in two parts (the scheme, and the rest as
 // typed), the sign-in, and the advanced settings. It starts from the
-// server signed in to last, if any.
+// server signed in to last, if any. With `keepsSecret` (editing a kept
+// server) the password or key may be left empty to keep the saved one.
 @Stable
-class SignInForm(last: SavedServer? = null) {
+class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
+    // The name the listener gives the server; empty shows its host.
+    var label by mutableStateOf(last?.label.orEmpty())
+
     // The address without its scheme, as it shows in the field.
     var address by mutableStateOf("")
         private set
@@ -115,9 +119,16 @@ class SignInForm(last: SavedServer? = null) {
     // Whether the form has what the chosen way of signing in needs.
     val ready: Boolean
         get() = !busy && url != null && when (mode) {
-            AuthMode.ApiKey -> apiKey.isNotBlank()
-            else -> username.isNotBlank() && password.isNotEmpty()
+            AuthMode.ApiKey -> apiKey.isNotBlank() || keepsSecret
+            else -> username.isNotBlank() && (password.isNotEmpty() || keepsSecret)
         }
+
+    // Whether anything but the name differs from the kept server, so the
+    // details need a sign-in test before they are saved.
+    fun changesConnection(server: SavedServer): Boolean =
+        url?.toString() != server.address || username.trim() != server.username || mode != server.authMode ||
+            home.trim().removeSuffix("/") != server.home?.removeSuffix("/").orEmpty() || password.isNotEmpty() || apiKey.isNotEmpty() ||
+            rememberPassword != server.rememberSignIn || headers.any { !it.saved } || headers.map { it.name } != server.headerNames
 
     fun addHeader() {
         headers.add(HeaderDraft("", ""))

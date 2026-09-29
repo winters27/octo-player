@@ -23,6 +23,7 @@ import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.nav.shortcutList
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.OCTO_LYRICS
+import app.winters.octo.server.serverOffers
 import app.winters.octo.desktop.setAutoplay
 import app.winters.octo.desktop.settings.AmbienceMotion
 import app.winters.octo.covers.PLAYLIST_COVERS_SETTING
@@ -41,7 +42,7 @@ import app.winters.octo.desktop.hotkeys.GlobalShortcutGroup
 import app.winters.octo.desktop.ui.LocalSoftwareDrawing
 import kotlin.math.roundToInt
 
-// Settings: the account, how Octo looks, playback, listening, lyrics, how
+// Settings: the servers, how Octo looks, playback, listening, lyrics, how
 // it fits into the system, and the keyboard shortcuts, each a section in
 // the list beside the page. Every change is saved at once.
 @Composable
@@ -52,7 +53,7 @@ fun SettingsPage(app: AppState, visit: Visit) {
         visit,
         "Settings",
         listOf(
-            PageSection("account", "Account") { AccountRows(app) },
+            PageSection("servers", "Servers") { ServerRows(app) },
             PageSection("look", "Appearance") { AppearanceGroups(app, settings) },
             PageSection("playback", "Playback") { PlaybackRows(app, settings) },
             PageSection("listening", "Listening") { ListeningRows(app, settings) },
@@ -72,38 +73,9 @@ fun SettingsPage(app: AppState, visit: Visit) {
     )
 }
 
-// The server signed in to: where it is and who is signed in, what it
-// offers, and reading its library again.
-@Composable
-private fun AccountRows(app: AppState) {
-    val connection = app.connection
-    Rows {
-        if (connection == null) {
-            SettingRow("Not signed in", null)
-            return@Rows
-        }
-        val server = connection.server
-        val kept = if (app.accounts.remembersSignIn) "Octo keeps you signed in on this computer." else "You'll sign in again the next time Octo opens."
-        SettingRow(server.address.removeSuffix("/"), "Signed in as ${server.username}. $kept") {
-            RowAction("Sign out", app::signOut)
-        }
-        val name = listOfNotNull(server.serverType?.replaceFirstChar { it.uppercase() }, server.serverVersion).joinToString(" ").ifEmpty { "Subsonic server" }
-        SettingRow(name, serverOffers(connection))
-        ActionRow("Read the library again", "When music added to the server hasn't shown up here yet.", "Read again", {
-            app.library?.load()
-            app.refreshPlaylists()
-        })
-    }
-}
-
 // What the server brings beyond the music, in plain words.
 internal fun serverOffers(connection: Connection): String? =
     serverOffers(lyrics = connection.lyricsByIdOn || connection.supports(OCTO_LYRICS), adds = connection.acquires)
-
-internal fun serverOffers(lyrics: Boolean, adds: Boolean): String? {
-    val offers = listOfNotNull(if (lyrics) "synced lyrics" else null, if (adds) "adding songs you find online to your library" else null)
-    return if (offers.isEmpty()) null else "Offers ${offers.joinToString(" and ")}."
-}
 
 // The window's background, then the full player's, then how much moves.
 // Each tuning line shows only while it has something to change.

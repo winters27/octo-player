@@ -3,6 +3,7 @@ package app.winters.octo.desktop
 import app.winters.octo.desktop.livelists.LiveListStore
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.player.SilentPlayer
+import app.winters.octo.desktop.search.commandsFor
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.FakeSecrets
 import app.winters.octo.desktop.server.SignInOutcome
@@ -153,6 +154,18 @@ class ServerSwitchTest {
         app.switchTo(workId, Page.Settings)
         waitFor { app.onWork() }
         assertEquals(Page.Settings, app.navigator.current.page)
+    }
+
+    @Test
+    fun theCommandSearchOffersTheOtherServers() {
+        val app = app()
+        val workName = accounts.find(workId)!!.name
+        val titles = commandsFor(app).map { it.title }
+        assertTrue(titles.contains("Switch to $workName"))
+        assertTrue(titles.contains("Add a server"))
+        assertFalse("not the one in use", titles.any { it == "Switch to ${app.connection!!.server.name}" && workName != app.connection!!.server.name })
+        commandsFor(app).first { it.title == "Switch to $workName" }.run()
+        waitFor { app.onWork() }
     }
 
     @Test
