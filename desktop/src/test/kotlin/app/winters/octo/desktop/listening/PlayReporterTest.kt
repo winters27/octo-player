@@ -129,20 +129,20 @@ class PlayReporterTest {
         assertEquals(1, scrobbles(true).size)
     }
 
-    // A file that cannot be written for longer than the reporter waits: the
-    // sent play stays in it for now, and next time it is taken off without
-    // being sent again.
+    // A waiting file that cannot be saved for longer than the reporter
+    // waits: the sent play stays in it for now, and next time it is taken
+    // off without being sent again.
     @Test
     fun aSentPlayThatCannotBeTakenOffYetIsNotSentAgain() {
         val file = File(folder(), "pending.txt")
         val readers = CopyOnWriteArrayList<Thread>()
         server.answerBy("scrobble") { request ->
             if (request.url.queryParameter("submission") == "true" && readers.isEmpty()) {
-                // Read only: it can be neither replaced, removed nor written.
-                file.setReadOnly()
+                // A folder where the save writes first: nothing can be saved.
+                val blocker = File(folder(), "pending.txt.tmp").apply { mkdirs() }
                 readers += thread {
                     Thread.sleep(3_000)
-                    file.setWritable(true)
+                    blocker.delete()
                 }
             }
             server.ok()
@@ -163,7 +163,7 @@ class PlayReporterTest {
     }
 
     // Something keeping the file open for longer than the wait keeps it from
-    // being moved over; the play is then written into it where it is.
+    // being moved over; the play is kept beside it, and found there.
     @Test
     fun aPlayGoesInWhileSomethingKeepsTheFileOpen() {
         val file = File(temp.root, "pending.txt")
@@ -275,5 +275,33 @@ class PlayReporterTest {
         val read = log.read()
         assertTrue("cut back, but never below the most kept", read.size in 8..10)
         assertEquals("s20", read.first().song.id)
+    }
+
+    // Each time Octo opens, the log starts out long: it is still cut back.
+    @Test
+    fun theLogStaysBoundedAcrossRestarts() {
+        val file = File(temp.root, "plays.jsonl")
+        (1..50).forEach { PlayLog(file, max = 8).add(LoggedPlay(it.toLong(), 1, LoggedSong("s$it", "Song $it"))) }
+        val read = PlayLog(file, max = 8).read()
+        assertTrue("${read.size} plays kept", read.size in 8..10)
+        assertEquals("s50", read.first().song.id)
+    }
+
+    // Plays counted through the reporter keep the log bounded as designed.
+    @Test
+    fun theReportersLogIsCutBack() {
+        server.answer("scrobble")
+        val connection = server.connection()
+        val reporter = PlayReporter(player, settings(), { connection }, temp.root, scope, io = Dispatchers.Unconfined, clock = { now }, wallClock = { 5_000 + now }, logMax = 8)
+        reporter.start()
+        repeat(30) {
+            player.play(songs)
+            now += 60_000
+            player.next()
+        }
+        waitFor { scrobbles(true).size >= 30 }
+        val read = reporter.log()!!.read()
+        assertTrue("${read.size} plays kept", read.size in 8..10)
+        assertEquals(5_000L + 29 * 60_000, read.first().at)
     }
 }

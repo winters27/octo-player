@@ -17,6 +17,9 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.FileInputStream
+import java.io.RandomAccessFile
+import kotlin.concurrent.thread
 
 // An account's live lists kept in its folder: written as they change, read
 // back as they were, one account's never another's.
@@ -60,6 +63,50 @@ class LiveListStoreTest {
         val third = store()
         third.open(file)
         assertEquals(listOf(copy.id, "b"), third.lists.value.map { it.id })
+    }
+
+    // Something else (a virus scanner, a backup) has the file open while a
+    // list is saved: the list is kept all the same, and read back.
+    @Test
+    fun aListSavedWhileTheFileIsHeldOpenIsKept() {
+        val file = File(temp.root, "listening/abc/live-lists.json")
+        val store = store()
+        store.open(file)
+        store.save(LiveList.new("First", favourites, 0, "a"))
+        val open = FileInputStream(file)
+        val closing = thread {
+            Thread.sleep(2_500)
+            open.close()
+        }
+        store.save(LiveList.new("Second", favourites, 0, "b"))
+        val meanwhile = store()
+        meanwhile.open(file)
+        assertEquals(listOf("First", "Second"), meanwhile.lists.value.map { it.name })
+        closing.join()
+        store.rename("b", "Second, renamed")
+        val after = store()
+        after.open(file)
+        assertEquals(listOf("First", "Second, renamed"), after.lists.value.map { it.name })
+        assertTrue(file.readText().contains("Second, renamed"))
+    }
+
+    // Lists that cannot be read at the start are never saved over with none.
+    @Test
+    fun listsThatCannotBeReadAreLeftAlone() {
+        val file = File(temp.root, "listening/abc/live-lists.json")
+        store().apply { open(file) }.save(LiveList.new("Kept", favourites, 0, "a"))
+        RandomAccessFile(file, "rw").use { locked ->
+            locked.channel.lock().use {
+                val store = store()
+                store.open(file)
+                assertEquals(emptyList<LiveList>(), store.lists.value)
+                store.save(LiveList.new("New", favourites, 0, "b"))
+                assertEquals(listOf("New"), store.lists.value.map { it.name })
+            }
+        }
+        val again = store()
+        again.open(file)
+        assertEquals(listOf("Kept"), again.lists.value.map { it.name })
     }
 
     @Test

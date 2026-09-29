@@ -5,6 +5,8 @@ import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.QueueEntry
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.SavedQueue
+import app.winters.octo.desktop.system.readSaved
+import app.winters.octo.desktop.system.saveWhole
 import app.winters.octo.playback.QueueSource
 import app.winters.octo.playback.encoded
 import app.winters.octo.playback.queueSourceOf
@@ -153,26 +155,22 @@ class QueueKeeper(
     private fun writeQueue(state: PlayerState) {
         val file = queueFile ?: return
         val saving = queueFileOf(state)
-        if (saving == null) {
-            file.delete()
-            return
-        }
-        replace(file, json.encodeToString(QueueFile.serializer(), saving))
+        saveWhole(file, saving?.let { json.encodeToString(QueueFile.serializer(), it) })
     }
 
     @Synchronized
     private fun writeSpot(state: PlayerState) {
         val file = spotFile ?: return
         val song = state.current?.song ?: return
-        replace(file, json.encodeToString(QueueSpot.serializer(), QueueSpot(song.id, player.positionMs())))
+        saveWhole(file, json.encodeToString(QueueSpot.serializer(), QueueSpot(song.id, player.positionMs())))
     }
 
     @Synchronized
     private fun read(): SavedQueue? {
-        val file = queueFile?.takeIf(File::exists) ?: return null
-        val queue = runCatching { json.decodeFromString(QueueFile.serializer(), file.readText()) }.getOrNull() ?: return null
+        val text = queueFile?.let(::readSaved) ?: return null
+        val queue = runCatching { json.decodeFromString(QueueFile.serializer(), text) }.getOrNull() ?: return null
         if (queue.songs.isEmpty()) return null
-        val spot = spotFile?.takeIf(File::exists)?.let { runCatching { json.decodeFromString(QueueSpot.serializer(), it.readText()) }.getOrNull() }
+        val spot = spotFile?.let(::readSaved)?.let { runCatching { json.decodeFromString(QueueSpot.serializer(), it) }.getOrNull() }
         return queue.saved(spot)
     }
 
@@ -180,16 +178,4 @@ class QueueKeeper(
     // where each came from) in the order they play, the current one,
     // shuffle and repeat.
     private data class Shape(val playOrder: List<Pair<Long, QueueSource>>, val current: Long?, val shuffle: Boolean, val repeat: RepeatMode)
-}
-
-// Writes a file whole, through a new file moved into place, so a crash
-// part way leaves the old one.
-internal fun replace(file: File, text: String) {
-    file.parentFile?.mkdirs()
-    val next = File(file.parentFile, file.name + ".new")
-    next.writeText(text)
-    if (!next.renameTo(file)) {
-        file.delete()
-        next.renameTo(file)
-    }
 }
