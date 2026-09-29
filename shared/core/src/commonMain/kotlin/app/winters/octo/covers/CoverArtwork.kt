@@ -8,8 +8,8 @@ import kotlin.math.roundToInt
 
 // A list's background from the library: with music, one of the few whose
 // strongest hues and lightness are nearest the music's colour (a few, so
-// lists of one colour do not all look alike); without, any, from a hash of
-// its id. Always the same one for the same list and music.
+// lists of one colour do not all look alike); without, or with music too
+// dull to say much, any, from a hash of its id. Always the same one for the same list and music.
 fun chooseBackground(
     id: String,
     palette: CoverPalette,
@@ -17,8 +17,8 @@ fun chooseBackground(
     rule: BackgroundRule = CoverBook.Default.background,
 ): CoverBackground {
     val all = library.backgrounds
-    val pick = coverHash(id) ushr 7
-    if (!palette.fromMusic) return all[(pick % all.size).toInt()]
+    val pick = coverPick(id) ushr 7
+    if (!palette.fromMusic || palette.chroma < rule.lowChromaAsGrey) return all[(pick % all.size).toInt()]
     val near = all.sortedBy { backgroundDistance(it, palette, rule) }.take(rule.nearest)
     return near[(pick % near.size).toInt()]
 }
@@ -33,6 +33,32 @@ internal fun backgroundDistance(background: CoverBackground, palette: CoverPalet
         hueDistance(h.h, palette.hue.toDouble()) / 180.0 + i * rule.hueStep + grey + abs(h.c - palette.chroma) * rule.chromaWeight
     } ?: 1.0
     return hue + abs(background.meanLightness - palette.lightness) * rule.lightnessWeight
+}
+
+// Which way a list turns its background, 0 to count - 1: v mod 4 quarter
+// turns clockwise, then mirrored left to right from 4 up.
+fun coverOrientation(id: String, rule: BackgroundRule = CoverBook.Default.background): Int =
+    ((coverPick(id) ushr rule.orientation.shift) % rule.orientation.count).toInt()
+
+// ARGB pixels, `side` square, turned (v mod 4) quarter turns clockwise, then
+// mirrored left to right when v >= 4.
+fun orientBackground(pixels: IntArray, side: Int, v: Int): IntArray {
+    val turns = v % 4
+    val mirror = v >= 4
+    if (turns == 0 && !mirror) return pixels
+    return IntArray(side * side) { i ->
+        var x = i % side
+        val y = i / side
+        if (mirror) x = side - 1 - x
+        // Where (x, y) of the turned picture comes from in the original.
+        val (sx, sy) = when (turns) {
+            1 -> y to side - 1 - x
+            2 -> side - 1 - x to side - 1 - y
+            3 -> side - 1 - y to x
+            else -> x to y
+        }
+        pixels[sy * side + sx]
+    }
 }
 
 // A background's pixels (ARGB, `from` square) at `side`: halved, each

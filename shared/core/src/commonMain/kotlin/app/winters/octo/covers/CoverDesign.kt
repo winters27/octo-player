@@ -51,9 +51,9 @@ data class CoverWords(
         }
 }
 
-// A cover ready to paint: its side in pixels, its background, its words,
-// and the veil's regions under them.
-data class CoverPlan(val side: Int, val background: CoverBackground, val words: List<CoverWords>, val veil: List<VeilRegion>)
+// A cover ready to paint: its side in pixels, its background and which way
+// it is turned, its words, and the veil's regions under them.
+data class CoverPlan(val side: Int, val background: CoverBackground, val orientation: Int, val words: List<CoverWords>, val veil: List<VeilRegion>)
 
 private const val White = 0xFFFFFFFF.toInt()
 
@@ -67,7 +67,7 @@ fun planCover(
     library: CoverBackgrounds = CoverBackgrounds.Default,
 ): CoverPlan {
     val words = coverWords(spec, side, setter, book)
-    return CoverPlan(side, chooseBackground(spec.id, spec.palette, library), words, veilRegions(words, side, book))
+    return CoverPlan(side, chooseBackground(spec.id, spec.palette, library, book.background), coverOrientation(spec.id, book.background), words, veilRegions(words, side, book))
 }
 
 // Where the words go.

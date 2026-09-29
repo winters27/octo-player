@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.text.font.createFontFamilyResolver
 import app.winters.octo.covers.CoverBackground
 import app.winters.octo.covers.CoverBackgrounds
+import app.winters.octo.covers.CoverPalette
 import app.winters.octo.covers.CoverSpec
 import app.winters.octo.covers.LIVE_LIST_COVER_LINE
 import app.winters.octo.covers.PLAYLIST_COVER_LINE
@@ -17,6 +18,7 @@ import app.winters.octo.covers.veilRegions
 import app.winters.octo.design.ComposeCoverTypesetter
 import app.winters.octo.design.CoverFontFamily
 import app.winters.octo.design.coverMeasurer
+import app.winters.octo.design.designCover
 import app.winters.octo.design.renderCover
 import app.winters.octo.desktop.library.PlaylistArtStore
 import org.jetbrains.skia.EncodedImageFormat
@@ -65,6 +67,39 @@ class CoverGalleryScreenShotsTest {
 
     private val names = listOf("Late night", "Running", "Sunday morning", "Focus", "Dinner with friends", "Chill", "Road trip", "Heavy rotation",
         "Rainy days", "Gym", "Old favourites", "Discover", "Summer 2026", "Deep work", "Kitchen dancing", "Sleep")
+
+    // The server's sheet of 24 lists, drawn by the app's own painter (the
+    // background chosen and turned, the veil, the words), to check a page
+    // of them has no copies. Written to OCTO_SHEET_OUT when set.
+    @Test
+    fun drawTheVarietySheet() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        // The server's sheet: each list's name and its music's colour as the
+        // server measures it (hue, chroma, lightness; hue -1 for none).
+        val lists = listOf(
+            Triple("Daft Punk Radio", 261, 0.043 to 0.722), Triple("Billie Eilish Radio", 63, 0.061 to 0.575),
+            Triple("Tame Impala Radio", 318, 0.041 to 0.453), Triple("Radiohead Radio", 47, 0.159 to 0.657),
+            Triple("Kendrick Lamar Radio", 4, 0.068 to 0.41), Triple("Your Mix", 241, 0.039 to 0.732),
+            Triple("Discovery Mix", 30, 0.225 to 0.581), Triple("Bad Bunny Radio", 30, 0.225 to 0.581),
+            Triple("Jazz & Blues Mix", 225, 0.14 to 0.62), Triple("Metal Mix", 40, 0.163 to 0.601),
+            Triple("1970s Mix", 75, 0.14 to 0.62), Triple("Rock Mix", 26, 0.14 to 0.62),
+            Triple("Hip-Hop Mix", 61, 0.14 to 0.62), Triple("1990s Mix", 134, 0.14 to 0.62),
+            Triple("2020s Mix", 168, 0.14 to 0.62), Triple("Electronic Radio", 250, 0.14 to 0.62),
+            Triple("Polka Mix", -1, 0.0 to 0.0), Triple("Red Hot Chili Peppers Radio", -1, 0.0 to 0.0),
+            Triple("The Most Unreasonably Long Playlist Name Anyone Ever Typed Into A Music Server Radio", -1, 0.0 to 0.0),
+            Triple("宇多田ヒカル Radio", -1, 0.0 to 0.0), Triple("블랙핑크 BLACKPINK Radio", 5, 0.041 to 0.336),
+            Triple("فيروز Radio", 69, 0.065 to 0.682), Triple("Late Night 🌙 Chill Mix", 206, 0.14 to 0.62),
+            Triple("Ünïcödé Café Mix", -1, 0.0 to 0.0),
+        )
+        val side = 600
+        val tiles = lists.map { (name, hue, colour) ->
+            val palette = if (hue < 0) coverPalette(emptyList(), name) else CoverPalette.of(hue.toDouble(), colour.first, colour.second, fromMusic = true)
+            val spec = CoverSpec(name, name, if (name.endsWith("Radio")) "Radio" else "Mix", "50 songs", palette)
+            Image.makeFromBitmap(designCover(spec, side, measurer, CoverFontFamily, { b -> decoded.getOrPut(b.file) { PlaylistArtStore.decodePixels(CoverBackgrounds.bytes(b.file)) } }, PlaylistArtStore::pictureOf).asSkiaBitmap())
+        }
+        sheet("variety", tiles, side, 6)
+        System.getenv("OCTO_SHEET_OUT")?.let { File("build/shots/covers/variety.png").copyTo(File(it), overwrite = true) }
+    }
 
     @Test
     fun drawTheCovers() {

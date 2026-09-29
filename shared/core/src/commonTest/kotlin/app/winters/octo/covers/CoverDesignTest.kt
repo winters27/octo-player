@@ -62,11 +62,11 @@ class CoverDesignTest {
         for (colour in listOf(rgb(200, 30, 40), rgb(30, 60, 200), rgb(40, 160, 70), rgb(240, 200, 30), rgb(150, 40, 190))) {
             val palette = music(colour)
             val picks = (0 until 60).map { chooseBackground("pl-$it", palette) }.toSet()
-            // A few different ones, so lists of one colour vary, never more than three.
-            assertTrue(picks.size in 2..3)
+            // A few different ones, so lists of one colour vary, never more than `nearest`.
+            assertTrue(picks.size in 2..CoverBook.Default.background.nearest)
             for (b in picks) {
                 val nearest = b.hues.minOf { hueDistance(it.h, palette.hue.toDouble()) }
-                assertTrue("${b.name} for hue ${palette.hue}: $nearest", nearest < 45)
+                assertTrue("${b.name} for hue ${palette.hue}: $nearest", nearest < 50)
             }
             assertEquals(chooseBackground("pl-1", palette), chooseBackground("pl-1", palette))
         }

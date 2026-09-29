@@ -36,7 +36,7 @@ fun playlistCoverFooter(songCount: Int, owner: String?, you: String?): String? =
 }
 
 // Bumped whenever the drawing changes, so covers kept on disk are made again.
-const val COVER_DESIGN_VERSION = 2
+const val COVER_DESIGN_VERSION = 3
 
 // Bumped whenever the colours are picked differently.
 const val COVER_PALETTE_VERSION = 2
@@ -59,7 +59,8 @@ fun coverSide(px: Int): Int {
 // change to any of them is a new picture.
 fun coverArtKey(spec: CoverSpec, side: Int, book: CoverBook = CoverBook.Default, library: CoverBackgrounds = CoverBackgrounds.Default): String {
     val words = coverHash(listOf(spec.name, spec.line.orEmpty(), spec.footer.orEmpty()).joinToString("\n")).toString(36)
-    val look = "${book.version}.${library.version}.${chooseBackground(spec.id, spec.palette, library).file.removeSuffix(".webp")}"
+    val background = chooseBackground(spec.id, spec.palette, library, book.background).file.removeSuffix(".webp")
+    val look = "${book.version}.${library.version}.$background.${coverOrientation(spec.id, book.background)}"
     return "playlist-art:v$COVER_DESIGN_VERSION:$look:${spec.id}:$side:$words"
 }
 

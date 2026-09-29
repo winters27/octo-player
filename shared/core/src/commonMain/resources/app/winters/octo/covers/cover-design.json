@@ -48,13 +48,15 @@
     }
   },
   "background": {
-    "about": "Which painted background (backgrounds/backgrounds.json) a list gets, always the same for the same list and music. With no covers, or only grey ones: backgrounds[(coverHash(id) >>> 7) mod count], coverHash being FNV-1a 64 over the id's UTF-8, then >>> 1. With music: the music's colour is the strongest colour among its first covers' swatches (score sqrt(share / number of covers) x (0.3 + 5 C), counting only C >= 0.035 and 0.15 <= L <= 0.97), rounded (hue to the degree, C and L to 0.001). A background's distance from it is the least, over its hues i (strongest first), of hueDistance / 180 + hueStep x i + (greyPenalty when that hue's C < greyBelow) + chromaWeight x |C - music C|, plus lightnessWeight x |meanLightness - music L|. The nearest few (ties in file order) are the candidates, and the list takes candidates[(coverHash(id) >>> 7) mod nearest]. Sizes other than the file's: halved, each pixel (a + b + c + d + 2) / 4, while that leaves at least the size wanted (so 600 is exactly the reference's), then each output pixel the mean of the area it covers. Below tinyBelowPx the background alone is the cover.",
-    "nearest": 3,
+    "about": "Which painted background (backgrounds/backgrounds.json) a list gets, always the same for the same list and music. With no covers, only grey ones, or music whose colour has chroma below lowChromaAsGrey: backgrounds[(coverPick(id) >>> 7) mod count], coverPick being FNV-1a 64 over the id's UTF-8 (offset 0xcbf29ce484222325, prime 0x100000001b3), then MurmurHash3's fmix64 (k ^= k >>> 33; k *= 0xff51afd7ed558ccd; k ^= k >>> 33; k *= 0xc4ceb9fe1a85ec53; k ^= k >>> 33), then >>> 1. (FNV-1a alone barely moves those bits when ids differ only in their last letter, as numbered ids do.) With music: the music's colour is the strongest colour among its first covers' swatches (score sqrt(share / number of covers) x (0.3 + 5 C), counting only C >= 0.035 and 0.15 <= L <= 0.97), rounded (hue to the degree, C and L to 0.001). A background's distance from it is the least, over its hues i (strongest first), of hueDistance / 180 + hueStep x i + (greyPenalty when that hue's C < greyBelow) + chromaWeight x |C - music C|, plus lightnessWeight x |meanLightness - music L|. The nearest few (ties in file order) are the candidates, and the list takes candidates[(coverPick(id) >>> 7) mod nearest]. Every list then turns its background by orientation: v = (coverPick(id) >>> shift) mod count, the background (at the cover's size) rotated (v mod 4) x 90 degrees clockwise, then mirrored left-right if v >= 4, before the veil (so the veil still guarantees contrast; backgrounds.json's textArea figures describe the file unturned and are only for reporting). Sizes other than the file's: halved, each pixel (a + b + c + d + 2) / 4, while that leaves at least the size wanted (so 600 is exactly the reference's), then each output pixel the mean of the area it covers. Below tinyBelowPx the background alone is the cover.",
+    "nearest": 8,
+    "lowChromaAsGrey": 0.07,
     "hueStep": 0.08,
     "greyBelow": 0.04,
     "greyPenalty": 0.5,
     "chromaWeight": 1.5,
-    "lightnessWeight": 0.8
+    "lightnessWeight": 0.8,
+    "orientation": { "shift": 11, "count": 8, "rule": "rotate (v mod 4) x 90 clockwise, then mirror left-right if v >= 4" }
   },
   "veil": {
     "about": "Under the words the background is darkened only where it is too bright for white words, and only by lightness: hue and chroma stay, so a bright cover deepens instead of greying. tools/cover-art/reference.py is the reference; its golden/ covers are what ports are checked against.",

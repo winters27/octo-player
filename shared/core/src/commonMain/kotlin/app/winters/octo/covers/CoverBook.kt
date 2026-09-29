@@ -85,12 +85,20 @@ data class FooterNumbers(
 @Serializable
 data class BackgroundRule(
     val nearest: Int,
+    // Music duller than this picks like a list with no covers: near-grey
+    // colours all sat nearest the same few backgrounds.
+    val lowChromaAsGrey: Double,
     val hueStep: Double,
     val greyBelow: Double,
     val greyPenalty: Double,
     val chromaWeight: Double,
     val lightnessWeight: Double,
+    val orientation: OrientationRule,
 )
+
+// How a list turns its background, so lists sharing one do not look like copies.
+@Serializable
+data class OrientationRule(val shift: Int, val count: Int)
 
 // The veil's numbers (see "veil" in cover-design.json for what each means).
 @Serializable
