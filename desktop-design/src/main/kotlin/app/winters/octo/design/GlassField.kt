@@ -1,5 +1,9 @@
 package app.winters.octo.design
 
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -80,12 +84,15 @@ fun GlassField(
     DisposableEffect(Unit) { onDispose { if (focused) typing.focused(false) } }
     // While typing, a thin accent ring fades in round the field.
     val ring by animateFloatAsState(if (focused) 1f else 0f, octoTween(motionScale(), OctoDuration.Card), label = "field ring")
+    // The whole field is the target: a click on its edge puts the caret in too.
+    val inner = focusRequester ?: remember { FocusRequester() }
     GlazeInset(
         fill = Color.Black.copy(alpha = 0.30f),
         shape = FieldShape,
         modifier = modifier
             .height(40.dp)
-            .focusRing(FieldShape, { ring }, width = 1.5.dp, color = OctoColors.Accent.copy(alpha = 0.60f)),
+            .focusRing(FieldShape, { ring }, width = 1.5.dp, color = OctoColors.Accent.copy(alpha = 0.60f))
+            .pointerInput(inner) { detectTapGestures { runCatching { inner.requestFocus() } } },
     ) {
         Row(
             // A control inside sits closer to the edge, as far in as it is from the top.
@@ -112,7 +119,9 @@ fun GlassField(
                     keyboardActions = KeyboardActions(onDone = { onSubmit?.invoke() }),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                        // Named by its hint, which a screen reader cannot see.
+                        .then(if (placeholder.isNotBlank()) Modifier.semantics { contentDescription = placeholder } else Modifier)
+                        .focusRequester(inner)
                         .onFocusChanged { state ->
                             if (state.isFocused != focused) {
                                 focused = state.isFocused

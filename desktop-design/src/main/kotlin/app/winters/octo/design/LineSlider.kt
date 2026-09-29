@@ -27,6 +27,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.skiaCanvas
 import androidx.compose.ui.graphics.toArgb
@@ -39,6 +40,8 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.snap
+import kotlin.math.roundToInt
 import org.jetbrains.skia.FilterBlurMode
 import org.jetbrains.skia.MaskFilter
 import org.jetbrains.skia.Paint
@@ -55,7 +58,9 @@ import org.jetbrains.skia.PaintStrokeCap
 // pill above the pointer: the time to seek to, for a song. `look` Jewel
 // draws it as the settings slider instead, filled with `fill`; `steps` snaps
 // it to that many equal steps and marks them, and `valueLabel` puts the
-// value in a bubble above the thumb while dragging.
+// value in a bubble above the thumb while dragging. `label` names it for
+// the keyboard and screen readers, which then move it by `keyStep` with the
+// arrow keys, and `reading` says its value in words.
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun LineSlider(
@@ -73,6 +78,9 @@ fun LineSlider(
     steps: Int = 0,
     valueLabel: ((Float) -> String)? = null,
     interactionSource: MutableInteractionSource? = null,
+    label: String? = null,
+    keyStep: Float = if (steps > 0) 1f / steps else 0.05f,
+    reading: ((Float) -> String)? = null,
 ) {
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
@@ -81,7 +89,7 @@ fun LineSlider(
     val seek by rememberUpdatedState(onSeek)
     val release by rememberUpdatedState(onRelease)
     val current by rememberUpdatedState(fraction)
-    val label by rememberUpdatedState(hoverLabel)
+    val hoverWords by rememberUpdatedState(hoverLabel)
     val interaction = interactionSource ?: remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     // A drag started by someone else on the same interactions (a preview)
@@ -90,9 +98,10 @@ fun LineSlider(
     val held = dragging || draggedElsewhere
     var drag by remember { mutableStateOf<DragInteraction.Start?>(null) }
 
-    val thickness by animateDpAsState(if (held || hovered) 5.dp else 3.dp, spring(0.6f, 300f), label = "track")
+    val still = motionScale().still
+    val thickness by animateDpAsState(if (held || hovered) 5.dp else 3.dp, if (still) snap() else spring(0.6f, 300f), label = "track")
     val thumb = thumbSize(hovered, held)
-    val glowAlpha by animateFloatAsState(if (held) 0.7f else 0.35f, spring(1f, 200f), label = "glow")
+    val glowAlpha by animateFloatAsState(if (held) 0.7f else 0.35f, if (still) snap() else spring(1f, 200f), label = "glow")
     val glowPaint = remember {
         Paint().apply {
             isAntiAlias = true
@@ -107,6 +116,13 @@ fun LineSlider(
     Box(
         modifier
             .height(if (look == SliderLook.Jewel) 22.dp else 24.dp)
+            .then(
+                if (label != null) {
+                    Modifier.adjustable(label, fraction, { seek(snapToSteps(it, steps)) }, keyStep, reading ?: { "${(it * 100).roundToInt()}%" }, onDone = { release() }, shape = CircleShape)
+                } else {
+                    Modifier
+                },
+            )
             .hoverable(interaction)
             .pointerHoverIcon(PointerIcon.Hand)
             .onPointerEvent(PointerEventType.Move) { event ->
@@ -183,7 +199,7 @@ fun LineSlider(
                 if (thumb > 0.dp) drawCircle(color, thumb.toPx(), Offset(end, y))
                 // What a click here would pick, above the pointer.
                 val at = if (dragging) dragFraction else pointerFraction
-                val words = label
+                val words = hoverWords
                 if (words != null && at >= 0f && (hovered || dragging)) {
                     val text = measurer.measure(words(at), OctoType.caption.copy(fontSize = 11.sp, color = Color.White, fontFeatureSettings = "tnum"))
                     val padX = 7.dp.toPx()

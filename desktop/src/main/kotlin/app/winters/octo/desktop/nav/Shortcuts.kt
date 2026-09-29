@@ -38,7 +38,11 @@ data class KeyPress(
 // keys, Home, End and Enter.
 private val ListKeys = setOf(Key.DirectionUp, Key.DirectionDown, Key.PageUp, Key.PageDown, Key.MoveHome, Key.MoveEnd, Key.Enter)
 
-fun shortcutFor(press: KeyPress, mac: Boolean, typing: Boolean, list: Boolean = false): Shortcut? {
+// A focused control that takes the arrow keys itself (a slider, or an
+// open menu, `arrows`) keeps them, and Home, End and the page keys too.
+private val ArrowKeys = setOf(Key.DirectionUp, Key.DirectionDown, Key.DirectionLeft, Key.DirectionRight, Key.PageUp, Key.PageDown, Key.MoveHome, Key.MoveEnd)
+
+fun shortcutFor(press: KeyPress, mac: Boolean, typing: Boolean, list: Boolean = false, arrows: Boolean = false): Shortcut? {
     val command = if (mac) press.meta else press.ctrl
     val plain = !press.ctrl && !press.alt && !press.meta
     return when {
@@ -58,6 +62,7 @@ fun shortcutFor(press: KeyPress, mac: Boolean, typing: Boolean, list: Boolean = 
         press.key == Key.Escape -> Shortcut.CloseLayer
         typing -> null
         list && press.key in ListKeys -> null
+        arrows && press.key in ArrowKeys -> null
         // In a text field Alt (Option on a Mac) with the arrows moves by
         // words, so these only go back and forward outside one.
         press.alt && !press.ctrl && !press.meta && press.key == Key.DirectionLeft -> Shortcut.Back
