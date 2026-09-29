@@ -56,7 +56,7 @@ class PlaylistCoversTest {
     fun theSettingSaysWhenEachIsForAndHasNoDashes() {
         for (style in PlaylistCoverStyle.entries) {
             val words = playlistCoverStyleName(style) + playlistCoverStyleHelp(style)
-            assertTrue(words.none { it == '—' || it == '–' })
+            assertTrue(words.none { it.code == 0x2014 || it.code == 0x2013 })
         }
         assertEquals("Designed", playlistCoverStyleName(PlaylistCoverStyle.Designed))
         assertEquals("Album mosaic", playlistCoverStyleName(PlaylistCoverStyle.Mosaic))
