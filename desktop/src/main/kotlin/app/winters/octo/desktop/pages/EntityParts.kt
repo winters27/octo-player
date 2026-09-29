@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.pages
 
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -145,7 +146,7 @@ fun FactLine(facts: List<Fact>) {
             if (open == null) {
                 Txt(fact.text, DesktopType.meta, OctoColors.TextMuted)
             } else {
-                Txt(fact.text, DesktopType.meta, OctoColors.TextSecondary, Modifier.pointerHoverIcon(PointerIcon.Hand).clickable(onClick = open))
+                Txt(fact.text, DesktopType.meta, OctoColors.TextSecondary, Modifier.pointerHoverIcon(PointerIcon.Hand).clickable(role = Role.Button, onClick = open))
             }
         }
     }
@@ -158,7 +159,7 @@ fun JumpLinks(links: List<Pair<String, () -> Unit>>) {
     Row(Modifier.offset(x = -Space.S).padding(bottom = Space.Xs), verticalAlignment = Alignment.CenterVertically) {
         links.forEachIndexed { index, (label, go) ->
             if (index > 0) Txt("·", DesktopType.meta, OctoColors.TextMuted)
-            Box(Modifier.hoverLift(Corner.RowShape).clickable(onClick = go).padding(horizontal = Space.S, vertical = Space.Xs)) {
+            Box(Modifier.hoverLift(Corner.RowShape).clickable(role = Role.Button, onClick = go).padding(horizontal = Space.S, vertical = Space.Xs)) {
                 Txt(label, DesktopType.meta, OctoColors.TextSecondary)
             }
         }

@@ -186,6 +186,9 @@ data class Appearance(
     val ambience: AmbienceStyle = AmbienceStyle.Glow,
     // How the immersive colours move behind the pages.
     val ambienceMotion: AmbienceMotion = AmbienceMotion.Gentle,
+    // How big the words are, as a percentage, or 0 for the system's own
+    // text size.
+    val textSize: Int = 0,
     // Playlists' pictures: designed for each one, or their album mosaics.
     val playlistCovers: PlaylistCoverStyle = PlaylistCoverStyle.Designed,
 )

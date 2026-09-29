@@ -1,5 +1,10 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.design.motionScale
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.layout.heightIn
+import app.winters.octo.design.Focus
+import app.winters.octo.desktop.nav.SEEK_STEP_MS
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -85,7 +90,7 @@ fun WashInk?.color(): Color = if (this?.dark == true) DarkInk else Color.White
 @Composable
 internal fun PlayerBackdrop(cover: WashCover?, bpm: Float, fps: Int, speed: Float, moving: Boolean, dolly: () -> Float) {
     val ink = remember(cover) { cover?.playerInk() }
-    val show by animateFloatAsState(ink?.show ?: 1f, tween(CoverFadeMs.toInt()), label = "player wash")
+    val show by animateFloatAsState(ink?.show ?: 1f, tween(motionScale().ms(CoverFadeMs.toInt())), label = "player wash")
     ImmersiveWash(cover, bpm, fps, speed, moving, dolly = dolly, opacity = { show })
 }
 
@@ -185,12 +190,18 @@ private val ColumnLeast = 340.dp
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Color, side: androidx.compose.ui.unit.Dp) {
-    val muted = ink.copy(alpha = 0.62f)
+    // The quieter words: most of the ink, so they keep 4.5:1 over the wash.
+    val muted = ink.copy(alpha = 0.9f)
     // Never narrower than the transport, however small the cover gets on a short window.
     Column(Modifier.width(maxOf(side, ColumnLeast)), horizontalAlignment = Alignment.CenterHorizontally) {
         // A touch smaller while paused, as on the phone.
         val scale = remember { Animatable(1f) }
-        LaunchedEffect(state.playing) { scale.animateTo(if (state.playing) 1f else 0.94f, tween(420)) }
+        val still = LocalReduceMotion.current
+        // With motion reduced the cover keeps its size.
+        LaunchedEffect(state.playing, still) {
+            val target = if (state.playing || still) 1f else 0.94f
+            if (still) scale.snapTo(target) else scale.animateTo(target, tween(420))
+        }
         Cover(
             song.coverArt,
             Modifier.size(side).graphicsLayer {
@@ -209,7 +220,7 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
                     artist,
                     OctoType.body,
                     muted,
-                    Modifier.clickable(enabled = song.artistId != null) {
+                    Modifier.heightIn(min = Focus.MinTarget).clickable(enabled = song.artistId != null, role = Role.Button) {
                         song.artistId?.let { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }
                         app.fullPlayer = false
                     },
@@ -239,6 +250,9 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
             color = ink,
             trackColor = ink.copy(alpha = 0.22f),
             hoverLabel = { lengthText(((it * duration) / 1000).toInt()).ifEmpty { "0:00" } },
+            label = "Song position",
+            keyStep = if (duration > 0) (SEEK_STEP_MS.toFloat() / duration).coerceAtMost(1f) else 0.05f,
+            reading = { "${lengthText((it * duration / 1000).toInt()).ifEmpty { "0:00" }} of ${lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }}" },
         )
         Row(Modifier.fillMaxWidth()) {
             Txt(lengthText((position / 1000).toInt()).ifEmpty { "0:00" }, OctoType.caption, muted, Modifier.weight(1f))
@@ -246,7 +260,7 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
         }
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = 40.dp, iconSize = 22.dp, active = state.shuffle, tint = ink)
+            IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = 40.dp, iconSize = 22.dp, active = state.shuffle, tint = ink, toggled = state.shuffle)
             IconAction(OctoIcons.Previous, "Previous", app.player::previous, size = 48.dp, iconSize = 30.dp, tint = ink)
             PlayButton(state.playing, enabled = true, size = 68.dp) { app.player.togglePlay() }
             IconAction(OctoIcons.Next, "Next", app.player::next, size = 48.dp, iconSize = 30.dp, tint = ink)
@@ -263,6 +277,7 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
                 iconSize = 22.dp,
                 active = repeat != RepeatMode.Off,
                 tint = ink,
+                toggled = repeat != RepeatMode.Off,
             )
         }
         Spacer(Modifier.height(10.dp))
@@ -277,7 +292,7 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             IconAction(OctoIcons.VolumeDown, "Quieter", { app.setVolume(volume - 0.1f) }, size = 30.dp, iconSize = 18.dp, tint = muted)
-            LineSlider(fraction = { volume }, onSeek = app::setVolume, modifier = Modifier.weight(1f), live = true, color = ink, trackColor = ink.copy(alpha = 0.22f))
+            LineSlider(fraction = { volume }, onSeek = app::setVolume, modifier = Modifier.weight(1f), live = true, color = ink, trackColor = ink.copy(alpha = 0.22f), label = "Volume")
             IconAction(OctoIcons.VolumeUp, "Louder", { app.setVolume(volume + 0.1f) }, size = 30.dp, iconSize = 18.dp, tint = muted)
         }
     }

@@ -111,6 +111,9 @@ class AppState(
     val popups = PopupHost()
     val searchFocus = FocusRequester()
 
+    // Whether the keyboard is in the side panel, where Escape closes it.
+    var panelHasKeyboard by mutableStateOf(false)
+
     // Bumped by the search shortcut, so a Search page already open brings
     // its field back into view.
     var searchAsks by mutableStateOf(0)
@@ -541,6 +544,8 @@ class AppState(
             Shortcut.CloseLayer -> when {
                 popups.open -> popups.close()
                 fullPlayer -> fullPlayer = false
+                // Escape in the side panel closes it.
+                sidePanel != null && panelHasKeyboard -> showSidePanel(null)
                 else -> return false
             }
         }

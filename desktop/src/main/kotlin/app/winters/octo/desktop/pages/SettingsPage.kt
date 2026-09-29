@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.desktop.settings.MaxTextScale
+import app.winters.octo.desktop.settings.DesktopOs
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -157,7 +159,20 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
             appearance { it.copy(calmMotion = on) }
         }
     }
+    Group("Text") {
+        val system = if (app.os == DesktopOs.Windows) "Windows" else "your system"
+        ChoiceRow(
+            "Text size",
+            "Bigger words everywhere in Octo. Like $system follows its own text size setting, up to ${(MaxTextScale * 100).roundToInt()}%.",
+            TextSizes,
+            look.textSize.takeIf { it in TextSizes } ?: 0,
+            { size -> if (size == 0) "Like $system" else "$size%" },
+        ) { size -> appearance { it.copy(textSize = size) } }
+    }
 }
+
+// The text sizes to choose from: the system's, then Octo's own steps.
+private val TextSizes = listOf(0, 100, 115, 130)
 
 // The window's ambience as one choice, null being off.
 internal fun ambienceOf(look: Appearance): AmbienceStyle? = if (look.ambientGlow) look.ambience else null

@@ -1,5 +1,7 @@
 package app.winters.octo.design
 
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.hoverable
@@ -39,7 +41,8 @@ val SeparatorColor = Color.White.copy(alpha = 0.08f)
 val HoverFill = Color.White.copy(alpha = 0.06f)
 
 // Text in the app's type, one line and cut with an ellipsis unless told
-// otherwise.
+// otherwise. A page's title and a section's name are headings, so a screen
+// reader can jump between them.
 @Composable
 fun Txt(
     text: String,
@@ -51,12 +54,16 @@ fun Txt(
 ) {
     BasicText(
         text,
-        modifier = modifier,
+        modifier = if (isHeading(style)) modifier.semantics { heading() } else modifier,
         style = if (align != null) style.copy(color = color, textAlign = align) else style.copy(color = color),
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
     )
 }
+
+// Whether words in this style are a heading: a page's title, a section's name.
+fun isHeading(style: TextStyle): Boolean =
+    style === DesktopType.pageTitle || style === DesktopType.section || style === OctoType.title || style === OctoType.headline || style === OctoType.section
 
 // An icon, white unless tinted.
 @Composable

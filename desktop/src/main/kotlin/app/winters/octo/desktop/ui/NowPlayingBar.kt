@@ -1,5 +1,13 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.foundation.layout.heightIn
+import app.winters.octo.design.Focus
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import app.winters.octo.design.FocusRing
+import app.winters.octo.design.adjustable
+import app.winters.octo.desktop.nav.SEEK_STEP_MS
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -128,7 +136,10 @@ fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier,
         Row(Modifier.fillMaxSize().padding(horizontal = Space.L), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
             Cover(
                 song?.coverArt,
-                Modifier.size(FrameSize.PlayerThumb).clickable(enabled = song != null) { app.fullPlayer = true },
+                Modifier
+                    .size(FrameSize.PlayerThumb)
+                    .clickable(enabled = song != null, role = Role.Button) { app.fullPlayer = true }
+                    .semantics { contentDescription = "Open the player" },
                 shape = Corner.ArtMShape,
                 placeholder = OctoIcons.Songs,
             )
@@ -152,7 +163,8 @@ private const val PlayerDrop = "player"
 @Composable
 private fun SongZone(app: AppState, song: Song?) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
-        Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
+        // Far enough apart that the title and the artist are two targets.
+        Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(Space.Xs)) {
             if (song == null) {
                 Txt("Nothing playing", DesktopType.emphasis, OctoColors.TextMuted)
             } else {
@@ -161,7 +173,14 @@ private fun SongZone(app: AppState, song: Song?) {
                     song.title,
                     DesktopType.emphasis,
                     OctoColors.TextPrimary,
-                    if (album != null) Modifier.pointerHoverIcon(PointerIcon.Hand).clickable { app.navigator.go(Page.Album(album)) } else Modifier,
+                    if (album != null) {
+                        Modifier
+                            .pointerHoverIcon(PointerIcon.Hand)
+                            .clickable(role = Role.Button) { app.navigator.go(Page.Album(album)) }
+                            .semantics { contentDescription = "${song.title}, open its album" }
+                    } else {
+                        Modifier
+                    },
                 )
                 LinkText(song.displayArtist ?: song.artist.orEmpty(), song.artistId) { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }
             }
@@ -182,7 +201,7 @@ private fun SongZone(app: AppState, song: Song?) {
 private fun Transport(app: AppState, state: PlayerState) {
     val song = state.current?.song
     Row(Modifier.padding(horizontal = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
-        IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = state.shuffle)
+        IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = state.shuffle, toggled = state.shuffle)
         IconAction(OctoIcons.Previous, "Previous", app.player::previous, size = ControlHeight.L, iconSize = IconSize.Transport, enabled = song != null)
         PlayButton(state.playing, enabled = song != null, size = FrameSize.PlayButton, waiting = state.buffering) { app.player.togglePlay() }
         IconAction(OctoIcons.Next, "Next", app.player::next, size = ControlHeight.L, iconSize = IconSize.Transport, enabled = song != null)
@@ -198,6 +217,7 @@ private fun Transport(app: AppState, state: PlayerState) {
             size = ControlHeight.M,
             iconSize = IconSize.Toolbar,
             active = repeat != RepeatMode.Off,
+            toggled = repeat != RepeatMode.Off,
         )
     }
 }
@@ -218,17 +238,28 @@ private fun ProgressLine(app: AppState, state: PlayerState) {
         Scrubber(
             fraction = { if (duration > 0) position.toFloat() / duration else 0f },
             onSeek = { app.player.seekTo((it * duration).toLong()) },
-            modifier = Modifier.weight(1f),
+            // The arrow keys move it five seconds; a screen reader hears where it is.
+            modifier = Modifier.weight(1f).adjustable(
+                "Song position",
+                { if (duration > 0) position.toFloat() / duration else 0f },
+                { app.player.seekTo((it * duration).toLong()) },
+                step = if (duration > 0) (SEEK_STEP_MS.toFloat() / duration).coerceAtMost(1f) else 0.05f,
+                reading = { "${lengthText((it * duration / 1000).toInt()).ifEmpty { "0:00" }} of ${lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }}" },
+                shape = CircleShape,
+            ),
             onScrub = { scrubbing = it },
         )
         val end = if (left && duration > 0) "-" + lengthText(((duration - shownMs).coerceAtLeast(0) / 1000).toInt()).ifEmpty { "0:00" } else lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }
-        Txt(
-            end,
-            TimeStyle,
-            OctoColors.TextMuted,
-            Modifier.width(TimeWidth).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { app.updateFrame { it.copy(showTimeLeft = !left) } },
-            align = TextAlign.End,
-        )
+        Box(
+            Modifier
+                .width(TimeWidth)
+                .heightIn(min = Focus.MinTarget)
+                .clickable(role = Role.Button) { app.updateFrame { it.copy(showTimeLeft = !left) } }
+                .semantics { contentDescription = if (left) "Time left, $end. Show the length instead" else "Length, $end. Show the time left instead" },
+            contentAlignment = Alignment.CenterEnd,
+        ) {
+            Txt(end, TimeStyle, OctoColors.TextMuted, align = TextAlign.End)
+        }
     }
 }
 
@@ -241,8 +272,8 @@ private val TimeWidth = Space.Wide + Space.S
 private fun UtilityZone(app: AppState, state: PlayerState, compact: Boolean = false) {
     Row(horizontalArrangement = Arrangement.spacedBy(Space.Xxs), verticalAlignment = Alignment.CenterVertically) {
         if (!compact) {
-            IconAction(OctoIcons.Lyrics, "Lyrics", { app.toggleSidePanel(SidePanel.Lyrics) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Lyrics)
-            IconAction(OctoIcons.Queue, "Queue", { app.toggleSidePanel(SidePanel.Queue) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Queue)
+            IconAction(OctoIcons.Lyrics, "Lyrics", { app.toggleSidePanel(SidePanel.Lyrics) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Lyrics, toggled = app.sidePanel == SidePanel.Lyrics)
+            IconAction(OctoIcons.Queue, "Queue", { app.toggleSidePanel(SidePanel.Queue) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Queue, toggled = app.sidePanel == SidePanel.Queue)
         }
         VolumeButton(app, state.volume)
         MoreButton(app, state, compact)
@@ -325,7 +356,11 @@ private fun ColumnScope.SleepMenu(app: AppState, sleep: SleepState, back: () -> 
 @Composable
 fun PlayButton(playing: Boolean, enabled: Boolean, size: Dp = FrameSize.PlayButtonLarge, waiting: Boolean = false, onClick: () -> Unit) {
     Glaze(
-        Modifier.size(size).hoverLift(CircleShape, clickable = enabled).clickable(enabled = enabled, onClick = onClick),
+        Modifier
+            .size(size)
+            .hoverLift(CircleShape, clickable = enabled)
+            .clickable(enabled = enabled, role = Role.Button, interactionSource = null, indication = FocusRing(CircleShape), onClick = onClick)
+            .semantics { contentDescription = if (playing) "Pause" else "Play" },
         light = GlazeLight.Lifted,
     ) {
         when {
@@ -403,6 +438,7 @@ private fun ColumnScope.VolumeMenu(app: AppState, before: MutableFloatState) {
         onSeek = app::setVolume,
         modifier = Modifier.fillMaxWidth().padding(horizontal = Space.L, vertical = Space.M),
         live = true,
+        label = "Volume",
     )
     MenuRow(
         if (muted) "Unmute" else "Mute",

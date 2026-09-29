@@ -49,6 +49,7 @@ class SettingsStoreTest {
                 wash = WashPrefs(moving = false, speed = 60, useBpm = false, brightnessCap = 35),
                 ambience = AmbienceStyle.Immersive,
                 ambienceMotion = AmbienceMotion.Still,
+                textSize = 115,
                 playlistCovers = PlaylistCoverStyle.Mosaic,
             ),
             playback = PlaybackPrefs(crossfadeSeconds = 4, speed = 0.75f, keepPitch = false, pitchSemitones = 3, autoplay = false),

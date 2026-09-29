@@ -2,6 +2,7 @@ package app.winters.octo.design
 
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
@@ -20,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
@@ -35,12 +37,18 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.awtRole
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
+import javax.accessibility.AccessibleRole
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 // A round icon button with no glass: a white glyph that lifts faintly under
 // the pointer. `active` marks a mode that is on (shuffle, repeat, an open
-// panel) with the accent, never a border.
+// panel) with the accent, never a border. `toggled`, when given, tells a
+// screen reader it is a switch that is on or off.
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun IconAction(
     icon: ImageVector,
@@ -52,22 +60,32 @@ fun IconAction(
     enabled: Boolean = true,
     active: Boolean = false,
     tint: Color = Color.White,
+    toggled: Boolean? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val motion = motionScale()
     val press by animateFloatAsState(if (pressed) motion.scale(0.9f) else 1f, octoTween(motion, OctoDuration.Press), label = "press")
+    // However small the glyph, the button is never less than the least a
+    // pointer should have to hit.
     Box(
         modifier
-            .size(size)
+            .size(size.coerceAtLeast(Focus.MinTarget))
             .graphicsLayer {
                 scaleX = press
                 scaleY = press
             }
             .alpha(if (enabled) 1f else 0.35f)
             .hoverLift(CircleShape, clickable = enabled)
-            .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = description },
+            .tabStop(LocalTabStops.current)
+            .clickable(interactionSource = interaction, indication = FocusRing(CircleShape), enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics {
+                contentDescription = description
+                if (toggled != null) {
+                    toggleableState = ToggleableState(toggled)
+                    awtRole = AccessibleRole.TOGGLE_BUTTON
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
         // An active one (shuffle on, a panel open) glows rather than changing colour.
@@ -97,7 +115,8 @@ fun GlazeCapsule(
             .alpha(if (enabled) 1f else OctoInk.DisabledAlpha)
             .hoverable(interaction)
             .pointerHoverIcon(PointerIcon.Hand)
-            .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+            .tabStop(LocalTabStops.current)
+            .clickable(interactionSource = interaction, indication = FocusRing(CircleShape), enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = text },
         light = if (lit || look.hovered || look.pressed) GlazeLight.Lifted else GlazeLight.Rest,
     ) {
@@ -120,7 +139,8 @@ fun TextAction(text: String, onClick: () -> Unit, modifier: Modifier = Modifier,
         modifier
             .alpha(if (enabled) 1f else 0.5f)
             .hoverLift(CircleShape, clickable = enabled)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .tabStop(LocalTabStops.current)
+            .clickable(interactionSource = null, indication = FocusRing(CircleShape), enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -147,6 +167,7 @@ fun <T> GlazeSegments(
         modifier = modifier.pointerHoverIcon(PointerIcon.Hand),
         height = 36.dp,
         fillWidth = false,
+        indication = FocusRing(CircleShape),
     ) { index, chosen ->
         Txt(label(options[index]), OctoType.label, if (chosen) OctoColors.TextPrimary else OctoColors.TextSecondary)
     }
@@ -198,7 +219,7 @@ internal fun thumbSize(hovered: Boolean, dragging: Boolean): Dp {
         hovered -> ThumbHover
         else -> 0.dp
     }
-    return animateDpAsState(target, spring(0.6f, 400f), label = "thumb").value
+    return animateDpAsState(target, if (motionScale().still) snap() else spring(0.6f, 400f), label = "thumb").value
 }
 
 // Keeps a line of controls apart evenly.

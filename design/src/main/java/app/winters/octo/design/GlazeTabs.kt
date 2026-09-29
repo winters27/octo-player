@@ -1,6 +1,7 @@
 package app.winters.octo.design
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.Indication
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -64,6 +65,8 @@ fun GlazeTabs(
     modifier: Modifier = Modifier,
     height: Dp = 40.dp,
     fillWidth: Boolean = true,
+    // What a tab shows while it has the keyboard; none by default.
+    indication: Indication? = null,
     tab: @Composable (index: Int, chosen: Boolean) -> Unit,
 ) {
     val motion = motionScale()
@@ -72,7 +75,7 @@ fun GlazeTabs(
     var way by remember { mutableFloatStateOf(1f) }
     LaunchedEffect(selected) {
         if (pill.value != selected.toFloat()) way = if (selected > pill.value) 1f else -1f
-        pill.animateTo(selected.toFloat(), octoTween(motion, OctoDuration.Neutral, OctoEasing.Smooth))
+        if (motion.still) pill.snapTo(selected.toFloat()) else pill.animateTo(selected.toFloat(), octoTween(motion, OctoDuration.Neutral, OctoEasing.Smooth))
     }
     var cell by remember { mutableFloatStateOf(0f) }
 
@@ -97,7 +100,7 @@ fun GlazeTabs(
                         Modifier.selectable(
                             selected = chosen,
                             interactionSource = null,
-                            indication = null,
+                            indication = indication,
                             role = Role.Tab,
                         ) { onSelect(index) },
                         contentAlignment = Alignment.Center,

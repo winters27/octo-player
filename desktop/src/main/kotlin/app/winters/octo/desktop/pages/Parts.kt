@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.design.LocalReduceMotion
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -71,11 +73,12 @@ fun <T> Shelf(title: String, items: List<T>, key: (T) -> Any, card: @Composable 
     val state = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val step = with(LocalDensity.current) { (ShelfCardWidth * 3).toPx() }
+    val still = LocalReduceMotion.current
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Txt(title, OctoType.headline, modifier = Modifier.weight(1f))
-            IconAction(OctoIcons.Back, "Scroll back", { scope.launch { state.animateScrollBy(-step) } }, size = 30.dp, iconSize = 18.dp, enabled = state.canScrollBackward)
-            IconAction(OctoIcons.Forward, "Scroll on", { scope.launch { state.animateScrollBy(step) } }, size = 30.dp, iconSize = 18.dp, enabled = state.canScrollForward)
+            IconAction(OctoIcons.Back, "Scroll back", { scope.launch { if (still) state.scrollBy(-step) else state.animateScrollBy(-step) } }, size = 30.dp, iconSize = 18.dp, enabled = state.canScrollBackward)
+            IconAction(OctoIcons.Forward, "Scroll on", { scope.launch { if (still) state.scrollBy(step) else state.animateScrollBy(step) } }, size = 30.dp, iconSize = 18.dp, enabled = state.canScrollForward)
         }
         LazyRow(state = state, contentPadding = PaddingValues(horizontal = 0.dp)) {
             items(items, key = key) { item -> Box(Modifier.width(ShelfCardWidth)) { card(item) } }

@@ -1,5 +1,8 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.design.LocalReduceMotion
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -326,7 +329,7 @@ private fun SchemeToggle(prefix: String, onClick: () -> Unit) {
 
 @Composable
 private fun AdvancedToggle(open: Boolean, onClick: () -> Unit) {
-    val turn by animateFloatAsState(if (open) 90f else 0f, label = "advanced chevron")
+    val turn by animateFloatAsState(if (open) 90f else 0f, if (LocalReduceMotion.current) snap() else spring(), label = "advanced chevron")
     Column(Modifier.padding(top = 4.dp)) {
         Separator()
         Row(

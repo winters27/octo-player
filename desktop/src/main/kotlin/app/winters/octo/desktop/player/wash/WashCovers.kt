@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.player.wash
 
+import app.winters.octo.player.immersive.relativeLuminance
 import app.winters.octo.player.immersive.WashSize
 import app.winters.octo.player.immersive.WashTuning
 import app.winters.octo.player.immersive.applyColorMatrix
@@ -29,13 +30,15 @@ import org.jetbrains.skia.Rect
 // from, the darkest and brightest patches of it (`washRange`), from which
 // the words over it take their colour, its main colour as ARGB, which
 // tints the app's glass while it plays, and the brightest the wash over it
-// gets (`washPeak`), for words on the pages.
+// gets (`washPeak`), for words on the pages, and the brightest of the cover
+// itself (`glowPeak`), for the glow, which draws the cover as it is.
 class WashCover(
     val key: String,
     val square: Image,
     val range: WashRange,
     val main: Int = 0,
     val peak: Int = 0xFF000000.toInt(),
+    val glowPeak: Int = peak,
 )
 
 // The pixels of a 512 square, as ARGB, and back.
@@ -99,6 +102,8 @@ class WashCovers(private val http: OkHttpClient) {
                 }
             }
             val dominant = dominantColour(pixels)
+            // Before the wash's own tuning: the glow shows the cover untouched.
+            val raw = if (source == null) 0xFF000000.toInt() else brightest(pixels)
             val matrix = washColorMatrix(tuning)
             for (i in pixels.indices) pixels[i] = capBrightness(applyColorMatrix(pixels[i], matrix), tuning.brightnessCap)
             for (i in pixels.indices) {
@@ -113,7 +118,14 @@ class WashCovers(private val http: OkHttpClient) {
             out.allocPixels(SquareInfo)
             out.installPixels(SquareInfo, bytes, WashSize * 4)
             out.setImmutable()
-            return WashCover(key, Image.makeFromBitmap(out), washRange(pixels, WashSize), dominant, washPeak(pixels))
+            return WashCover(key, Image.makeFromBitmap(out), washRange(pixels, WashSize), dominant, washPeak(pixels), raw)
+        }
+
+        // The cover's brightest colour, leaving out the brightest fiftieth
+        // (a few specks), as `washPeak` finds the wash's.
+        fun brightest(pixels: IntArray, step: Int = 7): Int {
+            val picked = IntArray((pixels.size + step - 1) / step) { pixels[it * step] }
+            return picked.sortedBy { relativeLuminance(it) }[((picked.size - 1) * 0.98f).toInt()]
         }
 
         // For music without a cover: three quiet colours, blended corner to

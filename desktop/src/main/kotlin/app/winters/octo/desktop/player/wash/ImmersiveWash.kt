@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.player.wash
 
+import app.winters.octo.design.motionScale
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Spacer
@@ -61,6 +62,7 @@ fun ImmersiveWash(
     // One more for every frame drawn; only the drawing reads it.
     val frames = remember { mutableIntStateOf(0) }
     val shown = remember { Animatable(0f) }
+    val fadeIn = motionScale().ms(FadeInMs.toInt())
     var arrivals by remember { mutableIntStateOf(0) }
 
     val focused = LocalWindowInfo.current.isWindowFocused
@@ -81,7 +83,7 @@ fun ImmersiveWash(
         val start = withFrameNanos { it }
         var now = start
         while (!first.drawn && now - start < FirstFrameWaitNanos) now = withFrameNanos { it }
-        shown.animateTo(1f, tween(FadeInMs))
+        shown.animateTo(1f, tween(fadeIn))
     }
 
     // The one clock, while there is something to move: the motion, or a
