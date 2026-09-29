@@ -47,7 +47,7 @@ class CoverDesignTest {
         assertEquals(title.top + title.height, line.top)
         assertEquals("12 songs", footer.text)
         assertEquals(300f - 24f, footer.top + footer.height, 0.5f)
-        assertEquals(400, footer.type.weight)
+        assertEquals(500, footer.type.weight)
     }
 
     @Test
