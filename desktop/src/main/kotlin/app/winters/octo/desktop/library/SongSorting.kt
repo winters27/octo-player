@@ -104,6 +104,8 @@ fun lengthText(seconds: Int): String {
 
 // "2 h 14 min" or "38 min", for a whole album or playlist.
 fun totalLengthText(seconds: Int): String {
+    // Under half a minute, in seconds, rather than "0 min".
+    if (seconds in 1 until 30) return "$seconds s"
     val minutes = (seconds + 30) / 60
     return if (minutes >= 60) "${minutes / 60} h ${minutes % 60} min" else "$minutes min"
 }

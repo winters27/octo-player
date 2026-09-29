@@ -11,6 +11,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -46,10 +47,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.awtEventOrNull
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -79,8 +82,10 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.LayoutDirection
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
+import app.winters.octo.design.CutTxt
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
+import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.GlazeLight
 import app.winters.octo.design.GlazeSelected
@@ -88,8 +93,11 @@ import app.winters.octo.design.Glyph
 import app.winters.octo.design.HoverFill
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
+import app.winters.octo.design.MenuFilm
+import app.winters.octo.design.MenuFrost
 import app.winters.octo.design.MenuRow
 import app.winters.octo.design.MenuSeparator
+import app.winters.octo.design.MenuShape
 import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.NowPlayingBars
 import app.winters.octo.design.OctoColors
@@ -110,6 +118,7 @@ import app.winters.octo.desktop.library.SongColumn
 import app.winters.octo.desktop.library.TableRow
 import app.winters.octo.desktop.library.TableSelection
 import app.winters.octo.desktop.library.chosenColumns
+import app.winters.octo.desktop.library.columnWidths
 import app.winters.octo.desktop.library.clicking
 import app.winters.octo.desktop.library.fitColumns
 import app.winters.octo.desktop.library.lengthText
@@ -313,10 +322,6 @@ fun SongTable(
             else -> false
         }
     }
-    fun widthOf(column: SongColumn): Dp = dragging[column] ?: widthOf(column, prefs)
-    fun cell(scope: RowScope, column: SongColumn): Modifier =
-        with(scope) { if (column == SongColumn.Title) Modifier.weight(1f) else Modifier.width(widthOf(column)) }
-
     BoxWithConstraints(
         modifier
             .focusRequester(focus)
@@ -332,6 +337,11 @@ fun SongTable(
         val usable = maxWidth - padding.calculateStartPadding(LayoutDirection.Ltr) - padding.calculateEndPadding(LayoutDirection.Ltr) - Space.M * 2 -
             (if (marks) MarkWidth + ColumnGap else Space.None)
         val shown = remember(chosen, usable, prefs) { fitColumns(chosen, usable, prefs) }
+        val widths = remember(shown, usable, prefs) { columnWidths(shown, usable, prefs) }
+        // A column's width now: while its edge is dragged, where the drag has got to.
+        fun widthOf(column: SongColumn): Dp = dragging[column] ?: widths[column] ?: widthOf(column, prefs)
+        fun cell(scope: RowScope, column: SongColumn): Modifier =
+            with(scope) { if (column == SongColumn.Title) Modifier.weight(1f) else Modifier.width(widthOf(column)) }
         val favouriteShown = SongColumn.Favourite in shown
         // The heading sits on a plate only while rows pass under it.
         val stuck by remember {
@@ -349,10 +359,10 @@ fun SongTable(
             }
             stickyHeader(key = HeaderKey) {
                 HeaderRow(
-                    app, id, shown, chosen, columns, order, onSort, stuck, marks,
+                    app, id, shown, chosen, columns, order, onSort, stuck, marks, padding,
                     cell = ::cell,
                     widthNow = ::widthOf,
-                    onDrag = { column, change -> dragging[column] = ((dragging[column] ?: widthOf(column, prefs)) + change).coerceAtLeast(specOf(column).min) },
+                    onDrag = { column, change -> dragging[column] = (widthOf(column) + change).coerceAtLeast(specOf(column).min) },
                     onDragEnd = { column ->
                         dragging[column]?.let { width -> app.updateTable(id) { it.copy(widths = it.widths + (column.name to width.value)) } }
                         dragging.remove(column)
@@ -411,7 +421,8 @@ fun SongTable(
         if (selection.picked.size > 1) {
             PickedBar(
                 app, selection.picked.size, ::picked, { place(selection.of(rows)) }, { selection.clear() },
-                Modifier.align(Alignment.BottomCenter).padding(bottom = Space.Xl),
+                // Just above the floating player, never under it.
+                Modifier.align(Alignment.BottomCenter).padding(bottom = LocalBottomRoom.current + Space.M),
                 outside = { picked -> picked.any { it.id in outside } },
             )
         }
@@ -469,6 +480,9 @@ private fun HeaderRow(
     stuck: Boolean,
     // Whether the rows carry a library mark before their end.
     marks: Boolean,
+    // The list's own margins, which the stuck heading's plate reaches over,
+    // so no row shows above it or beside it while passing under.
+    margins: PaddingValues,
     cell: (RowScope, SongColumn) -> Modifier,
     widthNow: (SongColumn) -> Dp,
     onDrag: (SongColumn, Dp) -> Unit,
@@ -476,7 +490,7 @@ private fun HeaderRow(
 ) {
     var anchor by remember { mutableStateOf(IntRect.Zero) }
     val openColumns = { app.popups.showUnder(anchor, width = ColumnsMenuWidth) { close -> ColumnsMenu(app, id, chosen, defaults, close) } }
-    Column(Modifier.fillMaxWidth().then(if (stuck) Modifier.background(StuckFill) else Modifier)) {
+    Column(Modifier.fillMaxWidth().then(if (stuck) Modifier.stuckPlate(margins) else Modifier)) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -516,7 +530,17 @@ private fun HeaderRow(
     }
 }
 
-private val StuckFill = OctoColors.Background.copy(alpha = 0.92f)
+// Nearly solid, so rows passing under it do not show through as a ghost.
+private val StuckFill = OctoColors.Background.copy(alpha = 0.97f)
+
+// The stuck heading's plate: under the heading, and over the list's top and
+// side margins beside and above it.
+private fun Modifier.stuckPlate(margins: PaddingValues): Modifier = drawBehind {
+    val top = margins.calculateTopPadding().toPx()
+    val start = margins.calculateStartPadding(LayoutDirection.Ltr).toPx()
+    val end = margins.calculateEndPadding(LayoutDirection.Ltr).toPx()
+    drawRect(StuckFill, topLeft = Offset(-start, -top), size = Size(size.width + start + end, size.height + top))
+}
 private val ColumnsMenuWidth = FrameSize.Menu
 
 // The columns to show, each with its place, the row height, and the way
@@ -685,7 +709,7 @@ private fun SongCell(
         SongColumn.Title -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs)) {
             if (covers) Cover(song.coverArt, Modifier.size(RowHeight.Roomy - Space.L), shape = Corner.ArtSShape, placeholder = OctoIcons.Songs)
             val failed = app.failedSongs[song.id]
-            Txt(
+            CutTxt(
                 song.title,
                 DesktopType.tableTitle,
                 if (failed != null) muted else OctoColors.TextPrimary,
@@ -701,7 +725,7 @@ private fun SongCell(
             val genre = (song.genres.firstOrNull() ?: song.genre).orEmpty()
             if (genre.isNotBlank()) LinkText(genre, genre) { app.navigator.go(Page.Genre(it)) }
         }
-        SongColumn.Composer -> Txt(song.displayComposer.orEmpty(), DesktopType.table, OctoColors.TextSecondary)
+        SongColumn.Composer -> CutTxt(song.displayComposer.orEmpty(), DesktopType.table, OctoColors.TextSecondary)
         SongColumn.Year -> Txt(song.year?.takeIf { it > 0 }?.toString().orEmpty(), numbers, muted, align = TextAlign.End)
         SongColumn.Added -> Txt(dateText(song.created), numbers, muted)
         SongColumn.Played -> Txt(dateText(song.played), numbers, muted)
@@ -753,7 +777,14 @@ private fun PickedBar(
     outside: (List<Song>) -> Boolean,
 ) {
     var anchor by remember { mutableStateOf(IntRect.Zero) }
-    Glaze(modifier.onGloballyPositioned { anchor = it.windowRect() }, shape = Corner.PanelShape, light = GlazeLight.Lifted) {
+    // The floating player's material, so the rows under it do not show through.
+    val backdrop = LocalFrameBackdrop.current
+    val placed = modifier.onGloballyPositioned { anchor = it.windowRect() }
+    val glass: @Composable (@Composable BoxScope.() -> Unit) -> Unit = { content ->
+        if (backdrop != null) FloatingGlaze(backdrop, placed, shape = MenuShape, film = MenuFilm, frost = MenuFrost, halo = true, content = content)
+        else Glaze(placed, shape = MenuShape, light = GlazeLight.Lifted, film = MenuFilm, content = content)
+    }
+    glass {
         Row(Modifier.padding(horizontal = Space.L, vertical = Space.S), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
             Txt("$count songs picked", DesktopType.emphasis, modifier = Modifier.padding(end = Space.Xs))
             TextAction("Play", { app.play(picked()) })
@@ -768,14 +799,15 @@ private fun PickedBar(
     }
 }
 
-// Words that open a page when clicked: an artist's or album's name.
+// Words that open a page when clicked: an artist's or album's name, shown
+// whole in a tooltip when cut.
 @Composable
 fun LinkText(text: String, id: String?, width: Dp? = null, open: (String) -> Unit) {
     val modifier = if (width != null) Modifier.width(width) else Modifier
     if (id.isNullOrEmpty()) {
-        Txt(text, DesktopType.table, OctoColors.TextSecondary, modifier)
+        CutTxt(text, DesktopType.table, OctoColors.TextSecondary, modifier)
     } else {
-        Txt(
+        CutTxt(
             text,
             DesktopType.table,
             OctoColors.TextSecondary,

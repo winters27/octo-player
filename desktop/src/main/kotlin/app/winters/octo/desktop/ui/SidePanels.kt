@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
+import app.winters.octo.design.CutTxt
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlassField
@@ -490,7 +491,7 @@ private fun QueueRow(
         ) {
             Cover(song.coverArt, Modifier.size(RowHeight.Roomy - Space.L), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs)
             Column(Modifier.weight(1f)) {
-                Txt(
+                CutTxt(
                     song.title,
                     DesktopType.tableTitle,
                     when {
@@ -499,7 +500,7 @@ private fun QueueRow(
                         else -> OctoColors.TextPrimary
                     },
                 )
-                Txt(song.displayArtist ?: song.artist.orEmpty(), DesktopType.meta, OctoColors.TextMuted)
+                CutTxt(song.displayArtist ?: song.artist.orEmpty(), DesktopType.meta, OctoColors.TextMuted)
             }
             if (hovered && !playing) {
                 IconAction(OctoIcons.Close, "Remove from the queue", onRemove, size = ControlHeight.Xs, iconSize = IconSize.Inline, tint = OctoColors.TextSecondary)

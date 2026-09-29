@@ -91,6 +91,9 @@ object FrameSize {
     val PlayerMin = 640.dp
     val PlayerThumb = 56.dp
     val PlayerGap = 16.dp
+    // The narrowest the page may be: a narrow window with the side panel
+    // open folds the sidebar to its rail, then narrows the panel, to keep it.
+    val PageMin = 560.dp
     // A wide card on a page, at most, so its buttons stay near its words.
     val CardMax = 640.dp
     val PlayButton = 36.dp

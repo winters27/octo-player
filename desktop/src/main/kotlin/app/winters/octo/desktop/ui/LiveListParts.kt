@@ -23,6 +23,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import app.winters.octo.design.Corner
+import app.winters.octo.design.CutTxt
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlazeSelected
@@ -87,7 +88,7 @@ fun LiveListRow(app: AppState, list: LiveList, selected: Boolean, rail: Boolean)
             if (selected) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
             Row(Modifier.padding(horizontal = if (rail) Space.None else Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs)) {
                 LiveMark(FrameSize.PlaylistCover)
-                if (!rail) Txt(list.name, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f))
+                if (!rail) CutTxt(list.name, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f))
             }
         }
     }

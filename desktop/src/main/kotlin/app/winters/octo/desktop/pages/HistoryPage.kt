@@ -19,8 +19,8 @@ import app.winters.octo.desktop.library.filteredCount
 import app.winters.octo.desktop.library.rememberFiltered
 import app.winters.octo.desktop.listening.MAX_LOGGED_PLAYS
 import app.winters.octo.desktop.nav.Visit
+import app.winters.octo.desktop.ui.PageLoadingLine
 import app.winters.octo.desktop.ui.FilterBar
-import app.winters.octo.desktop.ui.LoadingLine
 import app.winters.octo.desktop.ui.NoMatches
 import app.winters.octo.desktop.ui.PageTitle
 import app.winters.octo.desktop.ui.SongTable
@@ -52,8 +52,8 @@ fun HistoryPage(app: AppState, visit: Visit) {
                 historyRows(plays, System.currentTimeMillis(), ZoneId.systemDefault())
             }
         }
-        val shown = rows ?: return@WithLibrary LoadingLine()
-        val filtered = rememberFiltered(shown.songs, query, fields) ?: return@WithLibrary LoadingLine()
+        val shown = rows ?: return@WithLibrary PageLoadingLine()
+        val filtered = rememberFiltered(shown.songs, query, fields) ?: return@WithLibrary PageLoadingLine()
         val headings = remember(shown, filtered) { shown.headingsShown(filtered.songs.size, filtered::placeOf) }
         SongTable(
             app,
