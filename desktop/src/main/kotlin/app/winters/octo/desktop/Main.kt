@@ -56,6 +56,7 @@ import app.winters.octo.desktop.system.LocalSystem
 import app.winters.octo.desktop.system.SingleInstance
 import app.winters.octo.desktop.system.SystemIntegration
 import app.winters.octo.desktop.system.letRunningOctoComeForward
+import app.winters.octo.desktop.system.useAppNatives
 import app.winters.octo.desktop.system.startsInTray
 import app.winters.octo.desktop.ui.ListFocus
 import app.winters.octo.desktop.ui.LocalListFocus
@@ -92,6 +93,8 @@ private fun appIcon(): Painter? = runCatching {
 
 @OptIn(FlowPreview::class)
 fun main(args: Array<String>) {
+    // Before anything touches JNA.
+    useAppNatives()
     val places = AppPlaces.forSystem()
     // One Octo at a time: launching it again hands the files and links to
     // the running one, which comes forward, and ends here.
