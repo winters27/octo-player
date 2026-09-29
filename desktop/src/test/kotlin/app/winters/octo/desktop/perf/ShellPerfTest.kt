@@ -13,6 +13,7 @@ import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.library.LibraryState
 import app.winters.octo.desktop.library.coverLoader
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.nav.ScrollSpot
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.desktop.search.SearchFilter
@@ -83,7 +84,7 @@ class ShellPerfTest {
         say("Octo window performance, ${LocalDateTime.now().withNano(0)}")
         say("JVM ${runtime.vmVendor} ${runtime.vmName} ${System.getProperty("java.version")}, ${Runtime.getRuntime().availableProcessors()} cores, max heap ${Runtime.getRuntime().maxMemory() / MB} MB")
         say("JVM options: ${runtime.inputArguments.filter { it.startsWith("-X") }.joinToString(" ")}")
-        say("The whole window at 1440 x 900, drawn with Direct3D off screen and timed until the graphics card finished (on the processor where Direct3D is missing); a frame is offered every 16.7 ms and drawn only when something changed, as the window does.")
+        say("The whole window at $WIDTH x $HEIGHT, drawn with Direct3D off screen and timed until the graphics card finished (on the processor where Direct3D is missing); a frame is offered every 16.7 ms and drawn only when something changed, as the window does.")
         val events = CountingQueue().also { Toolkit.getDefaultToolkit().systemEventQueue.push(it) }
         val sizes = System.getenv("OCTO_PERF_SIZES")?.split(",")?.mapNotNull { it.trim().toIntOrNull() } ?: SIZES
         for (size in sizes) measure(size, events)
@@ -112,11 +113,11 @@ class ShellPerfTest {
             val loader = coverLoader(PlatformContext.INSTANCE, http, File(root, "cache"))
             SingletonImageLoader.setUnsafe(loader)
             var shown by mutableStateOf(true)
-            val scene = ImageComposeScene(1440, 900, Density(1f), coroutineContext = Dispatchers.Main) {
+            val scene = ImageComposeScene(WIDTH, HEIGHT, Density(1f), coroutineContext = Dispatchers.Main) {
                 CompositionLocalProvider(LocalTyping provides TypingState(), LocalWindowShown provides shown) { Shell(app, null) {} }
             }
             val gpu = offscreenGpu()
-            val target = gpu?.let { GpuTarget(it, 1440, 900) }
+            val target = gpu?.let { GpuTarget(it, WIDTH, HEIGHT) }
             target?.let { swapSurface(scene, it.surface) }
             if (target == null) say("(Direct3D off screen is not available: frames drawn on the processor)")
             val frames = Frames(scene, target)
@@ -147,6 +148,30 @@ class ShellPerfTest {
             }
             say("Library read and indexed after signing in: ${ms((System.nanoTime() - start) / 1e6)} ms (${app.library!!.index!!.songs.size} songs)")
             frames.settle()
+            if (ONLY_SCROLL) {
+                // Only the Songs table scrolling under the player island,
+                // with a song in the player so the island is full.
+                SwingUtilities.invokeAndWait {
+                    app.play(app.library!!.index!!.songs.take(20), 0)
+                    app.player.pause()
+                }
+                frames.settle { app.navigator.go(Page.Songs) }
+                repeat(SCROLL_REPEATS) {
+                    // Back to the top: away, the place forgotten, and back.
+                    val visit = app.navigator.current
+                    frames.settle { app.navigator.go(Page.Albums) }
+                    SwingUtilities.invokeAndWait { app.navigator.keepScroll(visit, ScrollSpot(0)) }
+                    frames.settle { app.navigator.back() }
+                    val songs = frames.scroll(SCROLL_FRAMES)
+                    say("Scrolling Songs under the island, ${songs.count} frames, a wheel click every other frame: mean ${ms(songs.mean)} ms, p95 ${ms(songs.p95)} ms, worst ${ms(songs.worst)} ms")
+                }
+                SwingUtilities.invokeAndWait { scene.close() }
+                target?.close()
+                gpu?.close()
+                scope.cancel()
+                SingletonImageLoader.reset()
+                return
+            }
 
             // Going from page to page: how long until the page has drawn
             // everything it will (sorting and filtering run off the window's
@@ -503,5 +528,15 @@ class ShellPerfTest {
         const val IDLE_SECONDS = 10
         val SIZES = listOf(2_500, 20_000)
         val TRACING = System.getenv("OCTO_PERF_TRACE") == "1"
+
+        // OCTO_PERF_PART=scroll measures only scrolling Songs under the
+        // player island, a few times over.
+        val ONLY_SCROLL = System.getenv("OCTO_PERF_PART") == "scroll"
+        val SCROLL_REPEATS = System.getenv("OCTO_PERF_REPEATS")?.toIntOrNull() ?: 4
+
+        // The window's size: OCTO_PERF_WINDOW=2560x1440 for a bigger one.
+        private val WINDOW = System.getenv("OCTO_PERF_WINDOW")?.split("x")?.mapNotNull { it.toIntOrNull() }?.takeIf { it.size == 2 } ?: listOf(1440, 900)
+        val WIDTH = WINDOW[0]
+        val HEIGHT = WINDOW[1]
     }
 }
