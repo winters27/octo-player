@@ -5,6 +5,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.runtime.snapshots.SnapshotApplyResult
 import androidx.compose.ui.focus.FocusRequester
 import app.winters.octo.design.PopupHost
 import app.winters.octo.desktop.audio.SoundTarget
@@ -298,35 +300,75 @@ class AppState(
     }
 
     // Signed in to a server: its library, search, Home, queue and live lists.
-    // `page` is where the window starts over.
+    // `page` is where the window starts over. The new server, its notice and
+    // the fresh start all show at once: nothing (a frame, another thread)
+    // can see the new server without its notice, or the old notice with it.
     fun signedIn(connection: Connection, note: String? = null, page: Page = Page.Home) {
-        useConnection(connection)
-        notice = note
-        noticeDetail = null
-        starOverrides.clear()
-        ratingOverrides.clear()
-        failedSongs.clear()
-        playlistViews.clear()
-        playlistSaves.clear()
-        infoSong = null
+        val views = viewsOf(connection)
+        together {
+            show(connection, views)
+            notice = note
+            noticeDetail = null
+            starOverrides.clear()
+            ratingOverrides.clear()
+            failedSongs.clear()
+            playlistViews.clear()
+            playlistSaves.clear()
+            infoSong = null
+            // Back and forward start afresh for this account.
+            navigator.startOver(page)
+        }
+        startReading(views)
         startListening(connection)
-        // Back and forward start afresh for this account.
-        navigator.startOver(page)
     }
 
-    // The pages' view of the server: its library, finds, search and Home,
-    // read afresh through this connection.
+    // The pages' view of the server, read afresh through this connection.
     private fun useConnection(connection: Connection) {
-        this.connection = connection
+        val views = viewsOf(connection)
+        together { show(connection, views) }
+        startReading(views)
+    }
+
+    // What the pages read a server through: its library, finds, search and
+    // Home. Made before any of it shows, and read only after.
+    private class ServerViews(val library: LibraryStore, val fetches: Fetches?, val search: SearchModel, val home: HomeStore)
+
+    private fun viewsOf(connection: Connection): ServerViews {
         val store = LibraryStore(connection.client, scope)
-        library = store
-        fetches = if (connection.acquires) Fetches(connection.client, scope, onArrived = { store.load() }) else null
-        search = SearchModel(connection, { store.index }, { playlists }, scope)
-        home = HomeStore(connection, scope)
+        return ServerViews(
+            store,
+            if (connection.acquires) Fetches(connection.client, scope, onArrived = { store.load() }) else null,
+            SearchModel(connection, { store.index }, { playlists }, scope),
+            HomeStore(connection, scope),
+        )
+    }
+
+    private fun show(connection: Connection, views: ServerViews) {
+        this.connection = connection
+        library = views.library
+        fetches = views.fetches
+        search = views.search
+        home = views.home
         health.forget()
         serverFacts.forget()
-        store.load()
+    }
+
+    private fun startReading(views: ServerViews) {
+        views.library.load()
         refreshPlaylists()
+    }
+
+    // Makes the changes all show at once. Should another thread have written
+    // one of the same values meanwhile, they are made again directly, so
+    // nothing is lost; each change here can safely run twice.
+    private fun together(change: () -> Unit) {
+        val snapshot = Snapshot.takeMutableSnapshot()
+        try {
+            snapshot.enter(change)
+            if (snapshot.apply() !is SnapshotApplyResult.Success) change()
+        } finally {
+            snapshot.dispose()
+        }
     }
 
     // This account's queue comes back, its waiting plays are sent, and a
@@ -373,17 +415,20 @@ class AppState(
     }
 
     private fun signedOut() {
-        signInForm = SignInForm(accounts.last)
-        connection = null
-        library = null
-        fetches = null
-        search = null
-        home = null
-        health.forget()
-        serverFacts.forget()
-        playlists = emptyList()
-        fullPlayer = false
-        navigator.startOver()
+        val form = SignInForm(accounts.last)
+        together {
+            signInForm = form
+            connection = null
+            library = null
+            fetches = null
+            search = null
+            home = null
+            health.forget()
+            serverFacts.forget()
+            playlists = emptyList()
+            fullPlayer = false
+            navigator.startOver()
+        }
     }
 
     // Fills the sign-in page with a kept server, asking for its password.

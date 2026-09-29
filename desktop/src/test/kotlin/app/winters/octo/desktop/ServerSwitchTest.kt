@@ -33,6 +33,10 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
+import androidx.compose.runtime.snapshots.Snapshot
 
 // Switching servers in the window: the library, queue, live lists and
 // playlists follow the server in use, and what was playing stops plainly.
@@ -117,6 +121,41 @@ class ServerSwitchTest {
         assertFalse(player.state.value.playing)
         assertTrue("nothing was playing on work", app.notice!!.startsWith("Now on"))
         assertFalse(app.notice!!.contains("stopped"))
+    }
+
+    // Another thread (or a frame) looking at the window at any moment of a
+    // switch sees the old server, or the new one with its notice; never the
+    // new one before its notice is there.
+    @Test
+    fun theNewServerNeverShowsWithoutItsNotice() {
+        val app = app()
+        val homeId = accounts.servers.first().id
+        val wrong = CopyOnWriteArrayList<String>()
+        val watching = AtomicBoolean(true)
+        val watcher = thread {
+            var switched = false
+            while (watching.get()) {
+                val snapshot = Snapshot.takeSnapshot()
+                try {
+                    snapshot.enter {
+                        val on = app.connection?.server
+                        val words = app.notice
+                        if (on?.id == workId) switched = true
+                        if (switched && on != null && words?.startsWith("Now on ${on.name}.") != true) wrong += "${on.name}: $words"
+                    }
+                } finally {
+                    snapshot.dispose()
+                }
+            }
+        }
+        repeat(6) { i ->
+            val to = if (i % 2 == 0) workId else homeId
+            app.switchTo(to)
+            waitFor { app.connection?.server?.id == to && app.switching == null }
+        }
+        watching.set(false)
+        watcher.join()
+        assertEquals(emptyList<String>(), wrong.distinct())
     }
 
     @Test
