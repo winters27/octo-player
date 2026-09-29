@@ -1,0 +1,143 @@
+# Publishes a player release on the public Octo repository (winters27/octo),
+# beside the server's releases, from the files a build job uploaded. Called
+# by desktop-installers.yml and android-release.yml on their version tags.
+#
+# The release gets the same tag as here (desktop-v1.2.0, android-v0.3.0).
+# It is never marked Latest, so the server's dated release stays the one
+# GitHub and Docker users see first, and neither tag pattern can start the
+# server's image build (that runs on v* and dated tags only).
+#
+# Every release carries update.json (each file's SHA-256 and size, and the
+# notes) and update.json.sig, an Ed25519 signature over it. The apps install
+# nothing without a signature from a key in trusted-keys.txt, so this checks
+# the signature against that same file before publishing anything.
+#
+# Needs two secrets in this repository (see the Brain runbook
+# Publish_Octo_Players): OCTO_RELEASES_TOKEN, a token that may write
+# releases on winters27/octo, and OCTO_UPDATE_SIGNING_KEY, the signing key.
+name: publish-player-release
+
+on:
+  workflow_call:
+    inputs:
+      app:
+        description: desktop or android
+        required: true
+        type: string
+      tag:
+        description: The version tag, as pushed here
+        required: true
+        type: string
+      artifacts:
+        description: The names of the build's uploaded files, as a pattern
+        required: true
+        type: string
+    secrets:
+      OCTO_RELEASES_TOKEN:
+        required: true
+      OCTO_UPDATE_SIGNING_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: publish-${{ inputs.tag }}
+      cancel-in-progress: false
+    env:
+      APP: ${{ inputs.app }}
+      TAG: ${{ inputs.tag }}
+      REPO: winters27/octo
+      KEYS: shared/core/src/commonMain/resources/app/winters/octo/update/trusted-keys.txt
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The commits since the last release, for the notes.
+          fetch-depth: 0
+
+      - name: The tag with its message
+        # The checkout can leave an annotated tag as a plain one, which
+        # would lose a message written for the notes.
+        run: git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
+
+      - name: Secrets are set
+        env:
+          TOKEN: ${{ secrets.OCTO_RELEASES_TOKEN }}
+          KEY: ${{ secrets.OCTO_UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -z "$TOKEN" ]; then echo "::error::OCTO_RELEASES_TOKEN is not set in this repository's secrets."; exit 1; fi
+          if [ -z "$KEY" ]; then echo "::error::OCTO_UPDATE_SIGNING_KEY is not set in this repository's secrets."; exit 1; fi
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ${{ inputs.artifacts }}
+          path: artifacts
+
+      - name: Name the files
+        run: |
+          version="${TAG#"${APP}-v"}"
+          if [ "$APP" = desktop ]; then
+            python3 scripts/release/release_assets.py stage-desktop --version "$version" --artifacts artifacts --out release
+          else
+            mapfile -t apks < <(find artifacts -name '*.apk')
+            if [ "${#apks[@]}" -ne 1 ]; then echo "::error::Expected one APK, found ${#apks[@]}."; exit 1; fi
+            python3 scripts/release/release_assets.py stage-android --version "$version" --apk "${apks[0]}" --out release
+          fi
+
+      - name: Release notes
+        run: python3 scripts/release/release_assets.py notes --app "$APP" --tag "$TAG" --out notes.md
+
+      - name: Manifest and checksums
+        run: python3 scripts/release/release_assets.py manifest --app "$APP" --tag "$TAG" --notes notes.md --dir release
+
+      - name: Sign the manifest
+        env:
+          KEY: ${{ secrets.OCTO_UPDATE_SIGNING_KEY }}
+        run: |
+          umask 077
+          key="$RUNNER_TEMP/update-key.pem"
+          trap 'rm -f "$key" "$RUNNER_TEMP/update.sig"' EXIT
+          printf '%s\n' "$KEY" > "$key"
+          openssl pkeyutl -sign -inkey "$key" -rawin -in release/update.json -out "$RUNNER_TEMP/update.sig"
+          base64 -w0 "$RUNNER_TEMP/update.sig" > release/update.json.sig
+
+      - name: The apps would accept it
+        run: |
+          python3 scripts/release/release_assets.py public-keys --keys "$KEYS" --out "$RUNNER_TEMP/keys"
+          base64 -d release/update.json.sig > "$RUNNER_TEMP/check.sig"
+          for pem in "$RUNNER_TEMP"/keys/*.pem; do
+            if openssl pkeyutl -verify -pubin -inkey "$pem" -rawin -in release/update.json -sigfile "$RUNNER_TEMP/check.sig" > /dev/null 2>&1; then
+              echo "The signature matches $(basename "$pem") in trusted-keys.txt."
+              exit 0
+            fi
+          done
+          echo "::error::The signing key matches no key in trusted-keys.txt, so the apps would refuse this release."
+          exit 1
+
+      - name: Publish on winters27/octo
+        env:
+          GH_TOKEN: ${{ secrets.OCTO_RELEASES_TOKEN }}
+        run: |
+          version="${TAG#"${APP}-v"}"
+          if [ "$APP" = desktop ]; then title="Octo for Windows, macOS and Linux $version"; else title="Octo for Android $version"; fi
+          if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
+            echo "::error::$TAG is already released on $REPO."
+            exit 1
+          fi
+          early=()
+          case "$version" in *-*) early=(--prerelease) ;; esac
+          # A draft first, so no one sees the release before all its files are there.
+          gh release create "$TAG" release/* --repo "$REPO" --draft --title "$title" --notes-file notes.md --latest=false "${early[@]}"
+          gh release edit "$TAG" --repo "$REPO" --draft=false --latest=false
+          {
+            echo "### $title"
+            echo
+            echo "Published on $REPO as $TAG (not Latest)."
+            echo
+            echo '```'
+            cat release/SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

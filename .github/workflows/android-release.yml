@@ -1,0 +1,112 @@
+# Builds the phone app's release APK, signed with the release key. Run by
+# hand from the Actions tab, the APK is kept as the run's artifact. On an
+# android-v<version> tag (android-v0.3.0, or android-v0.4.0-beta.1 for an
+# early version) it is also published, signed, as a release on the public
+# Octo repository, where the installed app finds it
+# (publish-player-release.yml).
+#
+# The release key comes from four secrets (see the Brain runbook
+# Publish_Octo_Players): OCTO_ANDROID_KEYSTORE_BASE64 (the keystore file,
+# base64), OCTO_ANDROID_KEYSTORE_PASSWORD, OCTO_ANDROID_KEY_ALIAS and
+# OCTO_ANDROID_KEY_PASSWORD. Every release must use the same key, or phones
+# refuse the update.
+name: android-release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["android-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Version from the tag
+        id: tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/android-v* ]]; then
+            version="${GITHUB_REF_NAME#android-v}"
+            if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+              echo "::error::$GITHUB_REF_NAME must look like android-v0.3.0 or android-v0.4.0-beta.1."
+              exit 1
+            fi
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The commit count is the version code, so every build counts up.
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Build number
+        run: echo "OCTO_BUILD=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
+
+      - name: Tests
+        run: ./gradlew :shared:core:allTests :app:testDebugUnitTest --no-daemon
+
+      - name: Release key
+        env:
+          KEYSTORE: ${{ secrets.OCTO_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then echo "::error::OCTO_ANDROID_KEYSTORE_BASE64 is not set in this repository's secrets."; exit 1; fi
+          umask 077
+          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/octo-release.jks"
+          echo "OCTO_ANDROID_KEYSTORE=$RUNNER_TEMP/octo-release.jks" >> "$GITHUB_ENV"
+
+      - name: Signed APK
+        env:
+          OCTO_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.OCTO_ANDROID_KEYSTORE_PASSWORD }}
+          OCTO_ANDROID_KEY_ALIAS: ${{ secrets.OCTO_ANDROID_KEY_ALIAS }}
+          OCTO_ANDROID_KEY_PASSWORD: ${{ secrets.OCTO_ANDROID_KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease -PoctoBuild=${{ env.OCTO_BUILD }} ${{ needs.version.outputs.version && format('-PoctoAndroidVersion={0}', needs.version.outputs.version) || '' }} --no-daemon
+
+      - name: The APK is signed
+        run: |
+          apk=app/build/outputs/apk/release/app-release.apk
+          if [ ! -f "$apk" ]; then echo "::error::No signed APK: the release key did not reach the build."; exit 1; fi
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          "$tools/apksigner" verify --print-certs "$apk" > "$RUNNER_TEMP/certs.txt"
+          grep "certificate SHA-256 digest" "$RUNNER_TEMP/certs.txt"
+          {
+            echo "### Octo for Android"
+            echo
+            echo '```'
+            grep "certificate SHA-256 digest" "$RUNNER_TEMP/certs.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Forget the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/octo-release.jks"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: octo-android
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+  publish:
+    needs: [version, build]
+    if: startsWith(github.ref, 'refs/tags/android-v')
+    uses: ./.github/workflows/publish-player-release.yml
+    with:
+      app: android
+      tag: ${{ github.ref_name }}
+      artifacts: octo-android
+    secrets:
+      OCTO_RELEASES_TOKEN: ${{ secrets.OCTO_RELEASES_TOKEN }}
+      OCTO_UPDATE_SIGNING_KEY: ${{ secrets.OCTO_UPDATE_SIGNING_KEY }}
