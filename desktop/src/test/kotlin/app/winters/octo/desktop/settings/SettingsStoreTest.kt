@@ -127,6 +127,12 @@ class SettingsStoreTest {
         assertEquals(File("/home/b/.cache", "octo"), linux.cache)
         val xdg = AppPlaces.forSystem(DesktopOs.Linux, mapOf("XDG_CONFIG_HOME" to "/x/conf")::get, "/home/b")
         assertEquals(File("/x/conf", "octo"), xdg.config)
+        // OCTO_PROFILE_DIR puts everything in one folder of its own.
+        val separate = AppPlaces.forSystem(DesktopOs.Windows, (env + ("OCTO_PROFILE_DIR" to "D:/octo-test"))::get, "C:/Users/b")
+        assertEquals(File("D:/octo-test", "config"), separate.config)
+        assertEquals(File("D:/octo-test", "cache"), separate.cache)
+        assertTrue(separateProfile(mapOf("OCTO_PROFILE_DIR" to "D:/octo-test")::get))
+        assertFalse(separateProfile(env::get))
     }
 
     @Test
