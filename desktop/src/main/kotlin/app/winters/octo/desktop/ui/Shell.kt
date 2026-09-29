@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.AnimatedVisibility
 import javax.swing.SwingUtilities
 import androidx.compose.animation.core.tween
@@ -485,21 +486,31 @@ private fun BoxScope.AmbientGlow(app: AppState) {
         return
     }
     if (cover == null) {
-        OctoAmbience(app, moving = false, veil = 1f - quietOpacity(look.glowStrength))
+        OctoAmbience(app, moving = false, veil = 1f - quietOpacity(look.glowStrength), readable = true)
         return
     }
-    CoverGlow(look.glowStrength) { blurred -> Cover(cover, blurred, shape = RectangleShape) }
+    // The cover's brightest colour, from the copy the key colour is made
+    // from (kept, so this costs nothing more), to keep the glow readable.
+    val wash = look.wash
+    val tuning = WashTuning(wash.contrast, wash.saturation / 100f, wash.brightnessCap / 100f)
+    val connection = app.connection
+    val peak by produceState<Int?>(null, cover, connection, tuning) {
+        value = connection?.let { app.washCovers.prepare(it.client, cover, tuning).glowPeak }
+    }
+    CoverGlow(look.glowStrength, peak) { blurred -> Cover(cover, blurred, shape = RectangleShape) }
 }
 
 // The glow itself: `picture` draws the cover into the blurred modifier it
 // is given, faint and fading into the page below.
 @Composable
-internal fun CoverGlow(strength: Float, picture: @Composable (Modifier) -> Unit) {
+internal fun CoverGlow(strength: Float, peak: Int? = null, picture: @Composable (Modifier) -> Unit) {
+    // Until the cover's brightest colour is known, as faint as it could be.
+    val opacity by animateFloatAsState(glowOpacity(strength, peak ?: 0xFFFFFFFF.toInt()), tween(motionScale().ms(OctoDuration.Neutral)), label = "glow")
     Box(
         Modifier
             .fillMaxWidth()
             .height(Ambience.Height)
-            .alpha(0.12f + 0.38f * strength.coerceIn(0f, 1f)),
+            .alpha(opacity),
     ) {
         picture(Modifier.fillMaxSize().blur(Ambience.Blur, BlurredEdgeTreatment.Unbounded))
         // Fades into the page below, so there is no edge.

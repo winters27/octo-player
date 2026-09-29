@@ -190,7 +190,8 @@ private val ColumnLeast = 340.dp
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Color, side: androidx.compose.ui.unit.Dp) {
-    val muted = ink.copy(alpha = 0.62f)
+    // The quieter words: most of the ink, so they keep 4.5:1 over the wash.
+    val muted = ink.copy(alpha = 0.9f)
     // Never narrower than the transport, however small the cover gets on a short window.
     Column(Modifier.width(maxOf(side, ColumnLeast)), horizontalAlignment = Alignment.CenterHorizontally) {
         // A touch smaller while paused, as on the phone.

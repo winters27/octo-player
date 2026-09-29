@@ -20,7 +20,10 @@ object OctoColors {
     val AccentHover = Color(0xFFADC4CC)
     val TextPrimary = Color.White
     val TextSecondary = Accent
-    val TextMuted = Accent.copy(alpha = 0.6f)
+    // The quietest words: four fifths of the accent, 5.8:1 on the page and
+    // the glass, so they keep WCAG AA's 4.5:1 with room for the colours
+    // behind the page. At 60% they measured 3.7:1.
+    val TextMuted = Accent.copy(alpha = 0.8f)
     val Error = Color(0xFFEF4444)
 
     // The accent's family, each derived from the accent the same way:

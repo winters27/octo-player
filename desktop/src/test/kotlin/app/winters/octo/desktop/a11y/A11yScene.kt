@@ -22,6 +22,7 @@ import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.server.Accounts
+import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.songJson
@@ -40,7 +41,15 @@ import javax.swing.SwingUtilities
 // the silent player, drawn off screen at one pixel a dp, for reading what a
 // screen reader and the keyboard get.
 @OptIn(ExperimentalComposeUiApi::class, InternalComposeUiApi::class)
-class A11yScene(folder: File, reduceMotion: Boolean = false, val width: Int = 1440, val height: Int = 900) : AutoCloseable {
+class A11yScene(
+    folder: File,
+    reduceMotion: Boolean = false,
+    val width: Int = 1440,
+    val height: Int = 900,
+    // A picture every song shares as its cover, or none.
+    cover: ByteArray? = null,
+    look: (AppSettings) -> AppSettings = { it },
+) : AutoCloseable {
     val server = FakeServer()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     val player = SilentPlayer()
@@ -56,14 +65,15 @@ class A11yScene(folder: File, reduceMotion: Boolean = false, val width: Int = 14
             songJson("s3", "Karma Police", artist = "Radiohead", album = "OK Computer", albumId = "a1", duration = 261),
             songJson("s4", "Roads", artist = "Portishead", album = "Dummy", albumId = "a3", duration = 305),
             songJson("s5", "Teardrop", artist = "Massive Attack", album = "Mezzanine", albumId = "a5", duration = 330),
-        ).joinToString(",")
+        ).map { if (cover != null) it.dropLast(1) + ""","coverArt":"c1"}""" else it }.joinToString(",")
+        if (cover != null) server.file("getCoverArt", cover)
         server.answer("getAlbumList2", """"albumList2":{"album":[{"id":"a1","name":"OK Computer","artist":"Radiohead","year":1997,"songCount":3},{"id":"a3","name":"Dummy","artist":"Portishead","year":1994,"songCount":1}]}""")
         server.answer("getArtists", """"artists":{"index":[{"name":"R","artist":[{"id":"r1","name":"Radiohead","albumCount":1}]}]}""")
         server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"p1","name":"Late night","songCount":2}]}""")
         server.answer("search3", """"searchResult3":{"song":[$songs]}""")
         server.answer("getStarred2", """"starred2":{}""")
         val settings = SettingsStore(File(folder, "settings.json"), 0)
-        settings.update { it.copy(lyrics = it.lyrics.copy(online = false)) }
+        settings.update { look(it.copy(lyrics = it.lyrics.copy(online = false))) }
         val http = OkHttpClient()
         SwingUtilities.invokeAndWait {
             app = AppState(
@@ -102,6 +112,19 @@ class A11yScene(folder: File, reduceMotion: Boolean = false, val width: Int = 14
     }
 
     fun onUi(block: () -> Unit) = SwingUtilities.invokeAndWait(block)
+
+    // Draws for a while in real time, so covers load and fades finish, and
+    // gives the last frame.
+    fun settle(ms: Long = 1_500): org.jetbrains.skia.Image {
+        val begin = System.nanoTime()
+        var image: org.jetbrains.skia.Image? = null
+        while (System.nanoTime() - begin < ms * 1_000_000) {
+            image?.close()
+            image = frameAt(System.nanoTime())
+            Thread.sleep(30)
+        }
+        return image!!
+    }
 
     // One frame drawn at a given moment of the scene's clock.
     fun frameAt(nanos: Long): org.jetbrains.skia.Image {

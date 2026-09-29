@@ -108,7 +108,7 @@ private fun Quiet(text: String, color: Color, onClick: (() -> Unit)? = null) {
         Txt(
             text,
             OctoType.bodySmall,
-            color.copy(alpha = 0.6f),
+            color.copy(alpha = 0.9f),
             if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier,
             align = TextAlign.Center,
             maxLines = 3,
