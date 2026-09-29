@@ -269,6 +269,22 @@ function Start-Octo($Info, [string]$Folder) {
     }
 }
 
+# The process that is the app. The installed Octo.exe is a small launcher
+# that starts the app as a second Octo.exe and waits for it, so the window,
+# memory and processor use to measure are that child's. A build without
+# the launcher is its own app.
+function Resolve-App($Launcher, $Clock, [int]$TimeoutSeconds) {
+    while ($Clock.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+        $child = Get-CimInstance Win32_Process -Filter "ParentProcessId=$($Launcher.Id) AND Name='Octo.exe'" | Select-Object -First 1
+        if ($child) { $app = Get-Process -Id $child.ProcessId -ErrorAction SilentlyContinue; if ($app) { return $app } }
+        $Launcher.Refresh()
+        if ($Launcher.HasExited) { throw "Octo ended before starting (exit $($Launcher.ExitCode))" }
+        if ($Launcher.MainWindowHandle -ne [IntPtr]::Zero) { return $Launcher }
+        Start-Sleep -Milliseconds 50
+    }
+    throw "Octo did not start within $TimeoutSeconds s"
+}
+
 # Seconds until the process shows a window, or null.
 function Wait-Window($Process, $Clock, [int]$TimeoutSeconds) {
     while ($Clock.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
@@ -281,20 +297,25 @@ function Wait-Window($Process, $Clock, [int]$TimeoutSeconds) {
     return $null
 }
 
-function Stop-Octo($Process) {
+function Stop-Octo($Process, $Launcher = $null) {
     $Process.Refresh()
-    if ($Process.HasExited) { return }
-    # The window's close; a test profile never keeps playing in the tray,
-    # but anything left after that is ended.
-    [void]$Process.CloseMainWindow()
-    if (-not $Process.WaitForExit(10000)) { Stop-Process -Id $Process.Id -Force -Confirm:$false }
+    if (-not $Process.HasExited) {
+        # The window's close; a test profile never keeps playing in the tray,
+        # but anything left after that is ended.
+        [void]$Process.CloseMainWindow()
+        if (-not $Process.WaitForExit(10000)) { Stop-Process -Id $Process.Id -Force -Confirm:$false }
+    }
+    # The launcher ends with the app; one still there after that is ended too.
+    if ($Launcher -and $Launcher.Id -ne $Process.Id -and -not $Launcher.WaitForExit(5000)) { Stop-Process -Id $Launcher.Id -Force -Confirm:$false }
 }
 
 # One start: window, settle, idle shown, idle minimised.
 function Measure-Start($Info, [string]$Folder, [string]$Kind, [int]$Seconds) {
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
-    $process = Start-Octo $Info $Folder
+    $launcher = Start-Octo $Info $Folder
+    $process = $launcher
     try {
+        $process = Resolve-App $launcher $clock $WindowTimeoutSeconds
         $window = Wait-Window $process $clock $WindowTimeoutSeconds
         if ($null -eq $window) { throw "No window within $WindowTimeoutSeconds s" }
         $settled = Wait-Quiet $process.Id $clock -TimeoutSeconds $SettleTimeoutSeconds
@@ -317,7 +338,7 @@ function Measure-Start($Info, [string]$Folder, [string]$Kind, [int]$Seconds) {
             MinCpuPctCore = $minimised.CpuPercentOfCore
         }
     } finally {
-        Stop-Octo $process
+        Stop-Octo $process $launcher
     }
 }
 
