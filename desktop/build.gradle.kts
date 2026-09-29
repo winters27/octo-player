@@ -266,7 +266,10 @@ compose.desktop {
             // jdk.security.auth, jdk.unsupported), plus what it cannot see
             // because it is reached by name at run time: elliptic-curve TLS
             // for https servers, name lookups, and XML for D-Bus on Linux.
-            modules("java.instrument", "jdk.security.auth", "jdk.unsupported", "jdk.crypto.ec", "java.naming", "java.xml")
+            // jdk.accessibility carries the Java Access Bridge, the only way
+            // a screen reader on Windows (NVDA, JAWS) can read the app;
+            // without it the installed Octo is a blank window to them.
+            modules("java.instrument", "jdk.security.auth", "jdk.unsupported", "jdk.crypto.ec", "java.naming", "java.xml", "jdk.accessibility")
             windows {
                 iconFile = file("icons/octo.ico")
                 menuGroup = "Octo"
