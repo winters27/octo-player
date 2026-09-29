@@ -25,10 +25,13 @@ fun openPlayer(
     scope: CoroutineScope,
     client: () -> SubsonicClient?,
     headers: () -> Map<String, String> = { emptyMap() },
+    // The engine, opened beforehand off the window's thread (Startup), or
+    // why it would not open.
+    opened: Result<AudioEngine> = runCatching { NativeAudioEngine.open() },
 ): OpenedPlayer {
     val playback = settings.current.playback
     return try {
-        val engine = NativeAudioEngine.open()
+        val engine = opened.getOrThrow()
         keepTrust(engine, settings, scope)
         val device = playback.outputDevice?.takeUnless { it == DEFAULT_OUTPUT }
         OpenedPlayer(EnginePlayer(engine, LocalOrServer(ServerSongs(headers, client)), volume = playback.volume, device = device), null)

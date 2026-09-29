@@ -41,6 +41,7 @@ class SizesTest {
         "ui/FrameFit.kt",
         "ui/PlaylistPictures.kt",
         "pages/ServersSection.kt",
+        "ui/Opening.kt",
     )
 
     private val root = File("src/main/kotlin/app/winters/octo/desktop")

@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.toComposeImageBitmap
@@ -42,9 +43,6 @@ import app.winters.octo.desktop.audio.openPlayer
 import app.winters.octo.desktop.library.coverLoader
 import app.winters.octo.desktop.nav.KeyPress
 import app.winters.octo.desktop.nav.shortcutFor
-import app.winters.octo.desktop.secrets.SecretStore
-import app.winters.octo.desktop.server.Accounts
-import app.winters.octo.desktop.server.ServerSecurity
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
@@ -62,6 +60,7 @@ import app.winters.octo.desktop.ui.ListFocus
 import app.winters.octo.desktop.ui.LocalListFocus
 import app.winters.octo.desktop.ui.LocalSoftwareDrawing
 import app.winters.octo.desktop.ui.LocalWindowShown
+import app.winters.octo.desktop.ui.Opening
 import app.winters.octo.desktop.ui.Shell
 import app.winters.octo.desktop.update.DesktopUpdates
 import app.winters.octo.desktop.window.Frame
@@ -77,19 +76,25 @@ import java.awt.Dimension
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 import java.io.File
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.debounce
-import okhttp3.OkHttpClient
+import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.skiko.GraphicsApi
 
 private fun appIcon(): Painter? = runCatching {
     val bytes = AppState::class.java.getResourceAsStream("/octo-icon.png")!!.use { it.readBytes() }
     BitmapPainter(org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap())
 }.getOrNull()
+
+// What the window runs once the app is made.
+private class Opened(val app: AppState, val system: SystemIntegration, val updates: DesktopUpdates)
+
+// How long the window waits for its first frame before the app is made in
+// any case (a window starting in the tray draws none).
+private const val FIRST_FRAME_WAIT_MS = 500L
 
 @OptIn(FlowPreview::class)
 fun main(args: Array<String>) {
@@ -102,49 +107,23 @@ fun main(args: Array<String>) {
     if (claim is SingleInstance.Claim.HandedOver) return
     val instance = (claim as? SingleInstance.Claim.First)?.instance
     val settings = SettingsStore(File(places.config, SettingsStore.FILE_NAME), SettingsStore.APP_WRITE_DELAY_MS)
-    // One client for everything, set up for the signed-in server's headers
-    // and the certificates the listener trusted.
-    val security = ServerSecurity(settings)
-    val http = security.install(OkHttpClient.Builder())
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()
-    val accounts = Accounts(settings, SecretStore.forSystem(), http, security)
-    // Read here, before the window, since the password store can wait on
-    // the listener (a locked keyring asks to be unlocked).
-    val restored = accounts.restore()
     val os = currentOs()
+    // The slow part (the HTTP client, the password store, the audio engine
+    // and the rest) starts now on threads of its own; the window shows
+    // while it runs, and the app is made once it is in.
+    val startup = Startup(settings, places, os)
     // The system's own "Animation effects" (or Reduce motion), read again
     // whenever the window comes forward, so a change applies without a restart.
-    var systemCalm by mutableStateOf(systemReducesMotion(os))
+    var systemCalm by mutableStateOf(false)
     // The system's text size, read the same way.
-    var systemText by mutableStateOf(systemTextScale(os))
+    var systemText by mutableStateOf(1f)
     val icon = appIcon()
-    // New versions of Octo, for the installed app only.
-    val updates = DesktopUpdates.forThisApp(settings, places.cache, os)
+    val inTray = startsInTray(args.toList())
 
     application {
-        val app = remember {
-            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-            var made: AppState? = null
-            // Server songs are signed with whoever is signed in when they queue.
-            val opened = openPlayer(settings, scope, { made?.connection?.client }) { made?.connection?.headers.orEmpty() }
-            AppState(settings, accounts, http, scope, os, opened.player, restored = restored, listeningRoot = places.config, updates = updates).also {
-                made = it
-                opened.problem?.let { problem -> it.notice = problem }
-            }
-        }
-        val system = remember { SystemIntegration(app, places, os, instance, startsInTray(args.toList())).also { app.toggleMiniPlayer = it::toggleMiniPlayer } }
-        System.getProperty(CHECK_PLAY)?.let { path -> LaunchedEffect(Unit) {
-                checkSound(app, File(path)) {
-                    system.close()
-                    app.player.close()
-                    exitApplication()
-                }
-            }
-        }
-        setSingletonImageLoaderFactory { context -> coverLoader(context, http, places.cache) }
-        remember { app.playlistArt.folder = File(places.cache, "playlist-art") }
+        // The app, once made; until then the window shows its first frame.
+        var opened by remember { mutableStateOf<Opened?>(null) }
+        val ready = opened
         val spot = remember { placeWindow(settings.current.window, screenAreas()) }
         // Windows and Linux get the app's own glass frame unless the
         // listener asked for the system's; macOS keeps its own lights.
@@ -167,35 +146,72 @@ fun main(args: Array<String>) {
         fun keepPlace() = settings.update { it.copy(window = floating.copy(maximized = maximizedNow())) }
         fun close() {
             keepPlace()
-            app.beforeQuit()
+            val made = opened
+            made?.app?.beforeQuit()
             settings.flush()
-            // A ready update goes in now when the listener chose that.
-            updates.onQuit()
-            system.close()
-            app.player.close()
+            if (made != null) {
+                // A ready update goes in now when the listener chose that.
+                made.updates.onQuit()
+                made.system.close()
+                made.app.player.close()
+            }
             exitApplication()
         }
         // Closing the window quits, or with the setting on, leaves Octo
         // playing in the tray.
         fun closeWindow() {
-            if (!system.closesToTray) return close()
+            val system = opened?.system
+            if (system == null || !system.closesToTray) return close()
             keepPlace()
             system.hideWindow()
         }
-        LaunchedEffect(Unit) {
-            system.quit = ::close
-            system.start(args.toList())
-            updates.start(app.scope)
+        // Makes the app from what Startup got ready, on the window's thread.
+        fun open(parts: StartupParts): Opened {
+            systemCalm = parts.systemCalm
+            systemText = parts.systemText
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+            var made: AppState? = null
+            // Server songs are signed with whoever is signed in when they queue.
+            val player = openPlayer(settings, scope, { made?.connection?.client }, { made?.connection?.headers.orEmpty() }, parts.engine)
+            val app = AppState(settings, parts.accounts, parts.http, scope, os, player.player, restored = parts.restored, listeningRoot = places.config, updates = parts.updates).also {
+                made = it
+                player.problem?.let { problem -> it.notice = problem }
+            }
+            app.playlistArt.folder = File(places.cache, "playlist-art")
+            val system = SystemIntegration(app, places, os, instance, inTray).also { app.toggleMiniPlayer = it::toggleMiniPlayer }
+            return Opened(app, system, parts.updates)
         }
+        if (ready != null) {
+            System.getProperty(CHECK_PLAY)?.let { path ->
+                LaunchedEffect(ready) {
+                    checkSound(ready.app, File(path)) {
+                        ready.system.close()
+                        ready.app.player.close()
+                        exitApplication()
+                    }
+                }
+            }
+            LaunchedEffect(ready) {
+                ready.system.quit = ::close
+                ready.system.start(args.toList())
+                ready.updates.start(ready.app.scope)
+            }
+        }
+        // Covers load only once the app is made, so the client is ready.
+        setSingletonImageLoaderFactory { context -> coverLoader(context, startup.now().http, places.cache) }
 
         Window(
             onCloseRequest = ::closeWindow,
             state = windowState,
-            visible = system.windowVisible,
+            // Before the app is made: shown, unless it starts in the tray.
+            visible = ready?.system?.windowVisible ?: !inTray,
             title = "Octo",
             icon = icon,
             undecorated = custom,
             onPreviewKeyEvent = { event ->
+                val made = opened ?: return@Window false
+                val app = made.app
+                val system = made.system
                 if (event.type != KeyEventType.KeyDown) return@Window false
                 // Tab, the Menu key, and the arrows in a list, a menu or a
                 // slider are the keyboard finding its way: rings show.
@@ -218,26 +234,39 @@ fun main(args: Array<String>) {
                 if (os == DesktopOs.Mac) seeThroughMacTitleBar(window)
                 if (own != null && os == DesktopOs.Windows) roundWindowsCorners(window)
                 if (own != null && spot.maximized) own.maximize()
-                system.watch(window)
-                // Coming back to Octo is when a queue from the phone is worth a look.
-                window.addWindowFocusListener(object : WindowAdapter() {
-                    override fun windowGainedFocus(e: WindowEvent?) {
-                        app.queueSync.check()
-                        Thread {
-                            val calm = systemReducesMotion(os)
-                            val text = systemTextScale(os)
-                            SwingUtilities.invokeLater {
-                                systemCalm = calm
-                                systemText = text
-                            }
-                        }.apply { isDaemon = true }.start()
+                // The first frame on screen, then the app: making it and
+                // drawing it keep this thread busy a while.
+                withTimeoutOrNull(FIRST_FRAME_WAIT_MS) {
+                    withFrameNanos { }
+                    withFrameNanos { }
+                }
+                opened = open(startup.parts())
+            }
+            if (ready != null) {
+                LaunchedEffect(ready) {
+                    val app = ready.app
+                    val system = ready.system
+                    system.watch(window)
+                    // Coming back to Octo is when a queue from the phone is worth a look.
+                    window.addWindowFocusListener(object : WindowAdapter() {
+                        override fun windowGainedFocus(e: WindowEvent?) {
+                            app.queueSync.check()
+                            Thread {
+                                val calm = systemReducesMotion(os)
+                                val text = systemTextScale(os)
+                                SwingUtilities.invokeLater {
+                                    systemCalm = calm
+                                    systemText = text
+                                }
+                            }.apply { isDaemon = true }.start()
+                        }
+                    })
+                    system.focusWindow = {
+                        windowState.isMinimized = false
+                        window.isVisible = true
+                        window.toFront()
+                        window.requestFocus()
                     }
-                })
-                system.focusWindow = {
-                    windowState.isMinimized = false
-                    window.isVisible = true
-                    window.toFront()
-                    window.requestFocus()
                 }
             }
             // Remembers the window's own size and place as it changes, and
@@ -262,24 +291,30 @@ fun main(args: Array<String>) {
                 check()
                 window.onRenderApiChanged(::check)
             }
-            val look by app.settings.state.collectAsState()
-            // Every word grows with the text size; nothing else does.
-            val density = LocalDensity.current
-            val words = textScale(look.appearance.textSize, systemText)
-            ProvideWindowLook(reduceMotion = look.appearance.calmMotion || systemCalm, focus = keyboard, arrows = arrows) {
-                CompositionLocalProvider(
-                    LocalDensity provides Density(density.density, density.fontScale * words),
-                    LocalTyping provides typing,
-                    LocalSystem provides system,
-                    LocalListFocus provides lists,
-                    LocalWindowShown provides (system.windowVisible && !windowState.isMinimized),
-                    LocalSoftwareDrawing provides software,
-                ) {
-                    AudioDropZone(system::openFiles) { Shell(app, own, ::closeWindow) }
+            if (ready == null) {
+                Opening(icon)
+            } else {
+                val app = ready.app
+                val system = ready.system
+                val look by app.settings.state.collectAsState()
+                // Every word grows with the text size; nothing else does.
+                val density = LocalDensity.current
+                val words = textScale(look.appearance.textSize, systemText)
+                ProvideWindowLook(reduceMotion = look.appearance.calmMotion || systemCalm, focus = keyboard, arrows = arrows) {
+                    CompositionLocalProvider(
+                        LocalDensity provides Density(density.density, density.fontScale * words),
+                        LocalTyping provides typing,
+                        LocalSystem provides system,
+                        LocalListFocus provides lists,
+                        LocalWindowShown provides (system.windowVisible && !windowState.isMinimized),
+                        LocalSoftwareDrawing provides software,
+                    ) {
+                        AudioDropZone(system::openFiles) { Shell(app, own, ::closeWindow) }
+                    }
                 }
             }
         }
-        with(system) { Surfaces(icon) }
+        if (ready != null) with(ready.system) { Surfaces(icon) }
     }
 }
 
