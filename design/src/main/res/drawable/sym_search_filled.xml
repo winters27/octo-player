@@ -1,0 +1,10 @@
+<!-- Phosphor Icons 2.1.1, magnifying-glass (fill), MIT. Made by tools/icons/make_icons.py. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="256"
+    android:viewportHeight="256">
+  <path
+      android:fillColor="@android:color/white"
+      android:pathData="M168,112A56,56,0,1,1,112,56A56,56,0,0,1,168,112ZM229.66,229.66A8,8,0,0,1,218.34,229.66L168.28,179.59A88,88,0,1,1,179.6,168.28L229.66,218.34A8,8,0,0,1,229.66,229.66ZM112,184A72,72,0,1,0,40,112A72.08,72.08,0,0,0,112,184Z"/>
+</vector>

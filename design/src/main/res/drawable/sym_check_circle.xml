@@ -1,9 +1,10 @@
+<!-- Phosphor Icons 2.1.1, check-circle (regular), MIT. Made by tools/icons/make_icons.py. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="960"
-    android:viewportHeight="960">
+    android:viewportWidth="256"
+    android:viewportHeight="256">
   <path
       android:fillColor="@android:color/white"
-      android:pathData="M424,552L338,466Q327,455 310,455Q293,455 282,466Q271,477 271,494Q271,511 282,522L396,636Q408,648 424,648Q440,648 452,636L678,410Q689,399 689,382Q689,365 678,354Q667,343 650,343Q633,343 622,354L424,552ZM480,880Q397,880 324,848.5Q251,817 197,763Q143,709 111.5,636Q80,563 80,480Q80,397 111.5,324Q143,251 197,197Q251,143 324,111.5Q397,80 480,80Q563,80 636,111.5Q709,143 763,197Q817,251 848.5,324Q880,397 880,480Q880,563 848.5,636Q817,709 763,763Q709,817 636,848.5Q563,880 480,880Z"/>
+      android:pathData="M173.66,98.34A8,8,0,0,1,173.66,109.66L117.66,165.66A8,8,0,0,1,106.34,165.66L82.34,141.66A8,8,0,0,1,93.66,130.34L112,148.69L162.34,98.34A8,8,0,0,1,173.66,98.34ZM232,128A104,104,0,1,1,128,24A104.11,104.11,0,0,1,232,128ZM216,128A88,88,0,1,0,128,216A88.1,88.1,0,0,0,216,128Z"/>
 </vector>

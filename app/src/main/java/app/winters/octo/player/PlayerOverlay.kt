@@ -57,8 +57,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
@@ -996,7 +994,7 @@ private fun CloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
         backdrop = LocalHaze.current,
         film = GlazeClearFilm,
     ) {
-        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = LocalContentColor.current, modifier = Modifier.size(26.dp))
+        Icon(painterResource(OctoIcons.Collapse), contentDescription = null, tint = LocalContentColor.current, modifier = Modifier.size(20.dp))
     }
 }
 

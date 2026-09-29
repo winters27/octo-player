@@ -1,10 +1,10 @@
+<!-- Phosphor Icons 2.1.1, caret-right (regular), MIT. Made by tools/icons/make_icons.py. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="960"
-    android:viewportHeight="960"
-    android:autoMirrored="true">
+    android:viewportWidth="256"
+    android:viewportHeight="256">
   <path
       android:fillColor="@android:color/white"
-      android:pathData="M504,480L348,324Q337,313 337,296Q337,279 348,268Q359,257 376,257Q393,257 404,268L588,452Q594,458 596.5,465Q599,472 599,480Q599,488 596.5,495Q594,502 588,508L404,692Q393,703 376,703Q359,703 348,692Q337,681 337,664Q337,647 348,636L504,480Z"/>
+      android:pathData="M181.66,133.66L101.66,213.66A8,8,0,0,1,90.34,202.34L164.69,128L90.34,53.66A8,8,0,0,1,101.66,42.34L181.66,122.34A8,8,0,0,1,181.66,133.66Z"/>
 </vector>

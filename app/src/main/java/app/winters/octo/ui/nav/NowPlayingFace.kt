@@ -35,7 +35,7 @@ fun NowPlayingFace(now: NowPlaying, progress: () -> Float, size: Dp = BarHeight)
             Box(Modifier.size(size - 12.dp).background(Color.Black.copy(alpha = 0.35f), CircleShape))
         }
         if (now.isPlaying) {
-            PauseGlyph(OctoColors.TextPrimary)
+            PauseGlyph(OctoColors.TextPrimary, size = 22.dp)
         } else {
             Icon(painterResource(OctoIcons.Play), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(22.dp))
         }

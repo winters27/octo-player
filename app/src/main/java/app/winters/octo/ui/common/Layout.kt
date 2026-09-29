@@ -8,15 +8,16 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.GlazedIconButton
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 
 // Content starts below the status bar and ends above the floating bar.
@@ -56,7 +57,7 @@ fun BackButton(onBack: () -> Unit) {
     Box(Modifier.statusBarsPadding().padding(start = 16.dp, top = 8.dp)) {
         GlazedIconButton(
             backdrop = LocalHaze.current,
-            icon = Icons.AutoMirrored.Rounded.ArrowBack,
+            icon = ImageVector.vectorResource(OctoIcons.Back),
             contentDescription = "Back",
             onClick = onBack,
             size = 40.dp,

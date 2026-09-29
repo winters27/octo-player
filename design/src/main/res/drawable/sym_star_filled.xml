@@ -1,9 +1,10 @@
+<!-- Phosphor Icons 2.1.1, star (fill), MIT. Made by tools/icons/make_icons.py. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="960"
-    android:viewportHeight="960">
+    android:viewportWidth="256"
+    android:viewportHeight="256">
   <path
       android:fillColor="@android:color/white"
-      android:pathData="M480,691L314,791Q303,798 291,797Q279,796 270,789Q261,782 256,771.5Q251,761 254,748L298,559L151,432Q141,423 138.5,411.5Q136,400 140,389Q144,378 152,371Q160,364 174,362L368,345L443,167Q448,155 458.5,149Q469,143 480,143Q491,143 501.5,149Q512,155 517,167L592,345L786,362Q800,364 808,371Q816,378 820,389Q824,400 821.5,411.5Q819,423 809,432L662,559L706,748Q709,761 704,771.5Q699,782 690,789Q681,796 669,797Q657,798 646,791L480,691Z"/>
+      android:pathData="M234.29,114.85L189.29,153.68L203,211.75A16.4,16.4,0,0,1,178.5,229.57L128,198.49L77.47,229.57A16.4,16.4,0,0,1,53,211.75L66.76,153.68L21.76,114.85A16.46,16.46,0,0,1,31.08,86L90.08,81.24L112.84,26.16A16.36,16.36,0,0,1,143.11,26.16L165.86,81.24L224.86,86A16.46,16.46,0,0,1,234.23,114.86Z"/>
 </vector>

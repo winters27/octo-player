@@ -24,11 +24,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.List
-import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,7 +41,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -82,20 +76,21 @@ import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
-private class Tab(val icon: ImageVector, @StringRes val label: Int)
+// A tab: its icon, the filled icon it shows while selected, and its name.
+private class Tab(@DrawableRes val icon: Int, @DrawableRes val selectedIcon: Int, @StringRes val label: Int)
 
 private val tabs = listOf(
-    Tab(Icons.Rounded.Home, R.string.tab_home),
-    Tab(Icons.Rounded.Search, R.string.tab_search),
-    Tab(Icons.AutoMirrored.Rounded.List, R.string.tab_library),
-    Tab(Icons.Rounded.Settings, R.string.tab_settings),
+    Tab(OctoIcons.Home, OctoIcons.HomeSelected, R.string.tab_home),
+    Tab(OctoIcons.Search, OctoIcons.SearchSelected, R.string.tab_search),
+    Tab(OctoIcons.Library, OctoIcons.LibrarySelected, R.string.tab_library),
+    Tab(OctoIcons.Settings, OctoIcons.SettingsSelected, R.string.tab_settings),
 )
 
 val BarHeight = 56.dp
 
 // The space between the bar and the bottom of the screen.
 val BarBottomGap = 14.dp
-private val TabIconSize = 25.dp
+private val TabIconSize = 23.dp
 private val Gap = 10.dp
 
 // What the bar's buttons do.
@@ -263,7 +258,7 @@ private fun TabBar(
             }
             if (folded > 0f) {
                 Icon(
-                    tabs[selected].icon,
+                    painterResource(tabs[selected].selectedIcon),
                     contentDescription = "Show tabs",
                     // The selected tab's accent, turning white as it folds into
                     // a plain glaze circle like the round button.
@@ -305,7 +300,7 @@ private fun TabButton(
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            tab.icon,
+            painterResource(if (selected) tab.selectedIcon else tab.icon),
             contentDescription = stringResource(tab.label),
             tint = tint,
             modifier = Modifier.size(TabIconSize).alpha(if (showIcon) 1f else 0f),

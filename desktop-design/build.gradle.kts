@@ -7,8 +7,8 @@
 // and the controls: buttons, chrome buttons and groups, the switch,
 // segmented tabs, sliders, the scrubber, tooltips) are compiled here as
 // they are, from the same source files, so the two apps cannot drift
-// apart. The icons are the same Material Symbols vector files,
-// read into ImageVectors at run time. What only makes sense on a desktop
+// apart. The icons are the same Phosphor vector files, read
+// into ImageVectors at run time. What only makes sense on a desktop
 // (menus at the pointer, hover, the slider, text fields) lives in this
 // module's own sources.
 plugins {
@@ -56,10 +56,15 @@ val shareDesign by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("generated/sharedDesign/kotlin"))
 }
 
-// The phone app's icon vectors, packaged as resources under octo-icons/.
+// The phone app's icon vectors (Phosphor Icons), packaged as resources
+// under octo-icons/ with their licence.
 val shareIcons by tasks.registering(Sync::class) {
     from(rootProject.file("design/src/main/res/drawable")) {
         include("sym_*.xml")
+        into("octo-icons")
+    }
+    from(rootProject.file("design/licenses")) {
+        include("Phosphor-MIT.txt")
         into("octo-icons")
     }
     into(layout.buildDirectory.dir("generated/sharedDesign/resources"))
