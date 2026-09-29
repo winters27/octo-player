@@ -39,8 +39,8 @@ import app.winters.octo.desktop.library.sortSongs
 import app.winters.octo.desktop.library.sortedByName
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
+import app.winters.octo.desktop.ui.PageLoadingLine
 import app.winters.octo.desktop.ui.FilterBar
-import app.winters.octo.desktop.ui.LoadingLine
 import app.winters.octo.desktop.ui.LocalBottomRoom
 import app.winters.octo.desktop.ui.MediaCard
 import app.winters.octo.desktop.ui.NoMatches
@@ -76,7 +76,7 @@ fun SongsPage(app: AppState, visit: Visit) {
     WithLibrary(app) { index ->
         val order = app.songOrder
         val sorted = rememberSorted(index.songs, order)
-        val songs = rememberFiltered(sorted, query, fields)?.songs ?: return@WithLibrary LoadingLine()
+        val songs = rememberFiltered(sorted, query, fields)?.songs ?: return@WithLibrary PageLoadingLine()
         val facts = remember(index) { libraryLine(index) }
         SongTable(
             app,
@@ -195,7 +195,7 @@ fun FavouritesPage(app: AppState, visit: Visit) {
         when (kind) {
             FavouriteKind.Songs -> {
                 val all = starred.song.filter(app::isStarred)
-                val songs = rememberFiltered(all, query, fields)?.songs ?: return@show LoadingLine()
+                val songs = rememberFiltered(all, query, fields)?.songs ?: return@show PageLoadingLine()
                 SongTable(
                     app,
                     songs,

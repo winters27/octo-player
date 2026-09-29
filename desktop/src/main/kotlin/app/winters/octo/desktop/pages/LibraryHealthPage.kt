@@ -38,6 +38,7 @@ import app.winters.octo.desktop.health.RemoveQuestion
 import app.winters.octo.desktop.health.healthColumns
 import app.winters.octo.desktop.health.healthRows
 import app.winters.octo.desktop.nav.Visit
+import app.winters.octo.desktop.ui.PageSide
 import app.winters.octo.desktop.ui.LoadingLine
 import app.winters.octo.desktop.ui.PageTitle
 import app.winters.octo.desktop.ui.SongTable
@@ -68,7 +69,7 @@ fun LibraryHealthPage(app: AppState, visit: Visit) {
     LaunchedEffect(app.connection) { health.askServer() }
     WithLibrary(app) { index ->
         LaunchedEffect(index) { health.check(index.songs) }
-        val report = health.report ?: return@WithLibrary Column {
+        val report = health.report ?: return@WithLibrary Column(Modifier.padding(start = PageSide, end = PageSide, top = Space.Xxl)) {
             PageTitle("Library health")
             LoadingLine("Checking your library")
         }

@@ -37,10 +37,10 @@ import app.winters.octo.desktop.playlists.movedPositions
 import app.winters.octo.desktop.renamePlaylist
 import app.winters.octo.desktop.reorderPlaylist
 import app.winters.octo.desktop.setPlaylistComment
+import app.winters.octo.desktop.ui.PageLoadingLine
 import app.winters.octo.desktop.ui.FilterBar
 import app.winters.octo.desktop.ui.Load
 import app.winters.octo.desktop.ui.Loaded
-import app.winters.octo.desktop.ui.LoadingLine
 import app.winters.octo.desktop.ui.NoMatches
 import app.winters.octo.desktop.ui.PageSide
 import app.winters.octo.desktop.ui.PlaylistMenu
@@ -80,7 +80,7 @@ fun PlaylistPage(app: AppState, visit: Visit, id: String) {
     val fields = rememberShownFields(app)
     Loaded(state) { round++ }.show(Modifier.padding(horizontal = PageSide)) { playlist ->
         val all = playlist.entry
-        val shown = rememberFiltered(all, query, fields) ?: return@show LoadingLine()
+        val shown = rememberFiltered(all, query, fields) ?: return@show PageLoadingLine()
         val songs = shown.songs
         val menuPlaylist = known ?: playlist.asPlaylist()
         val owns = app.canEdit(menuPlaylist)

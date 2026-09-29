@@ -35,6 +35,7 @@ import app.winters.octo.desktop.ui.FailedLine
 import app.winters.octo.desktop.ui.LoadingLine
 import app.winters.octo.desktop.ui.LocalPointer
 import app.winters.octo.desktop.ui.MediaCard
+import app.winters.octo.desktop.ui.PageSide
 import app.winters.octo.desktop.ui.ShelfCardWidth
 import app.winters.octo.design.Corner
 import app.winters.octo.design.CutTxt
@@ -55,8 +56,9 @@ fun WithLibrary(app: AppState, content: @Composable (LibraryIndex) -> Unit) {
     val store = app.library ?: return
     val state by store.state.collectAsState()
     when (val s = state) {
-        LibraryState.Idle, LibraryState.Loading -> LoadingLine("Reading your library")
-        is LibraryState.Failed -> FailedLine(s.message, store::load)
+        // In from the page's side, where the page's own words start.
+        LibraryState.Idle, LibraryState.Loading -> LoadingLine("Reading your library", Modifier.padding(horizontal = PageSide))
+        is LibraryState.Failed -> FailedLine(s.message, store::load, Modifier.padding(horizontal = PageSide))
         is LibraryState.Ready -> content(s.index)
     }
 }

@@ -162,6 +162,10 @@ fun LoadingLine(text: String = "Loading", modifier: Modifier = Modifier) {
     }
 }
 
+// The same, on its own on a page, in from the page's side as its words are.
+@Composable
+fun PageLoadingLine(text: String = "Loading") = LoadingLine(text, Modifier.padding(horizontal = PageSide))
+
 @Composable
 fun FailedLine(message: String, retry: () -> Unit, modifier: Modifier = Modifier) {
     Column(modifier.padding(vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
