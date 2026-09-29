@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
+import app.winters.octo.design.CutTxt
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.FrameSize
@@ -151,7 +152,7 @@ private fun SongZone(app: AppState, song: Song?) {
                 Txt("Nothing playing", DesktopType.emphasis, OctoColors.TextMuted)
             } else {
                 val album = song.albumId?.takeIf(String::isNotBlank)
-                Txt(
+                CutTxt(
                     song.title,
                     DesktopType.emphasis,
                     OctoColors.TextPrimary,

@@ -40,6 +40,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import app.winters.octo.design.CutTxt
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.OctoColors
@@ -216,8 +217,8 @@ fun MediaCard(
             if (badge != null) Box(Modifier.align(Alignment.BottomEnd).padding(6.dp)) { badge() }
         }
         Column(Modifier.fillMaxWidth(), horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
-            Txt(title, OctoType.label)
-            if (subtitle != null) Txt(subtitle, OctoType.caption, OctoColors.TextMuted)
+            CutTxt(title, OctoType.label)
+            if (subtitle != null) CutTxt(subtitle, OctoType.caption, OctoColors.TextMuted)
         }
     }
 }

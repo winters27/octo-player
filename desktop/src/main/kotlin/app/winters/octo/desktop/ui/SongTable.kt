@@ -79,6 +79,7 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.LayoutDirection
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
+import app.winters.octo.design.CutTxt
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.Glaze
@@ -685,7 +686,7 @@ private fun SongCell(
         SongColumn.Title -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs)) {
             if (covers) Cover(song.coverArt, Modifier.size(RowHeight.Roomy - Space.L), shape = Corner.ArtSShape, placeholder = OctoIcons.Songs)
             val failed = app.failedSongs[song.id]
-            Txt(
+            CutTxt(
                 song.title,
                 DesktopType.tableTitle,
                 if (failed != null) muted else OctoColors.TextPrimary,
@@ -701,7 +702,7 @@ private fun SongCell(
             val genre = (song.genres.firstOrNull() ?: song.genre).orEmpty()
             if (genre.isNotBlank()) LinkText(genre, genre) { app.navigator.go(Page.Genre(it)) }
         }
-        SongColumn.Composer -> Txt(song.displayComposer.orEmpty(), DesktopType.table, OctoColors.TextSecondary)
+        SongColumn.Composer -> CutTxt(song.displayComposer.orEmpty(), DesktopType.table, OctoColors.TextSecondary)
         SongColumn.Year -> Txt(song.year?.takeIf { it > 0 }?.toString().orEmpty(), numbers, muted, align = TextAlign.End)
         SongColumn.Added -> Txt(dateText(song.created), numbers, muted)
         SongColumn.Played -> Txt(dateText(song.played), numbers, muted)
@@ -768,14 +769,15 @@ private fun PickedBar(
     }
 }
 
-// Words that open a page when clicked: an artist's or album's name.
+// Words that open a page when clicked: an artist's or album's name, shown
+// whole in a tooltip when cut.
 @Composable
 fun LinkText(text: String, id: String?, width: Dp? = null, open: (String) -> Unit) {
     val modifier = if (width != null) Modifier.width(width) else Modifier
     if (id.isNullOrEmpty()) {
-        Txt(text, DesktopType.table, OctoColors.TextSecondary, modifier)
+        CutTxt(text, DesktopType.table, OctoColors.TextSecondary, modifier)
     } else {
-        Txt(
+        CutTxt(
             text,
             DesktopType.table,
             OctoColors.TextSecondary,
