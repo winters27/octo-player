@@ -94,8 +94,17 @@ class QueueKeeper(
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
-    // The signed-in account's folder, or null while signed out.
+    // The signed-in account's folder, or null while signed out. Until its
+    // saved queue has been looked for (restore), nothing is saved there on
+    // its own: after a switch of server, the stopped player is never saved
+    // over the queue about to come back.
     @Volatile var folder: File? = null
+        set(value) {
+            if (value != field) settled = false
+            field = value
+        }
+
+    @Volatile private var settled = false
 
     private val queueFile get() = folder?.let { File(it, "queue.json") }
     private val spotFile get() = folder?.let { File(it, "queue-spot.json") }
@@ -125,11 +134,16 @@ class QueueKeeper(
     // Brings back the queue saved for this account, when the player has
     // none. Answers what was put back, if anything.
     suspend fun restore(): SavedQueue? {
-        if (player.state.value.current != null) return null
-        val saved = withContext(io) { read() } ?: return null
-        if (player.state.value.current != null) return null
-        player.restore(saved)
-        return saved
+        val looking = folder
+        try {
+            if (player.state.value.current != null) return null
+            val saved = withContext(io) { read() } ?: return null
+            if (player.state.value.current != null || folder != looking) return null
+            player.restore(saved)
+            return saved
+        } finally {
+            if (folder == looking) settled = true
+        }
     }
 
     // Saves everything at once, for quitting.
@@ -139,6 +153,7 @@ class QueueKeeper(
     }
 
     private fun saveQueue() {
+        if (!settled) return
         val state = player.state.value
         scope.launch(io) {
             runCatching { writeQueue(state) }
@@ -147,6 +162,7 @@ class QueueKeeper(
     }
 
     private fun saveSpot() {
+        if (!settled) return
         val state = player.state.value
         scope.launch(io) { runCatching { writeSpot(state) } }
     }

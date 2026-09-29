@@ -41,6 +41,13 @@ import app.winters.octo.desktop.search.OmniboxState
 import app.winters.octo.desktop.search.SearchModel
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.Connection
+import app.winters.octo.desktop.server.ServerFactsModel
+import app.winters.octo.desktop.server.SwitchOutcome
+import app.winters.octo.desktop.settings.SavedServer
+import app.winters.octo.desktop.settings.key
+import app.winters.octo.desktop.settings.name
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.FramePrefs
@@ -122,6 +129,11 @@ class AppState(
     var connection by mutableStateOf<Connection?>(null)
         private set
 
+    // The kept server being switched to, while it is asked whether it
+    // answers; none otherwise.
+    var switching by mutableStateOf<SavedServer?>(null)
+        private set
+
     // The sign-in page's fields, started from the server signed in to last.
     var signInForm by mutableStateOf(SignInForm(accounts.last))
         private set
@@ -136,6 +148,10 @@ class AppState(
 
     // The Library health page's report and removals, for this sign-in.
     val health = HealthModel({ connection?.client }, scope)
+
+    // How the kept servers answer, and the scan and user of the one in use,
+    // for Settings > Servers.
+    val serverFacts = ServerFactsModel(accounts, { connection }, scope)
 
     // The user's playlists, for the sidebar and "Add to playlist".
     var playlists by mutableStateOf<List<Playlist>>(emptyList())
@@ -246,6 +262,10 @@ class AppState(
     // computer (see LiveListActions.kt).
     val liveLists = LiveListStore(scope)
 
+    // A song whose details the Info tab shows instead of the playing one's,
+    // until it is let go.
+    var infoSong by mutableStateOf<Song?>(null)
+
     init {
         if (listeningRoot != null) {
             plays.start()
@@ -277,7 +297,26 @@ class AppState(
         liveLists.saveNow()
     }
 
-    fun signedIn(connection: Connection, note: String? = null) {
+    // Signed in to a server: its library, search, Home, queue and live lists.
+    // `page` is where the window starts over.
+    fun signedIn(connection: Connection, note: String? = null, page: Page = Page.Home) {
+        useConnection(connection)
+        notice = note
+        noticeDetail = null
+        starOverrides.clear()
+        ratingOverrides.clear()
+        failedSongs.clear()
+        playlistViews.clear()
+        playlistSaves.clear()
+        infoSong = null
+        startListening(connection)
+        // Back and forward start afresh for this account.
+        navigator.startOver(page)
+    }
+
+    // The pages' view of the server: its library, finds, search and Home,
+    // read afresh through this connection.
+    private fun useConnection(connection: Connection) {
         this.connection = connection
         val store = LibraryStore(connection.client, scope)
         library = store
@@ -285,35 +324,34 @@ class AppState(
         search = SearchModel(connection, { store.index }, { playlists }, scope)
         home = HomeStore(connection, scope)
         health.forget()
-        notice = note
-        noticeDetail = null
-        starOverrides.clear()
-        ratingOverrides.clear()
-        failedSongs.clear()
-        startListening(connection)
+        serverFacts.forget()
         store.load()
         refreshPlaylists()
-        // Back and forward start afresh for this account.
-        navigator.startOver()
     }
 
     // This account's queue comes back, its waiting plays are sent, and a
     // queue saved on another device may be offered.
     private fun startListening(connection: Connection) {
-        val folder = listeningRoot?.let { listeningFolder(it, connection.client.username, connection.server.address) }
+        val folder = listeningRoot?.let { listeningFolder(it, connection.server) }
         queueKeeper.folder = folder
         queueSync.folder = folder
         queueSync.reset()
         liveLists.open(folder?.let { File(it, LiveListStore.FILE_NAME) })
         scope.launch {
-            if (folder != null) queueKeeper.restore()?.let(queueSync::restored)
+            if (folder != null) {
+                queueKeeper.restore()?.let {
+                    queueSync.restored(it)
+                    queueSync.putBack()
+                }
+            }
             queueSync.check(force = true)
         }
         plays.signedIn()
     }
 
-    fun signOut() {
-        // What was playing counts, and the queue is kept for next time.
+    // Leaves the server in use: what was playing counts, the queue and live
+    // lists are kept in its own folder for next time, and the player stops.
+    private fun leaveServer() {
         plays.flush()
         if (listeningRoot != null) queueKeeper.saveNow()
         queueKeeper.folder = null
@@ -322,9 +360,19 @@ class AppState(
         liveLists.saveNow()
         liveLists.open(null)
         player.clear()
+    }
+
+    // Signs out of the server in use. It stays in the list of servers,
+    // without its password, and the sign-in page opens.
+    fun signOut() {
+        leaveServer()
         // The server is forgotten at once; the password store is left to
         // finish off the window's thread.
         scope.launch(start = CoroutineStart.UNDISPATCHED) { accounts.signOut() }
+        signedOut()
+    }
+
+    private fun signedOut() {
         signInForm = SignInForm(accounts.last)
         connection = null
         library = null
@@ -332,9 +380,85 @@ class AppState(
         search = null
         home = null
         health.forget()
+        serverFacts.forget()
         playlists = emptyList()
         fullPlayer = false
         navigator.startOver()
+    }
+
+    // Fills the sign-in page with a kept server, asking for its password.
+    fun fillSignIn(server: SavedServer, note: String? = null) {
+        signInForm = SignInForm(server).also { form -> note?.let { form.result = false to it } }
+    }
+
+    // Makes another kept server the one in use. It is asked first, so one out
+    // of reach leaves everything as it was and says why. Then what was
+    // playing stops, its queue kept on its own server's side for next time,
+    // and the library, queue, live lists and covers become the new server's.
+    // `done` hears how it went (a server whose password is not kept asks
+    // for it there).
+    fun switchTo(id: String, page: Page = Page.Home, done: (SwitchOutcome) -> Unit = {}) {
+        val target = accounts.find(id) ?: return
+        if (switching != null || id == connection?.server?.id) return
+        switching = target
+        scope.launch {
+            val outcome = try {
+                accounts.switchTo(id)
+            } finally {
+                switching = null
+            }
+            when (outcome) {
+                is SwitchOutcome.Done -> arrive(outcome.connection, page)
+                is SwitchOutcome.Failed -> notice = outcome.message
+                is SwitchOutcome.NeedsPassword -> Unit
+            }
+            done(outcome)
+        }
+    }
+
+    // Moves the window over to another server's connection, saying so in
+    // the notice line, and plainly when music was stopped for it.
+    fun arrive(connection: Connection, page: Page = Page.Home, note: String? = null) {
+        val from = this.connection?.server
+        val playing = player.state.value.let { it.current != null && it.playing }
+        if (from != null) leaveServer()
+        val words = when {
+            from == null -> null
+            playing -> "Now on ${connection.server.name}. The music from ${from.name} stopped, and its queue is kept for when you come back."
+            else -> "Now on ${connection.server.name}."
+        }
+        signedIn(connection, listOfNotNull(words, note).joinToString(" ").ifEmpty { null }, page)
+    }
+
+    // A kept server's connection changed (its address, headers or way of
+    // signing in were edited). The same account keeps playing; another
+    // account on it is a switch.
+    fun reconnected(connection: Connection) {
+        val now = this.connection
+        if (now != null && now.server.key == connection.server.key) useConnection(connection) else arrive(connection, Page.Settings)
+    }
+
+    // Signs out of a kept server that is not the one in use; the one in use
+    // signs out as above.
+    fun signOutOf(id: String) {
+        if (id == connection?.server?.id) return signOut()
+        scope.launch(start = CoroutineStart.UNDISPATCHED) { accounts.signOut(id) }
+    }
+
+    // Takes a server off the list. Its songs and playlists stay on the
+    // server; with `forgetHere`, this computer's plays, queue and live lists
+    // for it are deleted too, otherwise they stay in case it is added again.
+    fun removeServer(id: String, forgetHere: Boolean) {
+        val server = accounts.find(id) ?: return
+        val inUse = id == connection?.server?.id
+        if (inUse) leaveServer()
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            accounts.remove(id)
+            if (forgetHere && listeningRoot != null) {
+                withContext(Dispatchers.IO) { runCatching { listeningFolder(listeningRoot, server).deleteRecursively() } }
+            }
+        }
+        if (inUse) signedOut()
     }
 
     fun refreshPlaylists() {
@@ -355,10 +479,6 @@ class AppState(
         sidePanel = panel
         settings.update { it.copy(sidePanel = panel?.key) }
     }
-
-    // A song whose details the Info tab shows instead of the playing one's,
-    // until it is let go.
-    var infoSong by mutableStateOf<Song?>(null)
 
     fun showInfo(song: Song?) {
         infoSong = song
