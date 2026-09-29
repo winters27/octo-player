@@ -231,7 +231,7 @@ private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, ra
             if (selected) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
             if (lit) Box(Modifier.matchParentSize().background(DropLit, Corner.ControlShape))
             Row(Modifier.padding(horizontal = if (rail) Space.None else Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs)) {
-                Cover(playlist.coverArt, Modifier.size(FrameSize.PlaylistCover), shape = Corner.ArtSShape, placeholder = OctoIcons.Playlists)
+                PlaylistPicture(app, playlist, Modifier.size(FrameSize.PlaylistCover), Corner.ArtSShape)
                 if (!rail) {
                     CutTxt(playlist.name, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f))
                     if (pinned) Glyph(OctoIcons.Pin, size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextMuted)

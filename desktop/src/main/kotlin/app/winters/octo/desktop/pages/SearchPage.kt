@@ -1,5 +1,8 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.design.Corner
+import app.winters.octo.design.FrameSize
+import app.winters.octo.desktop.ui.PlaylistPicture
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -140,7 +143,7 @@ private fun LazyListScope.after(app: AppState, found: SearchFound) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Glyph(OctoIcons.Playlists, size = 18.dp, tint = OctoColors.TextSecondary)
+                PlaylistPicture(app, playlist, Modifier.size(FrameSize.PlaylistCover), Corner.ArtSShape)
                 Txt(playlist.name, OctoType.bodySmall, modifier = Modifier.weight(1f))
                 Txt("${playlist.songCount} songs", OctoType.caption, OctoColors.TextMuted)
             }

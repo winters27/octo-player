@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -205,6 +206,8 @@ fun MediaCard(
     online: Boolean = false,
     onMenu: (() -> Unit)? = null,
     badge: @Composable (() -> Unit)? = null,
+    // Draws the picture instead of the cover, like a playlist's designed one.
+    picture: (@Composable (Modifier, Shape) -> Unit)? = null,
 ) {
     val shape = if (round) CircleShape else RoundedCornerShape(8.dp)
     Column(
@@ -216,13 +219,17 @@ fun MediaCard(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box {
-            Cover(
-                coverId,
-                Modifier.fillMaxWidth().aspectRatio(1f),
-                shape = shape,
-                online = online,
-                placeholder = if (round) OctoIcons.Artist else OctoIcons.Album,
-            )
+            if (picture != null) {
+                picture(Modifier.fillMaxWidth().aspectRatio(1f), shape)
+            } else {
+                Cover(
+                    coverId,
+                    Modifier.fillMaxWidth().aspectRatio(1f),
+                    shape = shape,
+                    online = online,
+                    placeholder = if (round) OctoIcons.Artist else OctoIcons.Album,
+                )
+            }
             if (badge != null) Box(Modifier.align(Alignment.BottomEnd).padding(6.dp)) { badge() }
         }
         Column(Modifier.fillMaxWidth(), horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {

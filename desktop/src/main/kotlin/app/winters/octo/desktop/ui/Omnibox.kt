@@ -272,7 +272,7 @@ private fun OmniLine(app: AppState, item: OmniItem, lit: Boolean, onHover: () ->
             is OmniItem.SongHit -> Cover(item.song.coverArt, Modifier.size(OmniArt), shape = Corner.ArtSShape, placeholder = OctoIcons.Songs, online = item.outside)
             is OmniItem.AlbumHit -> Cover(item.album.coverArt, Modifier.size(OmniArt), shape = Corner.ArtSShape, online = item.outside)
             is OmniItem.ArtistHit -> Cover(item.artist.coverArt, Modifier.size(OmniArt), shape = CircleShape, placeholder = OctoIcons.Artist, online = item.outside)
-            is OmniItem.PlaylistHit -> Cover(item.playlist.coverArt, Modifier.size(OmniArt), shape = Corner.ArtSShape, placeholder = OctoIcons.Playlists)
+            is OmniItem.PlaylistHit -> PlaylistPicture(app, item.playlist, Modifier.size(OmniArt), Corner.ArtSShape)
             is OmniItem.Recent -> IconBox(OctoIcons.History)
             is OmniItem.Run -> IconBox(OctoIcons.Chevron)
             is OmniItem.SeeAll -> IconBox(OctoIcons.Search)

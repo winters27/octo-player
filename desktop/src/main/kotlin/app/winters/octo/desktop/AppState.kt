@@ -58,6 +58,7 @@ import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.search.withRecent
+import app.winters.octo.desktop.library.PlaylistArtStore
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -153,6 +154,9 @@ class AppState(
 
     // Covers made ready for the full player's background.
     val washCovers = WashCovers(http)
+
+    // Playlists' designed covers; Main gives them a folder in the cache.
+    val playlistArt = PlaylistArtStore(http)
 
     // One quiet line at the top of the main area, for something the
     // listener should know once (never a stack of toasts).

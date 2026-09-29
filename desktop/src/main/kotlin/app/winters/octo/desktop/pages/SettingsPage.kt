@@ -23,6 +23,10 @@ import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.OCTO_LYRICS
 import app.winters.octo.desktop.setAutoplay
 import app.winters.octo.desktop.settings.AmbienceMotion
+import app.winters.octo.covers.PLAYLIST_COVERS_SETTING
+import app.winters.octo.covers.PlaylistCoverStyle
+import app.winters.octo.covers.playlistCoverStyleHelp
+import app.winters.octo.covers.playlistCoverStyleName
 import app.winters.octo.desktop.settings.AmbienceStyle
 import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.desktop.settings.Appearance
@@ -142,6 +146,11 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
         SliderRow("Brightness cap", "Turn it down if bright covers make the words hard to read.", "${look.wash.brightnessCap}%", (look.wash.brightnessCap - 20) / 80f, { x ->
             wash { it.copy(brightnessCap = (20 + x * 80).roundToInt()) }
         }, live = false)
+    }
+    Group("Playlists") {
+        ChoiceRow(PLAYLIST_COVERS_SETTING, playlistCoverStyleHelp(look.playlistCovers), PlaylistCoverStyle.entries, look.playlistCovers, ::playlistCoverStyleName) { style ->
+            appearance { it.copy(playlistCovers = style) }
+        }
     }
     Group("Motion") {
         SwitchRow("Calm motion", "For less movement: backgrounds hold still, and lyrics move without springs or blooms.", look.calmMotion) { on ->

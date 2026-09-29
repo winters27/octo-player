@@ -1,5 +1,8 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.foundation.layout.size
+import app.winters.octo.design.Corner
+import app.winters.octo.design.FrameSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -431,7 +434,11 @@ fun ColumnScope.PlaylistChooser(app: AppState, songs: suspend () -> List<Song>, 
     val rest = app.playlists.filter(app::canEdit) - recent.toSet()
     listOf(recent, rest).filter { it.isNotEmpty() }.forEach { group ->
         MenuSeparator()
-        group.forEach { playlist -> MenuRow(playlist.name, { pick(playlist) }, OctoIcons.Playlists, detail = "${playlist.songCount}") }
+        group.forEach { playlist ->
+            MenuRow(playlist.name, { pick(playlist) }, detail = "${playlist.songCount}", leading = {
+                PlaylistPicture(app, playlist, Modifier.size(FrameSize.MenuArt), Corner.ArtSShape)
+            })
+        }
     }
 }
 

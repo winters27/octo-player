@@ -101,6 +101,8 @@ object FrameSize {
     // A menu opened from a button.
     val Menu = 280.dp
     val PlaylistCover = 32.dp
+    // A playlist's picture in a menu's line.
+    val MenuArt = 20.dp
     // The search field floated out beside the rail.
     val SearchWidth = 360.dp
     // The search box's list: its width, how tall it may grow, a line, and

@@ -118,17 +118,23 @@ fun ListHeader(
     extras: @Composable () -> Unit = {},
     // Draws the name instead of the plain title, like one renamed by clicking it.
     titleContent: (@Composable () -> Unit)? = null,
+    // Draws the picture instead of the cover, like a playlist's designed one.
+    picture: (@Composable (Modifier) -> Unit)? = null,
 ) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val art = headerArt(maxWidth)
         Row(Modifier.fillMaxWidth().padding(bottom = Space.Xl), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.Page)) {
-            Cover(
-                coverId,
-                Modifier.size(art),
-                shape = if (round) CircleShape else Corner.ArtLShape,
-                online = online,
-                placeholder = if (round) OctoIcons.Artist else OctoIcons.Album,
-            )
+            if (picture != null) {
+                picture(Modifier.size(art))
+            } else {
+                Cover(
+                    coverId,
+                    Modifier.size(art),
+                    shape = if (round) CircleShape else Corner.ArtLShape,
+                    online = online,
+                    placeholder = if (round) OctoIcons.Artist else OctoIcons.Album,
+                )
+            }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs)) {
                 Txt(kind.uppercase(), DesktopType.label, OctoColors.TextMuted)
                 if (titleContent != null) titleContent() else CutTxt(title, DesktopType.pageTitle, maxLines = 2)

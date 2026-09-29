@@ -130,24 +130,8 @@ class WashCovers(private val http: OkHttpClient) {
             }
         }
 
-        // The cover's main colour: the most common of its colours, roughly,
-        // as a palette's dominant swatch picks it, averaged within its bucket.
-        fun dominantColour(pixels: IntArray): Int {
-            val counts = HashMap<Int, IntArray>()
-            var i = 0
-            while (i < pixels.size) {
-                val p = pixels[i]
-                val bucket = (p shr 20 and 0xF shl 8) or (p shr 12 and 0xF shl 4) or (p shr 4 and 0xF)
-                val sum = counts.getOrPut(bucket) { IntArray(4) }
-                sum[0]++
-                sum[1] += p shr 16 and 0xFF
-                sum[2] += p shr 8 and 0xFF
-                sum[3] += p and 0xFF
-                i += 7
-            }
-            val best = counts.values.maxByOrNull { it[0] } ?: return 0xFF202020.toInt()
-            val n = best[0]
-            return (0xFF shl 24) or ((best[1] / n) shl 16) or ((best[2] / n) shl 8) or (best[3] / n)
-        }
+        // The cover's main colour, as a palette's dominant swatch picks it
+        // (shared with the playlist covers).
+        fun dominantColour(pixels: IntArray): Int = app.winters.octo.covers.dominantColour(pixels)
     }
 }
