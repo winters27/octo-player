@@ -28,12 +28,12 @@ class SubsonicClient(
     // The address the server is known by. Its library is kept under this
     // address whichever one the calls go to.
     val primaryUrl: HttpUrl,
-    private val credentials: Credentials,
+    credentials: Credentials,
     http: OkHttpClient,
     private val clientName: String = "Octo",
     // Headers every request to the server carries, such as a proxy's
     // access token. They go only to the server's own addresses.
-    headers: Map<String, String> = emptyMap(),
+    private val headers: Map<String, String> = emptyMap(),
     // The library folder calls are limited to, or null for all of them.
     val musicFolderId: String? = null,
     // Where calls go right now, when the server has more than one address.
@@ -43,9 +43,16 @@ class SubsonicClient(
     // otherwise the primary one.
     val baseUrl: HttpUrl get() = route()
 
+    // Who signs in, and how. A change of the signed-in user's own password
+    // here puts the new one in, so the client keeps working afterwards.
+    @Volatile private var credentials: Credentials = credentials
+
     val username: String get() = credentials.username
 
     val authMode: AuthMode get() = credentials.mode
+
+    // The client as it was given, before this server's headers were added.
+    private val plainHttp: OkHttpClient = http
 
     private val http: OkHttpClient =
         if (headers.isEmpty()) http
@@ -406,18 +413,25 @@ class SubsonicClient(
     // Runs one playlist call, with its params in the address or in a form
     // body, and hands back the answer once it is known to be ok.
     private suspend fun sendCall(call: PlaylistCall, formPost: Boolean): String {
-        val request = if (formPost) {
-            val form = FormBody.Builder().apply { call.params.forEach { (key, value) -> add(key, value) } }.build()
-            Request.Builder().url(url(call.endpoint)).post(form).build()
-        } else {
-            val address = url(call.endpoint).newBuilder().apply { call.params.forEach { (key, value) -> addQueryParameter(key, value) } }.build()
-            Request.Builder().url(address).build()
-        }
+        if (formPost) return postForm(call.endpoint, call.params)
+        val address = url(call.endpoint).newBuilder().apply { call.params.forEach { (key, value) -> addQueryParameter(key, value) } }.build()
+        return exchange(Request.Builder().url(address).build(), call.endpoint)
+    }
+
+    // Sends the params in a form body rather than the address, and hands
+    // back the answer once it is known to be ok. Only the sign-in is in the
+    // address.
+    private suspend fun postForm(endpoint: String, params: List<Pair<String, String>>): String {
+        val form = FormBody.Builder().apply { params.forEach { (key, value) -> add(key, value) } }.build()
+        return exchange(Request.Builder().url(url(endpoint)).post(form).build(), endpoint)
+    }
+
+    private suspend fun exchange(request: Request, endpoint: String): String {
         val body = try {
             val response = http.newCall(request).await()
             withContext(Dispatchers.IO) {
                 response.use {
-                    if (!it.isSuccessful) throw SubsonicException.NotSubsonic("HTTP ${it.code} from ${call.endpoint}", it.code)
+                    if (!it.isSuccessful) throw SubsonicException.NotSubsonic("HTTP ${it.code} from $endpoint", it.code)
                     it.body.string()
                 }
             }
@@ -427,6 +441,21 @@ class SubsonicClient(
         withContext(Dispatchers.Default) { decode(body, null, ServerInfo.serializer(), null) }
         return body
     }
+
+    // Gives a user a new password: the signed-in user's own, or anyone's
+    // for an admin. The password goes in a form body, never in the
+    // address, which proxies and servers write to their logs. When it is
+    // the signed-in user's own, this client signs in with it from then on.
+    suspend fun changePassword(username: String, newPassword: String) {
+        postForm("changePassword", listOf("username" to username, "password" to newPassword))
+        val now = credentials
+        if (username == now.username && now.mode != AuthMode.ApiKey) credentials = Credentials(username, newPassword, now.mode)
+    }
+
+    // The same server, headers and route signed in with another secret, for
+    // checking a password without touching this client.
+    fun withSecret(secret: String): SubsonicClient =
+        SubsonicClient(primaryUrl, Credentials(username, secret, authMode), plainHttp, clientName, headers, musicFolderId, route)
 
     // A call that only answers ok or an error. The params may repeat a name.
     private suspend fun send(endpoint: String, params: List<Pair<String, String>>) {

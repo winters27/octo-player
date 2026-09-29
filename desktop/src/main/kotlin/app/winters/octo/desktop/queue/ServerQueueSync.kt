@@ -116,6 +116,13 @@ class ServerQueueSync(
         baseline = saved.order.map { saved.songs[it].id } to saved.order.indexOf(saved.index)
     }
 
+    // The queue the player holds now was put back from this computer, not
+    // played: a pause before anything changes sends nothing, so it never
+    // lands over a newer queue on a server just switched to.
+    fun putBack() {
+        lastSent = serverQueueOf(player.state.value, player.positionMs())?.trimmed()
+    }
+
     // A server was signed in to, or signed out of.
     fun reset() {
         pending?.cancel()

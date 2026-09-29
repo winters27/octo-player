@@ -1,6 +1,35 @@
 package app.winters.octo.ui.settings
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import app.winters.octo.data.ServerLook
+import app.winters.octo.data.Session
+import app.winters.octo.design.AccentButton
+import app.winters.octo.design.GlassInput
+import app.winters.octo.design.GlazeButton
+import app.winters.octo.design.OctoType
+import app.winters.octo.server.PasswordChange
+import app.winters.octo.server.PasswordDraft
+import app.winters.octo.server.passwordChangeWords
+import app.winters.octo.server.passwordDraftProblem
+import app.winters.octo.server.scanWords
+import app.winters.octo.server.serverKind
+import app.winters.octo.server.serverOffers
+import app.winters.octo.subsonic.AuthMode
+import app.winters.octo.ui.common.LocalFeedback
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -79,7 +108,17 @@ class ServerViewModel @Inject constructor(
     }
 
     fun disconnect() = sync.disconnect()
+
+    suspend fun changePassword(current: String, new: String): PasswordChange = sessions.changePassword(current, new)
+
+    suspend fun look(): ServerLook? = sessions.look()
 }
+
+// What the server offers beyond the music, from the extensions it lists.
+internal fun offersOf(extensions: Set<String>): String? = serverOffers(
+    lyrics = extensions.any { it.startsWith("songLyrics:") || it.startsWith("octoLyrics:") },
+    adds = extensions.any { it.startsWith("octoAcquisitions:") },
+)
 
 // The server, if one is connected: where it is, who is signed in, how fresh
 // the copy of its library is, and what else it offers.
@@ -96,6 +135,7 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
     val sheet = LocalChoiceSheet.current
     val scope = rememberCoroutineScope()
     var folderProblem by remember { mutableStateOf<String?>(null) }
+    var changing by remember { mutableStateOf(false) }
 
     SettingsPageFrame("Server and sync", onBack, highlight) {
         when (val current = state) {
@@ -140,8 +180,11 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
                     })
                     folderProblem?.let { NoteRow(it, color = OctoColors.Error) }
                     ActionRow(SettingsIndex.EditConnection, onClick = { onOpen(EditConnectionRoute) })
+                    if (client.authMode != AuthMode.ApiKey) ActionRow(SettingsIndex.ChangePassword, onClick = { changing = true })
                     ActionRow(SettingsIndex.OctoAdmin, onClick = { onOpen(OctoAdminRoute) })
                 }
+
+                ServerFacts(vm, current.session)
 
                 SettingsGroup(title = "Sync") {
                     InfoRow(SettingsIndex.LastSynced, copy?.let { timeAgo(it.at, System.currentTimeMillis()) } ?: "Not yet")
@@ -171,6 +214,82 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
             }
         }
     }
+    GlassPopup(
+        visible = changing,
+        anchor = null,
+        onDismiss = { changing = false },
+        backdrop = LocalHaze.current,
+        title = SettingsIndex.ChangePassword.title,
+        maxWidth = 400.dp,
+    ) {
+        if (changing) PasswordForm(vm) { changing = false }
+    }
+}
+
+// What the server is and offers, how quickly it answers, and when it last
+// looked through its folders.
+@Composable
+private fun ServerFacts(vm: ServerViewModel, session: Session) {
+    var look by remember(session) { mutableStateOf<ServerLook?>(null) }
+    LaunchedEffect(session) { look = vm.look() }
+    SettingsGroup(title = "Server") {
+        InfoRow(SettingsIndex.ServerKind, serverKind(session.serverType, session.serverVersion), helper = offersOf(session.extensions))
+        look?.answerMs?.let { InfoRow(SettingsIndex.ServerAnswer, "$it ms") }
+        scanWords(look?.scan, System.currentTimeMillis())?.let { InfoRow(SettingsIndex.ServerScan, "", helper = it) }
+    }
+}
+
+// The current password, then the new one twice. Nothing is sent until the
+// form is right; what the server says comes back in plain words.
+@Composable
+private fun PasswordForm(vm: ServerViewModel, close: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val feedback = LocalFeedback.current
+    var draft by remember { mutableStateOf(PasswordDraft()) }
+    var busy by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    fun change() {
+        passwordDraftProblem(draft)?.let { problem = it; return }
+        busy = true
+        problem = null
+        scope.launch {
+            val result = vm.changePassword(draft.current, draft.new)
+            busy = false
+            if (result == PasswordChange.Changed) {
+                close()
+                feedback.done(passwordChangeWords(result))
+            } else {
+                problem = passwordChangeWords(result)
+            }
+        }
+    }
+    Column(
+        Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(SettingsIndex.ChangePassword.title, style = OctoType.body, color = OctoColors.TextPrimary)
+        Text("Your other apps will ask for the new password the next time they sign in.", style = OctoType.caption, color = OctoColors.TextMuted)
+        PasswordInput(draft.current, "Current password") { draft = draft.copy(current = it); problem = null }
+        PasswordInput(draft.new, "New password") { draft = draft.copy(new = it); problem = null }
+        PasswordInput(draft.confirm, "New password again", last = true, onDone = ::change) { draft = draft.copy(confirm = it); problem = null }
+        problem?.let { Text(it, style = OctoType.caption, color = OctoColors.Error) }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AccentButton("Change password", onClick = ::change, loading = busy)
+            GlazeButton("Cancel", onClick = close, enabled = !busy)
+        }
+    }
+}
+
+@Composable
+private fun PasswordInput(value: String, placeholder: String, last: Boolean = false, onDone: () -> Unit = {}, onChange: (String) -> Unit) {
+    GlassInput(
+        value = value,
+        onValueChange = onChange,
+        placeholder = placeholder,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = if (last) ImeAction.Done else ImeAction.Next),
+        keyboardActions = KeyboardActions(onDone = { onDone() }),
+        visualTransformation = PasswordVisualTransformation(),
+    )
 }
 
 // Whether the question before disconnecting is showing. The shell draws

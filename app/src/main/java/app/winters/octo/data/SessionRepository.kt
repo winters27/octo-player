@@ -13,7 +13,10 @@ import app.winters.octo.connection.fingerprint
 import app.winters.octo.connection.mask
 import app.winters.octo.connection.opened
 import app.winters.octo.connection.sealed
+import app.winters.octo.server.PasswordChange
+import app.winters.octo.server.changeOwnPassword
 import app.winters.octo.server.serverSourceId
+import app.winters.octo.subsonic.ScanStatus
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.Credentials
 import app.winters.octo.subsonic.MusicFolder
@@ -93,6 +96,10 @@ class ConnectionDraft(
     val clientCertAlias: String?,
     val takesApiKeys: Boolean,
 )
+
+// A quick look at the signed-in server: how long it took to answer (null
+// when it did not), and its folders scan, when it says.
+class ServerLook(val answerMs: Long?, val scan: ScanStatus?)
 
 sealed interface SignInError {
     data object BadAddress : SignInError
@@ -213,6 +220,31 @@ class SessionRepository @Inject constructor(
         chooser.clear()
         security.clear()
         _state.value = SessionState.SignedOut
+    }
+
+    // Changes the signed-in user's password on the server. The current one is
+    // checked first; on success the new one is sealed in place of the old,
+    // and the client in use already signs in with it.
+    suspend fun changePassword(current: String, new: String): PasswordChange {
+        val session = (_state.value as? SessionState.SignedIn)?.session ?: return PasswordChange.Failed("Connect a server first.")
+        val result = changeOwnPassword(session.client, current, new)
+        if (result != PasswordChange.Changed) return result
+        changes.withLock {
+            store.read()?.let { saved -> store.write(saved.copy(passwordSealed = vault.seal(new))) }
+            credentials = credentials?.let { Credentials(it.username, new, it.mode) }
+        }
+        return result
+    }
+
+    // How quickly the signed-in server answers, in milliseconds, and how its
+    // folders scan stands; null for what it would not say.
+    suspend fun look(): ServerLook? {
+        val session = (_state.value as? SessionState.SignedIn)?.session ?: return null
+        val start = System.nanoTime()
+        val answered = runCatching { session.client.ping() }.isSuccess
+        val ms = if (answered) (System.nanoTime() - start) / 1_000_000 else null
+        val scan = runCatching { session.client.scanStatus() }.getOrNull()
+        return ServerLook(ms, scan)
     }
 
     // The library folders on the signed-in server.

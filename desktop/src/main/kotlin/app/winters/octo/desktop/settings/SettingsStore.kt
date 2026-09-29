@@ -5,7 +5,9 @@ import app.winters.octo.desktop.system.SystemPrefs
 import app.winters.octo.desktop.discord.DiscordPrefs
 import app.winters.octo.desktop.hotkeys.HotkeyPrefs
 import app.winters.octo.covers.PlaylistCoverStyle
+import app.winters.octo.livelists.accountKey
 import app.winters.octo.subsonic.AuthMode
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.Serializable
@@ -28,7 +30,14 @@ data class AppSettings(
     val window: WindowSpot? = null,
     // Use the system's own title bar instead of the app's glass one.
     val systemTitleBar: Boolean = false,
+    // The server in use, as Octo kept it before there could be several. It
+    // is always a copy of the one `activeServer` names, so an older Octo
+    // opened later still finds it.
     val server: SavedServer? = null,
+    // Every server kept here, in the listener's order, and the id of the one
+    // in use (none while signed out).
+    val servers: List<SavedServer> = emptyList(),
+    val activeServer: String? = null,
     val appearance: Appearance = Appearance(),
     val playback: PlaybackPrefs = PlaybackPrefs(),
     // How the Songs page is ordered, as the shared sort lists save it.
@@ -168,7 +177,46 @@ data class SavedServer(
     // Whether the password is kept in the system's store, or only while
     // the app is open.
     val rememberSignIn: Boolean = true,
+    // Which server this is, for its password and its own folder of plays,
+    // queue and live lists: the account's key from when it was first kept,
+    // which is also the folder older versions of Octo made for it. It stays
+    // when the address is edited.
+    val id: String = "",
+    // The name the listener gave it; none shows its host.
+    val label: String = "",
+    // Signed out: still in the list, its password forgotten.
+    val signedOut: Boolean = false,
 )
+
+// The server's id, or the one it would get, for a server kept by an older
+// version of Octo.
+val SavedServer.key: String get() = id.ifEmpty { accountKey(username, address) }
+
+// What the server is called in the app: its label, else its host.
+val SavedServer.name: String
+    get() = label.trim().ifEmpty { address.toHttpUrlOrNull()?.host ?: address.removeSuffix("/") }
+
+private fun SavedServer.withId(): SavedServer = if (id.isEmpty()) copy(id = key) else this
+
+// The servers as read from the file, in one shape: each with its id, and the
+// one in use named by `activeServer`. `server` has the last word, since an
+// older Octo writes only that: a file from before the list becomes a list of
+// one, a server an older Octo signed in to since is added (or brought up to
+// date) and made the one in use, and one it signed out of leaves none in use.
+internal fun AppSettings.settledServers(): AppSettings {
+    val listed = servers.map { it.withId() }.distinctBy { it.id }
+    val legacy = server?.withId() ?: return copy(servers = listed, activeServer = null)
+    val same = listed.firstOrNull { it.id == legacy.id || (it.username == legacy.username && it.address == legacy.address) }
+    val kept = if (same == null) legacy else legacy.copy(id = same.id, label = legacy.label.ifEmpty { same.label }, signedOut = false)
+    val list = if (same == null) listed + kept else listed.map { if (it.id == same.id) kept else it }
+    return copy(servers = list, activeServer = kept.id, server = kept)
+}
+
+// The settings as they are written: `server` a copy of the one in use.
+internal fun AppSettings.mirrored(): AppSettings {
+    val active = activeServer?.let { id -> servers.firstOrNull { it.id == id } }
+    return if (active == server && (active != null || activeServer == null)) this else copy(server = active, activeServer = active?.id)
+}
 
 @Serializable
 data class Appearance(
@@ -256,7 +304,7 @@ private val json = Json {
 // app ends.
 class SettingsStore(private val file: File, private val writeDelayMs: Long = 0) {
     private val lock = Any()
-    private val _state = MutableStateFlow(read())
+    private val _state = MutableStateFlow(read().settledServers())
 
     val state: StateFlow<AppSettings> = _state
 
@@ -276,8 +324,12 @@ class SettingsStore(private val file: File, private val writeDelayMs: Long = 0) 
 
     fun update(change: (AppSettings) -> AppSettings) {
         synchronized(lock) {
-            val next = change(_state.value)
-            if (next == _state.value) return
+            val before = _state.value
+            val changed = change(before)
+            // A change to `server` alone is read the way an older Octo's is.
+            val alone = changed.server != before.server && changed.servers == before.servers && changed.activeServer == before.activeServer
+            val next = if (alone) changed.settledServers() else changed.mirrored()
+            if (next == before) return
             _state.value = next
             if (writer == null) {
                 write(next)

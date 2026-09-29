@@ -88,7 +88,9 @@ class PlayReporter(
 
     private fun logIn(folder: File): PlayLog = synchronized(logs) { logs.getOrPut(folder) { PlayLog(File(folder, "plays.jsonl"), logMax) } }
 
-    private fun folder(): File? = root?.let { dir -> connection()?.let { listeningFolder(dir, it.client.username, it.server.address) } }
+    private fun folder(): File? = folderOf(connection())
+
+    private fun folderOf(connection: Connection?): File? = root?.let { dir -> connection?.let { listeningFolder(dir, it.server) } }
 
     private fun reports(): Boolean = settings.current.listening.reportPlays
 
@@ -128,8 +130,11 @@ class PlayReporter(
     // dropped, since it would refuse it again.
     private fun sendWaiting() = scope.launch(io) {
         if (!reports()) return@launch
-        val client = connection()?.client ?: return@launch
-        val folder = folder() ?: return@launch
+        // The client and the folder of one server, read once: a switch to
+        // another server in between must not send one's plays to the other.
+        val now = connection() ?: return@launch
+        val client = now.client
+        val folder = folderOf(now) ?: return@launch
         val file = File(folder, "pending.txt")
         val pending = PendingPlays(file)
         sending.withLock {

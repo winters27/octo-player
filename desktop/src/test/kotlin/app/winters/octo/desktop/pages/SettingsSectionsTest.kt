@@ -3,6 +3,7 @@ package app.winters.octo.desktop.pages
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.SettingsSize
 import app.winters.octo.design.Space
+import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.settings.AmbienceStyle
 import app.winters.octo.desktop.settings.Appearance
 import app.winters.octo.desktop.ui.PageSide
@@ -83,9 +84,9 @@ class SettingsSectionsTest {
     }
 
     @Test
-    fun theServerIsDescribedInPlainWords() {
-        assertEquals("Offers synced lyrics and adding songs you find online to your library.", serverOffers(lyrics = true, adds = true))
-        assertEquals("Offers synced lyrics.", serverOffers(lyrics = true, adds = false))
-        assertNull(serverOffers(lyrics = false, adds = false))
+    fun theServerIsDescribedInPlainWords() = FakeServer().use { server ->
+        assertEquals("Offers synced lyrics and adding songs you find online to your library.", serverOffers(server.connection(listOf("songLyrics:1", "octoAcquisitions:1"))))
+        assertEquals("Offers synced lyrics.", serverOffers(server.connection(listOf("octoLyrics:1"))))
+        assertNull(serverOffers(server.connection()))
     }
 }

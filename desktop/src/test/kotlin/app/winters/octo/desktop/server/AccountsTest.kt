@@ -129,21 +129,26 @@ class AccountsTest {
     }
 
     @Test
-    fun signingOutForgetsThePasswordAndTheServer() = runTest {
+    fun signingOutForgetsThePasswordAndKeepsTheServerListed() = runTest {
         octoServer()
         accounts.signIn(server.address, "winters", "pw")
         accounts.signOut()
         assertTrue(secrets.kept.isEmpty())
         assertNull(settings.current.server)
         assertNull(accounts.restore())
+        assertTrue(accounts.servers.single().signedOut)
+        assertEquals("the sign-in page starts from it", "winters", accounts.last!!.username)
     }
 
     @Test
-    fun signingInElsewhereRemovesTheOldPassword() = runTest {
+    fun signingInAsSomeoneElseKeepsTheFirstAccountToo() = runTest {
         octoServer()
         accounts.signIn(server.address, "winters", "pw")
         accounts.signIn(server.address, "brandon", "pw2")
-        assertEquals(setOf(secretAccount("brandon", settings.current.server!!.address)), secrets.kept.keys)
+        val address = settings.current.server!!.address
+        assertEquals(setOf(secretAccount("winters", address), secretAccount("brandon", address)), secrets.kept.keys)
+        assertEquals(listOf("winters", "brandon"), accounts.servers.map { it.username })
+        assertEquals("brandon", accounts.active!!.username)
     }
 
     @Test

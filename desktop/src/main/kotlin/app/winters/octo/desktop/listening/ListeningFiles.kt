@@ -8,13 +8,20 @@ import app.winters.octo.listening.decodePending
 import app.winters.octo.listening.encodePending
 import app.winters.octo.listening.plusPlay
 import app.winters.octo.livelists.accountKey
+import app.winters.octo.desktop.settings.SavedServer
+import app.winters.octo.desktop.settings.key
 import app.winters.octo.subsonic.Song
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 
-// Each server account keeps its listening in its own folder, named by a
-// hash of the name and address so neither shows in the file name.
+// Each server account keeps its listening in its own folder, named by the
+// server's id: a hash of the name and address from when it was first kept,
+// so neither shows in the file name, and the folder stays when the address
+// is edited.
+fun listeningFolder(root: File, server: SavedServer): File = File(File(root, "listening"), server.key)
+
+// The folder of an account by its name and address, as it was first kept.
 fun listeningFolder(root: File, username: String, address: String): File =
     File(File(root, "listening"), accountKey(username, address))
 

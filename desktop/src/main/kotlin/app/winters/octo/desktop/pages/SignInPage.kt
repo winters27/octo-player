@@ -46,6 +46,10 @@ import androidx.compose.ui.unit.dp
 import app.winters.octo.connection.formatFingerprint
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.server.CertificateQuestion
+import app.winters.octo.desktop.server.SwitchOutcome
+import app.winters.octo.desktop.settings.name
+import app.winters.octo.design.TextAction
+import androidx.compose.runtime.collectAsState
 import app.winters.octo.desktop.server.SignInOutcome
 import app.winters.octo.desktop.server.TestOutcome
 import app.winters.octo.desktop.server.shownAddress
@@ -113,6 +117,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                     form.apiKey = ""
                     app.signedIn(done.connection, done.note)
                 }
+                is SignInOutcome.Saved -> Unit
                 is SignInOutcome.Failed -> form.result = false to done.message
                 is SignInOutcome.Untrusted -> form.question = done.question
             }
@@ -197,11 +202,39 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                     AccentButton("Sign in", ::signIn, Modifier.widthIn(min = 150.dp), enabled = form.ready, loading = form.busy, size = ButtonSize.Medium)
                 }
             }
+            OtherServers(app)
         }
     }
 }
 
 private val CardShape = RoundedCornerShape(22.dp)
+
+// The other servers kept here, under the card, to open one of them instead.
+// One whose password is kept opens at once; otherwise the card fills in
+// with it and asks for the password.
+@Composable
+private fun OtherServers(app: AppState) {
+    val settings by app.settings.state.collectAsState()
+    val shown = app.signInForm.url?.toString()
+    val others = settings.servers.filter { it.address != shown || it.username != app.signInForm.username.trim() }
+    if (others.isEmpty()) return
+    Column(Modifier.padding(top = 16.dp).width(480.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Txt(if (app.switching != null) "Opening ${app.switching?.name}" else "Or open another of your servers", OctoType.caption, OctoColors.TextMuted)
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally), modifier = Modifier.padding(top = 4.dp)) {
+            others.take(4).forEach { server ->
+                TextAction(server.name, {
+                    if (server.signedOut) {
+                        app.fillSignIn(server)
+                    } else {
+                        app.switchTo(server.id) { outcome ->
+                            if (outcome is SwitchOutcome.NeedsPassword) app.fillSignIn(outcome.server, outcome.note)
+                        }
+                    }
+                }, enabled = app.switching == null)
+            }
+        }
+    }
+}
 
 // Below this height the card packs tighter.
 private val ShortWindow = 720.dp
@@ -230,7 +263,7 @@ private val CardFilm = Color(0xFF1A1A1E).copy(alpha = 0.55f)
 // The settings most servers never need: other ways of signing in, a home
 // address and extra headers.
 @Composable
-private fun ColumnScope.Advanced(form: SignInForm, submit: () -> Unit) {
+internal fun ColumnScope.Advanced(form: SignInForm, submit: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SwitchRow(
             "Legacy sign-in",
@@ -278,7 +311,7 @@ private fun ColumnScope.Advanced(form: SignInForm, submit: () -> Unit) {
 
 // A password or key: dots until the eye inside the field shows it.
 @Composable
-private fun SecretField(value: String, onChange: (String) -> Unit, placeholder: String, submit: () -> Unit, focus: FocusRequester? = null) {
+internal fun SecretField(value: String, onChange: (String) -> Unit, placeholder: String, submit: () -> Unit, focus: FocusRequester? = null) {
     var reveal by remember { mutableStateOf(false) }
     GlassField(
         value,
@@ -309,7 +342,7 @@ private fun SecretField(value: String, onChange: (String) -> Unit, placeholder: 
 // The scheme at the start of the address: a small darker pill set into
 // the field that switches between https:// and http:// when clicked.
 @Composable
-private fun SchemeToggle(prefix: String, onClick: () -> Unit) {
+internal fun SchemeToggle(prefix: String, onClick: () -> Unit) {
     val shape = RoundedCornerShape(8.dp)
     val other = if (prefix == "https://") "http://" else "https://"
     OctoTooltip("Switch to $other") {
@@ -328,7 +361,7 @@ private fun SchemeToggle(prefix: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun AdvancedToggle(open: Boolean, onClick: () -> Unit) {
+internal fun AdvancedToggle(open: Boolean, onClick: () -> Unit) {
     val turn by animateFloatAsState(if (open) 90f else 0f, if (LocalReduceMotion.current) snap() else spring(), label = "advanced chevron")
     Column(Modifier.padding(top = 4.dp)) {
         Separator()
@@ -374,7 +407,7 @@ private fun SwitchRow(label: String, detail: String, checked: Boolean, enabled: 
 // listener can compare it with the server's own. Nothing is trusted unless
 // they say so.
 @Composable
-private fun TrustQuestion(question: CertificateQuestion, onTrust: () -> Unit, onCancel: () -> Unit) {
+internal fun TrustQuestion(question: CertificateQuestion, onTrust: () -> Unit, onCancel: () -> Unit) {
     MenuTitle("Trust this certificate?")
     PopupPadding {
         Txt(

@@ -4,6 +4,7 @@ import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.QueueEntry
 import app.winters.octo.desktop.player.RepeatMode
+import app.winters.octo.desktop.player.SavedQueue
 import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.songJson
@@ -212,5 +213,48 @@ class QueueTest {
         sync.check(force = true)
         waitFor { sync.offer != null }
         assertNull(sync.offer!!.device)
+    }
+
+    // ---- Switching servers ----
+
+    @Test
+    fun aStoppedPlayerIsNotSavedOverAQueueNotYetBroughtBack() = runBlocking {
+        val folder = File(temp.root, "account")
+        val first = SilentPlayer(clock = { now })
+        first.play(songs, 2)
+        QueueKeeper(first, scope, Dispatchers.Unconfined).apply { this.folder = folder }.saveNow()
+        // The player changes after the folder is set and before its queue
+        // is looked for, as it does in a switch of server.
+        val second = SilentPlayer(clock = { now })
+        val keeper = QueueKeeper(second, scope, Dispatchers.Unconfined)
+        keeper.start()
+        keeper.folder = folder
+        second.play(songs.take(1), 0)
+        second.clear()
+        // Past the keeper's wait before it saves a changed queue.
+        Thread.sleep(1_600)
+        assertNotNull("still there to come back", keeper.restore())
+        assertEquals("s3", second.state.value.current?.song?.id)
+    }
+
+    @Test
+    fun aQueuePutBackIsNotSentAgainAtAPause() {
+        server.answer("savePlayQueue")
+        server.answer("getPlayQueue")
+        val player = SilentPlayer(clock = { now })
+        val sync = sync(player)
+        sync.start()
+        val saved = SavedQueue(songs, songs.indices.toList(), 2, 30_000)
+        sync.restored(saved)
+        player.restore(saved)
+        sync.putBack()
+        player.togglePlay()
+        player.togglePlay()
+        Thread.sleep(300)
+        assertFalse(server.endpoints().toString(), "savePlayQueue" in server.endpoints())
+        // Once it changes, it is sent.
+        player.next()
+        waitFor { "savePlayQueue" in server.endpoints() }
+        assertTrue("savePlayQueue" in server.endpoints())
     }
 }
