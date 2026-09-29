@@ -314,6 +314,30 @@ compose.desktop {
     }
 }
 
+// A class data sharing (CDS) archive in the packaged runtime: the Java
+// classes every start loads, parsed once here into a file the JVM maps at
+// start, as a full JDK ships one (jlink leaves it out of a trimmed runtime).
+// jlink's own --generate-cds-archive needs the runtime's java launcher,
+// which the trimmed runtime drops, so the JDK that built the runtime lends
+// its launcher for the dump and takes it back. A JVM that cannot use the
+// archive starts without it, as before.
+tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJLinkTask>().configureEach {
+    doLast {
+        val runtime = destinationDir.get().asFile
+        val exe = if (hostName.startsWith("windows")) "java.exe" else "java"
+        val lent = File(runtime, "bin/$exe")
+        File(javaHome.get(), "bin/$exe").copyTo(lent, overwrite = true)
+        try {
+            lent.setExecutable(true)
+            val dump = ProcessBuilder(lent.absolutePath, "-Xshare:dump").redirectErrorStream(true).start()
+            val said = dump.inputStream.bufferedReader().readText()
+            if (dump.waitFor() != 0) throw GradleException("The runtime's CDS archive could not be made:\n$said")
+        } finally {
+            lent.delete()
+        }
+    }
+}
+
 // The app as a zip that runs from wherever it is unpacked, installing
 // nothing: build/compose/binaries/main/zip/Octo-<version>-<system>.zip.
 val packagePortableZip by tasks.registering(Zip::class) {
