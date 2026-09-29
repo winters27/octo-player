@@ -29,25 +29,6 @@ class CoverTextTest {
     }
 
     @Test
-    fun theFirstCharacterKeepsWhatBelongsToIt() {
-        assertEquals("é", firstGrapheme("école"))
-        assertEquals("👍🏽", firstGrapheme("👍🏽 yes"))
-        assertEquals("👩‍💻", firstGrapheme("👩‍💻 code"))
-        assertEquals("🇯🇵", firstGrapheme("🇯🇵🇫🇷"))
-        assertEquals("❤️", firstGrapheme("❤️ love"))
-        assertEquals("夜", firstGrapheme("夜のドライブ"))
-    }
-
-    @Test
-    fun aMonogramIsTheFirstLetterAsACapital() {
-        assertEquals("L", monogram("late night"))
-        assertEquals("1", monogram("  #1 hits"))
-        assertEquals("夜", monogram("夜のドライブ"))
-        assertEquals("🌙", monogram("🌙 Night moves"))
-        assertEquals("أ", monogram("أغاني الصيف"))
-    }
-
-    @Test
     fun wideCharactersEachStandAlone() {
         assertEquals(listOf("Late", "night"), unbreakableRuns("Late  night"))
         assertEquals(listOf("夜", "の", "ド", "ラ", "イ", "ブ"), unbreakableRuns("夜のドライブ"))

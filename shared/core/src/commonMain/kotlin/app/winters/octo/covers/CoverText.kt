@@ -73,46 +73,6 @@ fun isRightToLeft(text: String): Boolean {
     return false
 }
 
-// The first character as a reader sees it: a letter with its accents, an
-// emoji with its skin tone, flag pair or joined parts.
-fun firstGrapheme(text: String): String {
-    if (text.isEmpty()) return ""
-    var end = Character.charCount(text.codePointAt(0))
-    val first = text.codePointAt(0)
-    val flag = first in 0x1F1E6..0x1F1FF
-    while (end < text.length) {
-        val cp = text.codePointAt(end)
-        val joins = when {
-            cp == 0x200D -> {
-                // A joiner takes the character after it too.
-                end += Character.charCount(cp)
-                if (end < text.length) end += Character.charCount(text.codePointAt(end))
-                continue
-            }
-            Character.getType(cp).let {
-                it == Character.NON_SPACING_MARK.toInt() || it == Character.ENCLOSING_MARK.toInt() || it == Character.COMBINING_SPACING_MARK.toInt()
-            } -> true
-            cp in 0xFE00..0xFE0F || cp in 0xE0100..0xE01EF -> true
-            cp in 0x1F3FB..0x1F3FF -> true
-            cp in 0xE0020..0xE007F -> true
-            flag && cp in 0x1F1E6..0x1F1FF && end == Character.charCount(first) -> true
-            else -> false
-        }
-        if (!joins) break
-        end += Character.charCount(cp)
-    }
-    return text.substring(0, end)
-}
-
-// The one character a tiny cover shows: the first letter, number or emoji
-// of the name, a capital where the writing has them.
-fun monogram(name: String): String {
-    val start = name.indexOfFirst { !it.isWhitespace() && (it.isLetterOrDigit() || it.isSurrogate() || it.code >= 0x2600) }
-    if (start < 0) return name.trim().take(1)
-    val first = firstGrapheme(name.substring(start))
-    return if (first.length == 1) first.uppercase() else first
-}
-
 // The pieces of the text that cannot be broken across lines: words between
 // spaces, while wide characters (Chinese, Japanese, Korean) each stand alone.
 fun unbreakableRuns(text: String): List<String> {

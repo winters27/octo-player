@@ -40,9 +40,9 @@ class CoverPaletteTest {
         val blue = listOf(Swatch(rgb(30, 60, 200), 0.6f))
         val palette = coverPalette(listOf(red, blue), "pl-1")
         assertTrue(palette.fromMusic)
-        // The first hue is the strongest cover's, the second a clearly different one.
+        // The strongest cover's colour, its hue and lightness.
         assertTrue(hueDistance(palette.hue.toDouble(), toLch(rgb(200, 30, 40)).h) < 2)
-        assertTrue(hueDistance(palette.hue2.toDouble(), toLch(rgb(30, 60, 200)).h) < 2)
+        assertEquals(toLch(rgb(200, 30, 40)).l, palette.lightness, 0.002)
     }
 
     @Test
@@ -77,7 +77,6 @@ class CoverPaletteTest {
     fun theHashIsTheSameEverywhere() {
         // FNV-1a over UTF-8, shifted: fixed values, so the server's matches.
         assertEquals(0x5280d386db28089bL, coverHash("pl-1"))
-        assertEquals(1, coverGradientOf("pl-1"))
     }
 
     @Test

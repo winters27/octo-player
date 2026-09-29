@@ -3,7 +3,7 @@ package app.winters.octo.covers
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-// The covers' design as numbers: the layout and the curated gradients, read
+// The covers' design as numbers: the layout, the fonts and the veil, read
 // from cover-design.json beside this file. The phone, the desktop and the
 // server all draw from that one file, so their covers match.
 @Serializable
@@ -11,8 +11,8 @@ data class CoverBook(
     val version: Int,
     val fonts: CoverFonts,
     val layout: CoverLayoutNumbers,
-    val music: MusicRule,
-    val gradients: List<CoverGradient>,
+    val background: BackgroundRule,
+    val veil: VeilNumbers,
 ) {
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
@@ -36,8 +36,6 @@ data class CoverLayoutNumbers(
     val margin: Float,
     val contrast: Double,
     val tinyBelowPx: Int,
-    val tinyMargin: Float,
-    val tinySize: Float,
     val title: TitleNumbers,
     val line: LineNumbers,
     val footer: FooterNumbers,
@@ -83,30 +81,74 @@ data class FooterNumbers(
     val showFromPx: Int,
 )
 
+// How music picks a background (see "background" in cover-design.json).
 @Serializable
-data class MusicRule(val maxChroma: Double, val minChroma: Double = 0.0)
-
-// A linear gradient from one point to another, its stops as (place, colour index).
-@Serializable
-data class CoverBase(val from: List<Float>, val to: List<Float>, val stops: List<List<Float>>)
-
-// A disc of one colour, solid out to (1 - soft) of its radius, then fading
-// to nothing at the radius.
-@Serializable
-data class CoverFold(val centre: List<Float>, val radius: Float, val soft: Float, val colour: Int)
-
-// A faint round light, `opacity` at its centre and nothing at its radius.
-@Serializable
-data class CoverLight(val centre: List<Float>, val radius: Float, val colour: String, val opacity: Float)
-
-@Serializable
-data class CoverGradient(
-    val name: String,
-    val colours: List<String>,
-    val base: CoverBase,
-    val folds: List<CoverFold> = emptyList(),
-    val light: CoverLight? = null,
+data class BackgroundRule(
+    val nearest: Int,
+    val hueStep: Double,
+    val greyBelow: Double,
+    val greyPenalty: Double,
+    val chromaWeight: Double,
+    val lightnessWeight: Double,
 )
 
-// "#rrggbb" as opaque ARGB.
-fun hexColour(hex: String): Int = (0xFF shl 24) or hex.removePrefix("#").toInt(16)
+// The veil's numbers (see "veil" in cover-design.json for what each means).
+@Serializable
+data class VeilNumbers(
+    val margin: Double,
+    val refine: Int,
+    val title: TitleVeil,
+    val footer: FooterVeil,
+    val yellow: YellowTurn,
+)
+
+@Serializable
+data class TitleVeil(val pad: Float, val falloff: List<Double>, val aimContrast: Double, val minContrast: Double, val maxDrop: Double)
+
+@Serializable
+data class FooterVeil(val pad: Float, val falloff: List<Double>, val contrast: Double)
+
+@Serializable
+data class YellowTurn(
+    val hues: List<Double>,
+    val split: Double,
+    val towards: List<Double>,
+    val turnPerDrop: Double,
+    val chromaFrom: Double,
+    val chromaLift: Double,
+)
+
+// The library of painted backgrounds, from backgrounds/backgrounds.json:
+// each file's strongest hues (OKLCH, strongest first) and mean lightness.
+@Serializable
+data class CoverBackgrounds(val version: Int, val size: Int, val backgrounds: List<CoverBackground>) {
+    companion object {
+        private val json = Json { ignoreUnknownKeys = true }
+
+        fun parse(text: String): CoverBackgrounds = json.decodeFromString(serializer(), text)
+
+        val Default: CoverBackgrounds by lazy {
+            val stream = CoverBackgrounds::class.java.getResourceAsStream("backgrounds/backgrounds.json")
+                ?: error("backgrounds.json is missing from the build")
+            parse(stream.use { it.readBytes().decodeToString() })
+        }
+
+        // A background's file as stored (WebP, `size` square).
+        fun bytes(file: String): ByteArray =
+            CoverBackgrounds::class.java.getResourceAsStream("backgrounds/$file")?.use { it.readBytes() }
+                ?: error("$file is missing from the covers' backgrounds")
+    }
+}
+
+@Serializable
+data class CoverBackground(
+    val file: String,
+    val name: String,
+    val family: String = "",
+    val hues: List<BackgroundHue>,
+    val meanLightness: Double,
+)
+
+@Serializable
+data class BackgroundHue(val l: Double, val c: Double, val h: Double)
+
