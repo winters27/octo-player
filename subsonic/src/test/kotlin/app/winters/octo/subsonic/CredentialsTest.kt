@@ -12,6 +12,14 @@ class CredentialsTest {
     }
 
     @Test
+    fun hexIsTwoLowerCaseDigitsForEveryByte() {
+        val every = ByteArray(256) { it.toByte() }
+        assertEquals(every.joinToString("") { "%02x".format(it) }, every.toHex())
+        assertEquals("", ByteArray(0).toHex())
+        assertEquals(16, newSalt().length)
+    }
+
+    @Test
     fun toStringHidesThePassword() {
         assertFalse("sesame" in Credentials("u", "sesame").toString())
     }

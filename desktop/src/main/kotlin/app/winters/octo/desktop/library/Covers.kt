@@ -80,6 +80,13 @@ fun coverKey(host: String, coverId: String, bucket: Int, online: Boolean = false
 // The client covers come from, set once signed in.
 val LocalCovers = staticCompositionLocalOf<SubsonicClient?> { null }
 
+// How many bytes of decoded covers are kept in memory: a few screens of
+// the Albums grid at 150%. Covers are Skia bitmaps outside the Java heap,
+// so the stock share of the heap limit (a fifth, 205 MB under -Xmx1g) went
+// straight onto the app's memory as the listener browsed. A cover scrolled
+// out of it comes back from the disk cache.
+const val COVER_MEMORY_BYTES = 64L * 1024 * 1024
+
 // The image loader for the whole app: the app's own HTTP client, a memory
 // cache, and a disk cache in the app's cache folder.
 fun coverLoader(context: PlatformContext, http: OkHttpClient, cacheDir: File): ImageLoader =
@@ -88,7 +95,7 @@ fun coverLoader(context: PlatformContext, http: OkHttpClient, cacheDir: File): I
             add(SmoothCoverDecoder.Factory())
             add(OkHttpNetworkFetcherFactory(callFactory = { http }))
         }
-        .memoryCache { MemoryCache.Builder().maxSizePercent(context, 0.2).build() }
+        .memoryCache { MemoryCache.Builder().maxSizeBytes(COVER_MEMORY_BYTES).build() }
         .diskCache {
             DiskCache.Builder()
                 .directory(File(cacheDir, "covers").toOkioPath())

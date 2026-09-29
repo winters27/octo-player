@@ -74,8 +74,8 @@ internal object OctoArt {
 // Octo's own colours as a slow wash, for when there is no cover to show:
 // behind the sign-in, and very dim behind the pages while nothing plays.
 // It is the full player's background seeded with the app's icon. With
-// motion reduced, or `moving` off, it holds still. `veil` is how much of
-// the page colour lies over it.
+// motion reduced, `moving` off, or the window minimised or in the tray, it
+// holds still. `veil` is how much of the page colour lies over it.
 @Composable
 fun OctoAmbience(app: AppState, moving: Boolean, veil: Float, modifier: Modifier = Modifier, readable: Boolean = false) {
     val settings by app.settings.state.collectAsState()
@@ -89,7 +89,7 @@ fun OctoAmbience(app: AppState, moving: Boolean, veil: Float, modifier: Modifier
             // Calm and cheap: a gentle pace at a modest frame rate.
             fpsLimit = minOf(wash.fps, 30),
             speed = 0.12f,
-            moving = moving && !LocalReduceMotion.current,
+            moving = moving && !LocalReduceMotion.current && LocalWindowShown.current,
             dolly = { 1f },
         )
         // Behind the pages, the page's quietest words still read over it.

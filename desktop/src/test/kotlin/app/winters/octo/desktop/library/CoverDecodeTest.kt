@@ -66,4 +66,12 @@ class CoverDecodeTest {
         val loader = coverLoader(PlatformContext.INSTANCE, OkHttpClient(), folder.root)
         assertEquals(150, shrink(loader, 400).width)
     }
+
+    @Test
+    fun coversInMemoryHaveAFixedBudgetWhateverTheHeap() {
+        // Decoded covers live outside the Java heap, so their share must
+        // not grow with the heap limit.
+        val loader = coverLoader(PlatformContext.INSTANCE, OkHttpClient(), folder.root)
+        assertEquals(64L * 1024 * 1024, loader.memoryCache!!.maxSize)
+    }
 }

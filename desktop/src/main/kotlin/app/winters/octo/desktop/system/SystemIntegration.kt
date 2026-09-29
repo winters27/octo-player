@@ -30,6 +30,8 @@ import app.winters.octo.desktop.hotkeys.HotkeyBackend
 import app.winters.octo.desktop.nav.VOLUME_STEP
 import app.winters.octo.desktop.ui.anyOutside
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Dispatchers
@@ -248,11 +250,17 @@ class SystemIntegration(
         }
         app.scope.launch { app.player.state.collect { tell() } }
         app.scope.launch { app.settings.state.map { it.discord }.distinctUntilChanged().collect { tell() } }
+        // Kept in step while a song plays and the status is on; otherwise
+        // nothing moves, so nothing is looked at.
         app.scope.launch {
-            while (true) {
-                delay(DISCORD_CHECK_MS)
-                if (app.settings.current.discord.on) tell()
-            }
+            combine(app.player.state.map { it.playing }, app.settings.state.map { it.discord.on }) { playing, on -> playing && on }
+                .distinctUntilChanged()
+                .collectLatest { moving ->
+                    while (moving) {
+                        delay(DISCORD_CHECK_MS)
+                        tell()
+                    }
+                }
         }
     }
 

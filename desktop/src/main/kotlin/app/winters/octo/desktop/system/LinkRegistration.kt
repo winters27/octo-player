@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.system
 
+import app.winters.octo.desktop.settings.separateProfile
+
 // octo:// links open Octo. macOS learns this from the app's own details;
 // on Windows and Linux the installed app tells the system itself, for this
 // user only, whenever it runs from somewhere new.
@@ -12,7 +14,10 @@ package app.winters.octo.desktop.system
 fun installedProgram(
     told: String? = System.getProperty("jpackage.app-path"),
     running: String? = ProcessHandle.current().info().command().orElse(null),
+    // A run with a folder of its own (OCTO_PROFILE_DIR) counts as a build.
+    separate: Boolean = separateProfile(),
 ): String? {
+    if (separate) return null
     told?.takeIf(String::isNotBlank)?.let { return it }
     val name = running?.let { java.io.File(it).name.lowercase() } ?: return null
     return running.takeIf { name == "octo.exe" || name == "octo" }

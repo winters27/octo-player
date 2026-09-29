@@ -7,7 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -110,10 +110,18 @@ class MediaSession(
         jobs += scope.launch {
             started = withContext(startOn) { controls.start { event -> scope.launch { handle(event) } } }
             onStarted(started)
-            launch { player.state.collect { update() } }
-            while (isActive) {
-                delay(checkEveryMs)
-                check()
+            // A playing song's place is checked every so often; a paused
+            // one only moves when the player changes (a seek is a change).
+            player.state.collectLatest { state ->
+                update()
+                if (!state.playing) {
+                    check()
+                } else {
+                    while (true) {
+                        delay(checkEveryMs)
+                        check()
+                    }
+                }
             }
         }
     }

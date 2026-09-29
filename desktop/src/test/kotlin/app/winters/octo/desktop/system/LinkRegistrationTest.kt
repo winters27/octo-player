@@ -39,6 +39,8 @@ class LinkRegistrationTest {
         // A build runs on Java: nothing is registered for it.
         assertNull(installedProgram(null, "C:/jdks/17/bin/java.exe"))
         assertNull(installedProgram(null, null))
+        // A run with a folder of its own touches nothing of the system's.
+        assertNull(installedProgram("C:/Users/b/AppData/Local/Octo/Octo.exe", "C:/Users/b/AppData/Local/Octo/Octo.exe", separate = true))
     }
 
     @Test

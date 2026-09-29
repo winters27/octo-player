@@ -52,6 +52,9 @@ data class PlayerState(
     val ended: Int = 0,
     // Whether the last edit to the queue can be taken back (undo).
     val canUndo: Boolean = false,
+    // Counts each time the place in the song was moved (a seek, a song
+    // started over), so a paused song's place is read again only then.
+    val moves: Int = 0,
 )
 
 // Why a song could not play: in plain words for the listener, the song if
