@@ -118,7 +118,8 @@ fun AlbumPage(app: AppState, visit: Visit, id: String) {
                         "Album",
                         album.name,
                         picture = { Cover(album.coverArt, it, shape = Corner.ArtLShape, online = !inLibrary) },
-                        subtitle = { LinkText(artistName, album.artistId) { app.navigator.go(Page.Artist(it, album.artist)) } },
+                        // No line at all for an album with no artist, rather than an empty one.
+                        subtitle = artistName?.takeIf(String::isNotBlank)?.let { name -> { LinkText(name, album.artistId) { app.navigator.go(Page.Artist(it, album.artist)) } } },
                         facts = albumFacts(app, album, songs.size, songs.sumOf { it.duration }, format),
                         note = share?.let { { LibraryNote(it) { askableSongs(songs, outside, phases).forEach { song -> fetches?.request(song.id) } } } },
                     ) {

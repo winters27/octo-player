@@ -66,6 +66,13 @@ val MenuFilm = Color.Black.copy(alpha = 0.52f)
 // How hard a menu frosts what is behind it, as a CSS blur.
 const val MenuFrost = 24f
 
+// The floating player: lighter than a menu so the page reads through it as
+// frosted glass, dark enough that its words stay clear over bright covers.
+val IslandFilm = Color.Black.copy(alpha = 0.26f)
+const val IslandFrost = 20f
+// How much the colours under it deepen, so a cover's hues show through.
+const val IslandSaturation = 1.4f
+
 val MenuShape = RoundedCornerShape(14.dp)
 
 // Where a pop-up of `size` goes in a window of `window`, keeping `margin`

@@ -196,7 +196,9 @@ fun OmniPanel(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier)
             sections.isEmpty() && loading -> Txt("Searching", DesktopType.body, OctoColors.TextMuted, Modifier.padding(Space.L))
             sections.isEmpty() && model.state is SearchState.Failed ->
                 Txt((model.state as SearchState.Failed).message, DesktopType.body, OctoColors.TextMuted, Modifier.padding(Space.L), maxLines = 3)
-            sections.isEmpty() -> Txt("Nothing found. Try other words, or fewer of them.", DesktopType.body, OctoColors.TextMuted, Modifier.padding(Space.L), maxLines = 2)
+            // Nothing but the way to the Search page: say so above it.
+            sections.all { section -> section.items.all { it is OmniItem.SeeAll } } ->
+                Txt("Nothing found. Try other words, or fewer of them.", DesktopType.body, OctoColors.TextMuted, Modifier.padding(Space.L), maxLines = 2)
         }
         LazyColumn(Modifier.heightIn(max = FrameSize.OmniHeight), state = list) {
             var at = 0

@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
+import app.winters.octo.design.CutTxt
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.FrameSize
@@ -52,6 +53,9 @@ import app.winters.octo.design.GlazeLight
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
+import app.winters.octo.design.IslandFilm
+import app.winters.octo.design.IslandFrost
+import app.winters.octo.design.IslandSaturation
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.MenuFilm
 import app.winters.octo.design.MenuFrost
@@ -112,15 +116,16 @@ fun rememberPosition(player: DesktopPlayer): State<Long> {
 // top line has the song, the transport in the middle and the panels,
 // volume and More on the right, with the progress line underneath. The two
 // sides share the width evenly, so the transport stays centred whatever
-// the song's title.
+// the song's title. When `compact` (a narrow page), the panel buttons move
+// into More and the song takes all the room the transport leaves.
 @Composable
-fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
+fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, compact: Boolean = false) {
     val state by app.player.state.collectAsState()
     val song = state.current?.song
     // Songs dragged here go to the end of the queue; the player lights
     // while they are held over it.
     val over = isDropOver(PlayerDrop)
-    FloatingGlaze(backdrop, modifier.dropTarget(PlayerDrop, "Add to the queue", layer = 1) { app.addToQueue(it) }, shape = MenuShape, film = MenuFilm, frost = MenuFrost, halo = true) {
+    FloatingGlaze(backdrop, modifier.dropTarget(PlayerDrop, "Add to the queue", layer = 1) { app.addToQueue(it) }, shape = MenuShape, film = IslandFilm, frost = IslandFrost, saturation = IslandSaturation, halo = true, seesAll = true) {
         if (over) Box(Modifier.matchParentSize().background(DropLit, MenuShape))
         Row(Modifier.fillMaxSize().padding(horizontal = Space.L), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
             Cover(
@@ -133,7 +138,8 @@ fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { SongZone(app, song) }
                     Transport(app, state)
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { UtilityZone(app, state) }
+                    if (compact) UtilityZone(app, state, compact = true)
+                    else Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { UtilityZone(app, state) }
                 }
                 ProgressLine(app, state)
             }
@@ -153,7 +159,7 @@ private fun SongZone(app: AppState, song: Song?) {
                 Txt("Nothing playing", DesktopType.emphasis, OctoColors.TextMuted)
             } else {
                 val album = song.albumId?.takeIf(String::isNotBlank)
-                Txt(
+                CutTxt(
                     song.title,
                     DesktopType.emphasis,
                     OctoColors.TextPrimary,
@@ -232,14 +238,16 @@ private fun ProgressLine(app: AppState, state: PlayerState) {
 private val TimeStyle = DesktopType.meta.copy(fontFeatureSettings = "tnum")
 private val TimeWidth = Space.Wide + Space.S
 
-// The panels, the volume and More.
+// The panels, the volume and More; when `compact`, the panels are in More.
 @Composable
-private fun UtilityZone(app: AppState, state: PlayerState) {
+private fun UtilityZone(app: AppState, state: PlayerState, compact: Boolean = false) {
     Row(horizontalArrangement = Arrangement.spacedBy(Space.Xxs), verticalAlignment = Alignment.CenterVertically) {
-        IconAction(OctoIcons.Lyrics, "Lyrics", { app.toggleSidePanel(SidePanel.Lyrics) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Lyrics)
-        IconAction(OctoIcons.Queue, "Queue", { app.toggleSidePanel(SidePanel.Queue) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Queue)
+        if (!compact) {
+            IconAction(OctoIcons.Lyrics, "Lyrics", { app.toggleSidePanel(SidePanel.Lyrics) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Lyrics)
+            IconAction(OctoIcons.Queue, "Queue", { app.toggleSidePanel(SidePanel.Queue) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Queue)
+        }
         VolumeButton(app, state.volume)
-        MoreButton(app, state)
+        MoreButton(app, state, compact)
     }
 }
 
@@ -247,13 +255,13 @@ private fun UtilityZone(app: AppState, state: PlayerState) {
 // sleep timer, stopping after this song, the song's details (with its
 // format) and the mini player. Lit while a timer is set.
 @Composable
-private fun MoreButton(app: AppState, state: PlayerState) {
+private fun MoreButton(app: AppState, state: PlayerState, compact: Boolean) {
     var anchor by remember { mutableStateOf(IntRect.Zero) }
     val sleep by app.sleep.state.collectAsState()
     val timing = sleep != SleepState.Off
     Box(Modifier.onGloballyPositioned { anchor = it.windowRect() }) {
         IconAction(OctoIcons.More, if (timing) "More (sleep timer: ${sleepSummary(sleep)})" else "More", {
-            app.popups.showUnder(anchor, width = FrameSize.Menu) { close -> MoreMenu(app, close) }
+            app.popups.showUnder(anchor, width = FrameSize.Menu) { close -> MoreMenu(app, close, compact) }
         }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = timing || state.stopAfterCurrent)
     }
 }
@@ -261,13 +269,18 @@ private fun MoreButton(app: AppState, state: PlayerState) {
 private enum class MorePage { Main, Output, Sleep }
 
 @Composable
-private fun ColumnScope.MoreMenu(app: AppState, close: () -> Unit) {
+private fun ColumnScope.MoreMenu(app: AppState, close: () -> Unit, compact: Boolean) {
     var page by remember { mutableStateOf(MorePage.Main) }
     val now by app.player.state.collectAsState()
     val sleep by app.sleep.state.collectAsState()
     when (page) {
         MorePage.Main -> {
             MenuRow("Open the player", { app.fullPlayer = true; close() }, OctoIcons.Expand, enabled = now.current != null)
+            // The panel buttons, when the player is too narrow to show them.
+            if (compact) {
+                MenuRow("Lyrics", { app.toggleSidePanel(SidePanel.Lyrics); close() }, if (app.sidePanel == SidePanel.Lyrics) OctoIcons.Check else OctoIcons.Lyrics)
+                MenuRow("Queue", { app.toggleSidePanel(SidePanel.Queue); close() }, if (app.sidePanel == SidePanel.Queue) OctoIcons.Check else OctoIcons.Queue)
+            }
             MenuRow("Play on", { page = MorePage.Output }, outputIcon(now.playingOn?.name), more = true, detail = now.playingOn?.name ?: "System default")
             MenuSeparator()
             MenuRow("Sleep timer", { page = MorePage.Sleep }, OctoIcons.SleepTimer, more = true, detail = if (sleep != SleepState.Off) sleepSummary(sleep) else null)

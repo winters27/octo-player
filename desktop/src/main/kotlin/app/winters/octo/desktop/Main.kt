@@ -57,6 +57,7 @@ import app.winters.octo.desktop.ui.Shell
 import app.winters.octo.desktop.window.Frame
 import app.winters.octo.desktop.window.MIN_HEIGHT
 import app.winters.octo.desktop.window.MIN_WIDTH
+import app.winters.octo.desktop.window.keepsSpot
 import app.winters.octo.desktop.window.placeWindow
 import app.winters.octo.desktop.window.roundWindowsCorners
 import app.winters.octo.desktop.window.screenAreas
@@ -72,8 +73,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.debounce
-import org.jetbrains.skiko.GraphicsApi
 import okhttp3.OkHttpClient
+import org.jetbrains.skiko.GraphicsApi
 
 private fun appIcon(): Painter? = runCatching {
     val bytes = AppState::class.java.getResourceAsStream("/octo-icon.png")!!.use { it.readBytes() }
@@ -201,10 +202,11 @@ fun main(args: Array<String>) {
             // Remembers the window's own size and place as it changes, and
             // saves it once it settles, so a crash does not lose it.
             LaunchedEffect(Unit) {
-                snapshotFlow { Triple(windowState.position, windowState.size, maximizedNow() || windowState.placement != WindowPlacement.Floating) }
+                snapshotFlow { Triple(windowState.position, windowState.size, maximizedNow() || windowState.placement != WindowPlacement.Floating) to windowState.isMinimized }
                     .debounce(700)
-                    .collect { (position, size, filled) ->
-                        if (!filled && position is WindowPosition.Absolute) {
+                    .collect { (where, minimized) ->
+                        val (position, size, filled) = where
+                        if (position is WindowPosition.Absolute && keepsSpot(minimized, filled, position.x.value, position.y.value)) {
                             floating = WindowSpot(position.x.value, position.y.value, size.width.value, size.height.value)
                         }
                         keepPlace()

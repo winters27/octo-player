@@ -37,6 +37,7 @@ class SizesTest {
         "system/MiniPlayer.kt",
         "system/MoreSystemRows.kt",
         "hotkeys/ShortcutRows.kt",
+        "ui/FrameFit.kt",
     )
 
     private val root = File("src/main/kotlin/app/winters/octo/desktop")

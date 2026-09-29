@@ -40,6 +40,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import app.winters.octo.design.CutTxt
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.OctoColors
@@ -56,6 +57,7 @@ import app.winters.octo.desktop.nav.ScrollSpot
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.subsonic.SubsonicException
+import dev.chrisbanes.haze.HazeState
 
 // What a page's data has come to.
 sealed interface Load<out T> {
@@ -108,6 +110,10 @@ private const val GRID = "grid"
 // Room a page leaves at its foot for the now-playing bar floating over it.
 val LocalBottomRoom = staticCompositionLocalOf { 0.dp }
 
+// The window's colours the frame's glass frosts, for glass floating over a
+// page (the bar of picked songs) to be made of the player's material.
+val LocalFrameBackdrop = staticCompositionLocalOf<HazeState?> { null }
+
 // The side margin every page keeps.
 val PageSide = 28.dp
 
@@ -155,6 +161,10 @@ fun LoadingLine(text: String = "Loading", modifier: Modifier = Modifier) {
         Txt(text, OctoType.bodySmall, OctoColors.TextSecondary)
     }
 }
+
+// The same, on its own on a page, in from the page's side as its words are.
+@Composable
+fun PageLoadingLine(text: String = "Loading") = LoadingLine(text, Modifier.padding(horizontal = PageSide))
 
 @Composable
 fun FailedLine(message: String, retry: () -> Unit, modifier: Modifier = Modifier) {
@@ -216,8 +226,8 @@ fun MediaCard(
             if (badge != null) Box(Modifier.align(Alignment.BottomEnd).padding(6.dp)) { badge() }
         }
         Column(Modifier.fillMaxWidth(), horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
-            Txt(title, OctoType.label)
-            if (subtitle != null) Txt(subtitle, OctoType.caption, OctoColors.TextMuted)
+            CutTxt(title, OctoType.label)
+            if (subtitle != null) CutTxt(subtitle, OctoType.caption, OctoColors.TextMuted)
         }
     }
 }

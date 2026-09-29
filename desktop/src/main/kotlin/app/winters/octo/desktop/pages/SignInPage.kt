@@ -143,16 +143,18 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
     // While the certificate is asked about, the card steps back behind it.
     val asking by animateFloatAsState(if (form.question != null) 0.35f else 1f, label = "asking")
     BoxWithConstraints(Modifier.fillMaxSize().alpha(asking)) {
+        // On a short window the card packs tighter, so Sign in shows without scrolling.
+        val short = maxHeight < ShortWindow
         Column(
             Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .heightIn(min = maxHeight)
-                .padding(vertical = 32.dp),
+                .padding(vertical = if (short) 12.dp else 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            SignInCard(backdrop) {
+            SignInCard(backdrop, short) {
                 Txt("Octo", OctoType.display)
                 Txt("Sign in to your music server. Any Subsonic, Navidrome or Octo server works.", OctoType.bodySmall, OctoColors.TextSecondary, maxLines = 3)
 
@@ -198,10 +200,13 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
 
 private val CardShape = RoundedCornerShape(22.dp)
 
+// Below this height the card packs tighter.
+private val ShortWindow = 720.dp
+
 // The one card of the sign-in: frosted glass over Octo's colours, with a
 // rim that takes a hint of the key colour.
 @Composable
-private fun SignInCard(backdrop: HazeState, content: @Composable ColumnScope.() -> Unit) {
+private fun SignInCard(backdrop: HazeState, short: Boolean, content: @Composable ColumnScope.() -> Unit) {
     val key = LocalKeyColour.current
     FloatingGlaze(
         backdrop = backdrop,
@@ -212,7 +217,7 @@ private fun SignInCard(backdrop: HazeState, content: @Composable ColumnScope.() 
         saturation = 1.8f,
     ) {
         Box(Modifier.matchParentSize().innerShadow(CardShape, Shadow(radius = 0.dp, spread = 1.dp, color = keyRim(key))))
-        Column(Modifier.fillMaxWidth().padding(32.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+        Column(Modifier.fillMaxWidth().padding(if (short) 20.dp else 32.dp), verticalArrangement = Arrangement.spacedBy(if (short) 6.dp else 12.dp), content = content)
     }
 }
 

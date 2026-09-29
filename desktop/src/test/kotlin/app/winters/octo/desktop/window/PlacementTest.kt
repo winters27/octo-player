@@ -1,10 +1,12 @@
 package app.winters.octo.desktop.window
 
 import app.winters.octo.desktop.settings.WindowSpot
-import org.junit.Assert.assertEquals
-import org.junit.Test
 import java.awt.Dimension
 import java.awt.Rectangle
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
 
 class PlacementTest {
     private val laptop = ScreenArea(0f, 0f, 1920f, 1040f)
@@ -12,7 +14,24 @@ class PlacementTest {
 
     @Test
     fun theFirstTimeItOpensCentredAtItsUsualSize() {
-        assertEquals(WindowSpot(320f, 120f, 1280f, 800f), placeWindow(null, listOf(laptop)))
+        // 1600 by 1000, at most nine tenths of the screen.
+        assertEquals(WindowSpot(160f, 52f, 1600f, 936f), placeWindow(null, listOf(laptop)))
+        assertEquals(WindowSpot(2400f, 200f, 1600f, 1000f), placeWindow(null, listOf(rightMonitor)))
+    }
+
+    @Test
+    fun aSpotSavedAtTheMinimumOpensRoomyAndCentredStillFilled() {
+        // What a minimized window used to be saved as.
+        val minimumInTheCorner = WindowSpot(0f, 0f, 960f, 600f, maximized = true)
+        assertEquals(WindowSpot(160f, 52f, 1600f, 936f, maximized = true), placeWindow(minimumInTheCorner, listOf(laptop)))
+    }
+
+    @Test
+    fun onlyAWindowAtItsOwnSizeOnAScreenIsKept() {
+        assertTrue(keepsSpot(minimized = false, filled = false, x = 120f, y = 80f))
+        assertFalse("minimized", keepsSpot(minimized = true, filled = false, x = 120f, y = 80f))
+        assertFalse("filling the screen", keepsSpot(minimized = false, filled = true, x = 0f, y = 0f))
+        assertFalse("parked off screen", keepsSpot(minimized = false, filled = false, x = -32000f, y = -32000f))
     }
 
     @Test
@@ -29,7 +48,7 @@ class PlacementTest {
 
     @Test
     fun itIsNeverSmallerThanTheMinimumNorBiggerThanTheScreen() {
-        assertEquals(WindowSpot(10f, 10f, 960f, 600f), placeWindow(WindowSpot(10f, 10f, 300f, 200f), listOf(laptop)))
+        assertEquals(WindowSpot(10f, 10f, 1000f, 600f), placeWindow(WindowSpot(10f, 10f, 1000f, 200f), listOf(laptop)))
         assertEquals(WindowSpot(0f, 0f, 1920f, 1040f), placeWindow(WindowSpot(0f, 0f, 5000f, 3000f), listOf(laptop)))
     }
 

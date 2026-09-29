@@ -17,9 +17,9 @@ import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.HazeSourceSelection
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.HazeBlurStyle
 import dev.chrisbanes.haze.blur.HazeColorEffect
@@ -118,6 +119,9 @@ fun Glaze(
     frost: Float = GlazeFrost,
     saturation: Float = GlazeSaturation,
     focused: Boolean = LocalWindowFocused.current,
+    // Frost every source on `backdrop`, not only the one behind by default:
+    // glass floating over a page that is a source of its own.
+    seesAll: Boolean = false,
     content: @Composable BoxScope.() -> Unit = {},
 ) {
     val blur = remember(frost, saturation) {
@@ -141,7 +145,7 @@ fun Glaze(
                 .clip(shape)
                 .then(
                     if (backdrop != null) {
-                        Modifier.hazeBlur(input = HazeInput.Backdrop(backdrop), style = blur)
+                        Modifier.hazeBlur(input = if (seesAll) HazeInput.Sources(backdrop, HazeSourceSelection.All) else HazeInput.Backdrop(backdrop), style = blur)
                     } else {
                         Modifier
                     },
@@ -200,6 +204,7 @@ fun FloatingGlaze(
     frost: Float = GlazeFrost,
     saturation: Float = GlazeSaturation,
     halo: Boolean = false,
+    seesAll: Boolean = false,
     content: @Composable BoxScope.() -> Unit,
 ) {
     Box(modifier) {
@@ -217,7 +222,7 @@ fun FloatingGlaze(
                     Shadow(radius = shadowBlur(24f), color = Color.Black.copy(alpha = 0.45f), offset = DpOffset(0.dp, 8.dp)),
                 ),
         )
-        Glaze(Modifier.matchParentSize(), shape = shape, backdrop = backdrop, film = film, frost = frost, saturation = saturation)
+        Glaze(Modifier.matchParentSize(), shape = shape, backdrop = backdrop, film = film, frost = frost, saturation = saturation, seesAll = seesAll)
         if (halo) {
             Box(Modifier.matchParentSize().innerShadow(shape, Shadow(radius = 0.dp, spread = 1.dp, color = Color.White.copy(alpha = 0.06f))))
         }
