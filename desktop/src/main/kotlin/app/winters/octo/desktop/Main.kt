@@ -54,6 +54,7 @@ import app.winters.octo.desktop.system.LocalSystem
 import app.winters.octo.desktop.system.SingleInstance
 import app.winters.octo.desktop.system.SystemIntegration
 import app.winters.octo.desktop.system.letRunningOctoComeForward
+import app.winters.octo.desktop.system.preloadStartClasses
 import app.winters.octo.desktop.system.useAppNatives
 import app.winters.octo.desktop.system.startsInTray
 import app.winters.octo.desktop.ui.ListFocus
@@ -100,6 +101,8 @@ private const val FIRST_FRAME_WAIT_MS = 500L
 fun main(args: Array<String>) {
     // Before anything touches JNA.
     useAppNatives()
+    // The start's classes, read ahead beside everything below.
+    preloadStartClasses()
     val places = AppPlaces.forSystem()
     // One Octo at a time: launching it again hands the files and links to
     // the running one, which comes forward, and ends here.
