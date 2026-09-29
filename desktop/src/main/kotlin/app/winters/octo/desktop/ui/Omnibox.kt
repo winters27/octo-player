@@ -96,7 +96,8 @@ fun OmniField(app: AppState, modifier: Modifier = Modifier) {
     Box(
         modifier
             .onGloballyPositioned { box.field = it.windowRect() }
-            .onFocusChanged { if (it.hasFocus) box.open = true }
+            // Tab on from the field shuts its list, as a click elsewhere does.
+            .onFocusChanged { if (it.hasFocus) box.open = true else if (box.open) box.open = false }
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown || !box.open) return@onPreviewKeyEvent false
                 val command = if (app.mac) event.isMetaPressed else event.isCtrlPressed

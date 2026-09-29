@@ -33,6 +33,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -192,7 +193,12 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
     }
     LaunchedEffect(request) {
         held = request
-        takeKeyboard(rows = keyboard)
+        takeKeyboard(rows = false)
+        // Opened from the keyboard, its first row takes it once laid out.
+        if (keyboard) {
+            withFrameNanos { }
+            runCatching { card.requestFocus(FocusDirection.Enter) }
+        }
         grow.animateTo(1f, octoTween(motion, POPUP_MS))
     }
     var origin by remember(request) { mutableStateOf(TransformOrigin(0f, 0f)) }

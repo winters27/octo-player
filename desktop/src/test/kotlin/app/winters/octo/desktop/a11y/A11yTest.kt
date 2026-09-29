@@ -199,7 +199,7 @@ class A11yTest {
             s.press(Key.Menu)
             assertTrue("the song menu opened", s.app.popups.open)
             val first = s.focused()?.name()
-            assertNotNull("a menu row has the keyboard", first)
+            assertEquals("opened from the keyboard, its first row has it", "Play", first)
             s.press(Key.DirectionDown)
             val second = s.focused()?.name()
             assertTrue("Down moved on: $first then $second", second != null && second != first)

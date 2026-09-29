@@ -11,6 +11,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import app.winters.octo.design.ArrowKeys
 import app.winters.octo.design.FocusVisibility
@@ -49,6 +50,8 @@ class A11yScene(
     // A picture every song shares as its cover, or none.
     cover: ByteArray? = null,
     look: (AppSettings) -> AppSettings = { it },
+    // How much bigger the words are, as the text size setting makes them.
+    textScale: Float = 1f,
 ) : AutoCloseable {
     val server = FakeServer()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -91,7 +94,10 @@ class A11yScene(
         waitFor { app.library?.index != null }
         scene = ImageComposeScene(width, height, Density(1f)) {
             ProvideWindowLook(reduceMotion = reduceMotion, focus = keyboard, arrows = arrows) {
-                CompositionLocalProvider(LocalTyping provides TypingState()) { Shell(app, null) {} }
+                CompositionLocalProvider(
+                    LocalTyping provides TypingState(),
+                    LocalDensity provides Density(1f, textScale),
+                ) { Shell(app, null) {} }
             }
         }
         render(4)
@@ -150,6 +156,23 @@ class A11yScene(
         }
         scene.semanticsOwners.forEach { walk(if (merged) it.rootSemanticsNode else it.unmergedRootSemanticsNode) }
         return all
+    }
+
+    // Tabs until the keyboard is on the control with this name, if it can.
+    fun tabTo(name: String, presses: Int = 120): Boolean {
+        repeat(presses) {
+            if (focused()?.name() == name) return true
+            press(Key.Tab)
+        }
+        return focused()?.name() == name
+    }
+
+    // Saves a frame for looking at, with OCTO_SHOTS=1.
+    fun shot(name: String, ms: Long = 1_200) {
+        val image = settle(ms)
+        if (System.getenv("OCTO_SHOTS") != "1") return
+        File("build/shots").mkdirs()
+        File("build/shots/$name.png").writeBytes(image.encodeToData(org.jetbrains.skia.EncodedImageFormat.PNG)!!.bytes)
     }
 
     // The deepest node holding the keyboard.
