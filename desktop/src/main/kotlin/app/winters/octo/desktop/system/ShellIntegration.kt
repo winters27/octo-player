@@ -11,6 +11,7 @@ import app.winters.octo.desktop.liveListSongs
 import app.winters.octo.desktop.library.LibraryState
 import app.winters.octo.desktop.playlistSongs
 import app.winters.octo.desktop.settings.DesktopOs
+import app.winters.octo.desktop.settings.key
 import app.winters.octo.subsonic.SubsonicException
 import com.sun.jna.Native
 import kotlinx.coroutines.Dispatchers
@@ -73,11 +74,11 @@ class ShellIntegration internal constructor(
             app.jumpList = this
             // Each account keeps its own record, since album ids belong to one server.
             jobs += app.scope.launch {
-                snapshotFlow { app.connection?.let { it.client.username to it.server.address } }
-                    .distinctUntilChanged()
+                snapshotFlow { app.connection?.server }
+                    .distinctUntilChanged { a, b -> a?.key == b?.key }
                     .collect { account ->
                         jumpStore.saveNow()
-                        val folder = account?.let { (name, address) -> listeningRoot?.let { listeningFolder(it, name, address) } }
+                        val folder = account?.let { server -> listeningRoot?.let { listeningFolder(it, server) } }
                         jumpStore.open(folder?.let { File(it, JumpListStore.FILE_NAME) })
                         if (account == null) jumpList.clear()
                     }

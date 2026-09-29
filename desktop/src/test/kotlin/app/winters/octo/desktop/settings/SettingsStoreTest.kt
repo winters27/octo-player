@@ -10,9 +10,12 @@ import app.winters.octo.sound.SoundSettings
 import app.winters.octo.subsonic.AuthMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import app.winters.octo.desktop.listening.listeningFolder
+import app.winters.octo.livelists.accountKey
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
@@ -23,10 +26,13 @@ class SettingsStoreTest {
 
     @Test
     fun everySettingSurvivesARestart() {
+        val home = SavedServer("http://music.test/", "winters", AuthMode.LegacyPassword, "navidrome", "0.58.0", true, listOf("songLyrics:1"), id = "h1", label = "Home")
         val changed = AppSettings(
             window = WindowSpot(10f, 20f, 1400f, 900f, maximized = true),
             systemTitleBar = true,
-            server = SavedServer("http://music.test/", "winters", AuthMode.LegacyPassword, "navidrome", "0.58.0", true, listOf("songLyrics:1")),
+            server = home,
+            servers = listOf(home, SavedServer("https://work.test/", "brandon", id = "w1", label = "Work", signedOut = true)),
+            activeServer = "h1",
             appearance = Appearance(ambientGlow = false, glowStrength = 0.8f, ambience = AmbienceStyle.Immersive, ambienceMotion = AmbienceMotion.Full),
             playback = PlaybackPrefs(volume = 0.3f, crossfadeSeconds = 6, outputDevice = "usb:dac", speed = 1.25f, keepPitch = false, pitchSemitones = -2),
             songSort = "Year:desc",
@@ -202,5 +208,80 @@ class SettingsStoreTest {
         val old = SettingsStore(file()).current.appearance
         assertEquals(PlaylistCoverStyle.Designed, old.playlistCovers)
         assertFalse(old.ambientGlow)
+    }
+
+    // A settings file from before there could be several servers, as the
+    // last such version wrote it.
+    private val oneServerFile = """{"systemTitleBar":false,"server":{"address":"https://music.test/","username":"winters","authMode":"Token","serverType":"octo","serverVersion":"0.9.0","openSubsonic":true,"extensions":["songLyrics:1"],"home":null,"headerNames":["X-Token"],"rememberSignIn":true}}"""
+
+    @Test
+    fun theOneServerOfAnOlderFileBecomesAListOfOneStillInUse() {
+        file().parentFile.mkdirs()
+        file().writeText(oneServerFile)
+        val read = SettingsStore(file()).current
+        val kept = read.servers.single()
+        assertEquals("the id is the folder older versions made", accountKey("winters", "https://music.test/"), kept.id)
+        assertEquals(listOf("X-Token"), kept.headerNames)
+        assertEquals(kept.id, read.activeServer)
+        assertEquals("still signed in", kept, read.server)
+        assertEquals("music.test", kept.name)
+        assertEquals(listeningFolder(folder.root, "winters", "https://music.test/"), listeningFolder(folder.root, kept))
+    }
+
+    @Test
+    fun theListIsWrittenOnceAnythingChanges() {
+        file().parentFile.mkdirs()
+        file().writeText(oneServerFile)
+        SettingsStore(file()).update { it.copy(sidePanel = "queue") }
+        val text = file().readText()
+        assertTrue(text.contains("\"servers\""))
+        assertTrue(text.contains("\"activeServer\": \"${accountKey("winters", "https://music.test/")}\""))
+        // An older Octo still finds the server in use where it looks.
+        assertTrue(text.contains("\"server\": {"))
+    }
+
+    @Test
+    fun aServerAnOlderOctoSignedInToSinceBecomesTheOneInUse() {
+        val home = SavedServer("https://home.test/", "winters", id = "h", label = "Home")
+        val work = SavedServer("https://work.test/", "brandon", id = "w", label = "Work")
+        SettingsStore(file()).update { it.copy(servers = listOf(home, work), activeServer = "h") }
+        // An older Octo reads only `server`, and writes it back changed.
+        val older = file().readText().replace(Regex("\"server\": \\{[^}]*\\}"),"\"server\": {\"address\": \"https://work.test/\", \"username\": \"brandon\"}")
+        assertTrue(older != file().readText())
+        file().writeText(older)
+        val read = SettingsStore(file()).current
+        assertEquals("w", read.activeServer)
+        assertEquals(listOf("h", "w"), read.servers.map { it.id })
+        assertEquals("its label is kept", "Work", read.servers[1].label)
+    }
+
+    @Test
+    fun aServerAnOlderOctoSignedOutOfLeavesNoneInUse() {
+        val home = SavedServer("https://home.test/", "winters", id = "h")
+        SettingsStore(file()).update { it.copy(servers = listOf(home), activeServer = "h") }
+        file().writeText(file().readText().replace(Regex("\"server\": \\{[^}]*\\}"), "\"server\": null"))
+        val read = SettingsStore(file()).current
+        assertNull(read.activeServer)
+        assertNull(read.server)
+        assertEquals(listOf("h"), read.servers.map { it.id })
+    }
+
+    @Test
+    fun theServerInUseIsAlwaysTheOneWrittenForOlderVersions() {
+        val store = SettingsStore(file())
+        val home = SavedServer("https://home.test/", "winters", id = "h")
+        val work = SavedServer("https://work.test/", "brandon", id = "w")
+        store.update { it.copy(servers = listOf(home, work), activeServer = "w") }
+        assertEquals(work, store.current.server)
+        store.update { it.copy(activeServer = "h") }
+        assertEquals(home, store.current.server)
+        // A server taken off the list is no longer in use.
+        store.update { it.copy(servers = listOf(work)) }
+        assertNull(store.current.activeServer)
+        assertNull(store.current.server)
+        // Setting `server` alone reads the way an older Octo's file does.
+        store.update { it.copy(server = home) }
+        assertEquals(listOf("w", "h"), store.current.servers.map { it.id })
+        assertEquals("h", store.current.activeServer)
     }
 }
