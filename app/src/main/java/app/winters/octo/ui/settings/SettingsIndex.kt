@@ -227,6 +227,22 @@ object SettingsIndex {
         "edit_connection", SettingsPage.Server, "Edit connection", "Change the address or sign-in",
         listOf("change server", "password", "address", "sign in"), section = "Connection",
     )
+    val ChangePassword = add(
+        "change_password", SettingsPage.Server, "Change password", "Set a new password for your account on the server",
+        listOf("password", "account", "security", "sign in"), section = "Connection",
+    )
+    val ServerKind = add(
+        "server_kind", SettingsPage.Server, "Server", "What the server is, and what it offers",
+        listOf("version", "navidrome", "octo", "subsonic", "about"), section = "Server",
+    )
+    val ServerAnswer = add(
+        "server_answer", SettingsPage.Server, "Response time", "How quickly the server answers",
+        listOf("speed", "ping", "latency", "slow"), section = "Server",
+    )
+    val ServerScan = add(
+        "server_scan", SettingsPage.Server, "Its folders", "When the server last looked for new music",
+        listOf("scan", "last scan", "new music"), section = "Server",
+    )
     val OctoAdmin = add(
         "octo_admin", SettingsPage.Server, "Octo admin", "What Octo is doing: services, stations and downloads",
         listOf("admin", "health", "services", "stations"), section = "Connection",
