@@ -1,6 +1,24 @@
 package app.winters.octo.desktop.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import javax.swing.SwingUtilities
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.focusGroup
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import app.winters.octo.design.LocalFocusVisibility
+import app.winters.octo.design.OctoDuration
+import app.winters.octo.design.motionScale
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -131,6 +149,10 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
     val focus = LocalFocusManager.current
     val connection = app.connection
     val key = rememberKeyColour(app)
+    val keyboard = LocalFocusVisibility.current
+    val parts = remember { FrameFocus() }
+    // What had the keyboard before a pop-up opened gets it back after.
+    SideEffect { app.popups.returnFocus = { parts.last?.let { runCatching { it.requestFocus() } } } }
     CompositionLocalProvider(
         LocalPopups provides app.popups,
         LocalPointer provides pointer,
@@ -147,6 +169,8 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
                 .onPointerEvent(PointerEventType.Move, PointerEventPass.Initial) { pointer.position = it.changes.first().position }
                 .onPointerEvent(PointerEventType.Press, PointerEventPass.Initial) { event ->
                     pointer.position = event.changes.first().position
+                    // A click: the mouse is in use, so focus rings rest.
+                    keyboard.keyboard = false
                     // A click outside the search box closes its list.
                     if (app.omnibox.open && !app.omnibox.holds(pointer.point.x, pointer.point.y)) {
                         app.omnibox.open = false
@@ -159,17 +183,20 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
             // The colours the glass frosts. Only these: the page is not under
             // glass, so scrolling never makes the frame blur again.
             Box(Modifier.fillMaxSize().hazeSource(backdrop)) { AmbientGlow(app) }
-            if (connection == null) {
-                // The sign-in card frosts the colours behind it.
-                Box(Modifier.fillMaxSize().padding(top = FrameSize.TitleBar)) { SignInPage(app, backdrop) }
-            } else {
-                SignedInFrame(app, backdrop)
-                AnimatedVisibility(app.fullPlayer, enter = fadeIn(), exit = fadeOut()) {
-                    FullPlayer(app, Modifier.fillMaxSize(), top = FrameSize.TitleBar)
+            // Everything but the pop-ups, as one group the keyboard can come back to.
+            Box(Modifier.fillMaxSize().focusRequester(parts.window).focusGroup()) {
+                if (connection == null) {
+                    // The sign-in card frosts the colours behind it.
+                    Box(Modifier.fillMaxSize().padding(top = FrameSize.TitleBar)) { SignInPage(app, backdrop) }
+                } else {
+                    SignedInFrame(app, backdrop, parts)
+                    AnimatedVisibility(app.fullPlayer, enter = fadeIn(motionFade()), exit = fadeOut(motionFade())) {
+                        FullPlayer(app, Modifier.fillMaxSize().part(parts, parts.full, app), top = FrameSize.TitleBar)
+                    }
                 }
+                if (connection != null && app.omnibox.open && !app.fullPlayer) OmniboxOver(app, backdrop)
+                Box(Modifier.part(parts, parts.title, app)) { TitleBar(app, frame, onClose) }
             }
-            if (connection != null && app.omnibox.open && !app.fullPlayer) OmniboxOver(app, backdrop)
-            TitleBar(app, frame, onClose)
             PopupLayer(app.popups, backdrop)
             DragLabel(drag)
             if (frame != null) ResizeEdges(frame)
@@ -177,9 +204,71 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
     }
 }
 
+// The frame's parts, in the order Tab walks them: the title bar, the
+// sidebar (search, places, playlists), the page, the side panel when open,
+// and the player floating at the page's foot, then round to the title bar
+// again. With the full player open only the title bar and it take turns;
+// the frame under it is out of reach.
+@Stable
+internal class FrameFocus {
+    val window = FocusRequester()
+    val title = FocusRequester()
+    val sidebar = FocusRequester()
+    val page = FocusRequester()
+    val panel = FocusRequester()
+    val player = FocusRequester()
+    val full = FocusRequester()
+
+    // The part that last had the keyboard; each part keeps its own last
+    // focused control, so asking the part for it lands there again.
+    var last: FocusRequester? = null
+
+    fun order(app: AppState): List<FocusRequester> = when {
+        app.fullPlayer -> listOf(title, full)
+        app.sidePanel != null -> listOf(title, sidebar, page, panel, player)
+        else -> listOf(title, sidebar, page, player)
+    }
+}
+
+// Makes a part of the frame one stop in that walk: leaving it with Tab or
+// Shift+Tab goes on to the next part that has anything to take the
+// keyboard, and a part out of the walk cannot be entered.
+internal fun Modifier.part(parts: FrameFocus, me: FocusRequester, app: AppState): Modifier = this
+    .onFocusChanged { if (it.hasFocus) parts.last = me }
+    .focusRequester(me)
+    .focusProperties {
+        onEnter = { if (me !in parts.order(app)) cancelFocusChange() }
+        onExit = {
+            val direction = requestedFocusDirection
+            val order = parts.order(app)
+            val at = order.indexOf(me)
+            if (at >= 0 && (direction == FocusDirection.Next || direction == FocusDirection.Previous)) {
+                val step = if (direction == FocusDirection.Next) 1 else -1
+                // Going on, a part is entered at its start; going back, from
+                // its foot, near where Shift+Tab would have met it last.
+                val enter = if (direction == FocusDirection.Next) FocusDirection.Enter else FocusDirection.Up
+                cancelFocusChange()
+                // Once this move has settled: asked from inside it, the move
+                // would carry on past the part it was sent to.
+                SwingUtilities.invokeLater {
+                    for (k in 1 until order.size) {
+                        val next = order[Math.floorMod(at + step * k, order.size)]
+                        if (runCatching { next.requestFocus(enter) }.getOrDefault(false)) break
+                    }
+                }
+            }
+        }
+    }
+    .focusGroup()
+    .focusRestorer()
+
+// The full player's fade: brief, and briefer still with motion reduced.
+@Composable
+private fun motionFade() = tween<Float>(motionScale().ms(OctoDuration.Neutral))
+
 // The frame and the page inside it.
 @Composable
-private fun SignedInFrame(app: AppState, backdrop: HazeState) {
+private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus) {
     val settings by app.settings.state.collectAsState()
     val saved = settings.frame
     // Widths follow a drag at once, and are saved when it ends.
@@ -187,15 +276,22 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState) {
     var panelWidth by remember { mutableStateOf(saved.panelWidth.dp) }
     val sideWidth = if (saved.sidebarRail) FrameSize.SidebarRail else sidebar.coerceIn(FrameSize.SidebarMin, FrameSize.SidebarMax)
     val panel = app.sidePanel
+    LaunchedEffect(panel) {
+        if (panel == null && app.panelHasKeyboard) {
+            app.panelHasKeyboard = false
+            runCatching { parts.page.requestFocus(FocusDirection.Next) }
+        }
+    }
     // The window's width, for the player's.
     val window = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() }
-    Column(Modifier.fillMaxSize()) {
+    // Under the full player the frame is out of a screen reader's reach too.
+    Column(Modifier.fillMaxSize().then(if (app.fullPlayer) Modifier.clearAndSetSemantics { } else Modifier)) {
         // Room for the title bar, in the frame's glass; its buttons are drawn
         // over it, last, so they stay over the full player too.
         Box(Modifier.fillMaxWidth().height(FrameSize.TitleBar).chromeFilm(backdrop))
         Seam(vertical = false)
         Row(Modifier.weight(1f).fillMaxWidth()) {
-            Box(Modifier.width(sideWidth).fillMaxHeight()) {
+            Box(Modifier.width(sideWidth).fillMaxHeight().part(parts, parts.sidebar, app)) {
                 Sidebar(app, backdrop, Modifier.fillMaxSize())
                 if (!saved.sidebarRail) {
                     ResizeHandle(
@@ -208,20 +304,27 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState) {
             Seam(vertical = true)
             CompositionLocalProvider(LocalBottomRoom provides FrameSize.Player + FrameSize.PlayerGap) {
                 BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
-                    Column(Modifier.fillMaxSize().clipToBounds()) {
+                    Column(Modifier.fillMaxSize().clipToBounds().part(parts, parts.page, app)) {
                         app.notice?.let { Notice(it, app.noticeDetail, app.actionFor(it)) { app.notice = null; app.noticeDetail = null } }
                         Box(Modifier.weight(1f)) { PageHost(app) }
                     }
                     // A third of the window, in the middle of the page.
                     val room = maxWidth - FrameSize.PlayerGap * 2
                     val width = (window / 3).coerceIn(minOf(FrameSize.PlayerMin, room), room)
-                    PlayerBar(app, backdrop, Modifier.align(Alignment.BottomCenter).padding(bottom = FrameSize.PlayerGap).width(width).height(FrameSize.Player))
+                    PlayerBar(app, backdrop, Modifier.align(Alignment.BottomCenter).padding(bottom = FrameSize.PlayerGap).width(width).height(FrameSize.Player).part(parts, parts.player, app))
                 }
             }
             if (panel != null) {
                 Seam(vertical = true)
                 val width = panelWidth.coerceIn(FrameSize.PanelMin, FrameSize.PanelMax)
-                Box(Modifier.width(width).fillMaxHeight()) {
+                // Escape in the panel closes it; the page then has the keyboard.
+                Box(
+                    Modifier
+                        .width(width)
+                        .fillMaxHeight()
+                        .onFocusChanged { app.panelHasKeyboard = it.hasFocus }
+                        .part(parts, parts.panel, app),
+                ) {
                     ContextPanel(app, panel, backdrop, Modifier.fillMaxSize())
                     ResizeHandle(
                         onDrag = { panelWidth = (panelWidth - it).coerceIn(FrameSize.PanelMin, FrameSize.PanelMax) },
@@ -295,12 +398,13 @@ private fun TitleBar(app: AppState, frame: Frame?, onClose: () -> Unit) {
 @Composable
 private fun Notice(text: String, detail: String?, action: NoticeAction?, onClose: () -> Unit) {
     var open by remember(text) { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().padding(start = PageSide, end = PageSide, top = Space.M)) {
+    // A screen reader that follows live regions reads a new notice out.
+    Column(Modifier.fillMaxWidth().padding(start = PageSide, end = PageSide, top = Space.M).semantics { liveRegion = LiveRegionMode.Polite }) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
             Txt(text, OctoType.bodySmall, OctoColors.TextSecondary, Modifier.weight(1f), maxLines = 2)
             if (action != null) TextAction(action.label, action.run)
             if (detail != null) TextAction(if (open) "Hide details" else "Details", { open = !open })
-            IconAction(OctoIcons.Close, "Dismiss", onClose, size = ControlHeight.S, iconSize = IconSize.Inline, tint = OctoColors.TextSecondary)
+            IconAction(OctoIcons.Close, "Dismiss this notice", onClose, size = ControlHeight.S, iconSize = IconSize.Inline, tint = OctoColors.TextSecondary)
         }
         if (open && detail != null) Txt(detail, OctoType.caption, OctoColors.TextMuted, maxLines = 4)
     }

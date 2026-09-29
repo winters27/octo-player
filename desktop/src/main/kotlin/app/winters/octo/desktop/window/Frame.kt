@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.window
 
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -266,7 +268,10 @@ private fun WindowButton(
                     else -> Color.Transparent
                 },
             )
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            // Like a system title bar's, these are not Tab stops: the keyboard
+            // has Alt+Space and Alt+F4.
+            .focusProperties { canFocus = false }
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
