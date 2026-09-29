@@ -85,13 +85,13 @@ private val YourPlaces = listOf(
 // to the player. The search field at the top, then Home on its own, the
 // library, what is yours, the playlists (pinned first, with their covers),
 // and Sound and Settings at the foot. Groups fold shut by their names.
-// Folded to a rail, it shows only icons and covers, each named in a
+// Folded to a rail (by the listener, or by a window too narrow for it
+// beside the side panel), it shows only icons and covers, each named in a
 // tooltip, and search is a button that floats the field out beside it.
 @Composable
-fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
+fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, rail: Boolean = app.settings.current.frame.sidebarRail) {
     val settings by app.settings.state.collectAsState()
     val frame = settings.frame
-    val rail = frame.sidebarRail
     val lit = app.navigator.sidebarItem
     val liveLists by app.liveLists.lists.collectAsState()
     fun go(page: Page) = app.navigator.go(page)
