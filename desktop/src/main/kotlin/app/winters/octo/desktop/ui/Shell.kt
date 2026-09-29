@@ -214,7 +214,10 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState) {
             Seam(vertical = true)
             CompositionLocalProvider(LocalBottomRoom provides FrameSize.Player + FrameSize.PlayerGap, LocalFrameBackdrop provides backdrop) {
                 BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
-                    Column(Modifier.fillMaxSize().clipToBounds()) {
+                    // The page is glass's backdrop too, over the window's colours, so
+                    // the floating player (and menus over the page) frost what
+                    // scrolls beneath them.
+                    Column(Modifier.fillMaxSize().clipToBounds().hazeSource(backdrop)) {
                         app.notice?.let { Notice(it, app.noticeDetail, app.actionFor(it)) { app.notice = null; app.noticeDetail = null } }
                         Box(Modifier.weight(1f)) { PageHost(app) }
                     }
