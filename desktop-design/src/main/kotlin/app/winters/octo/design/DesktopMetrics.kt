@@ -188,4 +188,9 @@ object SettingsSize {
     val Slider = 200.dp
     val Reading = 60.dp
     val EqPlot = 160.dp
+
+    // A small form over Settings: adding a server, a new password, and how
+    // tall it grows before it scrolls.
+    val Sheet = 460.dp
+    val SheetMax = 720.dp
 }

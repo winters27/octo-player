@@ -124,7 +124,12 @@ class PopupRequest(
     val anchor: IntRect?,
     val width: Dp?,
     val content: @Composable ColumnScope.(close: () -> Unit) -> Unit,
+    // How tall it may grow before it scrolls; never past the window.
+    val maxHeight: Dp = PopupMaxHeight,
 )
+
+// How tall a menu may grow before it scrolls.
+val PopupMaxHeight = 560.dp
 
 // Shows floating glass pop-ups over the whole window: menus at the pointer,
 // small forms, song details. One at a time; a new one replaces the old.
@@ -143,9 +148,10 @@ class PopupHost {
         request = PopupRequest(null, anchor, width, content)
     }
 
-    // Opens in the middle of the window, for a small form.
-    fun showCentred(width: Dp? = 380.dp, content: @Composable ColumnScope.(close: () -> Unit) -> Unit) {
-        request = PopupRequest(null, null, width, content)
+    // Opens in the middle of the window, for a small form. A taller form
+    // may ask for more room before it scrolls.
+    fun showCentred(width: Dp? = 380.dp, maxHeight: Dp = PopupMaxHeight, content: @Composable ColumnScope.(close: () -> Unit) -> Unit) {
+        request = PopupRequest(null, null, width, content, maxHeight)
     }
 
     fun close() {
@@ -248,7 +254,7 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
                         // The keyboard stays among the rows while the card is open.
                         .focusProperties { onExit = { if (host.request === request) cancelFocusChange() } }
                         .focusGroup()
-                        .heightIn(max = 560.dp)
+                        .heightIn(max = request.maxHeight)
                         .verticalScroll(rememberScrollState())
                         .padding(vertical = 6.dp),
                 ) {
