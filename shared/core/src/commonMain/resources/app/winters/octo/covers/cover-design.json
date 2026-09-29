@@ -1,0 +1,168 @@
+{
+  "version": 1,
+  "about": "Octo's designed playlist covers, read by the phone, the desktop and the server so all three draw the same thing. Positions and sizes are shares of the cover's side (0 to 1, origin top left, y down) unless named Px. Colours are sRGB hex. Words are always white.",
+  "fonts": {
+    "family": "Inter 4.1 (rsms/inter v4.1, OFL-1.1), static Display cut",
+    "title": "InterDisplay-SemiBold.ttf",
+    "line": "InterDisplay-Light.ttf",
+    "footer": "InterDisplay-Regular.ttf"
+  },
+  "layout": {
+    "margin": 0.08,
+    "contrast": 4.5,
+    "tinyBelowPx": 72,
+    "tinyMargin": 0.1,
+    "tinySize": 0.56,
+    "title": {
+      "top": 0.1,
+      "weight": 600,
+      "size": 0.16,
+      "oneLineDownTo": 0.09,
+      "oneLineMinPx": 12,
+      "wrapSize": 0.115,
+      "wrapMinPx": 13,
+      "minSize": 0.07,
+      "minPx": 9,
+      "maxLines": 3,
+      "lineHeight": 1.08,
+      "tracking": 0
+    },
+    "line": {
+      "weight": 300,
+      "shareOfTitle": 0.83,
+      "minPx": 9,
+      "lineHeight": 1.15,
+      "tracking": 0,
+      "showFromPx": 120
+    },
+    "footer": {
+      "weight": 400,
+      "size": 0.053,
+      "minPx": 9,
+      "bottom": 0.08,
+      "opacity": 0.6,
+      "lineHeight": 1.2,
+      "tracking": 0,
+      "showFromPx": 160
+    }
+  },
+  "music": {
+    "about": "With covers, each gradient keeps its own lightness, chroma and the spread of its hues, turned round the colour wheel so its fold colour (the colour of its first fold) takes the music's first hue. Chroma is the mean of the gradient's and the music's, at most maxChroma, and at least minChroma so a dull cover still gives a rich field.",
+    "maxChroma": 0.2,
+    "minChroma": 0.1
+  },
+  "gradients": [
+    {
+      "name": "Violet fold",
+      "colours": ["#35197f", "#7b2fd6", "#d24fd0"],
+      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [1.12, 1.08], "radius": 0.82, "soft": 0.3, "colour": 2 }],
+      "light": { "centre": [0.9, 0.12], "radius": 0.55, "colour": "#b8a8ff", "opacity": 0.32 }
+    },
+    {
+      "name": "Lagoon",
+      "colours": ["#16336b", "#0e7a8c", "#2fc39a"],
+      "base": { "from": [0, 0], "to": [1, 0.8], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [1.18, 0.38], "radius": 0.72, "soft": 0.32, "colour": 2 }],
+      "light": { "centre": [0.25, 1.02], "radius": 0.5, "colour": "#86e3ff", "opacity": 0.28 }
+    },
+    {
+      "name": "Ember",
+      "colours": ["#461241", "#bd3228", "#ef8a2c"],
+      "base": { "from": [0, 0], "to": [0.8, 1], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [0.98, 1.12], "radius": 0.78, "soft": 0.32, "colour": 2 }],
+      "light": { "centre": [1.0, 0.05], "radius": 0.5, "colour": "#ffb672", "opacity": 0.3 }
+    },
+    {
+      "name": "Orchid",
+      "colours": ["#4e1873", "#a8339b", "#e98bc6"],
+      "base": { "from": [0.1, 0], "to": [0.9, 1], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [-0.15, 1.05], "radius": 0.7, "soft": 0.3, "colour": 2 }],
+      "light": { "centre": [0.95, 0.35], "radius": 0.5, "colour": "#ffc6ee", "opacity": 0.26 }
+    },
+    {
+      "name": "Night tide",
+      "colours": ["#0f1b5a", "#2a4dd4", "#3cc4e6"],
+      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [1.05, 0.95], "radius": 0.6, "soft": 0.36, "colour": 2 }],
+      "light": { "centre": [0.8, 0.1], "radius": 0.45, "colour": "#9fc4ff", "opacity": 0.3 }
+    },
+    {
+      "name": "Rose quartz",
+      "colours": ["#622656", "#bf4c7a", "#eaa2ba"],
+      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [1.2, 0.2], "radius": 0.68, "soft": 0.32, "colour": 2 }],
+      "light": { "centre": [0.3, 1.05], "radius": 0.55, "colour": "#ffd6e2", "opacity": 0.24 }
+    },
+    {
+      "name": "Pine",
+      "colours": ["#0f3934", "#16774f", "#7bcf88"],
+      "base": { "from": [0, 0], "to": [0.9, 1], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [0.3, 1.25], "radius": 0.75, "soft": 0.3, "colour": 2 }],
+      "light": { "centre": [1.0, 0.2], "radius": 0.5, "colour": "#c6f5c0", "opacity": 0.24 }
+    },
+    {
+      "name": "Aurora",
+      "colours": ["#1b286b", "#5a3dcc", "#33ceb2"],
+      "base": { "from": [0, 0.2], "to": [1, 0.9], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [1.1, 1.15], "radius": 0.85, "soft": 0.32, "colour": 2 }],
+      "light": { "centre": [0.9, 0.0], "radius": 0.5, "colour": "#c7b8ff", "opacity": 0.28 }
+    },
+    {
+      "name": "Dusk",
+      "colours": ["#3a1959", "#cc3f69", "#ffa25d"],
+      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [1.1, 1.1], "radius": 0.7, "soft": 0.32, "colour": 2 }],
+      "light": { "centre": [0.1, 0.95], "radius": 0.45, "colour": "#ffc3a0", "opacity": 0.22 }
+    },
+    {
+      "name": "Cobalt",
+      "colours": ["#0b1e76", "#1e5bdc", "#b35bef"],
+      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [1.15, 0.1], "radius": 0.6, "soft": 0.32, "colour": 2 }],
+      "light": { "centre": [0.6, 1.05], "radius": 0.55, "colour": "#9cc2ff", "opacity": 0.3 }
+    },
+    {
+      "name": "Berry",
+      "colours": ["#3a0d3e", "#8b1c69", "#fb5a89"],
+      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [0.9, 1.2], "radius": 0.8, "soft": 0.3, "colour": 2 }],
+      "light": { "centre": [1.05, 0.25], "radius": 0.45, "colour": "#ffb0cc", "opacity": 0.26 }
+    },
+    {
+      "name": "Glacier",
+      "colours": ["#1d3b6f", "#3a82c6", "#a4d6ef"],
+      "base": { "from": [0, 0], "to": [0.8, 1], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [1.2, 1.0], "radius": 0.75, "soft": 0.36, "colour": 2 }],
+      "light": { "centre": [0.95, 0.1], "radius": 0.4, "colour": "#e0f2ff", "opacity": 0.25 }
+    },
+    {
+      "name": "Plum",
+      "colours": ["#291644", "#683b8c", "#df7e9d"],
+      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [-0.1, 1.2], "radius": 0.8, "soft": 0.32, "colour": 2 }],
+      "light": { "centre": [1.0, 0.45], "radius": 0.5, "colour": "#f0b8d8", "opacity": 0.24 }
+    },
+    {
+      "name": "Tangerine",
+      "colours": ["#561d10", "#d4501d", "#ffbe49"],
+      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [1.1, 0.9], "radius": 0.62, "soft": 0.36, "colour": 2 }],
+      "light": { "centre": [0.35, 1.05], "radius": 0.45, "colour": "#ffd9a0", "opacity": 0.24 }
+    },
+    {
+      "name": "Mint haze",
+      "colours": ["#133f57", "#1b8c87", "#99e2bf"],
+      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [1.15, 1.1], "radius": 0.8, "soft": 0.32, "colour": 2 }],
+      "light": { "centre": [0.85, 0.05], "radius": 0.45, "colour": "#c8fff0", "opacity": 0.22 }
+    },
+    {
+      "name": "Magenta wave",
+      "colours": ["#480e76", "#bc148c", "#6a5bfd"],
+      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
+      "folds": [{ "centre": [1.12, 0.3], "radius": 0.7, "soft": 0.3, "colour": 2 }],
+      "light": { "centre": [0.2, 1.05], "radius": 0.5, "colour": "#ff9ee0", "opacity": 0.26 }
+    }
+  ]
+}

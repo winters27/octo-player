@@ -103,7 +103,7 @@ fun LiveListRow(app: AppState, list: LiveList, selected: Boolean, rail: Boolean)
         ) {
             if (selected) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
             Row(Modifier.padding(horizontal = if (rail) Space.None else Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs)) {
-                LiveMark(FrameSize.PlaylistCover)
+                LiveListPicture(app, list, Modifier.size(FrameSize.PlaylistCover), Corner.ArtSShape) { LiveMark(FrameSize.PlaylistCover) }
                 CompositionLocalProvider(LocalKeyboardHere provides (here && keyboard)) { if (!rail) CutTxt(list.name, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f)) }
             }
         }

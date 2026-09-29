@@ -1,5 +1,9 @@
 package app.winters.octo.ui.settings
 
+import app.winters.octo.playlists.PlaylistArtSettings
+import app.winters.octo.covers.playlistCoverStyleName
+import app.winters.octo.covers.playlistCoverStyleHelp
+import app.winters.octo.covers.PlaylistCoverStyle
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -36,6 +40,16 @@ private val StrengthChoices = mapOf(
     AmbientStrength.Rich to Choice("Rich", "A fuller glow, still kept dark enough for text."),
 )
 
+// Whether playlists show designed covers or their album mosaics.
+@HiltViewModel
+class PlaylistCoversViewModel @Inject constructor(private val settings: PlaylistArtSettings) : ViewModel() {
+    val style: StateFlow<PlaylistCoverStyle> = settings.style.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PlaylistCoverStyle.Designed)
+
+    fun setStyle(style: PlaylistCoverStyle) {
+        viewModelScope.launch { settings.setStyle(style) }
+    }
+}
+
 // The Octo-wide switch for less movement.
 @HiltViewModel
 class MotionViewModel @Inject constructor(private val settings: PlayerSettings) : ViewModel() {
@@ -54,9 +68,11 @@ fun AppearancePage(
     highlight: String?,
     vm: AmbienceViewModel = hiltViewModel(),
     motion: MotionViewModel = hiltViewModel(),
+    covers: PlaylistCoversViewModel = hiltViewModel(),
 ) {
     val prefs = vm.prefs.collectAsStateWithLifecycle().value ?: AmbientPrefs()
     val motionPrefs by motion.prefs.collectAsStateWithLifecycle()
+    val coverStyle by covers.style.collectAsStateWithLifecycle()
     val sheet = LocalChoiceSheet.current
 
     SettingsPageFrame("Appearance", onBack, highlight) {
@@ -92,6 +108,18 @@ fun AppearancePage(
             }
         }
         PlayerBackgroundSection()
+        SettingsGroup(title = "Playlists") {
+            ChoiceRow(SettingsIndex.PlaylistCovers, value = playlistCoverStyleName(coverStyle), onClick = {
+                val options = PlaylistCoverStyle.entries
+                sheet.show(
+                    ChoiceRequest(
+                        SettingsIndex.PlaylistCovers.title,
+                        options.map { Choice(playlistCoverStyleName(it), playlistCoverStyleHelp(it)) },
+                        options.indexOf(coverStyle),
+                    ) { covers.setStyle(options[it]) },
+                )
+            })
+        }
         SettingsGroup(title = "Motion") {
             SwitchRow(
                 SettingsIndex.ReduceMotion,

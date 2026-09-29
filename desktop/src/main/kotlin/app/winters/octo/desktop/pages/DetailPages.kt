@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.desktop.ui.PlaylistPicture
+import app.winters.octo.desktop.ui.summary
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -122,6 +124,7 @@ fun PlaylistPage(app: AppState, visit: Visit, id: String) {
                     { app.play(songs) },
                     { app.play(songs, shuffle = true) },
                     playable = songs.isNotEmpty(),
+                    picture = { modifier -> PlaylistPicture(app, playlist.summary(), modifier, Corner.ArtLShape) },
                     titleContent = {
                         EditInPlace(playlist.name, "Playlist name", owns, "Rename", TitleFieldWidth, { app.renamePlaylist(id, it) }) { modifier ->
                             CutTxt(playlist.name, DesktopType.pageTitle, modifier = modifier, maxLines = 2)

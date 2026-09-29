@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.desktop.ui.StationPicture
+import app.winters.octo.desktop.ui.PlaylistPicture
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -103,7 +105,7 @@ fun HomePage(app: AppState, visit: Visit) {
                 if (home.stations.isNotEmpty()) {
                     item(key = "shelf:stations") {
                         ShelfRow("Stations", home.stations, { it.id }, null) { station ->
-                            StationCard(station, starting == station.id) {
+                            StationCard(app, station, starting == station.id) {
                                 if (starting != null) return@StationCard
                                 starting = station.id
                                 app.scope.launch {
@@ -177,18 +179,20 @@ private fun PlaylistCard(app: AppState, playlist: Playlist) {
         playlist.coverArt,
         onOpen = { app.navigator.go(Page.Playlist(playlist.id)) },
         onMenu = playlistMenu(app, playlist),
+        picture = { modifier, shape -> PlaylistPicture(app, playlist, modifier, shape) },
     )
 }
 
 // A station Octo runs: a click plays the songs it has lined up today.
 @Composable
-private fun StationCard(station: RadioStation, starting: Boolean, onPlay: () -> Unit) {
+private fun StationCard(app: AppState, station: RadioStation, starting: Boolean, onPlay: () -> Unit) {
     MediaCard(
         station.name,
         "Station",
         station.coverArt ?: station.id,
         onOpen = onPlay,
         badge = if (starting) ({ Spinner(size = IconSize.Transport) }) else null,
+        picture = { modifier, shape -> StationPicture(app, station, modifier, shape) },
     )
 }
 

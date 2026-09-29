@@ -138,6 +138,7 @@ fun main(args: Array<String>) {
             }
         }
         setSingletonImageLoaderFactory { context -> coverLoader(context, http, places.cache) }
+        remember { app.playlistArt.folder = File(places.cache, "playlist-art") }
         val spot = remember { placeWindow(settings.current.window, screenAreas()) }
         // Windows and Linux get the app's own glass frame unless the
         // listener asked for the system's; macOS keeps its own lights.

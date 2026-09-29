@@ -23,6 +23,8 @@ dependencies {
     api(libs.compose.material3)
     api(libs.haze)
     api(libs.haze.blur)
+    // The playlist covers' design, which PlaylistArt.kt paints.
+    implementation(project(":shared:core"))
     // Back closes sheets.
     implementation(libs.androidx.activity.compose)
 }

@@ -1,0 +1,188 @@
+package app.winters.octo.desktop.library
+
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asSkiaBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.text.font.createFontFamilyResolver
+import app.winters.octo.covers.CoverPalette
+import app.winters.octo.covers.CoverSpec
+import app.winters.octo.covers.Swatch
+import app.winters.octo.covers.coverArtKey
+import app.winters.octo.covers.coverFileName
+import app.winters.octo.covers.coverPalette
+import app.winters.octo.covers.coverSwatches
+import app.winters.octo.covers.quarterSwatches
+import app.winters.octo.design.CoverFontFamily
+import app.winters.octo.design.coverMeasurer
+import app.winters.octo.design.designCover
+import app.winters.octo.subsonic.SubsonicClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.jetbrains.skia.Bitmap
+import org.jetbrains.skia.Canvas
+import org.jetbrains.skia.ColorAlphaType
+import org.jetbrains.skia.ColorType
+import org.jetbrains.skia.EncodedImageFormat
+import org.jetbrains.skia.FilterMipmap
+import org.jetbrains.skia.FilterMode
+import org.jetbrains.skia.Image
+import org.jetbrains.skia.ImageInfo
+import org.jetbrains.skia.MipmapMode
+import org.jetbrains.skia.Paint
+import org.jetbrains.skia.Rect
+import java.io.File
+
+// What a designed cover is made from: the list's id, name, its light line
+// and foot line, and the covers its colours come from, with `quarters` when
+// the one picture is a server's four-cover square. `stamp` changes when the
+// list does, so its colours are worked out again.
+data class CoverOrder(
+    val id: String,
+    val name: String,
+    val line: String?,
+    val footer: String?,
+    val sources: List<String>,
+    val quarters: Boolean = false,
+    val stamp: String? = null,
+)
+
+// Designed playlist covers: their colours, from the lists' first covers,
+// and the pictures, drawn at the size shown. Both are kept in memory and,
+// once `folder` is set, on disk, so a list's cover is drawn once.
+class PlaylistArtStore(private val http: OkHttpClient) {
+    // Where covers are kept between runs; none in tests.
+    @Volatile var folder: File? = null
+
+    private val palettes = HashMap<String, CoverPalette>()
+    private val pictures = object : LinkedHashMap<String, ImageBitmap>(64, 0.75f, true) {
+        var bytes = 0L
+
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap>): Boolean {
+            if (bytes <= MemoryBytes) return false
+            bytes -= eldest.value.width.toLong() * eldest.value.height * 4
+            return true
+        }
+    }
+
+    // One at a time: the text engine's font cache is not safe to fill from
+    // two threads at once (two first draws crashed Skia registering the
+    // fonts), and one thread also keeps a sidebar of playlists off every core.
+    private val drawing = Semaphore(1)
+    private val fonts by lazy { createFontFamilyResolver() }
+    private var written = 0
+
+    fun knownPalette(key: String): CoverPalette? = synchronized(palettes) { palettes[key] }
+
+    fun known(key: String): ImageBitmap? = synchronized(pictures) { pictures[key] }
+
+    // The list's colours: kept, or worked out from its covers. With no
+    // covers to be had (none, or the server did not answer) the list's own,
+    // not kept, so they are asked for again next time.
+    suspend fun palette(client: SubsonicClient?, order: CoverOrder, key: String): CoverPalette {
+        knownPalette(key)?.let { return it }
+        val file = folder?.let { File(File(it, "palettes"), coverFileName(key, "txt")) }
+        val stored = withContext(Dispatchers.IO) { file?.takeIf(File::isFile)?.let { runCatching { it.readText() }.getOrNull() } }
+        stored?.let { text -> readPalette(text)?.let { return remember(key, it) } }
+        if (client == null || order.sources.isEmpty()) return coverPalette(emptyList(), order.id)
+        val pictures = withContext(Dispatchers.IO) { order.sources.map { fetchPixels(client, it) } }
+        if (pictures.any { it == null }) return coverPalette(emptyList(), order.id)
+        val swatches: List<List<Swatch>> = withContext(Dispatchers.Default) {
+            if (order.quarters && pictures.size == 1) quarterSwatches(pictures[0]!!, SampleSize) else pictures.map { coverSwatches(it!!) }
+        }
+        val palette = coverPalette(swatches, order.id)
+        if (file != null) withContext(Dispatchers.IO) { runCatching { file.parentFile.mkdirs(); file.writeText(writePalette(palette)) } }
+        return remember(key, palette)
+    }
+
+    private fun remember(key: String, palette: CoverPalette) = palette.also { synchronized(palettes) { palettes[key] = it } }
+
+    // The cover drawn `side` pixels square: kept, or drawn now off the
+    // window's thread.
+    suspend fun art(spec: CoverSpec, side: Int): ImageBitmap {
+        val key = coverArtKey(spec, side)
+        known(key)?.let { return it }
+        val file = folder?.let { File(File(it, "art"), coverFileName(key, "png")) }
+        val stored = withContext(Dispatchers.IO) {
+            file?.takeIf(File::isFile)?.let { runCatching { Image.makeFromEncoded(it.readBytes()).toComposeImageBitmap() }.getOrNull() }
+        }
+        if (stored != null) return keep(key, stored)
+        val drawn = drawing.withPermit { withContext(Dispatchers.Default) { designCover(spec, side, coverMeasurer(fonts), CoverFontFamily) } }
+        if (file != null) withContext(Dispatchers.IO) { save(file, drawn) }
+        return keep(key, drawn)
+    }
+
+    private fun keep(key: String, image: ImageBitmap): ImageBitmap = synchronized(pictures) {
+        if (pictures.put(key, image) == null) pictures.bytes += image.width.toLong() * image.height * 4
+        image
+    }
+
+    private fun save(file: File, image: ImageBitmap) {
+        runCatching {
+            file.parentFile.mkdirs()
+            val png = Image.makeFromBitmap(image.asSkiaBitmap()).encodeToData(EncodedImageFormat.PNG)?.bytes ?: return
+            val temp = File(file.parentFile, file.name + ".tmp")
+            temp.writeBytes(png)
+            if (!temp.renameTo(file)) temp.delete()
+        }
+        if (++written % TrimEvery == 0) trim(file.parentFile)
+    }
+
+    // Keeps the folder under its budget, the oldest pictures going first.
+    private fun trim(folder: File) {
+        val files = folder.listFiles { f -> f.isFile && f.name.endsWith(".png") }?.sortedBy { it.lastModified() } ?: return
+        var total = files.sumOf { it.length() }
+        for (f in files) {
+            if (total <= DiskBytes) break
+            total -= f.length()
+            f.delete()
+        }
+    }
+
+    private fun fetchPixels(client: SubsonicClient, coverId: String): IntArray? = runCatching {
+        http.newCall(Request.Builder().url(client.coverArtUrl(coverId, 150)).build()).execute().use { response ->
+            if (!response.isSuccessful) return null
+            coverPixels(response.body.bytes())
+        }
+    }.getOrNull()
+
+    companion object {
+        private const val MemoryBytes = 64L * 1024 * 1024
+        private const val DiskBytes = 96L * 1024 * 1024
+        private const val TrimEvery = 40
+
+        // Covers are looked at this small: plenty for their colours.
+        const val SampleSize = 64
+
+        fun writePalette(palette: CoverPalette): String = palette.key + if (palette.fromMusic) " music" else " own"
+
+        fun readPalette(text: String): CoverPalette? {
+            val (key, from) = text.trim().split(' ').takeIf { it.size == 2 } ?: return null
+            return CoverPalette.fromKey(key, fromMusic = from == "music")
+        }
+
+        // A picture's pixels at 64 square, as ARGB.
+        fun coverPixels(bytes: ByteArray): IntArray? {
+            val source = runCatching { Image.makeFromEncoded(bytes) }.getOrNull() ?: return null
+            val info = ImageInfo(SampleSize, SampleSize, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
+            val bitmap = Bitmap()
+            bitmap.allocPixels(info)
+            Canvas(bitmap).drawImageRect(
+                source,
+                Rect.makeWH(source.width.toFloat(), source.height.toFloat()),
+                Rect.makeWH(SampleSize.toFloat(), SampleSize.toFloat()),
+                FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR),
+                Paint(),
+                true,
+            )
+            val raw = bitmap.readPixels(info, SampleSize * 4, 0, 0) ?: return null
+            return IntArray(SampleSize * SampleSize) { i ->
+                val o = i * 4
+                (0xFF shl 24) or ((raw[o + 2].toInt() and 0xFF) shl 16) or ((raw[o + 1].toInt() and 0xFF) shl 8) or (raw[o].toInt() and 0xFF)
+            }
+        }
+    }
+}

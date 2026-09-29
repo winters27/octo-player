@@ -4,6 +4,7 @@ import app.winters.octo.sound.SoundSettings
 import app.winters.octo.desktop.system.SystemPrefs
 import app.winters.octo.desktop.discord.DiscordPrefs
 import app.winters.octo.desktop.hotkeys.HotkeyPrefs
+import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.subsonic.AuthMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -188,6 +189,8 @@ data class Appearance(
     // How big the words are, as a percentage, or 0 for the system's own
     // text size.
     val textSize: Int = 0,
+    // Playlists' pictures: designed for each one, or their album mosaics.
+    val playlistCovers: PlaylistCoverStyle = PlaylistCoverStyle.Designed,
 )
 
 // The window's colours: the playing cover blurred into a glow across the

@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.settings
 
+import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.desktop.system.SystemPrefs
 import app.winters.octo.sound.EqFilter
 import app.winters.octo.sound.EqMode
@@ -49,6 +50,7 @@ class SettingsStoreTest {
                 ambience = AmbienceStyle.Immersive,
                 ambienceMotion = AmbienceMotion.Still,
                 textSize = 115,
+                playlistCovers = PlaylistCoverStyle.Mosaic,
             ),
             playback = PlaybackPrefs(crossfadeSeconds = 4, speed = 0.75f, keepPitch = false, pitchSemitones = 3, autoplay = false),
             lyrics = LyricsPrefs(online = false),
@@ -187,5 +189,18 @@ class SettingsStoreTest {
         val newer = SettingsStore(file(), 0).current.appearance
         assertEquals(AmbienceStyle.Glow, newer.ambience)
         assertEquals(AmbienceMotion.Gentle, newer.ambienceMotion)
+    }
+
+    // Playlist covers are designed unless the listener picked the mosaics,
+    // and a file from before the choice existed reads as designed.
+    @Test
+    fun playlistCoversKeepTheirChoice() {
+        assertEquals(PlaylistCoverStyle.Designed, AppSettings().appearance.playlistCovers)
+        SettingsStore(file()).update { it.copy(appearance = it.appearance.copy(playlistCovers = PlaylistCoverStyle.Mosaic)) }
+        assertEquals(PlaylistCoverStyle.Mosaic, SettingsStore(file()).current.appearance.playlistCovers)
+        file().writeText("""{"appearance":{"ambientGlow":false}}""")
+        val old = SettingsStore(file()).current.appearance
+        assertEquals(PlaylistCoverStyle.Designed, old.playlistCovers)
+        assertFalse(old.ambientGlow)
     }
 }

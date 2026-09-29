@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.desktop.ui.LiveListPicture
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -198,7 +199,9 @@ private fun LiveListHeader(app: AppState, list: LiveList, songs: List<Song>, onE
         "Live list",
         list.name,
         picture = { modifier ->
-            if (covers.isEmpty()) Cover(null, modifier, shape = Corner.ArtMShape, placeholder = OctoIcons.Filter) else Mosaic(covers, modifier)
+            LiveListPicture(app, list, modifier, Corner.ArtMShape, songs) {
+                if (covers.isEmpty()) Cover(null, modifier, shape = Corner.ArtMShape, placeholder = OctoIcons.Filter) else Mosaic(covers, modifier)
+            }
         },
         note = { Txt(liveListSummary(list.query, songs.size), DesktopType.meta, OctoColors.TextSecondary, maxLines = 2) },
     ) {
