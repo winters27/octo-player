@@ -1,11 +1,12 @@
 package app.winters.octo.covers
 
 import app.winters.octo.player.immersive.contrastRatio
+import kotlin.random.Random
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.random.Random
 
 class CoverDesignTest {
     private val setter = FakeTypesetter()
@@ -182,5 +183,15 @@ class CoverDesignTest {
         assertNotEquals(key, coverArtKey(base.copy(id = "pl-2"), 160))
         assertNotEquals(key, coverArtKey(base, 160, book.copy(version = 2)))
         assertTrue(key.contains("v$COVER_DESIGN_VERSION"))
+    }
+
+    @Test
+    fun aNameThatSaysWhatItIsHasNoSecondLine() {
+        for (name in listOf("Road Trip Playlist", "Your Mix", "Summer mixes", "Late Night Radio", "Other Stations", "Trip hop (Playlist)")) {
+            assertTrue(name, nameSaysWhatItIs(name))
+        }
+        for (name in listOf("Mixtape Classics", "Radiohead", "Mix Masters", "Late night", "")) {
+            assertFalse(name, nameSaysWhatItIs(name))
+        }
     }
 }
