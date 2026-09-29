@@ -1,0 +1,1700 @@
+{
+  "version": 1,
+  "about": "Octo's cover backgrounds, made by tools/cover-art (python cover_art.py finals). Each is 1200x1200 WebP. Hues are OKLCH (l 0..1, c, h degrees), strongest first. textArea measures the box (shares of the side: x0, y0, x1, y1) where the title sits: darkness is 1 minus its mean OKLab lightness; whiteContrastP50 and P95 are white text against the box's median and 95th percentile luminance; veilFor3 and veilFor4_5 are the black overlay opacities that bring the P95 contrast to 3:1 (large text) and 4.5:1.",
+  "size": 1200,
+  "backgrounds": [
+    {
+      "file": "cobalt.webp",
+      "name": "Cobalt",
+      "family": "liquid",
+      "palette": "cobalt",
+      "seed": 1013,
+      "hues": [
+        {
+          "l": 0.575,
+          "c": 0.196,
+          "h": 262.5
+        }
+      ],
+      "meanLightness": 0.575,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.662,
+        "darkness": 0.338,
+        "p50Luminance": 0.2718,
+        "p95Luminance": 0.627,
+        "whiteContrastP50": 3.26,
+        "whiteContrastP95": 1.55,
+        "veilFor3": 0.522,
+        "veilFor4_5": 0.708
+      }
+    },
+    {
+      "file": "voltage.webp",
+      "name": "Voltage",
+      "family": "liquid",
+      "palette": "electric",
+      "seed": 1070,
+      "hues": [
+        {
+          "l": 0.534,
+          "c": 0.222,
+          "h": 267.5
+        },
+        {
+          "l": 0.721,
+          "c": 0.132,
+          "h": 232.5
+        }
+      ],
+      "meanLightness": 0.595,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.638,
+        "darkness": 0.362,
+        "p50Luminance": 0.2806,
+        "p95Luminance": 0.5591,
+        "whiteContrastP50": 3.18,
+        "whiteContrastP95": 1.72,
+        "veilFor3": 0.463,
+        "veilFor4_5": 0.672
+      }
+    },
+    {
+      "file": "night-swim.webp",
+      "name": "Night Swim",
+      "family": "liquid",
+      "palette": "midnight",
+      "seed": 1097,
+      "hues": [
+        {
+          "l": 0.335,
+          "c": 0.167,
+          "h": 277.5
+        }
+      ],
+      "meanLightness": 0.358,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.36,
+        "darkness": 0.64,
+        "p50Luminance": 0.038,
+        "p95Luminance": 0.1338,
+        "whiteContrastP50": 11.93,
+        "whiteContrastP95": 5.71,
+        "veilFor3": 0.0,
+        "veilFor4_5": 0.0
+      }
+    },
+    {
+      "file": "deep-current.webp",
+      "name": "Deep Current",
+      "family": "liquid",
+      "palette": "midnight",
+      "seed": 1027,
+      "hues": [
+        {
+          "l": 0.347,
+          "c": 0.175,
+          "h": 277.5
+        }
+      ],
+      "meanLightness": 0.389,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.455,
+        "darkness": 0.545,
+        "p50Luminance": 0.0784,
+        "p95Luminance": 0.3431,
+        "whiteContrastP50": 8.18,
+        "whiteContrastP95": 2.67,
+        "veilFor3": 0.126,
+        "veilFor4_5": 0.466
+      }
+    },
+    {
+      "file": "mercury.webp",
+      "name": "Mercury",
+      "family": "liquid",
+      "palette": "slate",
+      "seed": 1033,
+      "hues": [
+        {
+          "l": 0.504,
+          "c": 0.066,
+          "h": 267.5
+        }
+      ],
+      "meanLightness": 0.495,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.502,
+        "darkness": 0.498,
+        "p50Luminance": 0.1205,
+        "p95Luminance": 0.7009,
+        "whiteContrastP50": 6.16,
+        "whiteContrastP95": 1.4,
+        "veilFor3": 0.572,
+        "veilFor4_5": 0.738
+      }
+    },
+    {
+      "file": "peacock.webp",
+      "name": "Peacock",
+      "family": "liquid",
+      "palette": "peacock",
+      "seed": 1087,
+      "hues": [
+        {
+          "l": 0.698,
+          "c": 0.122,
+          "h": 182.5
+        },
+        {
+          "l": 0.485,
+          "c": 0.134,
+          "h": 247.5
+        }
+      ],
+      "meanLightness": 0.599,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.575,
+        "darkness": 0.425,
+        "p50Luminance": 0.2076,
+        "p95Luminance": 0.4446,
+        "whiteContrastP50": 4.08,
+        "whiteContrastP95": 2.12,
+        "veilFor3": 0.325,
+        "veilFor4_5": 0.588
+      }
+    },
+    {
+      "file": "lagoon.webp",
+      "name": "Lagoon",
+      "family": "liquid",
+      "palette": "lagoon",
+      "seed": 1146,
+      "hues": [
+        {
+          "l": 0.634,
+          "c": 0.194,
+          "h": 252.5
+        },
+        {
+          "l": 0.801,
+          "c": 0.139,
+          "h": 187.5
+        }
+      ],
+      "meanLightness": 0.74,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.775,
+        "darkness": 0.225,
+        "p50Luminance": 0.4949,
+        "p95Luminance": 0.7036,
+        "whiteContrastP50": 1.93,
+        "whiteContrastP95": 1.39,
+        "veilFor3": 0.574,
+        "veilFor4_5": 0.739
+      }
+    },
+    {
+      "file": "abyss.webp",
+      "name": "Abyss",
+      "family": "liquid",
+      "palette": "abyss",
+      "seed": 1134,
+      "hues": [
+        {
+          "l": 0.591,
+          "c": 0.101,
+          "h": 192.5
+        },
+        {
+          "l": 0.312,
+          "c": 0.058,
+          "h": 227.5
+        }
+      ],
+      "meanLightness": 0.406,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.456,
+        "darkness": 0.544,
+        "p50Luminance": 0.0927,
+        "p95Luminance": 0.5762,
+        "whiteContrastP50": 7.36,
+        "whiteContrastP95": 1.68,
+        "veilFor3": 0.479,
+        "veilFor4_5": 0.682
+      }
+    },
+    {
+      "file": "northern-lights.webp",
+      "name": "Northern Lights",
+      "family": "liquid",
+      "palette": "borealis",
+      "seed": 1066,
+      "hues": [
+        {
+          "l": 0.719,
+          "c": 0.145,
+          "h": 162.5
+        },
+        {
+          "l": 0.85,
+          "c": 0.185,
+          "h": 137.5
+        }
+      ],
+      "meanLightness": 0.668,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.715,
+        "darkness": 0.285,
+        "p50Luminance": 0.5397,
+        "p95Luminance": 0.8391,
+        "whiteContrastP50": 1.78,
+        "whiteContrastP95": 1.18,
+        "veilFor3": 0.642,
+        "veilFor4_5": 0.782
+      }
+    },
+    {
+      "file": "jungle.webp",
+      "name": "Jungle",
+      "family": "liquid",
+      "palette": "jungle",
+      "seed": 1014,
+      "hues": [
+        {
+          "l": 0.698,
+          "c": 0.17,
+          "h": 147.5
+        }
+      ],
+      "meanLightness": 0.714,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.729,
+        "darkness": 0.271,
+        "p50Luminance": 0.4709,
+        "p95Luminance": 0.7952,
+        "whiteContrastP50": 2.02,
+        "whiteContrastP95": 1.24,
+        "veilFor3": 0.623,
+        "veilFor4_5": 0.769
+      }
+    },
+    {
+      "file": "limelight.webp",
+      "name": "Limelight",
+      "family": "liquid",
+      "palette": "lime",
+      "seed": 1010,
+      "hues": [
+        {
+          "l": 0.814,
+          "c": 0.199,
+          "h": 147.5
+        },
+        {
+          "l": 0.618,
+          "c": 0.181,
+          "h": 247.5
+        }
+      ],
+      "meanLightness": 0.73,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.781,
+        "darkness": 0.219,
+        "p50Luminance": 0.5483,
+        "p95Luminance": 0.851,
+        "whiteContrastP50": 1.76,
+        "whiteContrastP95": 1.17,
+        "veilFor3": 0.647,
+        "veilFor4_5": 0.785
+      }
+    },
+    {
+      "file": "aurora.webp",
+      "name": "Aurora",
+      "family": "liquid",
+      "palette": "aurora",
+      "seed": 1007,
+      "hues": [
+        {
+          "l": 0.55,
+          "c": 0.236,
+          "h": 277.5
+        },
+        {
+          "l": 0.704,
+          "c": 0.145,
+          "h": 237.5
+        },
+        {
+          "l": 0.654,
+          "c": 0.248,
+          "h": 342.5
+        }
+      ],
+      "meanLightness": 0.644,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.64,
+        "darkness": 0.36,
+        "p50Luminance": 0.2504,
+        "p95Luminance": 0.5308,
+        "whiteContrastP50": 3.5,
+        "whiteContrastP95": 1.81,
+        "veilFor3": 0.435,
+        "veilFor4_5": 0.655
+      }
+    },
+    {
+      "file": "neon-tide.webp",
+      "name": "Neon Tide",
+      "family": "liquid",
+      "palette": "neon",
+      "seed": 1121,
+      "hues": [
+        {
+          "l": 0.529,
+          "c": 0.263,
+          "h": 292.5
+        },
+        {
+          "l": 0.696,
+          "c": 0.157,
+          "h": 242.5
+        },
+        {
+          "l": 0.628,
+          "c": 0.266,
+          "h": 342.5
+        }
+      ],
+      "meanLightness": 0.648,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.704,
+        "darkness": 0.296,
+        "p50Luminance": 0.3685,
+        "p95Luminance": 0.6885,
+        "whiteContrastP50": 2.51,
+        "whiteContrastP95": 1.42,
+        "veilFor3": 0.564,
+        "veilFor4_5": 0.734
+      }
+    },
+    {
+      "file": "bubblegum.webp",
+      "name": "Bubblegum",
+      "family": "liquid",
+      "palette": "candy",
+      "seed": 1113,
+      "hues": [
+        {
+          "l": 0.592,
+          "c": 0.233,
+          "h": 302.5
+        },
+        {
+          "l": 0.601,
+          "c": 0.203,
+          "h": 272.5
+        },
+        {
+          "l": 0.658,
+          "c": 0.229,
+          "h": 347.5
+        }
+      ],
+      "meanLightness": 0.624,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.597,
+        "darkness": 0.403,
+        "p50Luminance": 0.2059,
+        "p95Luminance": 0.2846,
+        "whiteContrastP50": 4.1,
+        "whiteContrastP95": 3.14,
+        "veilFor3": 0.0,
+        "veilFor4_5": 0.356
+      }
+    },
+    {
+      "file": "prism.webp",
+      "name": "Prism",
+      "family": "liquid",
+      "palette": "candy",
+      "seed": 1148,
+      "hues": [
+        {
+          "l": 0.596,
+          "c": 0.242,
+          "h": 302.5
+        },
+        {
+          "l": 0.563,
+          "c": 0.22,
+          "h": 272.5
+        },
+        {
+          "l": 0.66,
+          "c": 0.239,
+          "h": 347.5
+        }
+      ],
+      "meanLightness": 0.606,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.589,
+        "darkness": 0.411,
+        "p50Luminance": 0.1809,
+        "p95Luminance": 0.276,
+        "whiteContrastP50": 4.55,
+        "whiteContrastP95": 3.22,
+        "veilFor3": 0.0,
+        "veilFor4_5": 0.336
+      }
+    },
+    {
+      "file": "grape-soda.webp",
+      "name": "Grape Soda",
+      "family": "liquid",
+      "palette": "grape",
+      "seed": 1142,
+      "hues": [
+        {
+          "l": 0.682,
+          "c": 0.224,
+          "h": 342.5
+        },
+        {
+          "l": 0.541,
+          "c": 0.255,
+          "h": 297.5
+        }
+      ],
+      "meanLightness": 0.612,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.661,
+        "darkness": 0.339,
+        "p50Luminance": 0.2799,
+        "p95Luminance": 0.3787,
+        "whiteContrastP50": 3.18,
+        "whiteContrastP95": 2.45,
+        "veilFor3": 0.208,
+        "veilFor4_5": 0.516
+      }
+    },
+    {
+      "file": "ultraviolet.webp",
+      "name": "Ultraviolet",
+      "family": "liquid",
+      "palette": "ultraviolet",
+      "seed": 1176,
+      "hues": [
+        {
+          "l": 0.577,
+          "c": 0.246,
+          "h": 312.5
+        },
+        {
+          "l": 0.445,
+          "c": 0.23,
+          "h": 287.5
+        }
+      ],
+      "meanLightness": 0.521,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.478,
+        "darkness": 0.522,
+        "p50Luminance": 0.0881,
+        "p95Luminance": 0.3072,
+        "whiteContrastP50": 7.6,
+        "whiteContrastP95": 2.94,
+        "veilFor3": 0.023,
+        "veilFor4_5": 0.403
+      }
+    },
+    {
+      "file": "violet-hour.webp",
+      "name": "Violet Hour",
+      "family": "liquid",
+      "palette": "ultraviolet",
+      "seed": 1141,
+      "hues": [
+        {
+          "l": 0.457,
+          "c": 0.246,
+          "h": 287.5
+        },
+        {
+          "l": 0.595,
+          "c": 0.264,
+          "h": 312.5
+        }
+      ],
+      "meanLightness": 0.534,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.462,
+        "darkness": 0.538,
+        "p50Luminance": 0.0716,
+        "p95Luminance": 0.2341,
+        "whiteContrastP50": 8.64,
+        "whiteContrastP95": 3.7,
+        "veilFor3": 0.0,
+        "veilFor4_5": 0.217
+      }
+    },
+    {
+      "file": "nightshade.webp",
+      "name": "Nightshade",
+      "family": "liquid",
+      "palette": "nightshade",
+      "seed": 1063,
+      "hues": [
+        {
+          "l": 0.423,
+          "c": 0.217,
+          "h": 297.5
+        }
+      ],
+      "meanLightness": 0.426,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.442,
+        "darkness": 0.558,
+        "p50Luminance": 0.0945,
+        "p95Luminance": 0.2588,
+        "whiteContrastP50": 7.27,
+        "whiteContrastP95": 3.4,
+        "veilFor3": 0.0,
+        "veilFor4_5": 0.292
+      }
+    },
+    {
+      "file": "magenta.webp",
+      "name": "Magenta",
+      "family": "liquid",
+      "palette": "magenta",
+      "seed": 1012,
+      "hues": [
+        {
+          "l": 0.68,
+          "c": 0.235,
+          "h": 347.5
+        }
+      ],
+      "meanLightness": 0.664,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.638,
+        "darkness": 0.362,
+        "p50Luminance": 0.2217,
+        "p95Luminance": 0.2682,
+        "whiteContrastP50": 3.86,
+        "whiteContrastP95": 3.3,
+        "veilFor3": 0.0,
+        "veilFor4_5": 0.316
+      }
+    },
+    {
+      "file": "garnet.webp",
+      "name": "Garnet",
+      "family": "liquid",
+      "palette": "garnet",
+      "seed": 1139,
+      "hues": [
+        {
+          "l": 0.364,
+          "c": 0.135,
+          "h": 2.5
+        }
+      ],
+      "meanLightness": 0.352,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.418,
+        "darkness": 0.582,
+        "p50Luminance": 0.0651,
+        "p95Luminance": 0.2391,
+        "whiteContrastP50": 9.12,
+        "whiteContrastP95": 3.63,
+        "veilFor3": 0.0,
+        "veilFor4_5": 0.233
+      }
+    },
+    {
+      "file": "magma.webp",
+      "name": "Magma",
+      "family": "liquid",
+      "palette": "ember",
+      "seed": 1170,
+      "hues": [
+        {
+          "l": 0.355,
+          "c": 0.12,
+          "h": 27.5
+        }
+      ],
+      "meanLightness": 0.319,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.275,
+        "darkness": 0.725,
+        "p50Luminance": 0.0102,
+        "p95Luminance": 0.3524,
+        "whiteContrastP50": 17.43,
+        "whiteContrastP95": 2.61,
+        "veilFor3": 0.149,
+        "veilFor4_5": 0.48
+      }
+    },
+    {
+      "file": "firewave.webp",
+      "name": "Firewave",
+      "family": "liquid",
+      "palette": "firewave",
+      "seed": 1114,
+      "hues": [
+        {
+          "l": 0.648,
+          "c": 0.231,
+          "h": 12.5
+        },
+        {
+          "l": 0.548,
+          "c": 0.275,
+          "h": 297.5
+        },
+        {
+          "l": 0.695,
+          "c": 0.19,
+          "h": 42.5
+        }
+      ],
+      "meanLightness": 0.647,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.642,
+        "darkness": 0.358,
+        "p50Luminance": 0.2203,
+        "p95Luminance": 0.5502,
+        "whiteContrastP50": 3.88,
+        "whiteContrastP95": 1.75,
+        "veilFor3": 0.455,
+        "veilFor4_5": 0.667
+      }
+    },
+    {
+      "file": "sunset.webp",
+      "name": "Sunset",
+      "family": "liquid",
+      "palette": "sunset",
+      "seed": 1144,
+      "hues": [
+        {
+          "l": 0.666,
+          "c": 0.197,
+          "h": 32.5
+        }
+      ],
+      "meanLightness": 0.698,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.686,
+        "darkness": 0.314,
+        "p50Luminance": 0.2911,
+        "p95Luminance": 0.5012,
+        "whiteContrastP50": 3.08,
+        "whiteContrastP95": 1.91,
+        "veilFor3": 0.401,
+        "veilFor4_5": 0.634
+      }
+    },
+    {
+      "file": "tropic.webp",
+      "name": "Tropic",
+      "family": "liquid",
+      "palette": "tropic",
+      "seed": 1050,
+      "hues": [
+        {
+          "l": 0.726,
+          "c": 0.158,
+          "h": 47.5
+        },
+        {
+          "l": 0.865,
+          "c": 0.146,
+          "h": 87.5
+        },
+        {
+          "l": 0.672,
+          "c": 0.209,
+          "h": 7.5
+        }
+      ],
+      "meanLightness": 0.784,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.8,
+        "darkness": 0.2,
+        "p50Luminance": 0.5254,
+        "p95Luminance": 0.7799,
+        "whiteContrastP50": 1.82,
+        "whiteContrastP95": 1.27,
+        "veilFor3": 0.615,
+        "veilFor4_5": 0.765
+      }
+    },
+    {
+      "file": "flamingo.webp",
+      "name": "Flamingo",
+      "family": "liquid",
+      "palette": "flamingo",
+      "seed": 1143,
+      "hues": [
+        {
+          "l": 0.743,
+          "c": 0.171,
+          "h": 57.5
+        }
+      ],
+      "meanLightness": 0.735,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.727,
+        "darkness": 0.273,
+        "p50Luminance": 0.3366,
+        "p95Luminance": 0.6019,
+        "whiteContrastP50": 2.72,
+        "whiteContrastP95": 1.61,
+        "veilFor3": 0.502,
+        "veilFor4_5": 0.695
+      }
+    },
+    {
+      "file": "dusk.webp",
+      "name": "Dusk",
+      "family": "liquid",
+      "palette": "dusk",
+      "seed": 1102,
+      "hues": [
+        {
+          "l": 0.278,
+          "c": 0.098,
+          "h": 302.5
+        },
+        {
+          "l": 0.52,
+          "c": 0.142,
+          "h": 352.5
+        }
+      ],
+      "meanLightness": 0.379,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.409,
+        "darkness": 0.591,
+        "p50Luminance": 0.0495,
+        "p95Luminance": 0.304,
+        "whiteContrastP50": 10.55,
+        "whiteContrastP95": 2.97,
+        "veilFor3": 0.013,
+        "veilFor4_5": 0.397
+      }
+    },
+    {
+      "file": "coral.webp",
+      "name": "Coral",
+      "family": "liquid",
+      "palette": "coral",
+      "seed": 1116,
+      "hues": [
+        {
+          "l": 0.737,
+          "c": 0.148,
+          "h": 32.5
+        }
+      ],
+      "meanLightness": 0.734,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.745,
+        "darkness": 0.255,
+        "p50Luminance": 0.3914,
+        "p95Luminance": 0.5316,
+        "whiteContrastP50": 2.38,
+        "whiteContrastP95": 1.81,
+        "veilFor3": 0.436,
+        "veilFor4_5": 0.655
+      }
+    },
+    {
+      "file": "cotton-candy.webp",
+      "name": "Cotton Candy",
+      "family": "liquid",
+      "palette": "cotton",
+      "seed": 1055,
+      "hues": [
+        {
+          "l": 0.81,
+          "c": 0.091,
+          "h": 307.5
+        },
+        {
+          "l": 0.836,
+          "c": 0.086,
+          "h": 337.5
+        },
+        {
+          "l": 0.839,
+          "c": 0.061,
+          "h": 257.5
+        }
+      ],
+      "meanLightness": 0.833,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.843,
+        "darkness": 0.157,
+        "p50Luminance": 0.6114,
+        "p95Luminance": 0.806,
+        "whiteContrastP50": 1.59,
+        "whiteContrastP95": 1.23,
+        "veilFor3": 0.628,
+        "veilFor4_5": 0.773
+      }
+    },
+    {
+      "file": "lilac.webp",
+      "name": "Lilac",
+      "family": "liquid",
+      "palette": "lilac",
+      "seed": 1058,
+      "hues": [
+        {
+          "l": 0.805,
+          "c": 0.11,
+          "h": 302.5
+        },
+        {
+          "l": 0.864,
+          "c": 0.09,
+          "h": 332.5
+        }
+      ],
+      "meanLightness": 0.827,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.838,
+        "darkness": 0.162,
+        "p50Luminance": 0.6001,
+        "p95Luminance": 0.7626,
+        "whiteContrastP50": 1.62,
+        "whiteContrastP95": 1.29,
+        "veilFor3": 0.607,
+        "veilFor4_5": 0.76
+      }
+    },
+    {
+      "file": "mint.webp",
+      "name": "Mint",
+      "family": "liquid",
+      "palette": "mint",
+      "seed": 1126,
+      "hues": [
+        {
+          "l": 0.811,
+          "c": 0.088,
+          "h": 292.5
+        },
+        {
+          "l": 0.846,
+          "c": 0.084,
+          "h": 192.5
+        }
+      ],
+      "meanLightness": 0.843,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.849,
+        "darkness": 0.151,
+        "p50Luminance": 0.6298,
+        "p95Luminance": 0.9135,
+        "whiteContrastP50": 1.54,
+        "whiteContrastP95": 1.09,
+        "veilFor3": 0.672,
+        "veilFor4_5": 0.799
+      }
+    },
+    {
+      "file": "peach.webp",
+      "name": "Peach",
+      "family": "liquid",
+      "palette": "peach",
+      "seed": 1127,
+      "hues": [
+        {
+          "l": 0.822,
+          "c": 0.091,
+          "h": 7.5
+        },
+        {
+          "l": 0.834,
+          "c": 0.081,
+          "h": 47.5
+        },
+        {
+          "l": 0.896,
+          "c": 0.08,
+          "h": 77.5
+        }
+      ],
+      "meanLightness": 0.848,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.867,
+        "darkness": 0.133,
+        "p50Luminance": 0.6289,
+        "p95Luminance": 0.8691,
+        "whiteContrastP50": 1.55,
+        "whiteContrastP95": 1.14,
+        "veilFor3": 0.655,
+        "veilFor4_5": 0.789
+      }
+    },
+    {
+      "file": "teal-drift.webp",
+      "name": "Teal Drift",
+      "family": "silk",
+      "palette": "abyss",
+      "seed": 2043,
+      "hues": [
+        {
+          "l": 0.646,
+          "c": 0.112,
+          "h": 182.5
+        }
+      ],
+      "meanLightness": 0.553,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.415,
+        "darkness": 0.585,
+        "p50Luminance": 0.0225,
+        "p95Luminance": 0.2631,
+        "whiteContrastP50": 14.49,
+        "whiteContrastP95": 3.35,
+        "veilFor3": 0.0,
+        "veilFor4_5": 0.303
+      }
+    },
+    {
+      "file": "blue-silk.webp",
+      "name": "Blue Silk",
+      "family": "silk",
+      "palette": "cobalt",
+      "seed": 2032,
+      "hues": [
+        {
+          "l": 0.625,
+          "c": 0.175,
+          "h": 257.5
+        }
+      ],
+      "meanLightness": 0.625,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.509,
+        "darkness": 0.491,
+        "p50Luminance": 0.0803,
+        "p95Luminance": 0.337,
+        "whiteContrastP50": 8.06,
+        "whiteContrastP95": 2.71,
+        "veilFor3": 0.11,
+        "veilFor4_5": 0.456
+      }
+    },
+    {
+      "file": "tide.webp",
+      "name": "Tide",
+      "family": "silk",
+      "palette": "silk-tide",
+      "seed": 2053,
+      "hues": [
+        {
+          "l": 0.763,
+          "c": 0.109,
+          "h": 222.5
+        },
+        {
+          "l": 0.346,
+          "c": 0.166,
+          "h": 262.5
+        }
+      ],
+      "meanLightness": 0.647,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.737,
+        "darkness": 0.263,
+        "p50Luminance": 0.5609,
+        "p95Luminance": 0.738,
+        "whiteContrastP50": 1.72,
+        "whiteContrastP95": 1.33,
+        "veilFor3": 0.594,
+        "veilFor4_5": 0.752
+      }
+    },
+    {
+      "file": "midnight.webp",
+      "name": "Midnight",
+      "family": "silk",
+      "palette": "midnight",
+      "seed": 2069,
+      "hues": [
+        {
+          "l": 0.333,
+          "c": 0.18,
+          "h": 277.5
+        },
+        {
+          "l": 0.617,
+          "c": 0.158,
+          "h": 247.5
+        }
+      ],
+      "meanLightness": 0.394,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.219,
+        "darkness": 0.781,
+        "p50Luminance": 0.0006,
+        "p95Luminance": 0.1284,
+        "whiteContrastP50": 20.75,
+        "whiteContrastP95": 5.89,
+        "veilFor3": 0.0,
+        "veilFor4_5": 0.0
+      }
+    },
+    {
+      "file": "slate.webp",
+      "name": "Slate",
+      "family": "silk",
+      "palette": "slate",
+      "seed": 2046,
+      "hues": [
+        {
+          "l": 0.634,
+          "c": 0.06,
+          "h": 262.5
+        }
+      ],
+      "meanLightness": 0.517,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.417,
+        "darkness": 0.583,
+        "p50Luminance": 0.1078,
+        "p95Luminance": 0.6463,
+        "whiteContrastP50": 6.65,
+        "whiteContrastP95": 1.51,
+        "veilFor3": 0.536,
+        "veilFor4_5": 0.716
+      }
+    },
+    {
+      "file": "fern.webp",
+      "name": "Fern",
+      "family": "silk",
+      "palette": "silk-fern",
+      "seed": 2049,
+      "hues": [
+        {
+          "l": 0.798,
+          "c": 0.159,
+          "h": 137.5
+        }
+      ],
+      "meanLightness": 0.629,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.467,
+        "darkness": 0.533,
+        "p50Luminance": 0.1219,
+        "p95Luminance": 0.5242,
+        "whiteContrastP50": 6.11,
+        "whiteContrastP95": 1.83,
+        "veilFor3": 0.428,
+        "veilFor4_5": 0.65
+      }
+    },
+    {
+      "file": "reef.webp",
+      "name": "Reef",
+      "family": "silk",
+      "palette": "peacock",
+      "seed": 2062,
+      "hues": [
+        {
+          "l": 0.728,
+          "c": 0.125,
+          "h": 177.5
+        },
+        {
+          "l": 0.549,
+          "c": 0.117,
+          "h": 237.5
+        }
+      ],
+      "meanLightness": 0.622,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.529,
+        "darkness": 0.471,
+        "p50Luminance": 0.1839,
+        "p95Luminance": 0.4494,
+        "whiteContrastP50": 4.49,
+        "whiteContrastP95": 2.1,
+        "veilFor3": 0.332,
+        "veilFor4_5": 0.592
+      }
+    },
+    {
+      "file": "amber-night.webp",
+      "name": "Amber Night",
+      "family": "silk",
+      "palette": "silk-amber",
+      "seed": 2050,
+      "hues": [
+        {
+          "l": 0.796,
+          "c": 0.139,
+          "h": 77.5
+        },
+        {
+          "l": 0.278,
+          "c": 0.078,
+          "h": 262.5
+        }
+      ],
+      "meanLightness": 0.566,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.394,
+        "darkness": 0.606,
+        "p50Luminance": 0.0566,
+        "p95Luminance": 0.4723,
+        "whiteContrastP50": 9.85,
+        "whiteContrastP95": 2.01,
+        "veilFor3": 0.365,
+        "veilFor4_5": 0.612
+      }
+    },
+    {
+      "file": "ember.webp",
+      "name": "Ember",
+      "family": "silk",
+      "palette": "ember",
+      "seed": 2016,
+      "hues": [
+        {
+          "l": 0.489,
+          "c": 0.152,
+          "h": 42.5
+        }
+      ],
+      "meanLightness": 0.488,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.604,
+        "darkness": 0.396,
+        "p50Luminance": 0.2488,
+        "p95Luminance": 0.3673,
+        "whiteContrastP50": 3.51,
+        "whiteContrastP95": 2.52,
+        "veilFor3": 0.183,
+        "veilFor4_5": 0.501
+      }
+    },
+    {
+      "file": "golden-hour.webp",
+      "name": "Golden Hour",
+      "family": "silk",
+      "palette": "sunset",
+      "seed": 2029,
+      "hues": [
+        {
+          "l": 0.689,
+          "c": 0.204,
+          "h": 2.5
+        },
+        {
+          "l": 0.605,
+          "c": 0.196,
+          "h": 37.5
+        },
+        {
+          "l": 0.764,
+          "c": 0.157,
+          "h": 67.5
+        }
+      ],
+      "meanLightness": 0.685,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.679,
+        "darkness": 0.321,
+        "p50Luminance": 0.2163,
+        "p95Luminance": 0.5197,
+        "whiteContrastP50": 3.94,
+        "whiteContrastP95": 1.84,
+        "veilFor3": 0.423,
+        "veilFor4_5": 0.647
+      }
+    },
+    {
+      "file": "crimson.webp",
+      "name": "Crimson",
+      "family": "silk",
+      "palette": "silk-crimson",
+      "seed": 2051,
+      "hues": [
+        {
+          "l": 0.567,
+          "c": 0.198,
+          "h": 22.5
+        }
+      ],
+      "meanLightness": 0.48,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.387,
+        "darkness": 0.613,
+        "p50Luminance": 0.0675,
+        "p95Luminance": 0.2691,
+        "whiteContrastP50": 8.94,
+        "whiteContrastP95": 3.29,
+        "veilFor3": 0.0,
+        "veilFor4_5": 0.319
+      }
+    },
+    {
+      "file": "fuchsia.webp",
+      "name": "Fuchsia",
+      "family": "silk",
+      "palette": "magenta",
+      "seed": 2087,
+      "hues": [
+        {
+          "l": 0.679,
+          "c": 0.207,
+          "h": 347.5
+        },
+        {
+          "l": 0.502,
+          "c": 0.255,
+          "h": 307.5
+        }
+      ],
+      "meanLightness": 0.642,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.585,
+        "darkness": 0.415,
+        "p50Luminance": 0.1786,
+        "p95Luminance": 0.3089,
+        "whiteContrastP50": 4.59,
+        "whiteContrastP95": 2.93,
+        "veilFor3": 0.029,
+        "veilFor4_5": 0.407
+      }
+    },
+    {
+      "file": "orchid.webp",
+      "name": "Orchid",
+      "family": "silk",
+      "palette": "silk-orchid",
+      "seed": 2076,
+      "hues": [
+        {
+          "l": 0.673,
+          "c": 0.188,
+          "h": 332.5
+        },
+        {
+          "l": 0.372,
+          "c": 0.187,
+          "h": 292.5
+        }
+      ],
+      "meanLightness": 0.54,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.432,
+        "darkness": 0.568,
+        "p50Luminance": 0.0824,
+        "p95Luminance": 0.2601,
+        "whiteContrastP50": 7.93,
+        "whiteContrastP95": 3.39,
+        "veilFor3": 0.0,
+        "veilFor4_5": 0.295
+      }
+    },
+    {
+      "file": "velvet.webp",
+      "name": "Velvet",
+      "family": "silk",
+      "palette": "nightshade",
+      "seed": 2014,
+      "hues": [
+        {
+          "l": 0.674,
+          "c": 0.246,
+          "h": 342.5
+        },
+        {
+          "l": 0.39,
+          "c": 0.203,
+          "h": 297.5
+        }
+      ],
+      "meanLightness": 0.426,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.291,
+        "darkness": 0.709,
+        "p50Luminance": 0.0174,
+        "p95Luminance": 0.1357,
+        "whiteContrastP50": 15.59,
+        "whiteContrastP95": 5.65,
+        "veilFor3": 0.0,
+        "veilFor4_5": 0.0
+      }
+    },
+    {
+      "file": "afterglow.webp",
+      "name": "Afterglow",
+      "family": "silk",
+      "palette": "dusk",
+      "seed": 2017,
+      "hues": [
+        {
+          "l": 0.713,
+          "c": 0.138,
+          "h": 32.5
+        },
+        {
+          "l": 0.519,
+          "c": 0.142,
+          "h": 357.5
+        },
+        {
+          "l": 0.281,
+          "c": 0.114,
+          "h": 302.5
+        }
+      ],
+      "meanLightness": 0.524,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.64,
+        "darkness": 0.36,
+        "p50Luminance": 0.3013,
+        "p95Luminance": 0.4301,
+        "whiteContrastP50": 2.99,
+        "whiteContrastP95": 2.19,
+        "veilFor3": 0.302,
+        "veilFor4_5": 0.574
+      }
+    },
+    {
+      "file": "cloud.webp",
+      "name": "Cloud",
+      "family": "silk",
+      "palette": "cotton",
+      "seed": 2008,
+      "hues": [
+        {
+          "l": 0.75,
+          "c": 0.11,
+          "h": 307.5
+        },
+        {
+          "l": 0.885,
+          "c": 0.056,
+          "h": 337.5
+        },
+        {
+          "l": 0.823,
+          "c": 0.059,
+          "h": 252.5
+        }
+      ],
+      "meanLightness": 0.835,
+      "textArea": {
+        "box": [
+          0.04,
+          0.05,
+          0.8,
+          0.5
+        ],
+        "meanLightness": 0.87,
+        "darkness": 0.13,
+        "p50Luminance": 0.721,
+        "p95Luminance": 0.8892,
+        "whiteContrastP50": 1.36,
+        "whiteContrastP95": 1.12,
+        "veilFor3": 0.663,
+        "veilFor4_5": 0.794
+      }
+    }
+  ]
+}
