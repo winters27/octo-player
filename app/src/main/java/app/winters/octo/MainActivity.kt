@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import app.winters.octo.ui.common.Feedback
+import app.winters.octo.update.AppUpdates
 import app.winters.octo.design.OctoTheme
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.playback.PlaybackConnection
@@ -34,6 +35,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var feedback: Feedback
     // Launcher shortcuts and "Open with Octo".
     @Inject lateinit var systemEntries: SystemEntries
+    @Inject lateinit var updates: AppUpdates
 
     // Counts up each time a home screen widget asks for the full player.
     private var openPlayer by mutableIntStateOf(0)
@@ -95,6 +97,9 @@ class MainActivity : ComponentActivity() {
 
     // Letting go lets the service stop itself when nothing is playing.
     override fun onStop() {
+        // Leaving Octo is when "When I leave Octo" puts a ready update in,
+        // unless music is playing.
+        if (!isChangingConfigurations) updates.leaving(playing = playback.now.value.isPlaying)
         playback.release()
         super.onStop()
     }

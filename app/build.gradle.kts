@@ -16,10 +16,39 @@ android {
         targetSdk = 36
         // A test build passes its number (-PoctoBuild=N), so each one it
         // installs counts as newer than the last and reads as 0.2.0.N.
+        // A release (the android-v<version> tag's workflow) also passes its
+        // version, -PoctoAndroidVersion=1.2.0 or 1.3.0-beta.1, which the app shows
+        // and compares with newer releases; the commit count stays the
+        // version code, so every build counts up.
         val testBuild = (project.findProperty("octoBuild") as String?)?.toIntOrNull()
+        val release = (project.findProperty("octoAndroidVersion") as String?)?.takeIf(String::isNotBlank)?.trim()
+        if (release != null) {
+            require(Regex("""(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?""").matches(release)) { "octoAndroidVersion must look like 1.2.0 or 1.3.0-beta.1, not $release" }
+            requireNotNull(testBuild) { "A release needs -PoctoBuild=<commit count> for its version code" }
+        }
         versionCode = testBuild ?: 2
-        versionName = if (testBuild != null) "0.2.0.$testBuild" else "0.2.0"
+        versionName = release ?: if (testBuild != null) "0.2.0.$testBuild" else "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Trying the updater from a debug build: -Pocto.updates.force=true,
+        // and -Pocto.updates.api=<address> for a pretend GitHub.
+        buildConfigField("boolean", "UPDATES_FORCED", (project.findProperty("octo.updates.force") == "true").toString())
+        buildConfigField("String", "UPDATES_API", "\"${(project.findProperty("octo.updates.api") as String?).orEmpty()}\"")
+    }
+
+    // The release key, only where the release workflow provides it (from
+    // the repository's secrets): the keystore file and its passwords. Every
+    // release must be signed with this same key, or phones refuse the
+    // update; without it the release build is left unsigned.
+    val releaseKeystore = providers.environmentVariable("OCTO_ANDROID_KEYSTORE").orNull
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = providers.environmentVariable("OCTO_ANDROID_KEYSTORE_PASSWORD").orNull
+                keyAlias = providers.environmentVariable("OCTO_ANDROID_KEY_ALIAS").orNull
+                keyPassword = providers.environmentVariable("OCTO_ANDROID_KEY_PASSWORD").orNull
+            }
+        }
     }
 
     buildTypes {
@@ -30,6 +59,7 @@ android {
         }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
