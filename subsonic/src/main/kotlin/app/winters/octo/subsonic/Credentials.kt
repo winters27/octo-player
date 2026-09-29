@@ -56,4 +56,17 @@ internal fun newSalt(): String = ByteArray(8).also(random::nextBytes).toHex()
 internal fun md5Hex(text: String): String =
     MessageDigest.getInstance("MD5").digest(text.toByteArray(Charsets.UTF_8)).toHex()
 
-private fun ByteArray.toHex() = joinToString("") { "%02x".format(it) }
+// Lower-case hex, two digits a byte. By table rather than String.format,
+// which cost about 10 microseconds a signature: queueing a 20,000 song
+// library signs every song's address, 0.27 s on the window's thread.
+internal fun ByteArray.toHex(): String {
+    val out = CharArray(size * 2)
+    for (i in indices) {
+        val byte = this[i].toInt() and 0xFF
+        out[i * 2] = HexDigits[byte ushr 4]
+        out[i * 2 + 1] = HexDigits[byte and 0x0F]
+    }
+    return String(out)
+}
+
+private val HexDigits = "0123456789abcdef".toCharArray()
