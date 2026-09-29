@@ -2,7 +2,6 @@ package app.winters.octo.desktop.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.AnimatedVisibility
-import javax.swing.SwingUtilities
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.focusGroup
 import androidx.compose.runtime.SideEffect
@@ -11,7 +10,6 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -153,8 +151,14 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
     val key = rememberKeyColour(app)
     val keyboard = LocalFocusVisibility.current
     val parts = remember { FrameFocus() }
-    // What had the keyboard before a pop-up opened gets it back after.
-    SideEffect { app.popups.returnFocus = { parts.last?.let { runCatching { it.requestFocus() } } } }
+    // What had the keyboard before a pop-up opened gets it back after: the
+    // part it was in remembers the control, or failing that its first.
+    SideEffect {
+        app.popups.saveFocus = { parts.last?.let { runCatching { it.saveFocusedChild() } } }
+        app.popups.returnFocus = {
+            parts.last?.let { part -> if (!runCatching { part.restoreFocusedChild() }.getOrDefault(false)) runCatching { part.requestFocus() } }
+        }
+    }
     CompositionLocalProvider(
         LocalPopups provides app.popups,
         LocalPointer provides pointer,
@@ -206,11 +210,11 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
     }
 }
 
-// The frame's parts, in the order Tab walks them: the title bar, the
-// sidebar (search, places, playlists), the page, the side panel when open,
-// and the player floating at the page's foot, then round to the title bar
-// again. With the full player open only the title bar and it take turns;
-// the frame under it is out of reach.
+// The frame's parts, in the order Tab walks them, which is the order they
+// are laid out in: the sidebar (search, places, playlists), the page, the
+// side panel when open, the player floating at the page's foot, then the
+// title bar, and round again. With the full player open only it and the
+// title bar take turns; the frame under it is out of reach.
 @Stable
 internal class FrameFocus {
     val window = FocusRequester()
@@ -221,8 +225,7 @@ internal class FrameFocus {
     val player = FocusRequester()
     val full = FocusRequester()
 
-    // The part that last had the keyboard; each part keeps its own last
-    // focused control, so asking the part for it lands there again.
+    // The part that last had the keyboard.
     var last: FocusRequester? = null
 
     fun order(app: AppState): List<FocusRequester> = when {
@@ -232,37 +235,14 @@ internal class FrameFocus {
     }
 }
 
-// Makes a part of the frame one stop in that walk: leaving it with Tab or
-// Shift+Tab goes on to the next part that has anything to take the
-// keyboard, and a part out of the walk cannot be entered.
+// Marks a part of the frame: which part last had the keyboard (so it can
+// have it back after a pop-up), and, with the full player open, the frame's
+// parts cannot be entered at all.
 internal fun Modifier.part(parts: FrameFocus, me: FocusRequester, app: AppState): Modifier = this
     .onFocusChanged { if (it.hasFocus) parts.last = me }
     .focusRequester(me)
-    .focusProperties {
-        onEnter = { if (me !in parts.order(app)) cancelFocusChange() }
-        onExit = {
-            val direction = requestedFocusDirection
-            val order = parts.order(app)
-            val at = order.indexOf(me)
-            if (at >= 0 && (direction == FocusDirection.Next || direction == FocusDirection.Previous)) {
-                val step = if (direction == FocusDirection.Next) 1 else -1
-                // Going on, a part is entered at its start; going back, from
-                // its foot, near where Shift+Tab would have met it last.
-                val enter = if (direction == FocusDirection.Next) FocusDirection.Enter else FocusDirection.Up
-                cancelFocusChange()
-                // Once this move has settled: asked from inside it, the move
-                // would carry on past the part it was sent to.
-                SwingUtilities.invokeLater {
-                    for (k in 1 until order.size) {
-                        val next = order[Math.floorMod(at + step * k, order.size)]
-                        if (runCatching { next.requestFocus(enter) }.getOrDefault(false)) break
-                    }
-                }
-            }
-        }
-    }
+    .focusProperties { onEnter = { if (me !in parts.order(app)) cancelFocusChange() } }
     .focusGroup()
-    .focusRestorer()
 
 // The full player's fade: brief, and briefer still with motion reduced.
 @Composable
@@ -297,46 +277,54 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus)
         // over it, last, so they stay over the full player too.
         Box(Modifier.fillMaxWidth().height(FrameSize.TitleBar).chromeFilm(backdrop))
         Seam(vertical = false)
-        Row(Modifier.weight(1f).fillMaxWidth()) {
-            Box(Modifier.width(fit.sidebar).fillMaxHeight().part(parts, parts.sidebar, app)) {
-                Sidebar(app, backdrop, Modifier.fillMaxSize(), rail = fit.rail)
-                if (!fit.rail) {
-                    ResizeHandle(
-                        onDrag = { sidebar = (sidebar + it).coerceIn(FrameSize.SidebarMin, FrameSize.SidebarMax) },
-                        onDone = { app.updateFrame { f -> f.copy(sidebarWidth = sidebar.value) } },
-                        modifier = Modifier.align(Alignment.CenterEnd),
-                    )
-                }
-            }
-            Seam(vertical = true)
-            CompositionLocalProvider(LocalBottomRoom provides FrameSize.Player + FrameSize.PlayerGap, LocalFrameBackdrop provides backdrop) {
-                BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
-                    Column(Modifier.fillMaxSize().clipToBounds().part(parts, parts.page, app)) {
-                        app.notice?.let { Notice(it, app.noticeDetail, app.actionFor(it)) { app.notice = null; app.noticeDetail = null } }
-                        Box(Modifier.weight(1f)) { PageHost(app) }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            Row(Modifier.fillMaxSize()) {
+                Box(Modifier.width(fit.sidebar).fillMaxHeight().part(parts, parts.sidebar, app)) {
+                    Sidebar(app, backdrop, Modifier.fillMaxSize(), rail = fit.rail)
+                    if (!fit.rail) {
+                        ResizeHandle(
+                            onDrag = { sidebar = (sidebar + it).coerceIn(FrameSize.SidebarMin, FrameSize.SidebarMax) },
+                            onDone = { app.updateFrame { f -> f.copy(sidebarWidth = sidebar.value) } },
+                            modifier = Modifier.align(Alignment.CenterEnd),
+                        )
                     }
-                    // A third of the window, in the middle of the page.
-                    val width = playerWidth(maxWidth, window)
-                    PlayerBar(app, backdrop, Modifier.align(Alignment.BottomCenter).padding(bottom = FrameSize.PlayerGap).width(width).height(FrameSize.Player).part(parts, parts.player, app), compact = playerIsCompact(width))
+                }
+                Seam(vertical = true)
+                CompositionLocalProvider(LocalBottomRoom provides FrameSize.Player + FrameSize.PlayerGap, LocalFrameBackdrop provides backdrop) {
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                        Column(Modifier.fillMaxSize().clipToBounds().part(parts, parts.page, app)) {
+                            app.notice?.let { Notice(it, app.noticeDetail, app.actionFor(it)) { app.notice = null; app.noticeDetail = null } }
+                            Box(Modifier.weight(1f)) { PageHost(app) }
+                        }
+                    }
+                }
+                if (panel != null && fit.panel != null) {
+                    Seam(vertical = true)
+                    // Escape in the panel closes it; the page then has the keyboard.
+                    Box(
+                        Modifier
+                            .width(fit.panel)
+                            .fillMaxHeight()
+                            .onFocusChanged { app.panelHasKeyboard = it.hasFocus }
+                            .part(parts, parts.panel, app),
+                    ) {
+                        ContextPanel(app, panel, backdrop, Modifier.fillMaxSize())
+                        ResizeHandle(
+                            onDrag = { panelWidth = (panelWidth - it).coerceIn(FrameSize.PanelMin, FrameSize.PanelMax) },
+                            onDone = { app.updateFrame { f -> f.copy(panelWidth = panelWidth.value) } },
+                            modifier = Modifier.align(Alignment.CenterStart),
+                        )
+                    }
                 }
             }
-            if (panel != null && fit.panel != null) {
-                Seam(vertical = true)
-                // Escape in the panel closes it; the page then has the keyboard.
-                Box(
-                    Modifier
-                        .width(fit.panel)
-                        .fillMaxHeight()
-                        .onFocusChanged { app.panelHasKeyboard = it.hasFocus }
-                        .part(parts, parts.panel, app),
-                ) {
-                    ContextPanel(app, panel, backdrop, Modifier.fillMaxSize())
-                    ResizeHandle(
-                        onDrag = { panelWidth = (panelWidth - it).coerceIn(FrameSize.PanelMin, FrameSize.PanelMax) },
-                        onDone = { app.updateFrame { f -> f.copy(panelWidth = panelWidth.value) } },
-                        modifier = Modifier.align(Alignment.CenterStart),
-                    )
-                }
+            // The player floats over the foot of the page, a third of the window
+            // wide in its middle. It is laid out after the side panel, so Tab
+            // comes to it last, after the panel.
+            val start = fit.sidebar + FrameSize.Hairline
+            val end = fit.panel?.let { it + FrameSize.Hairline } ?: Space.None
+            Box(Modifier.fillMaxSize().padding(start = start, end = end)) {
+                val width = playerWidth(fit.page, window)
+                PlayerBar(app, backdrop, Modifier.align(Alignment.BottomCenter).padding(bottom = FrameSize.PlayerGap).width(width).height(FrameSize.Player).part(parts, parts.player, app), compact = playerIsCompact(width))
             }
         }
     }

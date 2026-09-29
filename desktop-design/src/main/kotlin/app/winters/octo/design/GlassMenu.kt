@@ -147,8 +147,9 @@ class PopupHost {
 
     val open: Boolean get() = request != null
 
-    // Set by the window: gives the keyboard back to what had it before a
-    // pop-up opened, once it shuts.
+    // Set by the window: notes what has the keyboard as a pop-up opens, and
+    // gives it back once it shuts.
+    var saveFocus: (() -> Unit)? = null
     var returnFocus: (() -> Unit)? = null
 }
 
@@ -192,6 +193,7 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
         if (rows) runCatching { card.requestFocus(FocusDirection.Enter) }
     }
     LaunchedEffect(request) {
+        if (held == null) runCatching { host.saveFocus?.invoke() }
         held = request
         takeKeyboard(rows = false)
         // Opened from the keyboard, its first row takes it once laid out.

@@ -115,13 +115,20 @@ class A11yTest {
         }
     }
 
-    // The parts Tab passes through, in order, each once per visit.
+    // The parts Tab passes through, in order, each once per visit, and the
+    // first control met in each part (the last visit's).
+    private val firsts = HashMap<String, String>()
+
     private fun A11yScene.walk(presses: Int, back: Boolean = false): List<String> {
         val seen = mutableListOf<String>()
         repeat(presses) {
             press(Key.Tab, shift = back)
-            val part = focused()?.let { partOf(it) } ?: "nothing"
-            if (seen.lastOrNull() != part) seen += part
+            val node = focused()
+            val part = node?.let { partOf(it) } ?: "nothing"
+            if (seen.lastOrNull() != part) {
+                seen += part
+                firsts[part] = node?.name().orEmpty()
+            }
         }
         return seen
     }
@@ -141,6 +148,9 @@ class A11yTest {
             assertTrue("reached the title bar: $parts", start >= 0)
             val round = parts.drop(start).take(cycle.size + 1)
             assertEquals("Tab's order", cycle + "title", round)
+            // Each part is entered at its start: the player at its cover.
+            assertEquals("Open the player", firsts["player"])
+            assertEquals("Search", firsts["sidebar"])
             // Shift+Tab goes round the other way.
             val backward = s.walk(140, back = true)
             val from = backward.indexOf("player")
