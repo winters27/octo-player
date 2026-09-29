@@ -20,18 +20,17 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
-import app.winters.octo.covers.CoverBook
 import app.winters.octo.covers.CoverSpec
 import app.winters.octo.covers.LIVE_LIST_COVER_LINE
 import app.winters.octo.covers.PLAYLIST_COVER_LINE
 import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.covers.STATION_COVER_LINE
 import app.winters.octo.covers.coverArtKey
-import app.winters.octo.covers.coverGradientOf
+import app.winters.octo.covers.backgroundColour
+import app.winters.octo.covers.chooseBackground
 import app.winters.octo.covers.coverPaletteKey
 import app.winters.octo.covers.coverSide
 import app.winters.octo.covers.coverSources
-import app.winters.octo.covers.gradientColours
 import app.winters.octo.covers.playlistCoverFooter
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -80,10 +79,7 @@ fun DesignedCover(app: AppState, order: CoverOrder, modifier: Modifier, shape: S
             if (spec != null && ready == null) shown = store.art(spec, side)
         }
         val ground = remember(spec?.id, palette) {
-            spec?.let { s ->
-                val gradient = CoverBook.Default.gradients[coverGradientOf(s.id)]
-                Color(gradientColours(gradient, s.palette).first())
-            } ?: OctoColors.BackgroundTertiary
+            spec?.let { s -> Color(backgroundColour(chooseBackground(s.id, s.palette))) } ?: OctoColors.BackgroundTertiary
         }
         Box(Modifier.matchParentSize().background(ground))
         (ready ?: shown)?.let {

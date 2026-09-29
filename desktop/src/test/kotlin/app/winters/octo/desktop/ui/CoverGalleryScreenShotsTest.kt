@@ -2,16 +2,23 @@ package app.winters.octo.desktop.ui
 
 import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.text.font.createFontFamilyResolver
-import app.winters.octo.covers.CoverBook
+import app.winters.octo.covers.CoverBackground
+import app.winters.octo.covers.CoverBackgrounds
 import app.winters.octo.covers.CoverSpec
-import app.winters.octo.covers.PLAYLIST_COVER_LINE
 import app.winters.octo.covers.LIVE_LIST_COVER_LINE
+import app.winters.octo.covers.PLAYLIST_COVER_LINE
 import app.winters.octo.covers.Swatch
-import app.winters.octo.covers.coverGradientOf
+import app.winters.octo.covers.applyVeil
+import app.winters.octo.covers.chooseBackground
 import app.winters.octo.covers.coverPalette
+import app.winters.octo.covers.coverWords
+import app.winters.octo.covers.sampleBackground
+import app.winters.octo.covers.veilRegions
+import app.winters.octo.design.ComposeCoverTypesetter
 import app.winters.octo.design.CoverFontFamily
 import app.winters.octo.design.coverMeasurer
-import app.winters.octo.design.designCover
+import app.winters.octo.design.renderCover
+import app.winters.octo.desktop.library.PlaylistArtStore
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
 import org.jetbrains.skia.Paint
@@ -22,16 +29,22 @@ import org.junit.Test
 import java.io.File
 
 // Designed playlist covers on their own, for looking at the design: every
-// gradient, names long and short and in several writings, from covers and
-// without, at the sizes the apps draw them. Only when asked:
+// background in the library, the ones music of each colour picks, hard
+// names, and every size the apps draw. Only when asked:
 // OCTO_SHOTS=1 ./gradlew :desktop:test --tests '*CoverGalleryScreenShotsTest*'
 class CoverGalleryScreenShotsTest {
     private val measurer = coverMeasurer(createFontFamilyResolver())
+    private val setter = ComposeCoverTypesetter(measurer, CoverFontFamily)
+    private val decoded = HashMap<String, Pair<IntArray, Int>>()
 
-    private fun cover(id: String, name: String, line: String?, footer: String?, swatches: List<List<Swatch>>, side: Int): Image {
-        val spec = CoverSpec(id, name, line, footer, coverPalette(swatches, id))
-        return Image.makeFromBitmap(designCover(spec, side, measurer, CoverFontFamily).asSkiaBitmap())
+    private fun cover(background: CoverBackground, spec: CoverSpec, side: Int): Image {
+        val (full, size) = decoded.getOrPut(background.file) { PlaylistArtStore.decodePixels(CoverBackgrounds.bytes(background.file)) }
+        val words = coverWords(spec, side, setter)
+        val veiled = applyVeil(sampleBackground(full, size, side), side, veilRegions(words, side))
+        return Image.makeFromBitmap(renderCover(PlaylistArtStore.pictureOf(veiled, side), words, measurer, CoverFontFamily).asSkiaBitmap())
     }
+
+    private fun cover(spec: CoverSpec, side: Int) = cover(chooseBackground(spec.id, spec.palette), spec, side)
 
     // Tiles in a grid on a dark page, as a list of covers looks in the app.
     private fun sheet(name: String, tiles: List<Image>, side: Int, columns: Int) {
@@ -48,25 +61,24 @@ class CoverGalleryScreenShotsTest {
         File(out, "$name.png").writeBytes(surface.makeImageSnapshot().encodeToData(EncodedImageFormat.PNG)!!.bytes)
     }
 
-    private val warm = listOf(listOf(Swatch(0xFFD9552B.toInt(), 0.6f), Swatch(0xFF2B1A12.toInt(), 0.3f)), listOf(Swatch(0xFFF2C14E.toInt(), 0.5f)))
-    private val cool = listOf(listOf(Swatch(0xFF1D3F8C.toInt(), 0.7f)), listOf(Swatch(0xFF2FB4A8.toInt(), 0.5f)), listOf(Swatch(0xFF101014.toInt(), 0.8f)))
-    private val grey = listOf(listOf(Swatch(0xFF808080.toInt(), 0.9f)), listOf(Swatch(0xFF202020.toInt(), 0.9f)))
-    private val neon = listOf(listOf(Swatch(0xFF00FF40.toInt(), 0.8f)), listOf(Swatch(0xFFFFE000.toInt(), 0.7f)))
-    private val white = listOf(listOf(Swatch(0xFFFFFFFF.toInt(), 0.9f)), listOf(Swatch(0xFFF4EEDC.toInt(), 0.8f)))
+    private fun music(argb: Long) = listOf(listOf(Swatch(argb.toInt(), 0.8f)))
+
+    private val names = listOf("Late night", "Running", "Sunday morning", "Focus", "Dinner with friends", "Chill", "Road trip", "Heavy rotation",
+        "Rainy days", "Gym", "Old favourites", "Discover", "Summer 2026", "Deep work", "Kitchen dancing", "Sleep")
 
     @Test
     fun drawTheCovers() {
         assumeTrue(System.getenv("OCTO_SHOTS") == "1")
-        val book = CoverBook.Default
-        // Every gradient as written (a list with no covers), one id each.
-        val ids = (0 until 400).map { "pl-$it" }
-        val byGradient = book.gradients.indices.map { g -> ids.first { coverGradientOf(it) == g } }
-        val names = listOf("Late night", "Running", "Sunday morning", "Focus", "Dinner with friends", "Chill", "Road trip", "Heavy rotation",
-            "Rainy days", "Gym", "Old favourites", "Discover", "Summer 2026", "Deep work", "Kitchen dancing", "Sleep")
-        sheet("gradients-written", byGradient.mapIndexed { i, id -> cover(id, names[i], PLAYLIST_COVER_LINE, "${12 + i * 7} songs", emptyList(), 300) }, 300, 4)
-        // The same with the music's colours.
-        for ((label, swatches) in listOf("warm" to warm, "cool" to cool, "grey" to grey, "neon" to neon, "white" to white)) {
-            sheet("gradients-$label", byGradient.mapIndexed { i, id -> cover(id, names[i], PLAYLIST_COVER_LINE, "${12 + i * 7} songs", swatches, 300) }, 300, 4)
+        // Every background in the library.
+        val library = CoverBackgrounds.Default.backgrounds
+        sheet("library", library.mapIndexed { i, b -> cover(b, CoverSpec("pl-$i", b.name, PLAYLIST_COVER_LINE, "${12 + i} songs", coverPalette(emptyList(), "x")), 300) }, 300, 8)
+        // What lists of one colour of music get.
+        for ((label, colour) in listOf("red" to 0xFFC8283C, "blue" to 0xFF1E4ED8, "green" to 0xFF2E9E4F, "yellow" to 0xFFF2C94C, "purple" to 0xFF8E3CC8, "none" to 0L)) {
+            val swatches = if (colour == 0L) emptyList() else music(colour)
+            sheet("music-$label", names.take(8).mapIndexed { i, name ->
+                val id = "pl-$label-$i"
+                cover(CoverSpec(id, name, PLAYLIST_COVER_LINE, "${12 + i * 7} songs", coverPalette(swatches, id)), 300)
+            }, 300, 4)
         }
         // Names that are hard to set.
         val hard = listOf(
@@ -81,12 +93,16 @@ class CoverGalleryScreenShotsTest {
             "Ünïcødé Çàfé",
             "A",
             "Музыка для работы",
-            "",
+            "Road Trip Playlist",
         )
-        sheet("hard-names", hard.mapIndexed { i, name -> cover(ids[i * 3], name, LIVE_LIST_COVER_LINE.takeIf { i % 2 == 0 } ?: PLAYLIST_COVER_LINE, "By sam", cool.takeIf { i % 3 == 0 } ?: emptyList(), 300) }, 300, 4)
+        sheet("hard-names", hard.mapIndexed { i, name ->
+            cover(CoverSpec("hard-$i", name, if (i % 2 == 0) LIVE_LIST_COVER_LINE else PLAYLIST_COVER_LINE, "By sam", coverPalette(emptyList(), "hard-$i")), 300)
+        }, 300, 4)
         // Every size the apps draw at.
-        for (side in listOf(32, 48, 64, 96, 128, 160, 240, 512, 1000)) {
-            val tiles = listOf(0, 1, 2, 3).map { i -> cover(byGradient[i], listOf("Late night", "Dinner with friends", "夜のドライブ", "Everything I have ever loved, in the order I found it")[i], PLAYLIST_COVER_LINE, "12 songs", warm.takeIf { i % 2 == 0 } ?: emptyList(), side) }
+        for (side in listOf(32, 48, 64, 96, 128, 160, 240, 600, 1200)) {
+            val tiles = listOf("Late night", "Dinner with friends", "夜のドライブ", "Everything I have ever loved, in the order I found it").mapIndexed { i, name ->
+                cover(CoverSpec("size-$i", name, PLAYLIST_COVER_LINE, "12 songs", coverPalette(emptyList(), "size-$i")), side)
+            }
             sheet("size-$side", tiles, side, 4)
         }
     }

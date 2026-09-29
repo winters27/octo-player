@@ -1,9 +1,12 @@
 package app.winters.octo.desktop.library
 
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asComposeImageBitmap
 import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.text.font.createFontFamilyResolver
+import app.winters.octo.covers.CoverBackground
+import app.winters.octo.covers.CoverBackgrounds
 import app.winters.octo.covers.CoverPalette
 import app.winters.octo.covers.CoverSpec
 import app.winters.octo.covers.Swatch
@@ -110,9 +113,21 @@ class PlaylistArtStore(private val http: OkHttpClient) {
             file?.takeIf(File::isFile)?.let { runCatching { Image.makeFromEncoded(it.readBytes()).toComposeImageBitmap() }.getOrNull() }
         }
         if (stored != null) return keep(key, stored)
-        val drawn = drawing.withPermit { withContext(Dispatchers.Default) { designCover(spec, side, coverMeasurer(fonts), CoverFontFamily) } }
+        val drawn = drawing.withPermit {
+            withContext(Dispatchers.Default) { designCover(spec, side, coverMeasurer(fonts), CoverFontFamily, ::backgroundPixels, ::pictureOf) }
+        }
         if (file != null) withContext(Dispatchers.IO) { save(file, drawn) }
         return keep(key, drawn)
+    }
+
+    // The library's backgrounds as pixels, the last few kept: a sidebar of
+    // lists often shares one.
+    private val backgrounds = object : LinkedHashMap<String, Pair<IntArray, Int>>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<IntArray, Int>>) = size > 4
+    }
+
+    private fun backgroundPixels(background: CoverBackground): Pair<IntArray, Int> = synchronized(backgrounds) {
+        backgrounds.getOrPut(background.file) { decodePixels(CoverBackgrounds.bytes(background.file)) }
     }
 
     private fun keep(key: String, image: ImageBitmap): ImageBitmap = synchronized(pictures) {
@@ -162,6 +177,41 @@ class PlaylistArtStore(private val http: OkHttpClient) {
         fun readPalette(text: String): CoverPalette? {
             val (key, from) = text.trim().split(' ').takeIf { it.size == 2 } ?: return null
             return CoverPalette.fromKey(key, fromMusic = from == "music")
+        }
+
+        // A picture (the backgrounds are WebP, which Skia reads) at its own
+        // size, as ARGB pixels and its side.
+        fun decodePixels(bytes: ByteArray): Pair<IntArray, Int> {
+            val image = Image.makeFromEncoded(bytes)
+            val side = image.width
+            val info = ImageInfo(side, image.height, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
+            val bitmap = Bitmap()
+            bitmap.allocPixels(info)
+            Canvas(bitmap).drawImage(image, 0f, 0f)
+            val raw = bitmap.readPixels(info, side * 4, 0, 0)!!
+            return IntArray(side * image.height) { i ->
+                val o = i * 4
+                (0xFF shl 24) or ((raw[o + 2].toInt() and 0xFF) shl 16) or ((raw[o + 1].toInt() and 0xFF) shl 8) or (raw[o].toInt() and 0xFF)
+            } to side
+        }
+
+        // ARGB pixels, `side` square, as a picture.
+        fun pictureOf(pixels: IntArray, side: Int): ImageBitmap {
+            val info = ImageInfo(side, side, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
+            val bytes = ByteArray(side * side * 4)
+            for (i in pixels.indices) {
+                val p = pixels[i]
+                val o = i * 4
+                bytes[o] = (p and 0xFF).toByte()
+                bytes[o + 1] = (p shr 8 and 0xFF).toByte()
+                bytes[o + 2] = (p shr 16 and 0xFF).toByte()
+                bytes[o + 3] = 0xFF.toByte()
+            }
+            val bitmap = Bitmap()
+            bitmap.allocPixels(info)
+            bitmap.installPixels(info, bytes, side * 4)
+            bitmap.setImmutable()
+            return bitmap.asComposeImageBitmap()
         }
 
         // A picture's pixels at 64 square, as ARGB.
