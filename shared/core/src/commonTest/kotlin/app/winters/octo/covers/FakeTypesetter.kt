@@ -2,7 +2,8 @@ package app.winters.octo.covers
 
 // A text engine for tests: every character a fixed share of the size wide
 // (wide characters a whole size), words wrapped greedily at spaces and
-// between wide characters, lines `lineHeight` apart.
+// between wide characters, lines `lineHeight` apart. A word wider than the
+// line is broken across lines, as Compose breaks it.
 class FakeTypesetter : CoverTypesetter {
     private fun charWidth(cp: Int, size: Float) =
         if (Character.UnicodeScript.of(cp) in setOf(Character.UnicodeScript.HAN, Character.UnicodeScript.HIRAGANA, Character.UnicodeScript.KATAKANA) || isEmoji(cp)) size else size * 0.55f
@@ -24,7 +25,12 @@ class FakeTypesetter : CoverTypesetter {
         val space = width(" ", type.sizePx)
         val lines = mutableListOf<Float>()
         var line = 0f
-        for (run in unbreakableRuns(text)) {
+        val char = type.sizePx * 0.55f
+        val pieces = unbreakableRuns(text).flatMap { run ->
+            val fits = maxOf(1, (width / char).toInt())
+            if (width(run, type.sizePx) <= width) listOf(run) else run.chunked(fits)
+        }
+        for (run in pieces) {
             val w = width(run, type.sizePx)
             if (line > 0f && line + space + w > width) {
                 lines += line
@@ -36,6 +42,6 @@ class FakeTypesetter : CoverTypesetter {
         lines += line
         val shown = minOf(lines.size, type.maxLines)
         val widest = lines.take(shown).maxOrNull()?.coerceAtMost(width) ?: 0f
-        return Measured(shown, widest, shown * type.sizePx * type.lineHeight, lines.size > type.maxLines || lines.any { it > width })
+        return Measured(shown, widest, shown * type.sizePx * type.lineHeight, lines.size > type.maxLines)
     }
 }
