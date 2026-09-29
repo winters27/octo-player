@@ -7,7 +7,7 @@ import com.sun.jna.Native
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -114,13 +114,20 @@ class WindowsTaskbar internal constructor(
         later("Taking on the taskbar button") { library.octo_taskbar_attach(window, listener).toLong() }
         icons()
         jobs += scope.launch { player.state.collect { update() } }
-        // The place moves on by itself, and the taskbar's theme can change.
+        // The place moves on by itself while a song plays, a failure's red
+        // runs out, and the taskbar's theme can change. Paused, only the
+        // theme is looked at, now and then.
         jobs += scope.launch {
-            var ticks = 0
-            while (isActive) {
-                delay(TICK_MS)
-                update()
-                if (++ticks % THEME_TICKS == 0) icons()
+            var themeAt = clock()
+            player.state.collectLatest { state ->
+                while (true) {
+                    delay(if (state.playing || failures.showing(clock())) TICK_MS else THEME_EVERY_MS)
+                    update()
+                    if (clock() - themeAt >= THEME_EVERY_MS) {
+                        themeAt = clock()
+                        icons()
+                    }
+                }
             }
         }
     }
@@ -171,8 +178,8 @@ class WindowsTaskbar internal constructor(
     private companion object {
         const val TICK_MS = 250L
 
-        // How often, in ticks, the taskbar's theme is looked at again.
-        const val THEME_TICKS = 40
+        // How often the taskbar's theme is looked at again.
+        const val THEME_EVERY_MS = 10_000L
     }
 }
 

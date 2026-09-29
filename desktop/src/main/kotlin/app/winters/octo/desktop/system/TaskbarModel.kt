@@ -68,6 +68,10 @@ class TaskbarFailures(private val showMs: Long = FAILURE_SHOWN_MS) {
         return now < until
     }
 
+    // Whether the red from the last failure is still up, without taking a
+    // new one in.
+    fun showing(now: Long): Boolean = now < until
+
     companion object {
         const val FAILURE_SHOWN_MS = 3_000L
     }

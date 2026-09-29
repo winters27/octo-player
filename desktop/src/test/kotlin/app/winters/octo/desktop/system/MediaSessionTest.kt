@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -62,6 +63,20 @@ class FakeControls(private val works: Boolean = true) : SystemMediaControls {
 
     override fun close() {
         closed = true
+    }
+}
+
+// A player whose state and place the test sets by hand, counting how often
+// its place is asked for.
+private class CountingHandPlayer : DesktopPlayer by SilentPlayer() {
+    val flow = MutableStateFlow(PlayerState())
+    var position = 0L
+    var asked = 0
+    override val state: StateFlow<PlayerState> get() = flow
+
+    override fun positionMs(): Long {
+        asked++
+        return position
     }
 }
 
@@ -299,5 +314,33 @@ class MediaSessionTest {
         val (_, session) = session(FakeControls(works = false))
         assertFalse(session.started)
         assertFalse(NoMediaControls().start {})
+    }
+
+    @Test
+    fun aPausedSongIsOnlyLookedAtWhenThePlayerChanges() = runTest(UnconfinedTestDispatcher()) {
+        val controls = FakeControls()
+        val player = CountingHandPlayer()
+        started(player, controls)
+        val entry = QueueEntry(1, songs[0])
+        val paused = PlayerState(queue = listOf(entry), current = entry, durationMs = 100_000)
+        player.flow.value = paused
+        runCurrent()
+        player.asked = 0
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertEquals("a paused song's place is not asked for", 0, player.asked)
+        // A seek while paused is a change of the player, and is told.
+        controls.calls.clear()
+        player.position = 40_000
+        player.flow.value = paused.copy(moves = 1)
+        runCurrent()
+        assertEquals(listOf("playback paused at 40 jumped"), controls.calls)
+        // Playing, the place is looked at every second again.
+        player.flow.value = paused.copy(moves = 1, playing = true)
+        runCurrent()
+        player.asked = 0
+        advanceTimeBy(3_500)
+        runCurrent()
+        assertEquals(3, player.asked)
     }
 }
