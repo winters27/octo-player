@@ -1,5 +1,8 @@
 package app.winters.octo.desktop.listening
 
+import app.winters.octo.desktop.system.appendWhole
+import app.winters.octo.desktop.system.readWhole
+import app.winters.octo.desktop.system.writeWhole
 import app.winters.octo.listening.PendingPlay
 import app.winters.octo.listening.decodePending
 import app.winters.octo.listening.encodePending
@@ -9,10 +12,6 @@ import app.winters.octo.subsonic.Song
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
-import java.io.IOException
-import java.nio.file.Files
-import java.nio.file.NoSuchFileException
-import java.nio.file.StandardCopyOption
 
 // Each server account keeps its listening in its own folder, named by a
 // hash of the name and address so neither shows in the file name.
@@ -47,19 +46,20 @@ private val json = Json {
 }
 
 // Every play counted on this computer, one JSON line each, oldest first.
-// The file only grows by a line at a time; past `max` plays it is cut back
-// to the newest, so it stays a few megabytes.
+// The file only grows by a line at a time; once it holds a quarter more
+// than `max` plays it is cut back to the newest `max`, so it stays a few
+// megabytes. Keep one for each file, so its count of lines holds.
 class PlayLog(private val file: File, private val max: Int = MAX_LOGGED_PLAYS) {
-    // Lines added since the file was last cut back.
-    private var written = 0
+    // Lines in the file, counted when the first play is added.
+    private var lines = -1
 
     @Synchronized
     fun add(play: LoggedPlay) {
-        file.parentFile?.mkdirs()
-        file.appendText(json.encodeToString(LoggedPlay.serializer(), play) + "\n")
-        written++
+        if (lines < 0) lines = linesOf(file).count(String::isNotBlank)
+        appendWhole(file, json.encodeToString(LoggedPlay.serializer(), play) + "\n")
+        lines++
         // The play is in; a log that cannot be cut back now is cut next time.
-        if (written > max / 4) runCatching { trim() }
+        if (lines > max + max / 4) runCatching { trim() }
     }
 
     // Newest first. Lines that cannot be read are skipped.
@@ -70,10 +70,9 @@ class PlayLog(private val file: File, private val max: Int = MAX_LOGGED_PLAYS) {
         }.asReversed()
 
     private fun trim() {
-        written = 0
-        val lines = linesOf(file).filter(String::isNotBlank)
-        if (lines.size <= max) return
-        writeWhole(file, lines.takeLast(max).joinToString("\n", postfix = "\n"))
+        val kept = linesOf(file).filter(String::isNotBlank).takeLast(max)
+        writeWhole(file, kept.joinToString("\n", postfix = "\n"))
+        lines = kept.size
     }
 }
 
@@ -95,59 +94,8 @@ class PendingPlays(private val file: File) {
         writeWhole(file, plays.takeIf { it.isNotEmpty() }?.let { encodePending(it).sorted().joinToString("\n", postfix = "\n") })
 }
 
-// How long a file that another program has open is waited for.
-private const val BUSY_FILE_WAIT_MS = 2_000L
-
-// Runs `step` on a file, trying again for a while when Windows refuses it:
-// it will not move over a file something else has open (a virus scanner, a
-// backup, any reader), nor remove one read through java.io, and may refuse
-// to open one that is being removed. Throws if it never goes through.
-private fun <T> patiently(step: () -> T): T {
-    val giveUpAt = System.nanoTime() + BUSY_FILE_WAIT_MS * 1_000_000
-    while (true) {
-        try {
-            return step()
-        } catch (e: IOException) {
-            if (e is NoSuchFileException || System.nanoTime() > giveUpAt) throw e
-            Thread.sleep(10)
-        }
-    }
-}
-
-// A file's lines, or none when it is not there. Read so that the file can
-// still be removed while it is open, which on Windows a file read through
-// java.io cannot be until it is closed.
-private fun linesOf(file: File): List<String> =
-    patiently {
-        try {
-            String(Files.readAllBytes(file.toPath()), Charsets.UTF_8).lines()
-        } catch (e: NoSuchFileException) {
-            emptyList()
-        }
-    }
-
-// Puts `text` in `file` whole, or removes the file when `text` is null.
-// The text goes in a file beside it that is then moved over it in one step,
-// so the file holds the old text or the new, even if Octo stops part way.
-// If something keeps the file open all the while, the text is written into
-// it where it is instead (empty for none), which a reader through java.io
-// allows. Throws if that fails too, rather than pass as written.
-private fun writeWhole(file: File, text: String?) {
-    val target = file.toPath()
-    val next = File(file.parentFile, file.name + ".new").toPath()
-    try {
-        if (text == null) {
-            patiently { Files.deleteIfExists(target) }
-        } else {
-            file.parentFile?.mkdirs()
-            Files.writeString(next, text)
-            patiently { Files.move(next, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE) }
-        }
-    } catch (e: IOException) {
-        Files.writeString(target, text.orEmpty())
-        Files.deleteIfExists(next)
-    }
-}
+// A file's lines, or none when it is not there.
+private fun linesOf(file: File): List<String> = readWhole(file)?.lines().orEmpty()
 
 // The most plays the log keeps.
 const val MAX_LOGGED_PLAYS = 20_000

@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.livelists
 
-import app.winters.octo.desktop.queue.replace
+import app.winters.octo.desktop.system.readForSaving
+import app.winters.octo.desktop.system.saveWhole
 import app.winters.octo.livelists.LiveList
 import app.winters.octo.livelists.LiveListsJson
 import app.winters.octo.livelists.duplicating
@@ -33,9 +34,12 @@ class LiveListStore(
 
     // Reads an account's lists from `file`, or starts empty with none. The
     // file is a few kilobytes, so it is read straight away.
+    // A file that cannot be read now is left alone, and the lists live only
+    // while the app runs: saving over it would lose the lists it holds.
     fun open(file: File?) {
-        this.file = file
-        _lists.value = file?.takeIf(File::exists)?.let { runCatching { LiveListsJson.decode(it.readText()) }.getOrNull() }.orEmpty()
+        val read = file?.let(::readForSaving) ?: Result.success(null)
+        this.file = file.takeIf { read.isSuccess }
+        _lists.value = read.getOrNull()?.let { runCatching { LiveListsJson.decode(it) }.getOrNull() }.orEmpty()
     }
 
     fun byId(id: String): LiveList? = _lists.value.firstOrNull { it.id == id }
@@ -75,7 +79,7 @@ class LiveListStore(
     @Synchronized
     private fun write() {
         val target = file ?: return
-        replace(target, LiveListsJson.encode(_lists.value))
+        saveWhole(target, LiveListsJson.encode(_lists.value))
     }
 
     companion object {

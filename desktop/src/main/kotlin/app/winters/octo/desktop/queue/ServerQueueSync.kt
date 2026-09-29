@@ -9,6 +9,8 @@ import app.winters.octo.desktop.player.SavedQueue
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.system.isOpenedFile
+import app.winters.octo.desktop.system.readSaved
+import app.winters.octo.desktop.system.saveWhole
 import app.winters.octo.server.RemoteQueue
 import app.winters.octo.server.ServerQueue
 import app.winters.octo.server.remoteQueueOf
@@ -221,11 +223,11 @@ class ServerQueueSync(
 
     @Synchronized
     private fun readMarks(): SyncMarks =
-        marksFile?.takeIf(File::exists)?.let { runCatching { json.decodeFromString(SyncMarks.serializer(), it.readText()) }.getOrNull() } ?: SyncMarks()
+        marksFile?.let(::readSaved)?.let { runCatching { json.decodeFromString(SyncMarks.serializer(), it) }.getOrNull() } ?: SyncMarks()
 
     @Synchronized
     private fun updateMarks(change: (SyncMarks) -> SyncMarks) {
         val file = marksFile ?: return
-        replace(file, json.encodeToString(SyncMarks.serializer(), change(readMarks())))
+        saveWhole(file, json.encodeToString(SyncMarks.serializer(), change(readMarks())))
     }
 }

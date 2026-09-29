@@ -39,6 +39,8 @@ class PlayReporter(
     private val io: CoroutineDispatcher = Dispatchers.IO,
     clock: () -> Long = { System.nanoTime() / 1_000_000 },
     wallClock: () -> Long = System::currentTimeMillis,
+    // The most plays each account's log keeps.
+    private val logMax: Int = MAX_LOGGED_PLAYS,
 ) {
     private val counter = PlayCounter(::started, ::counted, clock, wallClock)
     private val sending = Mutex()
@@ -78,8 +80,13 @@ class PlayReporter(
         }
     }
 
+    // One log for each account folder, kept, so it knows how long it is.
+    private val logs = HashMap<File, PlayLog>()
+
     // The play log of the signed-in account, if there is one.
-    fun log(): PlayLog? = folder()?.let { PlayLog(File(it, "plays.jsonl")) }
+    fun log(): PlayLog? = folder()?.let(::logIn)
+
+    private fun logIn(folder: File): PlayLog = synchronized(logs) { logs.getOrPut(folder) { PlayLog(File(folder, "plays.jsonl"), logMax) } }
 
     private fun folder(): File? = root?.let { dir -> connection()?.let { listeningFolder(dir, it.client.username, it.server.address) } }
 
@@ -103,7 +110,7 @@ class PlayReporter(
         // The log and the waiting file each go in on their own, so trouble
         // with one never keeps the play out of the other.
         val write = {
-            runCatching { PlayLog(File(folder, "plays.jsonl")).add(LoggedPlay(play.startedAt, play.heardMs, play.song.logged())) }
+            runCatching { logIn(folder).add(LoggedPlay(play.startedAt, play.heardMs, play.song.logged())) }
             if (send) runCatching { synchronized(pendingFile) { PendingPlays(File(folder, "pending.txt")).add(PendingPlay(play.song.id, play.startedAt)) } }
         }
         if (quitting) {

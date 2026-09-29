@@ -24,6 +24,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.FileInputStream
+import kotlin.concurrent.thread
 import kotlin.random.Random
 
 class QueueTest {
@@ -118,6 +120,29 @@ class QueueTest {
         second.play(listOf(Song("x", "X", duration = 10)))
         assertNull(QueueKeeper(second, scope, Dispatchers.Unconfined).apply { this.folder = folder }.restore())
         assertEquals("x", second.state.value.current?.song?.id)
+    }
+
+    // Something else has the queue open as Octo quits: the new queue is still
+    // the one that comes back.
+    @Test
+    fun aQueueSavedWhileTheFileIsHeldOpenComesBack() = runBlocking {
+        val folder = File(temp.root, "held")
+        val first = SilentPlayer(clock = { now })
+        first.play(songs, 0)
+        val keeper = QueueKeeper(first, scope, Dispatchers.Unconfined).apply { this.folder = folder }
+        keeper.saveNow()
+        first.play(songs.reversed(), 1)
+        val open = FileInputStream(File(folder, "queue.json"))
+        val closing = thread {
+            Thread.sleep(2_500)
+            open.close()
+        }
+        keeper.saveNow()
+        closing.join()
+
+        val second = SilentPlayer(clock = { now })
+        assertNotNull(QueueKeeper(second, scope, Dispatchers.Unconfined).apply { this.folder = folder }.restore())
+        assertEquals("s4", second.state.value.current?.song?.id)
     }
 
     // ---- The queue on the server ----

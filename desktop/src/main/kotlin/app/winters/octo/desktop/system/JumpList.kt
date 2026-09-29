@@ -1,7 +1,6 @@
 package app.winters.octo.desktop.system
 
 import app.winters.octo.desktop.nav.Page
-import app.winters.octo.desktop.queue.replace
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -148,9 +147,11 @@ class JumpListStore(
 
     @Volatile private var file: File? = null
 
+    // A file that cannot be read now is left alone rather than saved over.
     fun open(file: File?) {
-        this.file = file
-        _entries.value = file?.takeIf(File::isFile)?.let { runCatching { decodeJumpEntries(it.readText()) }.getOrNull() } ?: JumpEntries()
+        val read = file?.let(::readForSaving) ?: Result.success(null)
+        this.file = file.takeIf { read.isSuccess }
+        _entries.value = read.getOrNull()?.let(::decodeJumpEntries) ?: JumpEntries()
     }
 
     fun played(target: JumpTarget) = change { it.played(target) }
@@ -177,7 +178,7 @@ class JumpListStore(
     @Synchronized
     private fun write() {
         val target = file ?: return
-        replace(target, encodeJumpEntries(_entries.value))
+        saveWhole(target, encodeJumpEntries(_entries.value))
     }
 
     companion object {
