@@ -30,6 +30,7 @@ import app.winters.octo.covers.CoverWords
 import app.winters.octo.covers.Measured
 import app.winters.octo.covers.applyVeil
 import app.winters.octo.covers.planCover
+import app.winters.octo.covers.orientBackground
 import app.winters.octo.covers.sampleBackground
 import kotlin.math.ceil
 
@@ -124,6 +125,8 @@ fun designCover(
 ): ImageBitmap {
     val plan = planCover(spec, side, ComposeCoverTypesetter(measurer, family))
     val (pixels, size) = full(plan.background)
-    val veiled = applyVeil(sampleBackground(pixels, size, side), side, plan.veil)
+    // Turned before the veil, so the veil still keeps the words readable.
+    val turned = orientBackground(sampleBackground(pixels, size, side), side, plan.orientation)
+    val veiled = applyVeil(turned, side, plan.veil)
     return renderCover(picture(veiled, side), plan.words, measurer, family)
 }
