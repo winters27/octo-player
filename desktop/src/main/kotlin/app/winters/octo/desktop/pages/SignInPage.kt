@@ -113,6 +113,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                     form.apiKey = ""
                     app.signedIn(done.connection, done.note)
                 }
+                is SignInOutcome.Saved -> Unit
                 is SignInOutcome.Failed -> form.result = false to done.message
                 is SignInOutcome.Untrusted -> form.question = done.question
             }
