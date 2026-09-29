@@ -9,6 +9,10 @@ import app.winters.octo.subsonic.Song
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.NoSuchFileException
+import java.nio.file.StandardCopyOption
 
 // Each server account keeps its listening in its own folder, named by a
 // hash of the name and address so neither shows in the file name.
@@ -54,28 +58,22 @@ class PlayLog(private val file: File, private val max: Int = MAX_LOGGED_PLAYS) {
         file.parentFile?.mkdirs()
         file.appendText(json.encodeToString(LoggedPlay.serializer(), play) + "\n")
         written++
-        if (written > max / 4) trim()
+        // The play is in; a log that cannot be cut back now is cut next time.
+        if (written > max / 4) runCatching { trim() }
     }
 
     // Newest first. Lines that cannot be read are skipped.
     @Synchronized
-    fun read(): List<LoggedPlay> {
-        if (!file.exists()) return emptyList()
-        return file.readLines().mapNotNull { line ->
+    fun read(): List<LoggedPlay> =
+        linesOf(file).mapNotNull { line ->
             line.takeIf(String::isNotBlank)?.let { runCatching { json.decodeFromString(LoggedPlay.serializer(), it) }.getOrNull() }
         }.asReversed()
-    }
 
     private fun trim() {
         written = 0
-        val lines = file.readLines().filter(String::isNotBlank)
+        val lines = linesOf(file).filter(String::isNotBlank)
         if (lines.size <= max) return
-        val kept = File(file.parentFile, file.name + ".new")
-        kept.writeText(lines.takeLast(max).joinToString("\n", postfix = "\n"))
-        if (!kept.renameTo(file)) {
-            file.delete()
-            kept.renameTo(file)
-        }
+        writeWhole(file, lines.takeLast(max).joinToString("\n", postfix = "\n"))
     }
 }
 
@@ -83,27 +81,71 @@ class PlayLog(private val file: File, private val max: Int = MAX_LOGGED_PLAYS) {
 // lost when the server cannot be reached or Octo quits.
 class PendingPlays(private val file: File) {
     @Synchronized
-    fun all(): List<PendingPlay> =
-        if (file.exists()) decodePending(file.readLines().filter(String::isNotBlank).toSet()) else emptyList()
+    fun all(): List<PendingPlay> = decodePending(linesOf(file).filter(String::isNotBlank).toSet())
 
+    // Both throw when the file could not be written, rather than return as
+    // if the play were added or taken off.
     @Synchronized
     fun add(play: PendingPlay) = write(all().plusPlay(play))
 
     @Synchronized
     fun remove(play: PendingPlay) = write(all() - play)
 
-    private fun write(plays: List<PendingPlay>) {
-        file.parentFile?.mkdirs()
-        if (plays.isEmpty()) {
-            file.delete()
-            return
+    private fun write(plays: List<PendingPlay>) =
+        writeWhole(file, plays.takeIf { it.isNotEmpty() }?.let { encodePending(it).sorted().joinToString("\n", postfix = "\n") })
+}
+
+// How long a file that another program has open is waited for.
+private const val BUSY_FILE_WAIT_MS = 2_000L
+
+// Runs `step` on a file, trying again for a while when Windows refuses it:
+// it will not move over a file something else has open (a virus scanner, a
+// backup, any reader), nor remove one read through java.io, and may refuse
+// to open one that is being removed. Throws if it never goes through.
+private fun <T> patiently(step: () -> T): T {
+    val giveUpAt = System.nanoTime() + BUSY_FILE_WAIT_MS * 1_000_000
+    while (true) {
+        try {
+            return step()
+        } catch (e: IOException) {
+            if (e is NoSuchFileException || System.nanoTime() > giveUpAt) throw e
+            Thread.sleep(10)
         }
-        val next = File(file.parentFile, file.name + ".new")
-        next.writeText(encodePending(plays).sorted().joinToString("\n", postfix = "\n"))
-        if (!next.renameTo(file)) {
-            file.delete()
-            next.renameTo(file)
+    }
+}
+
+// A file's lines, or none when it is not there. Read so that the file can
+// still be removed while it is open, which on Windows a file read through
+// java.io cannot be until it is closed.
+private fun linesOf(file: File): List<String> =
+    patiently {
+        try {
+            String(Files.readAllBytes(file.toPath()), Charsets.UTF_8).lines()
+        } catch (e: NoSuchFileException) {
+            emptyList()
         }
+    }
+
+// Puts `text` in `file` whole, or removes the file when `text` is null.
+// The text goes in a file beside it that is then moved over it in one step,
+// so the file holds the old text or the new, even if Octo stops part way.
+// If something keeps the file open all the while, the text is written into
+// it where it is instead (empty for none), which a reader through java.io
+// allows. Throws if that fails too, rather than pass as written.
+private fun writeWhole(file: File, text: String?) {
+    val target = file.toPath()
+    val next = File(file.parentFile, file.name + ".new").toPath()
+    try {
+        if (text == null) {
+            patiently { Files.deleteIfExists(target) }
+        } else {
+            file.parentFile?.mkdirs()
+            Files.writeString(next, text)
+            patiently { Files.move(next, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE) }
+        }
+    } catch (e: IOException) {
+        Files.writeString(target, text.orEmpty())
+        Files.deleteIfExists(next)
     }
 }
 

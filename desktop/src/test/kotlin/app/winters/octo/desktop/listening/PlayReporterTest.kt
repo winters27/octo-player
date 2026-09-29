@@ -17,6 +17,10 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.FileInputStream
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
 
 class PlayReporterTest {
     @get:Rule val temp = TemporaryFolder()
@@ -44,11 +48,9 @@ class PlayReporterTest {
         server.calls.filter { it.url.pathSegments.last() == "scrobble" && it.url.queryParameter("submission") == "$submission" }
 
     // Waits a little for the fake server to hear a call, since the client
-    // answers on its own thread.
-    // Returns as soon as `what` holds; the bound is generous so a machine
-    // busy with other builds doesn't fail the test.
+    // answers on its own thread. Returns as soon as `what` holds.
     private fun waitFor(what: () -> Boolean) {
-        val until = System.currentTimeMillis() + 30_000
+        val until = System.currentTimeMillis() + 5_000
         while (!what() && System.currentTimeMillis() < until) Thread.sleep(20)
     }
 
@@ -97,6 +99,142 @@ class PlayReporterTest {
         reporter.signedIn()
         waitFor { PendingPlays(File(folder(), "pending.txt")).all().isEmpty() }
         assertEquals(emptyList<PendingPlay>(), PendingPlays(File(folder(), "pending.txt")).all())
+    }
+
+    // Something else may have the waiting file open just as a sent play is
+    // taken off it: a virus scanner, a backup, a look at it from elsewhere.
+    // The play still leaves the file, and is not sent a second time.
+    @Test
+    fun aSentPlayLeavesTheWaitingFileWhileSomethingHasItOpen() {
+        val file = File(folder(), "pending.txt")
+        val readers = CopyOnWriteArrayList<Thread>()
+        server.answerBy("scrobble") { request ->
+            if (request.url.queryParameter("submission") == "true") {
+                // Opened the way java.io opens a file, held past the answer.
+                val open = FileInputStream(file)
+                readers += thread {
+                    Thread.sleep(300)
+                    open.close()
+                }
+            }
+            server.ok()
+        }
+        reporter().start()
+        player.play(songs)
+        now += 60_000
+        player.next()
+        waitFor { scrobbles(true).isNotEmpty() && PendingPlays(file).all().isEmpty() }
+        readers.forEach(Thread::join)
+        assertEquals(emptyList<PendingPlay>(), PendingPlays(file).all())
+        assertEquals(1, scrobbles(true).size)
+    }
+
+    // A file that cannot be written for longer than the reporter waits: the
+    // sent play stays in it for now, and next time it is taken off without
+    // being sent again.
+    @Test
+    fun aSentPlayThatCannotBeTakenOffYetIsNotSentAgain() {
+        val file = File(folder(), "pending.txt")
+        val readers = CopyOnWriteArrayList<Thread>()
+        server.answerBy("scrobble") { request ->
+            if (request.url.queryParameter("submission") == "true" && readers.isEmpty()) {
+                // Read only: it can be neither replaced, removed nor written.
+                file.setReadOnly()
+                readers += thread {
+                    Thread.sleep(3_000)
+                    file.setWritable(true)
+                }
+            }
+            server.ok()
+        }
+        val reporter = reporter()
+        reporter.start()
+        player.play(songs)
+        now += 60_000
+        player.next()
+        waitFor { readers.isNotEmpty() }
+        readers.forEach(Thread::join)
+        assertEquals(listOf("s1"), PendingPlays(file).all().map { it.serverId })
+        reporter.signedIn()
+        waitFor { PendingPlays(file).all().isEmpty() }
+        assertEquals(emptyList<PendingPlay>(), PendingPlays(file).all())
+        Thread.sleep(100)
+        assertEquals(1, scrobbles(true).size)
+    }
+
+    // Something keeping the file open for longer than the wait keeps it from
+    // being moved over; the play is then written into it where it is.
+    @Test
+    fun aPlayGoesInWhileSomethingKeepsTheFileOpen() {
+        val file = File(temp.root, "pending.txt")
+        val plays = PendingPlays(file)
+        plays.add(PendingPlay("s1", 1))
+        val open = FileInputStream(file)
+        val closing = thread {
+            Thread.sleep(2_500)
+            open.close()
+        }
+        plays.add(PendingPlay("s2", 2))
+        closing.join()
+        assertEquals(listOf(PendingPlay("s1", 1), PendingPlay("s2", 2)), plays.all())
+    }
+
+    // Windows may refuse to open the file for a moment while it is being
+    // removed; a read then waits rather than fails.
+    @Test
+    fun theWaitingFileCanBeReadWhilePlaysComeAndGo() {
+        val file = File(temp.root, "pending.txt")
+        val plays = PendingPlays(file)
+        val going = AtomicBoolean(true)
+        val failures = CopyOnWriteArrayList<Throwable>()
+        val reader = thread {
+            while (going.get()) runCatching { PendingPlays(file).all() }.onFailure { failures += it }
+        }
+        try {
+            repeat(200) { i ->
+                val play = PendingPlay("s$i", i.toLong())
+                plays.add(play)
+                plays.remove(play)
+            }
+        } finally {
+            going.set(false)
+            reader.join()
+        }
+        assertEquals(emptyList<Throwable>(), failures)
+        assertEquals(emptyList<PendingPlay>(), plays.all())
+    }
+
+    // The same, many times over, with the file read over and over the whole
+    // time: each play is sent once and none is left waiting.
+    @Test
+    fun manyPlaysSentWhileTheFileIsReadAreEachSentOnceAndCleared() {
+        server.answer("scrobble")
+        reporter().start()
+        val file = File(folder(), "pending.txt")
+        val reading = AtomicBoolean(true)
+        val reader = thread {
+            while (reading.get()) {
+                runCatching { FileInputStream(file).use { it.readBytes() } }
+                Thread.sleep(1)
+            }
+        }
+        val rounds = 20
+        try {
+            repeat(rounds) { round ->
+                player.play(songs)
+                now += 60_000
+                player.next()
+                val until = System.currentTimeMillis() + 3_000
+                while ((scrobbles(true).size <= round || PendingPlays(file).all().isNotEmpty()) && System.currentTimeMillis() < until) Thread.sleep(1)
+                assertEquals("round $round", emptyList<PendingPlay>(), PendingPlays(file).all())
+            }
+        } finally {
+            reading.set(false)
+            reader.join()
+        }
+        val times = scrobbles(true).map { it.url.queryParameter("time") }
+        assertEquals(rounds, times.size)
+        assertEquals(rounds, times.toSet().size)
     }
 
     @Test
