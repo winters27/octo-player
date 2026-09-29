@@ -5,12 +5,13 @@
     "family": "Inter 4.1 (rsms/inter v4.1, OFL-1.1), static Display cut",
     "title": "InterDisplay-SemiBold.ttf",
     "line": "InterDisplay-Light.ttf",
-    "footer": "InterDisplay-Regular.ttf"
+    "footer": "InterDisplay-Medium.ttf"
   },
   "layout": {
     "margin": 0.08,
     "contrast": 4.5,
     "tinyBelowPx": 72,
+    "tiny": "Below tinyBelowPx a cover is its artwork only: no words, no letter, no veil. tinyMargin and tinySize are kept for older readers and are not used.",
     "tinyMargin": 0.1,
     "tinySize": 0.56,
     "title": {
@@ -36,15 +37,29 @@
       "showFromPx": 120
     },
     "footer": {
-      "weight": 400,
-      "size": 0.053,
+      "weight": 500,
+      "size": 0.06,
       "minPx": 9,
       "bottom": 0.08,
-      "opacity": 0.6,
+      "opacity": 0.85,
       "lineHeight": 1.2,
       "tracking": 0,
       "showFromPx": 160
     }
+  },
+  "veil": {
+    "about": "Under the words the background is darkened only where it is too bright for white words, and only by lightness: hue and chroma stay, so a bright cover deepens instead of greying. tools/cover-art/reference.py is the reference; its golden/ covers are what ports are checked against.",
+    "space": "Per pixel, from 8-bit sRGB: linear sRGB (the sRGB curve), luminance Y = 0.2126 R + 0.7152 G + 0.0722 B, and OKLab (Ottosson 2020) with OKLCH hue h in degrees and chroma C = hypot(a, b).",
+    "regions": "Each block of words has a box, in pixels, from its corner of the cover to the words' far edges plus pad (a share of the side): the title block (title and second line together) from the top-left corner to the widest line's right edge and the block's bottom; the footer from the bottom-left corner up to the footer's top and across to its right edge. For right-to-left words the boxes start from the right-hand corners instead. A pixel's weight w is 1 inside a box and 1 - smoothstep(0, 1, d) outside, where d = hypot(dx / (falloff[0] x side), dy / (falloff[1] x side)) and dx, dy are its distances from the box across and down, measured at pixel centres.",
+    "rule": "limit = min(max(aim, Y x (1 - maxDrop)), least), where aim and least are the luminances at which white words reach aimContrast and minContrast (1.05 / ratio - 0.05), each lowered by margin. Each region keeps the share 1 - w x (1 - min(1, limit / Y)) of the pixel's luminance, and the shares of all regions multiply: wanted = Y x product, so the veil stays smooth where regions meet. The footer's ink is white at the footer's opacity, laid over the background in sRGB, so its limit is the grey luminance at which that ink reaches contrast (0.141 before margin at 85%).",
+    "lightness": "The new pixel keeps its OKLab a and b (after the yellow turn) and takes lightness L x cbrt(wanted / Y), then refine times: settle the colour (OKLab to linear sRGB, gamut mapped as below) and scale L by cbrt(wanted / its luminance).",
+    "gamut": "Out-of-gamut colours: chroma is reduced toward grey at the same lightness (halving search, 12 steps, finding the largest in-gamut share) and the result blended with a plain per-channel clip by smoothstep(0, 0.05, how far the colour lay outside [0, 1]), so colours only just outside are clipped and never jump.",
+    "yellowRule": "Darkened yellows turn toward amber so they read golden, never olive: with drop = 1 - wanted / Y, the hue moves toward a target by the share clamp(turnPerDrop x drop, 0, 1) x wy (h + (target - h) x share, no wrapping). The target is chosen once per cover: the mean hue of the whole cover weighted by wy x C x reach (reach = the largest region weight at the pixel); at or under split the target is towards[0] (amber), above it towards[1] (green), so a yellow cover deepens to gold and a lime one to deep green, never olive, with no seam inside a cover, and chroma grows by chromaLift x drop x wy, where wy = smoothstep(hues[0], hues[1], h) x (1 - smoothstep(hues[2], hues[3], h)) x clamp(C / chromaFrom, 0, 1). Greens past hues[3] keep their hue.",
+    "margin": 0.03,
+    "refine": 3,
+    "title": { "pad": 0.04, "falloff": [0.5, 0.45], "aimContrast": 4.5, "minContrast": 3.0, "maxDrop": 0.6 },
+    "footer": { "pad": 0.05, "falloff": [0.6, 0.4], "contrast": 4.5 },
+    "yellow": { "hues": [55, 72, 128, 150], "split": 112, "towards": [66, 148], "turnPerDrop": 2.0, "chromaFrom": 0.06, "chromaLift": 0.5 }
   },
   "music": {
     "about": "With covers, each gradient keeps its own lightness, chroma and the spread of its hues, turned round the colour wheel so its fold colour (the colour of its first fold) takes the music's first hue. Chroma is the mean of the gradient's and the music's, at most maxChroma, and at least minChroma so a dull cover still gives a rich field.",

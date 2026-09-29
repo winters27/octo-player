@@ -1,0 +1,342 @@
+{
+  "about": "The chosen backgrounds: each is fully decided by family, palette and seed (see render.py), then softened by a Gaussian blur whose sigma is `blur` times the side (a pick may set its own). Rendered at 1600 px and saved at 1200 px by `python cover_art.py finals`.",
+  "blur": 0.09,
+  "picks": [
+    {
+      "id": "periwinkle",
+      "name": "Periwinkle",
+      "family": "liquid",
+      "palette": "bluebell",
+      "seed": 1404
+    },
+    {
+      "id": "northern-lights",
+      "name": "Northern Lights",
+      "family": "liquid",
+      "palette": "borealis",
+      "seed": 1031
+    },
+    {
+      "id": "bubblegum",
+      "name": "Bubblegum",
+      "family": "liquid",
+      "palette": "candy",
+      "seed": 1008
+    },
+    {
+      "id": "citrus",
+      "name": "Citrus",
+      "family": "liquid",
+      "palette": "citrus",
+      "seed": 1390
+    },
+    {
+      "id": "cobalt",
+      "name": "Cobalt",
+      "family": "liquid",
+      "palette": "cobalt",
+      "seed": 1223
+    },
+    {
+      "id": "coral",
+      "name": "Coral",
+      "family": "liquid",
+      "palette": "coral",
+      "seed": 1081
+    },
+    {
+      "id": "tangerine",
+      "name": "Tangerine",
+      "family": "liquid",
+      "palette": "tangerine",
+      "seed": 5008
+    },
+    {
+      "id": "dusk",
+      "name": "Dusk",
+      "family": "liquid",
+      "palette": "dusk",
+      "seed": 1242
+    },
+    {
+      "id": "magma",
+      "name": "Magma",
+      "family": "liquid",
+      "palette": "ember",
+      "seed": 1030
+    },
+    {
+      "id": "firewave",
+      "name": "Firewave",
+      "family": "liquid",
+      "palette": "firewave",
+      "seed": 1044
+    },
+    {
+      "id": "jungle",
+      "name": "Jungle",
+      "family": "liquid",
+      "palette": "jungle",
+      "seed": 1119
+    },
+    {
+      "id": "lagoon",
+      "name": "Lagoon",
+      "family": "liquid",
+      "palette": "lagoon",
+      "seed": 1041
+    },
+    {
+      "id": "lilac",
+      "name": "Lilac",
+      "family": "liquid",
+      "palette": "lilac",
+      "seed": 1093
+    },
+    {
+      "id": "magenta",
+      "name": "Magenta",
+      "family": "liquid",
+      "palette": "magenta",
+      "seed": 1047
+    },
+    {
+      "id": "night-swim",
+      "name": "Night Swim",
+      "family": "liquid",
+      "palette": "midnight",
+      "seed": 1342
+    },
+    {
+      "id": "mint",
+      "name": "Mint",
+      "family": "liquid",
+      "palette": "mint",
+      "seed": 1196
+    },
+    {
+      "id": "nightshade",
+      "name": "Nightshade",
+      "family": "liquid",
+      "palette": "nightshade",
+      "seed": 1203
+    },
+    {
+      "id": "opal",
+      "name": "Opal",
+      "family": "liquid",
+      "palette": "opal",
+      "seed": 1131
+    },
+    {
+      "id": "peach",
+      "name": "Peach",
+      "family": "liquid",
+      "palette": "peach",
+      "seed": 1127
+    },
+    {
+      "id": "tropic",
+      "name": "Tropic",
+      "family": "liquid",
+      "palette": "tropic",
+      "seed": 1365
+    },
+    {
+      "id": "neon-tide",
+      "name": "Neon Tide",
+      "family": "liquid",
+      "palette": "neon",
+      "seed": 1191
+    },
+    {
+      "id": "aurora",
+      "name": "Aurora",
+      "family": "liquid",
+      "palette": "aurora",
+      "seed": 1042
+    },
+    {
+      "id": "limelight",
+      "name": "Limelight",
+      "family": "liquid",
+      "palette": "lime",
+      "seed": 1360
+    },
+    {
+      "id": "mercury",
+      "name": "Mercury",
+      "family": "liquid",
+      "palette": "slate",
+      "seed": 1033
+    },
+    {
+      "id": "sunset",
+      "name": "Sunset",
+      "family": "liquid",
+      "palette": "sunset",
+      "seed": 1144
+    },
+    {
+      "id": "garnet",
+      "name": "Garnet",
+      "family": "liquid",
+      "palette": "garnet",
+      "seed": 1244
+    },
+    {
+      "id": "clear-sky",
+      "name": "Clear Sky",
+      "family": "liquid",
+      "palette": "ice",
+      "seed": 3017
+    },
+    {
+      "id": "lemonade",
+      "name": "Lemonade",
+      "family": "liquid",
+      "palette": "lemon",
+      "seed": 3012
+    },
+    {
+      "id": "sea-glass",
+      "name": "Sea Glass",
+      "family": "liquid",
+      "palette": "seaglass",
+      "seed": 3026
+    },
+    {
+      "id": "raspberry",
+      "name": "Raspberry",
+      "family": "liquid",
+      "palette": "berry",
+      "seed": 5015
+    },
+    {
+      "id": "teal-drift",
+      "name": "Teal Drift",
+      "family": "silk",
+      "palette": "abyss",
+      "seed": 2155
+    },
+    {
+      "id": "blue-hour",
+      "name": "Blue Hour",
+      "family": "silk",
+      "palette": "bluebell",
+      "seed": 2035
+    },
+    {
+      "id": "ember",
+      "name": "Ember",
+      "family": "silk",
+      "palette": "ember",
+      "seed": 2044
+    },
+    {
+      "id": "midnight",
+      "name": "Midnight",
+      "family": "silk",
+      "palette": "midnight",
+      "seed": 2153
+    },
+    {
+      "id": "velvet",
+      "name": "Velvet",
+      "family": "silk",
+      "palette": "nightshade",
+      "seed": 2014
+    },
+    {
+      "id": "reef",
+      "name": "Reef",
+      "family": "silk",
+      "palette": "peacock",
+      "seed": 2146
+    },
+    {
+      "id": "amber-night",
+      "name": "Amber Night",
+      "family": "silk",
+      "palette": "silk-amber",
+      "seed": 2022
+    },
+    {
+      "id": "fern",
+      "name": "Fern",
+      "family": "silk",
+      "palette": "silk-fern",
+      "seed": 2105
+    },
+    {
+      "id": "honey",
+      "name": "Honey",
+      "family": "silk",
+      "palette": "silk-gold",
+      "seed": 2139
+    },
+    {
+      "id": "orchid",
+      "name": "Orchid",
+      "family": "silk",
+      "palette": "silk-orchid",
+      "seed": 2188
+    },
+    {
+      "id": "meadow",
+      "name": "Meadow",
+      "family": "silk",
+      "palette": "lime",
+      "seed": 7017
+    },
+    {
+      "id": "crimson",
+      "name": "Crimson",
+      "family": "silk",
+      "palette": "silk-crimson",
+      "seed": 2107
+    },
+    {
+      "id": "tide",
+      "name": "Tide",
+      "family": "silk",
+      "palette": "silk-tide",
+      "seed": 2109
+    },
+    {
+      "id": "rosewood",
+      "name": "Rosewood",
+      "family": "silk",
+      "palette": "silk-rose",
+      "seed": 2136
+    },
+    {
+      "id": "slate",
+      "name": "Slate",
+      "family": "silk",
+      "palette": "slate",
+      "seed": 2046
+    },
+    {
+      "id": "iris",
+      "name": "Iris",
+      "family": "silk",
+      "palette": "candy",
+      "seed": 7019
+    },
+    {
+      "id": "chiffon",
+      "name": "Chiffon",
+      "family": "silk",
+      "palette": "lemon",
+      "seed": 4016
+    },
+    {
+      "id": "afterglow",
+      "name": "Afterglow",
+      "family": "silk",
+      "palette": "dusk",
+      "seed": 2157
+    }
+  ]
+}
