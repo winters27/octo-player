@@ -95,7 +95,7 @@ class PolishShotsTest {
                         app.signInForm.typeAddress("music.example.com")
                         app.signInForm.username = "winters"
                     }
-                    rig.scene(size) { scene -> rig.shot(scene, "${size.label}/signin", 1_500) }
+                    rig.scene(size) { scene -> rig.shot(scene, "${size.label}/signin", 1_500L * maxOf(1, size.width * size.height / 2_000_000)) }
                 }
             }
             rig.signIn()
@@ -110,7 +110,9 @@ class PolishShotsTest {
                         // Every page but those that play their own shows the long song.
                         if (rig.app.player.state.value.current?.song?.id != PolishData.LONG_SONG) rig.playLong()
                         setUp(scene)
-                        rig.shot(scene, "${size.label}/$name", 900)
+                        // A 4K picture takes several times as long to draw off screen, so
+                        // moving backgrounds get as many frames to settle as at 1080p.
+                        rig.shot(scene, "${size.label}/$name", 900L * maxOf(1, size.width * size.height / 2_000_000))
                     }
                     rig.reset(scene)
                 }
