@@ -35,6 +35,10 @@ kotlin {
             api(libs.compose.runtime)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.coroutines.core)
+            // Checking the signature on an update (Ed25519). Android's own
+            // Ed25519 arrives only in newer versions than the app supports,
+            // so both apps use this one.
+            implementation(libs.bouncycastle.prov)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

@@ -4,3 +4,6 @@ gradlew text eol=lf
 *.jar binary
 *.png binary
 *.ttf binary
+
+# Signed test fixtures: their bytes are what was signed.
+shared/core/src/commonTest/resources/update/** -text
