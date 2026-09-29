@@ -11,11 +11,21 @@ it runs locally too (Python 3.11 or newer, nothing to install).
   release_assets.py manifest --app desktop --tag desktop-v1.2.0 --notes FILE --dir DIR
   release_assets.py public-keys --keys FILE --out DIR
   release_assets.py self-test
+
+A rehearsal version (1.1.0-rehearsal.1) is refused: its build trusts a
+throwaway key, so it is never published. --rehearsal, given before the
+command, stages only rehearsal versions, for scripts/rehearse-update.ps1
+on one PC; it refuses to run on GitHub.
+
+  release_assets.py --rehearsal stage-desktop --version 1.1.0-rehearsal.2 ...
 """
 import argparse
 import base64
+import contextlib
 import hashlib
+import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -50,6 +60,8 @@ SIGNATURE = "update.json.sig"
 SUMS = "SHA256SUMS"
 # The DER prefix of an Ed25519 public key (SubjectPublicKeyInfo), before its 32 bytes.
 ED25519_SPKI = bytes.fromhex("302a300506032b6570032100")
+# Set by --rehearsal: only rehearsal versions, never anything publishable.
+REHEARSAL = False
 
 
 def fail(message: str) -> None:
@@ -60,6 +72,11 @@ def fail(message: str) -> None:
 def check_version(version: str) -> None:
     if not VERSION.fullmatch(version):
         fail(f"{version!r} is not a version like 1.2.0 or 1.3.0-beta.1")
+    rehearsal = "rehearsal" in version.lower()
+    if rehearsal and not REHEARSAL:
+        fail(f"{version} is a rehearsal version: its build trusts a throwaway key, so it is never published")
+    if REHEARSAL and not rehearsal:
+        fail(f"--rehearsal only stages rehearsal versions (1.1.0-rehearsal.1), not {version}")
 
 
 def version_of(tag: str, app: str) -> str:
@@ -209,6 +226,16 @@ def public_keys(keys: Path, out: Path) -> list[Path]:
     return written
 
 
+# Whether a step stops the script (fail), keeping its message quiet.
+def refuses(step) -> bool:
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            step()
+        except SystemExit:
+            return True
+    return False
+
+
 def self_test() -> None:
     assert sentence("desktop: a sheet of the server's 24 lists") == "A sheet of the server's 24 lists."
     assert sentence("player and nav: glowing buttons when on") == "Glowing buttons when on."
@@ -219,6 +246,18 @@ def self_test() -> None:
         assert VERSION.fullmatch(good), good
     for bad in ["1.2", "01.2.0", "1.2.0-", "v1.2.0", "2026.09.23.1"]:
         assert not VERSION.fullmatch(bad), bad
+    global REHEARSAL
+    for rehearsal, version, refused in [
+        (False, "1.1.0-rehearsal.1", True),
+        (False, "1.1.0-Rehearsal.1", True),
+        (False, "1.1.0-beta.rehearsal", True),
+        (False, "1.1.0-beta.1", False),
+        (True, "1.1.0-rehearsal.1", False),
+        (True, "1.1.0", True),
+    ]:
+        REHEARSAL = rehearsal
+        assert refuses(lambda: check_version(version)) == refused, (version, rehearsal)
+    REHEARSAL = False
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
         artifacts = root / "artifacts"
@@ -242,6 +281,12 @@ def self_test() -> None:
         msi = next(a for a in manifest["assets"] if a["kind"] == "msi")
         assert msi == {"name": "Octo-1.2.0-windows-x64.msi", "sha256": hashlib.sha256(b"msi/Octo-1.0.0.msi").hexdigest(), "size": 18, "os": "windows", "arch": "x64", "kind": "msi"}
         assert (out / SUMS).read_text().count("\n") == 6
+        # A rehearsal build is never staged or described for a release.
+        assert refuses(lambda: stage_desktop("1.1.0-rehearsal.1", artifacts, root / "never"))
+        assert refuses(lambda: stage_android("1.1.0-rehearsal.1", root / "app-release.apk", root / "never"))
+        assert refuses(lambda: write_manifest("desktop", "desktop-v1.1.0-rehearsal.1", "", out))
+        assert refuses(lambda: version_of("desktop-v1.1.0-rehearsal.1", "desktop"))
+        assert not (root / "never").exists()
         apk = root / "app-release.apk"
         apk.write_bytes(b"apk")
         phone = root / "phone"
@@ -256,6 +301,7 @@ def self_test() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--rehearsal", action="store_true", help="stage a rehearsal version, on this PC only")
     commands = parser.add_subparsers(dest="command", required=True)
     desktop = commands.add_parser("stage-desktop")
     desktop.add_argument("--version", required=True)
@@ -279,6 +325,11 @@ def main() -> None:
     keys.add_argument("--out", type=Path, required=True)
     commands.add_parser("self-test")
     args = parser.parse_args()
+    if args.rehearsal:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            fail("--rehearsal is for one PC, never for a release built on GitHub")
+        global REHEARSAL
+        REHEARSAL = True
 
     if args.command == "stage-desktop":
         for path in stage_desktop(args.version, args.artifacts, args.out):
