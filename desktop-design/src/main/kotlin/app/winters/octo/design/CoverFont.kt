@@ -4,7 +4,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.platform.Font
 
-// Inter Display, which playlist covers are set in: the three weights the
+// Inter Display, which playlist covers are set in: the four weights the
 // design uses, read from the app's resources (octo-fonts/, shared from the
 // phone's font resources).
 val CoverFontFamily: FontFamily by lazy {
@@ -17,6 +17,7 @@ val CoverFontFamily: FontFamily by lazy {
         font("inter_display_semibold", FontWeight.SemiBold),
         font("inter_display_light", FontWeight.Light),
         font("inter_display_regular", FontWeight.Normal),
+        font("inter_display_medium", FontWeight.Medium),
     )
 }
 

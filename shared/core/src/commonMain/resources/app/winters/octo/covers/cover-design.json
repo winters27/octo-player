@@ -5,12 +5,13 @@
     "family": "Inter 4.1 (rsms/inter v4.1, OFL-1.1), static Display cut",
     "title": "InterDisplay-SemiBold.ttf",
     "line": "InterDisplay-Light.ttf",
-    "footer": "InterDisplay-Regular.ttf"
+    "footer": "InterDisplay-Medium.ttf"
   },
   "layout": {
     "margin": 0.08,
     "contrast": 4.5,
     "tinyBelowPx": 72,
+    "tiny": "Below tinyBelowPx a cover is its artwork only: no words, no letter, no veil. tinyMargin and tinySize are kept for older readers and are not used.",
     "tinyMargin": 0.1,
     "tinySize": 0.56,
     "title": {
@@ -36,133 +37,37 @@
       "showFromPx": 120
     },
     "footer": {
-      "weight": 400,
-      "size": 0.053,
+      "weight": 500,
+      "size": 0.06,
       "minPx": 9,
       "bottom": 0.08,
-      "opacity": 0.6,
+      "opacity": 0.85,
       "lineHeight": 1.2,
       "tracking": 0,
       "showFromPx": 160
     }
   },
-  "music": {
-    "about": "With covers, each gradient keeps its own lightness, chroma and the spread of its hues, turned round the colour wheel so its fold colour (the colour of its first fold) takes the music's first hue. Chroma is the mean of the gradient's and the music's, at most maxChroma, and at least minChroma so a dull cover still gives a rich field.",
-    "maxChroma": 0.2,
-    "minChroma": 0.1
+  "background": {
+    "about": "Which painted background (backgrounds/backgrounds.json) a list gets, always the same for the same list and music. With no covers, or only grey ones: backgrounds[(coverHash(id) >>> 7) mod count], coverHash being FNV-1a 64 over the id's UTF-8, then >>> 1. With music: the music's colour is the strongest colour among its first covers' swatches (score sqrt(share / number of covers) x (0.3 + 5 C), counting only C >= 0.035 and 0.15 <= L <= 0.97), rounded (hue to the degree, C and L to 0.001). A background's distance from it is the least, over its hues i (strongest first), of hueDistance / 180 + hueStep x i + (greyPenalty when that hue's C < greyBelow) + chromaWeight x |C - music C|, plus lightnessWeight x |meanLightness - music L|. The nearest few (ties in file order) are the candidates, and the list takes candidates[(coverHash(id) >>> 7) mod nearest]. Sizes other than the file's: halved, each pixel (a + b + c + d + 2) / 4, while that leaves at least the size wanted (so 600 is exactly the reference's), then each output pixel the mean of the area it covers. Below tinyBelowPx the background alone is the cover.",
+    "nearest": 3,
+    "hueStep": 0.08,
+    "greyBelow": 0.04,
+    "greyPenalty": 0.5,
+    "chromaWeight": 1.5,
+    "lightnessWeight": 0.8
   },
-  "gradients": [
-    {
-      "name": "Violet fold",
-      "colours": ["#35197f", "#7b2fd6", "#d24fd0"],
-      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [1.12, 1.08], "radius": 0.82, "soft": 0.3, "colour": 2 }],
-      "light": { "centre": [0.9, 0.12], "radius": 0.55, "colour": "#b8a8ff", "opacity": 0.32 }
-    },
-    {
-      "name": "Lagoon",
-      "colours": ["#16336b", "#0e7a8c", "#2fc39a"],
-      "base": { "from": [0, 0], "to": [1, 0.8], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [1.18, 0.38], "radius": 0.72, "soft": 0.32, "colour": 2 }],
-      "light": { "centre": [0.25, 1.02], "radius": 0.5, "colour": "#86e3ff", "opacity": 0.28 }
-    },
-    {
-      "name": "Ember",
-      "colours": ["#461241", "#bd3228", "#ef8a2c"],
-      "base": { "from": [0, 0], "to": [0.8, 1], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [0.98, 1.12], "radius": 0.78, "soft": 0.32, "colour": 2 }],
-      "light": { "centre": [1.0, 0.05], "radius": 0.5, "colour": "#ffb672", "opacity": 0.3 }
-    },
-    {
-      "name": "Orchid",
-      "colours": ["#4e1873", "#a8339b", "#e98bc6"],
-      "base": { "from": [0.1, 0], "to": [0.9, 1], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [-0.15, 1.05], "radius": 0.7, "soft": 0.3, "colour": 2 }],
-      "light": { "centre": [0.95, 0.35], "radius": 0.5, "colour": "#ffc6ee", "opacity": 0.26 }
-    },
-    {
-      "name": "Night tide",
-      "colours": ["#0f1b5a", "#2a4dd4", "#3cc4e6"],
-      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [1.05, 0.95], "radius": 0.6, "soft": 0.36, "colour": 2 }],
-      "light": { "centre": [0.8, 0.1], "radius": 0.45, "colour": "#9fc4ff", "opacity": 0.3 }
-    },
-    {
-      "name": "Rose quartz",
-      "colours": ["#622656", "#bf4c7a", "#eaa2ba"],
-      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [1.2, 0.2], "radius": 0.68, "soft": 0.32, "colour": 2 }],
-      "light": { "centre": [0.3, 1.05], "radius": 0.55, "colour": "#ffd6e2", "opacity": 0.24 }
-    },
-    {
-      "name": "Pine",
-      "colours": ["#0f3934", "#16774f", "#7bcf88"],
-      "base": { "from": [0, 0], "to": [0.9, 1], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [0.3, 1.25], "radius": 0.75, "soft": 0.3, "colour": 2 }],
-      "light": { "centre": [1.0, 0.2], "radius": 0.5, "colour": "#c6f5c0", "opacity": 0.24 }
-    },
-    {
-      "name": "Aurora",
-      "colours": ["#1b286b", "#5a3dcc", "#33ceb2"],
-      "base": { "from": [0, 0.2], "to": [1, 0.9], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [1.1, 1.15], "radius": 0.85, "soft": 0.32, "colour": 2 }],
-      "light": { "centre": [0.9, 0.0], "radius": 0.5, "colour": "#c7b8ff", "opacity": 0.28 }
-    },
-    {
-      "name": "Dusk",
-      "colours": ["#3a1959", "#cc3f69", "#ffa25d"],
-      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [1.1, 1.1], "radius": 0.7, "soft": 0.32, "colour": 2 }],
-      "light": { "centre": [0.1, 0.95], "radius": 0.45, "colour": "#ffc3a0", "opacity": 0.22 }
-    },
-    {
-      "name": "Cobalt",
-      "colours": ["#0b1e76", "#1e5bdc", "#b35bef"],
-      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [1.15, 0.1], "radius": 0.6, "soft": 0.32, "colour": 2 }],
-      "light": { "centre": [0.6, 1.05], "radius": 0.55, "colour": "#9cc2ff", "opacity": 0.3 }
-    },
-    {
-      "name": "Berry",
-      "colours": ["#3a0d3e", "#8b1c69", "#fb5a89"],
-      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [0.9, 1.2], "radius": 0.8, "soft": 0.3, "colour": 2 }],
-      "light": { "centre": [1.05, 0.25], "radius": 0.45, "colour": "#ffb0cc", "opacity": 0.26 }
-    },
-    {
-      "name": "Glacier",
-      "colours": ["#1d3b6f", "#3a82c6", "#a4d6ef"],
-      "base": { "from": [0, 0], "to": [0.8, 1], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [1.2, 1.0], "radius": 0.75, "soft": 0.36, "colour": 2 }],
-      "light": { "centre": [0.95, 0.1], "radius": 0.4, "colour": "#e0f2ff", "opacity": 0.25 }
-    },
-    {
-      "name": "Plum",
-      "colours": ["#291644", "#683b8c", "#df7e9d"],
-      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [-0.1, 1.2], "radius": 0.8, "soft": 0.32, "colour": 2 }],
-      "light": { "centre": [1.0, 0.45], "radius": 0.5, "colour": "#f0b8d8", "opacity": 0.24 }
-    },
-    {
-      "name": "Tangerine",
-      "colours": ["#561d10", "#d4501d", "#ffbe49"],
-      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [1.1, 0.9], "radius": 0.62, "soft": 0.36, "colour": 2 }],
-      "light": { "centre": [0.35, 1.05], "radius": 0.45, "colour": "#ffd9a0", "opacity": 0.24 }
-    },
-    {
-      "name": "Mint haze",
-      "colours": ["#133f57", "#1b8c87", "#99e2bf"],
-      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [1.15, 1.1], "radius": 0.8, "soft": 0.32, "colour": 2 }],
-      "light": { "centre": [0.85, 0.05], "radius": 0.45, "colour": "#c8fff0", "opacity": 0.22 }
-    },
-    {
-      "name": "Magenta wave",
-      "colours": ["#480e76", "#bc148c", "#6a5bfd"],
-      "base": { "from": [0, 0], "to": [1, 1], "stops": [[0, 0], [1, 1]] },
-      "folds": [{ "centre": [1.12, 0.3], "radius": 0.7, "soft": 0.3, "colour": 2 }],
-      "light": { "centre": [0.2, 1.05], "radius": 0.5, "colour": "#ff9ee0", "opacity": 0.26 }
-    }
-  ]
+  "veil": {
+    "about": "Under the words the background is darkened only where it is too bright for white words, and only by lightness: hue and chroma stay, so a bright cover deepens instead of greying. tools/cover-art/reference.py is the reference; its golden/ covers are what ports are checked against.",
+    "space": "Per pixel, from 8-bit sRGB: linear sRGB (the sRGB curve), luminance Y = 0.2126 R + 0.7152 G + 0.0722 B, and OKLab (Ottosson 2020) with OKLCH hue h in degrees and chroma C = hypot(a, b).",
+    "regions": "Each block of words has a box, in pixels, from its corner of the cover to the words' far edges plus pad (a share of the side): the title block (title and second line together) from the top-left corner to the widest line's right edge and the block's bottom; the footer from the bottom-left corner up to the footer's top and across to its right edge. For right-to-left words the boxes start from the right-hand corners instead. A pixel's weight w is 1 inside a box and 1 - smoothstep(0, 1, d) outside, where d = hypot(dx / (falloff[0] x side), dy / (falloff[1] x side)) and dx, dy are its distances from the box across and down, measured at pixel centres.",
+    "rule": "limit = min(max(aim, Y x (1 - maxDrop)), least), where aim and least are the luminances at which white words reach aimContrast and minContrast (1.05 / ratio - 0.05), each lowered by margin. Each region keeps the share 1 - w x (1 - min(1, limit / Y)) of the pixel's luminance, and the shares of all regions multiply: wanted = Y x product, so the veil stays smooth where regions meet. The footer's ink is white at the footer's opacity, laid over the background in sRGB, so its limit is the grey luminance at which that ink reaches contrast (0.141 before margin at 85%).",
+    "lightness": "The new pixel keeps its OKLab a and b (after the yellow turn) and takes lightness L x cbrt(wanted / Y), then refine times: settle the colour (OKLab to linear sRGB, gamut mapped as below) and scale L by cbrt(wanted / its luminance).",
+    "gamut": "Out-of-gamut colours: chroma is reduced toward grey at the same lightness (halving search, 12 steps, finding the largest in-gamut share) and the result blended with a plain per-channel clip by smoothstep(0, 0.05, how far the colour lay outside [0, 1]), so colours only just outside are clipped and never jump.",
+    "yellowRule": "Darkened yellows turn toward amber so they read golden, never olive: with drop = 1 - wanted / Y, the hue moves toward a target by the share clamp(turnPerDrop x drop, 0, 1) x wy (h + (target - h) x share, no wrapping). The target is chosen once per cover: the mean hue of the whole cover weighted by wy x C x reach (reach = the largest region weight at the pixel); at or under split the target is towards[0] (amber), above it towards[1] (green), so a yellow cover deepens to gold and a lime one to deep green, never olive, with no seam inside a cover, and chroma grows by chromaLift x drop x wy, where wy = smoothstep(hues[0], hues[1], h) x (1 - smoothstep(hues[2], hues[3], h)) x clamp(C / chromaFrom, 0, 1). Greens past hues[3] keep their hue.",
+    "margin": 0.03,
+    "refine": 3,
+    "title": { "pad": 0.04, "falloff": [0.5, 0.45], "aimContrast": 4.5, "minContrast": 3.0, "maxDrop": 0.6 },
+    "footer": { "pad": 0.05, "falloff": [0.6, 0.4], "contrast": 4.5 },
+    "yellow": { "hues": [55, 72, 128, 150], "split": 112, "towards": [66, 148], "turnPerDrop": 2.0, "chromaFrom": 0.06, "chromaLift": 0.5 }
+  }
 }

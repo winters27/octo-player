@@ -2,6 +2,7 @@ package app.winters.octo.playlists
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -12,6 +13,8 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import app.winters.octo.covers.CoverBackground
+import app.winters.octo.covers.CoverBackgrounds
 import app.winters.octo.covers.CoverPalette
 import app.winters.octo.covers.CoverSpec
 import app.winters.octo.covers.PlaylistCoverStyle
@@ -99,11 +102,33 @@ class PlaylistArt @Inject constructor(
             if (file.isFile) runCatching { android.graphics.BitmapFactory.decodeFile(file.path)?.asImageBitmap() }.getOrNull() else null
         }
         if (stored != null) return stored.also { pictures.put(key, it) }
-        val drawn = drawing.withPermit { withContext(Dispatchers.Default) { designCover(spec, side, coverMeasurer(fonts), CoverFontFamily) } }
+        val drawn = drawing.withPermit {
+            withContext(Dispatchers.Default) { designCover(spec, side, coverMeasurer(fonts), CoverFontFamily, ::backgroundPixels, ::pictureOf) }
+        }
         withContext(Dispatchers.IO) { save(file, drawn) }
         pictures.put(key, drawn)
         return drawn
     }
+
+    // The library's backgrounds as pixels (WebP, which Android reads), the
+    // last two kept: a list of playlists often shares one.
+    private val backgrounds = object : LinkedHashMap<String, Pair<IntArray, Int>>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<IntArray, Int>>) = size > 2
+    }
+
+    private fun backgroundPixels(background: CoverBackground): Pair<IntArray, Int> = synchronized(backgrounds) {
+        backgrounds.getOrPut(background.file) {
+            val bytes = CoverBackgrounds.bytes(background.file)
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: error("${background.file} could not be read")
+            val pixels = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            bitmap.recycle()
+            pixels to bitmap.width
+        }
+    }
+
+    private fun pictureOf(pixels: IntArray, side: Int): ImageBitmap =
+        Bitmap.createBitmap(pixels, side, side, Bitmap.Config.ARGB_8888).asImageBitmap()
 
     private fun save(file: File, image: ImageBitmap) {
         runCatching {

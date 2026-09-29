@@ -97,3 +97,31 @@ internal fun distance(x: Lch, y: Lch): Double {
     val db = x.c * sin(ra) - y.c * sin(rb)
     return kotlin.math.sqrt((x.l - y.l).pow(2) + da * da + db * db)
 }
+
+// One 8-bit sRGB channel as light (the sRGB curve), and back.
+fun channelToLinear(c: Double): Double = if (c <= 0.04045) c / 12.92 else ((c + 0.055) / 1.055).pow(2.4)
+
+fun linearToChannel(v: Double): Double {
+    val c = v.coerceIn(0.0, 1.0)
+    return if (c <= 0.0031308) c * 12.92 else 1.055 * c.pow(1 / 2.4) - 0.055
+}
+
+// Linear sRGB to OKLab (L, a, b) into `out`.
+fun linearToOklab(r: Double, g: Double, b: Double, out: DoubleArray) {
+    val l = cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+    val m = cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+    val s = cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+    out[0] = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s
+    out[1] = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s
+    out[2] = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
+}
+
+// OKLab to linear sRGB into `out`; outside 0 to 1 when the screen cannot show it.
+fun oklabToLinear(lightness: Double, a: Double, b: Double, out: DoubleArray) {
+    val l = (lightness + 0.3963377774 * a + 0.2158037573 * b).pow(3)
+    val m = (lightness - 0.1055613458 * a - 0.0638541728 * b).pow(3)
+    val s = (lightness - 0.0894841775 * a - 1.2914855480 * b).pow(3)
+    out[0] = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s
+    out[1] = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s
+    out[2] = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+}

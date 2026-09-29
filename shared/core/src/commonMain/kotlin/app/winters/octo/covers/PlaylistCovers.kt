@@ -17,7 +17,7 @@ fun playlistCoverStyleName(style: PlaylistCoverStyle): String = when (style) {
 
 // When each is the one to pick.
 fun playlistCoverStyleHelp(style: PlaylistCoverStyle): String = when (style) {
-    PlaylistCoverStyle.Designed -> "Each playlist's name on colours from its music. Easy to tell apart at a glance, even in a long list."
+    PlaylistCoverStyle.Designed -> "Each playlist's name on painted artwork picked by its music. Easy to tell apart at a glance, even in a long list."
     PlaylistCoverStyle.Mosaic -> "The covers of the first albums on it. Handy when you know a playlist by its music."
 }
 
@@ -36,10 +36,10 @@ fun playlistCoverFooter(songCount: Int, owner: String?, you: String?): String? =
 }
 
 // Bumped whenever the drawing changes, so covers kept on disk are made again.
-const val COVER_DESIGN_VERSION = 1
+const val COVER_DESIGN_VERSION = 2
 
 // Bumped whenever the colours are picked differently.
-const val COVER_PALETTE_VERSION = 1
+const val COVER_PALETTE_VERSION = 2
 
 // The size a cover shown `px` wide is drawn at: the next step up, fine
 // where a pixel shows (every 4 up to 128), coarser above (16 up to 512,
@@ -54,14 +54,13 @@ fun coverSide(px: Int): Int {
     }
 }
 
-// What a drawn cover is kept under: the design's version, the playlist, its
-// gradient, its colours, the size, and its words. A change to any of them is
-// a new picture.
-fun coverArtKey(spec: CoverSpec, side: Int, book: CoverBook = CoverBook.Default): String {
+// What a drawn cover is kept under: the design's version, the book's and
+// the library's, the background, the playlist, the size, and its words. A
+// change to any of them is a new picture.
+fun coverArtKey(spec: CoverSpec, side: Int, book: CoverBook = CoverBook.Default, library: CoverBackgrounds = CoverBackgrounds.Default): String {
     val words = coverHash(listOf(spec.name, spec.line.orEmpty(), spec.footer.orEmpty()).joinToString("\n")).toString(36)
-    val look = "${book.version}.${coverGradientOf(spec.id, book)}"
-    val colours = spec.palette.key + if (spec.palette.fromMusic) "m" else "s"
-    return "playlist-art:v$COVER_DESIGN_VERSION:$look:${spec.id}:$colours:$side:$words"
+    val look = "${book.version}.${library.version}.${chooseBackground(spec.id, spec.palette, library).file.removeSuffix(".webp")}"
+    return "playlist-art:v$COVER_DESIGN_VERSION:$look:${spec.id}:$side:$words"
 }
 
 // What a playlist's colours are kept under: the server, and the covers they
