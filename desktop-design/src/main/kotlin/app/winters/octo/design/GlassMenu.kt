@@ -29,15 +29,29 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -139,6 +153,11 @@ class PopupHost {
     }
 
     val open: Boolean get() = request != null
+
+    // Set by the window: notes what has the keyboard as a pop-up opens, and
+    // gives it back once it shuts.
+    var saveFocus: (() -> Unit)? = null
+    var returnFocus: (() -> Unit)? = null
 }
 
 val LocalPopups = staticCompositionLocalOf { PopupHost() }
@@ -147,15 +166,55 @@ private const val POPUP_MS = OctoDuration.Hover
 
 // The layer the pop-ups draw in. It covers the window while one is open,
 // so a click anywhere off the card closes it, and Escape does too. The card
-// frosts whatever is behind it through `backdrop`.
+// frosts whatever is behind it through `backdrop`. The keyboard stays in
+// the card while it is open: the arrow keys and Tab walk its rows, Enter
+// picks one. Opened from the
+// keyboard, its first row has the keyboard at once; once it shuts, what
+// had it before gets it back.
 @Composable
 fun PopupLayer(host: PopupHost, backdrop: HazeState) {
-    val request = host.request ?: return
+    val request = host.request
+    // Hands the keyboard back once the pop-up that had it has gone.
+    var held by remember { mutableStateOf<PopupRequest?>(null) }
+    var handBack by remember { mutableStateOf(false) }
+    LaunchedEffect(request) {
+        if (request == null && held != null) {
+            held = null
+            if (handBack) runCatching { host.returnFocus?.invoke() }
+            handBack = false
+        }
+    }
+    if (request == null) return
     val motion = motionScale()
     val grow = remember(request) { Animatable(0f) }
     val focus = remember(request) { FocusRequester() }
-    LaunchedEffect(request) {
+    val card = remember(request) { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalFocusVisibility.current.keyboard
+    val scope = rememberCoroutineScope()
+    // Whether the card has had the keyboard, so a row that goes away (a
+    // menu turning to its next page) hands it back to the card; a few
+    // tries in a row at most, so nothing can bounce for ever.
+    var had by remember(request) { mutableStateOf(false) }
+    var tries by remember(request) { mutableIntStateOf(0) }
+    fun takeKeyboard(rows: Boolean) {
         runCatching { focus.requestFocus() }
+        if (rows) runCatching { card.requestFocus(FocusDirection.Enter) }
+    }
+    LaunchedEffect(request) {
+        // Only for the keyboard: after a click the keyboard stays where the
+        // click put it, and an old field is never woken.
+        if (held == null && keyboard) {
+            handBack = true
+            runCatching { host.saveFocus?.invoke() }
+        }
+        held = request
+        takeKeyboard(rows = false)
+        // Opened from the keyboard, its first row takes it once laid out.
+        if (keyboard) {
+            withFrameNanos { }
+            runCatching { card.requestFocus(FocusDirection.Enter) }
+        }
         grow.animateTo(1f, octoTween(motion, POPUP_MS))
     }
     var origin by remember(request) { mutableStateOf(TransformOrigin(0f, 0f)) }
@@ -185,6 +244,10 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
             ) {
                 Column(
                     Modifier
+                        .focusRequester(card)
+                        // The keyboard stays among the rows while the card is open.
+                        .focusProperties { onExit = { if (host.request === request) cancelFocusChange() } }
+                        .focusGroup()
                         .heightIn(max = 560.dp)
                         .verticalScroll(rememberScrollState())
                         .padding(vertical = 6.dp),
@@ -195,15 +258,30 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
         },
         modifier = Modifier
             .fillMaxSize()
+            .onFocusChanged {
+                when {
+                    it.hasFocus && !it.isFocused -> {
+                        had = true
+                        tries = 0
+                    }
+                    it.hasFocus -> had = true
+                    had && host.request === request && tries < 3 -> {
+                        tries++
+                        scope.launch { takeKeyboard(rows = true) }
+                    }
+                }
+            }
             .focusRequester(focus)
             .focusable()
             .onKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
-                    host.close()
-                    true
-                } else {
-                    false
+                if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                when (event.key) {
+                    Key.Escape -> host.close()
+                    Key.DirectionDown -> focusManager.moveFocus(FocusDirection.Next)
+                    Key.DirectionUp -> focusManager.moveFocus(FocusDirection.Previous)
+                    else -> return@onKeyEvent false
                 }
+                true
             }
             .pointerInput(request) {
                 awaitEachGesture {
@@ -253,20 +331,25 @@ fun MenuRow(
     val interaction = interactionSource ?: remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     val pressed by interaction.collectIsPressedAsState()
+    val focused by interaction.collectIsFocusedAsState()
     Row(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 6.dp)
-            .menuRowPress(MenuRowShape) { if ((hovered || pressed) && enabled) 1f else 0f }
+            .menuRowPress(MenuRowShape) { if ((hovered || pressed || focused) && enabled) 1f else 0f }
             .hoverable(interaction, enabled = enabled)
             .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
             .clickable(
                 interactionSource = interaction,
-                indication = null,
+                indication = FocusRing(MenuRowShape),
                 enabled = enabled,
                 role = Role.Button,
                 onClick = onClick,
             )
+            .semantics {
+                if (checked) selected = true
+                if (more) stateDescription = "Opens more"
+            }
             .height(MenuRowHeight.Pointer)
             .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -292,7 +375,7 @@ fun MenuRow(
 // A heading inside a menu or pop-up.
 @Composable
 fun MenuTitle(text: String, modifier: Modifier = Modifier) {
-    Txt(text, OctoType.label, OctoColors.TextSecondary, modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+    Txt(text, OctoType.label, OctoColors.TextSecondary, modifier.padding(horizontal = 16.dp, vertical = 8.dp).semantics { heading() })
 }
 
 // The hairline between groups of menu rows.

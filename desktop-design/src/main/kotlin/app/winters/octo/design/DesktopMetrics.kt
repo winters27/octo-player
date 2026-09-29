@@ -56,6 +56,15 @@ object IconSize {
     val Transport = 20.dp
 }
 
+// The keyboard's mark: the ring round what has the keyboard, a hairline of
+// dark just inside it so it still shows on a light cover, and the least a
+// thing to click may measure, whatever its glyph.
+object Focus {
+    val Ring = 2.dp
+    val Edge = 1.dp
+    val MinTarget = 24.dp
+}
+
 // One corner per role.
 object Corner {
     val Row = 6.dp

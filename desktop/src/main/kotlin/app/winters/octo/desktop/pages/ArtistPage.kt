@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.design.LocalReduceMotion
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -173,8 +174,9 @@ private fun ArtistBody(app: AppState, id: String, fallbackName: String, artist: 
     var topAll by remember(id) { mutableStateOf(false) }
     var similarAll by remember(id) { mutableStateOf(false) }
     val spots = remember(id) { HashMap<String, Int>() }
+    val still = LocalReduceMotion.current
     fun jump(key: String) {
-        spots[key]?.let { at -> scope.launch { list.animateScrollToItem(at) } }
+        spots[key]?.let { at -> scope.launch { if (still) list.scrollToItem(at) else list.animateScrollToItem(at) } }
     }
     val songs = (all as? Load.Ready)?.data.orEmpty()
     val songCount = artist.albums.sumOf { it.songCount }

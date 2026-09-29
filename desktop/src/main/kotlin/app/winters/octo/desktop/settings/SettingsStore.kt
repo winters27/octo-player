@@ -185,6 +185,9 @@ data class Appearance(
     val ambience: AmbienceStyle = AmbienceStyle.Glow,
     // How the immersive colours move behind the pages.
     val ambienceMotion: AmbienceMotion = AmbienceMotion.Gentle,
+    // How big the words are, as a percentage, or 0 for the system's own
+    // text size.
+    val textSize: Int = 0,
 )
 
 // The window's colours: the playing cover blurred into a glow across the

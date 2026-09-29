@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.library
 
+import app.winters.octo.design.LocalReduceMotion
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -117,11 +118,14 @@ fun Cover(
         if (coverId != null && client != null) {
             val bucket = coverBucket(coverFetchPx(px))
             val key = coverKey(client.primaryUrl.host, coverId, bucket, online)
-            val request = remember(key) {
+            // With motion reduced a cover is simply there, without fading in.
+            val still = LocalReduceMotion.current
+            val request = remember(key, still) {
                 ImageRequest.Builder(context)
                     .data(client.coverArtUrl(coverId, bucket).toString())
                     .memoryCacheKey(key)
                     .diskCacheKey(key)
+                    .crossfade(!still)
                     .build()
             }
             AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(), filterQuality = FilterQuality.Medium)

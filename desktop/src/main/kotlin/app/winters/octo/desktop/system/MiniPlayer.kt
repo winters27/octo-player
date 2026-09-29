@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.system
 
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -64,6 +65,7 @@ import app.winters.octo.design.MenuFilm
 import app.winters.octo.design.MenuShape
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.FocusVisibility
 import app.winters.octo.design.ProvideWindowLook
 import app.winters.octo.design.RowHeight
 import app.winters.octo.design.SeparatorColor
@@ -125,6 +127,8 @@ fun MiniPlayerWindow(
     onClose: () -> Unit,
     reduceMotion: Boolean,
 ) {
+    // Whether the keyboard is in use in this window, for its focus rings.
+    val keyboard = remember { FocusVisibility() }
     val windowState = rememberWindowState(position = WindowPosition(spot.x.dp, spot.y.dp), size = DpSize(spot.width.dp, spot.height.dp))
     val settings by app.settings.state.collectAsState()
     val prefs = settings.system
@@ -159,6 +163,8 @@ fun MiniPlayerWindow(
         resizable = true,
         onPreviewKeyEvent = { event ->
             if (event.type != KeyEventType.KeyDown) return@Window false
+            // Tab is the keyboard finding its way: rings show.
+            if (event.key == Key.Tab) keyboard.keyboard = true
             // Esc goes back to Octo's window, as closing does.
             if (event.key == Key.Escape) {
                 onClose()
@@ -188,7 +194,7 @@ fun MiniPlayerWindow(
                     if (position is WindowPosition.Absolute) onMoved(WindowSpot(position.x.value, position.y.value, size.width.value, size.height.value))
                 }
         }
-        ProvideWindowLook(reduceMotion = reduceMotion) {
+        ProvideWindowLook(reduceMotion = reduceMotion, focus = keyboard) {
             CompositionLocalProvider(LocalCovers provides app.connection?.client) {
                 Box(Modifier.fillMaxSize()) {
                     MiniPlayerView(
@@ -482,7 +488,7 @@ private fun UpNext(app: AppState, state: PlayerState) {
         item { Txt("UP NEXT", DesktopType.label, OctoColors.TextMuted, Modifier.padding(top = Space.M, bottom = Space.Xs, start = Space.Xs)) }
         items(upcoming.take(UP_NEXT_LIMIT), key = { it.key }) { entry ->
             Row(
-                Modifier.fillMaxWidth().height(RowHeight.Regular).clickable { app.player.skipTo(entry.key) }.padding(horizontal = Space.Xs),
+                Modifier.fillMaxWidth().height(RowHeight.Regular).clickable(role = Role.Button) { app.player.skipTo(entry.key) }.padding(horizontal = Space.Xs),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space.M),
             ) {

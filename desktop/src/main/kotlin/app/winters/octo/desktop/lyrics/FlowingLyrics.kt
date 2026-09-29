@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.lyrics
 
+import app.winters.octo.design.motionScale
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -185,6 +186,7 @@ fun FlowingLyrics(
     val measurer = rememberTextMeasurer()
     var laidOut by remember(lines) { mutableStateOf<LyricsLayout?>(null) }
     val fade = remember(lines) { Animatable(0f) }
+    val fadeMs = motionScale().ms(FADE_IN_MS)
     var stamp by remember(lines) { mutableStateOf<Int?>(null) }
 
     BoxWithConstraints(modifier.fillMaxSize().clipToBounds()) {
@@ -205,7 +207,7 @@ fun FlowingLyrics(
             val measured = LyricsLayout(spec, boxes)
             engine.setGeometry(measured.baseHeights(), spec.interludeIdle.toDouble(), spec.interludeFull.toDouble(), height.toDouble())
             laidOut = measured
-            fade.animateTo(1f, tween(FADE_IN_MS))
+            fade.animateTo(1f, tween(fadeMs))
         }
         val shown = laidOut ?: return@BoxWithConstraints
 

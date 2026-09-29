@@ -1,5 +1,10 @@
 package app.winters.octo.desktop
 
+import app.winters.octo.desktop.settings.systemTextScale
+import app.winters.octo.desktop.settings.textScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import javax.swing.SwingUtilities
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -11,6 +16,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -25,6 +31,8 @@ import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import app.winters.octo.design.ArrowKeys
+import app.winters.octo.design.FocusVisibility
 import app.winters.octo.design.LocalTyping
 import app.winters.octo.design.ProvideWindowLook
 import app.winters.octo.design.TypingState
@@ -102,7 +110,11 @@ fun main(args: Array<String>) {
     // the listener (a locked keyring asks to be unlocked).
     val restored = accounts.restore()
     val os = currentOs()
-    val systemCalm = systemReducesMotion(os)
+    // The system's own "Animation effects" (or Reduce motion), read again
+    // whenever the window comes forward, so a change applies without a restart.
+    var systemCalm by mutableStateOf(systemReducesMotion(os))
+    // The system's text size, read the same way.
+    var systemText by mutableStateOf(systemTextScale(os))
     val icon = appIcon()
 
     application {
@@ -137,6 +149,10 @@ fun main(args: Array<String>) {
         )
         val typing = remember { TypingState() }
         val lists = remember { ListFocus() }
+        // Whether the keyboard is moving about (rings show), and whether a
+        // focused control holds the arrow keys (a slider).
+        val keyboard = remember { FocusVisibility() }
+        val arrows = remember { ArrowKeys() }
         var frame by remember { mutableStateOf<Frame?>(null) }
         // Where the window last was at its own size, for the next run.
         var floating by remember { mutableStateOf(spot.copy(maximized = false)) }
@@ -171,12 +187,17 @@ fun main(args: Array<String>) {
             undecorated = custom,
             onPreviewKeyEvent = { event ->
                 if (event.type != KeyEventType.KeyDown) return@Window false
+                // Tab, the Menu key, and the arrows in a list, a menu or a
+                // slider are the keyboard finding its way: rings show.
+                val finding = event.key == Key.Tab || event.key == Key.Menu || (event.key == Key.F10 && event.isShiftPressed) ||
+                    (event.key in WalkKeys && (lists.active || arrows.claimed || app.popups.open))
+                if (finding) keyboard.keyboard = true
                 // New keys for a global shortcut, being pressed in Settings.
                 if (system.shortcuts.recording != null) {
                     return@Window system.shortcuts.pressed((event.nativeKeyEvent as? java.awt.event.KeyEvent)?.keyCode ?: 0, event.isCtrlPressed, event.isAltPressed, event.isShiftPressed, event.isMetaPressed)
                 }
                 val press = KeyPress(event.key, event.isCtrlPressed, event.isAltPressed, event.isShiftPressed, event.isMetaPressed)
-                val shortcut = shortcutFor(press, app.mac, typing.active, lists.active) ?: return@Window false
+                val shortcut = shortcutFor(press, app.mac, typing.active, lists.active, arrows = arrows.claimed || app.popups.open) ?: return@Window false
                 app.perform(shortcut)
             },
         ) {
@@ -190,7 +211,17 @@ fun main(args: Array<String>) {
                 system.watch(window)
                 // Coming back to Octo is when a queue from the phone is worth a look.
                 window.addWindowFocusListener(object : WindowAdapter() {
-                    override fun windowGainedFocus(e: WindowEvent?) = app.queueSync.check()
+                    override fun windowGainedFocus(e: WindowEvent?) {
+                        app.queueSync.check()
+                        Thread {
+                            val calm = systemReducesMotion(os)
+                            val text = systemTextScale(os)
+                            SwingUtilities.invokeLater {
+                                systemCalm = calm
+                                systemText = text
+                            }
+                        }.apply { isDaemon = true }.start()
+                    }
                 })
                 system.focusWindow = {
                     windowState.isMinimized = false
@@ -222,8 +253,12 @@ fun main(args: Array<String>) {
                 window.onRenderApiChanged(::check)
             }
             val look by app.settings.state.collectAsState()
-            ProvideWindowLook(reduceMotion = look.appearance.calmMotion || systemCalm) {
+            // Every word grows with the text size; nothing else does.
+            val density = LocalDensity.current
+            val words = textScale(look.appearance.textSize, systemText)
+            ProvideWindowLook(reduceMotion = look.appearance.calmMotion || systemCalm, focus = keyboard, arrows = arrows) {
                 CompositionLocalProvider(
+                    LocalDensity provides Density(density.density, density.fontScale * words),
                     LocalTyping provides typing,
                     LocalSystem provides system,
                     LocalListFocus provides lists,
@@ -237,3 +272,6 @@ fun main(args: Array<String>) {
         with(system) { Surfaces(icon) }
     }
 }
+
+// The keys that walk a list or a menu.
+private val WalkKeys = setOf(Key.DirectionUp, Key.DirectionDown, Key.DirectionLeft, Key.DirectionRight, Key.PageUp, Key.PageDown, Key.MoveHome, Key.MoveEnd)

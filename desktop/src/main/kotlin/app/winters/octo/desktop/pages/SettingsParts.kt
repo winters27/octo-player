@@ -1,5 +1,12 @@
 package app.winters.octo.desktop.pages
 
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.hideFromAccessibility
+import androidx.compose.ui.focus.focusProperties
+import app.winters.octo.design.FocusRing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -156,7 +163,8 @@ private fun SectionList(sections: List<PageSection>, current: Int, onPick: (Int)
                     .fillMaxWidth()
                     .height(RowHeight.Nav)
                     .hoverLift(Corner.ControlShape, lifted = false)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onPick(index) },
+                    .clickable(role = Role.Tab) { onPick(index) }
+                    .semantics { selected = chosen },
                 contentAlignment = Alignment.CenterStart,
             ) {
                 if (chosen) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
@@ -230,7 +238,17 @@ internal fun sectionInView(spans: List<Span>, height: Int, atEnd: Boolean, jumpe
 @Composable
 internal fun Group(name: String? = null, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(top = if (name != null) Space.L else Space.None)) {
-        if (name != null) Txt(name.uppercase(), DesktopType.label, OctoColors.TextMuted, Modifier.padding(start = Space.M, bottom = Space.Xs))
+        if (name != null) {
+            Txt(
+                name.uppercase(),
+                DesktopType.label,
+                OctoColors.TextMuted,
+                Modifier.padding(start = Space.M, bottom = Space.Xs).semantics {
+                    heading()
+                    contentDescription = name
+                },
+            )
+        }
         Rows(content)
     }
 }
@@ -290,9 +308,11 @@ internal fun SwitchRow(title: String, caption: String?, on: Boolean, change: (Bo
         caption,
         Modifier
             .hoverLift(Corner.RowShape)
-            .toggleable(value = on, interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Switch, onValueChange = change),
+            .toggleable(value = on, interactionSource = null, indication = FocusRing(Corner.RowShape), role = Role.Switch, onValueChange = change),
     ) {
-        OctoSwitch(on, change)
+        // The row is the one stop and the one switch a screen reader hears;
+        // the drawn switch inside only shows it.
+        OctoSwitch(on, change, Modifier.focusProperties { canFocus = false }.semantics { hideFromAccessibility() })
     }
 }
 
@@ -328,6 +348,8 @@ internal fun SliderRow(
                 onRelease = onRelease,
                 wheelStep = wheelStep,
                 look = SliderLook.Jewel,
+                label = title,
+                reading = { reading },
             )
             Txt(reading, DesktopType.meta.copy(fontFeatureSettings = "tnum"), OctoColors.TextSecondary, Modifier.width(SettingsSize.Reading))
         }
