@@ -11,6 +11,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -84,6 +85,7 @@ import app.winters.octo.design.Corner
 import app.winters.octo.design.CutTxt
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
+import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.GlazeLight
 import app.winters.octo.design.GlazeSelected
@@ -91,8 +93,11 @@ import app.winters.octo.design.Glyph
 import app.winters.octo.design.HoverFill
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
+import app.winters.octo.design.MenuFilm
+import app.winters.octo.design.MenuFrost
 import app.winters.octo.design.MenuRow
 import app.winters.octo.design.MenuSeparator
+import app.winters.octo.design.MenuShape
 import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.NowPlayingBars
 import app.winters.octo.design.OctoColors
@@ -772,7 +777,14 @@ private fun PickedBar(
     outside: (List<Song>) -> Boolean,
 ) {
     var anchor by remember { mutableStateOf(IntRect.Zero) }
-    Glaze(modifier.onGloballyPositioned { anchor = it.windowRect() }, shape = Corner.PanelShape, light = GlazeLight.Lifted) {
+    // The floating player's material, so the rows under it do not show through.
+    val backdrop = LocalFrameBackdrop.current
+    val placed = modifier.onGloballyPositioned { anchor = it.windowRect() }
+    val glass: @Composable (@Composable BoxScope.() -> Unit) -> Unit = { content ->
+        if (backdrop != null) FloatingGlaze(backdrop, placed, shape = MenuShape, film = MenuFilm, frost = MenuFrost, halo = true, content = content)
+        else Glaze(placed, shape = MenuShape, light = GlazeLight.Lifted, film = MenuFilm, content = content)
+    }
+    glass {
         Row(Modifier.padding(horizontal = Space.L, vertical = Space.S), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
             Txt("$count songs picked", DesktopType.emphasis, modifier = Modifier.padding(end = Space.Xs))
             TextAction("Play", { app.play(picked()) })

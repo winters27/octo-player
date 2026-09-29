@@ -57,6 +57,7 @@ import app.winters.octo.desktop.nav.ScrollSpot
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.subsonic.SubsonicException
+import dev.chrisbanes.haze.HazeState
 
 // What a page's data has come to.
 sealed interface Load<out T> {
@@ -108,6 +109,10 @@ private const val GRID = "grid"
 
 // Room a page leaves at its foot for the now-playing bar floating over it.
 val LocalBottomRoom = staticCompositionLocalOf { 0.dp }
+
+// The window's colours the frame's glass frosts, for glass floating over a
+// page (the bar of picked songs) to be made of the player's material.
+val LocalFrameBackdrop = staticCompositionLocalOf<HazeState?> { null }
 
 // The side margin every page keeps.
 val PageSide = 28.dp
