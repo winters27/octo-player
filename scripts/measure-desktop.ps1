@@ -432,8 +432,9 @@ Write-Host "  version $($info.Version), $($info.Jars) jars, JVM options: $($info
 Write-Host "  CDS archive in its runtime: $($info.HasCds); knows OCTO_PROFILE_DIR: $($info.KnowsProfile)"
 Write-Host "Test profile: $ProfileDir$(if ($WithLibrary) { ' (with the settings of the Octo in use, signed in)' } else { ' (signed out)' })"
 
-$installed = Join-Path $env:LOCALAPPDATA "Octo"
-if (-not $info.KnowsProfile -and ((Resolve-Path $installed -ErrorAction SilentlyContinue).Path -eq $App) -and -not $AllowInstalled) {
+# The installed Octo's folder: OctoPlayer, or Octo for builds before the move.
+$installed = @("OctoPlayer", "Octo") | ForEach-Object { (Resolve-Path (Join-Path $env:LOCALAPPDATA $_) -ErrorAction SilentlyContinue).Path }
+if (-not $info.KnowsProfile -and ($installed -contains $App) -and -not $AllowInstalled) {
     # The installed program shares the jump list of the Octo in use, which
     # an older build signed out would clear.
     throw "This is the installed Octo, and it does not know OCTO_PROFILE_DIR. Measure an unpacked copy (-Msi) instead, or pass -AllowInstalled."

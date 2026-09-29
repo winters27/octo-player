@@ -9,7 +9,7 @@
 # The phases, in the order a rehearsal runs them. Each is safe to run again,
 # and several can go in one call (they run in this order):
 #
-#   pwsh scripts/rehearse-update.ps1 -Prepare   # once: key, MSI A and B, B's signed release (builds only)
+#   pwsh scripts/rehearse-update.ps1 -Prepare   # once: key, MSI A and B, B's signed release, where A installs (builds only)
 #   pwsh scripts/rehearse-update.ps1 -Backup    # before installing: a copy of %APPDATA%\Octo to compare with
 #   pwsh scripts/rehearse-update.ps1 -Serve     # starts the pretend GitHub in the background
 #   pwsh scripts/rehearse-update.ps1 -Install   # with Octo closed: installs A over the installed Octo
@@ -20,17 +20,24 @@
 #   pwsh scripts/rehearse-update.ps1 -Restore   # only if the settings need putting back
 #
 # Options:
-#   -Build <n>        the MSI's third number for A; B gets n+1 (default 1).
+#   -Build <n>        the MSI's third number for A; B gets n+1 (default 3).
 #                     Keep it low: a real release's MSI (1.1.<commit count>)
-#                     must stay higher, or Windows refuses it as older.
+#                     must stay higher, or Windows refuses it as older. It
+#                     starts at 3 because the first rehearsal left MSI 1.1.1
+#                     installed, and Windows only installs a higher number.
 #   -Port <n>         the pretend GitHub's port (default 47631)
 #   -ServeHours <h>   how long the pretend GitHub runs before stopping by itself (default 3)
 #   -Work <folder>    where everything goes (default %TEMP%\octo-rehearsal)
 #   -From <folder>    the backup -Verify and -Restore use (default the newest)
 #
-# After a rehearsal the installed Octo is 1.1.0-rehearsal.2 (MSI 1.1.<n+1>).
-# A real release installs over it; a 1.0.x test build does not until the
-# rehearsal Octo is uninstalled (Settings > Apps). Settings stay either way.
+# After a rehearsal the installed Octo is 1.1.0-rehearsal.4 (MSI 1.1.<n+1>),
+# in %LOCALAPPDATA%\OctoPlayer. A real release installs over it; a 1.0.x
+# test build does not until the rehearsal Octo is uninstalled (Settings >
+# Apps). Settings stay either way.
+#
+# Installing A over an Octo in %LOCALAPPDATA%\Octo (every build before the
+# move to OctoPlayer) empties that folder, the cache in it included:
+# covers and playlist art download again. Settings live elsewhere and stay.
 param(
     [switch]$Prepare,
     [switch]$Backup,
@@ -39,7 +46,7 @@ param(
     [switch]$Launch,
     [switch]$Verify,
     [switch]$Restore,
-    [int]$Build = 1,
+    [int]$Build = 3,
     [int]$Port = 47631,
     [double]$ServeHours = 3,
     [string]$Work = (Join-Path ([IO.Path]::GetTempPath()) "octo-rehearsal"),
@@ -48,8 +55,10 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 
-$VersionA = "1.1.0-rehearsal.1"
-$VersionB = "1.1.0-rehearsal.2"
+# Each rehearsal takes new numbers: .1 and .2 were the first, whose A
+# could not update itself (its updater waited inside the install folder).
+$VersionA = "1.1.0-rehearsal.3"
+$VersionB = "1.1.0-rehearsal.4"
 $TagB = "desktop-v$VersionB"
 $MsiNumbersA = "1.1.$Build"
 $MsiNumbersB = "1.1.$($Build + 1)"
@@ -59,6 +68,18 @@ $KeysFile = Join-Path $root "shared\core\src\commonMain\resources\app\winters\oc
 $Release = Join-Path $Work "releases\$TagB"
 $MsiA = Join-Path $Work "msi\Octo-$VersionA-windows-x64.msi"
 $MsiNameB = "Octo-$VersionB-windows-x64.msi"
+
+# The installer's upgrade code and folder, as desktop/build.gradle.kts gives them.
+$BuildFile = Join-Path $root "desktop\build.gradle.kts"
+$UpgradeCode = "{" + (Select-String -Path $BuildFile -Pattern 'upgradeUuid = "([0-9A-Fa-f-]+)"').Matches[0].Groups[1].Value.ToUpperInvariant() + "}"
+$InstallPath = (Select-String -Path $BuildFile -Pattern 'installationPath = "([^"]+)"').Matches[0].Groups[1].Value
+$DefaultFolder = Join-Path $env:LOCALAPPDATA $InstallPath
+# Where builds before the move to OctoPlayer went.
+$OldFolder = Join-Path $env:LOCALAPPDATA "Octo"
+# Where the app keeps a download waiting (the temp folder), and where
+# builds before the fix kept it (inside the install folder).
+$Downloads = Join-Path ([IO.Path]::GetTempPath()) "Octo\updates"
+$OldDownloads = Join-Path $OldFolder "Cache\updates"
 
 if (-not ($Prepare -or $Backup -or $Serve -or $Install -or $Launch -or $Verify -or $Restore)) {
     foreach ($line in Get-Content $PSCommandPath | Select-Object -Skip 1) {
@@ -139,17 +160,67 @@ function Assert-NoOcto([string]$Doing) {
     }
 }
 
-# The installed Octo's entry in Apps, or null.
-function Get-InstalledOcto {
-    $places = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall", "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall"
-    Get-ChildItem $places -ErrorAction SilentlyContinue | ForEach-Object { Get-ItemProperty $_.PSPath } |
-        Where-Object { $_.DisplayName -eq "Octo" } | Select-Object -First 1
+# A property or method of a Windows Installer object. PowerShell 7 cannot
+# call them directly; the leading comma keeps a list whole.
+function Invoke-Msi($On, [string]$Name, [object[]]$With = @(), [switch]$Call) {
+    $how = if ($Call) { [Reflection.BindingFlags]::InvokeMethod } else { [Reflection.BindingFlags]::GetProperty }
+    , $On.GetType().InvokeMember($Name, $how, $null, $On, $With)
 }
 
+# The installed Octo, as Windows Installer files it under the upgrade
+# code: its product code, MSI version and folder. A per-user MSI has no
+# entry under the Uninstall keys, which are read only as a last resort.
+# Null when Octo is not installed.
+function Get-InstalledOcto {
+    try {
+        $installer = New-Object -ComObject WindowsInstaller.Installer
+        foreach ($code in (Invoke-Msi $installer RelatedProducts @($UpgradeCode))) {
+            $version = try { Invoke-Msi $installer ProductInfo @($code, "VersionString") } catch { $null }
+            $folder = try { Invoke-Msi $installer ProductInfo @($code, "InstallLocation") } catch { $null }
+            return [pscustomobject]@{ ProductCode = $code; DisplayVersion = $version; InstallLocation = $folder }
+        }
+    } catch {}
+    $places = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall", "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall"
+    Get-ChildItem $places -ErrorAction SilentlyContinue | ForEach-Object { Get-ItemProperty $_.PSPath } |
+        Where-Object { $_.DisplayName -eq "Octo" } | Select-Object -First 1 |
+        ForEach-Object { [pscustomobject]@{ ProductCode = $_.PSChildName; DisplayVersion = $_.DisplayVersion; InstallLocation = $_.InstallLocation } }
+}
+
+# The installed Octo's folder: where Windows Installer says, else the
+# folder that holds an Octo.exe, new place first.
 function Get-InstallFolder {
     $installed = Get-InstalledOcto
     if ($installed -and $installed.InstallLocation) { return $installed.InstallLocation.TrimEnd('\') }
-    return Join-Path $env:LOCALAPPDATA "Octo"
+    foreach ($folder in $DefaultFolder, $OldFolder) { if (Test-Path (Join-Path $folder "Octo.exe")) { return $folder } }
+    return $DefaultFolder
+}
+
+# Where an MSI puts Octo, from its Directory table (INSTALLDIR up to the
+# root), as LocalAppDataFolder\OctoPlayer. Reads the file; installs nothing.
+function Get-MsiInstallDir([string]$Msi) {
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $database = Invoke-Msi $installer OpenDatabase @($Msi, 0) -Call
+    $view = Invoke-Msi $database OpenView @('SELECT `Directory`, `Directory_Parent`, `DefaultDir` FROM `Directory`') -Call
+    Invoke-Msi $view Execute -Call | Out-Null
+    $rows = @{}
+    while ($record = Invoke-Msi $view Fetch -Call) {
+        $rows[(Invoke-Msi $record StringData @(1))] = @((Invoke-Msi $record StringData @(2)), (Invoke-Msi $record StringData @(3)))
+    }
+    Invoke-Msi $view Close -Call | Out-Null
+    [void][Runtime.InteropServices.Marshal]::ReleaseComObject($view)
+    [void][Runtime.InteropServices.Marshal]::ReleaseComObject($database)
+    $parts = @()
+    $at = "INSTALLDIR"
+    while ($at -and $rows.ContainsKey($at) -and $at -ne "TARGETDIR") {
+        # A system folder (right under the root) by its name, such as
+        # LocalAppDataFolder. DefaultDir is "target:source", each
+        # "short|long"; a folder named "." adds nothing.
+        $parent = $rows[$at][0]
+        $name = (($rows[$at][1] -split ':')[0] -split '\|') | Select-Object -Last 1
+        if ($parent -eq "TARGETDIR" -or -not $parent) { $parts = @($at) + $parts } elseif ($name -ne '.') { $parts = @($name) + $parts }
+        $at = $parent
+    }
+    $parts -join '\'
 }
 
 # The version the app itself shows, from its launcher settings.
@@ -265,6 +336,24 @@ if ($Prepare) {
     New-Item -ItemType Directory -Force (Split-Path $MsiA) | Out-Null
     Copy-Item $built $MsiA -Force
     $built = Build-Rehearsal $VersionB ($Build + 1) $public @(":desktop:packageMsi", ":desktop:packagePortableZip")
+
+    # Where each installs, from its Directory table; and A unpacked by an
+    # administrative install (files into a folder, nothing installed).
+    $want = "LocalAppDataFolder\$InstallPath"
+    foreach ($msi in $MsiA, $built) {
+        $dir = Get-MsiInstallDir $msi
+        if ($dir -ne $want) { throw "$(Split-Path -Leaf $msi) installs to $dir, not $want." }
+    }
+    $unpacked = Join-Path $Work "unpacked-A"
+    if (Test-Path $unpacked) { Remove-Item -Recurse -Force $unpacked }
+    $unpack = Start-Process msiexec.exe -ArgumentList "/a `"$MsiA`" /qn TARGETDIR=`"$unpacked`"" -Wait -PassThru
+    if ($unpack.ExitCode -ne 0) { throw "Unpacking MSI A failed ($($unpack.ExitCode))." }
+    $exe = Get-ChildItem -Recurse $unpacked -Filter Octo.exe | Select-Object -First 1
+    if (-not $exe) { throw "MSI A unpacked with no Octo.exe in it." }
+    $laid = [IO.Path]::GetRelativePath($unpacked, $exe.FullName)
+    if (-not $laid.EndsWith("$InstallPath\Octo.exe", [StringComparison]::OrdinalIgnoreCase)) { throw "MSI A unpacks Octo.exe as $laid, not under $InstallPath." }
+    Remove-Item -Recurse -Force $unpacked
+    Say "MSI A and B install to %LOCALAPPDATA%\$InstallPath ($dir; A unpacks as $laid)"
 
     # The files as the build job uploads them, in a folder named for the runner.
     $artifacts = Join-Path $Work "artifacts"
@@ -382,17 +471,23 @@ if ($Install) {
             Say "rehearsal A (MSI $want) is already installed"
             $skip = $true
         } elseif ($have -gt $want) {
-            throw "Octo $have is installed, newer than rehearsal A ($want), and Windows will not install an older version over it. Uninstall it first (Settings > Apps > Octo, or msiexec /x $($installed.PSChildName)); the settings stay. Then run -Install again."
+            throw "Octo $have is installed, newer than rehearsal A ($want), and Windows will not install an older version over it. Uninstall it first (Settings > Apps > Octo, or msiexec /x $($installed.ProductCode)); the settings stay. Then run -Install again."
         } else {
             Say "replacing the installed Octo $have with rehearsal A ($VersionA, MSI $want)"
         }
     }
     if (-not $skip) {
+        $from = Get-InstallFolder
+        if ($from -ieq $OldFolder -and (Test-Path (Join-Path $OldFolder "Octo.exe"))) {
+            Say "the Octo in $OldFolder goes, and its removal empties that folder, Cache included (covers download again); settings in $Config stay"
+        }
         $log = Join-Path $Work "install-A.log"
         $run = Start-Process msiexec.exe -ArgumentList "/i `"$MsiA`" /qn /norestart /l*v `"$log`"" -Wait -PassThru
         if ($run.ExitCode -notin 0, 3010) { throw "msiexec ended with $($run.ExitCode); see $log" }
         $installed = Get-InstalledOcto
-        Say "installed: Octo $(Get-AppVersion (Get-InstallFolder)) (MSI $($installed.DisplayVersion)) in $(Get-InstallFolder); log $log"
+        $folder = Get-InstallFolder
+        Say "installed: Octo $(Get-AppVersion $folder) (MSI $($installed.DisplayVersion)) in ${folder}; log $log"
+        if ($folder -ine $DefaultFolder) { Say "  NOT in $DefaultFolder, where it belongs" }
     }
 }
 
@@ -427,14 +522,18 @@ if ($Launch) {
 }
 
 # -Verify: after the update (or to see how far it got). Says which version
-# is installed, what Octo fetched from the pretend GitHub, how the
-# update's installer ended, and what changed in %APPDATA%\Octo since the backup.
+# is installed and where, what Octo fetched from the pretend GitHub,
+# whether Start with Windows and octo:// links name the installed Octo,
+# how the update's installer ended, and what changed in %APPDATA%\Octo
+# since the backup.
 if ($Verify) {
     $folder = Get-InstallFolder
     $installed = Get-InstalledOcto
     $shown = Get-AppVersion $folder
     $state = switch ($shown) { $VersionB { "UPDATED to B" } $VersionA { "still A, not updated yet" } default { "neither rehearsal build" } }
     Say "installed: Octo $shown (MSI $($installed.DisplayVersion)) in ${folder}: $state"
+    if ($folder -ine $DefaultFolder) { Say "  NOT in $DefaultFolder, where it belongs" }
+    if (Test-Path (Join-Path $OldFolder "Octo.exe")) { Say "  an Octo.exe is still in $OldFolder" }
 
     $log = Join-Path $Work "server.log"
     if (Test-Path $log) {
@@ -458,8 +557,22 @@ if ($Verify) {
         Say "  no server log yet at $log"
     }
 
-    $updates = Join-Path $env:LOCALAPPDATA "Octo\Cache\updates"
-    $download = Join-Path $updates $TagB
+    # Start with Windows and octo:// links name the installed program (the
+    # update points them at a moved Octo, or its first start does).
+    $exe = Join-Path $folder "Octo.exe"
+    foreach ($place in @(
+        @{ Name = "Start with Windows"; Key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"; Value = "Octo" },
+        @{ Name = "octo:// links"; Key = "HKCU:\Software\Classes\octo\shell\open\command"; Value = "(default)" }
+    )) {
+        $line = (Get-ItemProperty -LiteralPath $place.Key -ErrorAction SilentlyContinue).($place.Value)
+        $state = if (-not $line) { "not set" } elseif ($line.StartsWith("`"$exe`"", [StringComparison]::OrdinalIgnoreCase)) { "the installed Octo" } else { "ANOTHER program: $line" }
+        Say ("  {0,-20} {1}" -f $place.Name, $state)
+    }
+
+    # Where the app keeps the download: the temp folder now, the install
+    # folder before the fix.
+    $download = Join-Path $Downloads $TagB
+    if (-not (Test-Path $download) -and (Test-Path (Join-Path $OldDownloads $TagB))) { $download = Join-Path $OldDownloads $TagB }
     if (Test-Path $download) {
         Get-ChildItem $download | ForEach-Object { Say ("  downloaded {0,-40} {1,12:N0} bytes" -f $_.Name, $_.Length) }
         $installLog = Join-Path $download "install.log"
