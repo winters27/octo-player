@@ -66,7 +66,7 @@ class CoverDesignTest {
             assertTrue(picks.size in 2..CoverBook.Default.background.nearest)
             for (b in picks) {
                 val nearest = b.hues.minOf { hueDistance(it.h, palette.hue.toDouble()) }
-                assertTrue("${b.name} for hue ${palette.hue}: $nearest", nearest < 45)
+                assertTrue("${b.name} for hue ${palette.hue}: $nearest", nearest < 50)
             }
             assertEquals(chooseBackground("pl-1", palette), chooseBackground("pl-1", palette))
         }

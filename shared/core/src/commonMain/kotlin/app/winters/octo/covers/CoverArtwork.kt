@@ -17,7 +17,7 @@ fun chooseBackground(
     rule: BackgroundRule = CoverBook.Default.background,
 ): CoverBackground {
     val all = library.backgrounds
-    val pick = coverHash(id) ushr 7
+    val pick = coverPick(id) ushr 7
     if (!palette.fromMusic || palette.chroma < rule.lowChromaAsGrey) return all[(pick % all.size).toInt()]
     val near = all.sortedBy { backgroundDistance(it, palette, rule) }.take(rule.nearest)
     return near[(pick % near.size).toInt()]
@@ -38,7 +38,7 @@ internal fun backgroundDistance(background: CoverBackground, palette: CoverPalet
 // Which way a list turns its background, 0 to count - 1: v mod 4 quarter
 // turns clockwise, then mirrored left to right from 4 up.
 fun coverOrientation(id: String, rule: BackgroundRule = CoverBook.Default.background): Int =
-    ((coverHash(id) ushr rule.orientation.shift) % rule.orientation.count).toInt()
+    ((coverPick(id) ushr rule.orientation.shift) % rule.orientation.count).toInt()
 
 // ARGB pixels, `side` square, turned (v mod 4) quarter turns clockwise, then
 // mirrored left to right when v >= 4.

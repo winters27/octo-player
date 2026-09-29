@@ -72,3 +72,21 @@ fun coverHash(text: String): Long {
     }
     return hash ushr 1
 }
+
+// The hash well mixed, for picking a background and its turn: FNV-1a alone
+// barely changes its middle bits when only an id's last letter differs, so
+// ids like "1", "2", "3" all picked alike. The raw 64-bit FNV-1a goes
+// through MurmurHash3's finaliser (fmix64), then >>> 1.
+fun coverPick(text: String): Long {
+    var k = -0x340d631b7bdddcdbL
+    for (byte in text.encodeToByteArray()) {
+        k = k xor (byte.toLong() and 0xFF)
+        k *= 0x100000001b3L
+    }
+    k = k xor (k ushr 33)
+    k *= -0xae502812aa7333L
+    k = k xor (k ushr 33)
+    k *= -0x3b314601e57a13adL
+    k = k xor (k ushr 33)
+    return k ushr 1
+}

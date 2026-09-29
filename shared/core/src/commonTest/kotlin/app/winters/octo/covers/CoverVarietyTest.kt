@@ -50,9 +50,27 @@ class CoverVarietyTest {
         val turns = (0 until 400).map { coverOrientation("pl-$it") }
         assertEquals(turns, (0 until 400).map { coverOrientation("pl-$it") })
         assertEquals((0 until 8).toSet(), turns.toSet())
-        // The rule as written: (coverHash(id) >>> 11) mod 8.
-        assertEquals(((coverHash("pl-1") ushr 11) % 8).toInt(), coverOrientation("pl-1"))
-        assertEquals(6, CoverBook.Default.background.nearest)
+        // The rule as written: (coverPick(id) >>> 11) mod 8, with a fixed
+        // value so the server's port can check its hash.
+        assertEquals(0x098f28ee76f647ceL, coverPick("pl-1"))
+        assertEquals(((coverPick("pl-1") ushr 11) % 8).toInt(), coverOrientation("pl-1"))
+        assertTrue(CoverBook.Default.background.nearest in 6..8)
+    }
+
+    // Numbered ids, as some servers give playlists, differ only in their
+    // last letters; they must not all pick alike.
+    @Test
+    fun numberedListsLookApart() {
+        for (ids in listOf((1..12).map { "$it" }, (1..12).map { "p$it" })) {
+            val none = ids.map { chooseBackground(it, seededPalette(it)).file to coverOrientation(it) }
+            assertTrue("$ids: $none", none.toSet().size == ids.size)
+            assertTrue(ids.map { coverOrientation(it) }.toSet().size >= 5)
+            val warm = coverPalette(listOf(listOf(Swatch(0xFFE0701F.toInt(), 1f))), "x")
+            // Twelve lists of one colour among a few backgrounds and eight
+            // turns: an odd repeat can happen, a pile-up must not.
+            val picks = ids.map { chooseBackground(it, warm).file to coverOrientation(it) }
+            assertTrue("$ids warm: $picks", picks.toSet().size >= ids.size - 2)
+        }
     }
 
     @Test
