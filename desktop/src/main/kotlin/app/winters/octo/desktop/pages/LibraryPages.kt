@@ -119,10 +119,11 @@ fun AlbumsPage(app: AppState, visit: Visit) {
         LazyVerticalGrid(GridCells.Adaptive(GridCard), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
             header {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    PageTitle("Albums", Modifier.weight(1f), detail = "${albums.size} albums")
+                    PageTitle("Albums", Modifier.weight(1f), detail = countText(albums.size, "album"))
                     SortButton(app, SortList.Albums, order, app::sortAlbums)
                 }
             }
+            if (albums.isEmpty()) header { NothingHere("No albums yet", "Once your server has music, every album shows here.") }
             items(albums, key = { it.id }) { AlbumCard(app, it) }
         }
     }
@@ -135,7 +136,8 @@ fun RecentlyAddedPage(app: AppState, visit: Visit) {
     WithLibrary(app) { index ->
         val albums = remember(index) { sortAlbums(index.albums, SortOrder(AlbumSort.RecentlyAdded, descending = true)) }
         LazyVerticalGrid(GridCells.Adaptive(GridCard), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
-            header { PageTitle("Recently added", detail = "${albums.size} albums, newest first") }
+            header { PageTitle("Recently added", detail = if (albums.isEmpty()) null else countText(albums.size, "album") + ", newest first") }
+            if (albums.isEmpty()) header { NothingHere("Nothing added yet", "Albums added to your server show here, newest first.") }
             items(albums, key = { it.id }) { AlbumCard(app, it) }
         }
     }
@@ -148,7 +150,8 @@ fun ArtistsPage(app: AppState, visit: Visit) {
     WithLibrary(app) { index ->
         val artists = remember(index) { sortedByName(index.artists) { it.name } }
         LazyVerticalGrid(GridCells.Adaptive(GridCard), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
-            header { PageTitle("Artists", detail = "${artists.size} artists") }
+            header { PageTitle("Artists", detail = countText(artists.size, "artist")) }
+            if (artists.isEmpty()) header { NothingHere("No artists yet", "Once your server has music, every artist shows here.") }
             items(artists, key = { it.id }) { ArtistCard(app, it) }
         }
     }
@@ -158,7 +161,7 @@ fun ArtistsPage(app: AppState, visit: Visit) {
 fun ArtistCard(app: AppState, artist: Artist, outside: Boolean = false) {
     MediaCard(
         artist.name,
-        if (artist.albumCount > 0) (if (artist.albumCount == 1) "1 album" else "${artist.albumCount} albums") else null,
+        if (artist.albumCount > 0) countText(artist.albumCount, "album") else null,
         artist.coverArt,
         onOpen = { app.navigator.go(Page.Artist(artist.id, artist.name)) },
         onMenu = artistMenu(app, artist, outside),

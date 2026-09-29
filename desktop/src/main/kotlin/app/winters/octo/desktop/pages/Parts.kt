@@ -3,6 +3,7 @@ package app.winters.octo.desktop.pages
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -13,7 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -21,7 +22,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.library.Cover
@@ -36,7 +36,11 @@ import app.winters.octo.desktop.ui.LoadingLine
 import app.winters.octo.desktop.ui.LocalPointer
 import app.winters.octo.desktop.ui.MediaCard
 import app.winters.octo.desktop.ui.ShelfCardWidth
-import app.winters.octo.design.GlazeCapsule
+import app.winters.octo.design.Corner
+import app.winters.octo.design.CutTxt
+import app.winters.octo.design.DesktopType
+import app.winters.octo.design.PageSize
+import app.winters.octo.design.Space
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -94,7 +98,8 @@ fun AlbumCard(app: AppState, album: Album, modifier: Modifier = Modifier, outsid
 }
 
 // The top of a page that plays a list: the picture, what it is, its name,
-// a line of details, and Play and Shuffle as two glass capsules.
+// a line of details, and Play and Shuffle as two glass capsules. Laid out
+// as an album's heading is (EntityHeader), so the two pages match.
 @Composable
 fun ListHeader(
     kind: String,
@@ -109,36 +114,39 @@ fun ListHeader(
     playable: Boolean = true,
     online: Boolean = false,
     extras: @Composable () -> Unit = {},
-    art: Dp = 200.dp,
     // Draws the name instead of the plain title, like one renamed by clicking it.
     titleContent: (@Composable () -> Unit)? = null,
 ) {
-    Row(modifier.fillMaxWidth().padding(bottom = 20.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-        Cover(
-            coverId,
-            Modifier.size(art),
-            shape = if (round) androidx.compose.foundation.shape.CircleShape else RoundedCornerShape(10.dp),
-            online = online,
-            placeholder = if (round) OctoIcons.Artist else OctoIcons.Album,
-        )
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Txt(kind, OctoType.caption, OctoColors.TextMuted)
-            if (titleContent != null) titleContent() else Txt(title, OctoType.display, maxLines = 2)
-            subtitle?.invoke()
-            if (details != null) Txt(details, OctoType.bodySmall, OctoColors.TextMuted)
-            Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (playable) {
-                    GlazeCapsule(OctoIcons.Play, "Play", onPlay, lit = true, modifier = Modifier.width(150.dp))
-                    GlazeCapsule(OctoIcons.Shuffle, "Shuffle", onShuffle, modifier = Modifier.width(150.dp))
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val art = headerArt(maxWidth)
+        Row(Modifier.fillMaxWidth().padding(bottom = Space.Xl), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.Page)) {
+            Cover(
+                coverId,
+                Modifier.size(art),
+                shape = if (round) CircleShape else Corner.ArtLShape,
+                online = online,
+                placeholder = if (round) OctoIcons.Artist else OctoIcons.Album,
+            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs)) {
+                Txt(kind.uppercase(), DesktopType.label, OctoColors.TextMuted)
+                if (titleContent != null) titleContent() else CutTxt(title, DesktopType.pageTitle, maxLines = 2)
+                subtitle?.invoke()
+                if (details != null) Txt(details, DesktopType.meta, OctoColors.TextMuted)
+                // Play and Shuffle stay, greyed, on an empty list, so the row keeps its place.
+                HeaderActions {
+                    PlayAndShuffle(onPlay, onShuffle, enabled = playable)
+                    extras()
                 }
-                extras()
             }
         }
     }
 }
 
+// "1 album", "2,500 songs": a count and what it counts, with thousands marked.
+fun countText(count: Int, one: String, many: String = one + "s"): String = "%,d %s".format(count, if (count == 1) one else many)
+
 fun songsLine(count: Int, seconds: Int): String =
-    listOf(if (count == 1) "1 song" else "$count songs", totalLengthText(seconds)).joinToString(" · ")
+    listOf(countText(count, "song"), totalLengthText(seconds)).joinToString(" · ")
 
 @Composable
 fun NothingHere(title: String, detail: String? = null) = EmptyLine(title, detail)

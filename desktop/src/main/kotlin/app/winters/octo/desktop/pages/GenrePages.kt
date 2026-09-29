@@ -77,7 +77,7 @@ fun GenresPage(app: AppState, visit: Visit) {
             contentPadding = pagePadding(LocalBottomRoom.current),
             horizontalArrangement = Arrangement.spacedBy(Space.M),
         ) {
-            header { PageTitle("Genres", detail = if (genres.size == 1) "1 genre" else "${genres.size} genres") }
+            header { PageTitle("Genres", detail = countText(genres.size, "genre")) }
             if (genres.isEmpty()) {
                 header {
                     NextStep(

@@ -17,12 +17,11 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.Corner
+import app.winters.octo.design.CutTxt
+import app.winters.octo.design.DesktopType
 import app.winters.octo.design.GlassField
-import app.winters.octo.design.IconAction
 import app.winters.octo.design.OctoColors
-import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoTooltip
-import app.winters.octo.design.OctoType
 import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 import app.winters.octo.design.hoverLift
@@ -42,7 +41,6 @@ import app.winters.octo.desktop.ui.FilterBar
 import app.winters.octo.desktop.ui.Load
 import app.winters.octo.desktop.ui.Loaded
 import app.winters.octo.desktop.ui.LoadingLine
-import app.winters.octo.desktop.ui.LocalPointer
 import app.winters.octo.desktop.ui.NoMatches
 import app.winters.octo.desktop.ui.PageSide
 import app.winters.octo.desktop.ui.PlaylistMenu
@@ -80,7 +78,6 @@ fun PlaylistPage(app: AppState, visit: Visit, id: String) {
     val query = app.navigator.filterOf(visit)
     val filter: (LibraryQuery) -> Unit = { app.navigator.keepFilter(visit, it) }
     val fields = rememberShownFields(app)
-    val pointer = LocalPointer.current
     Loaded(state) { round++ }.show(Modifier.padding(horizontal = PageSide)) { playlist ->
         val all = playlist.entry
         val shown = rememberFiltered(all, query, fields) ?: return@show LoadingLine()
@@ -127,7 +124,7 @@ fun PlaylistPage(app: AppState, visit: Visit, id: String) {
                     playable = songs.isNotEmpty(),
                     titleContent = {
                         EditInPlace(playlist.name, "Playlist name", owns, "Rename", TitleFieldWidth, { app.renamePlaylist(id, it) }) { modifier ->
-                            Txt(playlist.name, OctoType.display, modifier = modifier, maxLines = 2)
+                            CutTxt(playlist.name, DesktopType.pageTitle, modifier = modifier, maxLines = 2)
                         }
                     },
                     subtitle = {
@@ -135,15 +132,15 @@ fun PlaylistPage(app: AppState, visit: Visit, id: String) {
                         if (owns || comment.isNotBlank()) {
                             EditInPlace(comment, "Add a description", owns, "Edit the description", TitleFieldWidth, { app.setPlaylistComment(id, it) }) { modifier ->
                                 if (comment.isBlank()) {
-                                    Txt("Add a description", OctoType.bodySmall, OctoColors.TextMuted, modifier)
+                                    Txt("Add a description", DesktopType.table, OctoColors.TextMuted, modifier)
                                 } else {
-                                    Txt(comment, OctoType.bodySmall, OctoColors.TextSecondary, modifier, maxLines = 2)
+                                    CutTxt(comment, DesktopType.table, OctoColors.TextSecondary, modifier, maxLines = 2)
                                 }
                             }
                         }
                     },
                     extras = {
-                        IconAction(OctoIcons.More, "More", { app.popups.showAt(pointer.point) { close -> PlaylistMenu(app, menuPlaylist, close) } })
+                        MoreButton(app, "More for this playlist") { close -> PlaylistMenu(app, menuPlaylist, close) }
                     },
                 )
             }

@@ -3,6 +3,9 @@ package app.winters.octo.desktop.pages
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -32,6 +35,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntRect
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
+import app.winters.octo.design.CutTxt
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.IconAction
@@ -77,17 +81,37 @@ fun EntityHeader(
     note: @Composable (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth().padding(bottom = Space.Xl), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.Page)) {
-        picture(Modifier.size(PageSize.HeaderArt))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs)) {
-            Txt(kind.uppercase(), DesktopType.label, OctoColors.TextMuted)
-            Txt(title, DesktopType.pageTitle, maxLines = 2)
-            subtitle?.invoke()
-            if (facts.isNotEmpty()) FactLine(facts)
-            note?.invoke()
-            Row(Modifier.padding(top = Space.L), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M), content = actions)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val art = headerArt(maxWidth)
+        Row(Modifier.fillMaxWidth().padding(bottom = Space.Xl), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.Page)) {
+            picture(Modifier.size(art))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs)) {
+                Txt(kind.uppercase(), DesktopType.label, OctoColors.TextMuted)
+                CutTxt(title, DesktopType.pageTitle, maxLines = 2)
+                subtitle?.invoke()
+                if (facts.isNotEmpty()) FactLine(facts)
+                note?.invoke()
+                HeaderActions(actions)
+            }
         }
     }
+}
+
+// The heading picture's size on a page `width` wide.
+fun headerArt(width: Dp): Dp = if (width < PageSize.HeaderNarrow) PageSize.HeaderArtSmall else PageSize.HeaderArt
+
+// A heading's buttons, in a row that wraps rather than cutting the last off
+// on a narrow page.
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun HeaderActions(actions: @Composable RowScope.() -> Unit) {
+    FlowRow(
+        Modifier.padding(top = Space.L),
+        horizontalArrangement = Arrangement.spacedBy(Space.M),
+        verticalArrangement = Arrangement.spacedBy(Space.M),
+        itemVerticalAlignment = Alignment.CenterVertically,
+        content = actions,
+    )
 }
 
 // Play and Shuffle, a page's first two actions.

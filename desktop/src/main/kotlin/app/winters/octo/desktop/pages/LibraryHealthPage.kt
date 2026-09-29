@@ -84,7 +84,11 @@ fun LibraryHealthPage(app: AppState, visit: Visit) {
             groupTitle = { at -> rows.titles[at] },
             groupDetail = { at -> rows.details[at] },
             menuExtra = { picked, close -> picked.singleOrNull()?.let { song -> songRows(app, health, song, close) } },
-            empty = { NothingHere("Everything looks right", HEALTH_ALL_CLEAR) },
+            // With no songs there is nothing to check, which is not the same as all clear.
+            empty = {
+                if (index.songs.isEmpty()) NothingHere("No songs to check yet", "Once your server has music, Octo looks it over here for second copies, split albums and missing tags.")
+                else NothingHere("Everything looks right", HEALTH_ALL_CLEAR)
+            },
         ) {
             item(key = "title") { PageTitle("Library health", detail = report.overview()) }
             if (check != null) {
