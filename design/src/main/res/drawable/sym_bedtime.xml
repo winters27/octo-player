@@ -1,9 +1,10 @@
+<!-- Phosphor Icons 2.1.1, moon (regular), MIT. Made by tools/icons/make_icons.py. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="960"
-    android:viewportHeight="960">
+    android:viewportWidth="256"
+    android:viewportHeight="256">
   <path
       android:fillColor="@android:color/white"
-      android:pathData="M524,920Q440,920 366.5,888Q293,856 238.5,801.5Q184,747 152,673.5Q120,600 120,516Q120,388 192,284Q264,180 385,138Q407,130 426,143.5Q445,157 444,180Q441,265 471,342Q501,419 561,479Q621,539 698,569Q775,599 860,596Q886,595 898.5,613.5Q911,632 903,655Q859,775 755.5,847.5Q652,920 524,920Z"/>
+      android:pathData="M233.54,142.23A8,8,0,0,0,225.54,140.23A88.08,88.08,0,0,1,115.74,30.43A8,8,0,0,0,105.74,20.43A104.84,104.84,0,0,0,52.83,57.43A104,104,0,0,0,136,224A103.09,103.09,0,0,0,198.52,203.12A104.84,104.84,0,0,0,235.52,150.21A8,8,0,0,0,233.54,142.23ZM188.9,190.34A88,88,0,0,1,65.66,67.11A89,89,0,0,1,97.06,41.11A106,106,0,0,0,96,56A104.11,104.11,0,0,0,200,160A106,106,0,0,0,214.92,158.94A89,89,0,0,1,188.9,190.34Z"/>
 </vector>

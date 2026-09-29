@@ -1,7 +1,10 @@
 package app.winters.octo.design
 
-// Player icons from Material Symbols Rounded (filled), kept as vectors in
-// this module. Draw them with painterResource and tint in place.
+// The app's icons, from Phosphor Icons (MIT, design/licenses/Phosphor-MIT.txt):
+// the Regular weight, and Fill for the transport and for things that are
+// on (a liked song, a rating, the selected tab). Kept as vectors in this
+// module and made by tools/icons/make_icons.py from tools/icons/icons.json.
+// Draw them with painterResource and tint in place.
 object OctoIcons {
     val Previous = R.drawable.sym_fast_rewind
     val Next = R.drawable.sym_fast_forward
@@ -27,8 +30,17 @@ object OctoIcons {
     val Artist = R.drawable.sym_person
     val Songs = R.drawable.sym_music_note
     val Genres = R.drawable.sym_genres
-    val Playlists = R.drawable.sym_queue_music
+    val Playlists = R.drawable.sym_playlist
     val Chevron = R.drawable.sym_chevron_right
+
+    // The chevron pointing back (inside a menu) and down (closing the
+    // player, opening a choice).
+    val ChevronBack = R.drawable.sym_chevron_left
+    val Collapse = R.drawable.sym_chevron_down
+
+    // Back out of a page.
+    val Back = R.drawable.sym_arrow_back
+
     val Cloud = R.drawable.sym_cloud
     val Check = R.drawable.sym_check
     val Download = R.drawable.sym_download
@@ -39,13 +51,13 @@ object OctoIcons {
     // stays for saving a library song to the phone.
     val AddToLibrary = R.drawable.sym_add
 
-    // The same plus drawn thinner (Light weight), small on the artwork of a
-    // song, album or artist that is not in the library.
+    // The same plus drawn thinner (the Light weight), small on the artwork
+    // of a song, album or artist that is not in the library.
     val NotInLibrary = R.drawable.sym_add_light
     val Radio = R.drawable.sym_radio
     // A link passed on to someone else.
     val Share = R.drawable.sym_share
-    // Three sliders, drawn to match the rounded set: the sound settings.
+    // Three sliders: the sound settings.
     val Sound = R.drawable.sym_tune
     // A rating.
     val Star = R.drawable.sym_star
@@ -99,6 +111,15 @@ object OctoIcons {
 
     // The phone itself, as a place music is kept.
     val Phone = R.drawable.sym_smartphone
+
+    // The tabs, each with the filled form it takes while selected. Search
+    // and Library share their icons with the rest of the app.
+    val Home = R.drawable.sym_home
+    val HomeSelected = R.drawable.sym_home_filled
+    val SearchSelected = R.drawable.sym_search_filled
+    val LibrarySelected = R.drawable.sym_library_filled
+    val Settings = R.drawable.sym_settings
+    val SettingsSelected = R.drawable.sym_settings_filled
 
     // Playing on another device: the button, and the button while it is.
     val Cast = R.drawable.sym_cast

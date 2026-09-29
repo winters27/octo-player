@@ -2,7 +2,6 @@ package app.winters.octo.design
 
 import androidx.compose.ui.graphics.vector.VectorGroup
 import androidx.compose.ui.graphics.vector.VectorPath
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -46,10 +45,14 @@ class IconsTest {
         }
     }
 
+    // Every icon file is made from Phosphor by tools/icons, and its licence
+    // travels with the icons.
     @Test
-    fun theCogIsOnePathWithAHole() {
-        val path = cogPath()
-        assertEquals(2, path.count { it == 'Z' })
-        assertTrue(path.startsWith("M"))
+    fun everyIconIsPhosphorWithItsLicence() {
+        val files = drawables.listFiles { f -> f.name.startsWith("sym_") && f.name.endsWith(".xml") }.orEmpty()
+        files.forEach { file -> assertTrue(file.name, file.readText().startsWith("<!-- Phosphor Icons ")) }
+        val licence = OctoIcons::class.java.getResourceAsStream("/octo-icons/Phosphor-MIT.txt")
+        assertTrue("the licence is packaged", licence != null)
+        assertTrue(licence!!.use { it.readBytes().decodeToString() }.contains("Phosphor Icons"))
     }
 }

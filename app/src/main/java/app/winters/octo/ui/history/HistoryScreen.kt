@@ -16,8 +16,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -31,6 +29,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -43,6 +42,7 @@ import app.winters.octo.catalog.PlayedTrack
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.listening.HistoryDay
 import app.winters.octo.listening.HistoryRange
@@ -208,7 +208,7 @@ private fun RangeButton(range: HistoryRange, modifier: Modifier = Modifier, onCl
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(range.label, style = OctoType.label, color = OctoColors.TextSecondary)
-        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = OctoColors.TextSecondary, modifier = Modifier.size(18.dp))
+        Icon(painterResource(OctoIcons.Collapse), contentDescription = null, tint = OctoColors.TextSecondary, modifier = Modifier.size(14.dp))
     }
 }
 

@@ -10,13 +10,11 @@ import org.jetbrains.skia.ImageInfo
 import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Path
 import org.jetbrains.skia.PathFillMode
-import org.jetbrains.skia.RRect
 import org.jetbrains.skia.Surface
 
-// The taskbar thumbnail's icons, drawn from the same glyphs as the player
-// bar's buttons (previous and next from the icon files, play from the
-// icon file, pause as the two rounded bars of PauseGlyph), at the size
-// Windows asks for. Dark on a light taskbar, white on a dark one.
+// The taskbar thumbnail's icons, drawn from the same icon files as the
+// player bar's buttons, at the size Windows asks for. Dark on a light
+// taskbar, white on a dark one.
 
 // The icons' colour for the system's taskbar theme.
 fun taskbarIconColour(lightTaskbar: Boolean): Int = if (lightTaskbar) 0xFF1F1F1F.toInt() else 0xFFFFFFFF.toInt()
@@ -27,10 +25,11 @@ fun taskbarIconColour(lightTaskbar: Boolean): Int = if (lightTaskbar) 0xFF1F1F1F
 fun taskbarIconPixels(size: Int, colour: Int): ByteArray {
     val previous = loadIcon("sym_fast_rewind")
     val play = loadIcon("sym_play_arrow")
+    val pause = loadIcon("sym_pause")
     val next = loadIcon("sym_fast_forward")
     return drawn(size) { canvas, paint -> glyph(canvas, paint, previous, size) }
         .plus(drawn(size) { canvas, paint -> glyph(canvas, paint, play, size) })
-        .plus(drawn(size) { canvas, paint -> pause(canvas, paint, size) })
+        .plus(drawn(size) { canvas, paint -> glyph(canvas, paint, pause, size) })
         .plus(drawn(size) { canvas, paint -> glyph(canvas, paint, next, size) })
         .also { tint(it, colour) }
 }
@@ -51,7 +50,7 @@ private fun drawn(size: Int, draw: (Canvas, Paint) -> Unit): ByteArray {
     return pixels
 }
 
-// An icon file's paths, filling the square as the 960 grid lays them out.
+// An icon file's paths, filling the square as its grid lays them out.
 private fun glyph(canvas: Canvas, paint: Paint, icon: IconSource, size: Int) {
     val scale = size / icon.viewportWidth
     canvas.save()
@@ -63,19 +62,6 @@ private fun glyph(canvas: Canvas, paint: Paint, icon: IconSource, size: Int) {
         path.close()
     }
     canvas.restore()
-}
-
-// PauseGlyph's two rounded bars, at the size the icon files' glyphs fill.
-private fun pause(canvas: Canvas, paint: Paint, size: Int) {
-    val box = size * 0.7f
-    val bar = box * 0.26f
-    val gap = box * 0.18f
-    val height = box * 0.72f
-    val top = (size - height) / 2
-    val left = (size - (bar * 2 + gap)) / 2
-    val radius = bar / 2.5f
-    canvas.drawRRect(RRect.makeXYWH(left, top, bar, height, radius), paint)
-    canvas.drawRRect(RRect.makeXYWH(left + bar + gap, top, bar, height, radius), paint)
 }
 
 // Every pixel takes the colour, keeping its own coverage.

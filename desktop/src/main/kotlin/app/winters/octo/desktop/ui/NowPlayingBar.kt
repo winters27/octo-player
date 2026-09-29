@@ -367,8 +367,8 @@ fun PlayButton(playing: Boolean, enabled: Boolean, size: Dp = FrameSize.PlayButt
     ) {
         when {
             waiting && playing -> Spinner(size = size * 0.5f)
-            playing -> PauseGlyph(OctoColors.TextPrimary, size = size * 0.42f)
-            else -> Glyph(OctoIcons.Play, size = size * 0.55f)
+            playing -> PauseGlyph(OctoColors.TextPrimary, size = size * 0.48f)
+            else -> Glyph(OctoIcons.Play, size = size * 0.48f)
         }
     }
 }

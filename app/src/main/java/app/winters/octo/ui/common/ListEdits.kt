@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -71,6 +69,6 @@ fun RemoveBackground(active: Boolean, shape: Shape) {
         Modifier.fillMaxSize().background(RemoveFill, shape).padding(horizontal = 24.dp),
         contentAlignment = Alignment.CenterEnd,
     ) {
-        Icon(Icons.Rounded.Delete, contentDescription = "Remove", tint = OctoColors.TextPrimary, modifier = Modifier.size(22.dp))
+        Icon(painterResource(OctoIcons.Delete), contentDescription = "Remove", tint = OctoColors.TextPrimary, modifier = Modifier.size(22.dp))
     }
 }
