@@ -44,6 +44,7 @@ val sharedDesignFiles = listOf(
     "OctoMotion.kt",
     "OctoSwitch.kt",
     "OctoTokens.kt",
+    "PlaylistArt.kt",
     "Scrubber.kt",
     "Sliders.kt",
     "Spinner.kt",
@@ -64,14 +65,28 @@ val shareIcons by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("generated/sharedDesign/resources"))
 }
 
+// The fonts playlist covers are set in (Inter Display, OFL), from the
+// phone's font resources, packaged under octo-fonts/ with their licence.
+val shareFonts by tasks.registering(Sync::class) {
+    from(rootProject.file("design/src/main/res/font")) {
+        include("*.ttf")
+        into("octo-fonts")
+    }
+    from(rootProject.file("design/licenses")) { into("octo-fonts") }
+    into(layout.buildDirectory.dir("generated/sharedFonts/resources"))
+}
+
 sourceSets.main {
     kotlin.srcDir(shareDesign)
     resources.srcDir(shareIcons)
+    resources.srcDir(shareFonts)
 }
 
 dependencies {
     api(compose.desktop.common)
     api(libs.haze)
     api(libs.haze.blur)
+    // The playlist covers' design, which PlaylistArt.kt paints.
+    implementation(project(":shared:core"))
     testImplementation(libs.junit)
 }
