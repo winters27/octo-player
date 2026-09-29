@@ -37,6 +37,11 @@ private val Offsets = floatArrayOf(0f, 0.3f, 0.65f)
 // while it plays, still and quiet while it is paused.
 @Composable
 fun NowPlayingBars(playing: Boolean, modifier: Modifier = Modifier) {
+    // With motion reduced a playing song's bars rest, still lit.
+    if (playing && motionScale().still) {
+        Canvas(modifier) { bars(OctoColors.TextPrimary, null) }
+        return
+    }
     if (playing) {
         val phase = rememberInfiniteTransition(label = "now playing").animateFloat(
             initialValue = 0f,

@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.design.motionScale
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -196,7 +197,7 @@ internal fun ImmersiveBackdrop(
 ) {
     val most = cover?.pageOpacity(strength) ?: 0f
     val target = if (quiet) minOf(most, quietOpacity(strength)) else most
-    val opacity by animateFloatAsState(target, tween(CoverFadeMs.toInt()), label = "ambience")
+    val opacity by animateFloatAsState(target, tween(motionScale().ms(CoverFadeMs.toInt())), label = "ambience")
     Box(modifier.fillMaxSize().background(OctoColors.Background)) {
         ImmersiveWash(cover, bpm, fps, speed, moving, dolly = { 1f }, opacity = { opacity })
     }

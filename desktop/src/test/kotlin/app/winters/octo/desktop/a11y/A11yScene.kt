@@ -103,6 +103,13 @@ class A11yScene(folder: File, reduceMotion: Boolean = false, val width: Int = 14
 
     fun onUi(block: () -> Unit) = SwingUtilities.invokeAndWait(block)
 
+    // One frame drawn at a given moment of the scene's clock.
+    fun frameAt(nanos: Long): org.jetbrains.skia.Image {
+        lateinit var image: org.jetbrains.skia.Image
+        SwingUtilities.invokeAndWait { image = scene.render(nanos) }
+        return image
+    }
+
     fun press(key: Key, shift: Boolean = false) {
         SwingUtilities.invokeAndWait {
             scene.sendKeyEvent(KeyEvent(key, KeyEventType.KeyDown, isShiftPressed = shift))
