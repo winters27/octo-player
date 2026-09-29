@@ -140,7 +140,8 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
             paceBpm(song.bpm, wash.useBpm),
             wash.fps,
             wash.speed / 100f,
-            moving = wash.moving && !LocalReduceMotion.current,
+            // Still while the window is minimised or in the tray.
+            moving = wash.moving && !LocalReduceMotion.current && LocalWindowShown.current,
             dolly = { dolly.value },
         )
         BoxWithConstraints(Modifier.fillMaxSize().padding(start = 56.dp, end = 40.dp, top = top + 48.dp, bottom = 32.dp)) {

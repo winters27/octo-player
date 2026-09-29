@@ -122,7 +122,11 @@ class ShellPerfTest {
             val frames = Frames(scene, target)
             // The sign-in page moves by design, so it never settles.
             val signIn = frames.count { frames.runFor(2_000) }
-            say("Sign-in page: ${"%.1f".format(signIn / 2.0)} frames drawn a second")
+            shown = false
+            frames.runFor(500)
+            val signInHidden = frames.count { frames.runFor(2_000) }
+            shown = true
+            say("Sign-in page: ${"%.1f".format(signIn / 2.0)} frames drawn a second shown, ${"%.1f".format(signInHidden / 2.0)} minimised")
             val before = usedAfterGc()
 
             // Signing in: the library read in pages from the server (on
@@ -232,7 +236,20 @@ class ShellPerfTest {
                 }
             }
             SwingUtilities.invokeAndWait { app.player.pause() }
+
+            // The full player, open and paused: its wash moves on screen by
+            // design; minimised it should not.
             shown = true
+            SwingUtilities.invokeAndWait { app.fullPlayer = true }
+            frames.runFor(1_000)
+            val full = frames.count { frames.runFor(2_000) }
+            shown = false
+            frames.runFor(500)
+            val fullHidden = frames.count { frames.runFor(2_000) }
+            shown = true
+            SwingUtilities.invokeAndWait { app.fullPlayer = false }
+            frames.settle()
+            say("Full player open, paused: ${"%.1f".format(full / 2.0)} frames drawn a second shown, ${"%.1f".format(fullHidden / 2.0)} minimised")
 
             SwingUtilities.invokeAndWait { scene.close() }
             target?.close()
