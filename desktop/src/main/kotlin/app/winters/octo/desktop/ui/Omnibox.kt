@@ -1,5 +1,12 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.awtRole
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.focused
+import javax.accessibility.AccessibleRole
 import androidx.compose.foundation.background
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -261,6 +268,16 @@ private fun OmniLine(app: AppState, item: OmniItem, lit: Boolean, onHover: () ->
             .onPointerEvent(PointerEventType.Enter) { onHover() }
             .onPointerEvent(PointerEventType.Press) { onChoose() }
             .background(if (lit) OctoColors.AccentSelected else if (hovered) HoverFill else androidx.compose.ui.graphics.Color.Transparent, Corner.ControlShape)
+            // The lit line is the one Enter takes: a screen reader hears it
+            // as the arrows move, though the keyboard stays in the field.
+            .clearAndSetSemantics {
+                val (title, detail, verb) = wordsFor(item)
+                contentDescription = listOf(title, detail).filter(String::isNotBlank).joinToString(", ")
+                if (verb.isNotEmpty()) stateDescription = verb
+                awtRole = AccessibleRole.LIST_ITEM
+                selected = lit
+                focused = lit
+            }
             .padding(horizontal = Space.S),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs),

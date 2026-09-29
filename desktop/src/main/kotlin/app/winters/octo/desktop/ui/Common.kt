@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.design.FocusRing
+import app.winters.octo.design.menuKey
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -197,11 +199,12 @@ fun MediaCard(
     badge: @Composable (() -> Unit)? = null,
 ) {
     val shape = if (round) CircleShape else RoundedCornerShape(8.dp)
+    val pointer = LocalPointer.current
     Column(
         modifier
             .hoverLift(RoundedCornerShape(12.dp))
-            .then(if (onMenu != null) Modifier.onRightClick(onMenu) else Modifier)
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onOpen)
+            .then(if (onMenu != null) Modifier.onRightClick(onMenu).menuKey { at -> pointer.position = androidx.compose.ui.geometry.Offset(at.left.toFloat(), at.bottom.toFloat()); onMenu() } else Modifier)
+            .clickable(interactionSource = null, indication = FocusRing(RoundedCornerShape(12.dp)), role = Role.Button, onClick = onOpen)
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {

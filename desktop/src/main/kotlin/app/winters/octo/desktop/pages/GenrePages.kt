@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.design.LocalReduceMotion
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -96,7 +98,7 @@ fun GenresPage(app: AppState, visit: Visit) {
 @Composable
 private fun GenreLine(genre: GenreCount, covers: List<String>, onOpen: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().hoverLift(Corner.PanelShape).clickable(onClick = onOpen).padding(Space.S),
+        Modifier.fillMaxWidth().hoverLift(Corner.PanelShape).clickable(role = Role.Button, onClick = onOpen).padding(Space.S),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.L),
     ) {
@@ -150,8 +152,9 @@ private fun GenreBody(
     var artistsAll by remember(name) { mutableStateOf(false) }
     val spots = remember(name) { HashMap<String, Int>() }
     val scope = rememberCoroutineScope()
+    val still = LocalReduceMotion.current
     fun jump(key: String) {
-        spots[key]?.let { at -> scope.launch { list.animateScrollToItem(at) } }
+        spots[key]?.let { at -> scope.launch { if (still) list.scrollToItem(at) else list.animateScrollToItem(at) } }
     }
     BoxWithConstraints {
         val columns = cardColumns(maxWidth)

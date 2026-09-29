@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.pages
 
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -136,7 +137,7 @@ private fun LazyListScope.after(app: AppState, found: SearchFound) {
         item(key = "playlists-title") { SectionTitle("Playlists", action = seeAll(app, library.morePlaylists)) { model.pick(SearchFilter.Playlists) } }
         items(library.playlists, key = { "pl:${it.id}" }) { playlist ->
             Row(
-                Modifier.fillMaxWidth().height(44.dp).hoverLift(RoundedCornerShape(8.dp)).onRightClick(playlistMenu(app, playlist)).clickable { app.navigator.go(Page.Playlist(playlist.id)) }.padding(horizontal = 10.dp),
+                Modifier.fillMaxWidth().height(44.dp).hoverLift(RoundedCornerShape(8.dp)).onRightClick(playlistMenu(app, playlist)).clickable(role = Role.Button) { app.navigator.go(Page.Playlist(playlist.id)) }.padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -197,7 +198,7 @@ private fun OutsideSong(app: AppState, songs: List<Song>, index: Int, song: Song
             .height(52.dp)
             .hoverLift(RoundedCornerShape(8.dp))
             .onRightClick { app.popups.showAt(pointer.point) { close -> SongMenu(app, listOf(song), close, outside = outside) } }
-            .clickable {
+            .clickable(role = Role.Button) {
                 val now = System.currentTimeMillis()
                 if (now - clicks[0] >= DOUBLE_CLICK_MS) app.play(songs, index)
                 clicks[0] = now

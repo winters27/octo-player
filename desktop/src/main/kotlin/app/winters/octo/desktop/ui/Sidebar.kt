@@ -1,5 +1,11 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import app.winters.octo.design.menuKey
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -168,8 +174,14 @@ private fun LazyListScope.group(
                     .fillMaxWidth()
                     .padding(top = Space.L, bottom = Space.Xxs)
                     .height(RowHeight.Nav - Space.Xs)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                    .clickable(role = Role.Button) {
                         app.updateFrame { it.copy(foldedGroups = if (shut) it.foldedGroups - key else it.foldedGroups + key) }
+                    }
+                    // A heading that folds: its name, and whether it is open.
+                    .semantics {
+                        heading()
+                        contentDescription = title
+                        stateDescription = if (shut) "Folded" else "Open"
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -193,7 +205,11 @@ private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Bo
                 .fillMaxWidth()
                 .height(RowHeight.Nav)
                 .hoverLift(Corner.ControlShape, lifted = false)
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab, onClick = onClick),
+                .clickable(role = Role.Tab, onClick = onClick)
+                .semantics {
+                    contentDescription = label
+                    this.selected = selected
+                },
             contentAlignment = if (rail) Alignment.Center else Alignment.CenterStart,
         ) {
             if (selected) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
@@ -224,7 +240,12 @@ private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, ra
                 .then(if (takes) Modifier.dropTarget(dropId, "Add to ${playlist.name}") { addDroppedSongs(app, playlist, it, pointer.point) } else Modifier)
                 .hoverLift(Corner.ControlShape, lifted = false)
                 .onRightClick { app.popups.showAt(pointer.point) { close -> PlaylistMenu(app, playlist, close) } }
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { app.navigator.go(Page.Playlist(playlist.id)) },
+                .menuKey { at -> app.popups.showUnder(at) { close -> PlaylistMenu(app, playlist, close) } }
+                .clickable(role = Role.Tab) { app.navigator.go(Page.Playlist(playlist.id)) }
+                .semantics {
+                    contentDescription = if (pinned) "${playlist.name}, playlist, pinned" else "${playlist.name}, playlist"
+                    this.selected = selected
+                },
             contentAlignment = if (rail) Alignment.Center else Alignment.CenterStart,
         ) {
             if (selected) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)

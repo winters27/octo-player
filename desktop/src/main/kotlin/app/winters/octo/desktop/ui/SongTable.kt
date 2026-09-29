@@ -1,6 +1,24 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.ui.semantics.awtRole
+import javax.accessibility.AccessibleRole
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.focused
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import app.winters.octo.design.LocalFocusVisibility
+import app.winters.octo.design.LocalTabStops
+import app.winters.octo.design.drawFocusRing
+import app.winters.octo.design.menuKey
+import app.winters.octo.design.tabStop
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -233,6 +251,8 @@ fun SongTable(
         if (at >= 0) app.play(songs, at)
     }
     fun openMenu(at: IntOffset) {
+        // From the keyboard with nothing picked: the row it is on.
+        if (selection.picked.isEmpty()) selection.focus?.let(selection::pickForMenu)
         val rowsPicked = selection.of(rows).ifEmpty { return }
         val where = place(rowsPicked)
         val picked = rowsPicked.map(TableRow::song)
@@ -317,6 +337,7 @@ fun SongTable(
     fun cell(scope: RowScope, column: SongColumn): Modifier =
         with(scope) { if (column == SongColumn.Title) Modifier.weight(1f) else Modifier.width(widthOf(column)) }
 
+    val visibility = LocalFocusVisibility.current
     BoxWithConstraints(
         modifier
             .focusRequester(focus)
@@ -327,6 +348,17 @@ fun SongTable(
                 lists.active = it.isFocused
             }
             .onPreviewKeyEvent(::onKey)
+            // The Menu key opens the song menu under the row the keyboard is on.
+            .menuKey { table ->
+                val info = state.layoutInfo
+                val row = info.visibleItemsInfo.firstOrNull { it.key == RowKey + selection.focus }
+                val y = table.top + (row?.let { it.offset + it.size } ?: 0)
+                openMenu(IntOffset(table.left + (table.width / 3), y))
+            }
+            .semantics {
+                contentDescription = if (rows.size == 1) "Song list, 1 song" else "Song list, ${rows.size} songs"
+                awtRole = AccessibleRole.LIST
+            }
             .focusable(),
     ) {
         val usable = maxWidth - padding.calculateStartPadding(LayoutDirection.Ltr) - padding.calculateEndPadding(LayoutDirection.Ltr) - Space.M * 2 -
@@ -371,6 +403,7 @@ fun SongTable(
                     sounding = row.song.id == currentId && sounding,
                     picked = row.key in selection.picked,
                     focused = hasFocus && selection.focus == row.key,
+                    ringed = visibility.keyboard,
                     covers = showCovers,
                     heartInTitle = !favouriteShown,
                     outside = row.song.id in outside,
@@ -491,11 +524,24 @@ private fun HeaderRow(
                 if (marks && at == markAt(shown)) Box(Modifier.width(MarkWidth))
                 val sortable = onSort != null && order != null && column.sort != null
                 val active = sortable && order.by == column.sort
-                Box(cell(this, column), contentAlignment = if (specOf(column).endAligned) Alignment.CenterEnd else Alignment.CenterStart) {
-                    Row(
-                        Modifier.then(if (sortable) Modifier.pointerHoverIcon(PointerIcon.Hand).clickable { onSort(order.clicking(column)) } else Modifier),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+                // A sortable heading is a target as tall as the heading row.
+                Box(
+                    cell(this, column).fillMaxHeight().then(
+                        if (sortable) {
+                            Modifier
+                                .pointerHoverIcon(PointerIcon.Hand)
+                                .clickable(role = Role.Button) { onSort(order.clicking(column)) }
+                                .semantics(mergeDescendants = true) {
+                                    contentDescription = "Sort by ${column.title}"
+                                    if (active) stateDescription = if (order.descending) "Sorted high to low" else "Sorted low to high"
+                                }
+                        } else {
+                            Modifier
+                        },
+                    ),
+                    contentAlignment = if (specOf(column).endAligned) Alignment.CenterEnd else Alignment.CenterStart,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         if (column == SongColumn.Favourite) {
                             Glyph(OctoIcons.Like, size = IconSize.Inline, tint = if (active) OctoColors.TextPrimary else OctoColors.TextMuted)
                         } else {
@@ -572,6 +618,8 @@ private fun SongRow(
     sounding: Boolean,
     picked: Boolean,
     focused: Boolean,
+    // Whether the keyboard is in use, so its row wears the ring.
+    ringed: Boolean,
     covers: Boolean,
     heartInTitle: Boolean,
     // Found online, not in the library.
@@ -624,6 +672,18 @@ private fun SongRow(
                     event.buttons.isSecondaryPressed -> onPress(false, false, false)
                     event.buttons.isPrimaryPressed -> onPress(true, toggle, keys.isShiftPressed)
                 }
+            }
+            // One line for a screen reader: the song and its state. The
+            // table's keys and the song menu do what the row's links do.
+            .clearAndSetSemantics {
+                contentDescription = rowSpeech(row.song, playing, sounding, picked, outside, app.failedSongs[row.song.id])
+                awtRole = AccessibleRole.LIST_ITEM
+                selected = picked
+                this.focused = focused
+                onClick("Play") {
+                    onPlay()
+                    true
+                }
             },
         contentAlignment = Alignment.CenterStart,
     ) {
@@ -631,9 +691,14 @@ private fun SongRow(
             picked -> GlazeSelected(Modifier.matchParentSize(), Corner.RowShape)
             hovered -> Box(Modifier.matchParentSize().background(HoverFill, Corner.RowShape))
         }
-        if (focused) Box(Modifier.matchParentSize().border(FocusLine, OctoColors.FocusRing, Corner.RowShape))
+        // The keyboard's row wears the ring; while the mouse is in use it
+        // keeps a quieter line, so the table still shows where it is.
+        if (focused) {
+            if (ringed) Box(Modifier.matchParentSize().drawBehind { drawFocusRing(Corner.RowShape) })
+            else Box(Modifier.matchParentSize().border(FocusLine, OctoColors.FocusRing, Corner.RowShape))
+        }
         drop?.let { DropLine(it.first) }
-        Row(Modifier.fillMaxWidth().padding(horizontal = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ColumnGap)) {
+        CompositionLocalProvider(LocalTabStops provides false) { Row(Modifier.fillMaxWidth().padding(horizontal = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ColumnGap)) {
             shown.forEachIndexed { at, column ->
                 if (marks && at == markAt(shown)) {
                     Box(Modifier.width(MarkWidth), contentAlignment = Alignment.Center) { LibraryMark(app, row.song, outside) }
@@ -647,8 +712,21 @@ private fun SongRow(
                     IconAction(OctoIcons.More, "More", { onMore(IntOffset(moreAnchor.left, moreAnchor.bottom)) }, size = ControlHeight.S, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
                 }
             }
-        }
+        } }
     }
+}
+
+// What a screen reader says for a row: title, artist, album and length,
+// then whether it plays, is picked, is outside the library, or failed.
+internal fun rowSpeech(song: Song, playing: Boolean, sounding: Boolean, picked: Boolean, outside: Boolean, failed: String?): String = buildString {
+    append(song.title)
+    (song.displayArtist ?: song.artist)?.takeIf(String::isNotBlank)?.let { append(", ").append(it) }
+    song.album?.takeIf(String::isNotBlank)?.let { append(", ").append(it) }
+    lengthText(song.duration).takeIf(String::isNotBlank)?.let { append(", ").append(it) }
+    if (playing) append(if (sounding) ", playing" else ", paused")
+    if (picked) append(", picked")
+    if (outside) append(", not in your library")
+    if (failed != null) append(", couldn't play: ").append(failed)
 }
 
 private val FocusLine = Space.Xxs / 2
@@ -779,7 +857,7 @@ fun LinkText(text: String, id: String?, width: Dp? = null, open: (String) -> Uni
             text,
             DesktopType.table,
             OctoColors.TextSecondary,
-            modifier.pointerHoverIcon(PointerIcon.Hand).clickable { open(id) },
+            modifier.pointerHoverIcon(PointerIcon.Hand).tabStop(LocalTabStops.current).clickable(role = Role.Button) { open(id) },
         )
     }
 }

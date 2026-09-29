@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.pages
 
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -226,7 +227,7 @@ private fun Crumbs(app: AppState, trail: List<FolderStep>, current: String) {
 
 @Composable
 private fun Crumb(text: String, onOpen: () -> Unit) {
-    Box(Modifier.hoverLift(Corner.RowShape).clickable(onClick = onOpen).padding(horizontal = Space.S, vertical = Space.Xs)) {
+    Box(Modifier.hoverLift(Corner.RowShape).clickable(role = Role.Button, onClick = onOpen).padding(horizontal = Space.S, vertical = Space.Xs)) {
         Txt(text, DesktopType.meta, OctoColors.TextSecondary)
     }
 }
@@ -236,7 +237,7 @@ private fun Crumb(text: String, onOpen: () -> Unit) {
 @Composable
 private fun FolderLine(folder: DirectoryRef, onOpen: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().height(RowHeight.Regular).hoverLift(Corner.RowShape).clickable(onClick = onOpen).padding(horizontal = Space.M),
+        Modifier.fillMaxWidth().height(RowHeight.Regular).hoverLift(Corner.RowShape).clickable(role = Role.Button, onClick = onOpen).padding(horizontal = Space.M),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.L),
     ) {

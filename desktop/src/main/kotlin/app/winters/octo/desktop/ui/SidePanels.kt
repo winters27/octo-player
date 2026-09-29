@@ -1,5 +1,16 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.focused
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import app.winters.octo.design.LocalFocusVisibility
+import app.winters.octo.design.LocalTabStops
+import app.winters.octo.design.drawFocusRing
+import app.winters.octo.design.menuKey
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -123,7 +134,7 @@ fun ContextPanel(app: AppState, panel: SidePanel, backdrop: HazeState, modifier:
             GlazeSegments(SidePanel.entries, panel, { it.title }, app::showSidePanel)
             Spacer(Modifier.weight(1f))
             if (panel == SidePanel.Lyrics) LyricsMenuButton(app)
-            IconAction(OctoIcons.Close, "Close", { app.showSidePanel(null) }, size = ControlHeight.M, iconSize = IconSize.Toolbar)
+            IconAction(OctoIcons.Close, "Close the panel", { app.showSidePanel(null) }, size = ControlHeight.M, iconSize = IconSize.Toolbar)
         }
         when (panel) {
             SidePanel.Queue -> QueueList(app)
@@ -315,6 +326,12 @@ fun QueueList(app: AppState, modifier: Modifier = Modifier.fillMaxSize()) {
                 lists.active = it.hasFocus
             }
             .onPreviewKeyEvent(::onKey)
+            .menuKey { panel ->
+                val row = list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == selection.focus?.toLongOrNull()?.let(::songKey) }
+                if (selection.picked.isEmpty()) selection.focus?.let(selection::pickForMenu)
+                openMenu(IntOffset(panel.left + panel.width / 4, panel.top + (row?.let { it.offset + it.size } ?: 0)))
+            }
+            .semantics { contentDescription = "Queue" }
             .focusable(),
     ) {
         QueueHeader(app, state)
@@ -351,6 +368,7 @@ fun QueueList(app: AppState, modifier: Modifier = Modifier.fillMaxSize()) {
                                 item.kind,
                                 picked = key in selection.picked,
                                 focused = hasFocus && selection.focus == key,
+                                ringed = LocalFocusVisibility.current.keyboard,
                                 lifted = lifted,
                                 failed = app.failedSongs[entry.song.id] != null,
                                 modifier = handle,
@@ -448,6 +466,7 @@ private fun QueueRow(
     kind: SectionKind,
     picked: Boolean,
     focused: Boolean,
+    ringed: Boolean,
     lifted: Boolean,
     failed: Boolean,
     modifier: Modifier,
@@ -470,6 +489,11 @@ private fun QueueRow(
                     event.buttons.isSecondaryPressed -> onPress(false, false, false)
                     event.buttons.isPrimaryPressed -> onPress(true, keys.isCtrlPressed || keys.isMetaPressed, keys.isShiftPressed)
                 }
+            }
+            .clearAndSetSemantics {
+                contentDescription = queueSpeech(song.title, song.displayArtist ?: song.artist, lengthText(song.duration), kind, picked, failed)
+                selected = picked
+                this.focused = focused
             },
         contentAlignment = Alignment.CenterStart,
     ) {
@@ -479,7 +503,10 @@ private fun QueueRow(
             playing -> Box(Modifier.matchParentSize().background(keyColour.copy(alpha = PLAYING_TINT), Corner.RowShape))
             hovered -> Box(Modifier.matchParentSize().background(HoverFill, Corner.RowShape))
         }
-        if (focused) Box(Modifier.matchParentSize().border(FocusLine, OctoColors.FocusRing, Corner.RowShape))
+        if (focused) {
+            if (ringed) Box(Modifier.matchParentSize().drawBehind { drawFocusRing(Corner.RowShape) })
+            else Box(Modifier.matchParentSize().border(FocusLine, OctoColors.FocusRing, Corner.RowShape))
+        }
         Row(
             Modifier
                 .fillMaxWidth()
@@ -502,12 +529,28 @@ private fun QueueRow(
                 Txt(song.displayArtist ?: song.artist.orEmpty(), DesktopType.meta, OctoColors.TextMuted)
             }
             if (hovered && !playing) {
-                IconAction(OctoIcons.Close, "Remove from the queue", onRemove, size = ControlHeight.Xs, iconSize = IconSize.Inline, tint = OctoColors.TextSecondary)
+                CompositionLocalProvider(LocalTabStops provides false) {
+                    IconAction(OctoIcons.Close, "Remove from the queue", onRemove, size = ControlHeight.Xs, iconSize = IconSize.Inline, tint = OctoColors.TextSecondary)
+                }
             } else {
                 Txt(lengthText(song.duration), DesktopType.meta.copy(fontFeatureSettings = "tnum"), OctoColors.TextMuted)
             }
         }
     }
+}
+
+// What a screen reader says for a song in the queue.
+internal fun queueSpeech(title: String, artist: String?, length: String, kind: SectionKind, picked: Boolean, failed: Boolean): String = buildString {
+    append(title)
+    artist?.takeIf(String::isNotBlank)?.let { append(", ").append(it) }
+    if (length.isNotBlank()) append(", ").append(length)
+    when (kind) {
+        SectionKind.NowPlaying -> append(", now playing")
+        SectionKind.Played -> append(", played")
+        else -> {}
+    }
+    if (picked) append(", picked")
+    if (failed) append(", couldn't play")
 }
 
 // Over the queue: how many songs are still to come, how long they last and

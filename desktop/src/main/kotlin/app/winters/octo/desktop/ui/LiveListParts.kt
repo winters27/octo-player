@@ -1,5 +1,9 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import app.winters.octo.design.menuKey
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -81,7 +85,12 @@ fun LiveListRow(app: AppState, list: LiveList, selected: Boolean, rail: Boolean)
                 .height(RowHeight.Nav + Space.Xs)
                 .hoverLift(Corner.ControlShape, lifted = false)
                 .onRightClick { app.popups.showAt(pointer.point) { close -> LiveListMenu(app, list, close) } }
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { app.navigator.go(Page.LiveList(list.id)) },
+                .menuKey { at -> app.popups.showUnder(at) { close -> LiveListMenu(app, list, close) } }
+                .clickable(role = Role.Tab) { app.navigator.go(Page.LiveList(list.id)) }
+                .semantics {
+                    contentDescription = "${list.name}, live list"
+                    this.selected = selected
+                },
             contentAlignment = if (rail) Alignment.Center else Alignment.CenterStart,
         ) {
             if (selected) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)

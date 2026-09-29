@@ -1,5 +1,8 @@
 package app.winters.octo.desktop.lyrics
 
+import app.winters.octo.design.motionScale
+import app.winters.octo.design.OctoDuration
+import androidx.compose.ui.semantics.Role
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
@@ -64,7 +67,7 @@ fun LyricsView(app: AppState, modifier: Modifier = Modifier, textColor: Color = 
     val player by app.player.state.collectAsState()
     val settings by app.settings.state.collectAsState()
     val song = shown.song
-    Crossfade(shown.answer, animationSpec = tween(300), modifier = modifier, label = "lyrics") { answer ->
+    Crossfade(shown.answer, animationSpec = tween(motionScale().ms(OctoDuration.Neutral)), modifier = modifier, label = "lyrics") { answer ->
         when {
             song == null -> Quiet("Play a song to see its lyrics here.", textColor)
             answer == null -> Box(Modifier.fillMaxSize())
@@ -106,7 +109,7 @@ private fun Quiet(text: String, color: Color, onClick: (() -> Unit)? = null) {
             text,
             OctoType.bodySmall,
             color.copy(alpha = 0.6f),
-            if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
+            if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier,
             align = TextAlign.Center,
             maxLines = 3,
         )
@@ -307,7 +310,7 @@ private fun OptionRow(option: LyricsOption, showing: Boolean, onClick: () -> Uni
             .fillMaxWidth()
             .padding(horizontal = 6.dp)
             .hoverLift(RoundedCornerShape(10.dp), lifted = showing)
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {

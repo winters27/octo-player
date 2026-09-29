@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.system
 
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -482,7 +483,7 @@ private fun UpNext(app: AppState, state: PlayerState) {
         item { Txt("UP NEXT", DesktopType.label, OctoColors.TextMuted, Modifier.padding(top = Space.M, bottom = Space.Xs, start = Space.Xs)) }
         items(upcoming.take(UP_NEXT_LIMIT), key = { it.key }) { entry ->
             Row(
-                Modifier.fillMaxWidth().height(RowHeight.Regular).clickable { app.player.skipTo(entry.key) }.padding(horizontal = Space.Xs),
+                Modifier.fillMaxWidth().height(RowHeight.Regular).clickable(role = Role.Button) { app.player.skipTo(entry.key) }.padding(horizontal = Space.Xs),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space.M),
             ) {
