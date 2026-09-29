@@ -93,10 +93,11 @@ class LibraryTest {
         assertEquals(listOf("a1", "a2", "a3"), library.albums.map { it.id })
         assertEquals(listOf("s1", "s2", "s3", "s4"), library.songs.map { it.id })
         assertEquals(4, library.artists.size)
-        assertEquals(
-            listOf("getAlbumList2 0", "getAlbumList2 2", "getArtists", "search3 0", "search3 2", "search3 4"),
-            asked,
-        )
+        // Albums, artists and songs are read side by side, each in page order.
+        assertEquals(listOf("getAlbumList2 0", "getAlbumList2 2"), asked.filter { it.startsWith("getAlbumList2") })
+        assertEquals(listOf("getArtists"), asked.filter { it.startsWith("getArtists") })
+        assertEquals(listOf("search3 0", "search3 2", "search3 4"), asked.filter { it.startsWith("search3") })
+        assertEquals(6, asked.size)
     }
 
     @Test

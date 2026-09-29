@@ -18,15 +18,18 @@ class Library(val songs: List<Song>, val albums: List<Album>, val artists: List<
 // twice is kept once: when the library changes during the read, the pages
 // shift and the same item can come back on the next page. Songs the server
 // marks as outside the library (an Octo album lists the tracks it lacks
-// too) are left out.
-suspend fun SubsonicClient.readLibrary(page: Int = LIBRARY_PAGE): Library {
-    val albums = pages(page) { offset -> albumList(AlbumListType.ALPHABETICAL, page, offset) }.distinctBy { it.id }
-    val artists = artists().flatMap { it.artist }.distinctBy { it.id }
-    val songs = pages(page) { offset -> songPage(page, offset) }
+// too) are left out. Albums, artists and songs are read side by side: a
+// server that takes half a second a request answers in half the time.
+suspend fun SubsonicClient.readLibrary(page: Int = LIBRARY_PAGE): Library = coroutineScope {
+    val albumsRead = async { pages(page) { offset -> albumList(AlbumListType.ALPHABETICAL, page, offset) }.distinctBy { it.id } }
+    val artistsRead = async { artists().flatMap { it.artist }.distinctBy { it.id } }
+    val listed = pages(page) { offset -> songPage(page, offset) }
+    val albums = albumsRead.await()
+    val songs = listed
         .ifEmpty { songsByAlbum(albums) }
         .filterNot { it.isExternal }
         .distinctBy { it.id }
-    return Library(songs, albums, artists)
+    Library(songs, albums, artistsRead.await())
 }
 
 // Asks for page after page until one comes back short.
