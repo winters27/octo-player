@@ -228,4 +228,23 @@ def render_silk(palette: str, seed: int, size: int, overrides: dict | None = Non
     return lab
 
 
+def soften(lab: np.ndarray, size: int, share: float, keep_chroma: float = 0.5) -> np.ndarray:
+    """The final wide blur, `share` of the side as the Gaussian's sigma, with
+    mirrored edges so the border neither darkens nor bleeds. Averaging two
+    hues shortens the colour vector, so a blend would sag toward grey; the
+    chroma is pulled part of the way back to the blurred chroma of the
+    pixels themselves, capped so a true hue crossing stays calm."""
+    if share <= 0:
+        return lab
+    sigma = share * size
+    out = np.stack([blur(lab[..., c], sigma) for c in range(3)], axis=-1)
+    if keep_chroma > 0:
+        chroma = blur(np.hypot(lab[..., 1], lab[..., 2]), sigma)
+        have = np.hypot(out[..., 1], out[..., 2])
+        lift = np.clip(chroma / np.maximum(have, 1e-4), 1.0, 1.6) ** keep_chroma
+        out[..., 1] *= lift
+        out[..., 2] *= lift
+    return out
+
+
 FAMILIES = {"liquid": render_liquid, "silk": render_silk}

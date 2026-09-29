@@ -1,9 +1,13 @@
 """Octo's cover background library: renders the liquid and silk families,
 contact sheets for choosing, and the finished set with its index.
 
-  python cover_art.py candidates --family liquid --count 120 --out DIR
+  python cover_art.py candidates --family liquid --count 120 --out DIR [--blur 0.09]
   python cover_art.py sheet DIR --out SHEET_PREFIX
   python cover_art.py finals            (reads picks.json, writes the library)
+
+Every render ends with a wide Gaussian blur (sigma = blur x side, 0.09 by
+default; picks.json sets it, per pick if need be), so a cover reads as soft
+colour masses, not as the shapes that made them.
 
 Run with PYTHONUTF8=1 from this folder, with requirements.txt installed.
 """
@@ -18,7 +22,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from colour import linear_to_oklab, oklab_to_srgb, oklch, relative_luminance, srgb_to_linear
 from palettes import PALETTES
-from render import FAMILIES
+from render import FAMILIES, soften
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
@@ -50,14 +54,18 @@ def quantise(rgb: np.ndarray, seed: int) -> Image.Image:
     return Image.fromarray(out, "RGB")
 
 
-def render(family: str, palette: str, seed: int, size: int, overrides=None) -> np.ndarray:
+DEFAULT_BLUR = 0.09
+
+
+def render(family: str, palette: str, seed: int, size: int, overrides=None, blur_share=DEFAULT_BLUR) -> np.ndarray:
     lab = FAMILIES[family](palette, seed, size, overrides)
+    lab = soften(lab, size, blur_share)
     return to_srgb(lab.astype(np.float32))
 
 
 def _candidate(job):
-    family, palette, seed, size, out = job
-    rgb = render(family, palette, seed, size)
+    family, palette, seed, size, blur_share, out = job
+    rgb = render(family, palette, seed, size, blur_share=blur_share)
     quantise(rgb, seed).save(Path(out) / f"{family}_{palette}_{seed}.png")
     return f"{family}_{palette}_{seed}"
 
@@ -72,7 +80,7 @@ def cmd_candidates(args):
     for i in range(args.count):
         palette = names[i % len(names)]
         seed = args.seed + i
-        jobs.append((args.family, palette, seed, args.size, str(out)))
+        jobs.append((args.family, palette, seed, args.size, args.blur, str(out)))
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         for name in pool.map(_candidate, jobs):
             print(name, flush=True)
@@ -172,7 +180,7 @@ def measure(rgb: np.ndarray) -> dict:
 
 def _final(job):
     pick, size, final, quality, out = job
-    rgb = render(pick["family"], pick["palette"], pick["seed"], size, pick.get("overrides"))
+    rgb = render(pick["family"], pick["palette"], pick["seed"], size, pick.get("overrides"), pick["blur"])
     rgb = resize(rgb, final)
     img = quantise(rgb, pick["seed"])
     path = Path(out) / pick["file"]
@@ -182,7 +190,10 @@ def _final(job):
 
 
 def cmd_finals(args):
-    picks = json.loads((HERE / "picks.json").read_text(encoding="utf-8"))["picks"]
+    chosen = json.loads((HERE / "picks.json").read_text(encoding="utf-8"))
+    picks = chosen["picks"]
+    for pick in picks:
+        pick.setdefault("blur", chosen.get("blur", DEFAULT_BLUR))
     out = Path(args.out) if args.out else LIBRARY
     out.mkdir(parents=True, exist_ok=True)
     for pick in picks:
@@ -198,7 +209,7 @@ def cmd_finals(args):
         for pick, m, size in pool.map(_final, jobs):
             total += size
             entries.append(dict(file=pick["file"], name=pick["name"], family=pick["family"],
-                                palette=pick["palette"], seed=pick["seed"], **m))
+                                palette=pick["palette"], seed=pick["seed"], blur=pick["blur"], **m))
             print(f"{pick['file']}  {size // 1024} KB", flush=True)
     index = dict(
         version=1,
@@ -214,7 +225,9 @@ def cmd_finals(args):
     (out / "backgrounds.json").write_text(json.dumps(index, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"total {total / 1024 / 1024:.2f} MB in {len(entries)} files")
     if args.sheet:
-        images = [(e["name"], Image.open(out / e["file"]).convert("RGB")) for e in entries]
+        # Family first, then round the colour wheel, so near neighbours sit together.
+        order = sorted(entries, key=lambda e: (e["family"] != "liquid", (e["hues"][0]["h"] + 30) % 360 if e["hues"] else 0))
+        images = [(e["name"], Image.open(out / e["file"]).convert("RGB")) for e in order]
         for i, sheet in enumerate(contact_sheet(images, cols=8, rows=6, tile=300)):
             sheet.save(f"{args.sheet}_{i + 1:02d}.png")
             print(f"{args.sheet}_{i + 1:02d}.png")
@@ -228,6 +241,7 @@ def main():
     c.add_argument("--count", type=int, default=60)
     c.add_argument("--seed", type=int, default=1)
     c.add_argument("--size", type=int, default=600)
+    c.add_argument("--blur", type=float, default=DEFAULT_BLUR)
     c.add_argument("--palettes", default="")
     c.add_argument("--workers", type=int, default=8)
     c.add_argument("--out", required=True)

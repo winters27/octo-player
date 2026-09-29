@@ -62,8 +62,17 @@ def gamut_clip(lin: np.ndarray, lab: np.ndarray) -> np.ndarray:
         hi = np.where(ok, hi, mid)
     fixed = lab_o.copy()
     fixed[:, 1:] *= lo[:, None]
+    reduced = np.clip(oklab_to_linear(fixed), 0, 1)
+    # A colour only just outside is clipped per channel: OKLab's constant
+    # lightness slices are not quite convex, so near the blue corner the
+    # chroma search can land far inside and leave a hard edge. The further
+    # out a colour is, the more it takes the chroma-reduced answer.
+    raw = lin[over]
+    excess = np.maximum(-raw.min(axis=-1), raw.max(axis=-1) - 1)
+    w = np.clip(excess / 0.05, 0, 1)[:, None]
+    w = w * w * (3 - 2 * w)
     lin = lin.copy()
-    lin[over] = oklab_to_linear(fixed)
+    lin[over] = np.clip(raw, 0, 1) * (1 - w) + reduced * w
     return lin
 
 

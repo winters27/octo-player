@@ -26,6 +26,9 @@ PALETTES = {
     "sorbet": dict(mood="vivid", families=["liquid"], stops=["#ff4a8a", "#ff9a5a", "#ffe07a", "#ff6ab0"]),
     "bluebell": dict(mood="vivid", families=["liquid", "silk"], stops=["#3a2aff", "#6a5aff", "#a07aff", "#5ac8ff"]),
 
+    "tangerine": dict(mood="vivid", families=["liquid", "silk"], stops=["#ff5a00", "#ff8a00", "#ffc040", "#ffe08a"]),
+    "lemon": dict(mood="vivid", families=["liquid", "silk"], stops=["#fff06a", "#ffd21a", "#9be64a", "#ffe9a0"]),
+
     # Pastel, soft and bright.
     "cotton": dict(mood="pastel", families=["liquid", "silk"], stops=["#ffb3dc", "#dab3ff", "#b3d9ff", "#ffd1ec"]),
     "mint": dict(mood="pastel", families=["liquid", "silk"], stops=["#a8f5d8", "#8ae0e0", "#c8b8ff", "#e8ffe0"]),
@@ -33,6 +36,8 @@ PALETTES = {
     "lilac": dict(mood="pastel", families=["liquid", "silk"], stops=["#d8b8ff", "#b89aff", "#ffb8e8", "#efd8ff"]),
     "sky": dict(mood="pastel", families=["liquid", "silk"], stops=["#a8dcff", "#c8c8ff", "#ffd0ea", "#dff2ff"]),
     "sherbet": dict(mood="pastel", families=["liquid"], stops=["#ffb09a", "#ffe08a", "#b0f0c0", "#ffc0d0"]),
+    "ice": dict(mood="pastel", families=["liquid", "silk"], stops=["#eafcff", "#a8e6ff", "#5ab8ff", "#c8d8ff"]),
+    "seaglass": dict(mood="pastel", families=["liquid", "silk"], stops=["#c8f7e6", "#86e3d2", "#5ac0d0", "#e6fff6"]),
     "opal": dict(mood="pastel", families=["liquid"], stops=["#b8f0ff", "#ffc8f0", "#fff0b8", "#c8b8ff"]),
 
     # Deep and night.
@@ -43,6 +48,8 @@ PALETTES = {
     "borealis": dict(mood="deep", families=["liquid"], stops=["#030a14", "#0a2a3a", "#16c79a", "#b0ff5a"]),
     "dusk": dict(mood="deep", families=["liquid", "silk"], stops=["#140a2c", "#46286c", "#b0487a", "#ff9070"]),
     "slate": dict(mood="deep", families=["liquid", "silk"], stops=["#161c2c", "#34446a", "#7a90c0", "#c8d6f0"]),
+    "berry": dict(mood="deep", families=["liquid", "silk"], stops=["#0a0a2e", "#2a1a70", "#c0186a", "#ff5a8a"]),
+    "forest": dict(mood="deep", families=["liquid", "silk"], stops=["#04140c", "#0c3a24", "#1f7a4a", "#d0b85a"]),
     "garnet": dict(mood="deep", families=["liquid", "silk"], stops=["#12030c", "#50082c", "#b0104a", "#ff4a7a"]),
 
     # Silk: analogous sweeps, back layer first.
