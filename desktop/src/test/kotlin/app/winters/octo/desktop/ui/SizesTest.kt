@@ -30,6 +30,7 @@ class SizesTest {
         "pages/LibraryHealthPage.kt",
         "pages/SettingsPage.kt",
         "pages/SettingsParts.kt",
+        "pages/AboutRows.kt",
         "pages/SoundPage.kt",
         "pages/LiveListPage.kt",
         "ui/LiveListParts.kt",

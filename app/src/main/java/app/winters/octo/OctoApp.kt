@@ -10,6 +10,7 @@ import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.server.ServerArtworkFetcher
 import app.winters.octo.server.ServerArtworkKeyer
 import app.winters.octo.server.ServerSync
+import app.winters.octo.update.AppUpdates
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
@@ -27,6 +28,7 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var serverSync: ServerSync
     @Inject lateinit var offline: OfflineDownloads
     @Inject lateinit var listenBrainz: ListenBrainzSync
+    @Inject lateinit var updates: AppUpdates
 
     override fun onCreate() {
         super.onCreate()
@@ -38,6 +40,8 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
         offline.start()
         // Plays waiting for ListenBrainz go out.
         listenBrainz.start()
+        // New versions of Octo, in the release build only.
+        updates.start()
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader =

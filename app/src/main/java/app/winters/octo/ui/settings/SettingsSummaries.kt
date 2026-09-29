@@ -110,4 +110,5 @@ fun scrobblingSummary(prefs: ListenBrainzPrefs): String = when {
 
 const val BACKUP_SUMMARY = "Settings, playlists, likes and favourites"
 
-fun aboutSummary(version: String): String = "Version $version"
+fun aboutSummary(version: String, updateReady: String? = null): String =
+    if (updateReady != null) "Update ready: $updateReady" else "Version $version"

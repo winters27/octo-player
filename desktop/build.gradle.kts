@@ -14,9 +14,28 @@ kotlin { jvmToolchain(17) }
 // The version the installers carry and the app shows. Windows only
 // replaces an installed Octo with a higher version, so every build handed
 // out must count up: a test build passes -PoctoBuild=<commit count>, as the
-// phone's test builds do, and becomes 1.0.<count>. Raise the first two
-// numbers for a release.
-val desktopVersion = "1.0.${(findProperty("octoBuild") as String?)?.toIntOrNull() ?: 0}"
+// phone's test builds do, and becomes 1.0.<count>.
+//
+// A release (the desktop-v<version> tag's workflow) also passes its version,
+// -PoctoDesktopVersion=1.2.0, or 1.3.0-beta.1 for an early one. The app shows and
+// compares that; macOS and Linux packages carry its three numbers; and the
+// MSI carries the first two with the commit count third, because Windows
+// compares only numbers and refuses one it already has: an early version and
+// its release (1.3.0-beta.1, 1.3.0) must still differ there. Raise the first
+// two numbers above 1.0 for releases, so they install over any test build.
+val octoBuild = (findProperty("octoBuild") as String?)?.toIntOrNull()
+val releaseVersion = (findProperty("octoDesktopVersion") as String?)?.takeIf(String::isNotBlank)?.trim()
+val releaseParts = releaseVersion?.let { version ->
+    val match = Regex("""(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?""").matchEntire(version)
+        ?: throw GradleException("octoDesktopVersion must look like 1.2.0 or 1.3.0-beta.1, not $version")
+    val (major, minor, patch) = match.destructured
+    if (major.toInt() !in 1..255 || minor.toInt() > 255) throw GradleException("Windows needs the first number 1 to 255 and the second at most 255: $version")
+    if (octoBuild == null || octoBuild > 65535) throw GradleException("A release needs -PoctoBuild=<commit count>, at most 65535, for the MSI's version")
+    Triple(major, minor, patch)
+}
+val desktopVersion = releaseVersion ?: "1.0.${octoBuild ?: 0}"
+val packageNumbers = releaseParts?.let { (major, minor, patch) -> "$major.$minor.$patch" } ?: desktopVersion
+val msiNumbers = releaseParts?.let { (major, minor, _) -> "$major.$minor.$octoBuild" } ?: desktopVersion
 
 // The phone app's icon, for the window and the taskbar, and the rounded one
 // made from it for the tray.
@@ -256,7 +275,7 @@ compose.desktop {
             targetFormats(TargetFormat.Msi, TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "Octo"
             // The installers need a first number above 0 (macOS insists).
-            packageVersion = desktopVersion
+            packageVersion = packageNumbers
             description = "A music player for Subsonic, Navidrome and Octo servers"
             vendor = "Winters"
             copyright = "Copyright Winters. Licensed under the GPL, version 3 or later."
@@ -280,6 +299,8 @@ compose.desktop {
                 // Keeps upgrades replacing this app rather than installing
                 // beside it. Never change it.
                 upgradeUuid = "4f7b3c1e-8a52-4d6b-9e0f-2c8d1a7b5e93"
+                // Windows' own version count (see desktopVersion above).
+                msiPackageVersion = msiNumbers
             }
             macOS {
                 iconFile = file("icons/octo.icns")
@@ -343,11 +364,14 @@ tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJLinkTask
 
 // The app as a zip that runs from wherever it is unpacked, installing
 // nothing: build/compose/binaries/main/zip/Octo-<version>-<system>.zip.
+// It carries portable/octo-portable beside the app's jars, which tells the
+// app it is not installed, so it never runs an installer over itself.
 val packagePortableZip by tasks.registering(Zip::class) {
     group = "compose desktop"
     description = "Packs the app into a zip that runs without installing."
     dependsOn("createDistributable")
     from(layout.buildDirectory.dir("compose/binaries/main/app"))
+    from(file("portable/octo-portable")) { into(if (hostName.startsWith("windows")) "Octo/app" else "Octo/lib/app") }
     archiveFileName = "Octo-$desktopVersion-$jnaFolder.zip"
     destinationDirectory = layout.buildDirectory.dir("compose/binaries/main/zip")
 }

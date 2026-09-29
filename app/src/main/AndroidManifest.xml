@@ -25,6 +25,14 @@
         android:name="android.permission.WRITE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- Installing Octo's own updates, downloaded from its releases and
+         checked against its signing key. Android asks the listener once to
+         allow it. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Updates that go in by themselves when Octo is left, after the first
+         one Octo installed (Android 12 and newer). -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+
     <!-- The phone's own equalizer, opened from the Sound page when one exists. -->
     <queries>
         <intent>
@@ -150,6 +158,11 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_quick_play" />
         </receiver>
+
+        <!-- Hears how an update's install went. -->
+        <receiver
+            android:name=".update.UpdateInstallReceiver"
+            android:exported="false" />
 
         <!-- Headphone buttons and "resume" in the media controls. -->
         <receiver

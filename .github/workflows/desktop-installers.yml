@@ -1,8 +1,10 @@
 # Builds the desktop installers on each system, since each is only made on
 # its own: the MSI and a portable zip on Windows, the DMG on macOS, and the
-# DEB, RPM and a portable zip on Linux. Run by hand from the Actions tab, or
-# on a version tag. The installers are kept as the run's artifacts; nothing
-# is published.
+# DEB, RPM and a portable zip on Linux. Run by hand from the Actions tab, the
+# installers are kept as the run's artifacts. On a desktop-v<version> tag
+# (desktop-v1.2.0, or desktop-v1.3.0-beta.1 for an early version) they are
+# also published, signed, as a release on the public Octo repository, where
+# the installed apps find them (publish-player-release.yml).
 name: desktop-installers
 
 on:
@@ -10,8 +12,29 @@ on:
   push:
     tags: ["desktop-v*"]
 
+permissions:
+  contents: read
+
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Version from the tag
+        id: tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/desktop-v* ]]; then
+            version="${GITHUB_REF_NAME#desktop-v}"
+            if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+              echo "::error::$GITHUB_REF_NAME must look like desktop-v1.2.0 or desktop-v1.3.0-beta.1."
+              exit 1
+            fi
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          fi
+
   package:
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -56,11 +79,13 @@ jobs:
         run: ./gradlew :desktop:test --no-daemon
 
       - name: Installers
-        run: ./gradlew ${{ matrix.tasks }} -PoctoBuild=${{ env.OCTO_BUILD }} --no-daemon
+        # A tag's version (none when run by hand) goes into the app and its installers.
+        run: ./gradlew ${{ matrix.tasks }} -PoctoBuild=${{ env.OCTO_BUILD }} ${{ needs.version.outputs.version && format('-PoctoDesktopVersion={0}', needs.version.outputs.version) || '' }} --no-daemon
 
       - uses: actions/upload-artifact@v7
         with:
-          name: octo-desktop-${{ runner.os }}
+          # The system and chip, which name the files in the release.
+          name: octo-desktop-${{ runner.os }}-${{ runner.arch }}
           path: |
             desktop/build/compose/binaries/main/msi/*.msi
             desktop/build/compose/binaries/main/dmg/*.dmg
@@ -68,3 +93,15 @@ jobs:
             desktop/build/compose/binaries/main/rpm/*.rpm
             desktop/build/compose/binaries/main/zip/*.zip
           if-no-files-found: error
+
+  publish:
+    needs: [version, package]
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    uses: ./.github/workflows/publish-player-release.yml
+    with:
+      app: desktop
+      tag: ${{ github.ref_name }}
+      artifacts: octo-desktop-*
+    secrets:
+      OCTO_RELEASES_TOKEN: ${{ secrets.OCTO_RELEASES_TOKEN }}
+      OCTO_UPDATE_SIGNING_KEY: ${{ secrets.OCTO_UPDATE_SIGNING_KEY }}

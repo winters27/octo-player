@@ -62,6 +62,7 @@ import app.winters.octo.desktop.ui.LocalListFocus
 import app.winters.octo.desktop.ui.LocalSoftwareDrawing
 import app.winters.octo.desktop.ui.LocalWindowShown
 import app.winters.octo.desktop.ui.Shell
+import app.winters.octo.desktop.update.DesktopUpdates
 import app.winters.octo.desktop.window.Frame
 import app.winters.octo.desktop.window.MIN_HEIGHT
 import app.winters.octo.desktop.window.MIN_WIDTH
@@ -116,6 +117,8 @@ fun main(args: Array<String>) {
     // The system's text size, read the same way.
     var systemText by mutableStateOf(systemTextScale(os))
     val icon = appIcon()
+    // New versions of Octo, for the installed app only.
+    val updates = DesktopUpdates.forThisApp(settings, places.cache, os)
 
     application {
         val app = remember {
@@ -123,7 +126,7 @@ fun main(args: Array<String>) {
             var made: AppState? = null
             // Server songs are signed with whoever is signed in when they queue.
             val opened = openPlayer(settings, scope, { made?.connection?.client }) { made?.connection?.headers.orEmpty() }
-            AppState(settings, accounts, http, scope, os, opened.player, restored = restored, listeningRoot = places.config).also {
+            AppState(settings, accounts, http, scope, os, opened.player, restored = restored, listeningRoot = places.config, updates = updates).also {
                 made = it
                 opened.problem?.let { problem -> it.notice = problem }
             }
@@ -163,6 +166,8 @@ fun main(args: Array<String>) {
             keepPlace()
             app.beforeQuit()
             settings.flush()
+            // A ready update goes in now when the listener chose that.
+            updates.onQuit()
             system.close()
             app.player.close()
             exitApplication()
@@ -177,6 +182,7 @@ fun main(args: Array<String>) {
         LaunchedEffect(Unit) {
             system.quit = ::close
             system.start(args.toList())
+            updates.start(app.scope)
         }
 
         Window(

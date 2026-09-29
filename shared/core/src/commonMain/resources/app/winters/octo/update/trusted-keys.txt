@@ -1,0 +1,10 @@
+# The Ed25519 public keys that may sign Octo player updates: one a line,
+# base64 of the key's 32 bytes. Only public keys belong here.
+#
+# The matching private key lives only in the player repository's
+# OCTO_UPDATE_SIGNING_KEY secret. The release workflow refuses to publish a
+# release whose signature none of these keys verify, and an app built with
+# no key here does not look for updates at all.
+#
+# To change keys, add the new line, ship a release signed with the old key,
+# then sign with the new one; remove the old line only after that.

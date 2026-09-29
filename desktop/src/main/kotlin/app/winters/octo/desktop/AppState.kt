@@ -58,6 +58,7 @@ import app.winters.octo.desktop.settings.TablePrefs
 import app.winters.octo.desktop.sound.SoundController
 import app.winters.octo.desktop.system.JumpListHooks
 import app.winters.octo.desktop.system.jumpTargetFor
+import app.winters.octo.desktop.update.DesktopUpdates
 import app.winters.octo.lyrics.OnlineLyrics
 import app.winters.octo.playback.skippedLine
 import app.winters.octo.sort.SortList
@@ -106,6 +107,8 @@ class AppState(
     // Where each account's plays and queue are kept, or null to keep none
     // (the screenshot tests).
     private val listeningRoot: File? = null,
+    // Looking for new versions of Octo; none in the tests and screenshots.
+    val updates: DesktopUpdates? = null,
 ) {
     // The Sound page's settings, kept on the engine; none for the silent player.
     val sound: SoundController? = (player as? SoundTarget)?.let { SoundController(it, settings, scope) }

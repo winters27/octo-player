@@ -425,6 +425,22 @@ object SettingsIndex {
         "whats_new", SettingsPage.About, "What's new", "The latest additions, in plain words",
         listOf("changes", "changelog", "release notes", "updates"),
     )
+    val CheckUpdates = add(
+        "check_updates", SettingsPage.About, "Check for updates automatically", "Looks for a new version of Octo every few hours",
+        listOf("update", "new version", "upgrade", "auto update"), section = "Updates",
+    )
+    val InstallUpdates = add(
+        "install_updates", SettingsPage.About, "Install updates", "Ask me, or when I leave Octo",
+        listOf("update", "install", "automatic", "upgrade"), section = "Updates",
+    )
+    val EarlyVersions = add(
+        "early_versions", SettingsPage.About, "Try early versions", "New versions before they're finished",
+        listOf("beta", "pre-release", "prerelease", "preview", "update"), section = "Updates",
+    )
+    val CheckNow = add(
+        "check_now", SettingsPage.About, "Check now", "Look for a new version of Octo",
+        listOf("update", "new version", "upgrade"), section = "Updates",
+    )
 
     val all: List<SettingEntry> get() = registered
 

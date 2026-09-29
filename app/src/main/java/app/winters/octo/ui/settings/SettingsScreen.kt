@@ -308,7 +308,10 @@ private fun Categories(onOpen: (NavKey) -> Unit, vm: SettingsViewModel) {
     }
     SettingsGroup(separatorInset = IconRowInset) {
         CategoryRow(OctoIcons.Backup, SettingsPage.Backup.title, BACKUP_SUMMARY) { open(SettingsPage.Backup) }
-        CategoryRow(OctoIcons.Info, SettingsPage.About.title, aboutSummary(BuildConfig.VERSION_NAME)) { open(SettingsPage.About) }
+        // A ready update shows here, quietly, in place of the version.
+        val updates = hiltViewModel<UpdatesViewModel>()
+        val update by updates.state.collectAsStateWithLifecycle()
+        CategoryRow(OctoIcons.Info, SettingsPage.About.title, aboutSummary(BuildConfig.VERSION_NAME, update.ready?.version?.toString())) { open(SettingsPage.About) }
     }
 }
 
