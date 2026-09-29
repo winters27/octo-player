@@ -1,5 +1,9 @@
 package app.winters.octo.desktop
 
+import app.winters.octo.desktop.settings.systemTextScale
+import app.winters.octo.desktop.settings.textScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import javax.swing.SwingUtilities
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -108,6 +112,8 @@ fun main(args: Array<String>) {
     // The system's own "Animation effects" (or Reduce motion), read again
     // whenever the window comes forward, so a change applies without a restart.
     var systemCalm by mutableStateOf(systemReducesMotion(os))
+    // The system's text size, read the same way.
+    var systemText by mutableStateOf(systemTextScale(os))
     val icon = appIcon()
 
     application {
@@ -206,7 +212,14 @@ fun main(args: Array<String>) {
                 window.addWindowFocusListener(object : WindowAdapter() {
                     override fun windowGainedFocus(e: WindowEvent?) {
                         app.queueSync.check()
-                        Thread { systemReducesMotion(os).let { calm -> SwingUtilities.invokeLater { systemCalm = calm } } }.apply { isDaemon = true }.start()
+                        Thread {
+                            val calm = systemReducesMotion(os)
+                            val text = systemTextScale(os)
+                            SwingUtilities.invokeLater {
+                                systemCalm = calm
+                                systemText = text
+                            }
+                        }.apply { isDaemon = true }.start()
                     }
                 })
                 system.focusWindow = {
@@ -238,8 +251,12 @@ fun main(args: Array<String>) {
                 window.onRenderApiChanged(::check)
             }
             val look by app.settings.state.collectAsState()
+            // Every word grows with the text size; nothing else does.
+            val density = LocalDensity.current
+            val words = textScale(look.appearance.textSize, systemText)
             ProvideWindowLook(reduceMotion = look.appearance.calmMotion || systemCalm, focus = keyboard, arrows = arrows) {
                 CompositionLocalProvider(
+                    LocalDensity provides Density(density.density, density.fontScale * words),
                     LocalTyping provides typing,
                     LocalSystem provides system,
                     LocalListFocus provides lists,
