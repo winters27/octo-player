@@ -8,6 +8,8 @@ import app.winters.octo.sound.FilterType
 import app.winters.octo.sound.ReplayGainMode
 import app.winters.octo.sound.SoundSettings
 import app.winters.octo.subsonic.AuthMode
+import app.winters.octo.update.InstallWhen
+import app.winters.octo.update.UpdatePrefs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -77,6 +79,7 @@ class SettingsStoreTest {
                 ),
                 presets = listOf(SavedCurve("Mine", List(10) { it.toFloat() })),
             ),
+            updates = UpdatePrefs(checkAutomatically = false, install = InstallWhen.OnQuit, earlyVersions = true),
         )
         SettingsStore(file()).update { changed }
         assertEquals(changed, SettingsStore(file()).current)

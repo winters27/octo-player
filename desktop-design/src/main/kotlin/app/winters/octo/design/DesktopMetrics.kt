@@ -110,6 +110,8 @@ object FrameSize {
     // A menu opened from a button.
     val Menu = 280.dp
     val PlaylistCover = 32.dp
+    // The small dot beside Settings while an update waits to be installed.
+    val NavMark = 6.dp
     // A playlist's picture in a menu's line.
     val MenuArt = 20.dp
     // The search field floated out beside the rail.

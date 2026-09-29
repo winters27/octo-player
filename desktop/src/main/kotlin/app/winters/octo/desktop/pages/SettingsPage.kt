@@ -67,7 +67,7 @@ fun SettingsPage(app: AppState, visit: Visit) {
                 KeyRows(app)
                 GlobalShortcutGroup(app)
             },
-            PageSection("about", "About") { Rows { InfoRow("Version", null, appVersion()) } },
+            PageSection("about", "About") { AboutRows(app, settings) },
         ),
     )
 }

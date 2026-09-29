@@ -6,6 +6,7 @@ import app.winters.octo.desktop.discord.DiscordPrefs
 import app.winters.octo.desktop.hotkeys.HotkeyPrefs
 import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.subsonic.AuthMode
+import app.winters.octo.update.UpdatePrefs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.Serializable
@@ -65,6 +66,8 @@ data class AppSettings(
     // not, as SHA-256 fingerprints by host. Each counts only for its host.
     // Not secret: a fingerprint only names a certificate.
     val trustedCertificates: Map<String, String> = emptyMap(),
+    // Looking for new versions of Octo, and how they are put in.
+    val updates: UpdatePrefs = UpdatePrefs(),
 )
 
 // A song table as the listener set it up: the columns shown, in order (by

@@ -11,6 +11,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import app.winters.octo.design.menuKey
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -135,7 +136,8 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
         }
         Separator(Modifier.padding(vertical = Space.S))
         NavRow("Sound", OctoIcons.Sound, lit == SidebarItem.Top(Page.Sound), rail) { go(Page.Sound) }
-        NavRow("Settings", OctoIcons.Settings, lit == SidebarItem.Top(Page.Settings), rail) { go(Page.Settings) }
+        // A small dot while an update waits to go in; the news itself is in Settings > About.
+        NavRow("Settings", OctoIcons.Settings, lit == SidebarItem.Top(Page.Settings), rail, mark = app.updates?.ready != null) { go(Page.Settings) }
     }
 }
 
@@ -203,7 +205,8 @@ private fun LazyListScope.group(
 // One place to go: an icon and its name, the chosen one on the darker
 // pill. On the rail, the icon alone with its name in a tooltip.
 @Composable
-private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Boolean, modifier: Modifier = Modifier, mark: Boolean = false, onClick: () -> Unit) {
+    val named = if (mark) "$label, update ready" else label
     val row: @Composable () -> Unit = {
         Box(
             modifier
@@ -212,19 +215,30 @@ private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Bo
                 .hoverLift(Corner.ControlShape, lifted = false)
                 .clickable(role = Role.Tab, onClick = onClick)
                 .semantics {
-                    contentDescription = label
+                    contentDescription = named
                     this.selected = selected
                 },
             contentAlignment = if (rail) Alignment.Center else Alignment.CenterStart,
         ) {
             if (selected) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
             Row(Modifier.padding(horizontal = if (rail) Space.None else Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
-                Glyph(icon, size = IconSize.Toolbar, tint = if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary)
+                Box {
+                    Glyph(icon, size = IconSize.Toolbar, tint = if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary)
+                    // On the rail the dot sits on the icon's corner.
+                    if (mark && rail) NavMark(Modifier.align(Alignment.TopEnd))
+                }
                 if (!rail) Txt(label, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary)
+                if (mark && !rail) NavMark()
             }
         }
     }
-    if (rail) OctoTooltip(label) { row() } else row()
+    if (rail) OctoTooltip(named) { row() } else row()
+}
+
+// The quiet dot that says something waits in Settings.
+@Composable
+private fun NavMark(modifier: Modifier = Modifier) {
+    Box(modifier.size(FrameSize.NavMark).background(OctoColors.Accent, CircleShape))
 }
 
 // A playlist with its small cover; right-click opens its menu, to play,
