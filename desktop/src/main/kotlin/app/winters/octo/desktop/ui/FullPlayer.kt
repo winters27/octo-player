@@ -67,7 +67,6 @@ import app.winters.octo.player.immersive.WashTuning
 import app.winters.octo.player.immersive.inkOver
 import app.winters.octo.player.immersive.paceBpm
 import app.winters.octo.subsonic.Song
-import kotlinx.coroutines.delay
 
 // The dark words used over a light background, as on the phone.
 val DarkInk = Color(DarkInkArgb)
@@ -93,19 +92,17 @@ internal fun PlayerBackdrop(cover: WashCover?, bpm: Float, fps: Int, speed: Floa
 // settling, as on the phone.
 private val DollyIn = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
 
-// Where the song is, read every frame while it plays, so the line glides,
-// and a few times a second while paused, so a seek then shows at once.
+// Where the song is, read every frame while it plays and the window is on
+// screen, so the line glides, and once at each change of the player (a
+// seek counts as one) otherwise.
 @Composable
 fun rememberFramePosition(player: DesktopPlayer): State<Long> {
     val position = remember { mutableLongStateOf(player.positionMs()) }
     val state by player.state.collectAsState()
-    LaunchedEffect(player, state.playing, state.current?.key) {
+    val shown = LocalWindowShown.current
+    LaunchedEffect(player, state, shown) {
         position.longValue = player.positionMs()
-        while (state.playing) withFrameMillis { position.longValue = player.positionMs() }
-        while (state.current != null) {
-            delay(200)
-            position.longValue = player.positionMs()
-        }
+        while (state.playing && shown) withFrameMillis { position.longValue = player.positionMs() }
     }
     return position
 }

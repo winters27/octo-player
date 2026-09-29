@@ -29,6 +29,8 @@ class SilentPlayer(
 
     // Where the song was at `since`, and whether time runs from there.
     private var anchorMs = 0L
+    // Times the place was moved, for PlayerState.moves.
+    private var moves = 0
     private var since = clock()
     private var running = false
     private var shuffle = false
@@ -287,6 +289,7 @@ class SilentPlayer(
     }
 
     private fun restartAt(position: Long, play: Boolean) {
+        moves++
         anchorMs = position
         since = clock()
         running = play && queue.currentEntry != null
@@ -318,6 +321,7 @@ class SilentPlayer(
             fade = fade,
             ended = ended,
             canUndo = queue.canUndo,
+            moves = moves,
         )
     }
 

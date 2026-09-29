@@ -88,16 +88,18 @@ import dev.chrisbanes.haze.HazeState
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 
-// Where the song is, read from the player a few times a second, for the
-// time and the progress line. It is read while paused too, so a seek then
-// shows at once.
+// Where the song is, for the time and the progress line: read a few times
+// a second while it plays and the window is on screen, and once at each
+// change of the player (a seek counts as one), so a paused or hidden
+// window never wakes to ask.
 @Composable
 fun rememberPosition(player: DesktopPlayer): State<Long> {
     val position = remember { mutableLongStateOf(player.positionMs()) }
-    val playing by player.state.collectAsState()
-    LaunchedEffect(player, playing) {
+    val state by player.state.collectAsState()
+    val shown = LocalWindowShown.current
+    LaunchedEffect(player, state, shown) {
         position.longValue = player.positionMs()
-        while (playing.current != null) {
+        while (state.playing && shown) {
             delay(200)
             position.longValue = player.positionMs()
         }

@@ -103,6 +103,9 @@ class EnginePlayer(
 
     private var pending: Pending? = null
 
+    // Times the place was moved, for PlayerState.moves.
+    private var moves = 0
+
     // After a jump, news of other songs starting is stale until this one
     // does (or a moment has passed).
     private var expecting: Long? = null
@@ -503,6 +506,7 @@ class EnginePlayer(
     private fun stillExpecting(): Boolean = expecting != null && clock() - expectingSince < EXPECT_MS
 
     private fun setPending(key: Long, ms: Long) {
+        moves++
         pending = Pending(key, ms, clock())
         lastShown = ms
     }
@@ -654,6 +658,7 @@ class EnginePlayer(
             fade = fade,
             ended = ended,
             canUndo = queue.canUndo,
+            moves = moves,
         )
     }
 
