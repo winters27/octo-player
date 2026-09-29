@@ -8,3 +8,4 @@
 #
 # To change keys, add the new line, ship a release signed with the old key,
 # then sign with the new one; remove the old line only after that.
+M/nLIDZFkukIYfrJGWK+cPmo/asGBkr+SdHPAWOSPp0=
