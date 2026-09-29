@@ -1,3 +1,5 @@
+import java.util.Base64
+
 // The app's logic that does not need Android: song matching, sorting, the
 // lyrics engine and parsers, the sound maths, queue rules and the immersive
 // background maths. The Android app and the desktop app both build on it.
@@ -45,6 +47,33 @@ kotlin {
             implementation(libs.junit)
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.mockwebserver)
+        }
+    }
+}
+
+// A rehearsal of the desktop update on one PC (scripts/rehearse-update.ps1):
+// -PoctoRehearsalKey=<base64 public key> adds a throwaway key to the keys
+// this build's desktop app trusts, in the built copy of trusted-keys.txt
+// only; the file in the repository never changes. Only a rehearsal version
+// may carry it (-PoctoDesktopVersion=1.1.0-rehearsal.1), and
+// release_assets.py refuses to publish any rehearsal version.
+val rehearsalKey = providers.gradleProperty("octoRehearsalKey").orNull?.trim()?.takeIf(String::isNotEmpty)
+if (rehearsalKey != null) {
+    val version = providers.gradleProperty("octoDesktopVersion").orNull?.trim().orEmpty()
+    if (!Regex("""\d+\.\d+\.\d+-rehearsal[0-9A-Za-z.-]*""").matches(version)) {
+        throw GradleException("octoRehearsalKey is only for a rehearsal build: -PoctoDesktopVersion must look like 1.1.0-rehearsal.1, not \"$version\"")
+    }
+    if (providers.environmentVariable("GITHUB_ACTIONS").orNull == "true") {
+        throw GradleException("octoRehearsalKey is for one PC, never for a build on GitHub")
+    }
+    val raw = runCatching { Base64.getDecoder().decode(rehearsalKey) }.getOrNull()
+    if (raw == null || raw.size != 32) throw GradleException("octoRehearsalKey must be the base64 of an Ed25519 public key's 32 bytes")
+}
+tasks.named<ProcessResources>("desktopProcessResources") {
+    inputs.property("octoRehearsalKey", rehearsalKey.orEmpty())
+    if (rehearsalKey != null) {
+        doLast {
+            destinationDir.resolve("app/winters/octo/update/trusted-keys.txt").appendText("\n# A throwaway key for a rehearsal on one PC (-PoctoRehearsalKey).\n$rehearsalKey\n")
         }
     }
 }
