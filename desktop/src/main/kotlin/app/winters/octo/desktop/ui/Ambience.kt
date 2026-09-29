@@ -1,6 +1,5 @@
 package app.winters.octo.desktop.ui
 
-import androidx.compose.ui.graphics.compositeOver
 import app.winters.octo.design.motionScale
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -77,7 +76,7 @@ internal object OctoArt {
 // motion reduced, `moving` off, or the window minimised or in the tray, it
 // holds still. `veil` is how much of the page colour lies over it.
 @Composable
-fun OctoAmbience(app: AppState, moving: Boolean, veil: Float, modifier: Modifier = Modifier, readable: Boolean = false) {
+fun OctoAmbience(app: AppState, moving: Boolean, veil: Float, modifier: Modifier = Modifier) {
     val settings by app.settings.state.collectAsState()
     val wash = settings.appearance.wash
     val tuning = WashTuning(wash.contrast, wash.saturation / 100f, wash.brightnessCap / 100f)
@@ -92,9 +91,7 @@ fun OctoAmbience(app: AppState, moving: Boolean, veil: Float, modifier: Modifier
             moving = moving && !LocalReduceMotion.current && LocalWindowShown.current,
             dolly = { 1f },
         )
-        // Behind the pages, the page's quietest words still read over it.
-        val shown = if (readable) cover?.let { minOf(1f - veil, readableAlpha(it.peak, OctoColors.Background.toArgb(), QuietInk, PageContrast, 1f - veil)) } ?: 0f else 1f - veil
-        Box(Modifier.fillMaxSize().alpha(1f - shown).background(OctoColors.Background))
+        Box(Modifier.fillMaxSize().alpha(veil).background(OctoColors.Background))
     }
 }
 
@@ -118,28 +115,21 @@ fun immersiveOpacity(strength: Float): Float = 0.3f + 0.6f * strength.coerceIn(0
 // shows of them, a fifth to a half.
 fun quietOpacity(strength: Float): Float = 0.2f + 0.3f * strength.coerceIn(0f, 1f)
 
-// The contrast the pages' quietest words (TextMuted: times, counts, small
-// captions) keep over the brightest colour behind them: WCAG AA for small
-// text.
+// The contrast the pages' quieter words (the accent colour, used for
+// subtitles and details) keep over the wash's brightest part, the usual
+// minimum for reading. The quietest words (TextMuted) are kept readable
+// by the page's own shade (PageShade.kt), so the colours stay rich.
 const val PageContrast = 4.5
-
-// Those words as drawn on the page colour. Over a lighter colour they come
-// out a little lighter, so reading them here errs on the safe side.
-val QuietInk: Int = OctoColors.TextMuted.compositeOver(OctoColors.Background).toArgb()
 
 // How much of this cover's wash shows behind the pages: as much as the
 // strength asks, less when the cover is bright enough to wash out the
 // words. The page's words stay light, so a bright cover shows fainter.
 fun WashCover.pageOpacity(strength: Float): Float =
-    readableAlpha(peak, OctoColors.Background.toArgb(), QuietInk, PageContrast, immersiveOpacity(strength))
+    readableAlpha(peak, OctoColors.Background.toArgb(), OctoColors.TextSecondary.toArgb(), PageContrast, immersiveOpacity(strength))
 
 // How much of the glow shows: a little more than a tenth up to a half, by
-// the strength, and never so much of a bright cover (`peak`, its brightest
-// colour, when known) that the page's quietest words stop reading.
-fun glowOpacity(strength: Float, peak: Int?): Float {
-    val most = 0.12f + 0.38f * strength.coerceIn(0f, 1f)
-    return if (peak == null) most else readableAlpha(peak, OctoColors.Background.toArgb(), QuietInk, PageContrast, most)
-}
+// the strength.
+fun glowOpacity(strength: Float): Float = 0.12f + 0.38f * strength.coerceIn(0f, 1f)
 
 // How fast the immersive colours drift behind the pages, as a share of the
 // full pace, or null when they hold still. Gentle is half the full

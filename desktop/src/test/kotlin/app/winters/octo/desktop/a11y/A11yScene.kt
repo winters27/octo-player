@@ -49,6 +49,9 @@ class A11yScene(
     val height: Int = 900,
     // A picture every song shares as its cover, or none.
     cover: ByteArray? = null,
+    // Its id: covers are kept by server name and id for the whole run, so
+    // each picture needs its own.
+    coverId: String = "c1",
     look: (AppSettings) -> AppSettings = { it },
     // How much bigger the words are, as the text size setting makes them.
     textScale: Float = 1f,
@@ -68,7 +71,7 @@ class A11yScene(
             songJson("s3", "Karma Police", artist = "Radiohead", album = "OK Computer", albumId = "a1", duration = 261),
             songJson("s4", "Roads", artist = "Portishead", album = "Dummy", albumId = "a3", duration = 305),
             songJson("s5", "Teardrop", artist = "Massive Attack", album = "Mezzanine", albumId = "a5", duration = 330),
-        ).map { if (cover != null) it.dropLast(1) + ""","coverArt":"c1"}""" else it }.joinToString(",")
+        ).map { if (cover != null) it.dropLast(1) + ""","coverArt":"$coverId"}""" else it }.joinToString(",")
         if (cover != null) server.file("getCoverArt", cover)
         server.answer("getAlbumList2", """"albumList2":{"album":[{"id":"a1","name":"OK Computer","artist":"Radiohead","year":1997,"songCount":3},{"id":"a3","name":"Dummy","artist":"Portishead","year":1994,"songCount":1}]}""")
         server.answer("getArtists", """"artists":{"index":[{"name":"R","artist":[{"id":"r1","name":"Radiohead","albumCount":1}]}]}""")

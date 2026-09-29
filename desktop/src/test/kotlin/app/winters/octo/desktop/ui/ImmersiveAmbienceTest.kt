@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.player.immersive.overlay
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.ImageComposeScene
@@ -70,9 +71,11 @@ class ImmersiveAmbienceTest {
             val ratio = contrastRatio(accent, brightest)
             // The grain adds a level either way, so a hair under 4.5 is the same.
             assertTrue("accent words over the $name wash: $ratio to 1", ratio >= 4.4)
-            // The quietest words too (times, counts), as drawn over that colour.
-            val quiet = contrastRatio(OctoColors.TextMuted.compositeOver(Color(brightest)).toArgb(), brightest)
-            assertTrue("quiet words over the $name wash: $quiet to 1", quiet >= 4.4)
+            // The quietest words (times, counts) read once the page's shade,
+            // worked out from that colour, lies under them.
+            val shaded = overlay(0xFF000000.toInt(), shadeFor(brightest), brightest)
+            val quiet = contrastRatio(OctoColors.TextMuted.compositeOver(Color(shaded)).toArgb(), shaded)
+            assertTrue("quiet words over the shaded $name wash: $quiet to 1", quiet >= 4.5)
         }
     }
 
@@ -81,10 +84,7 @@ class ImmersiveAmbienceTest {
         val pixels = drawn(cover(0xFF101830.toInt(), 0xFF8A1C3C.toInt()))
         val page = OctoColors.Background.toArgb()
         val lifted = pixels.count { contrastRatio(it, page) > 1.3 }
-        // The page's quietest words must read over the cover's brightest
-        // colour (the red), which caps how much of it shows; the wash still
-        // lifts clear of the page where the cover has colour.
-        assertTrue("the wash shows: $lifted of ${pixels.size} pixels lifted", lifted > pixels.size / 8)
+        assertTrue("the wash shows: $lifted of ${pixels.size} pixels lifted", lifted > pixels.size / 2)
     }
 
     @Test
