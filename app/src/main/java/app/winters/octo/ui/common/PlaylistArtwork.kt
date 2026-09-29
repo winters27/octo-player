@@ -23,15 +23,14 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.winters.octo.covers.CoverBook
 import app.winters.octo.covers.CoverSpec
 import app.winters.octo.covers.PLAYLIST_COVER_LINE
 import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.covers.coverArtKey
-import app.winters.octo.covers.coverGradientOf
+import app.winters.octo.covers.backgroundColour
+import app.winters.octo.covers.chooseBackground
 import app.winters.octo.covers.coverPaletteKey
 import app.winters.octo.covers.coverSide
-import app.winters.octo.covers.gradientColours
 import app.winters.octo.covers.playlistCoverFooter
 import app.winters.octo.design.ArtworkShape
 import app.winters.octo.design.OctoColors
@@ -91,7 +90,7 @@ fun PlaylistArtwork(
         if (spec != null && ready == null) shown = art.art(spec, side)
     }
     val ground = remember(spec?.id, palette) {
-        spec?.let { s -> Color(gradientColours(CoverBook.Default.gradients[coverGradientOf(s.id)], s.palette).first()) } ?: OctoColors.BackgroundTertiary
+        spec?.let { s -> Color(backgroundColour(chooseBackground(s.id, s.palette))) } ?: OctoColors.BackgroundTertiary
     }
     Box(modifier.size(size).clip(shape).background(ground)) {
         (ready ?: shown)?.let {
