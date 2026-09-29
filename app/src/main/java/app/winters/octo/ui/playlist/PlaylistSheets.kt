@@ -1,5 +1,6 @@
 package app.winters.octo.ui.playlist
 
+import app.winters.octo.ui.common.PlaylistArtwork
 import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -428,7 +429,9 @@ private fun PickLine(playlist: PlaylistSummary, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        PlaylistCover(playlist.covers, 36.dp, shape = RoundedCornerShape(6.dp))
+        PlaylistArtwork(playlist.id, playlist.name, playlist.covers, 36.dp, shape = RoundedCornerShape(6.dp)) {
+            PlaylistCover(playlist.covers, 36.dp, shape = RoundedCornerShape(6.dp))
+        }
         Column(Modifier.weight(1f)) {
             Text(playlist.name, style = OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {

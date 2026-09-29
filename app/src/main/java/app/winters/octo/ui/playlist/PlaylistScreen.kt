@@ -1,5 +1,7 @@
 package app.winters.octo.ui.playlist
 
+import app.winters.octo.ui.common.phonePlaylistFooter
+import app.winters.octo.ui.common.PlaylistArtwork
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -179,7 +181,11 @@ fun PlaylistScreen(
                                     PlaylistSheet.Options(playlist.id, playlist.name, onServer, canSave = serverAvailable && !onServer, canDownload = canDownload),
                                 )
                             },
-                        ) { modifier, shape -> PlaylistCover(current.covers, 240.dp, modifier, shape) }
+                        ) { modifier, shape ->
+                            PlaylistArtwork(playlist.id, playlist.name, current.covers, 240.dp, modifier, shape, footer = phonePlaylistFooter(tracks.size)) {
+                                PlaylistCover(current.covers, 240.dp, modifier, shape)
+                            }
+                        }
                     }
                     item(key = "keep") { KeepPlaylistDownloaded(playlist.id, tracks.map { it.track }) }
                     if (playlist.sourceId != null && phoneOnly > 0) {

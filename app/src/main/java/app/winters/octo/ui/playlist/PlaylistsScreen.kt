@@ -1,5 +1,11 @@
 package app.winters.octo.ui.playlist
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
+import app.winters.octo.catalog.mosaicCovers
+import app.winters.octo.livelists.LiveListSongs
+import app.winters.octo.ui.common.phonePlaylistFooter
+import app.winters.octo.ui.common.PlaylistArtwork
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -57,10 +63,17 @@ class PlaylistsViewModel @Inject constructor(
     private val files: PlaylistFiles,
     private val sorting: SortSettings,
     liveListStore: LiveListStore,
+    liveSongs: LiveListSongs,
 ) : ViewModel() {
     // The live lists, in the order they were made, above the playlists.
     val liveLists: StateFlow<List<LiveList>> =
         liveListStore.lists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // The covers of each live list's first albums, by its id, for its picture.
+    val liveCovers: StateFlow<Map<String, List<String>>> =
+        combine(liveListStore.lists, liveSongs.library) { lists, library ->
+            lists.associate { list -> list.id to mosaicCovers(library.pick(list.query).map { it.albumId to it.artwork }) }
+        }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     // The playlists in the chosen order. There are few, so they sort here.
     val playlists: StateFlow<Sorted<PlaylistSummary>?> =
@@ -105,6 +118,7 @@ fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsV
     val playlists by vm.playlists.collectAsStateWithLifecycle()
     val importState by vm.importState.collectAsStateWithLifecycle()
     val liveLists by vm.liveLists.collectAsStateWithLifecycle()
+    val liveCovers by vm.liveCovers.collectAsStateWithLifecycle()
     val sheets = LocalPlaylistSheets.current
     val menus = LocalSongMenu.current.collections
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::importFile) }
@@ -130,7 +144,7 @@ fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsV
                 }
             }
             items(liveLists, key = { "live:${it.id}" }) { list ->
-                LiveListLine(list, onClick = { onOpen(LiveListRoute(list.id)) }, onLongClick = { sheets.show(PlaylistSheet.LiveOptions(list.id, list.name)) })
+                LiveListLine(list, liveCovers[list.id].orEmpty(), onClick = { onOpen(LiveListRoute(list.id)) }, onLongClick = { sheets.show(PlaylistSheet.LiveOptions(list.id, list.name)) })
             }
             sortedRows(playlists?.items.orEmpty(), key = { it.id }) { playlist ->
                 PlaylistLine(
@@ -140,7 +154,9 @@ fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsV
                     onServer = playlist.onServer,
                     onLongClick = { menus.open(CollectionTarget.Playlist(playlist.id)) },
                 ) {
-                    PlaylistCover(playlist.covers, 56.dp)
+                    PlaylistArtwork(playlist.id, playlist.name, playlist.covers, 56.dp, footer = phonePlaylistFooter(playlist.songCount)) {
+                        PlaylistCover(playlist.covers, 56.dp)
+                    }
                 }
             }
         }

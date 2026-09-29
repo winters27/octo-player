@@ -1,5 +1,7 @@
 package app.winters.octo.ui.livelists
 
+import app.winters.octo.covers.LIVE_LIST_COVER_LINE
+import app.winters.octo.ui.common.PlaylistArtwork
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -41,8 +43,10 @@ fun LiveMarkTile(size: Dp, modifier: Modifier = Modifier, shape: Shape = Artwork
 
 // A live list among the playlists: its mark, its name, and "Live list".
 @Composable
-fun LiveListLine(list: LiveList, onClick: () -> Unit, onLongClick: () -> Unit) {
-    PlaylistLine(list.name, LIVE_LIST, onClick, onLongClick = onLongClick) { LiveMarkTile(56.dp) }
+fun LiveListLine(list: LiveList, covers: List<String>, onClick: () -> Unit, onLongClick: () -> Unit) {
+    PlaylistLine(list.name, LIVE_LIST, onClick, onLongClick = onLongClick) {
+        PlaylistArtwork(list.id, list.name, covers, 56.dp, line = LIVE_LIST_COVER_LINE) { LiveMarkTile(56.dp) }
+    }
 }
 
 // The line for making a live list, under New playlist, saying what one is.

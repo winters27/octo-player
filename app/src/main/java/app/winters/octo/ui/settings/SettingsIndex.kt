@@ -1,5 +1,6 @@
 package app.winters.octo.ui.settings
 
+import app.winters.octo.covers.PLAYLIST_COVERS_SETTING
 import app.winters.octo.catalog.searchKey
 import kotlinx.serialization.Serializable
 
@@ -173,6 +174,10 @@ object SettingsIndex {
     val BackgroundFps = add(
         "immersive_bg_fps", SettingsPage.Appearance, "Frame rate", "How smoothly the background moves",
         listOf("fps", "battery", "smooth", "background"), section = "Player",
+    )
+    val PlaylistCovers = add(
+        "playlist_covers", SettingsPage.Appearance, PLAYLIST_COVERS_SETTING, "Designed covers, or the covers of their albums",
+        listOf("playlist", "cover", "artwork", "mosaic", "picture", "designed"), section = "Playlists",
     )
     val ReduceMotion = add(
         "reduce_motion", SettingsPage.Appearance, "Reduce motion", "What moves only for show holds still",

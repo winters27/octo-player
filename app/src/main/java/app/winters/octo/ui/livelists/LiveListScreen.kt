@@ -1,5 +1,7 @@
 package app.winters.octo.ui.livelists
 
+import app.winters.octo.covers.LIVE_LIST_COVER_LINE
+import app.winters.octo.ui.common.PlaylistArtwork
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -112,7 +114,9 @@ fun LiveListScreen(
                             onShuffle = vm::shuffle,
                             onMore = { sheets.show(PlaylistSheet.LiveOptions(list.id, list.name)) },
                         ) { modifier, shape ->
-                            if (current.covers.isEmpty()) LiveMarkTile(240.dp, modifier, shape) else PlaylistCover(current.covers, 240.dp, modifier, shape)
+                            PlaylistArtwork(list.id, list.name, current.covers, 240.dp, modifier, shape, line = LIVE_LIST_COVER_LINE) {
+                                if (current.covers.isEmpty()) LiveMarkTile(240.dp, modifier, shape) else PlaylistCover(current.covers, 240.dp, modifier, shape)
+                            }
                         }
                     }
                     item(key = "rules") {

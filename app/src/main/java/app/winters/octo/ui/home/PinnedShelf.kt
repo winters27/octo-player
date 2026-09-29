@@ -1,5 +1,7 @@
 package app.winters.octo.ui.home
 
+import app.winters.octo.ui.common.phonePlaylistFooter
+import app.winters.octo.ui.common.PlaylistArtwork
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -64,7 +66,11 @@ fun LazyListScope.pinnedShelf(pins: List<PinnedItem>, onOpen: (NavKey) -> Unit) 
                         onClick = { onOpen(PlaylistRoute(pin.playlist.id)) },
                         target = CollectionTarget.Playlist(pin.playlist.id),
                         modifier = Modifier.animateItem(),
-                    ) { PlaylistCover(pin.playlist.covers, CardWidth) }
+                    ) {
+                        PlaylistArtwork(pin.playlist.id, pin.playlist.name, pin.playlist.covers, CardWidth, footer = phonePlaylistFooter(pin.playlist.songCount)) {
+                            PlaylistCover(pin.playlist.covers, CardWidth)
+                        }
+                    }
                 }
             }
         }
