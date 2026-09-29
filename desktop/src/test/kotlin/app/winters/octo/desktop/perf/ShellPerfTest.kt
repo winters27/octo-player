@@ -120,6 +120,11 @@ class ShellPerfTest {
             target?.let { swapSurface(scene, it.surface) }
             if (target == null) say("(Direct3D off screen is not available: frames drawn on the processor)")
             val frames = Frames(scene, target)
+            frames.frame()
+            if (firstFrameAt == null) {
+                firstFrameAt = ManagementFactory.getRuntimeMXBean().uptime
+                say("First frame of the window ${firstFrameAt} ms after this JVM started (${ManagementFactory.getClassLoadingMXBean().loadedClassCount} classes loaded)")
+            }
             // The sign-in page moves by design, so it never settles.
             val signIn = frames.count { frames.runFor(2_000) }
             shown = false
@@ -250,6 +255,7 @@ class ShellPerfTest {
             SwingUtilities.invokeAndWait { app.fullPlayer = false }
             frames.settle()
             say("Full player open, paused: ${"%.1f".format(full / 2.0)} frames drawn a second shown, ${"%.1f".format(fullHidden / 2.0)} minimised")
+            process()
 
             SwingUtilities.invokeAndWait { scene.close() }
             target?.close()
@@ -298,6 +304,28 @@ class ShellPerfTest {
         frames.runFor(3_000)
         handle.dispose()
         seen.entries.sortedByDescending { it.value }.take(15).forEach { say("  trace ${it.value}x ${it.key}") }
+    }
+
+    private var firstFrameAt: Long? = null
+
+    // The whole test process after the run: what the JVM holds, and what
+    // the system counts (working set, private bytes, every thread, native
+    // ones included), for comparing JVM options.
+    private fun process() {
+        val memory = ManagementFactory.getMemoryMXBean()
+        val heap = memory.heapMemoryUsage
+        val pools = ManagementFactory.getMemoryPoolMXBeans().associate { it.name to it.usage.committed / MB }
+        val gcs = ManagementFactory.getGarbageCollectorMXBeans()
+        say("JVM: heap ${heap.used / MB} MB used of ${heap.committed / MB} MB committed; metaspace ${pools["Metaspace"] ?: 0} MB, code ${(pools.filterKeys { it.startsWith("CodeHeap") }.values.sum())} MB committed; ${ManagementFactory.getThreadMXBean().threadCount} Java threads; GC ${gcs.sumOf { it.collectionCount }} collections, ${gcs.sumOf { it.collectionTime }} ms")
+        if (System.getProperty("os.name").orEmpty().startsWith("Windows")) {
+            runCatching {
+                val pid = ProcessHandle.current().pid()
+                val command = "(Get-Process -Id $pid) | ForEach-Object { [string]::Join(' ', @(\$_.WorkingSet64, \$_.PrivateMemorySize64, \$_.Threads.Count)) }"
+                val shell = ProcessBuilder("powershell", "-NoProfile", "-Command", command).redirectErrorStream(true).start()
+                val (workingSet, private, threads) = shell.inputStream.bufferedReader().readText().trim().split(" ").map { it.trim().toLong() }
+                say("Process: working set ${workingSet / MB} MB, private ${private / MB} MB, ${threads} threads (the Gradle test worker included)")
+            }.onFailure { say("Process: could not read (${it.message})") }
+        }
     }
 
     private fun pageName(page: Page) = page.toString().substringAfterLast('.').substringBefore('(').substringBefore('@')
