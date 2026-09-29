@@ -44,7 +44,9 @@ fun linkProgramOnWindows(key: String = LINK_KEY): String? = WindowsRegistry.read
 // Removes a scheme's registration and everything under it.
 internal fun forgetLinksOnWindows(key: String) = WindowsRegistry.remove(key)
 
-private const val LINK_KEY = "Software\\Classes\\octo"
+// The scheme's place under the current user; an update that moves Octo
+// points it at the new program (update/InstallLauncher.kt).
+internal const val LINK_KEY = "Software\\Classes\\octo"
 
 // On Linux the package's own desktop entry starts Octo with no file, so
 // "Open with Octo" would open nothing, and it does not claim octo:// links.

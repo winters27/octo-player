@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.desktop.settings.separateProfile
 import app.winters.octo.desktop.system.installedProgram
 import app.winters.octo.update.GITHUB_API
 import app.winters.octo.update.InstallWhen
@@ -99,6 +100,50 @@ fun installerFor(assets: List<ManifestAsset>, os: DesktopOs, arch: String, linux
     return assets.firstOrNull { it.os == system && it.arch == arch && it.kind == kind }
 }
 
+// Where downloads wait, with the installer's log: never inside the
+// program's own folder, since a new version empties that folder as it
+// goes in, the running installer and its log included. The user's temp
+// folder on Windows and macOS; the cache on Linux, whose /tmp every user
+// shares, and for a run with a folder of its own. When the first is
+// inside the program's folder, the next; when all are, the home folder.
+fun updatesFolder(
+    cache: File,
+    program: File?,
+    os: DesktopOs,
+    temp: File = File(System.getProperty("java.io.tmpdir")),
+    separate: Boolean = separateProfile(),
+    home: File = File(System.getProperty("user.home")),
+): File {
+    val own = File(cache, "updates")
+    val choices = listOfNotNull(
+        own.takeIf { separate || os == DesktopOs.Linux },
+        File(File(temp, "Octo"), "updates").takeIf { os != DesktopOs.Linux },
+        own,
+    )
+    val root = program?.let { programFolder(it, os) } ?: return choices.first()
+    return choices.firstOrNull { !isInside(it, root, os) } ?: File(home, ".octo-updates")
+}
+
+// The folder a new version replaces as a whole: the program's own on
+// Windows, the app bundle on macOS, the package's folder on Linux
+// (/opt/octo for /opt/octo/bin/Octo).
+fun programFolder(program: File, os: DesktopOs): File {
+    val parent = program.absoluteFile.parentFile ?: return program.absoluteFile
+    return when (os) {
+        DesktopOs.Windows -> parent
+        DesktopOs.Mac -> generateSequence(parent) { it.parentFile }.firstOrNull { it.name.endsWith(".app") } ?: parent
+        DesktopOs.Linux -> if (parent.name == "bin") parent.parentFile ?: parent else parent
+    }
+}
+
+// Whether `file` is `folder` or anywhere inside it. Windows ignores case.
+fun isInside(file: File, folder: File, os: DesktopOs): Boolean {
+    fun key(of: File) = of.absoluteFile.normalize().path.replace('\\', '/').trimEnd('/').let { if (os == DesktopOs.Windows) it.lowercase() else it }
+    val inner = key(file)
+    val outer = key(folder)
+    return inner == outer || inner.startsWith("$outer/")
+}
+
 // The desktop's updater: checks a while after start and every six hours
 // while "Check for updates automatically" is on, downloads the installer
 // in the background, and holds it ready. Nothing is ever said loudly: the
@@ -113,6 +158,8 @@ class DesktopUpdates(
     // Starts a process; tests hand in their own.
     private val start: (List<String>) -> Process = { ProcessBuilder(it).redirectErrorStream(true).start() },
     private val now: () -> Long = System::currentTimeMillis,
+    // The installed program, which Windows opens again after the update.
+    private val program: File? = installedProgram()?.let(::File),
 ) {
     val enabled: Boolean get() = availability is UpdaterAvailability.On && updater != null
 
@@ -232,8 +279,14 @@ class DesktopUpdates(
 
     private fun launchWindowsInstall(update: UpdateCheck.Ready, relaunch: Boolean): Boolean {
         if (launched) return true
-        val program = installedProgram()?.let(::File)
-        val command = WindowsInstall.command(update.file, octoProcesses(), if (relaunch) program else null, File(update.file.parentFile, "install.log"))
+        // The temp folder can be emptied while an update waits; the next
+        // check fetches it again.
+        if (!update.file.isFile) {
+            ready = null
+            lastLine = "The downloaded update was cleared away. Octo will fetch it again."
+            return false
+        }
+        val command = WindowsInstall.command(update.file, octoProcesses(), File(update.file.parentFile, "install.log"), program, relaunch)
         val started = runCatching {
             val process = start(command)
             process.waitFor(LAUNCH_WAIT_S, TimeUnit.SECONDS) && process.exitValue() == 0
@@ -251,9 +304,10 @@ class DesktopUpdates(
 
         // The updater for this Octo, or one that stays off, with why.
         fun forThisApp(settings: SettingsStore, cache: File, os: DesktopOs): DesktopUpdates {
-            val availability = updaterAvailability()
-            val folder = File(cache, "updates")
-            val on = availability as? UpdaterAvailability.On ?: return DesktopUpdates(settings, availability, os, folder, null)
+            val program = installedProgram()?.let(::File)
+            val availability = updaterAvailability(installed = program != null)
+            val folder = updatesFolder(cache, program, os)
+            val on = availability as? UpdaterAvailability.On ?: return DesktopUpdates(settings, availability, os, folder, null, program = program)
             // A client of its own: the system's certificates only, never a
             // server's trusted ones or its headers.
             val client = OkHttpClient.Builder()
@@ -276,7 +330,7 @@ class DesktopUpdates(
                 trustedKeys(),
                 pick = { assets -> installerFor(assets, os, arch, linuxKind) },
             )
-            return DesktopUpdates(settings, availability, os, folder, updater)
+            return DesktopUpdates(settings, availability, os, folder, updater, program = program)
         }
     }
 }

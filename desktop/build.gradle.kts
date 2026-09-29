@@ -296,6 +296,15 @@ compose.desktop {
                 menu = true
                 dirChooser = true
                 perUserInstall = true
+                // %LOCALAPPDATA%\OctoPlayer, a folder of the program's own.
+                // Earlier builds went into %LOCALAPPDATA%\Octo, which holds
+                // the cache, and replacing one emptied that whole folder.
+                // Not %LOCALAPPDATA%\Programs\Octo: jpackage 17 lists only
+                // the install folder and those inside it for removal, and
+                // a per-user MSI fails its checks (ICE64) for the Programs
+                // folder above it. The app knows this folder as
+                // WINDOWS_INSTALL_FOLDER (update/InstallLauncher.kt).
+                installationPath = "OctoPlayer"
                 // Keeps upgrades replacing this app rather than installing
                 // beside it. Never change it.
                 upgradeUuid = "4f7b3c1e-8a52-4d6b-9e0f-2c8d1a7b5e93"
