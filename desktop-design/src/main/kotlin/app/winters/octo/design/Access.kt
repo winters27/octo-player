@@ -63,9 +63,10 @@ val FocusEdgeColor = Color.Black.copy(alpha = 0.55f)
 
 // Whether the keyboard is what the listener is using: set by a key, cleared
 // by a click. Rings show only then, so a click never leaves one behind.
+// A window starts as if the mouse were in use.
 @Stable
-class FocusVisibility {
-    var keyboard by mutableStateOf(true)
+class FocusVisibility(keyboard: Boolean = false) {
+    var keyboard by mutableStateOf(keyboard)
 }
 
 val LocalFocusVisibility = staticCompositionLocalOf { FocusVisibility() }

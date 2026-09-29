@@ -77,7 +77,7 @@ class FocusRingTest {
 
     @Test
     fun tabRingsTheButtonAndAClickDoesNot() {
-        val visibility = FocusVisibility().apply { keyboard = false }
+        val visibility = FocusVisibility(keyboard = false)
         val scene = scene(visibility) { IconAction(OctoIcons.Play, "Play", {}, size = 36.dp) }
         try {
             scene.render()
@@ -101,7 +101,7 @@ class FocusRingTest {
 
     @Test
     fun theRingStillShowsOnALightCover() {
-        val scene = scene(FocusVisibility(), under = light) { IconAction(OctoIcons.Play, "Play", {}, size = 36.dp) }
+        val scene = scene(FocusVisibility(keyboard = true), under = light) { IconAction(OctoIcons.Play, "Play", {}, size = 36.dp) }
         try {
             scene.render()
             tab(scene)
@@ -118,7 +118,7 @@ class FocusRingTest {
 
     @Test
     fun aSmallButtonIsStillATargetOf24() {
-        val scene = scene(FocusVisibility()) { IconAction(OctoIcons.Play, "Play", {}, size = 16.dp, iconSize = 12.dp) }
+        val scene = scene(FocusVisibility(keyboard = true)) { IconAction(OctoIcons.Play, "Play", {}, size = 16.dp, iconSize = 12.dp) }
         try {
             scene.render()
             val node = scene.semanticsOwners.firstNotNullOf { find(it.unmergedRootSemanticsNode, "Play") }
@@ -130,7 +130,7 @@ class FocusRingTest {
 
     @Test
     fun aToggleSaysWhetherItIsOn() {
-        val scene = scene(FocusVisibility()) {
+        val scene = scene(FocusVisibility(keyboard = true)) {
             Row {
                 IconAction(OctoIcons.Shuffle, "Shuffle", {}, toggled = true)
                 IconAction(OctoIcons.Repeat, "Repeat", {}, toggled = false)
@@ -152,7 +152,7 @@ class FocusRingTest {
         var value by mutableFloatStateOf(0.5f)
         val arrows = ArrowKeys()
         val scene = ImageComposeScene(300, 80, Density(1f)) {
-            ProvideWindowLook(reduceMotion = false, arrows = arrows) {
+            ProvideWindowLook(reduceMotion = false, focus = FocusVisibility(keyboard = true), arrows = arrows) {
                 LineSlider({ value }, { value = it }, Modifier.size(200.dp, 24.dp), label = "Volume")
             }
         }

@@ -169,10 +169,12 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
     val request = host.request
     // Hands the keyboard back once the pop-up that had it has gone.
     var held by remember { mutableStateOf<PopupRequest?>(null) }
+    var handBack by remember { mutableStateOf(false) }
     LaunchedEffect(request) {
         if (request == null && held != null) {
             held = null
-            runCatching { host.returnFocus?.invoke() }
+            if (handBack) runCatching { host.returnFocus?.invoke() }
+            handBack = false
         }
     }
     if (request == null) return
@@ -193,7 +195,12 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
         if (rows) runCatching { card.requestFocus(FocusDirection.Enter) }
     }
     LaunchedEffect(request) {
-        if (held == null) runCatching { host.saveFocus?.invoke() }
+        // Only for the keyboard: after a click the keyboard stays where the
+        // click put it, and an old field is never woken.
+        if (held == null && keyboard) {
+            handBack = true
+            runCatching { host.saveFocus?.invoke() }
+        }
         held = request
         takeKeyboard(rows = false)
         // Opened from the keyboard, its first row takes it once laid out.

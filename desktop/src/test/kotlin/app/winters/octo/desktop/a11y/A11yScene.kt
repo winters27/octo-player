@@ -56,7 +56,7 @@ class A11yScene(
     val server = FakeServer()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     val player = SilentPlayer()
-    val keyboard = FocusVisibility()
+    val keyboard = FocusVisibility(keyboard = true)
     val arrows = ArrowKeys()
     lateinit var app: AppState
     val scene: ImageComposeScene

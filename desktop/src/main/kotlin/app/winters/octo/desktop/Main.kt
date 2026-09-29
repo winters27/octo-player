@@ -150,7 +150,7 @@ fun main(args: Array<String>) {
         val lists = remember { ListFocus() }
         // Whether the keyboard is moving about (rings show), and whether a
         // focused control holds the arrow keys (a slider).
-        val keyboard = remember { FocusVisibility().apply { this.keyboard = false } }
+        val keyboard = remember { FocusVisibility() }
         val arrows = remember { ArrowKeys() }
         var frame by remember { mutableStateOf<Frame?>(null) }
         // Where the window last was at its own size, for the next run.
