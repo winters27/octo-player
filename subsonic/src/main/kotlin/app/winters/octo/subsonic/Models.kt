@@ -35,6 +35,9 @@ data class Extension(val name: String, val versions: List<Int> = emptyList())
 data class User(
     val username: String = "",
     val adminRole: Boolean = false,
+    // Whether the user may change their own settings and password. A server
+    // that does not say lets them.
+    val settingsRole: Boolean = true,
     val scrobblingEnabled: Boolean = false,
     val streamRole: Boolean = true,
 )
