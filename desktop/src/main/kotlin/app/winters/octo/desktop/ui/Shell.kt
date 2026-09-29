@@ -256,6 +256,7 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus)
     // Widths follow a drag at once, and are saved when it ends.
     var sidebar by remember { mutableStateOf(saved.sidebarWidth.dp) }
     var panelWidth by remember { mutableStateOf(saved.panelWidth.dp) }
+    val shade = rememberPageShade(app)
     val panel = app.sidePanel
     LaunchedEffect(panel) {
         if (panel == null && app.panelHasKeyboard) {
@@ -294,8 +295,17 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus)
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         // The page is glass's backdrop too, over the window's colours, so
                         // the floating player (and menus over the page) frost what
-                        // scrolls beneath them.
-                        Column(Modifier.fillMaxSize().clipToBounds().hazeSource(backdrop).part(parts, parts.page, app)) {
+                        // scrolls beneath them. Under the page's words lies a soft shade
+                        // where a bright cover would wash out the quietest of them
+                        // (PageShade.kt); the glass over the page frosts it with the rest.
+                        Column(
+                            Modifier
+                                .fillMaxSize()
+                                .clipToBounds()
+                                .hazeSource(backdrop)
+                                .pageShade(shade, FrameSize.TitleBar + FrameSize.Hairline)
+                                .part(parts, parts.page, app),
+                        ) {
                             app.notice?.let { Notice(it, app.noticeDetail, app.actionFor(it)) { app.notice = null; app.noticeDetail = null } }
                             Box(Modifier.weight(1f)) { PageHost(app) }
                         }
@@ -477,31 +487,21 @@ private fun BoxScope.AmbientGlow(app: AppState) {
         return
     }
     if (cover == null) {
-        OctoAmbience(app, moving = false, veil = 1f - quietOpacity(look.glowStrength), readable = true)
+        OctoAmbience(app, moving = false, veil = 1f - quietOpacity(look.glowStrength))
         return
     }
-    // The cover's brightest colour, from the copy the key colour is made
-    // from (kept, so this costs nothing more), to keep the glow readable.
-    val wash = look.wash
-    val tuning = WashTuning(wash.contrast, wash.saturation / 100f, wash.brightnessCap / 100f)
-    val connection = app.connection
-    val peak by produceState<Int?>(null, cover, connection, tuning) {
-        value = connection?.let { app.washCovers.prepare(it.client, cover, tuning).glowPeak }
-    }
-    CoverGlow(look.glowStrength, peak) { blurred -> Cover(cover, blurred, shape = RectangleShape) }
+    CoverGlow(look.glowStrength) { blurred -> Cover(cover, blurred, shape = RectangleShape) }
 }
 
 // The glow itself: `picture` draws the cover into the blurred modifier it
 // is given, faint and fading into the page below.
 @Composable
-internal fun CoverGlow(strength: Float, peak: Int? = null, picture: @Composable (Modifier) -> Unit) {
-    // Until the cover's brightest colour is known, as faint as it could be.
-    val opacity by animateFloatAsState(glowOpacity(strength, peak ?: 0xFFFFFFFF.toInt()), tween(motionScale().ms(OctoDuration.Neutral)), label = "glow")
+internal fun CoverGlow(strength: Float, picture: @Composable (Modifier) -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
             .height(Ambience.Height)
-            .alpha(opacity),
+            .alpha(glowOpacity(strength)),
     ) {
         picture(Modifier.fillMaxSize().blur(Ambience.Blur, BlurredEdgeTreatment.Unbounded))
         // Fades into the page below, so there is no edge.
