@@ -32,14 +32,11 @@ import app.winters.octo.player.immersive.BaseBpm
 import app.winters.octo.player.immersive.WashTuning
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
-import org.jetbrains.skia.ColorSpace
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
 import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Rect
 import org.jetbrains.skia.Surface
-import org.jetbrains.skia.SurfaceColorFormat
-import org.jetbrains.skia.SurfaceOrigin
 import org.jetbrains.skiko.graphicapi.DirectXOffscreenContext
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -84,7 +81,7 @@ class AmbiencePerfTest {
         val cover = WashCovers.prepared("perf", source, WashTuning())
         say("Preparing a cover for the wash (once a song): %.1f ms".format((System.nanoTime() - started) / 1e6))
         val picture = source.toComposeImageBitmap()
-        val gpu = runCatching { DirectXOffscreenContext() }.getOrNull()
+        val gpu = offscreenGpu()
         for ((width, height) in SIZES) {
             say("")
             say("$width x $height")
@@ -183,37 +180,6 @@ class AmbiencePerfTest {
     private fun waitUntil(moment: Long) {
         while (moment - System.nanoTime() > 2_000_000) Thread.sleep(minOf((moment - System.nanoTime()) / 1_000_000 - 1, 9))
         while (System.nanoTime() < moment) Thread.onSpinWait()
-    }
-
-    // A Direct3D texture off screen and a Skia surface over it.
-    private class GpuTarget(private val context: DirectXOffscreenContext, width: Int, height: Int) : AutoCloseable {
-        private val texture = context.Texture(width, height)
-        val surface: Surface = Surface.makeFromBackendRenderTarget(
-            context.directContext,
-            texture.backendRenderTarget,
-            SurfaceOrigin.TOP_LEFT,
-            SurfaceColorFormat.BGRA_8888,
-            ColorSpace.sRGB,
-        )!!
-
-        // Waits until the graphics card has drawn everything sent so far.
-        fun finish() {
-            context.directContext.flushAndSubmit(surface, true)
-            texture.waitForCompletion()
-        }
-
-        override fun close() {
-            surface.close()
-            texture.close()
-        }
-    }
-
-    // An ImageComposeScene draws into a surface of its own on the
-    // processor; for timing it is handed the graphics card's instead.
-    private fun swapSurface(scene: ImageComposeScene, surface: Surface) {
-        val field = ImageComposeScene::class.java.getDeclaredField("surface").apply { isAccessible = true }
-        (field.get(scene) as Surface).close()
-        field.set(scene, surface)
     }
 
     // A cover of soft coloured shapes.
