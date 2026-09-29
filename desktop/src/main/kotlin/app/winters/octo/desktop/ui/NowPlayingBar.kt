@@ -53,6 +53,9 @@ import app.winters.octo.design.GlazeLight
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
+import app.winters.octo.design.IslandFilm
+import app.winters.octo.design.IslandFrost
+import app.winters.octo.design.IslandSaturation
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.MenuFilm
 import app.winters.octo.design.MenuFrost
@@ -120,7 +123,7 @@ fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier,
     // Songs dragged here go to the end of the queue; the player lights
     // while they are held over it.
     val over = isDropOver(PlayerDrop)
-    FloatingGlaze(backdrop, modifier.dropTarget(PlayerDrop, "Add to the queue", layer = 1) { app.addToQueue(it) }, shape = MenuShape, film = MenuFilm, frost = MenuFrost, halo = true) {
+    FloatingGlaze(backdrop, modifier.dropTarget(PlayerDrop, "Add to the queue", layer = 1) { app.addToQueue(it) }, shape = MenuShape, film = IslandFilm, frost = IslandFrost, saturation = IslandSaturation, halo = true, seesAll = true) {
         if (over) Box(Modifier.matchParentSize().background(DropLit, MenuShape))
         Row(Modifier.fillMaxSize().padding(horizontal = Space.L), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
             Cover(
