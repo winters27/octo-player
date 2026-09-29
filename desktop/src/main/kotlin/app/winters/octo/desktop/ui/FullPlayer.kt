@@ -182,13 +182,17 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
     }
 }
 
+// The transport's width, with a little room either side.
+private val ColumnLeast = 340.dp
+
 // The cover large, then the song and its heart, the seek line, the
 // transport and the volume.
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Color, side: androidx.compose.ui.unit.Dp) {
     val muted = ink.copy(alpha = 0.62f)
-    Column(Modifier.width(side), horizontalAlignment = Alignment.CenterHorizontally) {
+    // Never narrower than the transport, however small the cover gets on a short window.
+    Column(Modifier.width(maxOf(side, ColumnLeast)), horizontalAlignment = Alignment.CenterHorizontally) {
         // A touch smaller while paused, as on the phone.
         val scale = remember { Animatable(1f) }
         val still = LocalReduceMotion.current

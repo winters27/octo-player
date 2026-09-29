@@ -52,15 +52,18 @@ fun Txt(
     maxLines: Int = 1,
     align: TextAlign? = null,
 ) {
-    val heading = style === DesktopType.pageTitle || style === DesktopType.section || style === OctoType.title || style === OctoType.headline || style === OctoType.section
     BasicText(
         text,
-        modifier = if (heading) modifier.semantics { heading() } else modifier,
+        modifier = if (isHeading(style)) modifier.semantics { heading() } else modifier,
         style = if (align != null) style.copy(color = color, textAlign = align) else style.copy(color = color),
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
     )
 }
+
+// Whether words in this style are a heading: a page's title, a section's name.
+fun isHeading(style: TextStyle): Boolean =
+    style === DesktopType.pageTitle || style === DesktopType.section || style === OctoType.title || style === OctoType.headline || style === OctoType.section
 
 // An icon, white unless tinted.
 @Composable

@@ -69,6 +69,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.Ambience
 import app.winters.octo.design.ControlHeight
@@ -274,16 +275,21 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus)
     // Widths follow a drag at once, and are saved when it ends.
     var sidebar by remember { mutableStateOf(saved.sidebarWidth.dp) }
     var panelWidth by remember { mutableStateOf(saved.panelWidth.dp) }
-    val sideWidth = if (saved.sidebarRail) FrameSize.SidebarRail else sidebar.coerceIn(FrameSize.SidebarMin, FrameSize.SidebarMax)
     val panel = app.sidePanel
     LaunchedEffect(panel) {
         if (panel == null && app.panelHasKeyboard) {
             app.panelHasKeyboard = false
-            runCatching { parts.page.requestFocus(FocusDirection.Next) }
+            runCatching { parts.page.requestFocus(FocusDirection.Enter) }
         }
     }
-    // The window's width, for the player's.
+    // The window's width, which decides how the frame shares it (FrameFit.kt).
     val window = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() }
+    val fit = frameFit(
+        window,
+        sidebar.coerceIn(FrameSize.SidebarMin, FrameSize.SidebarMax),
+        saved.sidebarRail,
+        if (panel != null) panelWidth.coerceIn(FrameSize.PanelMin, FrameSize.PanelMax) else null,
+    )
     // Under the full player the frame is out of a screen reader's reach too.
     Column(Modifier.fillMaxSize().then(if (app.fullPlayer) Modifier.clearAndSetSemantics { } else Modifier)) {
         // Room for the title bar, in the frame's glass; its buttons are drawn
@@ -291,9 +297,9 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus)
         Box(Modifier.fillMaxWidth().height(FrameSize.TitleBar).chromeFilm(backdrop))
         Seam(vertical = false)
         Row(Modifier.weight(1f).fillMaxWidth()) {
-            Box(Modifier.width(sideWidth).fillMaxHeight().part(parts, parts.sidebar, app)) {
-                Sidebar(app, backdrop, Modifier.fillMaxSize())
-                if (!saved.sidebarRail) {
+            Box(Modifier.width(fit.sidebar).fillMaxHeight().part(parts, parts.sidebar, app)) {
+                Sidebar(app, backdrop, Modifier.fillMaxSize(), rail = fit.rail)
+                if (!fit.rail) {
                     ResizeHandle(
                         onDrag = { sidebar = (sidebar + it).coerceIn(FrameSize.SidebarMin, FrameSize.SidebarMax) },
                         onDone = { app.updateFrame { f -> f.copy(sidebarWidth = sidebar.value) } },
@@ -302,25 +308,23 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus)
                 }
             }
             Seam(vertical = true)
-            CompositionLocalProvider(LocalBottomRoom provides FrameSize.Player + FrameSize.PlayerGap) {
+            CompositionLocalProvider(LocalBottomRoom provides FrameSize.Player + FrameSize.PlayerGap, LocalFrameBackdrop provides backdrop) {
                 BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
                     Column(Modifier.fillMaxSize().clipToBounds().part(parts, parts.page, app)) {
                         app.notice?.let { Notice(it, app.noticeDetail, app.actionFor(it)) { app.notice = null; app.noticeDetail = null } }
                         Box(Modifier.weight(1f)) { PageHost(app) }
                     }
                     // A third of the window, in the middle of the page.
-                    val room = maxWidth - FrameSize.PlayerGap * 2
-                    val width = (window / 3).coerceIn(minOf(FrameSize.PlayerMin, room), room)
-                    PlayerBar(app, backdrop, Modifier.align(Alignment.BottomCenter).padding(bottom = FrameSize.PlayerGap).width(width).height(FrameSize.Player).part(parts, parts.player, app))
+                    val width = playerWidth(maxWidth, window)
+                    PlayerBar(app, backdrop, Modifier.align(Alignment.BottomCenter).padding(bottom = FrameSize.PlayerGap).width(width).height(FrameSize.Player).part(parts, parts.player, app), compact = playerIsCompact(width))
                 }
             }
-            if (panel != null) {
+            if (panel != null && fit.panel != null) {
                 Seam(vertical = true)
-                val width = panelWidth.coerceIn(FrameSize.PanelMin, FrameSize.PanelMax)
                 // Escape in the panel closes it; the page then has the keyboard.
                 Box(
                     Modifier
-                        .width(width)
+                        .width(fit.panel)
                         .fillMaxHeight()
                         .onFocusChanged { app.panelHasKeyboard = it.hasFocus }
                         .part(parts, parts.panel, app),
@@ -346,8 +350,8 @@ private fun OmniboxOver(app: AppState, backdrop: HazeState) {
     val box = app.omnibox
     val density = LocalDensity.current
     val window = LocalWindowInfo.current.containerSize.width
-    val settings by app.settings.state.collectAsState()
-    if (settings.frame.sidebarRail) {
+    // The rail's search button marks where it is while the rail shows.
+    if (box.trigger != IntRect.Zero) {
         val gap = with(density) { Space.M.roundToPx() }
         val inset = with(density) { Space.Xs.roundToPx() }
         FloatingGlaze(

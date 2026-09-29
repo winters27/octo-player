@@ -1,5 +1,9 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.focus.onFocusChanged
+import app.winters.octo.design.LocalFocusVisibility
+import app.winters.octo.design.LocalKeyboardHere
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -27,6 +31,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import app.winters.octo.design.Corner
+import app.winters.octo.design.CutTxt
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlazeSelected
@@ -78,6 +83,8 @@ private const val MarkGlyph = 0.62f
 @Composable
 fun LiveListRow(app: AppState, list: LiveList, selected: Boolean, rail: Boolean) {
     val pointer = LocalPointer.current
+    var here by remember { mutableStateOf(false) }
+    val keyboard = LocalFocusVisibility.current.keyboard
     val row: @Composable () -> Unit = {
         Box(
             Modifier
@@ -85,6 +92,7 @@ fun LiveListRow(app: AppState, list: LiveList, selected: Boolean, rail: Boolean)
                 .height(RowHeight.Nav + Space.Xs)
                 .hoverLift(Corner.ControlShape, lifted = false)
                 .onRightClick { app.popups.showAt(pointer.point) { close -> LiveListMenu(app, list, close) } }
+                .onFocusChanged { here = it.isFocused }
                 .menuKey { at -> app.popups.showUnder(at) { close -> LiveListMenu(app, list, close) } }
                 .clickable(role = Role.Tab) { app.navigator.go(Page.LiveList(list.id)) }
                 .semantics {
@@ -96,7 +104,7 @@ fun LiveListRow(app: AppState, list: LiveList, selected: Boolean, rail: Boolean)
             if (selected) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
             Row(Modifier.padding(horizontal = if (rail) Space.None else Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs)) {
                 LiveMark(FrameSize.PlaylistCover)
-                if (!rail) Txt(list.name, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f))
+                CompositionLocalProvider(LocalKeyboardHere provides (here && keyboard)) { if (!rail) CutTxt(list.name, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f)) }
             }
         }
     }

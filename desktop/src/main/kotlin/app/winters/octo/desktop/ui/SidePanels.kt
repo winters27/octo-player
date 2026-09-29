@@ -8,6 +8,7 @@ import androidx.compose.ui.semantics.focused
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import app.winters.octo.design.LocalFocusVisibility
+import app.winters.octo.design.LocalKeyboardHere
 import app.winters.octo.design.LocalTabStops
 import app.winters.octo.design.drawFocusRing
 import app.winters.octo.design.menuKey
@@ -72,6 +73,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
+import app.winters.octo.design.CutTxt
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlassField
@@ -517,16 +519,19 @@ private fun QueueRow(
         ) {
             Cover(song.coverArt, Modifier.size(RowHeight.Roomy - Space.L), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs)
             Column(Modifier.weight(1f)) {
-                Txt(
-                    song.title,
-                    DesktopType.tableTitle,
-                    when {
-                        playing -> OctoColors.Accent
-                        failed -> OctoColors.TextMuted
-                        else -> OctoColors.TextPrimary
-                    },
-                )
-                Txt(song.displayArtist ?: song.artist.orEmpty(), DesktopType.meta, OctoColors.TextMuted)
+                // The keyboard's row shows its cut title whole.
+                CompositionLocalProvider(LocalKeyboardHere provides (focused && ringed)) {
+                    CutTxt(
+                        song.title,
+                        DesktopType.tableTitle,
+                        when {
+                            playing -> OctoColors.Accent
+                            failed -> OctoColors.TextMuted
+                            else -> OctoColors.TextPrimary
+                        },
+                    )
+                }
+                CutTxt(song.displayArtist ?: song.artist.orEmpty(), DesktopType.meta, OctoColors.TextMuted)
             }
             if (hovered && !playing) {
                 CompositionLocalProvider(LocalTabStops provides false) {

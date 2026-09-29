@@ -8,8 +8,12 @@ import androidx.compose.ui.unit.sp
 // Sizes the album, artist, genre and folder pages share, beside the
 // frame's own in DesktopMetrics.
 object PageSize {
-    // The picture at the top of an album, artist or genre page.
+    // The picture at the top of an album, artist or genre page, and on a
+    // page narrower than HeaderNarrow, where the heading's buttons need
+    // the room.
     val HeaderArt = 180.dp
+    val HeaderArtSmall = 128.dp
+    val HeaderNarrow = 720.dp
     // The narrowest a card may be in a grid that fills the page's width.
     val Card = 168.dp
     // The same for an artist's round card beside a genre's albums, smaller

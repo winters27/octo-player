@@ -72,6 +72,37 @@ fun fitColumns(columns: List<SongColumn>, width: Dp, prefs: TablePrefs? = null):
     return shown
 }
 
+// The text columns that share a table's width with the title.
+private val Flexible = setOf(SongColumn.Artist, SongColumn.Album, SongColumn.Genre, SongColumn.Composer)
+
+// How many shares of spare room the title takes for each one a text column takes.
+private const val TITLE_SHARES = 3
+
+// Each shown column's width in a table `width` wide, but the title's, which
+// takes what is left. Text columns the listener has not widened by hand
+// share spare room with the title (the title three parts to their one
+// each, up to twice their own width), and give room back, down to their
+// least, when the title would be narrower than its own width.
+fun columnWidths(shown: List<SongColumn>, width: Dp, prefs: TablePrefs? = null): Map<SongColumn, Dp> {
+    val widths = shown.filter { it != SongColumn.Title }.associateWith { widthOf(it, prefs) }.toMutableMap()
+    val flex = widths.keys.filter { it in Flexible && prefs?.widths?.get(it.name) == null }
+    if (flex.isEmpty() || SongColumn.Title !in shown) return widths
+    val used = widths.values.fold(RowEnd + ColumnGap * shown.size) { sum, w -> sum + w }
+    val spare = width - used - specOf(SongColumn.Title).width
+    if (spare > 0.dp) {
+        val part = spare / (flex.size + TITLE_SHARES)
+        flex.forEach { column -> widths[column] = (widths.getValue(column) + part).coerceAtMost(widthOf(column, prefs) * 2) }
+    } else {
+        val room = flex.associateWith { widths.getValue(it) - specOf(it).min }
+        val total = room.values.fold(0.dp) { sum, w -> sum + w }
+        if (total > 0.dp) {
+            val share = (-spare / total).coerceAtMost(1f)
+            flex.forEach { column -> widths[column] = widths.getValue(column) - room.getValue(column) * share }
+        }
+    }
+    return widths
+}
+
 // The columns a table can offer to show: all of them.
 val AllColumns: List<SongColumn> = SongColumn.entries
 

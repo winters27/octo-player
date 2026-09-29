@@ -52,6 +52,50 @@ class TableTest {
         assertEquals("never below its least", specOf(Album).min, widthOf(Album, prefs))
     }
 
+    // The songs page's own columns, as a wide window shows them.
+    private val songsPage = listOf(Number, Title, Artist, Album, Added, SongColumn.Favourite, Length)
+
+    // What the row takes besides the title, at these widths.
+    private fun besidesTitle(widths: Map<SongColumn, androidx.compose.ui.unit.Dp>, shown: List<SongColumn>) =
+        widths.values.fold(RowEnd + ColumnGap * shown.size) { sum, w -> sum + w }
+
+    @Test
+    fun onAWideWindowTheArtistAndAlbumShareTheRoom() {
+        val widths = columnWidths(songsPage, 1600.dp)
+        assertTrue("artist grows: ${widths[Artist]}", widths.getValue(Artist) > specOf(Artist).width)
+        assertTrue("album grows: ${widths[Album]}", widths.getValue(Album) > specOf(Album).width)
+        // The title still has the most of it.
+        val title = 1600.dp - besidesTitle(widths, songsPage)
+        assertTrue("title $title beats album ${widths[Album]}", title > widths.getValue(Album))
+        // Numbers and dates keep their own widths.
+        assertEquals(specOf(Added).width, widths[Added])
+        assertEquals(specOf(Length).width, widths[Length])
+    }
+
+    @Test
+    fun onAnUltrawideWindowTheyStopAtTwiceTheirWidth() {
+        val widths = columnWidths(songsPage, 3200.dp)
+        assertEquals(specOf(Artist).width * 2, widths[Artist])
+        assertEquals(specOf(Album).width * 2, widths[Album])
+    }
+
+    @Test
+    fun onANarrowWindowTheyGiveRoomBackToTheTitle() {
+        val shown = listOf(Number, Title, Artist, Plays, SongColumn.Favourite, Length)
+        val widths = columnWidths(shown, 650.dp)
+        assertTrue("artist narrower: ${widths[Artist]}", widths.getValue(Artist) < specOf(Artist).width)
+        assertTrue("never below its least", widths.getValue(Artist) >= specOf(Artist).min)
+        val title = 650.dp - besidesTitle(widths, shown)
+        assertTrue("title $title has its own width back", title >= specOf(Title).width - 1.dp)
+    }
+
+    @Test
+    fun aColumnWidenedByHandKeepsItsWidth() {
+        val prefs = TablePrefs(widths = mapOf("Artist" to 150f))
+        assertEquals(150.dp, columnWidths(songsPage, 1600.dp, prefs)[Artist])
+        assertEquals(150.dp, columnWidths(songsPage, 650.dp, prefs)[Artist])
+    }
+
     @Test
     fun columnsMoveOnePlaceAtATime() {
         assertEquals(listOf(Number, Artist, Title), listOf(Number, Title, Artist).moved(Artist, -1))

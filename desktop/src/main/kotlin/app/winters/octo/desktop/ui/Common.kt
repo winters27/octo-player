@@ -1,5 +1,9 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.focus.onFocusChanged
+import app.winters.octo.design.LocalFocusVisibility
+import app.winters.octo.design.LocalKeyboardHere
 import app.winters.octo.design.FocusRing
 import app.winters.octo.design.menuKey
 import androidx.compose.foundation.clickable
@@ -42,6 +46,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import app.winters.octo.design.CutTxt
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.OctoColors
@@ -58,6 +63,7 @@ import app.winters.octo.desktop.nav.ScrollSpot
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.subsonic.SubsonicException
+import dev.chrisbanes.haze.HazeState
 
 // What a page's data has come to.
 sealed interface Load<out T> {
@@ -110,6 +116,10 @@ private const val GRID = "grid"
 // Room a page leaves at its foot for the now-playing bar floating over it.
 val LocalBottomRoom = staticCompositionLocalOf { 0.dp }
 
+// The window's colours the frame's glass frosts, for glass floating over a
+// page (the bar of picked songs) to be made of the player's material.
+val LocalFrameBackdrop = staticCompositionLocalOf<HazeState?> { null }
+
 // The side margin every page keeps.
 val PageSide = 28.dp
 
@@ -158,6 +168,10 @@ fun LoadingLine(text: String = "Loading", modifier: Modifier = Modifier) {
     }
 }
 
+// The same, on its own on a page, in from the page's side as its words are.
+@Composable
+fun PageLoadingLine(text: String = "Loading") = LoadingLine(text, Modifier.padding(horizontal = PageSide))
+
 @Composable
 fun FailedLine(message: String, retry: () -> Unit, modifier: Modifier = Modifier) {
     Column(modifier.padding(vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -200,8 +214,11 @@ fun MediaCard(
 ) {
     val shape = if (round) CircleShape else RoundedCornerShape(8.dp)
     val pointer = LocalPointer.current
+    var here by remember { mutableStateOf(false) }
+    val keyboard = LocalFocusVisibility.current.keyboard
     Column(
         modifier
+            .onFocusChanged { here = it.isFocused }
             .hoverLift(RoundedCornerShape(12.dp))
             .then(if (onMenu != null) Modifier.onRightClick(onMenu).menuKey { at -> pointer.position = androidx.compose.ui.geometry.Offset(at.left.toFloat(), at.bottom.toFloat()); onMenu() } else Modifier)
             .clickable(interactionSource = null, indication = FocusRing(RoundedCornerShape(12.dp)), role = Role.Button, onClick = onOpen)
@@ -219,8 +236,9 @@ fun MediaCard(
             if (badge != null) Box(Modifier.align(Alignment.BottomEnd).padding(6.dp)) { badge() }
         }
         Column(Modifier.fillMaxWidth(), horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
-            Txt(title, OctoType.label)
-            if (subtitle != null) Txt(subtitle, OctoType.caption, OctoColors.TextMuted)
+            // With the keyboard on the card, a cut title shows whole.
+            CompositionLocalProvider(LocalKeyboardHere provides (here && keyboard)) { CutTxt(title, OctoType.label) }
+            if (subtitle != null) CutTxt(subtitle, OctoType.caption, OctoColors.TextMuted)
         }
     }
 }

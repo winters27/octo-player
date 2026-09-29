@@ -138,7 +138,9 @@ internal fun measureLine(line: SyncLine, spec: LyricsSpec, measurer: TextMeasure
         fontWeight = if (line.isCredit) FontWeight.SemiBold else FontWeight.ExtraBold,
     )
     val padding = LINE_PADDING_EM * em
-    val align = if (line.alignRight) TextAlign.End else TextAlign.Start
+    // Right and left as the eye sees them: an Arabic or Hebrew line is right
+    // to left, where End would mean the left edge.
+    val align = if (line.alignRight) TextAlign.Right else TextAlign.Left
     val direction = if (line.rtl) TextDirection.Rtl else TextDirection.Ltr
     val whole = Constraints(minWidth = spec.available.toInt(), maxWidth = spec.available.toInt())
 

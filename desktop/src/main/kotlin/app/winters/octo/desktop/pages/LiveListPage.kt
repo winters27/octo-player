@@ -55,10 +55,10 @@ import app.winters.octo.desktop.livelists.liveListCovers
 import app.winters.octo.desktop.livelists.rememberLiveSongs
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
+import app.winters.octo.desktop.ui.PageLoadingLine
 import app.winters.octo.desktop.ui.FilterPill
 import app.winters.octo.desktop.ui.LiveListMenu
 import app.winters.octo.desktop.ui.LiveMark
-import app.winters.octo.desktop.ui.LoadingLine
 import app.winters.octo.desktop.ui.PageSide
 import app.winters.octo.desktop.ui.SongTable
 import app.winters.octo.desktop.ui.rememberListState
@@ -161,7 +161,7 @@ private fun LiveListBody(
     val fields = rememberShownFields(app)
     WithLibrary(app) { index ->
         val query = if (editing || list == null) draft.value.query else list.query
-        val songs = rememberLiveSongs(index.songs, query, fields) ?: return@WithLibrary LoadingLine("Picking the songs")
+        val songs = rememberLiveSongs(index.songs, query, fields) ?: return@WithLibrary PageLoadingLine("Picking the songs")
         SongTable(
             app,
             songs,

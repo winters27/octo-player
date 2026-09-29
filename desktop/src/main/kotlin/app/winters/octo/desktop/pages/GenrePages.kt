@@ -42,8 +42,8 @@ import app.winters.octo.desktop.library.rememberSorted
 import app.winters.octo.desktop.library.totalLengthText
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
+import app.winters.octo.desktop.ui.PageLoadingLine
 import app.winters.octo.desktop.ui.FilterBar
-import app.winters.octo.desktop.ui.LoadingLine
 import app.winters.octo.desktop.ui.LocalBottomRoom
 import app.winters.octo.desktop.ui.NoMatches
 import app.winters.octo.desktop.ui.PageTitle
@@ -79,7 +79,7 @@ fun GenresPage(app: AppState, visit: Visit) {
             contentPadding = pagePadding(LocalBottomRoom.current),
             horizontalArrangement = Arrangement.spacedBy(Space.M),
         ) {
-            header { PageTitle("Genres", detail = if (genres.size == 1) "1 genre" else "${genres.size} genres") }
+            header { PageTitle("Genres", detail = countText(genres.size, "genre")) }
             if (genres.isEmpty()) {
                 header {
                     NextStep(
@@ -131,7 +131,7 @@ fun GenrePage(app: AppState, visit: Visit, name: String) {
         val contents by produceState<GenreContents?>(null, index, name) {
             value = withContext(Dispatchers.Default) { genreContents(index, name) }
         }
-        val found = contents ?: return@WithLibrary LoadingLine()
+        val found = contents ?: return@WithLibrary PageLoadingLine()
         GenreBody(app, name, found, list, query, filter, fields)
     }
 }
@@ -147,7 +147,7 @@ private fun GenreBody(
     fields: SongFields<Song>,
 ) {
     var order by remember { mutableStateOf(SortList.GenreSongs.default) }
-    val songs = rememberFiltered(rememberSorted(contents.songs, order), query, fields)?.songs ?: return LoadingLine()
+    val songs = rememberFiltered(rememberSorted(contents.songs, order), query, fields)?.songs ?: return PageLoadingLine()
     val covers = remember(contents) { mosaicCovers(contents.albums) }
     var artistsAll by remember(name) { mutableStateOf(false) }
     val spots = remember(name) { HashMap<String, Int>() }

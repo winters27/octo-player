@@ -1,5 +1,9 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.focus.onFocusChanged
+import app.winters.octo.design.LocalFocusVisibility
+import app.winters.octo.design.LocalKeyboardHere
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
@@ -37,6 +41,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.IntRect
 import app.winters.octo.design.Corner
+import app.winters.octo.design.CutTxt
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlassField
@@ -90,13 +95,13 @@ private val YourPlaces = listOf(
 // to the player. The search field at the top, then Home on its own, the
 // library, what is yours, the playlists (pinned first, with their covers),
 // and Sound and Settings at the foot. Groups fold shut by their names.
-// Folded to a rail, it shows only icons and covers, each named in a
+// Folded to a rail (by the listener, or by a window too narrow for it
+// beside the side panel), it shows only icons and covers, each named in a
 // tooltip, and search is a button that floats the field out beside it.
 @Composable
-fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
+fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, rail: Boolean = app.settings.current.frame.sidebarRail) {
     val settings by app.settings.state.collectAsState()
     val frame = settings.frame
-    val rail = frame.sidebarRail
     val lit = app.navigator.sidebarItem
     val liveLists by app.liveLists.lists.collectAsState()
     fun go(page: Page) = app.navigator.go(page)
@@ -227,6 +232,8 @@ private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Bo
 @Composable
 private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, rail: Boolean, pinned: Boolean) {
     val pointer = LocalPointer.current
+    var here by remember { mutableStateOf(false) }
+    val keyboard = LocalFocusVisibility.current.keyboard
     // Songs dragged onto the listener's own playlist are added to it.
     val drag = LocalDrag.current
     val dropId = "pl:${playlist.id}"
@@ -240,6 +247,7 @@ private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, ra
                 .then(if (takes) Modifier.dropTarget(dropId, "Add to ${playlist.name}") { addDroppedSongs(app, playlist, it, pointer.point) } else Modifier)
                 .hoverLift(Corner.ControlShape, lifted = false)
                 .onRightClick { app.popups.showAt(pointer.point) { close -> PlaylistMenu(app, playlist, close) } }
+                .onFocusChanged { here = it.isFocused }
                 .menuKey { at -> app.popups.showUnder(at) { close -> PlaylistMenu(app, playlist, close) } }
                 .clickable(role = Role.Tab) { app.navigator.go(Page.Playlist(playlist.id)) }
                 .semantics {
@@ -253,7 +261,7 @@ private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, ra
             Row(Modifier.padding(horizontal = if (rail) Space.None else Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs)) {
                 Cover(playlist.coverArt, Modifier.size(FrameSize.PlaylistCover), shape = Corner.ArtSShape, placeholder = OctoIcons.Playlists)
                 if (!rail) {
-                    Txt(playlist.name, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f))
+                    CompositionLocalProvider(LocalKeyboardHere provides (here && keyboard)) { CutTxt(playlist.name, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f)) }
                     if (pinned) Glyph(OctoIcons.Pin, size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextMuted)
                 }
             }
