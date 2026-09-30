@@ -223,6 +223,15 @@ interface UserDao {
     )
     suspend fun unlinkOtherServers(keep: String?)
 
+    // Every playlist kept with this server goes back to being only on the phone.
+    @Query(
+        """
+        UPDATE playlist SET serverId = NULL, sourceId = NULL, syncedAt = NULL, syncedName = NULL, serverStamp = NULL
+        WHERE sourceId = :sourceId
+        """,
+    )
+    suspend fun unlinkServer(sourceId: String)
+
     // Every playlist kept with a server not among these goes back to being
     // only on the phone.
     @Query(
