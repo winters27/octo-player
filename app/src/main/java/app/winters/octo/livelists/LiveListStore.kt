@@ -77,6 +77,11 @@ class LiveListStore internal constructor(
         return made!!
     }
 
+    // Forgets the lists of a server taken off the list.
+    suspend fun forget(account: String) {
+        data.edit { it.remove(keyOf(account)) }
+    }
+
     private suspend fun change(edit: (List<LiveList>) -> List<LiveList>) {
         val key = keyOf(account.first())
         data.edit { prefs -> prefs[key] = LiveListsJson.encode(edit(LiveListsJson.decode(prefs[key]))) }

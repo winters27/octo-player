@@ -1,5 +1,12 @@
 package app.winters.octo.playback
 
+import android.content.Context
+import android.util.Log
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.LikedTrackEntity
 import app.winters.octo.catalog.PlayEventEntity
@@ -9,9 +16,15 @@ import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.listening.ListenBrainzSync
 import app.winters.octo.listening.ListeningSync
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -123,20 +136,129 @@ fun restoredShuffle(order: List<Int>, found: List<Boolean>): IntArray? {
     return order.filter { found[it] }.map { newIndex[it] }.toIntArray()
 }
 
+// The queue in use is the saved queue (its rows in the catalog); each other
+// account's waits in `parked` until its server is in use again. Every read
+// and write runs one at a time in the order asked, so a save asked for
+// before a hand-over lands before it, never over the queue handed over.
 @Singleton
-class QueueStore @Inject constructor(private val userDao: UserDao) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+class QueueStore internal constructor(
+    private val rows: QueueRows,
+    private val parked: ParkedQueues,
+) {
+    @Inject constructor(userDao: UserDao, @ApplicationContext context: Context) :
+        this(CatalogQueueRows(userDao), ParkedQueues(context.parkedQueueData))
 
-    // Saving runs on its own scope so it finishes even while the service stops.
-    fun save(snapshot: QueueSnapshot) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+
+    init {
         scope.launch {
-            val (items, state) = snapshot.toRows(System.currentTimeMillis())
-            userDao.saveQueue(items, state)
+            for (step in work) {
+                try {
+                    step()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w("Octo", "queue store: ${e.javaClass.simpleName}")
+                }
+            }
         }
     }
 
-    suspend fun load(): QueueSnapshot? = queueFromRows(userDao.queueItems(), userDao.queueState())
+    // Saving runs on its own scope so it finishes even while the service stops.
+    fun save(snapshot: QueueSnapshot) {
+        work.trySend { rows.write(snapshot) }
+    }
+
+    suspend fun load(): QueueSnapshot? = inTurn { rows.read() }
+
+    // Another account's queue becomes the one in use. The queue of `from`
+    // (as it was left, else as saved) waits for it, and the one `to` left
+    // comes back. With nothing waiting for `to`, the queue is emptied,
+    // unless `keepWhenNone`, when it stays as it is and nothing waits.
+    // Answers whether the queue in use changed.
+    suspend fun handOver(from: String, left: QueueSnapshot?, to: String, keepWhenNone: Boolean): Boolean = inTurn {
+        val coming = parked.take(to)
+        if (coming == null && keepWhenNone) return@inTurn false
+        parked.put(from, left ?: rows.read())
+        rows.write(coming ?: QueueSnapshot(emptyList(), emptyList(), 0, 0, 0, false))
+        true
+    }
+
+    // Forgets the queue kept for a server taken off the list.
+    suspend fun forget(account: String) = inTurn { parked.put(account, null) }
+
+    private suspend fun <T> inTurn(block: suspend () -> T): T {
+        val answer = CompletableDeferred<T>()
+        work.send {
+            try {
+                answer.complete(block())
+            } catch (e: Throwable) {
+                answer.completeExceptionally(e)
+            }
+        }
+        return answer.await()
+    }
 }
+
+// Where the queue in use is saved.
+interface QueueRows {
+    suspend fun read(): QueueSnapshot?
+
+    suspend fun write(snapshot: QueueSnapshot)
+}
+
+private class CatalogQueueRows(private val userDao: UserDao) : QueueRows {
+    override suspend fun read(): QueueSnapshot? = queueFromRows(userDao.queueItems(), userDao.queueState())
+
+    override suspend fun write(snapshot: QueueSnapshot) {
+        val (items, state) = snapshot.toRows(System.currentTimeMillis())
+        userDao.saveQueue(items, state)
+    }
+}
+
+private val Context.parkedQueueData by preferencesDataStore("parked_queues")
+
+// The queues of accounts not in use, one per account.
+class ParkedQueues(private val data: DataStore<Preferences>) {
+    // Takes the queue waiting for an account, which then waits no more.
+    suspend fun take(account: String): QueueSnapshot? {
+        var found: QueueSnapshot? = null
+        data.edit { p ->
+            found = p[keyOf(account)]?.let(::decodeQueue)
+            p.remove(keyOf(account))
+        }
+        return found
+    }
+
+    suspend fun put(account: String, queue: QueueSnapshot?) {
+        data.edit { p -> if (queue == null || queue.trackIds.isEmpty()) p.remove(keyOf(account)) else p[keyOf(account)] = encodeQueue(queue) }
+    }
+
+    private fun keyOf(account: String) = stringPreferencesKey("queue@$account")
+}
+
+@Serializable
+private class StoredQueue(
+    val trackIds: List<String>,
+    val shuffleOrder: List<Int> = emptyList(),
+    val index: Int = 0,
+    val positionMs: Long = 0,
+    val repeatMode: Int = 0,
+    val shuffle: Boolean = false,
+)
+
+private val queueJson = Json { ignoreUnknownKeys = true }
+
+fun encodeQueue(queue: QueueSnapshot): String = queueJson.encodeToString(
+    StoredQueue.serializer(),
+    StoredQueue(queue.trackIds, queue.shuffleOrder, queue.index, queue.positionMs, queue.repeatMode, queue.shuffle),
+)
+
+fun decodeQueue(text: String): QueueSnapshot? = runCatching {
+    val stored = queueJson.decodeFromString(StoredQueue.serializer(), text)
+    QueueSnapshot(stored.trackIds, stored.shuffleOrder, stored.index, stored.positionMs, stored.repeatMode, stored.shuffle)
+}.getOrNull()
 
 @Singleton
 class PlayStore @Inject constructor(

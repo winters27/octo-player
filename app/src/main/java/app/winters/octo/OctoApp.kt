@@ -7,6 +7,7 @@ import app.winters.octo.device.DeviceArtworkKeyer
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.listening.ListenBrainzSync
 import app.winters.octo.offline.OfflineDownloads
+import app.winters.octo.playback.ServerSwitch
 import app.winters.octo.server.ServerArtworkFetcher
 import app.winters.octo.server.ServerArtworkKeyer
 import app.winters.octo.server.ServerSync
@@ -26,6 +27,7 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var deviceLibrary: DeviceLibrary
     @Inject lateinit var sessions: SessionRepository
     @Inject lateinit var serverSync: ServerSync
+    @Inject lateinit var switcher: ServerSwitch
     @Inject lateinit var offline: OfflineDownloads
     @Inject lateinit var listenBrainz: ListenBrainzSync
     @Inject lateinit var updates: AppUpdates
@@ -36,6 +38,8 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
         deviceLibrary.start()
         // And with the server's, when one is connected.
         serverSync.start()
+        // A change of server puts the old one's music away and brings the new one's.
+        switcher.start()
         // Downloads left waiting last time carry on.
         offline.start()
         // Plays waiting for ListenBrainz go out.

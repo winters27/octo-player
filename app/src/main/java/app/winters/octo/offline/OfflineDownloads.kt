@@ -258,6 +258,11 @@ class OfflineDownloads @Inject constructor(
         }
     }
 
+    // Deletes the downloads of a server taken off the list, files and all.
+    suspend fun forgetSource(sourceId: String) {
+        lock.withLock { dao.all().filter { it.sourceId == sourceId }.forEach { deleteRow(it) } }
+    }
+
     fun setKeepLiked(on: Boolean) {
         scope.launch { settings.setKeepLiked(on) }
     }
