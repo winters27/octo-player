@@ -77,7 +77,8 @@ class HealthViewModel @Inject constructor(
     // thread. Null until the first check is done.
     val health: StateFlow<PhoneHealth?> = combine(dao.tracks(), dao.albums()) { tracks, albums -> tracks to albums }
         .mapLatest { (tracks, albums) ->
-            val copies = sources.sourceIds().flatMap { sources.tracks(it) }
+            // Only copies in the library: another kept server's are not.
+            val copies = sources.sourceIds().flatMap { sources.tracks(it) }.filter { it.mergedId.isNotEmpty() }
             phoneHealth(tracks, albums, copies)
         }
         .flowOn(Dispatchers.Default)

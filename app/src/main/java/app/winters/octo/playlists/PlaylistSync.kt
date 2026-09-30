@@ -121,11 +121,11 @@ class PlaylistSync @Inject constructor(
         }
     }
 
-    // After signing in (to this server) or out (null): playlists kept with
-    // any other server become playlists only on the phone. None is deleted.
-    suspend fun keepOnly(sourceId: String?) {
-        user.unlinkOtherServers(sourceId)
-        if (sourceId == null) store.forgetServer()
+    // Playlists kept with a server no longer kept (by its source) become
+    // playlists only on the phone. None is deleted.
+    suspend fun keepOnly(kept: Set<String>) {
+        user.unlinkServersExcept(kept.toList())
+        if (kept.isEmpty()) store.forgetServer()
     }
 
     private suspend fun send(localId: String) {
