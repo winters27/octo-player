@@ -51,6 +51,9 @@ private const val SAVE_AFTER_MS = 10_000L
 // Coming back to the front more often than this asks the server only once.
 private const val CHECK_EVERY_MS = 30_000L
 
+// How long the queue has to reach a server being left.
+private const val LEAVE_SAVE_MS = 3_000L
+
 // The phone's queue as a queue for the server. Songs the server does not
 // have are left out. With shuffle on, the songs go in the order they will
 // play, so the other device carries on with the same songs next. When the
@@ -92,7 +95,8 @@ class QueueSync @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val saving = Mutex()
     private var pending: Job? = null
-    // What the server was last sent, so the same queue is not sent twice.
+    // What the server was last sent, by account, so the same queue is not
+    // sent twice.
     @Volatile private var lastSent: Pair<String, ServerQueue>? = null
     @Volatile private var lastCheck = 0L
     // The restored queue's songs and current place, until something changes.
@@ -120,26 +124,55 @@ class QueueSync @Inject constructor(
         baseline = snapshot.trackIds to snapshot.index
     }
 
-    // The queue or the current song changed: save once it has settled.
+    // The queue or the current song changed: save once it has settled, on
+    // the server in use now.
     fun changed(snapshot: QueueSnapshot) {
+        val session = inUse()
         synchronized(this) {
             if (baseline == snapshot.trackIds to snapshot.index) return
             baseline = null
             pending?.cancel()
             pending = scope.launch {
                 delay(SAVE_AFTER_MS)
-                save(snapshot, exact = false)
+                save(session ?: return@launch, snapshot, exact = false)
             }
         }
     }
 
     // Playback paused: save now, with the exact position.
     fun paused(snapshot: QueueSnapshot) {
+        val session = inUse()
         synchronized(this) {
             baseline = null
             pending?.cancel()
-            pending = scope.launch { save(snapshot, exact = true) }
+            pending = scope.launch { save(session ?: return@launch, snapshot, exact = true) }
         }
+    }
+
+    // Leaving a server for another: its queue goes to it now, exactly, and
+    // is done before the next server is in use.
+    suspend fun leaving(snapshot: QueueSnapshot) {
+        val session = inUse() ?: return
+        synchronized(this) {
+            pending?.cancel()
+            pending = null
+            baseline = null
+        }
+        _offer.value = null
+        // A server out of reach does not hold the switch up for long.
+        withTimeoutOrNull(LEAVE_SAVE_MS) { save(session, snapshot, exact = true) }
+    }
+
+    // Forgets what was noted for a server taken off the list.
+    suspend fun forget(account: String) {
+        context.queueData.edit { p -> listOf(savedKey(account), answeredKey(account), stampKey(account)).forEach { p.remove(it) } }
+    }
+
+    // Another server is in use: the queue it offers is looked for at once.
+    fun arrived() {
+        lastCheck = 0L
+        _offer.value = null
+        check()
     }
 
     // The app came to the front: look for a queue saved elsewhere.
@@ -179,7 +212,7 @@ class QueueSync @Inject constructor(
         if (_offer.value === offer) _offer.value = null
         val session = signedIn() ?: return
         val at = offer.remote.changedAt ?: return
-        context.queueData.edit { it[answeredKey(session.sourceId)] = at }
+        context.queueData.edit { it[answeredKey(session.id)] = at }
     }
 
     private suspend fun lookForOffer() {
@@ -200,9 +233,10 @@ class QueueSync @Inject constructor(
             return
         }
         val prefs = context.queueData.data.first()
-        val savedAt = prefs[savedKey(session.sourceId)] ?: 0L
-        val answeredAt = prefs[answeredKey(session.sourceId)] ?: 0L
-        val ownStamp = prefs[stampKey(session.sourceId)]
+        // An older version kept these by the server's address.
+        val savedAt = prefs[savedKey(session.id)] ?: prefs[oldSavedKey(session.sourceId)] ?: 0L
+        val answeredAt = prefs[answeredKey(session.id)] ?: prefs[oldAnsweredKey(session.sourceId)] ?: 0L
+        val ownStamp = prefs[stampKey(session.id)] ?: prefs[oldStampKey(session.sourceId)]
         val current = remote?.current
         _offer.value = if (current != null && shouldOfferResume(remote, savedAt, answeredAt, ownStamp)) {
             ResumeOffer(remote.changedBy.orEmpty().trim().ifEmpty { "another device" }, current.title, current.displayArtist ?: current.artist, remote)
@@ -213,12 +247,11 @@ class QueueSync @Inject constructor(
 
     // A save after a change is skipped when only the position moved; a
     // save at a pause is skipped only when nothing did.
-    private suspend fun save(snapshot: QueueSnapshot, exact: Boolean) = saving.withLock {
+    private suspend fun save(session: Session, snapshot: QueueSnapshot, exact: Boolean) = saving.withLock {
         if (!enabled.first()) return@withLock
-        val session = signedIn() ?: return@withLock
         val serverIds = serverIdsOf(session.sourceId, snapshot.trackIds)
         val queue = serverQueueOf(snapshot) { serverIds[it] }?.trimmed() ?: return@withLock
-        val sent = lastSent?.takeIf { it.first == session.sourceId }?.second
+        val sent = lastSent?.takeIf { it.first == session.id }?.second
         if (sent == queue || (!exact && sent?.ids == queue.ids && sent.index == queue.index)) return@withLock
         try {
             if (session.hasExtension(INDEX_BASED_QUEUE)) {
@@ -226,7 +259,7 @@ class QueueSync @Inject constructor(
             } else {
                 session.client.savePlayQueue(queue.ids, queue.index, queue.positionMs)
             }
-            lastSent = session.sourceId to queue
+            lastSent = session.id to queue
             // The server's time for this save is how this phone knows its own
             // queue later, whatever name other phones running it give.
             val stamp = runCatching {
@@ -234,8 +267,8 @@ class QueueSync @Inject constructor(
                 else session.client.playQueue()?.let(::remoteQueueOf)
             }.getOrNull()?.changedAt
             context.queueData.edit {
-                it[savedKey(session.sourceId)] = System.currentTimeMillis()
-                if (stamp != null) it[stampKey(session.sourceId)] = stamp
+                it[savedKey(session.id)] = System.currentTimeMillis()
+                if (stamp != null) it[stampKey(session.id)] = stamp
             }
         } catch (e: SubsonicException) {
             Log.w("Octo", "queue save failed: ${e.javaClass.simpleName}")
@@ -260,12 +293,24 @@ class QueueSync @Inject constructor(
         return (state as? SessionState.SignedIn)?.session
     }
 
+    // The server in use right now, if any.
+    private fun inUse(): Session? = (sessions.state.value as? SessionState.SignedIn)?.session
+
     private fun Session.hasExtension(name: String) = extensions.any { it.startsWith("$name:") }
 
     private companion object {
         val SYNC_ON = booleanPreferencesKey("sync_on")
-        fun savedKey(sourceId: String) = longPreferencesKey("saved_at:$sourceId")
-        fun answeredKey(sourceId: String) = longPreferencesKey("answered_at:$sourceId")
-        fun stampKey(sourceId: String) = longPreferencesKey("own_stamp:$sourceId")
+
+        // When this phone last saved its queue on a server, the last offer
+        // answered there, and the server's own time for that save, for each
+        // kept server by its id.
+        fun savedKey(account: String) = longPreferencesKey("saved_at@$account")
+        fun answeredKey(account: String) = longPreferencesKey("answered_at@$account")
+        fun stampKey(account: String) = longPreferencesKey("own_stamp@$account")
+
+        // The same, as an older version kept them by the server's address.
+        fun oldSavedKey(sourceId: String) = longPreferencesKey("saved_at:$sourceId")
+        fun oldAnsweredKey(sourceId: String) = longPreferencesKey("answered_at:$sourceId")
+        fun oldStampKey(sourceId: String) = longPreferencesKey("own_stamp:$sourceId")
     }
 }
