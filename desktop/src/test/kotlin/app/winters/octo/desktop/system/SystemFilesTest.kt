@@ -92,6 +92,24 @@ class SystemFilesTest {
         assertEquals("room around the macOS icon", 0, mac.getRGB(8, 64) ushr 24)
     }
 
+    // The mask sits at fractional pixels; the art once stopped a pixel short
+    // of it, leaving a white line down the right and along the bottom.
+    @Test
+    fun roundedIconsHaveNoWhiteEdge() {
+        for (size in IcoSizes + listOf(512)) {
+            for (shape in listOf(FlatShape, MacShape)) {
+                val icon = roundedIcon(art, size, shape)
+                for (i in 0 until size) {
+                    for ((x, y) in listOf(size - 1 - i to size / 2, size / 2 to size - 1 - i, i to size / 2)) {
+                        val rgb = icon.getRGB(x, y)
+                        if (rgb ushr 24 == 0) continue
+                        assertTrue("no white at $x,$y of $size", (rgb shr 8 and 0xFF) < 0x80)
+                    }
+                }
+            }
+        }
+    }
+
     @Test
     fun icoFilesListEachPicture() {
         val pictures = listOf(16, 256).map { it to pngBytes(roundedIcon(art, it, FlatShape)) }

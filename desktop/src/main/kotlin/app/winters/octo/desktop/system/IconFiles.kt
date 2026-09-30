@@ -9,6 +9,8 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import javax.imageio.ImageIO
+import kotlin.math.ceil
+import kotlin.math.floor
 
 // Makes the app's icon files from the phone app's square store icon: a PNG
 // for Linux and the window, an ICO for Windows and an ICNS for macOS. Each
@@ -38,11 +40,14 @@ fun roundedIcon(art: BufferedImage, size: Int, shape: IconShape): BufferedImage 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
         g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC)
-        // The mask first, then the art drawn only where the mask is.
+        // The mask first, then the art drawn only where the mask is. The art
+        // covers every pixel the mask touches, or the mask's white shows
+        // as a hairline on the right and bottom.
         g.color = java.awt.Color.WHITE
         g.fill(RoundRectangle2D.Float(margin, margin, side, side, size * shape.radius * 2, size * shape.radius * 2))
         g.composite = AlphaComposite.SrcIn
-        g.drawImage(scaled(art, side.toInt().coerceAtLeast(1)), margin.toInt(), margin.toInt(), null)
+        val start = floor(margin).toInt()
+        g.drawImage(scaled(art, (ceil(margin + side).toInt() - start).coerceAtLeast(1)), start, start, null)
     } finally {
         g.dispose()
     }
