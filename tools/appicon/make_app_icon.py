@@ -1,5 +1,5 @@
 """Octo's app icon: the octopus from Octo's logo, exactly as painted, on a
-deep violet tile.
+lavender tile.
 
   python make_app_icon.py              writes the phone's adaptive icon layers
                                        and the square store icon the desktop
@@ -30,12 +30,13 @@ OCTOPUS = HERE / "octopus.png"
 RES = ROOT / "app/src/main/res"
 STORE = ROOT / "app/src/main/ic_launcher-playstore.png"
 
-# The tile: a deep violet, lighter at the top left, with a faint light of
-# the octopus's own violet behind it, as around the logo.
-SKY_TOP = "#1D1250"
-SKY_BOTTOM = "#0B0720"
-GLOW = "#6C4AF6"
-GLOW_ALPHA = 0.28
+# The tile: a lavender, lighter at the top left, with a soft white light
+# behind the octopus. A dark tile hid the octopus, and a lighter indigo
+# one blends into its violet; on lavender it stands out as painted.
+SKY_TOP = "#C9BEFF"
+SKY_BOTTOM = "#9C8AF0"
+GLOW = "#FFFFFF"
+GLOW_ALPHA = 0.45
 GLOW_RADIUS = 0.50   # of the side, from the centre
 
 # How far the octopus reaches from the tile's centre, as a share of the side.
