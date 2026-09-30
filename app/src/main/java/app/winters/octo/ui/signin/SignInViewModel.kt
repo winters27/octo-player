@@ -78,11 +78,15 @@ class SignInViewModel @Inject constructor(private val sessions: SessionRepositor
         url != null && !url.isHttps && !isPrivateHost(url)
     }
 
+    // The kept server being edited.
+    private var editingId: String? = null
+
     // Starts from the saved connection. Nothing secret is filled in.
     fun startEditing() {
         if (editing) return
         val draft = sessions.connectionDraft() ?: return
         editing = true
+        editingId = sessions.servers.value.active
         address = draft.address
         username = draft.username
         legacyPassword = draft.authMode == AuthMode.LegacyPassword
@@ -159,7 +163,8 @@ class SignInViewModel @Inject constructor(private val sessions: SessionRepositor
             clientCertAlias = clientCert,
         )
         viewModelScope.launch {
-            when (val failed = sessions.signIn(request)) {
+            val id = editingId
+            when (val failed = if (editing && id != null) sessions.edit(id, request) else sessions.signIn(request)) {
                 null -> {
                     // Once in, the secrets are kept only in the sealed vault.
                     password = ""

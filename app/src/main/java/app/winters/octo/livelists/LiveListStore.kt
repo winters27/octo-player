@@ -26,7 +26,7 @@ private val Context.liveListPrefs by preferencesDataStore("live_lists")
 internal fun accountOf(state: SessionState): String? = when (state) {
     SessionState.Loading -> null
     SessionState.SignedOut -> PHONE_ACCOUNT
-    is SessionState.SignedIn -> accountKey(state.session.client.username, state.session.client.primaryUrl.toString())
+    is SessionState.SignedIn -> state.session.id.ifEmpty { accountKey(state.session.client.username, state.session.client.primaryUrl.toString()) }
 }
 
 // The lists kept while no server is signed in.
