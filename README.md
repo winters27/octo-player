@@ -8,13 +8,13 @@
 
 </div>
 
-[Octo](https://github.com/winters27/octo) puts discovery in front of Navidrome. These apps are built around it, so your server feels like a streaming service: the music you don't own sits right beside yours, and keeping a song is just **Add to library**.
+[Octo](https://github.com/winters27/octo) is a proxy that adds discovery to your Navidrome server and works with any Subsonic app. These are players made to go with it: the music Octo finds sits beside your library, and keeping a song is just **Add to library**.
 
 ![Home](docs/images/desktop-home.webp)
 
 ## With Octo
 
-- **Add songs the way you'd expect.** Press **+** on a song, an album or a search result, and it joins your library.
+- **Add songs to your library.** Press **+** on a song, an album or a search result, and it joins your library.
 - **One search for everything.** Your music comes first, then what Octo found, and all of it plays straight away.
 - **Whole albums.** Every track shows, the ones you have are marked, and one press adds the rest.
 - **Stations on Home,** each with its own painted cover, and radio that reaches past your library.
