@@ -1,0 +1,10 @@
+<resources>
+    <!-- Android 12 and up show a launch screen built from the app icon.
+         It shows the logo's octopus alone, over the app's dark background,
+         not the icon's lavender tile. -->
+    <style name="Theme.Octo" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/octo_background</item>
+        <item name="android:windowSplashScreenBackground">@color/octo_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_octopus</item>
+    </style>
+</resources>

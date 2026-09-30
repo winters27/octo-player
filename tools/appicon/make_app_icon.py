@@ -1,9 +1,10 @@
 """Octo's app icon: the octopus from Octo's logo, exactly as painted, on a
 lavender tile.
 
-  python make_app_icon.py              writes the phone's adaptive icon layers
-                                       and the square store icon the desktop
-                                       icons are cut from
+  python make_app_icon.py              writes the phone's adaptive icon layers,
+                                       its launch screen's octopus, and the
+                                       square store icon the desktop icons
+                                       are cut from
   python make_app_icon.py take LOGO    copies the octopus out of the logo's PNG
                                        (C:\\Octo\\octo\\Assets\\octo_logo.png)
                                        into octopus.png; run the line above after
@@ -12,7 +13,8 @@ lavender tile.
 The logo's pixels are used as they are: its alpha is the octopus and its
 colour is the painted octopus (the grey glow around it is fully clear).
 Only the tile behind it is drawn here, and the same tile is written as the
-adaptive icon's vector background.
+adaptive icon's vector background. The launch screen shows the octopus
+alone, over the app's own dark background.
 
 After a change, run ./gradlew :desktop:makeIcons to remake desktop/icons.
 
@@ -43,6 +45,10 @@ GLOW_RADIUS = 0.50   # of the side, from the centre
 # Launchers always show the middle 66 dp circle of the adaptive icon's 108.
 ADAPTIVE_REACH = 29 / 108
 SQUARE_REACH = 0.44
+# Android 12's launch screen draws an icon with no background in a 288 dp
+# square and shows only the circle 192 dp across in its middle.
+SPLASH_DP = 288
+SPLASH_REACH = 0.29
 
 # The adaptive icon's layers, 108 dp at each density.
 DENSITIES = {"mdpi": 1, "hdpi": 1.5, "xhdpi": 2, "xxhdpi": 3, "xxxhdpi": 4}
@@ -146,9 +152,12 @@ def write():
         white = Image.new("RGBA", front.size, (255, 255, 255, 0))
         white.putalpha(front.getchannel("A"))
         white.save(folder / "ic_launcher_monochrome.png", optimize=True)
+        splash = RES / f"drawable-{name}"
+        splash.mkdir(parents=True, exist_ok=True)
+        placed(art, round(SPLASH_DP * density), SPLASH_REACH).save(splash / "splash_octopus.png", optimize=True)
     (RES / "drawable/ic_launcher_background.xml").write_text(background_vector(), encoding="utf-8")
     square(art, 512).convert("RGB").save(STORE, optimize=True)
-    print("Wrote the adaptive icon layers and", STORE.relative_to(ROOT))
+    print("Wrote the adaptive icon layers, the launch screen's octopus and", STORE.relative_to(ROOT))
 
 
 def preview(out):
