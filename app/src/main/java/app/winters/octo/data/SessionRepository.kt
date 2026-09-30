@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -349,7 +350,7 @@ class SessionRepository @Inject constructor(
 
     // Makes a signed-in session: the network set up for the server, the
     // address chooser started, and a client whose calls follow it.
-    private fun activate(
+    private suspend fun activate(
         main: HttpUrl,
         settings: ConnectionSettings,
         creds: Credentials,
@@ -366,10 +367,12 @@ class SessionRepository @Inject constructor(
         return Session(client, serverType, serverVersion, isOcto, adminReachable, extensions, settings)
     }
 
-    private fun applySecurity(main: HttpUrl, settings: ConnectionSettings) {
+    private suspend fun applySecurity(main: HttpUrl, settings: ConnectionSettings) {
         security.configure(main, settings)
-        // Open connections were made under the old trust; start fresh.
-        http.connectionPool.evictAll()
+        // Open connections were made under the old trust; start fresh. Closing
+        // an HTTPS connection sends its goodbye over the network, which Android
+        // refuses on the main thread, so it happens on the IO threads.
+        withContext(Dispatchers.IO) { http.connectionPool.evictAll() }
     }
 
     // The saved secret, when it fits the way of signing in asked for: a
