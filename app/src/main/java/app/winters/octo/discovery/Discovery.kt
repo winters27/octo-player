@@ -12,10 +12,10 @@ import app.winters.octo.catalog.onlineArtwork
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
+import app.winters.octo.data.runsOcto
 import app.winters.octo.playback.tracksByIds
 import app.winters.octo.server.serverSourceId
 import app.winters.octo.subsonic.Album
-import app.winters.octo.subsonic.OCTO_ACQUISITIONS
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
@@ -86,7 +86,11 @@ class Discovery @Inject constructor(
         return (listOf(seed) + similar).distinctBy { it.id }
     }
 
+    // Only Octo runs stations. Other servers list internet radio here, which
+    // is a stream, not songs, so nothing is shown for them.
     suspend fun stations(): List<Station> {
+        val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return emptyList()
+        if (!session.runsOcto) return emptyList()
         val (client, sourceId) = server() ?: return emptyList()
         return client.radioStations().map { station ->
             Station(station.id, station.name, ArtworkRef.Server(sourceId, station.coverArt ?: station.id).encode())
@@ -116,8 +120,7 @@ class Discovery @Inject constructor(
     // none of the songs came from it.
     suspend fun libraryAlbum(trackIds: List<String>): List<TrackEntity>? {
         val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return null
-        val octo = session.serverType.equals("octo", ignoreCase = true) || session.extensions.any { it.startsWith("$OCTO_ACQUISITIONS:") }
-        if (!octo) return null
+        if (!session.runsOcto) return null
         val (client, sourceId) = server() ?: return null
         val copies = trackIds.chunked(900).flatMap { sources.copiesOf(it) }.filter { it.sourceId == sourceId }
         val albumRow = copies.groupingBy { it.albumId }.eachCount().maxByOrNull { it.value }?.key ?: return null
