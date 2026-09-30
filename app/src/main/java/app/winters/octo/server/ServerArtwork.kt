@@ -1,6 +1,7 @@
 package app.winters.octo.server
 
 import app.winters.octo.catalog.ArtworkRef
+import app.winters.octo.catalog.drawnCoverStamp
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import coil3.ImageLoader
@@ -24,12 +25,17 @@ private val Sizes = listOf(150, 300, 600, 1200)
 const val ONLINE_COVER_VERSION = 3
 
 // What a cover is remembered by, whatever address fetched it: its server
-// and id.
-fun serverCoverKey(art: ArtworkRef.Server): String =
-    if (art.online) "online-art:v$ONLINE_COVER_VERSION:${art.sourceId}|${art.coverId}" else "server-art:${art.sourceId}|${art.coverId}"
+// and id. A cover Octo paints (a station's or a mix's) changes under the
+// same id, so it is kept under its version and the day, and asked for
+// again each day.
+fun serverCoverKey(art: ArtworkRef.Server, nowMs: Long = System.currentTimeMillis()): String = when {
+    art.online -> "online-art:v$ONLINE_COVER_VERSION:${art.sourceId}|${art.coverId}"
+    art.drawn -> "drawn-art:${drawnCoverStamp(nowMs)}:${art.sourceId}|${art.coverId}"
+    else -> "server-art:${art.sourceId}|${art.coverId}"
+}
 
 // What one downloaded size of a cover is kept on disk under.
-fun serverCoverDiskKey(art: ArtworkRef.Server, px: Int): String = "${serverCoverKey(art)}|$px"
+fun serverCoverDiskKey(art: ArtworkRef.Server, px: Int, nowMs: Long = System.currentTimeMillis()): String = "${serverCoverKey(art, nowMs)}|$px"
 
 // Draws a cover from the signed-in server. Its address is signed afresh for
 // each download, so the download is cached under what the picture is, never
@@ -62,7 +68,8 @@ class ServerArtworkFetcher(
     }
 }
 
-// A cover is remembered by its server and id, whatever address fetched it.
+// A cover is remembered by its server and id, whatever address fetched it,
+// and a painted one by the day too.
 class ServerArtworkKeyer : Keyer<ArtworkRef.Server> {
     override fun key(data: ArtworkRef.Server, options: Options) = serverCoverKey(data)
 }

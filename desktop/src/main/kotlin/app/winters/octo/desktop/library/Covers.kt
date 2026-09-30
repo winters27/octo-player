@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.library
 
+import app.winters.octo.catalog.drawnCoverStamp
+import app.winters.octo.catalog.isDrawnCoverId
 import app.winters.octo.design.LocalReduceMotion
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -73,9 +75,14 @@ private const val SharpUpTo = 300
 const val ONLINE_COVER_VERSION = 3
 
 // What a cover is cached under: its server and id and size, never the
-// address, which is signed afresh for every request.
-fun coverKey(host: String, coverId: String, bucket: Int, online: Boolean = false): String =
-    if (online) "online-cover:v$ONLINE_COVER_VERSION:$host:$coverId:$bucket" else "cover:$host:$coverId:$bucket"
+// address, which is signed afresh for every request. A cover Octo paints
+// (a station's or a mix's) changes under the same id, so it is kept under
+// its version and the day, and asked for again each day, as on the phone.
+fun coverKey(host: String, coverId: String, bucket: Int, online: Boolean = false, nowMs: Long = System.currentTimeMillis()): String = when {
+    online -> "online-cover:v$ONLINE_COVER_VERSION:$host:$coverId:$bucket"
+    isDrawnCoverId(coverId) -> "drawn-cover:${drawnCoverStamp(nowMs)}:$host:$coverId:$bucket"
+    else -> "cover:$host:$coverId:$bucket"
+}
 
 // The client covers come from, set once signed in.
 val LocalCovers = staticCompositionLocalOf<SubsonicClient?> { null }
