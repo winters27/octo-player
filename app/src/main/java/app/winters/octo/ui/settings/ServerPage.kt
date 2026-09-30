@@ -17,6 +17,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import app.winters.octo.data.ServerLook
 import app.winters.octo.data.Session
+import app.winters.octo.data.runsOcto
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.GlassInput
 import app.winters.octo.design.GlazeButton
@@ -181,7 +182,7 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
                     folderProblem?.let { NoteRow(it, color = OctoColors.Error) }
                     ActionRow(SettingsIndex.EditConnection, onClick = { onOpen(EditConnectionRoute) })
                     if (client.authMode != AuthMode.ApiKey) ActionRow(SettingsIndex.ChangePassword, onClick = { changing = true })
-                    ActionRow(SettingsIndex.OctoAdmin, onClick = { onOpen(OctoAdminRoute) })
+                    if (current.session.runsOcto) ActionRow(SettingsIndex.OctoAdmin, onClick = { onOpen(OctoAdminRoute) })
                 }
 
                 ServerFacts(vm, current.session)
