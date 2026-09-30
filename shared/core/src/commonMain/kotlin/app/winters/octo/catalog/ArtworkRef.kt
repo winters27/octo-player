@@ -10,7 +10,11 @@ sealed interface ArtworkRef {
     // fetch it is signed only when it is drawn, so none is ever stored.
     // `online` is for a song, album or artist the server found online
     // rather than one in the library, so its cover is cached apart.
-    data class Server(val sourceId: String, val coverId: String, val online: Boolean = false) : ArtworkRef
+    // `drawn` means Octo paints the cover itself, a station's or a mix's.
+    // Its id tells, so a stored cover needs nothing new to say so.
+    data class Server(val sourceId: String, val coverId: String, val online: Boolean = false) : ArtworkRef {
+        val drawn: Boolean get() = !online && isDrawnCoverId(coverId)
+    }
 
     fun encode(): String = when (this) {
         is Device -> "device:$key|$uri"
