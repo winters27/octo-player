@@ -10,6 +10,8 @@ import app.winters.octo.design.TypingState
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.library.coverLoader
+import app.winters.octo.desktop.lyrics.LyricsAnswer
+import app.winters.octo.desktop.search.SearchFilter
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.desktop.secrets.SecretStore
@@ -19,9 +21,17 @@ import app.winters.octo.desktop.server.ServerSecurity
 import app.winters.octo.desktop.settings.AmbienceStyle
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.livelists.DefaultLiveListSort
+import app.winters.octo.livelists.LiveList
+import app.winters.octo.livelists.LiveListStarters
+import app.winters.octo.lyrics.Lyrics
 import app.winters.octo.lyrics.OnlineLyrics
+import app.winters.octo.lyrics.serverLyrics
+import app.winters.octo.query.FilterPresets
+import app.winters.octo.query.LibraryQuery
 import app.winters.octo.sort.AlbumSort
 import app.winters.octo.sort.SortOrder
+import app.winters.octo.subsonic.Song
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import java.io.ByteArrayInputStream
@@ -35,6 +45,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
@@ -72,6 +83,26 @@ import org.junit.rules.TemporaryFolder
 //   OCTO_README_PLAYLIST  playlist ids for the playlist page, split by commas
 //   OCTO_README_PAGES     draw only the pages whose names start with these
 //   OCTO_README_SCALE     screen scale (default 2), window 1600x1000
+// and for the gallery:
+//   OCTO_README_SEARCH    words for the Search page; OCTO_README_SEARCH_SCROLL
+//                         turns of the wheel down it, several split by
+//                         commas for a picture each
+//   OCTO_README_ARTIST    artist id for the artist page
+//   OCTO_README_QUEUE     "album id:track" playing, with the queue open beside
+//                         its album; OCTO_README_QUEUE_NEXT "album id:count"
+//                         songs put next by hand
+//   OCTO_README_LYRICS    "words|song id|line" the full player with lyrics:
+//                         the song as a search for the words finds it (in the
+//                         library or online), paused on that line (from 0)
+//   OCTO_README_PALETTE   what is typed in the Ctrl+K box, over the album page;
+//                         several split by ";", one picture each
+//   OCTO_README_LIVELIST  live lists split by ";", each a starter's name or
+//                         "name|genre", one picture each
+// Songs, Genres and Library health are drawn too.
+// OCTO_README_FIND and OCTO_README_FIND_LYRICS (searches split by "|") list
+// instead what each search finds, the second with whether the server has
+// timed lyrics for each song, in build/shots/readme/find.txt, with the
+// artists and genres by size.
 class ReadmeShotsTest {
     @get:Rule val folder = TemporaryFolder()
 
@@ -109,6 +140,9 @@ class ReadmeShotsTest {
                 lyrics = it.lyrics.copy(online = false),
                 discord = it.discord.copy(on = false),
                 updates = it.updates.copy(checkAutomatically = false),
+                // Past searches and other servers' names are the listener's.
+                recentSearches = emptyList(),
+                servers = it.servers.filter { server -> server.id == it.activeServer },
             )
         }
         val saved = settings.current.servers.firstOrNull { it.id == settings.current.activeServer }
@@ -148,7 +182,11 @@ class ReadmeShotsTest {
         println("README shots: ${index.songs.size} songs, ${index.albums.size} albums, ${app.playlists.size} playlists")
 
         try {
-            if (System.getenv("OCTO_README_SURVEY") != null) survey(app, http) else shots(app, player)
+            when {
+                System.getenv("OCTO_README_SURVEY") != null -> survey(app, http)
+                env("OCTO_README_FIND") != null || env("OCTO_README_FIND_LYRICS") != null -> find(app)
+                else -> shots(app, player)
+            }
         } finally {
             println("README shots: blocked ${blocked.size} requests: ${blocked.groupingBy { it }.eachCount()}")
             player.close()
@@ -202,6 +240,47 @@ class ReadmeShotsTest {
         }
     }
 
+    // What searches find, to pick the gallery's search and lyrics song:
+    // for each, the library's and the server's online finds, and with
+    // OCTO_README_FIND_LYRICS whether the server has timed lyrics for each
+    // song and how they begin. Then the artists and genres by size.
+    private fun find(app: AppState) {
+        val connection = app.connection!!
+        val model = app.search!!
+        val index = app.library!!.index!!
+        val enhanced = connection.supports("songLyrics", 2)
+        fun split(name: String) = env(name)?.split("|")?.map(String::trim)?.filter(String::isNotEmpty).orEmpty()
+        val lines = mutableListOf<String>()
+        runBlocking {
+            split("OCTO_README_FIND").forEach { query ->
+                val found = model.search(query, SearchFilter.All)
+                lines += "# search \"$query\": library ${found.library.artists.size} artists, ${found.library.albums.size} albums, ${found.library.songs.size} songs; " +
+                    "online ${found.outside.songs.size} songs, ${found.outside.albums.size} albums, ${found.outside.artists.size} artists"
+                found.library.artists.forEach { lines += "library artist | ${it.id} | ${it.name}" }
+            }
+            split("OCTO_README_FIND_LYRICS").forEach { query ->
+                val found = model.search(query, SearchFilter.Songs)
+                lines += "# lyrics \"$query\": library ${found.library.songs.size} songs, online ${found.outside.songs.size}"
+                val songs = found.library.songs.take(8).map { it to "library" } + found.outside.songs.take(12).map { it to "online" }
+                songs.forEach { (song, where) ->
+                    val lyrics = runCatching { serverLyrics(connection.client.lyricsBySongId(song.id, enhanced), "en") }.getOrNull()
+                    val kind = lyrics?.let { "${if (it.synced) "timed" else "plain"} ${it.lines.size}" } ?: "none"
+                    lines += "$where | ${song.id} | ${song.title} | ${song.artist} | ${song.album} | ${song.year ?: ""} | ${song.duration}s | $kind"
+                    lyrics?.lines?.filter { it.text.isNotBlank() }?.take(8)?.forEachIndexed { n, line -> lines += "    $n ${line.startMs} ${line.text}" }
+                }
+            }
+        }
+        lines += "# artists: id | albums | songs | name"
+        val names = index.artists.associate { it.id to it.name }
+        index.songs.filter { it.artistId != null }.groupBy { it.artistId!! }
+            .map { (id, songs) -> Triple(id, songs.mapNotNull { it.albumId }.toSet().size, songs.size) }
+            .sortedByDescending { it.second }.take(40)
+            .forEach { (id, albums, songs) -> lines += "$id | $albums | $songs | ${names[id].orEmpty()}" }
+        lines += "# genres: songs | albums | name"
+        index.genres.sortedByDescending { it.songs }.take(30).forEach { lines += "${it.songs} | ${it.albums} | ${it.name}" }
+        File(out, "find.txt").writeText(lines.joinToString("\n"))
+    }
+
     private fun shots(app: AppState, player: SilentPlayer) {
         val index = app.library!!.index!!
         val scale = System.getenv("OCTO_README_SCALE")?.toFloatOrNull() ?: 2f
@@ -214,27 +293,32 @@ class ReadmeShotsTest {
         val only = System.getenv("OCTO_README_PAGES")?.split(",")?.map(String::trim)?.toSet()
         val albumSort = System.getenv("OCTO_README_ALBUM_SORT")?.let { name -> AlbumSort.entries.firstOrNull { it.name == name } }
 
-        // Plays a song, then pauses it a little way in: no sound, no clock.
-        fun cue(spec: String) {
-            val id = spec.substringBefore(":")
-            val track = spec.substringAfter(":", "0").toIntOrNull() ?: 0
-            val songs = index.songs.filter { it.albumId == id }.sortedWith(compareBy({ it.discNumber }, { it.track }))
-            if (songs.isEmpty()) return
-            val at = track.coerceIn(0, songs.lastIndex)
+        // Plays a song, then pauses it (at `ms`, or a little way in): no
+        // sound, no clock.
+        fun cueSongs(songs: List<Song>, at: Int, ms: Long? = null) {
             SwingUtilities.invokeAndWait {
                 app.play(songs, at)
                 player.pause()
-                player.seekTo(songs[at].duration.coerceAtLeast(60) * 1000L * 38 / 100)
+                player.seekTo(ms ?: (songs[at].duration.coerceAtLeast(60) * 1000L * 38 / 100))
             }
+        }
+        fun albumSongs(id: String) = index.songs.filter { it.albumId == id }.sortedWith(compareBy({ it.discNumber }, { it.track }))
+        fun cue(spec: String) {
+            val songs = albumSongs(spec.substringBefore(":"))
+            if (songs.isEmpty()) return
+            cueSongs(songs, (spec.substringAfter(":", "0").toIntOrNull() ?: 0).coerceIn(0, songs.lastIndex))
         }
         playing.firstOrNull()?.let(::cue)
         albumSort?.let { sort -> SwingUtilities.invokeAndWait { app.sortAlbums(SortOrder(sort, sort.startsDescending)) } }
         val w = (1600 * scale).toInt()
         val h = (1000 * scale).toInt()
         scene(app, Density(scale), w, h) { scene ->
-            fun page(name: String, settle: Long = 9_000, setUp: () -> Unit) {
+            fun page(name: String, settle: Long = 9_000, wheel: Int = 0, setUp: () -> Unit) {
                 if (only != null && only.none { name.startsWith(it) }) return
                 SwingUtilities.invokeAndWait {
+                    app.popups.close()
+                    app.omnibox.open = false
+                    if (app.search?.text?.isNotEmpty() == true) app.search?.type("")
                     app.fullPlayer = false
                     app.showSidePanel(null)
                     setUp()
@@ -242,12 +326,78 @@ class ReadmeShotsTest {
                 }
                 // A first pass loads the covers; the second is the picture.
                 shot(scene, null, settle)
+                // Turns of the wheel over the page, a frame drawn after each.
+                if (wheel > 0) {
+                    val at = Offset(w * 0.6f, h * 0.5f)
+                    repeat(wheel) {
+                        SwingUtilities.invokeAndWait {
+                            scene.sendPointerEvent(PointerEventType.Scroll, at, scrollDelta = Offset(0f, 1f))
+                            scene.render().close()
+                        }
+                    }
+                    SwingUtilities.invokeAndWait { scene.sendPointerEvent(PointerEventType.Move, Offset(-10f, -10f)) }
+                    shot(scene, null, 3_000)
+                }
                 shot(scene, "desktop-$name", 3_000)
             }
             page("home", 12_000) { app.navigator.go(Page.Home) }
             album?.let { page("album") { app.navigator.go(Page.Album(it)) } }
             playlists.forEachIndexed { n, id -> page(if (n == 0) "playlists" else "playlists-$n") { app.navigator.go(Page.Playlist(id)) } }
             page("albums") { app.navigator.go(Page.Albums) }
+            page("songs") { app.navigator.go(Page.Songs) }
+            page("genres") { app.navigator.go(Page.Genres) }
+            page("health", 15_000) { app.navigator.go(Page.LibraryHealth) }
+            env("OCTO_README_SEARCH")?.let { words ->
+                val turns = env("OCTO_README_SEARCH_SCROLL")?.split(",")?.mapNotNull { it.trim().toIntOrNull() } ?: listOf(0)
+                turns.forEach { n ->
+                    page(if (n == 0) "search" else "search-$n", 12_000, wheel = n) {
+                        app.navigator.go(Page.Search)
+                        app.search?.type(words)
+                    }
+                }
+            }
+            env("OCTO_README_ARTIST")?.let { id ->
+                val name = index.artists.firstOrNull { it.id == id }?.name.orEmpty()
+                page("artist", 12_000) { app.navigator.go(Page.Artist(id, name)) }
+            }
+            env("OCTO_README_LIVELIST")?.let { spec ->
+                val made = spec.split(";").map(String::trim).filter(String::isNotEmpty).map { one ->
+                    val name = one.substringBefore("|").trim()
+                    val genre = one.substringAfter("|", "").trim()
+                    val query = LiveListStarters.firstOrNull { it.name == name && genre.isEmpty() }?.query
+                        ?: LibraryQuery(listOf(FilterPresets.genre(genre)), sort = DefaultLiveListSort)
+                    // Kept in memory only: this run keeps no lists on disk.
+                    var list: LiveList? = null
+                    SwingUtilities.invokeAndWait { list = app.liveLists.save(LiveList.new(name, query, System.currentTimeMillis())) }
+                    list!!
+                }
+                made.forEachIndexed { n, list -> page(if (n == 0) "livelist" else "livelist-$n") { app.navigator.go(Page.LiveList(list.id)) } }
+            }
+            env("OCTO_README_QUEUE")?.let { spec ->
+                if (only != null && only.none { it.startsWith("queue") }) return@let
+                // In the album's own order, played from its page, so the
+                // queue is named after it.
+                val id = spec.substringBefore(":")
+                val songs = runBlocking { app.albumSongs(id) }.ifEmpty { albumSongs(id) }
+                SwingUtilities.invokeAndWait { app.navigator.go(Page.Album(id)) }
+                cueSongs(songs, (spec.substringAfter(":", "0").toIntOrNull() ?: 0).coerceIn(0, songs.lastIndex))
+                env("OCTO_README_QUEUE_NEXT")?.let { next ->
+                    val songs = albumSongs(next.substringBefore(":")).take(next.substringAfter(":", "2").toIntOrNull() ?: 2)
+                    SwingUtilities.invokeAndWait { app.playNext(songs) }
+                }
+                page("queue") { app.showSidePanel(SidePanel.Queue) }
+                // The other pages keep the song they had in the player bar.
+                playing.firstOrNull()?.let(::cue)
+            }
+            // After the other pages with a sidebar, since the search field
+            // keeps the keyboard and shows it.
+            env("OCTO_README_PALETTE")?.split(";")?.forEachIndexed { n, typed ->
+                page(if (n == 0) "palette" else "palette-$n") {
+                    app.navigator.go(album?.let { Page.Album(it) } ?: Page.Home)
+                    app.openSearch()
+                    app.search?.type(typed)
+                }
+            }
             playing.forEachIndexed { n, spec ->
                 if (only != null && only.none { it.startsWith("player") }) return@forEachIndexed
                 cue(spec)
@@ -265,6 +415,32 @@ class ReadmeShotsTest {
                     page("player-$tag-plain") {
                         app.fullPlayer = true
                         app.playerPanel?.let(app::togglePlayerPanel)
+                    }
+                }
+            }
+            env("OCTO_README_LYRICS")?.split("|")?.map(String::trim)?.let { parts ->
+                if (only != null && only.none { it.startsWith("lyrics") }) return@let
+                val (words, id, lineText) = parts
+                val found = runBlocking { app.search!!.search(words, SearchFilter.Songs) }
+                val song = (found.library.songs + found.outside.songs).firstOrNull { it.id == id }
+                checkNotNull(song) { "The search for the lyrics song does not find it" }
+                cueSongs(listOf(song), 0, 0)
+                val until = System.currentTimeMillis() + 60_000
+                var lyrics: Lyrics? = null
+                while (lyrics == null && System.currentTimeMillis() < until) {
+                    val shown = app.lyrics.state.value
+                    if (shown.song?.id == song.id) lyrics = (shown.answer as? LyricsAnswer.Found)?.lyrics
+                    Thread.sleep(200)
+                }
+                val timed = checkNotNull(lyrics?.takeIf { it.synced }) { "The server has no timed lyrics for the lyrics song" }
+                val line = timed.lines.filter { it.text.isNotBlank() }[lineText.toInt()]
+                // A little way into the line, so it is the one being sung.
+                SwingUtilities.invokeAndWait { player.seekTo(line.startMs + 700) }
+                for (style in listOf(AmbienceStyle.Immersive, AmbienceStyle.Glow)) {
+                    SwingUtilities.invokeAndWait { app.settings.update { it.copy(appearance = it.appearance.copy(ambience = style)) } }
+                    page("lyrics-${style.name.lowercase()}", 12_000) {
+                        app.fullPlayer = true
+                        if (app.playerPanel != SidePanel.Lyrics) app.togglePlayerPanel(SidePanel.Lyrics)
                     }
                 }
             }
@@ -329,6 +505,8 @@ private class ReadOnlyGuard(private val host: String, private val note: (String)
             .build()
     }
 }
+
+private fun env(name: String): String? = System.getenv(name)?.takeIf(String::isNotBlank)
 
 private val OWNER = Regex(""""owner"\s*:\s*"(?:[^"\\]|\\.)*"""")
 
