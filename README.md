@@ -22,8 +22,6 @@
 
 These need Octo 2026.09.29 or newer.
 
-![An album](docs/images/desktop-album.webp)
-
 ## With any Subsonic server
 
 With Navidrome or any Subsonic server, both apps are full players for the music you have:
@@ -32,17 +30,28 @@ With Navidrome or any Subsonic server, both apps are full players for the music 
 - Synced lyrics, gapless playback, an equalizer with presets, ReplayGain and a sleep timer.
 - A queue that follows you between the desktop and the phone, and plays reported to your server.
 
-![A station](docs/images/desktop-playlists.webp)
-
 ## The desktop app
 
 For Windows and Linux. Several servers with one-click switching, a song table you can sort and resize, **Ctrl+K** to search or run a command from anywhere, live lists built from rules, Library health, a mini player, and media keys.
 
-![The player](docs/images/desktop-player.webp)
+<table>
+<tr><td width="50%" valign="top"><img src="docs/images/desktop-album.webp" alt="An album, with the songs you have marked"><br><sub>An album, with the songs you have marked</sub></td><td width="50%" valign="top"><img src="docs/images/desktop-player.webp" alt="The full player"><br><sub>The full player</sub></td></tr>
+<tr><td width="50%" valign="top"><img src="docs/images/desktop-search.webp" alt="Search: your music, then what Octo found"><br><sub>Search: your music, then what Octo found</sub></td><td width="50%" valign="top"><img src="docs/images/desktop-artist.webp" alt="An artist"><br><sub>An artist</sub></td></tr>
+<tr><td width="50%" valign="top"><img src="docs/images/desktop-lyrics.webp" alt="Live lyrics, word by word"><br><sub>Live lyrics, word by word</sub></td><td width="50%" valign="top"><img src="docs/images/desktop-queue.webp" alt="The queue beside an album"><br><sub>The queue beside an album</sub></td></tr>
+<tr><td width="50%" valign="top"><img src="docs/images/desktop-library.webp" alt="Albums"><br><sub>Albums</sub></td><td width="50%" valign="top"><img src="docs/images/desktop-palette.webp" alt="Ctrl+K from anywhere"><br><sub>Ctrl+K from anywhere</sub></td></tr>
+<tr><td width="50%" valign="top"><img src="docs/images/desktop-livelist.webp" alt="A live list"><br><sub>A live list</sub></td><td width="50%" valign="top"><img src="docs/images/desktop-health.webp" alt="Library health"><br><sub>Library health</sub></td></tr>
+<tr><td width="50%" valign="top"><img src="docs/images/desktop-playlists.webp" alt="A station with its painted cover"><br><sub>A station with its painted cover</sub></td><td width="50%" valign="top"><img src="docs/images/desktop-genres.webp" alt="Genres"><br><sub>Genres</sub></td></tr>
+</table>
 
 ## The Android app
 
 For Android 10 and newer. Your phone's music and your server's make one library. Download songs, albums and playlists for offline, set streaming quality for Wi-Fi and mobile data, and use the notification, lock screen and widgets.
+
+<table>
+<tr><td width="25%" valign="top"><img src="docs/images/phone-search.webp" alt="Search"><br><sub>Search</sub></td><td width="25%" valign="top"><img src="docs/images/phone-album.webp" alt="An album"><br><sub>An album</sub></td><td width="25%" valign="top"><img src="docs/images/phone-album-tracks.webp" alt="Songs you can add"><br><sub>Songs you can add</sub></td><td width="25%" valign="top"><img src="docs/images/phone-artist.webp" alt="An artist found online"><br><sub>An artist found online</sub></td></tr>
+<tr><td width="25%" valign="top"><img src="docs/images/phone-player.webp" alt="The player"><br><sub>The player</sub></td><td width="25%" valign="top"><img src="docs/images/phone-lyrics.webp" alt="Live lyrics"><br><sub>Live lyrics</sub></td><td width="25%" valign="top"><img src="docs/images/phone-queue.webp" alt="Up next"><br><sub>Up next</sub></td><td width="25%" valign="top"><img src="docs/images/phone-library.webp" alt="Albums"><br><sub>Albums</sub></td></tr>
+<tr><td width="25%" valign="top"><img src="docs/images/phone-artist-library.webp" alt="An artist in your library"><br><sub>An artist in your library</sub></td><td width="25%" valign="top"><img src="docs/images/phone-health.webp" alt="Library health"><br><sub>Library health</sub></td></tr>
+</table>
 
 ## Install
 
