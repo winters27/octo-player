@@ -204,21 +204,28 @@ class ServerSwitch @Inject constructor(
         // The last song's play is noted for the server it played from.
         listening.noted()
         left?.queue?.let { serverQueue.leaving(it) }
-        queue.handOver(from.id, left?.queue, to ?: PHONE_LIBRARY, keepWhenNone = false)
+        val next = to ?: PHONE_LIBRARY
+        queue.handOver(from.id, left?.queue, next, keepWhenNone = false)
         handedOver = true
+        // The player waits for the next server's library on its own, even
+        // should another switch follow at once.
+        scope.launch { bringBack(next, changed = true) }
     }
 
-    // After the server in use changed: once its library is in place, its
-    // queue comes back into the player.
+    // After the server in use changed without a leave (none was in use):
+    // the phone's queue keeps playing, unless the server signed in to left
+    // one here.
     private suspend fun arrived(from: String, to: String) {
-        val changed = if (handedOver) {
-            true
-        } else {
-            // No server was in use: the phone's queue keeps playing, unless
-            // the server signed in to left one here.
-            queue.handOver(from, null, to, keepWhenNone = true)
+        if (handedOver) {
+            handedOver = false
+            return
         }
-        handedOver = false
+        bringBack(to, queue.handOver(from, null, to, keepWhenNone = true))
+    }
+
+    // Once the library of `to` is in place, its queue comes back into the
+    // player, and a car reads its tabs again.
+    private suspend fun bringBack(to: String, changed: Boolean) {
         serverQueue.arrived()
         val side = player ?: return
         if (withTimeoutOrNull(LIBRARY_WAIT_MS) { sync.ready.first { it == to } } == null) {
