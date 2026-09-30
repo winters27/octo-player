@@ -22,6 +22,7 @@ import app.winters.octo.design.GlassInput
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoType
 import app.winters.octo.server.PasswordChange
+import app.winters.octo.server.ServerCheck
 import app.winters.octo.server.PasswordDraft
 import app.winters.octo.server.passwordChangeWords
 import app.winters.octo.server.passwordDraftProblem
@@ -45,9 +46,12 @@ import app.winters.octo.connection.ConnectionChooser
 import app.winters.octo.connection.FolderChoice
 import app.winters.octo.connection.Place
 import app.winters.octo.data.SessionRepository
+import app.winters.octo.data.KeptServers
 import app.winters.octo.data.SessionState
 import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.OctoColors
+import app.winters.octo.playback.ServerSwitch
+import app.winters.octo.playback.SwitchOutcome
 import app.winters.octo.playlists.PlaylistSync
 import app.winters.octo.server.LastSync
 import app.winters.octo.server.ServerSync
@@ -69,9 +73,11 @@ import app.winters.octo.ui.settings.rows.SettingsGroup
 import app.winters.octo.ui.settings.rows.SettingsPageFrame
 import app.winters.octo.ui.settings.rows.SwitchRow
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -80,9 +86,32 @@ class ServerViewModel @Inject constructor(
     private val sessions: SessionRepository,
     private val sync: ServerSync,
     private val playlists: PlaylistSync,
+    private val switcher: ServerSwitch,
     chooser: ConnectionChooser,
 ) : ViewModel() {
     val session: StateFlow<SessionState> = sessions.state
+
+    // Every kept server, the one being switched to, and how each answered.
+    val servers: StateFlow<KeptServers> = sessions.servers
+    val switching: StateFlow<String?> = switcher.switching
+    private val _checks = MutableStateFlow<Map<String, ServerCheck>>(emptyMap())
+    val checks: StateFlow<Map<String, ServerCheck>> = _checks
+
+    // Asks every kept server how it is. Servers signed out of are not asked.
+    fun refreshChecks() {
+        sessions.servers.value.servers.forEach { server ->
+            viewModelScope.launch {
+                val check = sessions.check(server.id)
+                _checks.update { it + (server.id to check) }
+            }
+        }
+    }
+
+    suspend fun switchTo(id: String): SwitchOutcome = switcher.switchTo(id)
+
+    fun signOut(id: String) = switcher.signOut(id)
+
+    fun remove(id: String, forgetHere: Boolean) = switcher.remove(id, forgetHere)
     val syncing: StateFlow<Boolean> = sync.syncing
     val problem: StateFlow<String?> = sync.problem
     val last: StateFlow<LastSync?> = sync.last.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -137,13 +166,19 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
     var folderProblem by remember { mutableStateOf<String?>(null) }
     var changing by remember { mutableStateOf(false) }
 
+    val kept by vm.servers.collectAsStateWithLifecycle()
+
     SettingsPageFrame("Server and sync", onBack, highlight) {
+        // Once a server is kept, the list of them leads the page.
+        if (state !is SessionState.Loading && kept.servers.isNotEmpty()) ServerList(vm, onOpen, onChangePassword = { changing = true })
         when (val current = state) {
             SessionState.Loading -> Unit
-            SessionState.SignedOut -> SettingsGroup(
-                footer = "Add the music on your own server. It joins your library here and plays over the network.",
-            ) {
-                ActionRow(SettingsIndex.ConnectServer, onClick = { onOpen(SignInRoute) })
+            SessionState.SignedOut -> if (kept.servers.isEmpty()) {
+                SettingsGroup(
+                    footer = "Add the music on your own server. It joins your library here and plays over the network.",
+                ) {
+                    ActionRow(SettingsIndex.ConnectServer, onClick = { onOpen(SignInRoute) })
+                }
             }
             is SessionState.SignedIn -> {
                 val client = current.session.client
@@ -309,21 +344,23 @@ class DisconnectPrompt {
 
 val LocalDisconnectPrompt = staticCompositionLocalOf<DisconnectPrompt> { error("No disconnect prompt") }
 
-// Asks before the server is disconnected.
+// Asks before signing out of the server in use.
 @Composable
 fun DisconnectSheetHost(prompt: DisconnectPrompt, vm: ServerViewModel = hiltViewModel()) {
+    val state by vm.session.collectAsStateWithLifecycle()
+    val name = (state as? SessionState.SignedIn)?.session?.name ?: "the server"
     GlassPopup(
         visible = prompt.open,
         anchor = rememberOpenedBeside(prompt.open),
         onDismiss = prompt::close,
         backdrop = LocalHaze.current,
-        title = "Disconnect",
+        title = "Sign out",
     ) {
         PopupQuestion(
-            "Disconnect the server?",
-            "Its music leaves your library on this phone. Nothing on the server changes, " +
-                "and you can connect again at any time.",
-            "Disconnect",
+            "Sign out of $name?",
+            "Its music leaves your library on this phone until you sign in again. It stays in your list, " +
+                "and nothing on the server changes.",
+            "Sign out",
             onConfirm = {
                 vm.disconnect()
                 prompt.close()

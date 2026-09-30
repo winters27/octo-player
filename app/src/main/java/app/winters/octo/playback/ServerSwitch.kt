@@ -5,6 +5,8 @@ import app.winters.octo.data.Session
 import app.winters.octo.data.SessionHandoff
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
+import app.winters.octo.data.SignInError
+import app.winters.octo.data.SignInRequest
 import app.winters.octo.data.StoredServer
 import app.winters.octo.data.SwitchResult
 import app.winters.octo.data.accountId
@@ -23,6 +25,7 @@ import app.winters.octo.server.switchNotice
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -131,12 +134,14 @@ class ServerSwitch @Inject constructor(
         if (player === side) player = null
     }
 
-    // Makes another kept server the one in use, and says how it went.
-    suspend fun switchTo(id: String): SwitchOutcome {
-        if (_switching.value != null) return SwitchOutcome.Failed("Still switching. Try again in a moment.")
+    // Makes another kept server the one in use, and says how it went. It
+    // runs on its own, so a page closed meanwhile never cuts it in half.
+    suspend fun switchTo(id: String): SwitchOutcome = scope.async {
+        if (_switching.value != null) return@async SwitchOutcome.Failed("Still switching. Try again in a moment.")
         _switching.value = id
         try {
-            return when (val result = sessions.switchTo(id)) {
+            stoppedMusic = false
+            when (val result = sessions.switchTo(id)) {
                 is SwitchResult.Done -> SwitchOutcome.Done(switchNotice(result.session.name, result.from?.name, stoppedMusic && result.from != null))
                 is SwitchResult.NeedsPassword -> SwitchOutcome.NeedsPassword(result.server, result.note)
                 is SwitchResult.Failed -> SwitchOutcome.Failed(result.message)
@@ -144,25 +149,50 @@ class ServerSwitch @Inject constructor(
         } finally {
             _switching.value = null
         }
+    }.await()
+
+    // Signs in and makes the server the one in use. Answers what went wrong,
+    // or the notice to show: the switch's, when another was in use before.
+    suspend fun signIn(request: SignInRequest): Pair<SignInError?, String?> = scope.async {
+        val before = (sessions.state.value as? SessionState.SignedIn)?.session
+        stoppedMusic = false
+        val failed = sessions.signIn(request)
+        if (failed != null) return@async failed to null
+        val now = (sessions.state.value as? SessionState.SignedIn)?.session ?: return@async null to null
+        val from = before?.takeIf { it.id != now.id }
+        null to switchNotice(now.name, from?.name, stoppedMusic && from != null)
+    }.await()
+
+    // Runs a change to the kept servers on its own, so a page closed
+    // meanwhile never cuts it in half.
+    suspend fun <T> onItsOwn(change: suspend () -> T): T = scope.async { change() }.await()
+
+    // Signs out of a kept server, the one in use included. It stays listed.
+    fun signOut(id: String) {
+        scope.launch {
+            if (sessions.state.value.accountId == id) sync.disconnect() else sessions.signOut(id)
+        }
     }
 
     // Takes a server off the list, with its copy of the library. With
     // `forgetHere`, what the phone keeps for it goes too: its queue, plays
     // waiting to be sent, live lists, downloads and the rest; otherwise it
     // stays in case the server is added again.
-    suspend fun remove(id: String, forgetHere: Boolean) {
-        val gone = sync.remove(id) ?: return
-        if (!forgetHere) return
-        queue.forget(id)
-        listeningStore.forget(id)
-        favouriteStore.forget(id)
-        playlists.forget(id, gone.sourceId)
-        recent.forget(id)
-        liveLists.forget(id)
-        serverQueue.forget(id)
-        // Another kept account on the same address keeps the downloads.
-        val shared = sessions.servers.value.servers.any { it.sourceId == gone.sourceId }
-        if (!shared) gone.sourceId?.let { offline.forgetSource(it) }
+    fun remove(id: String, forgetHere: Boolean) {
+        scope.launch {
+            val gone = sync.remove(id) ?: return@launch
+            if (!forgetHere) return@launch
+            queue.forget(id)
+            listeningStore.forget(id)
+            favouriteStore.forget(id)
+            playlists.forget(id, gone.sourceId)
+            recent.forget(id)
+            liveLists.forget(id)
+            serverQueue.forget(id)
+            // Another kept account on the same address keeps the downloads.
+            val shared = sessions.servers.value.servers.any { it.sourceId == gone.sourceId }
+            if (!shared) gone.sourceId?.let { offline.forgetSource(it) }
+        }
     }
 
     // Before the server in use changes: what plays stops and counts for it,

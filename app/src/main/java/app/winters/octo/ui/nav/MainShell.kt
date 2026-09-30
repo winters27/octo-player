@@ -244,6 +244,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             }
                             entry<SignInRoute> { SignInScreen(back) }
                             entry<EditConnectionRoute> { SignInScreen(back, editing = true) }
+                            entry<ServerFormRoute> { route -> SignInScreen(back, form = route.form, serverId = route.id, note = route.note) }
                             entry<OctoAdminRoute> { OctoAdminScreen(back) }
                             entry<SoundRoute> { SoundScreen(back) }
                             entry<SharesRoute> { SharesScreen(back) }
