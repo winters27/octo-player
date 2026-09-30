@@ -122,7 +122,7 @@ jobs:
           GH_TOKEN: ${{ secrets.OCTO_RELEASES_TOKEN }}
         run: |
           version="${TAG#"${APP}-v"}"
-          if [ "$APP" = desktop ]; then title="Octo for Windows, macOS and Linux $version"; else title="Octo for Android $version"; fi
+          if [ "$APP" = desktop ]; then title="Octo for Windows and Linux $version"; else title="Octo for Android $version"; fi
           if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
             echo "::error::$TAG is already released on $REPO."
             exit 1

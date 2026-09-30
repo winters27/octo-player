@@ -41,8 +41,7 @@ jobs:
         include:
           - os: windows-latest
             tasks: ":desktop:packageMsi :desktop:packagePortableZip"
-          - os: macos-latest
-            tasks: ":desktop:packageDmg"
+          # macOS stays out until the Mac build has been opened on a Mac.
           - os: ubuntu-latest
             tasks: ":desktop:packageDeb :desktop:packageRpm :desktop:packagePortableZip"
     runs-on: ${{ matrix.os }}

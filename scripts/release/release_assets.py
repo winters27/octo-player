@@ -36,7 +36,7 @@ from pathlib import Path
 APPS = {
     "desktop": {
         "prefix": "desktop-v",
-        "title": "Octo for Windows, macOS and Linux",
+        "title": "Octo for Windows and Linux",
         # The parts of the repository the desktop app is built from.
         "paths": ["desktop", "desktop-design", "design", "shared", "subsonic", "audio-engine"],
     },
