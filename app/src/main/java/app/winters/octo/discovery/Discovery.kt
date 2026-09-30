@@ -71,6 +71,11 @@ class Discovery @Inject constructor(
     // Whether a server is signed in, so there is anything to discover.
     val available: Flow<Boolean> = sessions.state.map { it is SessionState.SignedIn }
 
+    // Whether the signed-in server runs stations, which only Octo does. It
+    // can turn true after sign-in, once the server's extensions are read again.
+    val offersStations: Flow<Boolean> =
+        sessions.state.map { (it as? SessionState.SignedIn)?.session?.runsOcto == true }
+
     suspend fun search(query: String): Discovered? {
         val (client, sourceId) = server() ?: return null
         val found = client.search(query.trim(), artists = 10, albums = 20, songs = SEARCH_SONGS)

@@ -106,7 +106,7 @@ class HomeViewModel @Inject constructor(
     var startingStation by mutableStateOf<String?>(null)
         private set
 
-    private var signedIn = false
+    private var offersStations = false
     private var stationsJob: Job? = null
     private var stationsLoadedAt: Long? = null
     private var stationsFailed = false
@@ -117,14 +117,16 @@ class HomeViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collect { reroll() }
         }
-        // A new sign-in starts over; signing out drops the old server's list.
+        // A new sign-in starts over; signing out, or a server without
+        // stations, drops the old list. The server can turn out to be Octo
+        // after start, once its extensions are read again.
         viewModelScope.launch {
-            discovery.available.distinctUntilChanged().collect { available ->
-                signedIn = available
+            discovery.offersStations.distinctUntilChanged().collect { offered ->
+                offersStations = offered
                 stationsJob?.cancel()
                 stationsLoadedAt = null
                 stationsFailed = false
-                if (available) loadStations() else stations = emptyList()
+                if (offered) loadStations() else stations = emptyList()
             }
         }
     }
@@ -133,7 +135,7 @@ class HomeViewModel @Inject constructor(
     // or the list is getting old.
     fun onShown() {
         val loading = stationsJob?.isActive == true
-        if (signedIn && stationsDue(SystemClock.elapsedRealtime(), stationsLoadedAt, stationsFailed, loading)) {
+        if (offersStations && stationsDue(SystemClock.elapsedRealtime(), stationsLoadedAt, stationsFailed, loading)) {
             loadStations()
         }
     }
@@ -174,7 +176,7 @@ class HomeViewModel @Inject constructor(
             reroll()
             refreshing = false
         }
-        if (signedIn) loadStations()
+        if (offersStations) loadStations()
     }
 
     // Runs in the background so no other shelf waits on the server.

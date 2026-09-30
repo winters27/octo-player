@@ -137,7 +137,38 @@ class SessionRepository @Inject constructor(
     @Volatile private var credentials: Credentials? = null
 
     init {
-        scope.launch { _state.value = changes.withLock { restore() } }
+        scope.launch {
+            _state.value = changes.withLock { restore() }
+            refreshExtensions()
+        }
+    }
+
+    // What the server offers is saved at sign-in, and a server gains
+    // extensions over time: an Octo signed in to before it listed its own
+    // ones would never be known as Octo. So each start asks again, and keeps
+    // what was saved when the server does not answer.
+    private suspend fun refreshExtensions() {
+        val session = (_state.value as? SessionState.SignedIn)?.session ?: return
+        val fresh = runCatching { session.client.extensions() }.getOrNull()
+            ?.flatMap { ext -> ext.versions.map { "${ext.name}:$it" } }?.toSet() ?: return
+        if (fresh.isEmpty() || fresh == session.extensions) return
+        changes.withLock {
+            // Only while the same session is still the one in use.
+            val current = (_state.value as? SessionState.SignedIn)?.session
+            if (current !== session) return@withLock
+            store.read()?.let { saved -> store.write(saved.copy(extensions = fresh)) }
+            _state.value = SessionState.SignedIn(
+                Session(
+                    session.client,
+                    session.serverType,
+                    session.serverVersion,
+                    session.isOcto,
+                    session.adminReachable,
+                    fresh,
+                    session.connection,
+                ),
+            )
+        }
     }
 
     suspend fun signIn(address: String, username: String, password: String): SignInError? =
