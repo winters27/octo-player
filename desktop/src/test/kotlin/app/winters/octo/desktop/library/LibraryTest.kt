@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.library
 
+import app.winters.octo.catalog.DRAWN_COVER_VERSION
 import app.winters.octo.catalog.naturalSortKey
 import app.winters.octo.server.serverTime
 import app.winters.octo.sort.SongSort
@@ -11,6 +12,7 @@ import app.winters.octo.subsonic.Artist
 import app.winters.octo.subsonic.Song
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -242,6 +244,24 @@ class LibraryIndexTest {
         assertEquals(1200, coverBucket(5000))
         assertEquals("cover:music.test:al-1:300", coverKey("music.test", "al-1", 300))
         assertEquals("online-cover:v$ONLINE_COVER_VERSION:music.test:al-1:300", coverKey("music.test", "al-1", 300, online = true))
+    }
+
+    @Test
+    fun aCoverOctoPaintsIsKeptUnderItsVersionAndTheDay() {
+        val day = 24L * 60 * 60 * 1000
+        // 2026-09-29T12:00Z, on day 20725.
+        val noon = 1_790_683_200_000L
+        val station = "or3kZ9QpLmN2xY7wV1bC0a"
+        val mix = "og8Hf2Kd9LzQw3Rt5Yu7Ip"
+        assertEquals("drawn-cover:v$DRAWN_COVER_VERSION:20725:music.test:$station:300", coverKey("music.test", station, 300, nowMs = noon))
+        assertEquals("drawn-cover:v$DRAWN_COVER_VERSION:20725:music.test:$mix:600", coverKey("music.test", mix, 600, nowMs = noon))
+        // Never the key it was kept under for good before.
+        assertNotEquals("cover:music.test:$station:300", coverKey("music.test", station, 300, nowMs = noon))
+        // Asked for again the next day, and only then.
+        assertEquals(coverKey("music.test", station, 300, nowMs = 20725 * day), coverKey("music.test", station, 300, nowMs = 20726 * day - 1))
+        assertNotEquals(coverKey("music.test", station, 300, nowMs = 20725 * day), coverKey("music.test", station, 300, nowMs = 20726 * day))
+        // A library cover keeps its key whatever the day.
+        assertEquals("cover:music.test:al-1:300", coverKey("music.test", "al-1", 300, nowMs = noon))
     }
 
     @Test

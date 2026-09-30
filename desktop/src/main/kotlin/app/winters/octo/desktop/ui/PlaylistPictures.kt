@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import app.winters.octo.catalog.drawnCoverStamp
 import app.winters.octo.covers.CoverSpec
 import app.winters.octo.covers.LIVE_LIST_COVER_LINE
 import app.winters.octo.covers.PLAYLIST_COVER_LINE
@@ -146,6 +147,19 @@ fun StationPicture(app: AppState, station: RadioStation, modifier: Modifier, sha
     if (playlistCoverStyle(app) == PlaylistCoverStyle.Mosaic) {
         Cover(station.coverArt ?: station.id, modifier, shape = shape)
     } else {
-        DesignedCover(app, CoverOrder(station.id, station.name, STATION_COVER_LINE, null, listOfNotNull(station.coverArt ?: station.id), quarters = true), modifier, shape)
+        DesignedCover(app, stationOrder(station, System.currentTimeMillis()), modifier, shape)
     }
 }
+
+// A station's order, its colours from the server's picture of it. That
+// picture changes with the station's songs, so they are worked out again
+// each day, as the picture is fetched again.
+fun stationOrder(station: RadioStation, nowMs: Long) = CoverOrder(
+    station.id,
+    station.name,
+    STATION_COVER_LINE,
+    null,
+    listOfNotNull(station.coverArt ?: station.id),
+    quarters = true,
+    stamp = drawnCoverStamp(nowMs),
+)

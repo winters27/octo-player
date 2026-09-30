@@ -8,6 +8,8 @@ import app.winters.octo.covers.hueDistance
 import app.winters.octo.covers.seededPalette
 import app.winters.octo.covers.toLch
 import app.winters.octo.desktop.FakeServer
+import app.winters.octo.desktop.ui.stationOrder
+import app.winters.octo.subsonic.RadioStation
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import org.jetbrains.skia.EncodedImageFormat
@@ -16,6 +18,7 @@ import org.jetbrains.skia.Rect
 import org.jetbrains.skia.Surface
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -93,6 +96,15 @@ class PlaylistArtStoreTest {
         // A new name is a new picture.
         assertNotNull(store.art(spec.copy(name = "Late nights"), 160))
         assertEquals(2, File(folder.root, "art").listFiles()!!.size)
+    }
+
+    @Test
+    fun aStationsColoursAreWorkedOutAgainEachDayAsItsPictureIs() {
+        val day = 24L * 60 * 60 * 1000
+        val station = RadioStation("or3kZ9QpLmN2xY7wV1bC0a", "Rap Radio", coverArt = "or3kZ9QpLmN2xY7wV1bC0a")
+        fun key(nowMs: Long) = stationOrder(station, nowMs).let { coverPaletteKey("music.test", it.sources + listOfNotNull(it.stamp)) }
+        assertEquals(key(20725 * day), key(20726 * day - 1))
+        assertNotEquals(key(20725 * day), key(20726 * day))
     }
 
     @Test
