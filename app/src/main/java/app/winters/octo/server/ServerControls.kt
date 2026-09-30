@@ -6,6 +6,7 @@ import app.winters.octo.catalog.SourceDao
 import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
+import app.winters.octo.data.accountId
 import app.winters.octo.subsonic.NowPlayingEntry
 import app.winters.octo.subsonic.RadioStationDetails
 import app.winters.octo.subsonic.Share
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -90,29 +92,33 @@ class ServerControls @Inject constructor(
     private val _admin = MutableStateFlow(false)
     val admin: StateFlow<Boolean> = _admin
 
-    // The server that said it does not share, if any.
-    private val noSharing = MutableStateFlow<String?>(null)
+    // The kept servers that said they do not share, by id, for this run.
+    private val noSharing = MutableStateFlow<Set<String>>(emptySet())
 
     // Whether links can be shared: a server is signed in and has not said no.
     val sharing: StateFlow<Boolean> = combine(sessions.state, noSharing) { state, refused ->
-        state is SessionState.SignedIn && state.session.sourceId != refused
+        state is SessionState.SignedIn && state.session.id !in refused
     }.stateIn(scope, SharingStarted.Eagerly, false)
 
     private val _scan = MutableStateFlow<ScanState>(ScanState.Idle)
     val scan: StateFlow<ScanState> = _scan
     private var scanJob: Job? = null
 
-    // Stations the server refused to change, by id.
-    private val _readOnly = MutableStateFlow<Set<String>>(emptySet())
-    val readOnly: StateFlow<Set<String>> = _readOnly
+    // Stations each kept server refused to change, by its id and theirs,
+    // for this run; a switch back finds them still marked.
+    private val refusedStations = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
+    val readOnly: StateFlow<Set<String>> = combine(sessions.state, refusedStations) { state, refused ->
+        refused[state.accountId].orEmpty()
+    }.stateIn(scope, SharingStarted.Eagerly, emptySet())
+
+    private fun markReadOnly(account: String, ids: Collection<String>) =
+        refusedStations.update { it + (account to it[account].orEmpty() + ids) }
 
     init {
-        // Each new sign-in starts over, and asks once whether the user is an admin.
+        // Each server in use asks once whether the user is an admin there.
         scope.launch {
             sessions.state.distinctUntilChangedBy { (it as? SessionState.SignedIn)?.session }.collect { state ->
                 _admin.value = false
-                _readOnly.value = emptySet()
-                noSharing.value = null
                 scanJob?.cancel()
                 _scan.value = ScanState.Idle
                 val session = (state as? SessionState.SignedIn)?.session ?: return@collect
@@ -169,7 +175,7 @@ class ServerControls @Inject constructor(
     private suspend fun <T> remembering(session: Session, call: suspend () -> T): T = try {
         call()
     } catch (e: SubsonicException) {
-        if (sharingUnavailable(e)) noSharing.value = session.sourceId
+        if (sharingUnavailable(e)) noSharing.update { it + session.id }
         throw e
     }
 
@@ -222,7 +228,7 @@ class ServerControls @Inject constructor(
         val session = session() ?: return emptyList()
         val stations = session.client.radioStationDetails()
         val generated = stations.filter { looksGenerated(it, session.isOcto) }.map { it.id }
-        if (generated.isNotEmpty()) _readOnly.value += generated
+        if (generated.isNotEmpty()) markReadOnly(session.id, generated)
         return stations
     }
 
@@ -242,7 +248,7 @@ class ServerControls @Inject constructor(
         try {
             call()
         } catch (e: SubsonicException) {
-            if (e is SubsonicException.NotFound || (e is SubsonicException.Server && e.code == 50)) _readOnly.value += id
+            if (e is SubsonicException.NotFound || (e is SubsonicException.Server && e.code == 50)) session()?.let { markReadOnly(it.id, listOf(id)) }
             throw e
         }
     }
