@@ -18,6 +18,7 @@ import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.server.ServerSync
 import app.winters.octo.server.serverSourceId
+import app.winters.octo.server.sourceId
 import app.winters.octo.subsonic.Acquisition
 import app.winters.octo.subsonic.OCTO_ACQUISITIONS
 import app.winters.octo.subsonic.SubsonicException
@@ -224,7 +225,8 @@ class Downloads @Inject constructor(
     suspend fun afterSync() {
         val client = client() ?: return
         val now = System.currentTimeMillis()
-        online.prune(serverSourceId(client.primaryUrl), now - FORGET_MS)
+        val kept = sessions.servers.value.servers.mapNotNull { it.sourceId }
+        online.prune(serverSourceId(client.primaryUrl), kept + serverSourceId(client.primaryUrl), now - FORGET_MS)
         val waiting = online.waiting().ifEmpty { return }
         val candidates = waiting.flatMap { titleKeys(it.title) }.distinct().chunked(900).flatMap { catalog.tracksWithKeys(it) }
         val adopted = adoptions(waiting, candidates.filter { !isFind(it.id) })

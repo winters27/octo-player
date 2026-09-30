@@ -123,6 +123,8 @@ class ServerSync @Inject constructor(
         if (started) return
         started = true
         scope.launch {
+            // The kept servers are known once the saved sign-in is read.
+            sessions.state.first { it !is SessionState.Loading }
             takeInOneServersRecord()
             sessions.state
                 .filter { it !is SessionState.Loading }
