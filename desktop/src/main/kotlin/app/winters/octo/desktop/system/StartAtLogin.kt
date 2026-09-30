@@ -1,6 +1,5 @@
 package app.winters.octo.desktop.system
 
-import java.io.File
 
 // Starting Octo when the listener signs in to Windows: a value in the
 // current user's Run key naming the installed program, with --tray added
@@ -36,7 +35,8 @@ fun startCommand(program: String, inTray: Boolean): String = "\"$program\"" + if
 // Whether a command starts an Octo program, so Octo only ever removes its own.
 fun isOctoCommand(command: String?): Boolean {
     val program = command?.trim()?.let { if (it.startsWith("\"")) it.drop(1).substringBefore('"') else it.substringBefore(' ') } ?: return false
-    val name = File(program).name.lowercase()
+    // The last part of the path, whichever slash the command uses.
+    val name = program.substringAfterLast('/').substringAfterLast('\\').lowercase()
     return name == "octo.exe" || name == "octo"
 }
 

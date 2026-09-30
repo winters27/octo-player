@@ -172,6 +172,8 @@ class DesktopUpdatesTest {
     // with its path quoted, finds where Octo is now, and opens it again.
     @Test
     fun theWindowsLauncherWaitsInstallsFindsAndReopens() {
+        // Its paths are Windows paths, which only split into folders there.
+        assumeTrue(System.getProperty("os.name").startsWith("Windows"))
         val msi = File("C:\\Users\\O'Brien\\AppData\\Local\\Temp\\Octo\\updates\\desktop-v1.2.0\\Octo-1.2.0-windows-x64.msi")
         val octo = File("C:\\Users\\O'Brien\\AppData\\Local\\Octo\\Octo.exe")
         val moved = File("C:\\Users\\O'Brien\\AppData\\Local\\OctoPlayer\\Octo.exe")

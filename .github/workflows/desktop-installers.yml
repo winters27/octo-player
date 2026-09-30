@@ -79,6 +79,8 @@ jobs:
 
       - name: Installers
         # A tag's version (none when run by hand) goes into the app and its installers.
+        # Bash on every system: PowerShell splits -PoctoDesktopVersion=1.1.0 at its first dot.
+        shell: bash
         run: ./gradlew ${{ matrix.tasks }} -PoctoBuild=${{ env.OCTO_BUILD }} ${{ needs.version.outputs.version && format('-PoctoDesktopVersion={0}', needs.version.outputs.version) || '' }} --no-daemon
 
       - uses: actions/upload-artifact@v7

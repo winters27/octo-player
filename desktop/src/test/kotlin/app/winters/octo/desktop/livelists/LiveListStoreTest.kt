@@ -20,6 +20,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.RandomAccessFile
 import kotlin.concurrent.thread
+import org.junit.Assume.assumeTrue
 
 // An account's live lists kept in its folder: written as they change, read
 // back as they were, one account's never another's.
@@ -93,6 +94,8 @@ class LiveListStoreTest {
     // Lists that cannot be read at the start are never saved over with none.
     @Test
     fun listsThatCannotBeReadAreLeftAlone() {
+        // A lock only stops reading on Windows; elsewhere locks are advisory.
+        assumeTrue(System.getProperty("os.name").startsWith("Windows"))
         val file = File(temp.root, "listening/abc/live-lists.json")
         store().apply { open(file) }.save(LiveList.new("Kept", favourites, 0, "a"))
         RandomAccessFile(file, "rw").use { locked ->
