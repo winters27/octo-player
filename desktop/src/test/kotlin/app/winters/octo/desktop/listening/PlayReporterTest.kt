@@ -8,6 +8,7 @@ import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.cancel
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -72,6 +73,29 @@ class PlayReporterTest {
         waitFor { PendingPlays(File(folder(), "pending.txt")).all().isEmpty() }
         assertEquals(emptyList<PendingPlay>(), PendingPlays(File(folder(), "pending.txt")).all())
         assertEquals(listOf("s1"), PlayLog(File(folder(), "plays.jsonl")).read().map { it.song.id })
+    }
+
+    @Test
+    fun aPlayIsSentTheMomentItCountsNotWhenTheSongMovesOn() {
+        server.answer("scrobble")
+        val gate = Channel<Unit>(Channel.UNLIMITED)
+        val asked = CopyOnWriteArrayList<Long>()
+        val connection = server.connection()
+        PlayReporter(
+            player, settings(), { connection }, temp.root, scope, io = Dispatchers.Unconfined,
+            clock = { now }, wallClock = { 5_000 + now }, pause = { asked += it; gate.receive() },
+        ).start()
+        player.play(songs)
+        waitFor { asked.isNotEmpty() }
+        assertEquals(50_000L, asked.first())
+        now += 50_000
+        gate.trySend(Unit)
+        waitFor { scrobbles(true).isNotEmpty() }
+        assertEquals("s1", scrobbles(true).single().url.queryParameter("id"))
+        now += 10_000
+        player.next()
+        Thread.sleep(200)
+        assertEquals(1, scrobbles(true).size)
     }
 
     @Test

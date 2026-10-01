@@ -3,16 +3,18 @@ package app.winters.octo.desktop.listening
 import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.discovery.knownLengthMs
 import app.winters.octo.playback.countsAsPlay
+import app.winters.octo.playback.msLeftToCount
 import app.winters.octo.subsonic.Song
 
 // A play that counted: the song, when it began (ms since 1970), how long
-// it was actually heard and how long it is.
+// it had been heard when it counted, and how long it is.
 data class HeardPlay(val song: Song, val startedAt: Long, val heardMs: Long, val durationMs: Long)
 
 // Counts how long each song is actually heard, pauses and waits for the
-// network left out, and hands on a play when the song moves on, if enough
-// of it was heard (the phone's rule). Also says when each song first
-// starts to be heard. Each time round a song on repeat is its own play.
+// network left out, and hands on a play the moment enough of it was heard
+// (the phone's rule), or when it moves on if that moment was missed. Also
+// says when each song first starts to be heard. Each time round a song on
+// repeat is its own play.
 // Fed every player state; not thread safe, so one thread feeds it.
 class PlayCounter(
     private val onStarted: (Song) -> Unit,
@@ -30,6 +32,9 @@ class PlayCounter(
     private var hearingSince: Long? = null
     private var announced = false
 
+    // Whether this play was already handed on, the moment it counted.
+    private var counted = false
+
     fun update(state: PlayerState) {
         val current = state.current
         val id = current?.let { it.key to state.rounds }
@@ -40,6 +45,7 @@ class PlayCounter(
             startedAt = wallClock()
             heardMs = 0
             announced = false
+            counted = false
         }
         if (current == null) return
         val length = knownLengthMs(current.song)
@@ -56,6 +62,26 @@ class PlayCounter(
         }
     }
 
+    // How long until the song playing counts, while it is being heard and
+    // has not counted yet; null otherwise.
+    fun msUntilCounted(): Long? {
+        if (counted || song == null) return null
+        val since = hearingSince ?: return null
+        return msLeftToCount(heardMs + (clock() - since), durationMs)
+    }
+
+    // Hands on the song playing the moment enough of it was heard, not when
+    // it moves on, so the last song before a long pause or a shutdown is
+    // neither held back nor lost. Once per play.
+    fun check() {
+        if (counted) return
+        val heard = song ?: return
+        val heardNow = heardMs + (hearingSince?.let { clock() - it } ?: 0)
+        if (!countsAsPlay(heardNow, durationMs)) return
+        counted = true
+        onCounted(HeardPlay(heard, startedAt, heardNow, durationMs))
+    }
+
     // Hands on the song playing now if it counts, and starts over: for
     // quitting, or signing out.
     fun flush() {
@@ -67,7 +93,7 @@ class PlayCounter(
     private fun finish() {
         stopClock()
         val heard = song ?: return
-        if (countsAsPlay(heardMs, durationMs)) onCounted(HeardPlay(heard, startedAt, heardMs, durationMs))
+        if (!counted && countsAsPlay(heardMs, durationMs)) onCounted(HeardPlay(heard, startedAt, heardMs, durationMs))
         song = null
         heardMs = 0
     }

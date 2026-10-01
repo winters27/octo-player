@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -24,7 +25,8 @@ import java.io.IOException
 private const val RETRY_EVERY_MS = 5 * 60_000L
 
 // Tells the signed-in server what is played here, as the phone does: the
-// song playing now as soon as it is heard, and each play that counted.
+// song playing now as soon as it is heard, and each play the moment it
+// counts.
 // Every counted play also goes in this computer's own play log. A play the
 // server cannot take right now waits on disk and is sent later, oldest
 // first. Nothing here ever holds up playback or shows an error.
@@ -41,6 +43,8 @@ class PlayReporter(
     wallClock: () -> Long = System::currentTimeMillis,
     // The most plays each account's log keeps.
     private val logMax: Int = MAX_LOGGED_PLAYS,
+    // Waits that long; tests hold it.
+    private val pause: suspend (Long) -> Unit = { delay(it) },
 ) {
     private val counter = PlayCounter(::started, ::counted, clock, wallClock)
     private val sending = Mutex()
@@ -59,7 +63,18 @@ class PlayReporter(
 
     // Follows the player, and tries waiting plays again now and then.
     fun start(): Job = scope.launch {
-        launch { player.state.collect(counter::update) }
+        launch {
+            player.state.collectLatest { state ->
+                counter.update(state)
+                // A play goes to the server the moment it counts, not when the
+                // song moves on. A new state calls the wait off.
+                while (true) {
+                    val left = counter.msUntilCounted() ?: break
+                    pause(maxOf(left, 1))
+                    counter.check()
+                }
+            }
+        }
         while (isActive) {
             delay(RETRY_EVERY_MS)
             sendWaiting()

@@ -4,6 +4,7 @@ import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.QueueEntry
 import app.winters.octo.subsonic.Song
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class PlayCounterTest {
@@ -90,6 +91,51 @@ class PlayCounterTest {
         now += 240_000
         counter.flush()
         assertEquals(listOf("long"), counted.map { it.song.id })
+    }
+
+    @Test
+    fun aPlayCountsTheMomentEnoughIsHeardAndOnlyOnce() {
+        on(a)
+        assertEquals(100_000L, counter.msUntilCounted())
+        now += 100_000
+        counter.check()
+        assertEquals(listOf("a"), counted.map { it.song.id })
+        assertEquals(100_000, counted.single().heardMs)
+        assertNull(counter.msUntilCounted())
+        now += 50_000
+        on(b)
+        assertEquals(listOf("a"), counted.map { it.song.id })
+    }
+
+    @Test
+    fun nothingIsDueWhilePausedAndTheWaitResumes() {
+        on(a)
+        now += 30_000
+        on(a, playing = false)
+        assertNull(counter.msUntilCounted())
+        on(a)
+        assertEquals(70_000L, counter.msUntilCounted())
+    }
+
+    @Test
+    fun checkingTooEarlyCountsNothing() {
+        on(a)
+        now += 99_000
+        counter.check()
+        assertEquals(emptyList<HeardPlay>(), counted)
+    }
+
+    @Test
+    fun eachRoundOnRepeatCountsOnceAtItsMoment() {
+        on(a)
+        now += 100_000
+        counter.check()
+        now += 100_000
+        on(a, rounds = 1)
+        now += 100_000
+        counter.check()
+        on(b)
+        assertEquals(2, counted.size)
     }
 
     @Test
