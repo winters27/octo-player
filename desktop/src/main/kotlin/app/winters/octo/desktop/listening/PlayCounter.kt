@@ -15,7 +15,8 @@ data class HeardPlay(val song: Song, val startedAt: Long, val heardMs: Long, val
 // (the phone's rule), or when it moves on if that moment was missed. Also
 // says when each song first starts to be heard. Each time round a song on
 // repeat is its own play.
-// Fed every player state; not thread safe, so one thread feeds it.
+// Fed every player state, and flushed at quit from another thread, so
+// each step holds the counter's lock.
 class PlayCounter(
     private val onStarted: (Song) -> Unit,
     private val onCounted: (HeardPlay) -> Unit,
@@ -35,6 +36,7 @@ class PlayCounter(
     // Whether this play was already handed on, the moment it counted.
     private var counted = false
 
+    @Synchronized
     fun update(state: PlayerState) {
         val current = state.current
         val id = current?.let { it.key to state.rounds }
@@ -64,6 +66,7 @@ class PlayCounter(
 
     // How long until the song playing counts, while it is being heard and
     // has not counted yet; null otherwise.
+    @Synchronized
     fun msUntilCounted(): Long? {
         if (counted || song == null) return null
         val since = hearingSince ?: return null
@@ -73,6 +76,7 @@ class PlayCounter(
     // Hands on the song playing the moment enough of it was heard, not when
     // it moves on, so the last song before a long pause or a shutdown is
     // neither held back nor lost. Once per play.
+    @Synchronized
     fun check() {
         if (counted) return
         val heard = song ?: return
@@ -84,6 +88,7 @@ class PlayCounter(
 
     // Hands on the song playing now if it counts, and starts over: for
     // quitting, or signing out.
+    @Synchronized
     fun flush() {
         finish()
         play = null

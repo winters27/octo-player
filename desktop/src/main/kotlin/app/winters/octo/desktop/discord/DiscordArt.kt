@@ -23,11 +23,14 @@ data class DiscordArtwork(val cover: String? = null, val artist: String? = null)
 // address of the listener's server and nothing signed ever leaves this
 // computer: the album cover from iTunes (Deezer when iTunes has none) and
 // the artist's photo from Deezer. Only names Discord shows anyway are sent.
-// Every answer, found or not, is kept for the session.
+// Every answer, found or not, is kept for the session. A lookup that could
+// not reach the catalogue is not an answer: it rests a while, then is tried
+// again, so a moment offline does not cost the pictures for good.
 class DiscordArt(
     // The body of a GET, or null on any failure.
     private val fetch: (String) -> String? = ::httpGet,
     private val keep: Int = 256,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val found: MutableMap<String, String?> = Collections.synchronizedMap(
         object : LinkedHashMap<String, String?>(16, 0.75f, true) {
@@ -35,24 +38,33 @@ class DiscordArt(
         },
     )
     private val looking: MutableSet<String> = Collections.synchronizedSet(HashSet())
+    private val failedAt: MutableMap<String, Long> = Collections.synchronizedMap(HashMap())
 
     fun known(now: NowPlaying): DiscordArtwork =
         DiscordArtwork(cover = found[coverKey(now)], artist = found[artistKey(now)])
 
     // Whether a picture the settings ask for has not been looked for yet.
     fun wants(now: NowPlaying, prefs: DiscordPrefs): Boolean =
-        keysFor(now, prefs).any { it !in found && it !in looking }
+        keysFor(now, prefs).any { it !in found && it !in looking && !resting(it) }
 
     suspend fun look(now: NowPlaying, prefs: DiscordPrefs) = withContext(Dispatchers.IO) {
         for (key in keysFor(now, prefs)) {
-            if (key in found || !looking.add(key)) continue
+            if (key in found || resting(key) || !looking.add(key)) continue
             try {
                 found[key] = if (key == coverKey(now)) findCover(albumArtistOf(now), now.album) else findArtist(primaryOf(now))
+                failedAt.remove(key)
+            } catch (e: Unreachable) {
+                failedAt[key] = clock()
             } finally {
                 looking.remove(key)
             }
         }
     }
+
+    private fun resting(key: String): Boolean = failedAt[key]?.let { clock() - it < RETRY_AFTER_MS } == true
+
+    // The body of a GET, or Unreachable when there was no answer to read.
+    private fun get(url: String): String = fetch(url) ?: throw Unreachable()
 
     private fun keysFor(now: NowPlaying, prefs: DiscordPrefs): List<String> = buildList {
         if (prefs.picture == DiscordPicture.Cover && now.album.isNotBlank()) add(coverKey(now))
@@ -60,11 +72,11 @@ class DiscordArt(
     }
 
     private fun findCover(artist: String, album: String): String? =
-        fetch(ITUNES + enc("$artist $album"))?.let { itunesCover(it, artist, album) }
-            ?: fetch(DEEZER_ALBUM + enc("artist:\"$artist\" album:\"$album\""))?.let { deezerCover(it, artist, album) }
+        itunesCover(get(ITUNES + enc("$artist $album")), artist, album)
+            ?: deezerCover(get(DEEZER_ALBUM + enc("artist:\"$artist\" album:\"$album\"")), artist, album)
 
     private fun findArtist(artist: String): String? =
-        fetch(DEEZER_ARTIST + enc(artist))?.let { deezerArtistPhoto(it, artist) }
+        deezerArtistPhoto(get(DEEZER_ARTIST + enc(artist)), artist)
 
     private fun albumArtistOf(now: NowPlaying) = now.albumArtist.ifBlank { now.artist }
 
@@ -74,6 +86,11 @@ class DiscordArt(
 
     private fun artistKey(now: NowPlaying) = "artist:${SongIdentity.key(primaryOf(now))}"
 }
+
+private class Unreachable : Exception()
+
+// How long a lookup that could not reach the catalogue rests before another try.
+const val RETRY_AFTER_MS = 2 * 60_000L
 
 private const val ITUNES = "https://itunes.apple.com/search?media=music&entity=album&limit=10&term="
 private const val DEEZER_ALBUM = "https://api.deezer.com/search/album?limit=10&q="

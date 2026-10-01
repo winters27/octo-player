@@ -60,7 +60,8 @@ class DiscordArtTest {
     @Test
     fun eachPictureIsLookedForOnceAndAMissIsKept() = runBlocking {
         val asked = mutableListOf<String>()
-        val art = DiscordArt(fetch = { url -> asked += url; null })
+        // The catalogues answer, with nothing that matches.
+        val art = DiscordArt(fetch = { url -> asked += url; if ("itunes" in url) """{"results":[]}""" else """{"data":[]}""" })
         assertTrue(art.wants(now(), prefs))
         art.look(now(), prefs)
         // iTunes then Deezer for the cover, Deezer for the artist; nothing found.
@@ -69,6 +70,23 @@ class DiscordArtTest {
         art.look(now(), prefs)
         assertEquals(3, asked.size)
         assertEquals(DiscordArtwork(), art.known(now()))
+    }
+
+    @Test
+    fun aLookupThatCouldNotConnectRestsThenTriesAgain() = runBlocking {
+        var clock = 0L
+        val asked = mutableListOf<String>()
+        val art = DiscordArt(fetch = { url -> asked += url; null }, clock = { clock })
+        art.look(now(), prefs)
+        // iTunes gave no answer, so the cover waits; the artist's one try failed too.
+        assertEquals(2, asked.size)
+        assertFalse("resting, not hammering a catalogue that is down", art.wants(now(), prefs))
+        art.look(now(), prefs)
+        assertEquals(2, asked.size)
+        clock += RETRY_AFTER_MS
+        assertTrue("a failure is not an answer: it is tried again", art.wants(now(), prefs))
+        art.look(now(), prefs)
+        assertEquals(4, asked.size)
     }
 
     @Test

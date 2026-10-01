@@ -250,9 +250,11 @@ class SystemIntegration(
             val prefs = app.settings.current.discord
             val now = nowPlayingOf(app.player.state.value)
             val pictures = now?.let(art::known) ?: DiscordArtwork()
-            presence.want(prefs.on, discordActivityFor(now, app.player.positionMs(), System.currentTimeMillis(), prefs, pictures))
+            val shown = discordActivityFor(now, app.player.positionMs(), System.currentTimeMillis(), prefs, pictures)
+            presence.want(prefs.on, shown)
             // A picture not looked for yet is fetched once, then the status is told again.
-            if (prefs.on && now != null && art.wants(now, prefs)) {
+            // Only for a song that shows: a file kept private never has its names sent anywhere.
+            if (shown != null && now != null && art.wants(now, prefs)) {
                 app.scope.launch {
                     art.look(now, prefs)
                     tell()
