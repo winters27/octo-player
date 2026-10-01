@@ -5,7 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlassField
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.discord.DiscordBadge
@@ -77,10 +77,10 @@ private fun DiscordLookRows(prefs: DiscordPrefs, update: ((DiscordPrefs) -> Disc
         update { it.copy(listName = v) }
     }
     SettingRow("First line", "{title}, {artist} and {album} are filled in.") {
-        GlassField(prefs.firstLine, { v -> update { it.copy(firstLine = v) } }, Modifier.width(260.dp), placeholder = FIRST_LINE)
+        GlassField(prefs.firstLine, { v -> update { it.copy(firstLine = v) } }, Modifier.width(FrameSize.SettingField), placeholder = FIRST_LINE)
     }
     SettingRow("Second line", "{title}, {artist} and {album} are filled in.") {
-        GlassField(prefs.secondLine, { v -> update { it.copy(secondLine = v) } }, Modifier.width(260.dp), placeholder = SECOND_LINE)
+        GlassField(prefs.secondLine, { v -> update { it.copy(secondLine = v) } }, Modifier.width(FrameSize.SettingField), placeholder = SECOND_LINE)
     }
     ActionRow(
         "Lines as they were",

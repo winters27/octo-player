@@ -109,6 +109,8 @@ object FrameSize {
     val PlayButtonLarge = 44.dp
     // A menu opened from a button.
     val Menu = 280.dp
+    // A short text field beside a setting, such as a Discord status line.
+    val SettingField = 260.dp
     val PlaylistCover = 32.dp
     // Octo's mark on the window while the app behind it gets ready.
     val OpeningMark = 64.dp
