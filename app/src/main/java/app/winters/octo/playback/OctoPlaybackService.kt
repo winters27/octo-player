@@ -151,7 +151,7 @@ class OctoPlaybackService : MediaLibraryService() {
         )
         local = OctoPlayer(this, deck(), deck())
         player = OutputSwitch(local)
-        tracker = PlayTracker(plays) { player.isPlaying }
+        tracker = PlayTracker(plays::started, plays::record, isPlaying = { player.isPlaying })
         player.addListener(tracker)
         player.addListener(Watcher())
         sleep.attach(player)
