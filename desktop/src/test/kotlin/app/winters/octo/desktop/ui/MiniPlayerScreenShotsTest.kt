@@ -58,7 +58,8 @@ import org.junit.rules.TemporaryFolder
 // Pictures of the mini player in each of its shapes, and of its, Discord's
 // and the global shortcuts' rows in Settings. Only when asked:
 // OCTO_SHOTS=1 ./gradlew :desktop:test --tests '*ScreenShotsTest*'.
-// Saved as build/shots/mini-*.png and settings-system-extras.png,
+// Saved as build/shots/mini-*.png, settings-system-extras.png,
+// settings-discord.png,
 // settings-shortcuts.png. Nothing here reaches Discord or claims a key: the
 // shortcuts are claimed from a pretend system, and Discord is never started.
 class MiniPlayerScreenShotsTest {
@@ -179,6 +180,9 @@ class MiniPlayerScreenShotsTest {
                 system.shortcuts.start()
             }
             draw(scene, "settings-system-extras-on", 1_500)
+            // Further down: how the Discord status looks.
+            wheel(8)
+            draw(scene, "settings-discord", 1_500)
             tap(400f, KEYBOARD_Y)
             draw(scene, null, 1_200)
             wheel(40)

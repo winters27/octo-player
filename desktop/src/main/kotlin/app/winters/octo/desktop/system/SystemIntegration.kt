@@ -19,6 +19,8 @@ import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.systemReducesMotion
 import app.winters.octo.desktop.window.screenAreas
+import app.winters.octo.desktop.discord.DiscordArt
+import app.winters.octo.desktop.discord.DiscordArtwork
 import app.winters.octo.desktop.discord.DiscordPresence
 import app.winters.octo.desktop.discord.DiscordSync
 import app.winters.octo.desktop.discord.discordActivityFor
@@ -243,10 +245,19 @@ class SystemIntegration(
         val presence = discord ?: return
         presence.onConnected = { connected -> app.scope.launch { discordConnected = connected } }
         presence.start()
+        val art = DiscordArt()
         fun tell() {
             val prefs = app.settings.current.discord
             val now = nowPlayingOf(app.player.state.value)
-            presence.want(prefs.on, discordActivityFor(now, app.player.positionMs(), System.currentTimeMillis(), prefs))
+            val pictures = now?.let(art::known) ?: DiscordArtwork()
+            presence.want(prefs.on, discordActivityFor(now, app.player.positionMs(), System.currentTimeMillis(), prefs, pictures))
+            // A picture not looked for yet is fetched once, then the status is told again.
+            if (prefs.on && now != null && art.wants(now, prefs)) {
+                app.scope.launch {
+                    art.look(now, prefs)
+                    tell()
+                }
+            }
         }
         app.scope.launch { app.player.state.collect { tell() } }
         app.scope.launch { app.settings.state.map { it.discord }.distinctUntilChanged().collect { tell() } }

@@ -85,7 +85,7 @@ class DiscordSyncTest {
         connect = { DiscordConnection(it, clock = { clock }, pause = { ms -> clock += ms }) },
     )
 
-    private fun song(title: String = "Karma Police", start: Long = clock) = DiscordActivity(title, "Radiohead", "OK Computer", start, start + 264_000)
+    private fun song(title: String = "Karma Police", start: Long = clock) = DiscordActivity(details = title, state = "Radiohead", startMs = start, endMs = start + 264_000, largeText = "OK Computer")
 
     private fun later(ms: Long) {
         clock += ms
@@ -107,9 +107,9 @@ class DiscordSyncTest {
         val shown = song()
         sync.step(true, shown, clock)
         later(SEND_GAP_MS)
-        sync.step(true, shown.copy(startMs = shown.startMs + 500), clock)
+        sync.step(true, shown.copy(startMs = shown.startMs!! + 500), clock)
         assertEquals("a moment of drift sends nothing", 1, discord!!.statuses.size)
-        sync.step(true, shown.copy(startMs = shown.startMs - 60_000, endMs = shown.endMs!! - 60_000), clock)
+        sync.step(true, shown.copy(startMs = shown.startMs!! - 60_000, endMs = shown.endMs!! - 60_000), clock)
         assertEquals(2, discord!!.statuses.size)
     }
 

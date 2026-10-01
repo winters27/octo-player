@@ -47,7 +47,7 @@ class DiscordSocketTest {
         }
         val opener = discordPipes(DesktopOs.Linux) { name -> if (name == "XDG_RUNTIME_DIR") folder.root.path else null }
         val sync = DiscordSync("1234567890123456789", opener, pid = 7)
-        sync.step(true, DiscordActivity("Teardrop", "Massive Attack", "Mezzanine", 1_000, 331_000), System.currentTimeMillis())
+        sync.step(true, DiscordActivity(details = "Teardrop", state = "Massive Attack", startMs = 1_000, endMs = 331_000, largeText = "Mezzanine"), System.currentTimeMillis())
         assertTrue(done.await(5, TimeUnit.SECONDS))
         assertTrue(sync.connected)
         assertEquals("Teardrop", fake.statuses.single()!!["details"].toString().trim('"'))

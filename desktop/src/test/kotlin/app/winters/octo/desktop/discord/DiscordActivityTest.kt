@@ -4,6 +4,7 @@ import app.winters.octo.desktop.system.NowPlaying
 import app.winters.octo.desktop.system.openedFileId
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
@@ -46,9 +47,9 @@ class DiscordActivityTest {
     @Test
     fun aPlayingSongShowsItsWordsAndWhenItEnds() {
         val shown = discordActivityFor(now(), positionMs = 64_000, clockMs = clock, prefs = on)!!
-        assertEquals("Karma Police", shown.song)
-        assertEquals("Radiohead", shown.artist)
-        assertEquals("OK Computer", shown.album)
+        assertEquals("Karma Police", shown.details)
+        assertEquals("Radiohead", shown.state)
+        assertEquals("OK Computer", shown.largeText)
         assertEquals("started 64 s ago", clock - 64_000, shown.startMs)
         assertEquals("ends in 200 s", clock + 200_000, shown.endMs)
     }
@@ -65,9 +66,9 @@ class DiscordActivityTest {
         val file = now(id = openedFileId("file:///C:/Users/b/Music/demo.flac", "demo"), title = "demo", artist = "", album = "")
         assertNull(discordActivityFor(file, 1_000, clock, on))
         val allowed = discordActivityFor(file, 1_000, clock, DiscordPrefs(on = true, openedFiles = true))!!
-        assertEquals("demo", allowed.song)
-        assertNull("no artist, no line for one", allowed.artist)
-        assertNull(allowed.album)
+        assertEquals("demo", allowed.details)
+        assertNull("no artist, no line for one", allowed.state)
+        assertEquals("no album: the icon's own name", "Octo", allowed.largeText)
     }
 
     @Test
@@ -109,7 +110,7 @@ class DiscordActivityTest {
 
     @Test
     fun theCommandIsWhatDiscordReads() {
-        val shown = DiscordActivity("Karma Police", "Radiohead", "OK Computer", 1_000, 265_000)
+        val shown = DiscordActivity(details = "Karma Police", state = "Radiohead", startMs = 1_000, endMs = 265_000, largeText = "OK Computer")
         val command = setActivityCommand(shown, pid = 42, nonce = "n1")
         assertEquals("SET_ACTIVITY", command["cmd"]!!.jsonPrimitive.content)
         val args = command["args"]!!.jsonObject
@@ -133,11 +134,103 @@ class DiscordActivityTest {
 
     @Test
     fun aMomentOfDriftIsTheSameButASeekIsNot() {
-        val a = DiscordActivity("A", "B", "C", 10_000, 200_000)
+        val a = DiscordActivity(details = "A", state = "B", startMs = 10_000, endMs = 200_000, largeText = "C")
         assertTrue(a.looksLike(a.copy(startMs = 11_000, endMs = 201_000)))
         assertFalse(a.looksLike(a.copy(startMs = 30_000, endMs = 220_000)))
-        assertFalse(a.looksLike(a.copy(song = "D")))
+        assertFalse(a.looksLike(a.copy(details = "D")))
         assertFalse(a.looksLike(null))
+    }
+
+    @Test
+    fun templatesFillTheLines() {
+        val shown = discordActivityFor(now(), 0, clock, on.copy(firstLine = "{title} ({album})", secondLine = "  "))!!
+        assertEquals("Karma Police (OK Computer)", shown.details)
+        assertNull("a blank second line shows none", shown.state)
+        val blank = discordActivityFor(now(), 0, clock, on.copy(firstLine = ""))!!
+        assertEquals("a blank first line falls back to the title", "Karma Police", blank.details)
+    }
+
+    @Test
+    fun timeShowsWhatIsLeftWhatWasPlayedOrNothing() {
+        val left = discordActivityFor(now(), 64_000, clock, on)!!
+        assertEquals(clock - 64_000, left.startMs)
+        assertEquals(clock + 200_000, left.endMs)
+        val played = discordActivityFor(now(), 64_000, clock, on.copy(time = DiscordTime.Elapsed))!!
+        assertEquals(clock - 64_000, played.startMs)
+        assertNull(played.endMs)
+        val none = discordActivityFor(now(), 64_000, clock, on.copy(time = DiscordTime.Off))!!
+        assertNull(none.startMs)
+        assertNull(none.endMs)
+        assertNull(none.toJson()["timestamps"])
+    }
+
+    @Test
+    fun pausedClearsUnlessKeptThenShowsAPauseBadgeAndNoTime() {
+        assertNull(discordActivityFor(now(playing = false), 1_000, clock, on))
+        val kept = discordActivityFor(now(playing = false), 1_000, clock, on.copy(whilePaused = true))!!
+        assertEquals(DISCORD_PAUSE, kept.smallImage)
+        assertEquals("Paused", kept.smallText)
+        assertNull(kept.startMs)
+        assertNull(kept.endMs)
+    }
+
+    @Test
+    fun theCoverIsLargeAndTheArtistIsTheBadge() {
+        val art = DiscordArtwork("https://is1.example/1024x1024bb.jpg", "https://e-cdns.example/p.jpg")
+        val shown = discordActivityFor(now(), 0, clock, on, art)!!
+        assertEquals(art.cover, shown.largeImage)
+        assertEquals("OK Computer", shown.largeText)
+        assertEquals(art.artist, shown.smallImage)
+        assertEquals("Radiohead", shown.smallText)
+        val bare = discordActivityFor(now(), 0, clock, on)!!
+        assertEquals(DISCORD_ICON, bare.largeImage)
+        assertEquals("OK Computer", bare.largeText)
+        assertNull("no photo found, no badge", bare.smallImage)
+        assertNull(bare.smallText)
+        val icon = discordActivityFor(now(), 0, clock, on.copy(picture = DiscordPicture.Icon, badge = DiscordBadge.Off), art)!!
+        assertEquals(DISCORD_ICON, icon.largeImage)
+        assertNull(icon.smallImage)
+    }
+
+    @Test
+    fun theSongAndArtistLinkToLastFm() {
+        val shown = discordActivityFor(now(title = "Instant Crush", artist = "Daft Punk"), 0, clock, on)!!
+        assertEquals("https://www.last.fm/music/Daft+Punk/_/Instant+Crush", shown.detailsUrl)
+        assertEquals("https://www.last.fm/music/Daft+Punk", shown.stateUrl)
+        assertEquals(DiscordButton("Open on Last.fm", "https://www.last.fm/music/Daft+Punk/_/Instant+Crush"), shown.button)
+        val off = discordActivityFor(now(), 0, clock, on.copy(lastFmLinks = false))!!
+        assertNull(off.detailsUrl)
+        assertNull(off.stateUrl)
+        assertNull(off.button)
+    }
+
+    @Test
+    fun theJsonNamesWhatTheListShowsAndCarriesTheButton() {
+        fun shows(name: DiscordListName) =
+            discordActivityFor(now(), 0, clock, on.copy(listName = name))!!.toJson()["status_display_type"]!!.jsonPrimitive.int
+        assertEquals(2, shows(DiscordListName.Song))
+        assertEquals(1, shows(DiscordListName.Artist))
+        assertEquals(0, shows(DiscordListName.App))
+        val json = discordActivityFor(now(), 0, clock, on)!!.toJson()
+        val button = json["buttons"]!!.jsonArray.single().jsonObject
+        assertEquals("Open on Last.fm", button["label"]!!.jsonPrimitive.content)
+        assertTrue(button["url"]!!.jsonPrimitive.content.startsWith("https://www.last.fm/music/"))
+        assertTrue(json.containsKey("details_url"))
+    }
+
+    @Test
+    fun nothingFromTheServerEverGoesOut() {
+        val text = discordActivityFor(now(), 0, clock, on)!!.toJson().toString()
+        assertFalse(text.contains("rest/"))
+        assertFalse(text.contains("getCoverArt"))
+        assertFalse(text.contains("al-1"))
+    }
+
+    @Test
+    fun aDifferentPictureIsADifferentStatus() {
+        val a = DiscordActivity(details = "A", state = "B", startMs = 10_000, endMs = 200_000)
+        assertFalse(a.looksLike(a.copy(largeImage = "https://is1.example/cover.jpg")))
+        assertFalse(a.looksLike(a.copy(smallImage = "https://e-cdns.example/p.jpg")))
     }
 
     @Test
