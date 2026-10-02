@@ -112,8 +112,8 @@ object FrameSize {
     // A short text field beside a setting, such as a Discord status line.
     val SettingField = 260.dp
     val PlaylistCover = 32.dp
-    // Octo's mark on the window while the app behind it gets ready.
-    val OpeningMark = 64.dp
+    // Octo's octopus on the window while the app behind it gets ready.
+    val OpeningMark = 112.dp
     // The small dot beside Settings while an update waits to be installed.
     val NavMark = 6.dp
     // A playlist's picture in a menu's line.

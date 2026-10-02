@@ -1,10 +1,7 @@
 package app.winters.octo.desktop
 
-import app.winters.octo.desktop.settings.systemTextScale
-import app.winters.octo.desktop.settings.textScale
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Density
-import javax.swing.SwingUtilities
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -14,6 +11,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.toComposeImageBitmap
@@ -25,6 +24,8 @@ import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
@@ -49,14 +50,16 @@ import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.settings.WindowSpot
 import app.winters.octo.desktop.settings.currentOs
 import app.winters.octo.desktop.settings.systemReducesMotion
+import app.winters.octo.desktop.settings.systemTextScale
+import app.winters.octo.desktop.settings.textScale
 import app.winters.octo.desktop.system.AudioDropZone
 import app.winters.octo.desktop.system.LocalSystem
 import app.winters.octo.desktop.system.SingleInstance
 import app.winters.octo.desktop.system.SystemIntegration
 import app.winters.octo.desktop.system.letRunningOctoComeForward
 import app.winters.octo.desktop.system.preloadStartClasses
-import app.winters.octo.desktop.system.useAppNatives
 import app.winters.octo.desktop.system.startsInTray
+import app.winters.octo.desktop.system.useAppNatives
 import app.winters.octo.desktop.ui.ListFocus
 import app.winters.octo.desktop.ui.LocalListFocus
 import app.winters.octo.desktop.ui.LocalSoftwareDrawing
@@ -77,11 +80,13 @@ import java.awt.Dimension
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 import java.io.File
+import javax.swing.SwingUtilities
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.skiko.GraphicsApi
 
@@ -90,12 +95,24 @@ private fun appIcon(): Painter? = runCatching {
     BitmapPainter(org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap())
 }.getOrNull()
 
+// Octo's octopus alone, for the window's opening: the logo's own pixels with
+// no tile, written by tools/appicon/make_app_icon.py. Drawn smaller than it
+// is stored, so it is scaled smoothly.
+private fun openingOctopus(): Painter? = runCatching {
+    val bytes = AppState::class.java.getResourceAsStream("/octo-opening.png")!!.use { it.readBytes() }
+    BitmapPainter(org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap(), filterQuality = FilterQuality.High)
+}.getOrNull()
+
 // What the window runs once the app is made.
 private class Opened(val app: AppState, val system: SystemIntegration, val updates: DesktopUpdates)
 
 // How long the window waits for its first frame before the app is made in
 // any case (a window starting in the tray draws none).
 private const val FIRST_FRAME_WAIT_MS = 500L
+
+// The most the app waits for the opening's octopus to come in before it is
+// made in any case (it lands in about 0.4 s).
+private const val OPENING_WAIT_MS = 700L
 
 @OptIn(FlowPreview::class)
 fun main(args: Array<String>) {
@@ -121,12 +138,18 @@ fun main(args: Array<String>) {
     // The system's text size, read the same way.
     var systemText by mutableStateOf(1f)
     val icon = appIcon()
+    val octopus = openingOctopus()
     val inTray = startsInTray(args.toList())
+    // The opening comes in quietly when the listener asked for calm motion.
+    val calmStart = settings.current.appearance.calmMotion
 
     application {
         // The app, once made; until then the window shows its first frame.
         var opened by remember { mutableStateOf<Opened?>(null) }
         val ready = opened
+        // The opening's octopus is far enough in, and later gone.
+        var entered by remember { mutableStateOf(false) }
+        var openingGone by remember { mutableStateOf(false) }
         val spot = remember { placeWindow(settings.current.window, screenAreas()) }
         // Windows and Linux get the app's own glass frame unless the
         // listener asked for the system's; macOS keeps its own lights.
@@ -243,7 +266,13 @@ fun main(args: Array<String>) {
                     withFrameNanos { }
                     withFrameNanos { }
                 }
-                opened = open(startup.parts())
+                val parts = startup.parts()
+                // The octopus comes in while that work runs. Making the app
+                // holds this thread, so it waits for the octopus to land
+                // rather than freeze it part way; a tray start draws nothing
+                // and never waits.
+                if (!inTray) withTimeoutOrNull(OPENING_WAIT_MS) { snapshotFlow { entered }.first { it } }
+                opened = open(parts)
             }
             if (ready != null) {
                 LaunchedEffect(ready) {
@@ -294,9 +323,8 @@ fun main(args: Array<String>) {
                 check()
                 window.onRenderApiChanged(::check)
             }
-            if (ready == null) {
-                Opening(icon)
-            } else {
+            Box(Modifier.fillMaxSize()) {
+            if (ready != null) {
                 val app = ready.app
                 val system = ready.system
                 val look by app.settings.state.collectAsState()
@@ -315,6 +343,11 @@ fun main(args: Array<String>) {
                         AudioDropZone(system::openFiles) { Shell(app, own, ::closeWindow) }
                     }
                 }
+            }
+            // Over the app until it has drawn, then fading away.
+            if (!openingGone) {
+                Opening(octopus, calm = calmStart, leaving = ready != null, onEntered = { entered = true }, onGone = { openingGone = true })
+            }
             }
         }
         if (ready != null) with(ready.system) { Surfaces(icon) }

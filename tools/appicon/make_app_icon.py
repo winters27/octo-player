@@ -2,8 +2,9 @@
 lavender tile.
 
   python make_app_icon.py              writes the phone's adaptive icon layers,
-                                       its launch screen's octopus, and the
-                                       square store icon the desktop icons
+                                       its launch screen's octopus, the
+                                       desktop window's opening octopus, and
+                                       the square store icon the desktop icons
                                        are cut from
   python make_app_icon.py take LOGO    copies the octopus out of the logo's PNG
                                        (C:\\Octo\\octo\\Assets\\octo_logo.png)
@@ -49,6 +50,11 @@ SQUARE_REACH = 0.44
 # square and shows only the circle 192 dp across in its middle.
 SPLASH_DP = 288
 SPLASH_REACH = 0.29
+# The desktop window opens on the octopus alone, FrameSize.OpeningMark
+# (112 dp) across, drawn sharp up to 300% display scaling.
+DESKTOP_OPENING = ROOT / "desktop/src/main/resources/octo-opening.png"
+OPENING_PX = 336
+OPENING_REACH = 0.48
 
 # The adaptive icon's layers, 108 dp at each density.
 DENSITIES = {"mdpi": 1, "hdpi": 1.5, "xhdpi": 2, "xxhdpi": 3, "xxxhdpi": 4}
@@ -156,8 +162,9 @@ def write():
         splash.mkdir(parents=True, exist_ok=True)
         placed(art, round(SPLASH_DP * density), SPLASH_REACH).save(splash / "splash_octopus.png", optimize=True)
     (RES / "drawable/ic_launcher_background.xml").write_text(background_vector(), encoding="utf-8")
+    placed(art, OPENING_PX, OPENING_REACH).save(DESKTOP_OPENING, optimize=True)
     square(art, 512).convert("RGB").save(STORE, optimize=True)
-    print("Wrote the adaptive icon layers, the launch screen's octopus and", STORE.relative_to(ROOT))
+    print("Wrote the adaptive icon layers, the launch screen's octopus, the desktop's opening octopus and", STORE.relative_to(ROOT))
 
 
 def preview(out):
