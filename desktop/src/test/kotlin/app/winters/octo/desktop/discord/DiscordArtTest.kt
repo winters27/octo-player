@@ -8,6 +8,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CopyOnWriteArrayList
 
 class DiscordArtTest {
     private fun now(artist: String = "Daft Punk", album: String = "Random Access Memories") = NowPlaying(
@@ -59,8 +60,9 @@ class DiscordArtTest {
     }
 
     // Answers as the catalogues would, from what the test lays out by
-    // address; anything else finds nothing.
-    private fun catalogue(vararg answers: Pair<String, String>, asked: MutableList<String> = mutableListOf()): (String) -> String? = { url ->
+    // address; anything else finds nothing. The cover and the photo are
+    // looked for at once, so what was asked goes in a list safe for both.
+    private fun catalogue(vararg answers: Pair<String, String>, asked: MutableList<String> = CopyOnWriteArrayList()): (String) -> String? = { url ->
         asked += url
         answers.firstOrNull { url.startsWith(it.first) }?.second
             ?: if ("itunes" in url) """{"results":[]}""" else """{"data":[]}"""
@@ -68,7 +70,7 @@ class DiscordArtTest {
 
     @Test
     fun eachPictureIsLookedForOnceAndAMissIsKept() = runBlocking {
-        val asked = mutableListOf<String>()
+        val asked = CopyOnWriteArrayList<String>()
         val art = DiscordArt(fetch = catalogue(asked = asked))
         assertTrue(art.wants(now(), prefs))
         art.look(now(), prefs)
@@ -84,7 +86,7 @@ class DiscordArtTest {
     @Test
     fun aLookupThatCouldNotConnectRestsThenTriesAgain() = runBlocking {
         var clock = 0L
-        val asked = mutableListOf<String>()
+        val asked = CopyOnWriteArrayList<String>()
         val art = DiscordArt(fetch = { url -> asked += url; null }, clock = { clock })
         art.look(now(), prefs)
         // Deezer gave no answer, so the cover waits; the artist's one try failed too.
@@ -113,7 +115,7 @@ class DiscordArtTest {
     // Real tags: an album artist credited to two names, searched by the first.
     @Test
     fun aJoinedCreditIsSearchedByItsFirstArtist() = runBlocking {
-        val asked = mutableListOf<String>()
+        val asked = CopyOnWriteArrayList<String>()
         val art = DiscordArt(fetch = catalogue(
             "https://api.deezer.com/search/album" to
                 """{"data":[{"title":"via crucis","cover_big":"https://e-cdns.example/via/1000x1000.jpg","artist":{"name":"Scrim"}}]}""",
@@ -128,7 +130,7 @@ class DiscordArtTest {
     // A single with no album tag is found by the song itself.
     @Test
     fun aSongWithNoAlbumIsFoundByItsTitle() = runBlocking {
-        val asked = mutableListOf<String>()
+        val asked = CopyOnWriteArrayList<String>()
         val art = DiscordArt(fetch = catalogue(
             "https://api.deezer.com/search/track" to
                 """{"data":[{"title":"Nightcall","artist":{"name":"Kavinsky"},"album":{"title":"OutRun","cover_big":"https://e-cdns.example/outrun/1000x1000.jpg"}}]}""",
