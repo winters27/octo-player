@@ -71,6 +71,14 @@ object OctoIcons {
     val Filter by sym("sym_filter_list")
     val Speaker by sym("sym_speaker")
     val Headphones by sym("sym_headphones")
+    // The sections of Settings and Sound.
+    val Servers by sym("sym_servers")
+    val System by sym("sym_system")
+    val Keyboard by sym("sym_keyboard")
+    val Equalizer by sym("sym_equalizer")
+    val Loudness by sym("sym_loudness")
+    val Balance by sym("sym_balance")
+    val Crossfade by sym("sym_crossfade")
 
     // Back and forward through the pages, and opening the full player: the
     // chevron turned.
@@ -113,7 +121,9 @@ val allIcons: List<Pair<String, () -> ImageVector>> = listOf(
     "RemoveFromPlaylist" to { OctoIcons.RemoveFromPlaylist }, "Playback" to { OctoIcons.Playback },
     "Appearance" to { OctoIcons.Appearance }, "Library" to { OctoIcons.Library }, "Search" to { OctoIcons.Search },
     "Add" to { OctoIcons.Add }, "Filter" to { OctoIcons.Filter }, "Speaker" to { OctoIcons.Speaker },
-    "Headphones" to { OctoIcons.Headphones }, "Back" to { OctoIcons.Back }, "Forward" to { OctoIcons.Forward },
+    "Headphones" to { OctoIcons.Headphones }, "Servers" to { OctoIcons.Servers }, "System" to { OctoIcons.System },
+    "Keyboard" to { OctoIcons.Keyboard }, "Equalizer" to { OctoIcons.Equalizer }, "Loudness" to { OctoIcons.Loudness },
+    "Balance" to { OctoIcons.Balance }, "Crossfade" to { OctoIcons.Crossfade }, "Back" to { OctoIcons.Back }, "Forward" to { OctoIcons.Forward },
     "Expand" to { OctoIcons.Expand }, "Collapse" to { OctoIcons.Collapse }, "Home" to { OctoIcons.Home },
     "Settings" to { OctoIcons.Settings }, "Reveal" to { OctoIcons.Reveal }, "Conceal" to { OctoIcons.Conceal },
     "Minimize" to { OctoIcons.Minimize }, "Maximize" to { OctoIcons.Maximize }, "Restore" to { OctoIcons.Restore },

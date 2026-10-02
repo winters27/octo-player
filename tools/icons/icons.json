@@ -86,6 +86,13 @@
     "sym_visibility_off": { "icon": "eye-slash", "weight": "regular" },
     "sym_minimize": { "icon": "minus", "weight": "regular" },
     "sym_maximize": { "icon": "square", "weight": "regular" },
-    "sym_restore": { "icon": "copy", "weight": "regular" }
+    "sym_restore": { "icon": "copy", "weight": "regular" },
+    "sym_servers": { "icon": "hard-drives", "weight": "regular" },
+    "sym_system": { "icon": "desktop", "weight": "regular" },
+    "sym_keyboard": { "icon": "keyboard", "weight": "regular" },
+    "sym_equalizer": { "icon": "faders", "weight": "regular" },
+    "sym_loudness": { "icon": "gauge", "weight": "regular" },
+    "sym_balance": { "icon": "scales", "weight": "regular" },
+    "sym_crossfade": { "icon": "intersect", "weight": "regular" }
   }
 }

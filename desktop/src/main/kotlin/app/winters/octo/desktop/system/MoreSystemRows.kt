@@ -29,90 +29,62 @@ fun MiniPlayerGroup(app: AppState) {
     val settings by app.settings.state.collectAsState()
     val command = if (app.os == DesktopOs.Mac) "Cmd+M" else "Ctrl+M"
     Group("Mini player") {
-        SwitchRow(
-            "Mini player",
-            "A small window in place of this one, for while you work. $command, the player's More menu and the ${if (app.os == DesktopOs.Mac) "menu bar" else "tray"} open it too.",
-            system.miniPlayerOpen,
-        ) { on -> system.setMiniPlayer(on) }
-        SwitchRow(
-            "Keep it above other windows",
-            "So it stays in sight over whatever you work in. The pin in the mini player does the same.",
-            settings.system.miniPlayerOnTop,
-        ) { on -> app.settings.update { it.copy(system = it.system.copy(miniPlayerOnTop = on)) } }
-    }
-}
-
-// Discord's rows in Settings > System, in a build that carries Octo's
-// Discord application: showing the song in the listener's status, and
-// whether songs opened from files may show too.
-@Composable
-fun DiscordGroup(app: AppState) {
-    val system = LocalSystem.current ?: return
-    if (system.discord == null) return
-    val settings by app.settings.state.collectAsState()
-    val prefs = settings.discord
-    val waiting = if (prefs.on && !system.discordConnected) " It shows once Discord is open." else ""
-    Group("Discord") {
-        SwitchRow(
-            "Show what you're playing",
-            "Friends see the song, the album cover and the artist in your Discord status, with the time left.$waiting",
-            prefs.on,
-        ) { on -> app.settings.update { it.copy(discord = it.discord.copy(on = on)) } }
-        if (prefs.on) {
-            SwitchRow(
-                "Include songs opened from files",
-                "Songs you open from a folder on this computer show too. Off, they stay private.",
-                prefs.openedFiles,
-            ) { on -> app.settings.update { it.copy(discord = it.discord.copy(openedFiles = on)) } }
-            DiscordLookRows(prefs) { change -> app.settings.update { it.copy(discord = change(it.discord)) } }
+        SwitchRow("Mini player", "A small window in place of this one. $command opens it too.", system.miniPlayerOpen) { on -> system.setMiniPlayer(on) }
+        SwitchRow("Keep it above other windows", null, settings.system.miniPlayerOnTop) { on ->
+            app.settings.update { it.copy(system = it.system.copy(miniPlayerOnTop = on)) }
         }
     }
 }
 
-// How the Discord status looks: its two lines, what the member list names,
-// the time, the pictures, and the links. Shown once it is on.
+// Whether this build carries Octo's Discord application, so Settings has a
+// Discord section.
 @Composable
-private fun DiscordLookRows(prefs: DiscordPrefs, update: ((DiscordPrefs) -> DiscordPrefs) -> Unit) {
-    ChoiceRow("Friends' list shows", "What follows \"Listening to\" beside your name.", DiscordListName.entries, prefs.listName, ::listNameLabel) { v ->
-        update { it.copy(listName = v) }
+fun hasDiscord(): Boolean = LocalSystem.current?.discord != null
+
+// Settings > Discord: showing the song in the listener's status, then, once
+// it is on, how it reads, its pictures, and the rest.
+@Composable
+fun DiscordRows(app: AppState) {
+    val system = LocalSystem.current ?: return
+    if (system.discord == null) return
+    val settings by app.settings.state.collectAsState()
+    val prefs = settings.discord
+    fun update(change: (DiscordPrefs) -> DiscordPrefs) = app.settings.update { it.copy(discord = change(it.discord)) }
+    Group {
+        SwitchRow(
+            "Show what you're playing",
+            if (prefs.on && !system.discordConnected) "It shows once Discord is open." else "The song, its cover and the artist, in your Discord status.",
+            prefs.on,
+        ) { on -> update { it.copy(on = on) } }
+        if (prefs.on) {
+            SwitchRow("Include songs opened from files", "Off, they stay private.", prefs.openedFiles) { on -> update { it.copy(openedFiles = on) } }
+        }
     }
-    SettingRow("First line", "{title}, {artist} and {album} are filled in.") {
-        GlassField(prefs.firstLine, { v -> update { it.copy(firstLine = v) } }, Modifier.width(FrameSize.SettingField), placeholder = FIRST_LINE)
+    if (!prefs.on) return
+    Group("Status") {
+        ChoiceRow("Friends' list shows", null, DiscordListName.entries, prefs.listName, ::listNameLabel) { v -> update { it.copy(listName = v) } }
+        SettingRow("First line", "{title}, {artist} and {album} are filled in.") {
+            GlassField(prefs.firstLine, { v -> update { it.copy(firstLine = v) } }, Modifier.width(FrameSize.SettingField), placeholder = FIRST_LINE)
+        }
+        SettingRow("Second line", null) {
+            GlassField(prefs.secondLine, { v -> update { it.copy(secondLine = v) } }, Modifier.width(FrameSize.SettingField), placeholder = SECOND_LINE)
+        }
+        if (prefs.firstLine != FIRST_LINE || prefs.secondLine != SECOND_LINE) {
+            ActionRow("Lines as they were", null, "Reset", { update { it.copy(firstLine = FIRST_LINE, secondLine = SECOND_LINE) } })
+        }
+        ChoiceRow("Time", null, DiscordTime.entries, prefs.time, ::timeLabel) { v -> update { it.copy(time = v) } }
     }
-    SettingRow("Second line", "{title}, {artist} and {album} are filled in.") {
-        GlassField(prefs.secondLine, { v -> update { it.copy(secondLine = v) } }, Modifier.width(FrameSize.SettingField), placeholder = SECOND_LINE)
+    Group("Pictures") {
+        ChoiceRow("Picture", "Found on iTunes or Deezer by name. Nothing from your server is shared.", DiscordPicture.entries, prefs.picture, ::pictureLabel) { v ->
+            update { it.copy(picture = v) }
+        }
+        ChoiceRow("Badge", null, DiscordBadge.entries, prefs.badge, ::badgeLabel) { v -> update { it.copy(badge = v) } }
+        SwitchRow("Album name on the cover", null, prefs.albumName) { on -> update { it.copy(albumName = on) } }
     }
-    ActionRow(
-        "Lines as they were",
-        null,
-        "Reset",
-        { update { it.copy(firstLine = FIRST_LINE, secondLine = SECOND_LINE) } },
-        enabled = prefs.firstLine != FIRST_LINE || prefs.secondLine != SECOND_LINE,
-    )
-    ChoiceRow("Time", "The time left, the time played, or none.", DiscordTime.entries, prefs.time, ::timeLabel) { v ->
-        update { it.copy(time = v) }
+    Group("More") {
+        SwitchRow("Keep showing while paused", "With a pause badge. Off, your status clears on pause.", prefs.whilePaused) { on -> update { it.copy(whilePaused = on) } }
+        SwitchRow("Link to Last.fm", "Friends get an Open on Last.fm button.", prefs.lastFmLinks) { on -> update { it.copy(lastFmLinks = on) } }
     }
-    ChoiceRow(
-        "Picture",
-        "Album covers are found on iTunes or Deezer by the album's name. Nothing from your server is shared.",
-        DiscordPicture.entries,
-        prefs.picture,
-        ::pictureLabel,
-    ) { v -> update { it.copy(picture = v) } }
-    ChoiceRow("Badge", "The small round picture on the cover. Artist photos come from Deezer.", DiscordBadge.entries, prefs.badge, ::badgeLabel) { v ->
-        update { it.copy(badge = v) }
-    }
-    SwitchRow("Show the album name", "When someone points at the cover.", prefs.albumName) { on -> update { it.copy(albumName = on) } }
-    SwitchRow(
-        "Keep showing while paused",
-        "With a pause badge and no time. Off, your status clears when you pause.",
-        prefs.whilePaused,
-    ) { on -> update { it.copy(whilePaused = on) } }
-    SwitchRow(
-        "Link to Last.fm",
-        "The song and artist open their Last.fm pages, and friends get an Open on Last.fm button.",
-        prefs.lastFmLinks,
-    ) { on -> update { it.copy(lastFmLinks = on) } }
 }
 
 private fun listNameLabel(name: DiscordListName) = when (name) {

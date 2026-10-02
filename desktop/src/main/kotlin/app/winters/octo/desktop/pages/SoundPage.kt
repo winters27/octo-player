@@ -107,7 +107,7 @@ fun SoundPage(app: AppState, visit: Visit) {
             visit,
             "Sound",
             listOf(
-                PageSection("none", "No sound engine") {
+                PageSection("none", "No sound engine", OctoIcons.Speaker) {
                     Rows { SettingRow("Nothing to shape", "Octo's sound engine couldn't start on this computer.") }
                 },
             ),
@@ -121,23 +121,23 @@ fun SoundPage(app: AppState, visit: Visit) {
         visit,
         "Sound",
         listOf(
-            PageSection("output", "Output", detail = if (all.sound.perOutput) "These settings are for $device." else "These settings are for every output.") {
+            PageSection("output", "Output", OctoIcons.Speaker, detail = if (all.sound.perOutput) "These settings are for $device." else "These settings are for every output.") {
                 Rows {
                     SwitchRow(
                         "Each output keeps its own sound",
-                        "Speakers, headphones and each USB device remember their own settings, and switch with them.",
+                        "Speakers, headphones and each USB device remember theirs.",
                         all.sound.perOutput,
                         controller::setPerOutput,
                     )
                 }
             },
-            PageSection("eq", "Equalizer", trailing = { OctoSwitch(eq.eqEnabled, { on -> controller.update { it.copy(eqEnabled = on) } }) }) {
+            PageSection("eq", "Equalizer", OctoIcons.Equalizer, trailing = { OctoSwitch(eq.eqEnabled, { on -> controller.update { it.copy(eqEnabled = on) } }) }) {
                 Equalizer(app, controller)
             },
-            PageSection("loudness", "Loudness") { LoudnessRows(controller) },
-            PageSection("balance", "Balance") { BalanceRows(controller) },
-            PageSection("playback", "Crossfade and speed") { PlaybackRows(app, all.playback) },
-            PageSection("correction", "Headphone correction") { CorrectionRows(controller) },
+            PageSection("loudness", "Loudness", OctoIcons.Loudness) { LoudnessRows(controller) },
+            PageSection("balance", "Balance", OctoIcons.Balance) { BalanceRows(controller) },
+            PageSection("playback", "Crossfade and speed", OctoIcons.Crossfade) { PlaybackRows(app, all.playback) },
+            PageSection("correction", "Headphone correction", OctoIcons.Headphones) { CorrectionRows(controller) },
         ),
     )
 }
@@ -152,35 +152,37 @@ private fun Equalizer(app: AppState, sound: SoundController) {
     val parametric = settings.mode == EqMode.Parametric
     Rows {
         if (!parametric) {
-            SettingRow("Preset", "Start from a shape, then drag the bands to taste.") { PresetButton(app, sound, settings) }
+            SettingRow("Preset", null) { PresetButton(app, sound, settings) }
         }
         ChoiceRow(
             "Bands",
-            if (parametric) "Filters placed anywhere, for correcting a room or a pair of headphones." else "Ten fixed bands, the simplest way to shape the sound.",
+            if (parametric) "Filters placed anywhere, for correcting a room or headphones." else "Ten fixed bands, the simplest way.",
             listOf(EqMode.Graphic, EqMode.Parametric),
             settings.mode,
             { if (it == EqMode.Graphic) "Ten bands" else "Free filters" },
             { mode -> sound.update { withMode(it, mode) } },
         )
     }
-    EqCurve(
-        settings,
-        selected,
-        onSelect = { chosen = it },
-        onPreview = sound::preview,
-        onSettle = sound::settle,
-        modifier = Modifier.padding(horizontal = Space.M).padding(top = Space.S),
-        plotHeight = SettingsSize.EqPlot,
-    )
-    Txt(
-        if (parametric) "Drag a point to move a filter; the wheel nudges its gain, a double click sets it flat." else "Drag a band up or down; the wheel nudges it, a double click sets it flat.",
-        DesktopType.meta,
-        OctoColors.TextMuted,
-        Modifier.padding(horizontal = Space.M).padding(bottom = Space.S),
-    )
+    Card {
+        EqCurve(
+            settings,
+            selected,
+            onSelect = { chosen = it },
+            onPreview = sound::preview,
+            onSettle = sound::settle,
+            modifier = Modifier.padding(horizontal = RowInset).padding(top = Space.L),
+            plotHeight = SettingsSize.EqPlot,
+        )
+        Txt(
+            if (parametric) "Drag a point to move a filter; the wheel nudges its gain, a double click sets it flat." else "Drag a band up or down; the wheel nudges it, a double click sets it flat.",
+            DesktopType.meta,
+            OctoColors.TextMuted,
+            Modifier.padding(horizontal = RowInset).padding(top = Space.S, bottom = Space.L),
+        )
+    }
     if (parametric) FilterEditor(settings, selected, sound) { chosen = it }
     Rows {
-        SwitchRow("Automatic preamp", "Lowers the level by the curve's highest boost, so boosting never distorts.", settings.autoPreamp) { on ->
+        SwitchRow("Automatic preamp", "Lowers the level by the curve's top boost, so it never distorts.", settings.autoPreamp) { on ->
             sound.update { it.copy(autoPreamp = on) }
         }
         if (!settings.autoPreamp) {
@@ -349,7 +351,7 @@ private fun LoudnessRows(sound: SoundController) {
                 sound.update { it.copy(preventClipping = on) }
             }
         }
-        SwitchRow("Limiter", "Catches any peak that would still distort, just below full volume.", settings.limiter) { on ->
+        SwitchRow("Limiter", "Catches any peak that would still distort.", settings.limiter) { on ->
             sound.update { it.copy(limiter = on) }
         }
     }
@@ -395,7 +397,7 @@ private fun PlaybackRows(app: AppState, playback: PlaybackPrefs) {
     Rows {
         SliderRow(
             "Crossfade",
-            "Each song fades into the next. Songs from one album played in order still run straight on.",
+            "Songs fade into the next. An album played in order runs straight on.",
             if (playback.crossfadeSeconds == 0) "Off" else "${playback.crossfadeSeconds} s",
             playback.crossfadeSeconds / 12f,
             { x -> change { it.copy(crossfadeSeconds = (x * 12).roundToInt()) } },
@@ -411,7 +413,7 @@ private fun PlaybackRows(app: AppState, playback: PlaybackPrefs) {
             live = false,
             wheelStep = 0.05f / (FASTEST_SPEED - SLOWEST_SPEED),
         )
-        SwitchRow("Keep the pitch", "Voices stay where they are at other speeds. Off, they rise and fall like a record.", playback.keepPitch) { on ->
+        SwitchRow("Keep the pitch", "Off, voices rise and fall with the speed, like a record.", playback.keepPitch) { on ->
             change { it.copy(keepPitch = on) }
         }
         SliderRow(
@@ -451,7 +453,7 @@ private fun CorrectionRows(sound: SoundController) {
         }
         ActionRow(
             if (correction == null) "Import a correction" else "Import another",
-            importProblem ?: "Evens out how your headphones colour the sound, from a ParametricEQ.txt file made for them.",
+            importProblem ?: "From a ParametricEQ.txt file made for your headphones.",
             "Import",
             {
                 val file = chooseFile("Choose a ParametricEQ.txt file", save = false) ?: return@ActionRow
@@ -460,7 +462,7 @@ private fun CorrectionRows(sound: SoundController) {
                 if (read != null) sound.update { it.copy(eqEnabled = true, correction = read) }
             },
         )
-        ActionRow("Export my curve", exportProblem ?: "Saves the equalizer as a ParametricEQ.txt file, for another app or device.", "Export", {
+        ActionRow("Export my curve", exportProblem ?: "Saves the equalizer as a ParametricEQ.txt file.", "Export", {
             val file = chooseFile("Save the curve", save = true, suggested = "Octo ParametricEQ.txt") ?: return@ActionRow
             val on = settings.copy(eqEnabled = true)
             exportProblem = if (runCatching { file.writeText(ParametricEqFile.write(on.effectivePreampDb(), on.activeFilters())) }.isSuccess) null else "The file could not be saved."

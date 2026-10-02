@@ -26,12 +26,12 @@ fun TaskbarAndStartupRows(app: AppState) {
 internal fun StartupRows(prefs: SystemPrefs, works: Boolean, turnedOff: Boolean, tray: Boolean, change: ((SystemPrefs) -> SystemPrefs) -> Unit) {
     Group("Taskbar and startup") {
         if (!works) {
-            InfoRow("Start with Windows", "For music ready as soon as you sign in. Works in the installed Octo; this copy runs from a build.", "Installed app only")
+            InfoRow("Start with Windows", "Works in the installed Octo.", "Installed app only")
             return@Group
         }
         SwitchRow("Start with Windows", startCaption(turnedOff), prefs.startWithWindows) { on -> change { it.copy(startWithWindows = on) } }
         if (prefs.startWithWindows && tray) {
-            SwitchRow("Start in the tray", "Octo waits in the tray instead of opening its window, for when you'd rather pick music later.", prefs.startInTray) { on ->
+            SwitchRow("Start in the tray", "Waits there instead of opening its window.", prefs.startInTray) { on ->
                 change { it.copy(startInTray = on) }
             }
         }

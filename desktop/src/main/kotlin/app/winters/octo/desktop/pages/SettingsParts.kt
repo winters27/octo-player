@@ -1,21 +1,14 @@
 package app.winters.octo.desktop.pages
 
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.hideFromAccessibility
-import androidx.compose.ui.focus.focusProperties
-import app.winters.octo.design.FocusRing
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,40 +17,53 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.hideFromAccessibility
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import app.winters.octo.design.CardEdge
+import app.winters.octo.design.CardFill
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
+import app.winters.octo.design.FocusRing
+import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlazeSegments
 import app.winters.octo.design.GlazeSelected
+import app.winters.octo.design.IconSize
 import app.winters.octo.design.LineSlider
-import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.RowHeight
@@ -72,55 +78,50 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.ui.LocalBottomRoom
 import app.winters.octo.desktop.ui.PageSide
-import app.winters.octo.desktop.ui.rememberListState
-import kotlinx.coroutines.launch
 
 // The parts the Settings and Sound pages are made of: the list of sections
-// beside the page, the sections, and one kind of row for every setting.
+// beside the page, one section at a time, its settings in cards, and one
+// kind of row for every setting.
 
-// One section of a page: its name, which the list beside the page shows
-// too, a line under the name, and something beside it (the equalizer's
-// switch).
+// One section of a page: its name and icon, which the list beside the page
+// shows too, a line under the name, and something beside it (the
+// equalizer's switch). A brand's own mark keeps its own colours.
 class PageSection(
     val key: String,
     val name: String,
+    val icon: ImageVector? = null,
     val detail: String? = null,
+    val brand: Boolean = false,
     val trailing: (@Composable () -> Unit)? = null,
     val content: @Composable ColumnScope.() -> Unit,
 )
 
-// A page of settings: its title and the list of its sections on the left,
-// and the sections themselves in a column centred in the rest of the page.
-// A click in the list scrolls to that section; the section being read is
-// the one marked. On a narrow window the list is left out.
+// How far a row's words sit in from its card's edge.
+internal val RowInset = Space.Xl
+
+// The section each page last showed, by page, for the rest of the session.
+private val shownSections = mutableStateMapOf<String, String>()
+
+// Shows a page's section by its key, as a click in the list would: for a
+// link straight to it, and for the tests' pictures.
+fun showSection(page: String, key: String) {
+    shownSections[page] = key
+}
+
+// Which section to show: the one last shown on this page while it is still
+// there, else the first.
+internal fun shownSection(keys: List<String>, remembered: String?): Int =
+    keys.indexOf(remembered).takeIf { it >= 0 } ?: 0
+
+// A page of settings: its title, the list of its sections on the left, and
+// the section picked, alone, in a column beside it. On a narrow window the
+// list becomes a row of tabs over the section.
 @Composable
 internal fun SectionedPage(app: AppState, visit: Visit, title: String, sections: List<PageSection>) {
-    val list = rememberListState(app.navigator, visit)
-    val scope = rememberCoroutineScope()
-    val still = LocalReduceMotion.current
-    // The section last picked in the list, until the reader scrolls.
-    var jumped by remember { mutableStateOf<Int?>(null) }
-    var jumping by remember { mutableStateOf(false) }
-    LaunchedEffect(list) {
-        snapshotFlow { list.isScrollInProgress }.collect { moving -> if (moving && !jumping) jumped = null }
-    }
-    val current by remember(list) {
-        derivedStateOf {
-            val info = list.layoutInfo
-            val spans = info.visibleItemsInfo.map { Span(it.index, it.offset, it.offset + it.size) }
-            sectionInView(spans, info.viewportSize.height, atEnd = !list.canScrollForward, jumped = jumped)
-        }
-    }
-    fun jump(index: Int) {
-        jumped = index
-        scope.launch {
-            jumping = true
-            try {
-                if (still) list.scrollToItem(index) else list.animateScrollToItem(index)
-            } finally {
-                jumping = false
-            }
-        }
+    val index = shownSection(sections.map { it.key }, shownSections[title])
+    val section = sections.getOrNull(index) ?: return
+    fun pick(at: Int) {
+        shownSections[title] = sections[at].key
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val withList = maxWidth >= PageSide * 2 + SettingsSize.Nav + Space.Wide + SettingsSize.ColumnMin
@@ -129,17 +130,14 @@ internal fun SectionedPage(app: AppState, visit: Visit, title: String, sections:
         val side = if (withList) groupSide(maxWidth) else PageSide
         Column(Modifier.fillMaxSize()) {
             Txt(title, DesktopType.pageTitle, modifier = Modifier.padding(start = side, end = PageSide, top = Space.Xxl, bottom = Space.Xs))
-            // The list of sections lies over the scrolling column, which
-            // spans the whole page so the wheel scrolls it from either side.
-            Box(Modifier.fillMaxSize()) {
-                SectionColumn(
-                    list,
-                    sections,
-                    Modifier.fillMaxSize(),
-                    start = if (withList) side - Space.M + SettingsSize.Nav + Space.Wide else PageSide,
-                    end = if (withList) side - Space.M else PageSide,
-                )
-                if (withList) SectionList(sections, current, ::jump, start = side - Space.M)
+            if (withList) {
+                Row(Modifier.fillMaxSize()) {
+                    SectionList(sections, index, ::pick, Modifier.padding(start = side - Space.M))
+                    SectionColumn(section, Modifier.weight(1f), start = Space.Wide - Space.M, end = side - Space.M)
+                }
+            } else {
+                SectionTabs(sections, index, ::pick, Modifier.padding(horizontal = PageSide - Space.M))
+                SectionColumn(section, Modifier.weight(1f), start = PageSide - Space.M, end = PageSide - Space.M)
             }
         }
     }
@@ -152,41 +150,71 @@ internal fun SectionedPage(app: AppState, visit: Visit, title: String, sections:
 internal fun groupSide(width: Dp): Dp =
     maxOf(PageSide, (width - SettingsSize.Nav - Space.Wide - SettingsSize.Column) / 2 + Space.M)
 
-// The names of the page's sections, the one being read on the darker pill.
+// The page's sections, each with its icon, the one shown on the darker pill.
 @Composable
-private fun SectionList(sections: List<PageSection>, current: Int, onPick: (Int) -> Unit, start: Dp) {
-    Column(Modifier.padding(start = start, top = Space.Xl - Space.S).width(SettingsSize.Nav), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
+private fun SectionList(sections: List<PageSection>, current: Int, onPick: (Int) -> Unit, modifier: Modifier) {
+    Column(modifier.padding(top = Space.Xl).width(SettingsSize.Nav), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
         sections.forEachIndexed { index, section ->
-            val chosen = index == current
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(RowHeight.Nav)
-                    .hoverLift(Corner.ControlShape, lifted = false)
-                    .clickable(role = Role.Tab) { onPick(index) }
-                    .semantics { selected = chosen },
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                if (chosen) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
-                Txt(section.name, DesktopType.body, if (chosen) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.padding(horizontal = Space.M))
-            }
+            SectionPick(section, index == current, { onPick(index) }, Modifier.fillMaxWidth())
         }
     }
 }
 
-// The sections, one under another, in a column no wider than reads well,
-// with room at the foot so the last of them clears the floating player.
+// The same, as a row of tabs over the section on a narrow window.
 @Composable
-private fun SectionColumn(list: LazyListState, sections: List<PageSection>, modifier: Modifier, start: Dp, end: Dp) {
-    val bottom = LocalBottomRoom.current + Space.Section
-    LazyColumn(
-        modifier.topFade(Space.Xl),
-        state = list,
-        contentPadding = PaddingValues(start = start, end = end, top = Space.Xl, bottom = bottom),
-        horizontalAlignment = Alignment.CenterHorizontally,
+private fun SectionTabs(sections: List<PageSection>, current: Int, onPick: (Int) -> Unit, modifier: Modifier) {
+    Row(
+        modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = Space.L),
+        horizontalArrangement = Arrangement.spacedBy(Space.Xxs),
     ) {
-        sections.forEach { section ->
-            item(key = section.key) { Section(section, Modifier.widthIn(max = SettingsSize.Column).fillMaxWidth()) }
+        sections.forEachIndexed { index, section -> SectionPick(section, index == current, { onPick(index) }) }
+    }
+}
+
+// One section to pick: its icon and name.
+@Composable
+private fun SectionPick(section: PageSection, chosen: Boolean, onPick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .height(RowHeight.Nav)
+            .hoverLift(Corner.ControlShape, lifted = false)
+            .clickable(role = Role.Tab, onClick = onPick)
+            .semantics { selected = chosen },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (chosen) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
+        Row(Modifier.padding(horizontal = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
+            section.icon?.let { SectionIcon(it, section.brand, IconSize.Toolbar, if (chosen) OctoColors.TextPrimary else OctoColors.TextSecondary) }
+            Txt(section.name, DesktopType.body, if (chosen) OctoColors.TextPrimary else OctoColors.TextSecondary)
+        }
+    }
+}
+
+// A section's icon: tinted like the words beside it, or a brand's mark in
+// its own colours.
+@Composable
+private fun SectionIcon(icon: ImageVector, brand: Boolean, size: Dp, tint: Color) {
+    Image(
+        rememberVectorPainter(icon),
+        contentDescription = null,
+        modifier = Modifier.size(size),
+        colorFilter = if (brand) null else ColorFilter.tint(tint),
+    )
+}
+
+// The section shown, in a column no wider than reads well, scrolling on
+// its own, with room at the foot so its last card clears the floating
+// player. Each section starts at its top.
+@Composable
+private fun SectionColumn(section: PageSection, modifier: Modifier, start: Dp, end: Dp) {
+    val bottom = LocalBottomRoom.current + Space.Section
+    key(section.key) {
+        Box(modifier.fillMaxSize().topFade(Space.Xl)) {
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = start, end = end, top = Space.Xl, bottom = bottom),
+            ) {
+                Column(Modifier.widthIn(max = SettingsSize.Column).fillMaxWidth()) { Section(section) }
+            }
         }
     }
 }
@@ -201,49 +229,41 @@ private fun Modifier.topFade(height: Dp): Modifier = this
         drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black), startY = 0f, endY = edge), size = Size(size.width, edge), blendMode = BlendMode.DstIn)
     }
 
+// A section: its icon on a tile, its name and line, then its cards.
 @Composable
-private fun Section(section: PageSection, modifier: Modifier) {
-    Column(modifier.padding(bottom = Space.Section + Space.M)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = Space.M).padding(bottom = Space.S), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Txt(section.name, DesktopType.section)
-                section.detail?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xxs), maxLines = 2) }
-            }
-            section.trailing?.invoke()
+private fun ColumnScope.Section(section: PageSection) {
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = Space.Xl),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.L),
+    ) {
+        section.icon?.let { icon ->
+            Box(
+                Modifier.size(SettingsSize.SectionIcon).clip(Corner.ControlShape).background(CardFill),
+                contentAlignment = Alignment.Center,
+            ) { SectionIcon(icon, section.brand, IconSize.Transport, OctoColors.TextPrimary) }
         }
+        Column(Modifier.weight(1f)) {
+            Txt(section.name, DesktopType.section, modifier = Modifier.semantics { heading() })
+            section.detail?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xxs), maxLines = 2) }
+        }
+        section.trailing?.invoke()
+    }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.Xl)) {
         section.content(this)
     }
 }
 
-// Where a section sits in the list, in pixels from the top of what shows.
-internal data class Span(val index: Int, val top: Int, val bottom: Int)
-
-// The section being read: at the very top the first, at the very end the
-// last, and otherwise the one a line a tenth of the way down the list
-// crosses. One just picked in the list stays marked while it is in sight,
-// since a short section near the end can never reach the top.
-internal fun sectionInView(spans: List<Span>, height: Int, atEnd: Boolean, jumped: Int?): Int {
-    if (spans.isEmpty()) return jumped ?: 0
-    if (jumped != null && spans.any { it.index == jumped && it.top < height && it.bottom > 0 }) return jumped
-    val first = spans.first()
-    if (first.index == 0 && first.top >= 0) return 0
-    if (atEnd) return spans.last().index
-    val line = height / 10
-    return spans.firstOrNull { line >= it.top && line < it.bottom }?.index
-        ?: spans.lastOrNull { it.top <= line }?.index
-        ?: spans.first().index
-}
-
-// A group of rows inside a section, with its name above when it has one.
+// A group of rows, in a card, with its name above when it has one.
 @Composable
 internal fun Group(name: String? = null, content: @Composable () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(top = if (name != null) Space.L else Space.None)) {
+    Column(Modifier.fillMaxWidth()) {
         if (name != null) {
             Txt(
                 name.uppercase(),
                 DesktopType.label,
                 OctoColors.TextMuted,
-                Modifier.padding(start = Space.M, bottom = Space.Xs).semantics {
+                Modifier.padding(start = RowInset, bottom = Space.S).semantics {
                     heading()
                     contentDescription = name
                 },
@@ -253,17 +273,35 @@ internal fun Group(name: String? = null, content: @Composable () -> Unit) {
     }
 }
 
-// Rows one under another with a hairline between each. A row that draws
-// nothing takes no place and gets no line.
+// A card: a faint panel with a hairline edge, holding whatever is put in it.
+// A card with nothing in it draws nothing.
+@Composable
+internal fun Card(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier.fillMaxWidth().cardSurface(), content = content)
+}
+
+private fun Modifier.cardSurface(): Modifier = this
+    .drawBehind {
+        if (size.height <= 0f) return@drawBehind
+        val radius = CornerRadius(Corner.Panel.toPx())
+        val edge = FrameSize.Hairline.toPx()
+        drawRoundRect(CardFill, cornerRadius = radius)
+        drawRoundRect(CardEdge, topLeft = Offset(edge / 2, edge / 2), size = Size(size.width - edge, size.height - edge), cornerRadius = radius, style = Stroke(edge))
+    }
+    .clip(Corner.PanelShape)
+
+// Rows one under another in a card, with a hairline between each. A row
+// that draws nothing takes no place and gets no line; with no rows at all
+// there is no card.
 @Composable
 internal fun Rows(content: @Composable () -> Unit) {
     val onePixel = with(LocalDensity.current) { 1.toDp() }
-    SubcomposeLayout(Modifier.fillMaxWidth()) { constraints ->
+    SubcomposeLayout(Modifier.fillMaxWidth().cardSurface()) { constraints ->
         val loose = constraints.copy(minHeight = 0)
         val rows = subcompose("rows", content).map { it.measure(loose) }.filter { it.height > 0 }
         val lines = subcompose("lines") {
             repeat((rows.size - 1).coerceAtLeast(0)) {
-                Box(Modifier.padding(horizontal = Space.M).fillMaxWidth().height(onePixel).background(SeparatorColor))
+                Box(Modifier.padding(horizontal = RowInset).fillMaxWidth().height(onePixel).background(SeparatorColor))
             }
         }.map { it.measure(loose) }
         layout(constraints.maxWidth, rows.sumOf { it.height } + lines.sumOf { it.height }) {
@@ -280,7 +318,7 @@ internal fun Rows(content: @Composable () -> Unit) {
     }
 }
 
-// Every setting's row: its name, a line on when you would want it, and
+// Every setting's row: its name, a short line when the name needs one, and
 // its control on the right.
 @Composable
 internal fun SettingRow(title: String, caption: String?, modifier: Modifier = Modifier, dim: Boolean = false, control: @Composable RowScope.() -> Unit = {}) {
@@ -288,7 +326,7 @@ internal fun SettingRow(title: String, caption: String?, modifier: Modifier = Mo
         modifier
             .fillMaxWidth()
             .heightIn(min = RowHeight.Roomy)
-            .padding(horizontal = Space.M, vertical = Space.L),
+            .padding(horizontal = RowInset, vertical = Space.L),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.Xxl),
     ) {
@@ -307,7 +345,7 @@ internal fun SwitchRow(title: String, caption: String?, on: Boolean, change: (Bo
         title,
         caption,
         Modifier
-            .hoverLift(Corner.RowShape)
+            .hoverLift()
             .toggleable(value = on, interactionSource = null, indication = FocusRing(Corner.RowShape), role = Role.Switch, onValueChange = change),
     ) {
         // The row is the one stop and the one switch a screen reader hears;
@@ -351,7 +389,8 @@ internal fun SliderRow(
                 label = title,
                 reading = { reading },
             )
-            Txt(reading, DesktopType.meta.copy(fontFeatureSettings = "tnum"), OctoColors.TextSecondary, Modifier.width(SettingsSize.Reading))
+            // Its end lines up with the switches' and actions' edge.
+            Txt(reading, DesktopType.meta.copy(fontFeatureSettings = "tnum"), OctoColors.TextSecondary, Modifier.width(SettingsSize.Reading), align = TextAlign.End)
         }
     }
 }
@@ -376,5 +415,5 @@ internal fun ActionRow(title: String, caption: String?, action: String, onClick:
 // edge; the lift under the pointer reaches a little past it.
 @Composable
 internal fun RowAction(text: String, onClick: () -> Unit, enabled: Boolean = true, icon: ImageVector? = null) {
-    TextAction(text, onClick, Modifier.offset(x = Space.L), enabled = enabled, icon = icon)
+    TextAction(text, onClick, Modifier.offset(x = Space.M), enabled = enabled, icon = icon)
 }

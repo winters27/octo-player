@@ -1,5 +1,9 @@
 package app.winters.octo.desktop.pages
 
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -90,7 +94,7 @@ internal fun ServerRows(app: AppState) {
         }
         ActionRow(
             "Add a server",
-            "Keep another server here and switch to it in one click. You stay on ${connection?.server?.name ?: "this one"} while you add it.",
+            "Switch between servers in one click.",
             "Add",
             { addServer(app) },
         )
@@ -105,16 +109,15 @@ private fun ServerRow(app: AppState, server: SavedServer, inUse: Boolean) {
     val switching = app.switching?.id == server.id
     val check = app.serverFacts.checks[server.id]
     Box(Modifier.fillMaxWidth().heightIn(min = RowHeight.Roomy).semantics { selected = inUse }) {
-        if (inUse) GlazeSelected(Modifier.matchParentSize(), Corner.RowShape)
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.M, vertical = Space.L),
+            Modifier.fillMaxWidth().padding(horizontal = RowInset, vertical = Space.L),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Space.L),
         ) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
                     Txt(server.name, if (inUse) DesktopType.emphasis else DesktopType.body, if (server.signedOut) OctoColors.TextSecondary else OctoColors.TextPrimary)
-                    if (inUse) Txt("In use", DesktopType.meta, OctoColors.TextSecondary)
+                    if (inUse) InUseMark()
                 }
                 Txt(accountLine(server), DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xxs))
                 val quiet = check?.reach == Reach.Unreachable || check?.reach == Reach.WrongPassword
@@ -129,6 +132,15 @@ private fun ServerRow(app: AppState, server: SavedServer, inUse: Boolean) {
             }
             ServerMenuButton(app, server, inUse)
         }
+    }
+}
+
+// The server in use, marked as such: a green dot and its words.
+@Composable
+private fun InUseMark() {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
+        Box(Modifier.size(Space.S).clip(CircleShape).background(OctoColors.SignalGreen))
+        Txt("In use", DesktopType.meta, OctoColors.TextSecondary)
     }
 }
 
@@ -192,12 +204,12 @@ private fun OverviewRows(app: AppState, connection: Connection) {
     SettingRow("Signed in as ${connection.client.username.ifEmpty { "API key" }}", overview.passwordNote ?: kept) {
         if (overview.canChangePassword) RowAction("Change password", { changePassword(app) })
     }
-    ActionRow("Read the library again", "When music added to the server hasn't shown up here yet.", "Read again", {
+    ActionRow("Read the library again", "When new music hasn't shown up yet.", "Read again", {
         app.library?.load()
         app.refreshPlaylists()
     })
     if (overview.canScan) {
-        val caption = facts.scanProblem ?: overview.scan ?: "Has the server look through its folders for music added or changed there. For when a new album isn't on the server yet."
+        val caption = facts.scanProblem ?: overview.scan ?: "Has the server look for music added to its folders."
         SettingRow("Scan the server", caption) {
             if (overview.scanning) {
                 Spinner(size = IconSize.Table)

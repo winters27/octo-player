@@ -1,9 +1,21 @@
 package app.winters.octo.desktop.pages
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import app.winters.octo.design.FrameSize
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.Space
@@ -17,14 +29,14 @@ import app.winters.octo.update.InstallWhen
 import app.winters.octo.update.UpdatePrefs
 import kotlinx.coroutines.launch
 
-// Settings > About: the version, a ready update with what is new in it,
-// and how Octo looks for new versions.
+// Settings > About: Octo and its version, a ready update with what is new
+// in it, and how Octo looks for new versions.
 @Composable
 internal fun AboutRows(app: AppState, settings: AppSettings) {
     val updates = app.updates
     val ready = updates?.ready
+    AboutCard()
     Rows {
-        InfoRow("Version", null, appVersion())
         if (updates != null && ready != null) {
             SettingRow("Update ready: ${ready.version}", updates.installHelp(ready)) {
                 val system = LocalSystem.current
@@ -33,13 +45,15 @@ internal fun AboutRows(app: AppState, settings: AppSettings) {
         }
     }
     if (ready != null && ready.notes.isNotBlank()) {
-        Txt(
-            ready.notes.trim(),
-            DesktopType.meta,
-            OctoColors.TextSecondary,
-            Modifier.fillMaxWidth().padding(horizontal = Space.M, vertical = Space.S),
-            maxLines = NOTES_LINES,
-        )
+        Card {
+            Txt(
+                ready.notes.trim(),
+                DesktopType.meta,
+                OctoColors.TextSecondary,
+                Modifier.fillMaxWidth().padding(horizontal = RowInset, vertical = Space.L),
+                maxLines = NOTES_LINES,
+            )
+        }
     }
     if (updates == null) return
     val prefs = settings.updates
@@ -52,7 +66,7 @@ internal fun AboutRows(app: AppState, settings: AppSettings) {
         }
         SwitchRow(
             "Check for updates automatically",
-            "Looks for a new version a little after Octo opens and every few hours, and downloads it in the background.",
+            "Looks every few hours and downloads in the background.",
             prefs.checkAutomatically,
         ) { on -> change { it.copy(checkAutomatically = on) } }
         if (app.os == DesktopOs.Windows) {
@@ -66,18 +80,44 @@ internal fun AboutRows(app: AppState, settings: AppSettings) {
         }
         SwitchRow(
             "Try early versions",
-            "New versions before they're finished, for trying what's coming. They can have rough edges.",
+            "Before they're finished. They can have rough edges.",
             prefs.earlyVersions,
         ) { on -> change { it.copy(earlyVersions = on) } }
         ActionRow(
             "New versions",
-            updates.lastLine ?: "Octo's new versions come from its releases on GitHub, signed so only real ones install.",
+            updates.lastLine ?: "Signed releases from GitHub.",
             if (updates.checking) "Checking" else "Check now",
             { app.scope.launch { updates.check() } },
             enabled = !updates.checking,
         )
     }
 }
+
+// Octo's octopus, its name and the version.
+@Composable
+private fun AboutCard() {
+    val octopus = remember { octopusPicture() }
+    Card {
+        Row(
+            Modifier.padding(horizontal = RowInset, vertical = Space.Xl),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.Xl),
+        ) {
+            octopus?.let { Image(it, contentDescription = null, modifier = Modifier.size(FrameSize.OpeningMark / 2)) }
+            Column {
+                Txt("Octo", DesktopType.section)
+                val version = appVersion()
+                Txt(if (version.first().isDigit()) "Version $version" else version, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xxs))
+            }
+        }
+    }
+}
+
+// The octopus the window opens on, drawn smaller than it is stored.
+private fun octopusPicture(): Painter? = runCatching {
+    val bytes = AppState::class.java.getResourceAsStream("/octo-opening.png")!!.use { it.readBytes() }
+    BitmapPainter(org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap(), filterQuality = FilterQuality.High)
+}.getOrNull()
 
 // How many lines of a release's notes show under its row.
 private const val NOTES_LINES = 12

@@ -26,6 +26,7 @@ import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.pages.RowInset
 import app.winters.octo.desktop.pages.ActionRow
 import app.winters.octo.desktop.pages.Group
 import app.winters.octo.desktop.pages.SwitchRow
@@ -46,14 +47,14 @@ fun GlobalShortcutGroup(app: AppState) {
     Group("Global shortcuts") {
         SwitchRow(
             "Use these keys from any app",
-            "Play, skip and turn the volume while you work in another app or play a game, even with Octo hidden.",
+            "Play, skip and set the volume from any app, even with Octo hidden.",
             prefs.on,
         ) { on -> app.settings.update { it.copy(hotkeys = it.hotkeys.copy(on = on)) } }
         HotkeyAction.entries.forEach { action ->
             ShortcutRow(action, keys[action], shortcuts, on = prefs.on)
         }
         if (prefs.keys.isNotEmpty()) {
-            ActionRow("Use the usual keys", "Puts every shortcut here back as Octo first had it.", "Reset", shortcuts::useUsualKeys)
+            ActionRow("Use the usual keys", null, "Reset", shortcuts::useUsualKeys)
         }
     }
 }
@@ -81,7 +82,7 @@ private fun ShortcutRow(action: HotkeyAction, combo: KeyCombo?, shortcuts: Globa
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button) {
                 if (listening) shortcuts.stopRecording() else shortcuts.record(action)
             }
-            .padding(horizontal = Space.M, vertical = Space.S),
+            .padding(horizontal = RowInset, vertical = Space.S),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f).padding(end = Space.Xl)) {

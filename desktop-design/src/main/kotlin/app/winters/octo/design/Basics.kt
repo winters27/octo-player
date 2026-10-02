@@ -40,6 +40,10 @@ val SeparatorColor = Color.White.copy(alpha = 0.08f)
 // What a row or button shows under the pointer: a faint lift, never a border.
 val HoverFill = Color.White.copy(alpha = 0.06f)
 
+// A card of settings: a faint lift off the page, its edge a hairline.
+val CardFill = Color.White.copy(alpha = 0.035f)
+val CardEdge = Color.White.copy(alpha = 0.07f)
+
 // Text in the app's type, one line and cut with an ellipsis unless told
 // otherwise. A page's title and a section's name are headings, so a screen
 // reader can jump between them.

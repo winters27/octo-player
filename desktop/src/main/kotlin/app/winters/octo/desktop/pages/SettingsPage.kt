@@ -37,38 +37,43 @@ import app.winters.octo.desktop.settings.WashPrefs
 import app.winters.octo.desktop.system.SystemRows
 import app.winters.octo.desktop.system.TaskbarAndStartupRows
 import app.winters.octo.desktop.system.MiniPlayerGroup
-import app.winters.octo.desktop.system.DiscordGroup
+import app.winters.octo.desktop.system.DiscordRows
+import app.winters.octo.desktop.system.hasDiscord
+import app.winters.octo.desktop.discord.DiscordMark
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.desktop.hotkeys.GlobalShortcutGroup
 import app.winters.octo.desktop.ui.LocalSoftwareDrawing
 import kotlin.math.roundToInt
 
-// Settings: the servers, how Octo looks, playback, listening, lyrics, how
-// it fits into the system, and the keyboard shortcuts, each a section in
-// the list beside the page. Every change is saved at once.
+// Settings: the servers, how Octo looks, playback, listening, lyrics,
+// Discord, how it fits into the system, the keyboard shortcuts and the
+// version, each a section of its own in the list beside the page. Every
+// change is saved at once.
 @Composable
 fun SettingsPage(app: AppState, visit: Visit) {
     val settings by app.settings.state.collectAsState()
+    val discord = hasDiscord()
     SectionedPage(
         app,
         visit,
         "Settings",
-        listOf(
-            PageSection("servers", "Servers") { ServerRows(app) },
-            PageSection("look", "Appearance") { AppearanceGroups(app, settings) },
-            PageSection("playback", "Playback") { PlaybackRows(app, settings) },
-            PageSection("listening", "Listening") { ListeningRows(app, settings) },
-            PageSection("lyrics", "Lyrics") { LyricsRows(app, settings) },
-            PageSection("system", "System") {
+        listOfNotNull(
+            PageSection("servers", "Servers", OctoIcons.Servers) { ServerRows(app) },
+            PageSection("look", "Appearance", OctoIcons.Appearance) { AppearanceGroups(app, settings) },
+            PageSection("playback", "Playback", OctoIcons.Playback) { PlaybackRows(app, settings) },
+            PageSection("listening", "Listening", OctoIcons.Headphones) { ListeningRows(app, settings) },
+            PageSection("lyrics", "Lyrics", OctoIcons.Lyrics) { LyricsRows(app, settings) },
+            if (discord) PageSection("discord", "Discord", DiscordMark, detail = "Show what you're playing to your friends.", brand = true) { DiscordRows(app) } else null,
+            PageSection("system", "System", OctoIcons.System) {
                 SystemRows(app)
                 TaskbarAndStartupRows(app)
                 MiniPlayerGroup(app)
-                DiscordGroup(app)
             },
-            PageSection("keys", "Keyboard") {
+            PageSection("keys", "Keyboard", OctoIcons.Keyboard) {
                 KeyRows(app)
                 GlobalShortcutGroup(app)
             },
-            PageSection("about", "About") { AboutRows(app, settings) },
+            PageSection("about", "About", OctoIcons.Info) { AboutRows(app, settings) },
         ),
     )
 }
@@ -90,7 +95,7 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
             appearance { withAmbience(it, style) }
         }
         if (chosen != null) {
-            SliderRow("Strength", "Turn it down if the colours pull your eye from the page.", "${(look.glowStrength * 100).roundToInt()}%", look.glowStrength, { value ->
+            SliderRow("Strength", null, "${(look.glowStrength * 100).roundToInt()}%", look.glowStrength, { value ->
                 appearance { it.copy(glowStrength = value) }
             })
         }
@@ -106,18 +111,18 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
         }
     }
     Group("Full player") {
-        SwitchRow("Moving background", "The cover's colours drift behind the full player. Off holds them still, easier on a laptop's battery.", look.wash.moving) { on ->
+        SwitchRow("Moving background", "Off holds the colours still, easier on a battery.", look.wash.moving) { on ->
             wash { it.copy(moving = on) }
         }
         if (look.wash.moving && !look.calmMotion) {
-            SliderRow("Drift speed", "How fast the colours move.", "${look.wash.speed}%", (look.wash.speed - 5) / 95f, { x ->
+            SliderRow("Drift speed", null, "${look.wash.speed}%", (look.wash.speed - 5) / 95f, { x ->
                 wash { it.copy(speed = (5 + x * 95).roundToInt()) }
             }, live = false)
-            SwitchRow("Move with the beat", "Slow songs drift slower and quick ones faster, when the server knows their tempo.", look.wash.useBpm) { on ->
+            SwitchRow("Move with the beat", "Slow songs drift slower, quick ones faster.", look.wash.useBpm) { on ->
                 wash { it.copy(useBpm = on) }
             }
         }
-        SliderRow("Brightness cap", "Turn it down if bright covers make the words hard to read.", "${look.wash.brightnessCap}%", (look.wash.brightnessCap - 20) / 80f, { x ->
+        SliderRow("Brightness cap", "Lower it if bright covers make words hard to read.", "${look.wash.brightnessCap}%", (look.wash.brightnessCap - 20) / 80f, { x ->
             wash { it.copy(brightnessCap = (20 + x * 80).roundToInt()) }
         }, live = false)
     }
@@ -127,7 +132,7 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
         }
     }
     Group("Motion") {
-        SwitchRow("Calm motion", "For less movement: backgrounds hold still, and lyrics move without springs or blooms.", look.calmMotion) { on ->
+        SwitchRow("Calm motion", "Backgrounds hold still and lyrics move without springs.", look.calmMotion) { on ->
             appearance { it.copy(calmMotion = on) }
         }
     }
@@ -135,7 +140,7 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
         val system = if (app.os == DesktopOs.Windows) "Windows" else "your system"
         ChoiceRow(
             "Text size",
-            "Bigger words everywhere in Octo. Like $system follows its own text size setting, up to ${(MaxTextScale * 100).roundToInt()}%.",
+            "Like $system follows its own text size, up to ${(MaxTextScale * 100).roundToInt()}%.",
             TextSizes,
             look.textSize.takeIf { it in TextSizes } ?: 0,
             { size -> if (size == 0) "Like $system" else "$size%" },
@@ -157,10 +162,10 @@ internal fun withAmbience(look: Appearance, style: AmbienceStyle?): Appearance =
 @Composable
 private fun PlaybackRows(app: AppState, settings: AppSettings) {
     Rows {
-        SwitchRow("Autoplay", "When the queue ends, similar songs keep playing: from your server, or by the same artist or in the same genre.", settings.playback.autoplay) { on ->
+        SwitchRow("Autoplay", "When the queue ends, similar songs keep playing.", settings.playback.autoplay) { on ->
             app.setAutoplay(on)
         }
-        ActionRow("Equalizer, loudness, crossfade and speed", "On the Sound page.", "Open Sound", { app.navigator.go(Page.Sound) })
+        ActionRow("Equalizer, loudness, crossfade and speed", null, "Open Sound", { app.navigator.go(Page.Sound) })
     }
 }
 
@@ -170,12 +175,12 @@ private fun ListeningRows(app: AppState, settings: AppSettings) {
     Rows {
         SwitchRow(
             "Tell the server what you play",
-            "Keeps play counts and recently played right in every app. Turn off if another app already reports this computer's plays.",
+            "Keeps play counts and history right in every app.",
             listening.reportPlays,
         ) { on -> app.settings.update { it.copy(listening = it.listening.copy(reportPlays = on)) } }
         SwitchRow(
             "Carry the queue between devices",
-            "Pick up on your phone where you left off here, and here where you left off on your phone.",
+            "Pick up on your phone where you left off here, and back.",
             listening.syncQueue,
         ) { on -> app.settings.update { it.copy(listening = it.listening.copy(syncQueue = on)) } }
     }
@@ -186,7 +191,7 @@ private fun LyricsRows(app: AppState, settings: AppSettings) {
     Rows {
         SwitchRow(
             "Find lyrics online",
-            "When your server and the song have none, ask LRCLIB, sending only the title, artist, album and length.",
+            "Asks LRCLIB when your server has none, sending only the song's names.",
             settings.lyrics.online,
         ) { on ->
             app.settings.update { it.copy(lyrics = it.lyrics.copy(online = on)) }
@@ -198,10 +203,10 @@ private fun LyricsRows(app: AppState, settings: AppSettings) {
 // Each shortcut and its keys, in short lines.
 @Composable
 private fun KeyRows(app: AppState) {
-    Rows {
+    Group("In Octo") {
         shortcutList(app.mac).forEach { (what, keys) ->
             Row(
-                Modifier.fillMaxWidth().heightIn(min = RowHeight.Regular).padding(horizontal = Space.M, vertical = Space.S),
+                Modifier.fillMaxWidth().heightIn(min = RowHeight.Regular).padding(horizontal = RowInset, vertical = Space.S),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Txt(what, DesktopType.body, modifier = Modifier.weight(1f).padding(end = Space.Xl), maxLines = 2)
@@ -220,9 +225,9 @@ private fun ambienceName(style: AmbienceStyle?): String = when (style) {
 
 // When each ambience choice is the one to pick.
 private fun ambienceHelp(style: AmbienceStyle?): String = when (style) {
-    null -> "The plain dark background, for the fewest distractions."
-    AmbienceStyle.Glow -> "A soft glow of the playing song's colours across the top of the window."
-    AmbienceStyle.Immersive -> "The cover's colours behind the whole window, as in the full player."
+    null -> "The plain dark background."
+    AmbienceStyle.Glow -> "The song's colours glow across the top of the window."
+    AmbienceStyle.Immersive -> "The cover's colours behind the whole window."
 }
 
 private fun motionName(motion: AmbienceMotion): String = when (motion) {
@@ -233,9 +238,9 @@ private fun motionName(motion: AmbienceMotion): String = when (motion) {
 
 // When each movement is the one to pick.
 private fun motionHelp(motion: AmbienceMotion): String = when (motion) {
-    AmbienceMotion.Still -> "Holds still. Easiest on a laptop's battery or an older computer."
-    AmbienceMotion.Gentle -> "Drifts slowly while music plays, and rests when it stops."
-    AmbienceMotion.Full -> "Drifts at the full player's pace while music plays."
+    AmbienceMotion.Still -> "Holds still, easiest on a battery."
+    AmbienceMotion.Gentle -> "Drifts slowly while music plays."
+    AmbienceMotion.Full -> "Drifts at the full player's pace."
 }
 
 // The version the build stamped, or "Development build" when run from source

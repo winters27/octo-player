@@ -12,45 +12,21 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-// The Settings and Sound pages' list of sections, and the choices the
-// Settings page folds into one control.
+// The Settings and Sound pages' sections, and the choices the Settings
+// page folds into one control.
 class SettingsSectionsTest {
-    // Four sections 300 px tall, the list showing 800 px of them.
-    private fun spans(scrolled: Int) = (0 until 4).map { Span(it, it * 300 - scrolled, (it + 1) * 300 - scrolled) }
-        .filter { it.bottom > 0 && it.top < 800 }
-
     @Test
-    fun atTheTopTheFirstSectionIsMarked() {
-        assertEquals(0, sectionInView(spans(0), 800, atEnd = false, jumped = null))
-        // Even when the second section is the one near the top line: a
-        // short first section is still the one being read at the top.
-        val short = listOf(Span(0, 0, 60), Span(1, 60, 500))
-        assertEquals(0, sectionInView(short, 800, atEnd = false, jumped = null))
+    fun aPageOpensOnTheSectionLastShown() {
+        val keys = listOf("servers", "look", "discord", "about")
+        assertEquals(2, shownSection(keys, "discord"))
     }
 
     @Test
-    fun scrollingMarksTheSectionAtTheTop() {
-        assertEquals(0, sectionInView(spans(200), 800, atEnd = false, jumped = null))
-        assertEquals(1, sectionInView(spans(250), 800, atEnd = false, jumped = null))
-        assertEquals(2, sectionInView(spans(620), 800, atEnd = false, jumped = null))
-    }
-
-    @Test
-    fun atTheEndTheLastSectionIsMarked() {
-        assertEquals(3, sectionInView(spans(400), 800, atEnd = true, jumped = null))
-    }
-
-    @Test
-    fun aSectionPickedInTheListStaysMarkedWhileItShows() {
-        // Picked, but the list can go no further than showing it low down.
-        assertEquals(2, sectionInView(spans(400), 800, atEnd = true, jumped = 2))
-        // Scrolled out of sight, the picking no longer counts.
-        assertEquals(3, sectionInView(spans(1000).filter { it.index >= 3 }, 800, atEnd = true, jumped = 1))
-    }
-
-    @Test
-    fun anEmptyListMarksTheFirst() {
-        assertEquals(0, sectionInView(emptyList(), 800, atEnd = false, jumped = null))
+    fun aPageOpensOnItsFirstSectionAtFirstOrWhenTheLastIsGone() {
+        val keys = listOf("servers", "look", "about")
+        assertEquals(0, shownSection(keys, null))
+        // A build without Discord has no such section any more.
+        assertEquals(0, shownSection(keys, "discord"))
     }
 
     @Test

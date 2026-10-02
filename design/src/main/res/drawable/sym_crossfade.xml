@@ -1,0 +1,10 @@
+<!-- Phosphor Icons 2.1.1, intersect (regular), MIT. Made by tools/icons/make_icons.py. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="256"
+    android:viewportHeight="256">
+  <path
+      android:fillColor="@android:color/white"
+      android:pathData="M174.63,81.37A80,80,0,1,0,81.37,174.63A80,80,0,1,0,174.63,81.37ZM100.69,136L120,155.31A63.48,63.48,0,0,1,96,160A63.48,63.48,0,0,1,100.69,136ZM134.44,147.13L108.87,121.56A64.65,64.65,0,0,1,121.56,108.87L147.13,134.44A64.65,64.65,0,0,1,134.44,147.13ZM155.31,120L136,100.69A63.48,63.48,0,0,1,160,96A63.48,63.48,0,0,1,155.31,120ZM32,96A64,64,0,0,1,158,80A80.08,80.08,0,0,0,80.05,158A64.11,64.11,0,0,1,32,96ZM160,224A64.11,64.11,0,0,1,98,176A80.08,80.08,0,0,0,176,98A64,64,0,0,1,160,224Z"/>
+</vector>

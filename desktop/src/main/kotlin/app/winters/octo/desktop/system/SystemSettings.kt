@@ -27,24 +27,24 @@ fun SystemRows(app: AppState) {
         if (system?.trayAvailable == true) {
             SwitchRow(
                 "Keep playing when the window closes",
-                "Octo stays in the $tray, for music while the window is out of the way. Open it again from there.",
+                "Octo stays in the $tray.",
                 prefs.closeToTray,
             ) { on -> app.settings.update { it.copy(system = it.system.copy(closeToTray = on)) } }
         }
         if (system?.notificationsAvailable == true) {
-            SwitchRow("Now playing notifications", "A notice with each new song, while Octo's window is behind others.", prefs.nowPlayingNotices) { on ->
+            SwitchRow("Now playing notifications", "While Octo's window is behind others.", prefs.nowPlayingNotices) { on ->
                 app.settings.update { it.copy(system = it.system.copy(nowPlayingNotices = on)) }
             }
         }
         if (!mac) {
-            SwitchRow("Use the system title bar", "Your system's own window frame in place of Octo's. Takes effect the next time Octo opens.", settings.systemTitleBar) { on ->
+            SwitchRow("Use the system title bar", "Takes effect the next time Octo opens.", settings.systemTitleBar) { on ->
                 app.settings.update { it.copy(systemTitleBar = on) }
             }
         }
         if (system != null) {
             InfoRow(
                 "Media keys",
-                "Play, pause and skip from your keyboard and the system's media controls.",
+                null,
                 if (system.mediaKeysWork) "Working" else "Not available here",
             )
         }

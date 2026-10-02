@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.Density
 import app.winters.octo.design.LocalTyping
 import app.winters.octo.design.TypingState
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.pages.showSection
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.audio.EnginePlayer
 import app.winters.octo.desktop.audio.LocalOrServer
@@ -147,21 +148,11 @@ class MiniPlayerScreenShotsTest {
             mini("mini-bar-plain", MINI_WIDTH, MINI_HEIGHT)
             SwingUtilities.invokeAndWait { app.settings.update { it.copy(appearance = it.appearance.copy(ambientGlow = true)) } }
 
-            // Settings: System's new groups, then Keyboard's global
-            // shortcuts turned on, one refused by the system and one
-            // listening for new keys.
+            // Settings and Sound, every section, with Discord on and the
+            // global shortcuts on (one refused by the system); then a narrow
+            // window, where the list becomes tabs.
             val scene = ImageComposeScene(1440, 900, Density(1f)) {
                 Provided(app, system) { Shell(app, null) {} }
-            }
-            // A press and release on the list beside the page, then the
-            // wheel over the page, a frame drawn after each step.
-            fun tap(x: Float, y: Float) {
-                listOf(PointerEventType.Move, PointerEventType.Press, PointerEventType.Release).forEach { type ->
-                    SwingUtilities.invokeAndWait {
-                        scene.sendPointerEvent(type, Offset(x, y), buttons = PointerButtons(isPrimaryPressed = type == PointerEventType.Press), button = PointerButton.Primary)
-                        scene.render()
-                    }
-                }
             }
             fun wheel(clicks: Int) {
                 repeat(clicks) {
@@ -169,25 +160,34 @@ class MiniPlayerScreenShotsTest {
                 }
                 SwingUtilities.invokeAndWait { scene.sendPointerEvent(PointerEventType.Move, Offset(1400f, 880f)) }
             }
-            SwingUtilities.invokeAndWait { app.navigator.go(Page.Settings) }
-            draw(scene, null, 800)
-            tap(400f, SYSTEM_Y)
-            draw(scene, null, 1_200)
-            wheel(3)
-            draw(scene, "settings-system-extras", 1_500)
             SwingUtilities.invokeAndWait {
                 app.settings.update { it.copy(discord = it.discord.copy(on = true), hotkeys = it.hotkeys.copy(on = true)) }
                 system.shortcuts.start()
+                app.navigator.go(Page.Settings)
             }
-            draw(scene, "settings-system-extras-on", 1_500)
-            // Further down: how the Discord status looks.
-            wheel(8)
-            draw(scene, "settings-discord", 1_500)
-            tap(400f, KEYBOARD_Y)
-            draw(scene, null, 1_200)
+            draw(scene, null, 800)
+            for (key in listOf("servers", "look", "playback", "listening", "lyrics", "discord", "system", "keys", "about")) {
+                SwingUtilities.invokeAndWait { showSection("Settings", key) }
+                draw(scene, "settings-$key", 1_200)
+            }
+            SwingUtilities.invokeAndWait { showSection("Settings", "keys") }
             wheel(40)
             SwingUtilities.invokeAndWait { system.shortcuts.record(HotkeyAction.Like) }
             draw(scene, "settings-shortcuts", 1_500)
+            SwingUtilities.invokeAndWait { app.navigator.go(Page.Sound) }
+            for (key in listOf("output", "eq", "loudness", "balance", "playback", "correction")) {
+                SwingUtilities.invokeAndWait { showSection("Sound", key) }
+                draw(scene, "sound-$key", 1_200)
+            }
+            val narrow = ImageComposeScene(960, 640, Density(1f)) {
+                Provided(app, system) { Shell(app, null) {} }
+            }
+            SwingUtilities.invokeAndWait {
+                app.navigator.go(Page.Settings)
+                showSection("Settings", "discord")
+            }
+            draw(narrow, "settings-narrow", 1_200)
+            narrow.close()
             scene.close()
             system.shortcuts.close()
             player.close()

@@ -194,6 +194,8 @@ object SettingsSize {
     val Slider = 200.dp
     val Reading = 60.dp
     val EqPlot = 160.dp
+    // The tile behind a section's icon at the top of its page.
+    val SectionIcon = 36.dp
 
     // A small form over Settings: adding a server, a new password, and how
     // tall it grows before it scrolls.
