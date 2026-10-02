@@ -38,23 +38,23 @@ class DiscordArtTest {
               {"artistName":"Daft Punk","collectionName":"Random Access Memories - Single","artworkUrl100":"https://is1.example/ram/100x100bb.jpg"}
             ]}
         """.trimIndent()
-        assertEquals("https://is1.example/ram/1024x1024bb.jpg", itunesCover(body, "Daft Punk", "Random Access Memories"))
+        assertEquals("https://is1.example/ram/512x512bb.jpg", itunesCover(body, "Daft Punk", "Random Access Memories"))
         assertNull(itunesCover(body, "Daft Punk", "Discovery"))
         assertNull("an answer that is not JSON finds nothing", itunesCover("<html>", "Daft Punk", "Random Access Memories"))
     }
 
     @Test
     fun deezerTakesTheAlbumWhoseArtistAndNameAgree() {
-        val body = """{"data":[{"title":"Random Access Memories","cover_xl":"https://e-cdns.example/ram/1000x1000.jpg","artist":{"name":"Daft Punk"}}]}"""
+        val body = """{"data":[{"title":"Random Access Memories","cover_big":"https://e-cdns.example/ram/1000x1000.jpg","artist":{"name":"Daft Punk"}}]}"""
         assertEquals("https://e-cdns.example/ram/1000x1000.jpg", deezerCover(body, "Daft Punk", "Random Access Memories"))
         assertNull(deezerCover(body, "Justice", "Random Access Memories"))
     }
 
     @Test
     fun deezersEmptyArtistPlaceholderIsNotAPhoto() {
-        val placeholder = """{"data":[{"name":"Daft Punk","picture_big":"https://e-cdns-images.dzcdn.net/images/artist//500x500-000000-80-0-0.jpg"}]}"""
+        val placeholder = """{"data":[{"name":"Daft Punk","picture_medium":"https://e-cdns-images.dzcdn.net/images/artist//500x500-000000-80-0-0.jpg"}]}"""
         assertNull(deezerArtistPhoto(placeholder, "Daft Punk"))
-        val real = """{"data":[{"name":"Daft Punk Tribute","picture_big":"https://x/a.jpg"},{"name":"Daft Punk","picture_big":"https://e-cdns-images.dzcdn.net/images/artist/f3/500x500.jpg"}]}"""
+        val real = """{"data":[{"name":"Daft Punk Tribute","picture_medium":"https://x/a.jpg"},{"name":"Daft Punk","picture_medium":"https://e-cdns-images.dzcdn.net/images/artist/f3/500x500.jpg"}]}"""
         assertEquals("https://e-cdns-images.dzcdn.net/images/artist/f3/500x500.jpg", deezerArtistPhoto(real, "Daft Punk"))
     }
 
@@ -104,10 +104,10 @@ class DiscordArtTest {
             "https://itunes.apple.com/search?media=music&entity=album" to
                 """{"results":[{"artistName":"Daft Punk","collectionName":"Random Access Memories","artworkUrl100":"https://is1.example/ram/100x100bb.jpg"}]}""",
             "https://api.deezer.com/search/artist" to
-                """{"data":[{"name":"Daft Punk","picture_big":"https://e-cdns.example/artist/f3/500x500.jpg"}]}""",
+                """{"data":[{"name":"Daft Punk","picture_medium":"https://e-cdns.example/artist/f3/500x500.jpg"}]}""",
         ))
         art.look(now(), prefs)
-        assertEquals(DiscordArtwork("https://is1.example/ram/1024x1024bb.jpg", "https://e-cdns.example/artist/f3/500x500.jpg"), art.known(now()))
+        assertEquals(DiscordArtwork("https://is1.example/ram/512x512bb.jpg", "https://e-cdns.example/artist/f3/500x500.jpg"), art.known(now()))
     }
 
     // Real tags: an album artist credited to two names, searched by the first.
@@ -116,7 +116,7 @@ class DiscordArtTest {
         val asked = mutableListOf<String>()
         val art = DiscordArt(fetch = catalogue(
             "https://api.deezer.com/search/album" to
-                """{"data":[{"title":"via crucis","cover_xl":"https://e-cdns.example/via/1000x1000.jpg","artist":{"name":"Scrim"}}]}""",
+                """{"data":[{"title":"via crucis","cover_big":"https://e-cdns.example/via/1000x1000.jpg","artist":{"name":"Scrim"}}]}""",
             asked = asked,
         ))
         val scrim = ArtQuery("Father, Hold Me", "Scrim", "via crucis", "Scrim • \$crim")
@@ -131,7 +131,7 @@ class DiscordArtTest {
         val asked = mutableListOf<String>()
         val art = DiscordArt(fetch = catalogue(
             "https://api.deezer.com/search/track" to
-                """{"data":[{"title":"Nightcall","artist":{"name":"Kavinsky"},"album":{"title":"OutRun","cover_xl":"https://e-cdns.example/outrun/1000x1000.jpg"}}]}""",
+                """{"data":[{"title":"Nightcall","artist":{"name":"Kavinsky"},"album":{"title":"OutRun","cover_big":"https://e-cdns.example/outrun/1000x1000.jpg"}}]}""",
             asked = asked,
         ))
         val nightcall = ArtQuery("Nightcall", "Kavinsky & Lovefoxxx", "[Unknown Album]", "Kavinsky & Lovefoxxx")

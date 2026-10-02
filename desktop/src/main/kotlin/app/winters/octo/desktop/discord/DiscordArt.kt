@@ -161,6 +161,13 @@ private const val DEEZER_ARTIST = "https://api.deezer.com/search/artist?limit=5&
 private const val ITUNES_ALBUM = "https://itunes.apple.com/search?media=music&entity=album&limit=10&term="
 private const val ITUNES_SONG = "https://itunes.apple.com/search?media=music&entity=song&limit=10&term="
 
+// How big the pictures are: Discord fetches them itself (through its own
+// proxy) and draws the cover at most a couple of hundred pixels across even
+// on a sharp screen, and the badge far smaller. So the cover is asked for
+// at 512 px (Deezer's nearest is 500) and the artist's photo at 250: no
+// visible loss, and about a quarter of the weight of 1000 px.
+private const val COVER_PX = 512
+
 private val json = Json { ignoreUnknownKeys = true }
 
 private fun enc(text: String) = URLEncoder.encode(text, Charsets.UTF_8)
@@ -177,20 +184,20 @@ private fun JsonObject.text(name: String): String? = this[name]?.jsonPrimitive?.
 private fun rows(body: String, name: String): List<JsonObject> =
     json.parseToJsonElement(body).jsonObject[name]?.jsonArray.orEmpty().map { it.jsonObject }
 
-// The first iTunes album whose artist and name agree, at 1024 px.
+// The first iTunes album whose artist and name agree, at COVER_PX.
 fun itunesCover(body: String, artist: String, album: String): String? =
     runCatching {
         rows(body, "results").firstOrNull {
             sameArtist(it.text("artistName").orEmpty(), artist) && albumKey(it.text("collectionName").orEmpty()) == albumKey(album)
-        }?.text("artworkUrl100")?.replace("100x100bb", "1024x1024bb")
+        }?.text("artworkUrl100")?.replace("100x100bb", "${COVER_PX}x${COVER_PX}bb")
     }.getOrNull()
 
-// The first Deezer album whose artist and name agree, at 1000 px.
+// The first Deezer album whose artist and name agree, at 500 px.
 fun deezerCover(body: String, artist: String, album: String): String? =
     runCatching {
         rows(body, "data").firstOrNull {
             sameArtist(it["artist"]?.jsonObject?.text("name").orEmpty(), artist) && albumKey(it.text("title").orEmpty()) == albumKey(album)
-        }?.text("cover_xl")
+        }?.text("cover_big")
     }.getOrNull()
 
 // The cover of the first Deezer track whose artist and title agree.
@@ -198,15 +205,15 @@ fun deezerTrackCover(body: String, artist: String, title: String): String? =
     runCatching {
         rows(body, "data").firstOrNull {
             sameArtist(it["artist"]?.jsonObject?.text("name").orEmpty(), artist) && titleKey(it.text("title").orEmpty()) == titleKey(title)
-        }?.get("album")?.jsonObject?.text("cover_xl")
+        }?.get("album")?.jsonObject?.text("cover_big")
     }.getOrNull()
 
-// The cover of the first iTunes song whose artist and title agree, at 1024 px.
+// The cover of the first iTunes song whose artist and title agree, at COVER_PX.
 fun itunesSongCover(body: String, artist: String, title: String): String? =
     runCatching {
         rows(body, "results").firstOrNull {
             sameArtist(it.text("artistName").orEmpty(), artist) && titleKey(it.text("trackName").orEmpty()) == titleKey(title)
-        }?.text("artworkUrl100")?.replace("100x100bb", "1024x1024bb")
+        }?.text("artworkUrl100")?.replace("100x100bb", "${COVER_PX}x${COVER_PX}bb")
     }.getOrNull()
 
 // The Deezer photo of the artist with this very name; Deezer's empty
@@ -215,7 +222,7 @@ fun deezerArtistPhoto(body: String, artist: String): String? =
     runCatching {
         rows(body, "data").firstOrNull {
             SongIdentity.key(it.text("name").orEmpty()) == SongIdentity.key(artist)
-        }?.text("picture_big")?.takeUnless { "/artist//" in it }
+        }?.text("picture_medium")?.takeUnless { "/artist//" in it }
     }.getOrNull()
 
 private val http by lazy {
