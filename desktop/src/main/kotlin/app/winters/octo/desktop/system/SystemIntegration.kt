@@ -21,6 +21,7 @@ import app.winters.octo.desktop.settings.systemReducesMotion
 import app.winters.octo.desktop.window.screenAreas
 import app.winters.octo.desktop.discord.DiscordArt
 import app.winters.octo.desktop.discord.DiscordArtwork
+import app.winters.octo.desktop.discord.artQueryOf
 import app.winters.octo.desktop.discord.DiscordPresence
 import app.winters.octo.desktop.discord.DiscordSync
 import app.winters.octo.desktop.discord.discordActivityFor
@@ -246,19 +247,45 @@ class SystemIntegration(
         presence.onConnected = { connected -> app.scope.launch { discordConnected = connected } }
         presence.start()
         val art = DiscordArt()
+        // The song the status last moved to, and when, so a new song can
+        // wait a moment for its pictures.
+        var song: Long? = null
+        var songSince = 0L
         fun tell() {
             val prefs = app.settings.current.discord
-            val now = nowPlayingOf(app.player.state.value)
-            val pictures = now?.let(art::known) ?: DiscordArtwork()
-            val shown = discordActivityFor(now, app.player.positionMs(), System.currentTimeMillis(), prefs, pictures)
-            presence.want(prefs.on, shown)
-            // A picture not looked for yet is fetched once, then the status is told again.
-            // Only for a song that shows: a file kept private never has its names sent anywhere.
-            if (shown != null && now != null && art.wants(now, prefs)) {
-                app.scope.launch {
-                    art.look(now, prefs)
+            val state = app.player.state.value
+            val now = nowPlayingOf(state)
+            val clock = System.currentTimeMillis()
+            val query = now?.let { artQueryOf(it) }
+            val pictures = query?.let { art.known(it) } ?: DiscordArtwork()
+            val shown = discordActivityFor(now, app.player.positionMs(), clock, prefs, pictures)
+            if (now?.entryKey != song) {
+                song = now?.entryKey
+                songSince = clock
+                // Told again once the wait is over, found or not.
+                if (shown != null) app.scope.launch {
+                    delay(PICTURE_HOLD_MS)
                     tell()
                 }
+            }
+            // A new song waits a moment for its pictures, as Cider waits for
+            // its artwork, so its status goes out once and whole rather than
+            // with Octo's icon first (Discord then takes seconds to change it).
+            val holding = shown != null && query != null && clock - songSince < PICTURE_HOLD_MS && art.pending(query, prefs)
+            if (!holding) presence.want(prefs.on, shown)
+            // A picture not looked for yet is fetched once, then the status is told again.
+            // Only for a song that shows: a file kept private never has its names sent anywhere.
+            if (shown != null && query != null && art.wants(query, prefs)) {
+                app.scope.launch {
+                    art.look(query, prefs)
+                    tell()
+                }
+            }
+            // The next song's pictures, ahead of time, so they are there when it starts.
+            val next = state.upcoming.firstOrNull()?.song
+            if (shown != null && next != null && (!isOpenedFile(next.id) || prefs.openedFiles)) {
+                val ahead = artQueryOf(next)
+                if (art.wants(ahead, prefs)) app.scope.launch { art.look(ahead, prefs) }
             }
         }
         app.scope.launch { app.player.state.collect { tell() } }
@@ -375,6 +402,9 @@ class SystemIntegration(
 
 // How often the Discord status is checked against the player (for seeks).
 private const val DISCORD_CHECK_MS = 3_000L
+
+// How long a new song's Discord status waits for its pictures at most.
+private const val PICTURE_HOLD_MS = 1_500L
 
 // A picture from the app's resources.
 fun picture(resource: String): Painter? = runCatching {

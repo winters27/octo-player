@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.discord
 
 import app.winters.octo.desktop.system.NowPlaying
+import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -57,18 +58,26 @@ class DiscordArtTest {
         assertEquals("https://e-cdns-images.dzcdn.net/images/artist/f3/500x500.jpg", deezerArtistPhoto(real, "Daft Punk"))
     }
 
+    // Answers as the catalogues would, from what the test lays out by
+    // address; anything else finds nothing.
+    private fun catalogue(vararg answers: Pair<String, String>, asked: MutableList<String> = mutableListOf()): (String) -> String? = { url ->
+        asked += url
+        answers.firstOrNull { url.startsWith(it.first) }?.second
+            ?: if ("itunes" in url) """{"results":[]}""" else """{"data":[]}"""
+    }
+
     @Test
     fun eachPictureIsLookedForOnceAndAMissIsKept() = runBlocking {
         val asked = mutableListOf<String>()
-        // The catalogues answer, with nothing that matches.
-        val art = DiscordArt(fetch = { url -> asked += url; if ("itunes" in url) """{"results":[]}""" else """{"data":[]}""" })
+        val art = DiscordArt(fetch = catalogue(asked = asked))
         assertTrue(art.wants(now(), prefs))
         art.look(now(), prefs)
-        // iTunes then Deezer for the cover, Deezer for the artist; nothing found.
-        assertEquals(3, asked.size)
+        // Deezer then iTunes by the album, the same by the song, Deezer for the artist; nothing found.
+        assertEquals(5, asked.size)
         assertFalse(art.wants(now(), prefs))
+        assertFalse(art.pending(artQueryOf(now()), prefs))
         art.look(now(), prefs)
-        assertEquals(3, asked.size)
+        assertEquals(5, asked.size)
         assertEquals(DiscordArtwork(), art.known(now()))
     }
 
@@ -78,7 +87,7 @@ class DiscordArtTest {
         val asked = mutableListOf<String>()
         val art = DiscordArt(fetch = { url -> asked += url; null }, clock = { clock })
         art.look(now(), prefs)
-        // iTunes gave no answer, so the cover waits; the artist's one try failed too.
+        // Deezer gave no answer, so the cover waits; the artist's one try failed too.
         assertEquals(2, asked.size)
         assertFalse("resting, not hammering a catalogue that is down", art.wants(now(), prefs))
         art.look(now(), prefs)
@@ -91,17 +100,50 @@ class DiscordArtTest {
 
     @Test
     fun aFoundPictureIsKnownAfterwards() = runBlocking {
-        val art = DiscordArt(fetch = { url ->
-            when {
-                url.startsWith("https://itunes.apple.com/") ->
-                    """{"results":[{"artistName":"Daft Punk","collectionName":"Random Access Memories","artworkUrl100":"https://is1.example/ram/100x100bb.jpg"}]}"""
-                url.startsWith("https://api.deezer.com/search/artist") ->
-                    """{"data":[{"name":"Daft Punk","picture_big":"https://e-cdns.example/artist/f3/500x500.jpg"}]}"""
-                else -> null
-            }
-        })
+        val art = DiscordArt(fetch = catalogue(
+            "https://itunes.apple.com/search?media=music&entity=album" to
+                """{"results":[{"artistName":"Daft Punk","collectionName":"Random Access Memories","artworkUrl100":"https://is1.example/ram/100x100bb.jpg"}]}""",
+            "https://api.deezer.com/search/artist" to
+                """{"data":[{"name":"Daft Punk","picture_big":"https://e-cdns.example/artist/f3/500x500.jpg"}]}""",
+        ))
         art.look(now(), prefs)
         assertEquals(DiscordArtwork("https://is1.example/ram/1024x1024bb.jpg", "https://e-cdns.example/artist/f3/500x500.jpg"), art.known(now()))
+    }
+
+    // Real tags: an album artist credited to two names, searched by the first.
+    @Test
+    fun aJoinedCreditIsSearchedByItsFirstArtist() = runBlocking {
+        val asked = mutableListOf<String>()
+        val art = DiscordArt(fetch = catalogue(
+            "https://api.deezer.com/search/album" to
+                """{"data":[{"title":"via crucis","cover_xl":"https://e-cdns.example/via/1000x1000.jpg","artist":{"name":"Scrim"}}]}""",
+            asked = asked,
+        ))
+        val scrim = ArtQuery("Father, Hold Me", "Scrim", "via crucis", "Scrim • \$crim")
+        art.look(scrim, prefs)
+        assertEquals("https://e-cdns.example/via/1000x1000.jpg", art.known(scrim).cover)
+        assertTrue("a plain search for the first name", asked.any { it.startsWith("https://api.deezer.com/search/album") && it.endsWith("q=Scrim+via+crucis") })
+    }
+
+    // A single with no album tag is found by the song itself.
+    @Test
+    fun aSongWithNoAlbumIsFoundByItsTitle() = runBlocking {
+        val asked = mutableListOf<String>()
+        val art = DiscordArt(fetch = catalogue(
+            "https://api.deezer.com/search/track" to
+                """{"data":[{"title":"Nightcall","artist":{"name":"Kavinsky"},"album":{"title":"OutRun","cover_xl":"https://e-cdns.example/outrun/1000x1000.jpg"}}]}""",
+            asked = asked,
+        ))
+        val nightcall = ArtQuery("Nightcall", "Kavinsky & Lovefoxxx", "[Unknown Album]", "Kavinsky & Lovefoxxx")
+        art.look(nightcall, prefs)
+        assertEquals("https://e-cdns.example/outrun/1000x1000.jpg", art.known(nightcall).cover)
+        assertFalse("no search for an album called Unknown", asked.any { "Unknown" in it })
+    }
+
+    @Test
+    fun aSongStillToComeIsAskedByTheSameNames() {
+        val song = Song("s9", "Teardrop", artist = "Massive Attack", album = "Mezzanine")
+        assertEquals(ArtQuery("Teardrop", "Massive Attack", "Mezzanine", ""), artQueryOf(song))
     }
 
     @Test
