@@ -166,12 +166,38 @@ class DiscordConnection(
     }
 
     // Shows the activity, or clears the status with null. Throws when
-    // Discord has gone or closed the connection.
+    // Discord has gone, closed the connection, or answered with an error
+    // (then the status is not showing, and must be sent again).
     fun setActivity(activity: DiscordActivity?, pid: Long) {
         send(OP_FRAME, setActivityCommand(activity, pid, UUID.randomUUID().toString()))
         val reply = receive(ANSWER_WAIT_MS)
         if (reply?.op == OP_CLOSE) throw IOException("Discord closed the connection: ${reply.body}")
+        if (reply != null && isError(reply.body)) throw IOException("Discord refused the status: ${reply.body.take(200)}")
     }
+
+    // Whether Discord is still at the other end, found without waiting:
+    // what has arrived is read (a ping is answered), and a pipe Discord has
+    // left, or a close from it, says no.
+    fun alive(): Boolean = try {
+        var open = true
+        while (open) {
+            val count = pipe.readNow(chunk)
+            if (count < 0) open = false else if (count == 0) break else buffer.add(chunk, count)
+        }
+        while (open) {
+            val frame = buffer.take() ?: break
+            when (frame.op) {
+                OP_PING -> pipe.write(encodeFrame(OP_PONG, frame.body))
+                OP_CLOSE -> open = false
+            }
+        }
+        open
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun isError(body: String): Boolean =
+        runCatching { Json.parseToJsonElement(body).jsonObject["evt"]?.jsonPrimitive?.content == "ERROR" }.getOrDefault(false)
 
     // The next frame that is not a ping, within the wait, or null.
     internal fun receive(waitMs: Long): IpcFrame? {

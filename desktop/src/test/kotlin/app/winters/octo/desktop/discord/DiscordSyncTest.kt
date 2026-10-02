@@ -18,6 +18,10 @@ import java.io.IOException
 class FakeDiscord(
     private val accepts: Boolean = true,
     private val answers: Boolean = true,
+    // Answers a status with Discord's error event.
+    private val refusesStatus: Boolean = false,
+    // Fails a status in a way that is not an IOException.
+    private val explodes: Boolean = false,
 ) : IpcPipe {
     private val incoming = FrameBuffer()
     private var outgoing = ByteArray(0)
@@ -47,6 +51,11 @@ class FakeDiscord(
                 OP_FRAME -> {
                     val command = Json.parseToJsonElement(frame.body).jsonObject
                     val activity = command["args"]!!.jsonObject["activity"]
+                    if (explodes) throw IllegalStateException("something nobody expected")
+                    if (refusesStatus) {
+                        reply(OP_FRAME, """{"cmd":"SET_ACTIVITY","evt":"ERROR","data":{"code":4000,"message":"not ready"},"nonce":${command["nonce"]}}""")
+                        continue
+                    }
                     statuses += if (activity == null || activity is JsonNull) null else activity.jsonObject
                     if (answers) reply(OP_FRAME, """{"cmd":"SET_ACTIVITY","nonce":${command["nonce"]}}""")
                 }
@@ -201,6 +210,53 @@ class DiscordSyncTest {
         discord = FakeDiscord()
         later(2_000)
         sync.step(true, song(start = clock - 92_000), clock)
+        assertTrue(sync.connected)
+        assertEquals(1, discord!!.statuses.size)
+    }
+
+    // Discord restarts (an update, say) while the same song plays on: nothing
+    // changes to send, so the connection is checked as it sits.
+    @Test
+    fun whenDiscordRestartsMidSongTheSameSongShowsAgain() {
+        val shown = song()
+        discord = FakeDiscord()
+        sync.step(true, shown, clock)
+        val before = discord!!
+        before.gone = true
+        discord = null
+        later(ALIVE_CHECK_MS)
+        sync.step(true, shown, clock)
+        assertFalse("the dead connection is noticed without a change to send", sync.connected)
+        // The new Discord is up; the next try finds it and shows the song.
+        discord = FakeDiscord()
+        later(2_000)
+        sync.step(true, shown, clock)
+        assertTrue(sync.connected)
+        assertEquals(1, discord!!.statuses.size)
+        assertEquals("Karma Police", discord!!.statuses.single()!!["details"]!!.jsonPrimitive.content)
+    }
+
+    // A Discord that answers the status with an error has not shown it.
+    @Test
+    fun aStatusDiscordRefusesIsSentAgain() {
+        discord = FakeDiscord(refusesStatus = true)
+        sync.step(true, song(), clock)
+        assertFalse("refused, so not taken as shown", sync.connected)
+        discord = FakeDiscord()
+        later(2_000)
+        sync.step(true, song(), clock)
+        assertEquals(1, discord!!.statuses.size)
+    }
+
+    // Anything at all going wrong in a send leaves it able to try again.
+    @Test
+    fun anUnexpectedFailureNeverWedgesIt() {
+        discord = FakeDiscord(explodes = true)
+        sync.step(true, song(), clock)
+        assertFalse(sync.connected)
+        discord = FakeDiscord()
+        later(2_000)
+        sync.step(true, song(), clock)
         assertTrue(sync.connected)
         assertEquals(1, discord!!.statuses.size)
     }

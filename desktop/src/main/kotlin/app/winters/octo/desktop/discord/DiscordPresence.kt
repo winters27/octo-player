@@ -26,11 +26,21 @@ class DiscordSync(
     private var shown: DiscordActivity? = null
     private var nextTryAt = 0L
     private var lastSentAt: Long? = null
+    private var checkedAt = 0L
 
     val connected: Boolean get() = connection != null
 
     fun step(enabled: Boolean, wanted: DiscordActivity?, nowMs: Long) {
         if (!enabled) return letGo()
+        // A quiet connection is checked now and then: with nothing new to
+        // send, a Discord that restarted would otherwise never be noticed,
+        // and the song never shown again.
+        connection?.let { open ->
+            if (nowMs - checkedAt >= ALIVE_CHECK_MS) {
+                checkedAt = nowMs
+                if (!open.alive()) return lost(open, nowMs)
+            }
+        }
         if (wanted == null) {
             // Only a status that is showing needs clearing; there is no
             // reason to reach Discord just to show nothing.
@@ -61,7 +71,7 @@ class DiscordSync(
     private fun reach(nowMs: Long): DiscordConnection? {
         if (nowMs < nextTryAt) return null
         val pipe = runCatching { opener.open() }.getOrNull()
-        val open = pipe?.let(connect)
+        val open = runCatching { pipe?.let(connect) }.getOrNull()
         val ready = open != null && runCatching { open.handshake(appId) }.getOrDefault(false)
         if (!ready) {
             open?.close() ?: runCatching { pipe?.close() }
@@ -71,6 +81,7 @@ class DiscordSync(
         backoff.reset()
         connection = open
         shown = null
+        checkedAt = nowMs
         // The pace Discord asks for is per connection; a new one may show
         // the song at once.
         lastSentAt = null
@@ -82,15 +93,25 @@ class DiscordSync(
         try {
             open.setActivity(activity, pid)
             shown = activity
-        } catch (e: IOException) {
-            // Discord quit or closed on Octo: try again in a while.
-            runCatching { open.close() }
-            connection = null
-            shown = null
-            nextTryAt = nowMs + backoff.next()
+        } catch (e: Exception) {
+            // Discord quit, closed on Octo, refused the status, or anything
+            // else: never wedged, it tries again in a while.
+            lost(open, nowMs)
         }
     }
+
+    // The connection is no good: let it go, and look for Discord again soon.
+    private fun lost(open: DiscordConnection, nowMs: Long) {
+        runCatching { open.close() }
+        connection = null
+        shown = null
+        nextTryAt = nowMs + backoff.next()
+    }
 }
+
+// How often a quiet connection is checked, so a Discord that restarted
+// (an update, say) is noticed while the same song plays on.
+const val ALIVE_CHECK_MS = 10_000L
 
 // Discord takes about five status changes in twenty seconds.
 const val SEND_GAP_MS = 4_000L
