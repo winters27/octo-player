@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import app.winters.octo.sound.AudioOutput
+import app.winters.octo.sound.savedFor
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -63,6 +64,9 @@ fun screenLeadMs(refreshHz: Float): Long {
 
 // An output's offset from what is kept, 0 for an output never moved.
 fun outputOffsetIn(offsets: Map<String, Long>, outputKey: String): Long = offsets[outputKey] ?: 0L
+
+// The same for an output that may have been saved under another key before.
+fun outputOffsetIn(offsets: Map<String, Long>, output: AudioOutput): Long = savedFor(offsets, output) ?: 0L
 
 // Every output's offset out of the stored settings, by output key.
 fun outputOffsetsIn(stored: Map<String, Any?>): Map<String, Long> = stored.entries
@@ -146,18 +150,21 @@ class LyricsTiming @Inject constructor(@ApplicationContext private val context: 
     // changes, in the same milliseconds and direction as a song's: minus is
     // sooner.
     fun outputOffsetFor(output: Flow<AudioOutput>): Flow<Long> =
-        combine(output, context.lyricsData.data) { out, prefs -> outputOffsetIn(outputOffsetsIn(prefs.byName()), out.key) }
+        combine(output, context.lyricsData.data) { out, prefs -> outputOffsetIn(outputOffsetsIn(prefs.byName()), out) }
             .distinctUntilChanged()
 
-    suspend fun stepOutput(outputKey: String, steps: Int) {
+    // Moves the output's timing on from what it has, wherever that was
+    // saved, and keeps it under the output's key alone.
+    suspend fun stepOutput(output: AudioOutput, steps: Int) {
         context.lyricsData.edit { prefs ->
-            val moved = stepTiming(prefs[outputOffsetKey(outputKey)] ?: 0L, steps, OUTPUT_TIMING_LIMIT_MS)
-            if (moved == 0L) prefs.remove(outputOffsetKey(outputKey)) else prefs[outputOffsetKey(outputKey)] = moved
+            val moved = stepTiming(outputOffsetIn(outputOffsetsIn(prefs.byName()), output), steps, OUTPUT_TIMING_LIMIT_MS)
+            output.formerKeys.forEach { prefs.remove(outputOffsetKey(it)) }
+            if (moved == 0L) prefs.remove(outputOffsetKey(output.key)) else prefs[outputOffsetKey(output.key)] = moved
         }
     }
 
-    suspend fun resetOutput(outputKey: String) {
-        context.lyricsData.edit { it.remove(outputOffsetKey(outputKey)) }
+    suspend fun resetOutput(output: AudioOutput) {
+        context.lyricsData.edit { prefs -> output.keys.forEach { prefs.remove(outputOffsetKey(it)) } }
     }
 
     // Every output whose timing was moved, by output key, for a backup.

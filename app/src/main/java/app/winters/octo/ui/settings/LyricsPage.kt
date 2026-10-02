@@ -57,13 +57,13 @@ class LyricsSettingsViewModel @Inject constructor(
     val outputOffset: StateFlow<Long> = timing.outputOffsetFor(sound.output).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
     fun stepOutput(steps: Int) {
-        val key = sound.output.value.key
-        viewModelScope.launch { timing.stepOutput(key, steps) }
+        val output = sound.output.value
+        viewModelScope.launch { timing.stepOutput(output, steps) }
     }
 
     fun resetOutput() {
-        val key = sound.output.value.key
-        viewModelScope.launch { timing.resetOutput(key) }
+        val output = sound.output.value
+        viewModelScope.launch { timing.resetOutput(output) }
     }
 
     fun setLyricsOnline(on: Boolean) {

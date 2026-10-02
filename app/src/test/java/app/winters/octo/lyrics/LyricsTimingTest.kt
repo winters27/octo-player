@@ -1,5 +1,6 @@
 package app.winters.octo.lyrics
 
+import app.winters.octo.sound.AudioOutput
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -72,6 +73,14 @@ class LyricsTimingTest {
         assertEquals(0L, outputOffsetIn(outputs, "wired"))
         assertEquals(0L, outputOffsetIn(outputs, "bluetooth:CC:DD"))
         assertEquals(0L, outputOffsetIn(emptyMap(), "speaker"))
+    }
+
+    @Test
+    fun earbudsKeepTheTimingSavedUnderAnyOfTheirAddresses() {
+        val earbuds = AudioOutput("bluetooth:Enco X3", "Enco X3", listOf("bluetooth:AA:01", "bluetooth:AA:02"))
+        assertEquals(-500L, outputOffsetIn(mapOf("bluetooth:AA:02" to -500L), earbuds))
+        assertEquals(-250L, outputOffsetIn(mapOf("bluetooth:AA:02" to -500L, "bluetooth:Enco X3" to -250L), earbuds))
+        assertEquals(0L, outputOffsetIn(mapOf("speaker" to 50L), earbuds))
     }
 
     @Test
