@@ -28,6 +28,7 @@ import androidx.lifecycle.viewModelScope
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.GlassInput
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.listening.LISTENBRAINZ_TOKEN_PAGE
 import app.winters.octo.listening.ListenBrainzPrefs
@@ -45,11 +46,11 @@ import app.winters.octo.ui.settings.rows.SettingsGroup
 import app.winters.octo.ui.settings.rows.SettingsPageFrame
 import app.winters.octo.ui.settings.rows.SwitchRow
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 @HiltViewModel
 class ScrobblingViewModel @Inject constructor(private val sync: ListenBrainzSync) : ViewModel() {
@@ -111,19 +112,18 @@ fun ScrobblingPage(onBack: () -> Unit, highlight: String?, vm: ScrobblingViewMod
     val sheet = LocalChoiceSheet.current
     val modes = SendPlays.entries
 
-    SettingsPageFrame("Scrobbling", onBack, highlight) {
-        SettingsGroup {
+    SettingsPageFrame("Scrobbling", onBack, highlight, icon = OctoIcons.Scrobbling) {
+        SettingsGroup(title = "ListenBrainz", icon = OctoIcons.ListenBrainz, brand = true) {
             SwitchRow(
                 SettingsIndex.ListenBrainz,
                 checked = prefs.enabled,
                 onChange = vm::setEnabled,
-                helper = "Add the songs you play to your ListenBrainz profile.",
+                helper = "The songs you play, on your profile.",
             )
             if (prefs.enabled && prefs.connected) {
                 if (prefs.needsAttention) {
                     NoteRow(
-                        "ListenBrainz no longer accepts the saved token. Paste a new one to keep sending plays. " +
-                            "Plays wait here until then.",
+                        "The saved token stopped working. Paste a new one; plays wait here until then.",
                         color = OctoColors.Error,
                     )
                 } else {
@@ -135,13 +135,12 @@ fun ScrobblingPage(onBack: () -> Unit, highlight: String?, vm: ScrobblingViewMod
         if (!prefs.enabled) return@SettingsPageFrame
 
         if (!prefs.connected || prefs.needsAttention) {
-            SettingsGroup(title = "Connect") { TokenEntry(vm) }
+            SettingsGroup(title = "Connect", icon = OctoIcons.Key) { TokenEntry(vm) }
         }
 
         if (prefs.connected) {
             SettingsGroup(
-                footer = "Choose Only songs on this phone when your server already passes its plays on to ListenBrainz, " +
-                    "so they are not counted twice.",
+                footer = "If your server already sends its plays, choose Only songs on this phone so none count twice.",
             ) {
                 ChoiceRow(SettingsIndex.SendPlays, value = prefs.sendPlays.label, onClick = {
                     sheet.show(
@@ -154,7 +153,7 @@ fun ScrobblingPage(onBack: () -> Unit, highlight: String?, vm: ScrobblingViewMod
                     SettingsIndex.NowPlaying,
                     checked = prefs.nowPlaying,
                     onChange = vm::setNowPlaying,
-                    helper = "Your profile shows the song while it plays.",
+                    helper = "Shown on your profile while it plays.",
                 )
             }
             SettingsGroup {
@@ -170,8 +169,7 @@ private fun TokenEntry(vm: ScrobblingViewModel) {
     val context = LocalContext.current
     Column(Modifier.fillMaxWidth()) {
         NoteRow(
-            "Paste your user token from your ListenBrainz settings. It is kept encrypted on this phone " +
-                "and only ever sent to ListenBrainz.",
+            "Paste the user token from your ListenBrainz settings. It stays encrypted on this phone.",
         )
         ActionRow(
             null,

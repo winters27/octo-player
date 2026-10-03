@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.offline.CacheSize
 import app.winters.octo.offline.OfflinePrefs
 import app.winters.octo.offline.OfflineSettings
@@ -26,12 +27,12 @@ import app.winters.octo.ui.settings.rows.SettingsGroup
 import app.winters.octo.ui.settings.rows.SettingsPageFrame
 import app.winters.octo.ui.settings.rows.SwitchRow
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 @HiltViewModel
 class StreamingViewModel @Inject constructor(private val settings: PlayerSettings) : ViewModel() {
@@ -126,8 +127,8 @@ fun StreamingPage(
     val qualities = StreamQuality.entries
     val sizes = CacheSize.entries
 
-    SettingsPageFrame("Streaming and downloads", onBack, highlight) {
-        SettingsGroup(title = "Streaming") {
+    SettingsPageFrame("Streaming and downloads", onBack, highlight, icon = OctoIcons.Download) {
+        SettingsGroup(title = "Streaming", icon = OctoIcons.Wifi) {
             ChoiceRow(SettingsIndex.Copies, value = CopyChoices.getValue(prefs.copies).label, onClick = {
                 val options = CopyPreference.entries
                 sheet.show(
@@ -144,7 +145,7 @@ fun StreamingPage(
             })
         }
 
-        SettingsGroup(title = "Cache") {
+        SettingsGroup(title = "Cache", icon = OctoIcons.Storage) {
             ChoiceRow(
                 SettingsIndex.CacheSize,
                 value = if (kept.cacheSize == CacheSize.Off) "Off" else "${kept.cacheSize.label}, ${sizeLabel(used)} used",
@@ -163,7 +164,7 @@ fun StreamingPage(
             }
         }
 
-        SettingsGroup(title = "Downloads") {
+        SettingsGroup(title = "Downloads", icon = OctoIcons.Download) {
             ChoiceRow(SettingsIndex.DownloadQuality, value = kept.downloadQuality.downloadLabel, onClick = {
                 sheet.show(
                     ChoiceRequest(SettingsIndex.DownloadQuality.title, qualities.map { it.downloadChoice }, qualities.indexOf(kept.downloadQuality)) {
@@ -175,19 +176,18 @@ fun StreamingPage(
                 SettingsIndex.WifiOnly,
                 checked = kept.wifiOnly,
                 onChange = offline::setWifiOnly,
-                helper = "Downloads wait for Wi-Fi instead of using mobile data.",
             )
             SwitchRow(
                 SettingsIndex.KeepLiked,
                 checked = kept.keepLiked,
                 onChange = offline::setKeepLiked,
-                helper = "Liked songs only on your server are downloaded, and follow your likes.",
+                helper = "Liked songs from your server, kept in step with your likes.",
             )
             SwitchRow(
                 SettingsIndex.StreamOnWifi,
                 checked = kept.streamOnWifi,
                 onChange = offline::setStreamOnWifi,
-                helper = "On Wi-Fi, stream songs even when they are downloaded.",
+                helper = "Even songs that are downloaded.",
             )
             ActionRow(SettingsIndex.DownloadedMusic, onClick = { onOpen(DownloadsRoute) })
         }

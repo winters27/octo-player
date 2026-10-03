@@ -20,14 +20,26 @@ import app.winters.octo.data.SignInRequest
 import app.winters.octo.data.userMessage
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.isPrivateHost
-import app.winters.octo.subsonic.normalizeServerUrl
+import app.winters.octo.subsonic.Scheme
+import app.winters.octo.subsonic.automaticScheme
+import app.winters.octo.subsonic.serverUrl
+import app.winters.octo.subsonic.splitScheme
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl
 import javax.inject.Inject
 
 @HiltViewModel
 class SignInViewModel @Inject constructor(private val sessions: SessionRepository) : ViewModel() {
+    // The address in two parts, as the desktop keeps it: the scheme, shown
+    // as a button at the start of the field, and the rest as typed.
     var address by mutableStateOf("")
+        private set
+    var scheme by mutableStateOf(Scheme.Https)
+        private set
+
+    // Picked by hand (or typed, or saved): no longer follows the address.
+    private var schemePicked = false
     var username by mutableStateOf("")
     var password by mutableStateOf("")
     var busy by mutableStateOf(false)
@@ -72,10 +84,33 @@ class SignInViewModel @Inject constructor(private val sessions: SessionRepositor
     private var savedPassword = false
     private var savedKey = false
 
+    // The server's address, or null while what is typed isn't one.
+    val url: HttpUrl? by derivedStateOf { serverUrl(scheme, address) }
+
     // Plain http to an address outside the home network.
-    val insecure by derivedStateOf {
-        val url = normalizeServerUrl(address)
-        url != null && !url.isHttps && !isPrivateHost(url)
+    val insecure by derivedStateOf { url?.let { !it.isHttps && !isPrivateHost(it) } == true }
+
+    // Takes what was typed or pasted into the address field. A full address
+    // sets the scheme and leaves the rest; otherwise the scheme follows the
+    // address until one is picked: http at home, https anywhere else.
+    fun typeAddress(text: String) {
+        val (typed, rest) = splitScheme(text)
+        if (typed != null) {
+            scheme = typed
+            schemePicked = true
+            address = rest
+        } else {
+            address = text
+            if (!schemePicked) scheme = automaticScheme(text)
+        }
+        error = null
+    }
+
+    // Switches between https and http by hand.
+    fun toggleScheme() {
+        scheme = if (scheme == Scheme.Https) Scheme.Http else Scheme.Https
+        schemePicked = true
+        error = null
     }
 
     // Starts from the saved connection. Nothing secret is filled in.
@@ -83,7 +118,7 @@ class SignInViewModel @Inject constructor(private val sessions: SessionRepositor
         if (editing) return
         val draft = sessions.connectionDraft() ?: return
         editing = true
-        address = draft.address
+        typeAddress(draft.address.removeSuffix("/"))
         username = draft.username
         legacyPassword = draft.authMode == AuthMode.LegacyPassword
         useApiKey = draft.authMode == AuthMode.ApiKey
@@ -127,7 +162,7 @@ class SignInViewModel @Inject constructor(private val sessions: SessionRepositor
 
     // Whether the form has what the chosen way of signing in needs.
     val ready: Boolean
-        get() = address.isNotBlank() && when (mode) {
+        get() = url != null && when (mode) {
             AuthMode.ApiKey -> apiKey.isNotBlank() || (editing && savedKey)
             else -> username.isNotBlank() && (password.isNotEmpty() || (editing && savedPassword))
         }
@@ -149,7 +184,7 @@ class SignInViewModel @Inject constructor(private val sessions: SessionRepositor
         busy = true
         error = null
         val request = SignInRequest(
-            address = address,
+            address = url?.toString() ?: (scheme.prefix + address.trim()),
             username = username,
             secret = if (mode == AuthMode.ApiKey) apiKey.trim() else password,
             authMode = mode,
@@ -171,7 +206,7 @@ class SignInViewModel @Inject constructor(private val sessions: SessionRepositor
                     // A server that cannot check tokens gets the password
                     // itself where that is safe, and the switch shows it.
                     val retry = (failed as? SignInError.Failed)?.cause
-                    val url = normalizeServerUrl(address)
+                    val url = url
                     when (if (url == null) LegacyRetry.None else legacyRetry(retry, mode, url)) {
                         LegacyRetry.Retry -> {
                             legacyPassword = true

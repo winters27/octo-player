@@ -1,0 +1,15 @@
+<!-- ListenBrainz's mark, from MetaBrainz's own logos (metabrainz-logos,
+     ListenBrainz_logo_icon.svg), in its navy and orange. The mark is
+     MetaBrainz's, shown only to name ListenBrainz. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="30"
+    android:viewportHeight="30">
+  <path
+      android:fillColor="#353070"
+      android:pathData="M 14.5 1 L 2.5 8 L 2.5 22 L 14.5 29 Z"/>
+  <path
+      android:fillColor="#EB743B"
+      android:pathData="M 15.5 1 L 27.5 8 L 27.5 22 L 15.5 29 Z"/>
+</vector>

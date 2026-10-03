@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.device.Access
 import app.winters.octo.device.DEVICE
 import app.winters.octo.device.DeviceLibrary
@@ -19,11 +20,11 @@ import app.winters.octo.ui.settings.rows.SettingsGroup
 import app.winters.octo.ui.settings.rows.SettingsPageFrame
 import app.winters.octo.ui.settings.rows.SwitchRow
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 @HiltViewModel
 class LibrarySettingsViewModel @Inject constructor(
@@ -53,8 +54,8 @@ fun LibraryPage(onBack: () -> Unit, highlight: String?, vm: LibrarySettingsViewM
     val requestAccess = rememberAccessRequest(vm.library, access)
     val granted = access == Access.Granted
 
-    SettingsPageFrame("Library", onBack, highlight) {
-        SettingsGroup(title = "Music on this phone") {
+    SettingsPageFrame("Library", onBack, highlight, icon = OctoIcons.Library) {
+        SettingsGroup(title = "Music on this phone", icon = OctoIcons.Phone) {
             if (granted) {
                 InfoRow(SettingsIndex.PhoneAccess, "Allowed")
             } else {
@@ -71,8 +72,8 @@ fun LibraryPage(onBack: () -> Unit, highlight: String?, vm: LibrarySettingsViewM
             )
         }
         if (folders.isNotEmpty()) {
-            SettingsGroup(title = SettingsIndex.MusicFolders.title) {
-                NoteRow("Switch a folder off to leave its music out of your library.", entry = SettingsIndex.MusicFolders)
+            SettingsGroup(title = SettingsIndex.MusicFolders.title, icon = OctoIcons.Folder) {
+                NoteRow("Switch a folder off to leave it out.", entry = SettingsIndex.MusicFolders)
                 folders.forEach { folder ->
                     SwitchRow(
                         null,

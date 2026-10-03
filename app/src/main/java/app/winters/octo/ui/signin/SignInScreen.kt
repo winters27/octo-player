@@ -2,8 +2,14 @@ package app.winters.octo.ui.signin
 
 import android.security.KeyChain
 import androidx.activity.compose.LocalActivity
+import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.widthIn
@@ -36,9 +43,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -47,6 +62,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import app.winters.octo.R
 import app.winters.octo.connection.formatFingerprint
 import app.winters.octo.data.SignInError
 import app.winters.octo.design.AccentButton
@@ -58,12 +74,15 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.glassPanel
-import app.winters.octo.subsonic.normalizeServerUrl
+import app.winters.octo.subsonic.Scheme
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.LocalReduceMotion
 import app.winters.octo.ui.common.PopupQuestion
 import app.winters.octo.ui.common.rememberLast
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val CardShape = RoundedCornerShape(20.dp)
 
@@ -82,9 +101,31 @@ fun SignInScreen(onBack: () -> Unit, editing: Boolean = false, vm: SignInViewMod
     TrustSheet(vm.question, onTrust = vm::trust, onCancel = vm::distrust)
 }
 
+// The sign-in page: Octo's octopus in a soft glow over its name, then one
+// glass card with the address, username and password, each led by its
+// icon. The octopus comes in as the desktop's opening brings it, rising and
+// growing a little as it fades in; the words and the card follow a beat
+// apart. With the phone's animations off everything only fades in.
 @Composable
 private fun SignInForm(vm: SignInViewModel) {
     var reveal by remember { mutableStateOf(false) }
+    val still = LocalReduceMotion.current
+    val mark = remember { Animatable(0f) }
+    val words = remember { Animatable(0f) }
+    val card = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        val spec = if (still) CalmFade else Rise
+        launch { mark.animateTo(1f, spec) }
+        launch {
+            if (!still) delay(WORDS_AFTER_MS)
+            words.animateTo(1f, spec)
+        }
+        launch {
+            if (!still) delay(CARD_AFTER_MS)
+            card.animateTo(1f, spec)
+        }
+    }
+    val rise = with(LocalDensity.current) { 14.dp.toPx() }
 
     Box(
         Modifier
@@ -102,86 +143,210 @@ private fun SignInForm(vm: SignInViewModel) {
                 .padding(start = 24.dp, end = 24.dp, top = DetailTopGap, bottom = 120.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("Octo", style = OctoType.display, color = OctoColors.TextPrimary)
-            Text(
-                if (vm.editing) "Change how Octo connects" else "Sign in to your music server",
-                style = OctoType.bodySmall,
-                color = OctoColors.TextSecondary,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            Spacer(Modifier.height(32.dp))
-
+            OctoMark(mark, still)
             Column(
-                Modifier
-                    .fillMaxWidth()
-                    .glassPanel(CardShape)
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                Modifier.entrance(words, rise, still),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                GlassInput(
-                    value = vm.address,
-                    onValueChange = { vm.address = it },
-                    placeholder = "Server address",
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
+                Text("Octo", style = OctoType.display, color = OctoColors.TextPrimary)
+                Text(
+                    if (vm.editing) "Change how Octo connects" else "Sign in to your music server",
+                    style = OctoType.bodySmall,
+                    color = OctoColors.TextSecondary,
+                    modifier = Modifier.padding(top = 4.dp),
                 )
-                GlassInput(
-                    value = vm.username,
-                    onValueChange = { vm.username = it },
-                    placeholder = if (vm.useApiKey) "Username (optional)" else "Username",
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                    contentType = ContentType.Username,
-                )
-                if (!vm.useApiKey) {
+            }
+            Spacer(Modifier.height(28.dp))
+
+            Column(Modifier.fillMaxWidth().entrance(card, rise, still), horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .glassPanel(CardShape)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                     GlassInput(
-                        value = vm.password,
-                        onValueChange = { vm.password = it },
-                        placeholder = if (vm.editing) "Password (unchanged)" else "Password",
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { vm.submit() }),
-                        visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
-                        contentType = ContentType.Password,
-                        trailing = { RevealToggle(reveal) { reveal = !reveal } },
+                        value = vm.address,
+                        onValueChange = vm::typeAddress,
+                        placeholder = "music.example.com",
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
+                        leading = { SchemeButton(vm.scheme, onClick = vm::toggleScheme) },
+                    )
+                    GlassInput(
+                        value = vm.username,
+                        onValueChange = { vm.username = it },
+                        placeholder = if (vm.useApiKey) "Username (optional)" else "Username",
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                        contentType = ContentType.Username,
+                        leading = { FieldIcon(OctoIcons.Artist) },
+                    )
+                    if (!vm.useApiKey) {
+                        GlassInput(
+                            value = vm.password,
+                            onValueChange = { vm.password = it },
+                            placeholder = if (vm.editing) "Password (unchanged)" else "Password",
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { vm.submit() }),
+                            visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
+                            contentType = ContentType.Password,
+                            leading = { FieldIcon(OctoIcons.Key) },
+                            trailing = { RevealToggle(reveal) { reveal = !reveal } },
+                        )
+                    }
+                }
+
+                ConnectionNote(vm)
+
+                AccentButton(
+                    text = if (vm.editing) "Save and reconnect" else "Sign in",
+                    onClick = vm::submit,
+                    loading = vm.busy,
+                    enabled = vm.ready,
+                    modifier = Modifier
+                        .padding(top = 20.dp)
+                        .fillMaxWidth(),
+                )
+
+                vm.error?.let {
+                    Text(
+                        it,
+                        style = OctoType.bodySmall,
+                        color = OctoColors.Error,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 12.dp),
                     )
                 }
-            }
 
-            if (vm.insecure) {
-                Text(
-                    if (vm.legacyPassword && !vm.useApiKey) {
-                        "This address isn't encrypted, and a legacy password travels as it is. Anyone on the way can read it."
-                    } else {
-                        "This address isn't encrypted. Your password goes as a one-time token, " +
-                            "but the rest can be read on the way."
-                    },
-                    style = OctoType.caption,
-                    color = if (vm.legacyPassword && !vm.useApiKey) OctoColors.Error else OctoColors.TextMuted,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
-            }
-
-            AdvancedToggle(vm.advancedOpen) { vm.advancedOpen = !vm.advancedOpen }
-            AnimatedVisibility(vm.advancedOpen) { Advanced(vm) }
-
-            AccentButton(
-                text = if (vm.editing) "Save and reconnect" else "Sign in",
-                onClick = vm::submit,
-                loading = vm.busy,
-                enabled = vm.ready,
-                modifier = Modifier
-                    .padding(top = 20.dp)
-                    .fillMaxWidth(),
-            )
-
-            vm.error?.let {
-                Text(
-                    it,
-                    style = OctoType.bodySmall,
-                    color = OctoColors.Error,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
+                AdvancedToggle(vm.advancedOpen) { vm.advancedOpen = !vm.advancedOpen }
+                AnimatedVisibility(vm.advancedOpen) { Advanced(vm) }
             }
         }
+    }
+}
+
+// How the octopus and the words come in: a soft spring, or with calm
+// motion a quick fade. The words and the card start this long after it.
+private val Rise = spring<Float>(dampingRatio = 0.8f, stiffness = 160f)
+private val CalmFade = tween<Float>(durationMillis = 180, easing = LinearOutSlowInEasing)
+private const val WORDS_AFTER_MS = 110L
+private const val CARD_AFTER_MS = 200L
+
+// Fades something in as `shown` goes from 0 to 1, rising into place by
+// `rise` pixels unless motion is calm.
+private fun Modifier.entrance(shown: Animatable<Float, *>, rise: Float, still: Boolean): Modifier = graphicsLayer {
+    val p = shown.value
+    alpha = (p / 0.6f).coerceIn(0f, 1f)
+    translationY = if (still) 0f else (1f - p) * rise
+}
+
+// Octo's octopus in a soft glow of the accent. The picture keeps a wide
+// margin round the octopus, so it is drawn larger than the room it takes
+// and the glow sits in that margin.
+@Composable
+private fun OctoMark(shown: Animatable<Float, *>, still: Boolean) {
+    val rise = with(LocalDensity.current) { 12.dp.toPx() }
+    Box(Modifier.size(MarkRoom), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .requiredSize(MarkDrawn)
+                .graphicsLayer { alpha = shown.value.coerceIn(0f, 1f) }
+                .drawBehind {
+                    val radius = size.minDimension * 0.42f
+                    drawCircle(
+                        Brush.radialGradient(
+                            0f to OctoColors.Accent.copy(alpha = 0.30f),
+                            0.55f to OctoColors.Accent.copy(alpha = 0.10f),
+                            1f to Color.Transparent,
+                            center = center,
+                            radius = radius,
+                        ),
+                        radius = radius,
+                    )
+                },
+        )
+        Image(
+            painterResource(R.drawable.splash_octopus),
+            contentDescription = "Octo",
+            modifier = Modifier.requiredSize(MarkDrawn).graphicsLayer {
+                val p = shown.value
+                alpha = (p / 0.6f).coerceIn(0f, 1f)
+                val grow = if (still) 1f else GROW_FROM + (1f - GROW_FROM) * p
+                scaleX = grow
+                scaleY = grow
+                translationY = if (still) 0f else (1f - p) * rise
+            },
+        )
+    }
+}
+
+// The octopus fills about half its picture: drawn at this size it is about
+// 110dp across, in a space of this height on the page.
+private val MarkDrawn = 220.dp
+private val MarkRoom = 150.dp
+private const val GROW_FROM = 0.88f
+
+// The start of the address: a lock and "https://", or an open lock and
+// "http://", in the field's quieter words, so the address reads whole. A
+// tap switches between them; it is picked by itself as the address is
+// typed (http at home, https anywhere else).
+@Composable
+private fun SchemeButton(scheme: Scheme, onClick: () -> Unit) {
+    val secure = scheme == Scheme.Https
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(role = Role.Button, onClickLabel = if (secure) "Use http" else "Use https", onClick = onClick)
+            .semantics { contentDescription = if (secure) "Encrypted, https" else "Not encrypted, http" }
+            .padding(start = 2.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painterResource(if (secure) OctoIcons.Lock else OctoIcons.LockOpen),
+            contentDescription = null,
+            tint = if (secure) OctoColors.Accent else OctoColors.TextMuted,
+            modifier = Modifier.padding(end = 8.dp).size(18.dp),
+        )
+        Text(scheme.prefix, style = OctoType.body, color = OctoColors.TextMuted, maxLines = 1)
+    }
+}
+
+// The icon at the start of a field, naming it.
+@Composable
+private fun FieldIcon(@DrawableRes icon: Int) {
+    Icon(
+        painterResource(icon),
+        contentDescription = null,
+        tint = OctoColors.TextMuted,
+        modifier = Modifier.padding(start = 2.dp, end = 10.dp).size(18.dp),
+    )
+}
+
+// One quiet line under the card on how the connection travels: encrypted,
+// plain on the home network, or plain across the internet, which is said
+// plainly (in red when the password itself would travel as it is).
+@Composable
+private fun ConnectionNote(vm: SignInViewModel) {
+    val url = vm.url ?: return
+    val danger = vm.insecure && vm.legacyPassword && !vm.useApiKey
+    val (icon, text) = when {
+        url.isHttps -> OctoIcons.Lock to "Encrypted connection"
+        !vm.insecure -> OctoIcons.LockOpen to "Not encrypted. Fine on your home network."
+        danger -> OctoIcons.LockOpen to "Not encrypted, and a legacy password travels as it is. Anyone on the way can read it."
+        else -> OctoIcons.LockOpen to "Not encrypted. Your password goes as a one-time token, but the rest can be read on the way."
+    }
+    val color = when {
+        danger -> OctoColors.Error
+        vm.insecure -> OctoColors.TextSecondary
+        else -> OctoColors.TextMuted
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(top = 12.dp, start = 4.dp, end = 4.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Icon(painterResource(icon), contentDescription = null, tint = color, modifier = Modifier.padding(top = 1.dp, end = 6.dp).size(14.dp))
+        Text(text, style = OctoType.caption, color = color, textAlign = TextAlign.Center)
     }
 }
 
@@ -331,7 +496,7 @@ private fun ClientCertificate(vm: SignInViewModel) {
             enabled = activity != null,
             onClick = {
                 val host = activity ?: return@GlazeButton
-                val url = normalizeServerUrl(vm.address)
+                val url = vm.url
                 KeyChain.choosePrivateKeyAlias(
                     host,
                     { alias -> if (alias != null) host.runOnUiThread { vm.clientCert = alias } },

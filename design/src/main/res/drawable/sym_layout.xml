@@ -1,0 +1,10 @@
+<!-- Phosphor Icons 2.1.1, layout (regular), MIT. Made by tools/icons/make_icons.py. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="256"
+    android:viewportHeight="256">
+  <path
+      android:fillColor="@android:color/white"
+      android:pathData="M216,40H40A16,16,0,0,0,24,56V200A16,16,0,0,0,40,216H216A16,16,0,0,0,232,200V56A16,16,0,0,0,216,40ZM216,56V96H40V56ZM40,112H96V200H40ZM216,200H112V112H216V200Z"/>
+</vector>

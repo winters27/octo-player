@@ -36,7 +36,8 @@ private val InputShape = RoundedCornerShape(12.dp)
 // A text field sunk into the surface: dark inner shadow from the top left,
 // a faint highlight from the bottom right, both deeper while typing. Its
 // accent fill strengthens from a tenth to 15% while typing, and a thin
-// accent ring fades in round it.
+// accent ring fades in round it. `leading` sits before the words, such as
+// an icon naming the field.
 @Composable
 fun GlassInput(
     value: String,
@@ -48,6 +49,7 @@ fun GlassInput(
     visualTransformation: VisualTransformation = VisualTransformation.None,
     contentType: ContentType? = null,
     trailing: (@Composable () -> Unit)? = null,
+    leading: (@Composable () -> Unit)? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
@@ -96,6 +98,7 @@ fun GlassInput(
                     .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                leading?.invoke()
                 Box(Modifier.weight(1f)) {
                     if (value.isEmpty()) {
                         Text(placeholder, style = OctoType.body, color = OctoColors.TextMuted, maxLines = 1)

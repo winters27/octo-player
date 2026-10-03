@@ -9,6 +9,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.lyrics.LookDial
 import app.winters.octo.lyrics.LyricsLook
 import app.winters.octo.lyrics.LyricsLookSettings
@@ -31,12 +32,12 @@ import app.winters.octo.ui.settings.rows.SettingsPageFrame
 import app.winters.octo.ui.settings.rows.SliderRow
 import app.winters.octo.ui.settings.rows.SwitchRow
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-import kotlin.math.roundToInt
 
 // The look's sliders move in steps of this many percent.
 private const val DIAL_STEP = 5
@@ -113,23 +114,21 @@ fun LyricsPage(onBack: () -> Unit, highlight: String?, vm: LyricsSettingsViewMod
     val outputOffset by vm.outputOffset.collectAsStateWithLifecycle()
     val sheet = LocalChoiceSheet.current
 
-    SettingsPageFrame("Lyrics", onBack, highlight) {
+    SettingsPageFrame("Lyrics", onBack, highlight, icon = OctoIcons.Lyrics) {
         SettingsGroup {
             SwitchRow(
                 SettingsIndex.LyricsOnline,
                 checked = prefs.lyricsOnline,
                 onChange = vm::setLyricsOnline,
-                helper = "When your server and the song's files have none, look them up on LRCLIB. " +
-                    "Only the title, artist, album and length are sent.",
+                helper = "From LRCLIB when your music has none. Sends only the title, artist, album and length.",
             )
             SwitchRow(
                 SettingsIndex.LyricsScreenOn,
                 checked = keepScreenOn,
                 onChange = vm::setKeepScreenOn,
-                helper = "While lyrics show in the player, the screen does not turn off.",
             )
         }
-        SettingsGroup(title = "Synced lyrics") {
+        SettingsGroup(title = "Synced lyrics", icon = OctoIcons.Lyrics) {
             ChoiceRow(SettingsIndex.LyricsStyle, value = look.style.label, onClick = {
                 val options = LyricsStyle.entries
                 sheet.show(
@@ -143,13 +142,14 @@ fun LyricsPage(onBack: () -> Unit, highlight: String?, vm: LyricsSettingsViewMod
         }
         SettingsGroup(
             title = "Timing",
-            footer = "If the words light up late, tap Earlier. If early, tap Later. A song of its own is set in the lyrics menu in the player.",
+            icon = OctoIcons.Timer,
+            footer = "Words late? Tap Earlier. Early? Tap Later. One song is set from the player's lyrics menu.",
         ) {
             InfoRow(
                 SettingsIndex.LyricsOutputTiming,
                 value = signedTiming(outputOffset),
                 title = output.label,
-                helper = "Applies to every song on this output.",
+                helper = "Every song on this output.",
             )
             TimingButtons(
                 outputOffset,
@@ -159,7 +159,7 @@ fun LyricsPage(onBack: () -> Unit, highlight: String?, vm: LyricsSettingsViewMod
                 modifier = Modifier.padding(top = 12.dp, start = 8.dp, end = 8.dp),
             )
         }
-        SettingsGroup(title = "Look", footer = "For the Flowing style. Reduce motion in Appearance holds all of it still.") {
+        SettingsGroup(title = "Look", icon = OctoIcons.Appearance, footer = "For the Flowing style.") {
             LookDial.entries.forEach { dial ->
                 DialRow(dial, look.percent(dial)) { vm.setDial(dial, it) }
             }
@@ -167,13 +167,13 @@ fun LyricsPage(onBack: () -> Unit, highlight: String?, vm: LyricsSettingsViewMod
                 SettingsIndex.LyricsKeepCompleted,
                 checked = look.keepCompleted,
                 onChange = vm::setKeepCompleted,
-                helper = "Lines already sung stay faintly above the one being sung.",
+                helper = "Sung lines stay faintly above.",
             )
             SwitchRow(
                 SettingsIndex.LyricsArc,
                 checked = look.arc,
                 onChange = vm::setArc,
-                helper = "The lines bend away around a drum, the one being sung in front.",
+                helper = "Lines bend round a drum.",
             )
         }
     }

@@ -93,6 +93,17 @@
     "sym_equalizer": { "icon": "faders", "weight": "regular" },
     "sym_loudness": { "icon": "gauge", "weight": "regular" },
     "sym_balance": { "icon": "scales", "weight": "regular" },
-    "sym_crossfade": { "icon": "intersect", "weight": "regular" }
+    "sym_crossfade": { "icon": "intersect", "weight": "regular" },
+    "sym_lock": { "icon": "lock-simple", "weight": "regular" },
+    "sym_lock_open": { "icon": "lock-simple-open", "weight": "regular" },
+    "sym_globe": { "icon": "globe-simple", "weight": "regular" },
+    "sym_key": { "icon": "key", "weight": "regular" },
+    "sym_sparkle": { "icon": "sparkle", "weight": "regular" },
+    "sym_sync": { "icon": "arrows-clockwise", "weight": "regular" },
+    "sym_database": { "icon": "database", "weight": "regular" },
+    "sym_timer": { "icon": "timer", "weight": "regular" },
+    "sym_listeners": { "icon": "users-three", "weight": "regular" },
+    "sym_layout": { "icon": "layout", "weight": "regular" },
+    "sym_wifi": { "icon": "wifi-high", "weight": "regular" }
   }
 }

@@ -9,6 +9,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.playback.speedLabel
 import app.winters.octo.player.CrossfadeSecondsRange
 import app.winters.octo.player.PlayerPrefs
@@ -20,11 +21,11 @@ import app.winters.octo.ui.settings.rows.SettingsPageFrame
 import app.winters.octo.ui.settings.rows.SliderRow
 import app.winters.octo.ui.settings.rows.SwitchRow
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 @HiltViewModel
 class PlaybackViewModel @Inject constructor(private val settings: PlayerSettings) : ViewModel() {
@@ -59,13 +60,13 @@ fun PlaybackPage(onBack: () -> Unit, highlight: String?, vm: PlaybackViewModel =
     val prefs by vm.prefs.collectAsStateWithLifecycle()
     var speedOpen by rememberSaveable { mutableStateOf(false) }
 
-    SettingsPageFrame("Playback", onBack, highlight) {
+    SettingsPageFrame("Playback", onBack, highlight, icon = OctoIcons.Playback) {
         SettingsGroup {
             SwitchRow(
                 SettingsIndex.Crossfade,
                 checked = prefs.crossfade,
                 onChange = vm::setCrossfade,
-                helper = "Each song fades into the next. Albums played in order stay gapless.",
+                helper = "Albums played in order stay gapless.",
             )
             if (prefs.crossfade) CrossfadeLength(prefs.crossfadeSeconds, vm::setCrossfadeSeconds)
             ChoiceRow(SettingsIndex.Speed, value = paceLabel(prefs), onClick = { speedOpen = true })
@@ -73,20 +74,19 @@ fun PlaybackPage(onBack: () -> Unit, highlight: String?, vm: PlaybackViewModel =
                 SettingsIndex.SkipSilence,
                 checked = prefs.skipSilence,
                 onChange = vm::setSkipSilence,
-                helper = "Quiet stretches inside songs are skipped.",
             )
             SwitchRow(
                 SettingsIndex.Autoplay,
                 checked = prefs.autoplay,
                 onChange = vm::setAutoplay,
-                helper = "When the queue ends, similar songs keep playing: songs like it from your server, " +
-                    "or by the same artist or in the same genre.",
+                helper = "When the queue ends, similar songs keep playing.",
             )
         }
         SettingsGroup(
             title = "Headphones",
+            icon = OctoIcons.Headphones,
             footer = if (prefs.resumeWired || prefs.resumeBluetooth) {
-                "Works while Octo is playing or paused in the background. Once Android has closed Octo, connecting does nothing."
+                "Only while Octo is open or paused in the background."
             } else {
                 null
             },
@@ -95,35 +95,35 @@ fun PlaybackPage(onBack: () -> Unit, highlight: String?, vm: PlaybackViewModel =
                 SettingsIndex.ResumeWired,
                 checked = prefs.resumeWired,
                 onChange = vm::setResumeWired,
-                helper = "Plays again when a cable or USB headset goes back in, if taking it out paused the music in the last 30 minutes.",
+                helper = "If unplugging paused it in the last 30 minutes.",
             )
             SwitchRow(
                 SettingsIndex.ResumeBluetooth,
                 checked = prefs.resumeBluetooth,
                 onChange = vm::setResumeBluetooth,
-                helper = "Plays again when Bluetooth headphones or a speaker reconnect, if losing them paused the music in the last 30 minutes.",
+                helper = "If losing them paused it in the last 30 minutes.",
             )
             if (prefs.resumeWired || prefs.resumeBluetooth) {
                 SwitchRow(
                     SettingsIndex.ResumeAlways,
                     checked = prefs.resumeAlways,
                     onChange = vm::setResumeAlways,
-                    helper = "Plays on connect even when the music was paused some other way, or longer ago.",
+                    helper = "However or whenever the music was paused.",
                 )
             }
         }
-        SettingsGroup(title = "Casting") {
+        SettingsGroup(title = "Casting", icon = OctoIcons.Cast) {
             SwitchRow(
                 SettingsIndex.CastRenderers,
                 checked = prefs.castRenderers,
                 onChange = vm::setCastRenderers,
-                helper = "Smart TVs, AV receivers and hi-fi streamers on the same Wi-Fi show up beside Cast devices when you cast.",
+                helper = "TVs, receivers and streamers on your Wi-Fi, beside Cast devices.",
             )
             SwitchRow(
                 SettingsIndex.CastKeepPlaying,
                 checked = prefs.castKeepPlaying,
                 onChange = vm::setCastKeepPlaying,
-                helper = "When a TV or speaker goes away, or is stopped from somewhere else, the music carries on here. Off, it pauses.",
+                helper = "When a TV or speaker drops out, the music carries on here.",
             )
         }
     }

@@ -7,6 +7,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.player.LiveBackgroundSupported
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
@@ -15,8 +16,8 @@ import app.winters.octo.player.immersive.BackgroundPrefs
 import app.winters.octo.player.immersive.BrightnessCapRange
 import app.winters.octo.player.immersive.ContrastRange
 import app.winters.octo.player.immersive.FpsChoices
-import app.winters.octo.player.immersive.SpeedRange
 import app.winters.octo.player.immersive.SaturationRange
+import app.winters.octo.player.immersive.SpeedRange
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.LocalChoiceSheet
@@ -25,12 +26,12 @@ import app.winters.octo.ui.settings.rows.SettingsGroup
 import app.winters.octo.ui.settings.rows.SliderRow
 import app.winters.octo.ui.settings.rows.SwitchRow
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-import kotlin.math.roundToInt
 
 private val ModeChoices = mapOf(
     BackgroundMode.Default to Choice("Immersive", "The artwork torn into drifting layers, blurred into a slow wash of its colours."),
@@ -66,7 +67,7 @@ fun PlayerBackgroundSection(vm: PlayerBackgroundViewModel = hiltViewModel()) {
         else -> false
     }
 
-    SettingsGroup(title = "Player") {
+    SettingsGroup(title = "Player", icon = OctoIcons.Playback) {
         ChoiceRow(SettingsIndex.PlayerBackground, value = ModeChoices.getValue(background.mode).label, onClick = {
             val options = BackgroundMode.entries
             sheet.show(
@@ -81,10 +82,10 @@ fun PlayerBackgroundSection(vm: PlayerBackgroundViewModel = hiltViewModel()) {
             onChange = vm::setLiveBackground,
             enabled = moves,
             helper = when {
-                background.mode == BackgroundMode.Default && !washes -> "Needs Android 13 or newer. The still artwork is used instead."
-                background.mode == BackgroundMode.Classic && !LiveBackgroundSupported -> "Needs Android 13 or newer. The blurred artwork is used instead."
+                background.mode == BackgroundMode.Default && !washes -> "Needs Android 13 or newer."
+                background.mode == BackgroundMode.Classic && !LiveBackgroundSupported -> "Needs Android 13 or newer."
                 !moves -> "This background stays still."
-                else -> "It drifts slowly while the player is open. Off holds it still."
+                else -> null
             },
         )
         if (background.prepared) {
@@ -104,7 +105,7 @@ fun PlayerBackgroundSection(vm: PlayerBackgroundViewModel = hiltViewModel()) {
                 SettingsIndex.BackgroundUseBpm,
                 checked = background.useBpm,
                 onChange = { on -> vm.update { it.copy(useBpm = on) } },
-                helper = "Slow songs drift slower and quick ones faster, when the song's BPM is known.",
+                helper = "Drifts with the song's tempo, when it's known.",
             )
             ChoiceRow(SettingsIndex.BackgroundFps, value = "${background.fps} fps", onClick = {
                 sheet.show(

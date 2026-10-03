@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.server.QueueSync
 import app.winters.octo.server.ScanState
 import app.winters.octo.server.ServerControls
@@ -24,12 +25,12 @@ import app.winters.octo.ui.settings.rows.InfoRow
 import app.winters.octo.ui.settings.rows.SettingsGroup
 import app.winters.octo.ui.settings.rows.SwitchRow
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 // How often "Listening now" is read again while the page is on screen.
 private const val LISTENING_EVERY_MS = 60_000L
@@ -99,13 +100,13 @@ internal fun ServerExtras(onOpen: (NavKey) -> Unit, vm: ServerExtrasViewModel = 
         }
     }
 
-    SettingsGroup(title = "On the server") {
+    SettingsGroup(title = "On the server", icon = OctoIcons.Cloud) {
         if (sharing) ActionRow(SettingsIndex.Shares, onClick = { onOpen(SharesRoute) })
         ActionRow(SettingsIndex.RadioStations, onClick = { onOpen(RadioStationsRoute) })
         if (admin) ScanRow(scan, vm::scanNow)
     }
     if (vm.listening.isNotEmpty()) {
-        SettingsGroup(title = SettingsIndex.ListeningNow.title) {
+        SettingsGroup(title = SettingsIndex.ListeningNow.title, icon = OctoIcons.Listeners) {
             vm.listening.forEach { ListenerRow(it) }
         }
     }

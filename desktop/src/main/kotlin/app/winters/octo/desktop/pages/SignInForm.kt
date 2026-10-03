@@ -8,14 +8,14 @@ import androidx.compose.runtime.setValue
 import app.winters.octo.data.HeaderDraft
 import app.winters.octo.desktop.server.API_KEY_EXTENSION
 import app.winters.octo.desktop.server.CertificateQuestion
-import app.winters.octo.desktop.server.Scheme
 import app.winters.octo.desktop.server.SignInRequest
-import app.winters.octo.desktop.server.automaticScheme
-import app.winters.octo.desktop.server.serverUrl
-import app.winters.octo.desktop.server.splitScheme
 import app.winters.octo.desktop.settings.SavedServer
 import app.winters.octo.subsonic.AuthMode
+import app.winters.octo.subsonic.Scheme
+import app.winters.octo.subsonic.automaticScheme
 import app.winters.octo.subsonic.isPrivateHost
+import app.winters.octo.subsonic.serverUrl
+import app.winters.octo.subsonic.splitScheme
 import okhttp3.HttpUrl
 
 // What the sign-in page holds while someone fills it in, as the phone's

@@ -3,6 +3,7 @@ package app.winters.octo.ui.settings.rows
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -37,10 +38,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -67,18 +71,36 @@ private const val HOLD_MS = 900L
 
 // Rows in one glass panel, a hairline between each. A row that draws
 // nothing takes no place and gets no line. The lines start under the text,
-// so rows with icons pass a deeper inset.
+// so rows with icons pass a deeper inset. A title sits above the panel as
+// a quiet capitalised label, as the desktop names its groups, led by the
+// group's `icon` when it has one (a `brand` mark keeps its own colours).
 @Composable
 fun SettingsGroup(
     modifier: Modifier = Modifier,
     title: String? = null,
     footer: String? = null,
     separatorInset: Dp = 16.dp,
+    @DrawableRes icon: Int? = null,
+    brand: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     Column(modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         title?.let {
-            Text(it, style = OctoType.label, color = OctoColors.TextSecondary, modifier = Modifier.padding(start = 16.dp, bottom = 8.dp))
+            Row(
+                Modifier
+                    .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+                    .semantics(mergeDescendants = true) { heading() },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                icon?.let { MarkOrIcon(it, brand, OctoColors.TextMuted, 15.dp) }
+                Text(
+                    it.uppercase(),
+                    style = OctoType.label.copy(letterSpacing = 0.6.sp),
+                    color = OctoColors.TextMuted,
+                    modifier = Modifier.semantics { contentDescription = it },
+                )
+            }
         }
         SubcomposeLayout(Modifier.fillMaxWidth().glassPanel(GroupShape)) { constraints ->
             val loose = constraints.copy(minHeight = 0)
@@ -179,8 +201,9 @@ fun SwitchRow(
     }
 }
 
-// A setting with a few answers: its title and the current one. Tapping it
-// pops the answers up beside the row.
+// A setting with a few answers: its title on the left, the current one on
+// the right, as the desktop reads them, and a chevron. Tapping it pops the
+// answers up beside the row.
 @Composable
 fun ChoiceRow(
     entry: SettingEntry?,
@@ -188,10 +211,43 @@ fun ChoiceRow(
     onClick: () -> Unit,
     enabled: Boolean = true,
     title: String = entry?.title.orEmpty(),
+    helper: String? = null,
 ) {
     val sheet = LocalChoiceSheet.current
     RowFrame(entry, Modifier.choiceAnchor(sheet).clickable(enabled = enabled, role = Role.Button, onClick = onClick)) {
-        Label(title, value, enabled, belowColor = OctoColors.TextSecondary)
+        Label(title, helper, enabled)
+        Reading(value, enabled)
+        Icon(
+            painterResource(OctoIcons.Chevron),
+            contentDescription = null,
+            tint = OctoColors.TextMuted,
+            modifier = Modifier.size(18.dp).alpha(if (enabled) 1f else 0.5f),
+        )
+    }
+}
+
+// A row's current value on its right: quieter than the title, kept to the
+// end of the line, and never taking more than its share of the row.
+@Composable
+private fun RowScope.Reading(value: String, enabled: Boolean = true) {
+    Text(
+        value,
+        style = OctoType.bodySmall,
+        color = if (enabled) OctoColors.TextSecondary else OctoColors.TextMuted,
+        textAlign = TextAlign.End,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.weight(1f, fill = false),
+    )
+}
+
+// An icon tinted to its place, or a brand's mark in its own colours.
+@Composable
+internal fun MarkOrIcon(@DrawableRes icon: Int, brand: Boolean, tint: Color, size: Dp) {
+    if (brand) {
+        Image(painterResource(icon), contentDescription = null, modifier = Modifier.size(size))
+    } else {
+        Icon(painterResource(icon), contentDescription = null, tint = tint, modifier = Modifier.size(size))
     }
 }
 
@@ -239,7 +295,7 @@ fun ActionRow(
         Label(title, helper, enabled, titleColor = if (destructive) OctoColors.Error else OctoColors.TextPrimary)
         when {
             busy -> CircularProgressIndicator(color = OctoColors.Accent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
-            trailing != null -> Text(trailing, style = OctoType.bodySmall, color = OctoColors.TextSecondary)
+            trailing != null -> Reading(trailing, enabled)
             else -> Unit
         }
         if (chevron && !busy) {
@@ -258,14 +314,7 @@ fun ActionRow(
 fun InfoRow(entry: SettingEntry?, value: String, title: String = entry?.title.orEmpty(), helper: String? = null) {
     RowFrame(entry) {
         Label(title, helper)
-        Text(
-            value,
-            style = OctoType.bodySmall,
-            color = OctoColors.TextSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
-        )
+        Reading(value)
     }
 }
 

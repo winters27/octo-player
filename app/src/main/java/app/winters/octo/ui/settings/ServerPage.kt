@@ -10,33 +10,17 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.unit.dp
-import app.winters.octo.data.ServerLook
-import app.winters.octo.data.Session
-import app.winters.octo.data.runsOcto
-import app.winters.octo.design.AccentButton
-import app.winters.octo.design.GlassInput
-import app.winters.octo.design.GlazeButton
-import app.winters.octo.design.OctoType
-import app.winters.octo.server.PasswordChange
-import app.winters.octo.server.PasswordDraft
-import app.winters.octo.server.passwordChangeWords
-import app.winters.octo.server.passwordDraftProblem
-import app.winters.octo.server.scanWords
-import app.winters.octo.server.serverKind
-import app.winters.octo.server.serverOffers
-import app.winters.octo.subsonic.AuthMode
-import app.winters.octo.ui.common.LocalFeedback
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -45,17 +29,34 @@ import androidx.navigation3.runtime.NavKey
 import app.winters.octo.connection.ConnectionChooser
 import app.winters.octo.connection.FolderChoice
 import app.winters.octo.connection.Place
+import app.winters.octo.data.ServerLook
+import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
+import app.winters.octo.data.runsOcto
+import app.winters.octo.design.AccentButton
+import app.winters.octo.design.GlassInput
 import app.winters.octo.design.GlassPopup
+import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.OctoType
 import app.winters.octo.playlists.PlaylistSync
 import app.winters.octo.server.LastSync
+import app.winters.octo.server.PasswordChange
+import app.winters.octo.server.PasswordDraft
 import app.winters.octo.server.ServerSync
+import app.winters.octo.server.passwordChangeWords
+import app.winters.octo.server.passwordDraftProblem
+import app.winters.octo.server.scanWords
+import app.winters.octo.server.serverKind
+import app.winters.octo.server.serverOffers
+import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.MusicFolder
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.LocalChoiceSheet
+import app.winters.octo.ui.common.LocalFeedback
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.PopupQuestion
 import app.winters.octo.ui.common.rememberOpenedBeside
@@ -70,11 +71,11 @@ import app.winters.octo.ui.settings.rows.SettingsGroup
 import app.winters.octo.ui.settings.rows.SettingsPageFrame
 import app.winters.octo.ui.settings.rows.SwitchRow
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 @HiltViewModel
 class ServerViewModel @Inject constructor(
@@ -138,11 +139,11 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
     var folderProblem by remember { mutableStateOf<String?>(null) }
     var changing by remember { mutableStateOf(false) }
 
-    SettingsPageFrame("Server and sync", onBack, highlight) {
+    SettingsPageFrame("Server and sync", onBack, highlight, icon = OctoIcons.Cloud) {
         when (val current = state) {
             SessionState.Loading -> Unit
             SessionState.SignedOut -> SettingsGroup(
-                footer = "Add the music on your own server. It joins your library here and plays over the network.",
+                footer = "Your server's music joins your library here.",
             ) {
                 ActionRow(SettingsIndex.ConnectServer, onClick = { onOpen(SignInRoute) })
             }
@@ -151,7 +152,7 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
                 val connection = current.session.connection
                 val copy = last?.takeIf { it.sourceId == current.session.sourceId }
 
-                SettingsGroup(title = "Connection") {
+                SettingsGroup(title = "Connection", icon = OctoIcons.Globe) {
                     InfoRow(SettingsIndex.ServerAddress, client.primaryUrl.toString().removeSuffix("/"))
                     // Which address is in use, when there is a choice.
                     if (connection.home != null) {
@@ -187,7 +188,7 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
 
                 ServerFacts(vm, current.session)
 
-                SettingsGroup(title = "Sync") {
+                SettingsGroup(title = "Sync", icon = OctoIcons.Sync) {
                     InfoRow(SettingsIndex.LastSynced, copy?.let { timeAgo(it.at, System.currentTimeMillis()) } ?: "Not yet")
                     if (copy != null) {
                         InfoRow(null, "%,d".format(copy.songs), title = "Songs")
@@ -201,8 +202,7 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
                             SettingsIndex.PlaylistsToServer,
                             checked = newPlaylistsOnServer,
                             onChange = vm::setNewPlaylistsOnServer,
-                            helper = "Playlists you make here are made on your server too. Others stay on this phone " +
-                                "until you choose Save to server.",
+                            helper = "New playlists are made on your server too.",
                         )
                     }
                 }
@@ -233,7 +233,7 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
 private fun ServerFacts(vm: ServerViewModel, session: Session) {
     var look by remember(session) { mutableStateOf<ServerLook?>(null) }
     LaunchedEffect(session) { look = vm.look() }
-    SettingsGroup(title = "Server") {
+    SettingsGroup(title = "Server", icon = OctoIcons.Info) {
         InfoRow(SettingsIndex.ServerKind, serverKind(session.serverType, session.serverVersion), helper = offersOf(session.extensions))
         look?.answerMs?.let { InfoRow(SettingsIndex.ServerAnswer, "$it ms") }
         scanWords(look?.scan, System.currentTimeMillis())?.let { InfoRow(SettingsIndex.ServerScan, "", helper = it) }

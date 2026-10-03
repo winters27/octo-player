@@ -47,11 +47,11 @@ import app.winters.octo.update.UpdateSettings
 import app.winters.octo.update.UpdateState
 import app.winters.octo.whatsnew.WhatsNewPanel
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 @HiltViewModel
 class UpdatesViewModel @Inject constructor(
@@ -99,7 +99,7 @@ fun AboutPage(onBack: () -> Unit, highlight: String?) {
         onPauseOrDispose { }
     }
 
-    SettingsPageFrame("About", onBack, highlight) {
+    SettingsPageFrame("About", onBack, highlight, icon = OctoIcons.Info) {
         SettingsGroup {
             InfoRow(SettingsIndex.Version, BuildConfig.VERSION_NAME)
             state.ready?.let { ready ->
@@ -108,7 +108,7 @@ fun AboutPage(onBack: () -> Unit, highlight: String?) {
                         null,
                         onClick = vm::install,
                         title = "Update ready: ${ready.version}",
-                        helper = "Android puts it in over this Octo. Your music, playlists and settings stay.",
+                        helper = "Your music and settings stay.",
                         trailing = "Install",
                     )
                 } else {
@@ -117,15 +117,15 @@ fun AboutPage(onBack: () -> Unit, highlight: String?) {
                         null,
                         onClick = { context.startActivity(vm.allowInstallsIntent()) },
                         title = "Update ready: ${ready.version}",
-                        helper = "First allow Octo to install its updates, then come back here.",
+                        helper = "Allow Octo to install updates first.",
                         trailing = "Allow",
                     )
                 }
                 if (ready.notes.isNotBlank()) NoteRow(ready.notes.trim(), color = OctoColors.TextSecondary)
             }
-            ActionRow(SettingsIndex.WhatsNew, onClick = { reading = true }, helper = "The latest additions, in plain words")
+            ActionRow(SettingsIndex.WhatsNew, onClick = { reading = true })
         }
-        SettingsGroup(title = "Updates") {
+        SettingsGroup(title = "Updates", icon = OctoIcons.Sync) {
             val off = state.off
             if (off != null) {
                 NoteRow(off)
@@ -135,7 +135,7 @@ fun AboutPage(onBack: () -> Unit, highlight: String?) {
                 SettingsIndex.CheckUpdates,
                 checked = prefs.checkAutomatically,
                 onChange = vm::setCheckAutomatically,
-                helper = "Looks for a new version every few hours, and downloads it on Wi-Fi.",
+                helper = "Every few hours, downloading on Wi-Fi.",
             )
             ChoiceRow(SettingsIndex.InstallUpdates, value = installName(prefs.install), onClick = {
                 val options = InstallWhen.entries
@@ -151,12 +151,12 @@ fun AboutPage(onBack: () -> Unit, highlight: String?) {
                 SettingsIndex.EarlyVersions,
                 checked = prefs.earlyVersions,
                 onChange = vm::setEarlyVersions,
-                helper = "New versions before they're finished, for trying what's coming. They can have rough edges.",
+                helper = "Before they're finished. Can have rough edges.",
             )
             ActionRow(
                 SettingsIndex.CheckNow,
                 onClick = vm::checkNow,
-                helper = state.line ?: "Octo's new versions come from its releases on GitHub, signed so only real ones install.",
+                helper = state.line,
                 busy = state.checking,
                 chevron = false,
             )

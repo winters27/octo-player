@@ -1,9 +1,5 @@
 package app.winters.octo.ui.settings
 
-import app.winters.octo.playlists.PlaylistArtSettings
-import app.winters.octo.covers.playlistCoverStyleName
-import app.winters.octo.covers.playlistCoverStyleHelp
-import app.winters.octo.covers.PlaylistCoverStyle
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -18,8 +14,13 @@ import app.winters.octo.ambient.AmbientArea
 import app.winters.octo.ambient.AmbientPrefs
 import app.winters.octo.ambient.AmbientPreview
 import app.winters.octo.ambient.AmbientStrength
+import app.winters.octo.covers.PlaylistCoverStyle
+import app.winters.octo.covers.playlistCoverStyleHelp
+import app.winters.octo.covers.playlistCoverStyleName
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
+import app.winters.octo.playlists.PlaylistArtSettings
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.LocalChoiceSheet
@@ -75,7 +76,7 @@ fun AppearancePage(
     val coverStyle by covers.style.collectAsStateWithLifecycle()
     val sheet = LocalChoiceSheet.current
 
-    SettingsPageFrame("Appearance", onBack, highlight) {
+    SettingsPageFrame("Appearance", onBack, highlight, icon = OctoIcons.Appearance) {
         AmbientPreview(prefs.strength, Modifier.padding(horizontal = 16.dp))
         SettingsGroup {
             ChoiceRow(SettingsIndex.Ambient, value = StrengthChoices.getValue(prefs.strength).label, onClick = {
@@ -88,27 +89,26 @@ fun AppearancePage(
             })
         }
         if (prefs.strength != AmbientStrength.Off) {
-            SettingsGroup(title = "Where it shows") {
-                SwitchRow(SettingsIndex.AmbientHome, prefs.home, { vm.setArea(AmbientArea.Home, it) }, helper = "The home page.")
+            SettingsGroup(title = "Where it shows", icon = OctoIcons.Layout) {
+                SwitchRow(SettingsIndex.AmbientHome, prefs.home, { vm.setArea(AmbientArea.Home, it) })
                 SwitchRow(
                     SettingsIndex.AmbientLibrary,
                     prefs.library,
                     { vm.setArea(AmbientArea.Library, it) },
-                    helper = "Its lists and pages: albums, artists, playlists, genres and folders.",
                 )
-                SwitchRow(SettingsIndex.AmbientSearch, prefs.search, { vm.setArea(AmbientArea.Search, it) }, helper = "The search page and its results.")
-                SwitchRow(SettingsIndex.AmbientSettings, prefs.settings, { vm.setArea(AmbientArea.Settings, it) }, helper = "These pages.")
-                SwitchRow(SettingsIndex.AmbientBar, prefs.bar, vm::setBar, helper = "A trace of the song's colour in the floating bar's glass.")
+                SwitchRow(SettingsIndex.AmbientSearch, prefs.search, { vm.setArea(AmbientArea.Search, it) })
+                SwitchRow(SettingsIndex.AmbientSettings, prefs.settings, { vm.setArea(AmbientArea.Settings, it) })
+                SwitchRow(SettingsIndex.AmbientBar, prefs.bar, vm::setBar, helper = "A trace of the song's colour in its glass.")
                 SwitchRow(
                     SettingsIndex.AmbientPageArtwork,
                     prefs.pageArtwork,
                     vm::setPageArtwork,
-                    helper = "The glow follows the album or artist on the page instead of the song playing.",
+                    helper = "The glow follows the page's album or artist, not the song.",
                 )
             }
         }
         PlayerBackgroundSection()
-        SettingsGroup(title = "Playlists") {
+        SettingsGroup(title = "Playlists", icon = OctoIcons.Playlists) {
             ChoiceRow(SettingsIndex.PlaylistCovers, value = playlistCoverStyleName(coverStyle), onClick = {
                 val options = PlaylistCoverStyle.entries
                 sheet.show(
@@ -120,13 +120,12 @@ fun AppearancePage(
                 )
             })
         }
-        SettingsGroup(title = "Motion") {
+        SettingsGroup(title = "Motion", icon = OctoIcons.Sparkle) {
             SwitchRow(
                 SettingsIndex.ReduceMotion,
                 checked = motionPrefs.reduceMotion,
                 onChange = motion::setReduceMotion,
-                helper = "The backgrounds stop drifting, and synced lyrics jump into place without ripple, bloom or " +
-                    "bouncing dots; words still fill as they are sung. Also on when the phone's animations are off.",
+                helper = "Backgrounds and lyrics hold still. On by itself when the phone's animations are off.",
             )
         }
     }

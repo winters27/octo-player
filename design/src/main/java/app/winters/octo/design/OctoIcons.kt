@@ -130,4 +130,22 @@ object OctoIcons {
     val Speaker = R.drawable.sym_speaker
     val SpeakerGroup = R.drawable.sym_speaker_group
     val Headphones = R.drawable.sym_headphones
+
+    // Signing in: the address, whether it is encrypted, and an API key.
+    val Globe = R.drawable.sym_globe
+    val Lock = R.drawable.sym_lock
+    val LockOpen = R.drawable.sym_lock_open
+    val Key = R.drawable.sym_key
+
+    // Settings' group names.
+    val Sparkle = R.drawable.sym_sparkle
+    val Sync = R.drawable.sym_sync
+    val Storage = R.drawable.sym_database
+    val Timer = R.drawable.sym_timer
+    val Listeners = R.drawable.sym_listeners
+    val Layout = R.drawable.sym_layout
+    val Wifi = R.drawable.sym_wifi
+
+    // Services' own marks, drawn in their colours (not tinted).
+    val ListenBrainz = R.drawable.brand_listenbrainz
 }

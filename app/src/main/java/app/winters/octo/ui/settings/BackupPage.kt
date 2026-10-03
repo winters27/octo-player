@@ -15,16 +15,17 @@ import app.winters.octo.backup.Backups
 import app.winters.octo.backup.RestorePlan
 import app.winters.octo.backup.describeBackup
 import app.winters.octo.backup.describePlan
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.ui.settings.rows.ActionRow
 import app.winters.octo.ui.settings.rows.NoteRow
 import app.winters.octo.ui.settings.rows.SettingsGroup
 import app.winters.octo.ui.settings.rows.SettingsPageFrame
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.time.LocalDate
+import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import java.time.LocalDate
-import javax.inject.Inject
 
 // Where saving or restoring a backup is up to.
 sealed interface BackupState {
@@ -91,13 +92,13 @@ fun BackupPage(onBack: () -> Unit, highlight: String?, vm: BackupViewModel = hil
     }
     val working = state == BackupState.Working
 
-    SettingsPageFrame("Backup and restore", onBack, highlight) {
+    SettingsPageFrame("Backup and restore", onBack, highlight, icon = OctoIcons.Backup) {
         when (val now = state) {
             is BackupState.Ready -> {
                 SettingsGroup(
                     title = "In this backup",
-                    footer = "Restoring replaces your settings. Playlists are added, songs are liked and rated, " +
-                        "and albums and artists are added to your favourites and pins.",
+                    icon = OctoIcons.Backup,
+                    footer = "Restoring replaces your settings and adds the rest to what you have.",
                 ) {
                     (describeBackup(now.backup) + describePlan(now.plan)).forEach { line -> NoteRow(line) }
                 }
@@ -114,8 +115,7 @@ fun BackupPage(onBack: () -> Unit, highlight: String?, vm: BackupViewModel = hil
                     else -> null
                 }
                 SettingsGroup(
-                    footer = "Saves your settings, sound, equalizer presets, playlists, likes, favourites, pins and ratings " +
-                        "to a file. Passwords, keys and certificates are never saved.",
+                    footer = "Settings, sound, playlists, likes and ratings, in one file. Never passwords or keys.",
                 ) {
                     ActionRow(
                         SettingsIndex.SaveBackup,

@@ -1,9 +1,8 @@
 package app.winters.octo.desktop.pages
 
-import app.winters.octo.design.LocalReduceMotion
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,11 +31,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.semantics.Role
@@ -44,17 +44,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import app.winters.octo.connection.formatFingerprint
-import app.winters.octo.desktop.AppState
-import app.winters.octo.desktop.server.CertificateQuestion
-import app.winters.octo.desktop.server.SwitchOutcome
-import app.winters.octo.desktop.settings.name
-import app.winters.octo.design.TextAction
-import androidx.compose.runtime.collectAsState
-import app.winters.octo.desktop.server.SignInOutcome
-import app.winters.octo.desktop.server.TestOutcome
-import app.winters.octo.desktop.server.shownAddress
-import app.winters.octo.desktop.ui.LocalKeyColour
-import app.winters.octo.desktop.ui.keyRim
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.FloatingGlaze
@@ -62,6 +51,7 @@ import app.winters.octo.design.GlassField
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconAction
+import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -70,8 +60,18 @@ import app.winters.octo.design.OctoTooltip
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.PopupPadding
 import app.winters.octo.design.Separator
+import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.design.hoverLift
+import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.server.CertificateQuestion
+import app.winters.octo.desktop.server.SignInOutcome
+import app.winters.octo.desktop.server.SwitchOutcome
+import app.winters.octo.desktop.server.TestOutcome
+import app.winters.octo.desktop.settings.name
+import app.winters.octo.desktop.ui.LocalKeyColour
+import app.winters.octo.desktop.ui.keyRim
+import app.winters.octo.subsonic.shownAddress
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
 

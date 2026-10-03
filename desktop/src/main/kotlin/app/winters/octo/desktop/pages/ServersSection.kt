@@ -1,9 +1,6 @@
 package app.winters.octo.desktop.pages
 
 import androidx.compose.foundation.background
-import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,7 +10,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -25,14 +24,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntRect
-import app.winters.octo.design.Corner
 import app.winters.octo.design.ControlHeight
+import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlassField
@@ -56,6 +56,7 @@ import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.library.LibraryState
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.OCTO_LYRICS
@@ -65,17 +66,16 @@ import app.winters.octo.desktop.server.SwitchOutcome
 import app.winters.octo.desktop.server.TestOutcome
 import app.winters.octo.desktop.server.accountLine
 import app.winters.octo.desktop.server.overviewOf
-import app.winters.octo.desktop.server.shownAddress
 import app.winters.octo.desktop.server.statusLine
 import app.winters.octo.desktop.settings.SavedServer
 import app.winters.octo.desktop.settings.name
 import app.winters.octo.desktop.ui.windowRect
-import app.winters.octo.desktop.library.LibraryState
 import app.winters.octo.server.PasswordChange
 import app.winters.octo.server.PasswordDraft
 import app.winters.octo.server.passwordChangeWords
 import app.winters.octo.server.passwordDraftProblem
 import app.winters.octo.subsonic.AuthMode
+import app.winters.octo.subsonic.shownAddress
 import kotlinx.coroutines.launch
 
 // Settings > Servers: the servers kept on this computer, the one in use on

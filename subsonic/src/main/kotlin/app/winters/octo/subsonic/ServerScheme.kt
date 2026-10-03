@@ -1,7 +1,5 @@
-package app.winters.octo.desktop.server
+package app.winters.octo.subsonic
 
-import app.winters.octo.subsonic.isPrivateHost
-import app.winters.octo.subsonic.normalizeServerUrl
 import okhttp3.HttpUrl
 
 // How the sign-in page reaches a server: encrypted or plain.

@@ -4037,8 +4037,8 @@ app.winters.octo.audio.FfiConverterOptionalTypeOutputFormat
 app.winters.octo.desktop.pages.SignInForm
 java.util.AbstractList$ListItr
 java.util.ArrayList$ListItr
-app.winters.octo.desktop.server.Scheme
-app.winters.octo.desktop.server.ServerAddressKt
+app.winters.octo.subsonic.Scheme
+app.winters.octo.subsonic.ServerSchemeKt
 kotlin.collections.AbstractList$IteratorImpl
 androidx.compose.runtime.external.kotlinx.collections.immutable.internal.ListImplementation
 androidx.compose.runtime.external.kotlinx.collections.immutable.implementations.immutableList.AbstractListIterator

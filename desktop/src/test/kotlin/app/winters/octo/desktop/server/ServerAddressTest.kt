@@ -2,14 +2,19 @@ package app.winters.octo.desktop.server
 
 import app.winters.octo.desktop.pages.SignInForm
 import app.winters.octo.desktop.settings.SavedServer
+import app.winters.octo.subsonic.Scheme
 import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.subsonic.automaticScheme
+import app.winters.octo.subsonic.serverUrl
+import app.winters.octo.subsonic.shownAddress
+import app.winters.octo.subsonic.splitScheme
+import java.net.ConnectException
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.net.ConnectException
 
 class ServerAddressTest {
     @Test
