@@ -70,6 +70,13 @@ import app.winters.octo.design.Txt
 import app.winters.octo.playlists.playlistFileName
 import app.winters.octo.ui.playlist.ADD_NEW_ONES
 import app.winters.octo.ui.playlist.addAgainChoice
+import app.winters.octo.design.DesktopType
+import app.winters.octo.design.PopupPadding
+import app.winters.octo.desktop.system.isOpenedFile
+import app.winters.octo.desktop.upgrade.UpgradeModel
+import app.winters.octo.query.isUpgradable
+import app.winters.octo.ui.upgrade.findFlacLabel
+import app.winters.octo.ui.upgrade.findFlacQuestion
 import kotlinx.coroutines.launch
 
 private enum class MenuPage { Main, Playlists, Rate, Move }
@@ -107,7 +114,19 @@ fun ColumnScope.SongMenu(
             }
             val last = app.lastPlaylists().firstOrNull()
             val fetches = app.fetches
-            songMenuActions(songs.size, place, outside, owns, lastPlaylist = last != null, inFolder = !one?.parent.isNullOrEmpty(), canAdd = fetches != null).forEachIndexed { index, group ->
+            val upgrades = app.upgrades
+            // The picked songs a FLAC could replace, less any already looked for.
+            val upgradable = if (upgrades?.canUpgrade == true && !outside) upgradableOf(songs, upgrades) else emptyList()
+            songMenuActions(
+                songs.size,
+                place,
+                outside,
+                owns,
+                lastPlaylist = last != null,
+                inFolder = !one?.parent.isNullOrEmpty(),
+                canAdd = fetches != null,
+                canUpgrade = upgradable.isNotEmpty(),
+            ).forEachIndexed { index, group ->
                 if (index > 0) MenuSeparator()
                 group.forEach { action ->
                     val label = songActionLabel(action, starred, last?.name)
@@ -134,6 +153,13 @@ fun ColumnScope.SongMenu(
                             if ((rating ?: 0) > 0) OctoIcons.StarFilled else OctoIcons.Star,
                             more = true,
                             detail = rating?.let(::starsLabel),
+                        )
+                        // With several picked, how many of them it asks for.
+                        SongAction.FindFlac -> MenuRow(
+                            label,
+                            { upgrades?.request(upgradable); close() },
+                            OctoIcons.Lossless,
+                            detail = if (songs.size > 1) "${upgradable.size}" else null,
                         )
                         SongAction.GoToAlbum -> MenuRow(label, { one?.albumId?.let { app.navigator.go(Page.Album(it)) }; close() }, OctoIcons.Album, enabled = !one?.albumId.isNullOrEmpty())
                         SongAction.GoToArtist -> MenuRow(label, { one?.artistId?.let { app.navigator.go(Page.Artist(it, one.artist.orEmpty())) }; close() }, OctoIcons.Artist, enabled = !one?.artistId.isNullOrEmpty())
@@ -233,7 +259,16 @@ private fun CollectionRow(
     }
 }
 
-// The menu for an album card: play it, start a radio from it, keep it.
+// The songs among `songs` a FLAC could replace: library files of a kind
+// that loses detail, not files opened from this computer, and not already
+// being looked for.
+private fun upgradableOf(songs: List<Song>, upgrades: UpgradeModel): List<Song> {
+    val pending = upgrades.pending
+    return songs.filter { isUpgradable(it) && !isOpenedFile(it.id) && it.id !in pending }
+}
+
+// The menu for an album card: play it, start a radio from it, keep it, and
+// on an Octo server that can, look for FLACs of the songs that lose detail.
 @Composable
 fun ColumnScope.AlbumMenu(app: AppState, album: Album, close: () -> Unit, outside: Boolean = false) {
     var choosing by remember { mutableStateOf(false) }
@@ -244,7 +279,14 @@ fun ColumnScope.AlbumMenu(app: AppState, album: Album, close: () -> Unit, outsid
     }
     MenuTitle(album.name)
     val jumpList = app.jumpList
-    albumMenuActions(outside, jumpList = jumpList != null).forEachIndexed { index, group ->
+    val upgrades = app.upgrades
+    val library = app.library?.index
+    // Counted from the library as read, so the row knows its number before
+    // anything is asked of the server.
+    val lossy = remember(album.id, library, upgrades?.canUpgrade, outside) {
+        if (upgrades?.canUpgrade == true && !outside && library != null) upgradableOf(library.songs.filter { it.albumId == album.id }, upgrades) else emptyList()
+    }
+    albumMenuActions(outside, jumpList = jumpList != null, lossy = lossy.size).forEachIndexed { index, group ->
         if (index > 0) MenuSeparator()
         group.forEach { action ->
             when (action) {
@@ -254,12 +296,34 @@ fun ColumnScope.AlbumMenu(app: AppState, album: Album, close: () -> Unit, outsid
                     MenuRow(if (starred) "Remove from favourites" else "Add to favourites", { app.setAlbumStarred(album.id, !starred); close() }, if (starred) OctoIcons.Liked else OctoIcons.Like)
                 }
                 CollectionAction.GoToArtist -> MenuRow("Go to artist", { album.artistId?.let { app.navigator.go(Page.Artist(it, album.artist)) }; close() }, OctoIcons.Artist, enabled = !album.artistId.isNullOrEmpty())
+                CollectionAction.FindFlac -> MenuRow(findFlacLabel(lossy.size), {
+                    close()
+                    if (upgrades != null) askToFindFlac(app, upgrades, album.name, lossy)
+                }, OctoIcons.Lossless)
                 CollectionAction.JumpList -> if (jumpList != null) {
                     val target = JumpTarget(JumpKind.Album, album.id, album.name, album.displayArtist ?: album.artist.ifBlank { null })
                     val pinned = jumpList.isPinned(target)
                     MenuRow(if (pinned) "Unpin from jump list" else "Pin to jump list", { jumpList.setPinned(target, !pinned); close() }, OctoIcons.Pin)
                 }
                 else -> CollectionRow(app, action, songs, close) { choosing = true }
+            }
+        }
+    }
+}
+
+// Asks before an album's songs go to the server to be looked for, since it
+// may be many downloads; each original stays until its FLAC passes.
+private fun askToFindFlac(app: AppState, upgrades: UpgradeModel, name: String, songs: List<Song>) {
+    app.popups.showCentred { close ->
+        MenuTitle(name)
+        PopupPadding {
+            Txt(findFlacQuestion(songs.size), DesktopType.body, OctoColors.TextPrimary, maxLines = 6)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
+                GlazeCapsule(null, "Cancel", close)
+                GlazeCapsule(OctoIcons.Lossless, "Find FLAC", {
+                    close()
+                    upgrades.request(songs)
+                }, lit = true)
             }
         }
     }

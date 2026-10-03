@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.ui.upgrade.FIND_IN_FLAC
+
 // What each menu offers, and in which groups, worked out apart from how the
 // rows are drawn so the choices can be checked without a window. Every menu
 // runs in the same order: playing, keeping, going somewhere, looking into
@@ -21,7 +23,7 @@ sealed interface SongPlace {
 
 enum class SongAction {
     Play, PlayNext, AddToQueue, StartRadio,
-    AddToLibrary, AddToLastPlaylist, AddToPlaylist, Favourite, Rate,
+    AddToLibrary, AddToLastPlaylist, AddToPlaylist, Favourite, Rate, FindFlac,
     GoToAlbum, GoToArtist, ShowInFolder,
     Details,
     Move,
@@ -38,7 +40,10 @@ enum class SongAction {
 // come out of it only when the listener's own playlist (`ownsPlaylist`).
 // `lastPlaylist` is whether there is a playlist added to lately, offered
 // first among the ways to keep the songs. Show in folder needs the server
-// to have said which folder the song is in (`inFolder`).
+// to have said which folder the song is in (`inFolder`). Find in FLAC needs
+// an Octo server that can look for one and a picked library song of a kind
+// that loses detail (`canUpgrade`); a song found online has no file to
+// replace.
 fun songMenuActions(
     count: Int,
     place: SongPlace,
@@ -47,6 +52,7 @@ fun songMenuActions(
     lastPlaylist: Boolean = false,
     inFolder: Boolean = false,
     canAdd: Boolean = false,
+    canUpgrade: Boolean = false,
 ): List<List<SongAction>> {
     val one = count == 1
     val editable = place is SongPlace.Playlist && ownsPlaylist && place.positions.isNotEmpty()
@@ -62,6 +68,7 @@ fun songMenuActions(
             SongAction.AddToPlaylist,
             SongAction.Favourite.takeIf { !outside },
             SongAction.Rate.takeIf { !outside },
+            SongAction.FindFlac.takeIf { canUpgrade && !outside },
         ),
         if (one && !outside) listOfNotNull(SongAction.GoToAlbum, SongAction.GoToArtist, SongAction.ShowInFolder.takeIf { inFolder }) else emptyList(),
         listOfNotNull(SongAction.Details.takeIf { one }),
@@ -86,6 +93,7 @@ fun songActionLabel(action: SongAction, starred: Boolean, last: String? = null):
     SongAction.AddToPlaylist -> "Add to playlist"
     SongAction.Favourite -> if (starred) "Remove from favourites" else "Add to favourites"
     SongAction.Rate -> "Rate"
+    SongAction.FindFlac -> FIND_IN_FLAC
     SongAction.GoToAlbum -> "Go to album"
     SongAction.GoToArtist -> "Go to artist"
     SongAction.ShowInFolder -> "Show in folder"
@@ -107,7 +115,7 @@ fun sharedRating(ratings: List<Int>): Int? = ratings.distinct().singleOrNull()
 
 enum class CollectionAction {
     Play, Shuffle, PlayNext, AddToQueue, StartRadio,
-    AddToPlaylist, Favourite,
+    AddToPlaylist, FindFlac, Favourite,
     Pin, JumpList,
     GoToArtist,
     Rename, Duplicate, Export, Public,
@@ -119,9 +127,16 @@ private val Playing = listOf(CollectionAction.Play, CollectionAction.Shuffle, Co
 // An album's menu. One found online has no favourite heart (on Octo a star
 // would download it), no artist page to open and no place in the jump list.
 // `jumpList` is whether there is a jump list to pin it to (Windows).
-fun albumMenuActions(outside: Boolean = false, jumpList: Boolean = false): List<List<CollectionAction>> = listOf(
+// `lossy` is how many of its songs a FLAC could replace, counted only when
+// the server can look for one; 0 leaves the row out.
+fun albumMenuActions(outside: Boolean = false, jumpList: Boolean = false, lossy: Int = 0): List<List<CollectionAction>> = listOf(
     Playing + CollectionAction.StartRadio,
-    listOfNotNull(CollectionAction.AddToPlaylist, CollectionAction.Favourite.takeIf { !outside }, CollectionAction.JumpList.takeIf { jumpList && !outside }),
+    listOfNotNull(
+        CollectionAction.AddToPlaylist,
+        CollectionAction.FindFlac.takeIf { lossy > 0 && !outside },
+        CollectionAction.Favourite.takeIf { !outside },
+        CollectionAction.JumpList.takeIf { jumpList && !outside },
+    ),
     listOfNotNull(CollectionAction.GoToArtist.takeIf { !outside }),
 ).filter { it.isNotEmpty() }
 

@@ -158,6 +158,10 @@ import app.winters.octo.desktop.settings.TablePrefs
 import app.winters.octo.server.serverTime
 import app.winters.octo.sort.SortOrder
 import app.winters.octo.subsonic.Song
+import app.winters.octo.subsonic.Upgrade
+import app.winters.octo.subsonic.UpgradeStage
+import app.winters.octo.design.ProgressRing
+import app.winters.octo.ui.upgrade.WAITING_FOR_SOULSEEK
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -800,6 +804,10 @@ private fun SongCell(
             if (heartInTitle && !outside && app.isStarred(song)) Glyph(OctoIcons.Liked, size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextSecondary)
             // A song that would not play this time says why on hover.
             if (failed != null) OctoTooltip(failed) { Glyph(OctoIcons.Info, size = IconSize.Inline - Space.Xxs, tint = OctoColors.SignalOrange) }
+            // A FLAC being looked for: a ring, filling once it downloads.
+            app.upgrades?.pending?.get(song.id)?.let { upgrade ->
+                OctoTooltip(upgradeHint(upgrade)) { ProgressRing(upgrade.fraction, size = IconSize.Inline - Space.Xxs) }
+            }
         }
         SongColumn.Artist -> LinkText(song.displayArtist ?: song.artist.orEmpty(), song.artistId) { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }
         SongColumn.Album -> LinkText(song.album.orEmpty(), song.albumId) { app.navigator.go(Page.Album(it)) }
@@ -834,6 +842,10 @@ private fun SongCell(
         SongColumn.Length -> Txt(lengthText(song.duration), numbers, muted, align = TextAlign.End)
     }
 }
+
+// What a song's ring says when hovered.
+internal fun upgradeHint(upgrade: Upgrade): String =
+    if (upgrade.stage == UpgradeStage.Waiting) WAITING_FOR_SOULSEEK else "Looking for a FLAC"
 
 // A song's rating as five small stars, the given ones filled.
 @Composable
