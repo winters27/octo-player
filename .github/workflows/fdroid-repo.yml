@@ -1,0 +1,127 @@
+# Octo's own F-Droid repository, https://winters27.github.io/octo/fdroid/repo,
+# which F-Droid, Droid-ify or Neo Store can add so the phone app updates there
+# like any other app. Rebuilt after every Android release (and by hand from
+# the Actions tab): the newest stable releases' APKs are taken from the public
+# Octo repository, indexed and signed with the repo key, and published as the
+# GitHub Pages site of winters27/octo.
+#
+# Secrets: FDROID_KEYSTORE_BASE64 (the repo key, a PKCS12 file, base64) and
+# FDROID_KEYSTORE_PASSWORD, made 2026-10-03; its public fingerprint is on the
+# site and in the Brain runbook Publish_Octo_Players. Losing the key means
+# every phone has to remove and re-add the repository. OCTO_RELEASES_TOKEN
+# (Contents on winters27/octo) pushes the site.
+name: fdroid-repo
+
+on:
+  workflow_run:
+    workflows: [android-release]
+    types: [completed]
+  workflow_dispatch:
+
+# One rebuild at a time; a later one waits rather than racing the push.
+concurrency:
+  group: fdroid-repo
+  cancel-in-progress: false
+
+env:
+  REPO_URL: https://winters27.github.io/octo/fdroid/repo
+  # How many of the newest stable releases the repository keeps.
+  KEEP: 3
+
+jobs:
+  repo:
+    # After a release that published (an android-v tag), or when run by hand.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'android-v'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # fdroidserver checks each APK's signature with keytool and the SDK's
+      # apksigner; the runner has the Android SDK.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: fdroidserver
+        run: |
+          python3 -m venv "$RUNNER_TEMP/fdroid"
+          "$RUNNER_TEMP/fdroid/bin/pip" install --quiet fdroidserver==2.4.5
+          echo "$RUNNER_TEMP/fdroid/bin" >> "$GITHUB_PATH"
+
+      - name: The newest releases' APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p work/repo
+          gh release list --repo winters27/octo --limit 100 --json tagName,isPrerelease,isDraft \
+            --jq '.[] | select(.tagName | startswith("android-v")) | select(.isPrerelease | not) | select(.isDraft | not) | .tagName' \
+            | head -n "$KEEP" > tags.txt
+          if [ ! -s tags.txt ]; then echo "::error::No Android release to index."; exit 1; fi
+          while read -r tag; do
+            gh release download "$tag" --repo winters27/octo --pattern '*.apk' --dir work/repo
+          done < tags.txt
+          ls -la work/repo
+
+      - name: Index, signed with the repo key
+        working-directory: work
+        env:
+          FDROID_KEYSTORE_BASE64: ${{ secrets.FDROID_KEYSTORE_BASE64 }}
+          FDROID_KEYSTORE_PASSWORD: ${{ secrets.FDROID_KEYSTORE_PASSWORD }}
+        run: |
+          umask 077
+          printf '%s' "$FDROID_KEYSTORE_BASE64" | base64 -d > keystore.p12
+          cp -r ../fdroid/metadata .
+          mkdir -p repo/icons
+          cp ../fdroid/octo.png octo.png
+          cp ../fdroid/octo.png repo/icons/octo.png
+          # The passwords are read from the environment, never written here.
+          cat > config.yml <<EOF
+          repo_url: $REPO_URL
+          repo_name: Octo
+          repo_icon: octo.png
+          repo_description: >-
+            The Octo music player for Android, for your Octo or Navidrome server.
+            Releases come from https://github.com/winters27/octo/releases.
+          archive_older: 0
+          keystore: keystore.p12
+          repo_keyalias: octo-fdroid
+          keystorepass: {env: FDROID_KEYSTORE_PASSWORD}
+          keypass: {env: FDROID_KEYSTORE_PASSWORD}
+          keydname: CN=Octo F-Droid repo, O=winters27
+          EOF
+          chmod 0600 config.yml
+          fdroid update --use-date-from-apk --pretty
+          ls -la repo
+          for file in index-v1.jar index-v2.json entry.jar; do
+            test -s "repo/$file" || { echo "::error::fdroid made no $file"; exit 1; }
+          done
+          # The fingerprint phones check the repository against.
+          keytool -list -v -keystore keystore.p12 -storepass:env FDROID_KEYSTORE_PASSWORD -alias octo-fdroid \
+            | sed -n 's/^.*SHA256: //p' | head -n 1 | tr -d ':\r\n' > fingerprint.txt
+          test -s fingerprint.txt
+          echo "Fingerprint: $(cat fingerprint.txt)"
+          rm -f keystore.p12
+
+      - name: Publish to GitHub Pages on winters27/octo
+        env:
+          TOKEN: ${{ secrets.OCTO_RELEASES_TOKEN }}
+        run: |
+          site="$RUNNER_TEMP/site"
+          mkdir -p "$site/fdroid"
+          cp -r work/repo "$site/fdroid/repo"
+          sed "s/__FINGERPRINT__/$(cat work/fingerprint.txt)/g" fdroid/index.html > "$site/fdroid/index.html"
+          cp "$site/fdroid/index.html" "$site/index.html"
+          sed -i 's#src="repo/icons/octo.png"#src="fdroid/repo/icons/octo.png"#' "$site/index.html"
+          touch "$site/.nojekyll"
+          cd "$site"
+          git init --quiet -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit --quiet -m "F-Droid repository for $(cat "$GITHUB_WORKSPACE/tags.txt" | head -n 1)"
+          # One commit each time, so old APKs never pile up in the branch's history.
+          git push --force --quiet "https://x-access-token:${TOKEN}@github.com/winters27/octo.git" gh-pages
