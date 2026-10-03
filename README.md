@@ -6,6 +6,8 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPL_v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
+<a href="https://winters27.github.io/octo/fdroid/"><img src="https://f-droid.org/badge/get-it-on.png" alt="Get the Octo Android app on F-Droid" height="80"></a>
+
 </div>
 
 [Octo](https://github.com/winters27/octo) is a proxy that adds discovery to your Navidrome server and works with any Subsonic app. These are players made to go with it: the music Octo finds sits beside your library, and keeping a song is just **Add to library**.
@@ -57,8 +59,9 @@ For Android 10 and newer. Your phone's music and your server's make one library.
 
 Download the latest release:
 
-- [Octo for Windows and Linux](https://github.com/winters27/octo/releases/tag/desktop-v1.1.0): an `.msi` or portable zip for Windows, and a `.deb`, `.rpm` or portable zip for Linux. The Windows installer needs no administrator rights. It isn't code signed yet, so Windows asks the first time you open Octo.
-- [Octo for Android](https://github.com/winters27/octo/releases/tag/android-v1.1.0): an `.apk` for Android 10 and newer. Allow your browser or file manager to install apps when Android asks.
+- [Octo for Windows and Linux](https://github.com/winters27/octo/releases/tag/desktop-v1.3.2): an `.msi` or portable zip for Windows, and a `.deb`, `.rpm` or portable zip for Linux. The Windows installer needs no administrator rights. It isn't code signed yet, so Windows asks the first time you open Octo.
+- [Octo for Android](https://github.com/winters27/octo/releases/tag/android-v1.2.4): an `.apk` for Android 10 and newer. Allow your browser or file manager to install apps when Android asks.
+- Or add [Octo's F-Droid repository](https://winters27.github.io/octo/fdroid/) in F-Droid, Droid-ify or Neo Store, and the Android app updates there like any other.
 
 New versions appear on the [Octo Releases page](https://github.com/winters27/octo/releases), tagged `desktop-v` and `android-v`.
 
