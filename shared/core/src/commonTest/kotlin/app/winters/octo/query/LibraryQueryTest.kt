@@ -79,6 +79,20 @@ class LibraryQueryTest {
     }
 
     @Test
+    fun onlyALibraryFileThatLosesDetailCanBeUpgraded() {
+        val (flac, mp3, alac, aac) = songs
+        assertFalse(isUpgradable(flac))
+        assertTrue(isUpgradable(mp3))
+        // An m4a with a bit depth is Apple Lossless; without one it is AAC.
+        assertFalse(isUpgradable(alac))
+        assertTrue(isUpgradable(aac))
+        // A song the server only found online is not a library file.
+        assertFalse(isUpgradable(mp3.copy(isExternal = true)))
+        // Nor is one whose kind is unknown: it may be lossless already.
+        assertFalse(isUpgradable(mp3.copy(suffix = null)))
+    }
+
+    @Test
     fun aGenreRuleLooksAtEveryGenreOfASong() {
         assertEquals(listOf("3", "4"), rule(FilterPresets.genre("Electronic")))
         assertEquals(listOf("2"), rule(FilterPresets.genre("pop")))

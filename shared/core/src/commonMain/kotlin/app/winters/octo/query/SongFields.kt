@@ -54,6 +54,13 @@ fun isLosslessFormat(format: String?, bitDepth: Int? = null): Boolean {
     return kind in LosslessFormats
 }
 
+// Whether a FLAC could be looked for to take this song's place: a library
+// file (not one the server only found online) of a kind that loses detail.
+// A song whose kind the server never said is left alone, since it may well
+// be lossless already.
+fun isUpgradable(song: Song): Boolean =
+    !song.isExternal && !song.suffix.isNullOrBlank() && !isLosslessFormat(song.suffix, song.bitDepth)
+
 // A server's songs, as the desktop keeps them.
 open class SubsonicSongFields : SongFields<Song> {
     override fun id(song: Song) = song.id
