@@ -39,6 +39,7 @@ import app.winters.octo.playback.QueueSource
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import app.winters.octo.desktop.search.Fetches
+import app.winters.octo.desktop.upgrade.UpgradeModel
 import app.winters.octo.desktop.search.OmniboxState
 import app.winters.octo.desktop.search.SearchModel
 import app.winters.octo.desktop.server.Accounts
@@ -145,6 +146,10 @@ class AppState(
     var library by mutableStateOf<LibraryStore?>(null)
         private set
     var fetches by mutableStateOf<Fetches?>(null)
+        private set
+
+    // "Find in FLAC" on an Octo server; null on any other.
+    var upgrades by mutableStateOf<UpgradeModel?>(null)
         private set
     var search by mutableStateOf<SearchModel?>(null)
         private set
@@ -308,6 +313,7 @@ class AppState(
     // can see the new server without its notice, or the old notice with it.
     fun signedIn(connection: Connection, note: String? = null, page: Page = Page.Home) {
         val views = viewsOf(connection)
+        val old = upgrades
         together {
             show(connection, views)
             notice = note
@@ -321,6 +327,7 @@ class AppState(
             // Back and forward start afresh for this account.
             navigator.startOver(page)
         }
+        old?.close()
         startReading(views)
         startListening(connection)
     }
@@ -328,13 +335,21 @@ class AppState(
     // The pages' view of the server, read afresh through this connection.
     private fun useConnection(connection: Connection) {
         val views = viewsOf(connection)
+        val old = upgrades
         together { show(connection, views) }
+        old?.close()
         startReading(views)
     }
 
     // What the pages read a server through: its library, finds, search and
     // Home. Made before any of it shows, and read only after.
-    private class ServerViews(val library: LibraryStore, val fetches: Fetches?, val search: SearchModel, val home: HomeStore)
+    private class ServerViews(
+        val library: LibraryStore,
+        val fetches: Fetches?,
+        val search: SearchModel,
+        val home: HomeStore,
+        val upgrades: UpgradeModel?,
+    )
 
     private fun viewsOf(connection: Connection): ServerViews {
         val store = LibraryStore(connection.client, scope)
@@ -343,6 +358,9 @@ class AppState(
             if (connection.acquires) Fetches(connection.client, scope, onArrived = { store.load() }) else null,
             SearchModel(connection, { store.index }, { playlists }, scope),
             HomeStore(connection, scope),
+            // Any Octo server: whether it can look for FLACs is asked live,
+            // since the extensions saved at sign-in may be older than it.
+            if (connection.isOcto) UpgradeModel(connection.client, scope, reload = { store.load() }, notify = { notice = it }) else null,
         )
     }
 
@@ -350,6 +368,7 @@ class AppState(
         this.connection = connection
         library = views.library
         fetches = views.fetches
+        upgrades = views.upgrades
         search = views.search
         home = views.home
         health.forget()
@@ -358,6 +377,7 @@ class AppState(
 
     private fun startReading(views: ServerViews) {
         views.library.load()
+        views.upgrades?.start()
         refreshPlaylists()
     }
 
@@ -419,11 +439,13 @@ class AppState(
 
     private fun signedOut() {
         val form = SignInForm(accounts.last)
+        upgrades?.close()
         together {
             signInForm = form
             connection = null
             library = null
             fetches = null
+            upgrades = null
             search = null
             home = null
             health.forget()
