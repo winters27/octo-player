@@ -2,6 +2,7 @@ package app.winters.octo.desktop.system
 
 import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.RepeatMode
+import app.winters.octo.subsonic.Song
 
 // The song the system should show, taken from the player: what the media
 // controls, the tray, the notifications and the mini player all read.
@@ -32,6 +33,15 @@ data class NowPlaying(
     val rate: Double get() = if (playing && !buffering) speed.toDouble() else 0.0
 }
 
+// The album to show. An outside song whose album nobody knows reaches the
+// app with its own title as the album, which Octo sends so iPhone Subsonic
+// apps do not hide the song; Discord, the tray and the notices would show it
+// as an album. A library single named after its song keeps its album.
+internal fun shownAlbum(song: Song): String {
+    val album = song.album.orEmpty()
+    return if (song.isExternal && album.trim().equals(song.title.trim(), ignoreCase = true)) "" else album
+}
+
 // What the system shows for the player's state, or null with nothing in.
 fun nowPlayingOf(state: PlayerState): NowPlaying? {
     val entry = state.current ?: return null
@@ -42,7 +52,7 @@ fun nowPlayingOf(state: PlayerState): NowPlaying? {
         songId = song.id,
         title = song.title.ifBlank { opened?.let { titleFromFileName(it.path) } ?: "Unknown song" },
         artist = (song.displayArtist ?: song.artist).orEmpty(),
-        album = song.album.orEmpty(),
+        album = shownAlbum(song),
         albumArtist = (song.displayAlbumArtist ?: song.albumArtists.joinToString(", ") { it.name }.ifBlank { null }).orEmpty(),
         durationMs = state.durationMs.takeIf { it > 0 } ?: (song.duration * 1000L),
         coverId = song.coverArt,

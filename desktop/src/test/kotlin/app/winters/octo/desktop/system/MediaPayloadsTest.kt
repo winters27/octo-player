@@ -48,6 +48,23 @@ class MediaPayloadsTest {
         assertTrue("previous always starts over or goes back", now.canPrevious)
     }
 
+    // A song streamed from YouTube with no album known comes from Octo with its
+    // title as the album; Discord showed "Smile in Your Sleep" as the album.
+    @Test
+    fun anOutsideSongsTitleStandingInAsItsAlbumIsNoAlbum() {
+        val outside = QueueEntry(7, Song("ext-1", "Smile in Your Sleep", album = "Smile in Your Sleep", artist = "Silverstein", isExternal = true))
+        val now = nowPlayingOf(PlayerState(queue = listOf(outside), current = outside))!!
+        assertEquals("", now.album)
+        val known = QueueEntry(8, Song("ext-2", "Smile in Your Sleep", album = "Discovering the Waterfront", isExternal = true))
+        assertEquals("Discovering the Waterfront", nowPlayingOf(PlayerState(queue = listOf(known), current = known))!!.album)
+    }
+
+    @Test
+    fun aLibrarySingleNamedAfterItsSongKeepsItsAlbum() {
+        val single = QueueEntry(9, Song("s9", "Creep", album = "Creep", artist = "Radiohead"))
+        assertEquals("Creep", nowPlayingOf(PlayerState(queue = listOf(single), current = single))!!.album)
+    }
+
     @Test
     fun nothingPlayingIsNothingToShow() {
         assertNull(nowPlayingOf(PlayerState()))
