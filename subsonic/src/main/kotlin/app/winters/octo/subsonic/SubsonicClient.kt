@@ -110,11 +110,17 @@ class SubsonicClient(
     suspend fun libraryActions(): LibraryActions =
         get("getLibraryActions", key = "libraryActions", serializer = LibraryActions.serializer(), default = LibraryActions())
 
-    // Asks the server to act on one library song's file; for now only
-    // LIBRARY_ACTION_REMOVE, which moves it out of the library into the
-    // server's trash. Never a rating: on some servers a low rating deletes.
+    // Asks the server to act on one library song's file: LIBRARY_ACTION_REMOVE
+    // moves it out of the library into the server's trash, and
+    // LIBRARY_ACTION_UPGRADE queues a look for its FLAC and answers at once.
+    // Never a rating: on some servers a low rating deletes.
     suspend fun libraryAction(id: String, action: String = LIBRARY_ACTION_REMOVE): LibraryActionResult =
         get("libraryAction", mapOf("id" to id, "action" to action), "libraryAction", LibraryActionResult.serializer())
+
+    // The FLACs the signed-in user asked for, and how each is going. Only for
+    // servers that list octoLibraryActions at version 2.
+    suspend fun upgrades(): List<Upgrade> =
+        get("getUpgrades", key = "upgrades", serializer = ListSerializer(Upgrade.serializer()), default = emptyList())
 
     // One song, by its id on the server.
     suspend fun song(id: String): Song = get("getSong", mapOf("id" to id), "song", Song.serializer())

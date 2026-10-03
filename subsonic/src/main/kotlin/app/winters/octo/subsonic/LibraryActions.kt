@@ -3,13 +3,18 @@ package app.winters.octo.subsonic
 import kotlinx.serialization.Serializable
 
 // The OpenSubsonic extension an Octo server lists when it can act on the
-// library's files for an app: for now, take a song out of the library. It
-// is listed only while the server's library actions are switched on.
+// library's files for an app: take a song out of the library and, from
+// version 2, look for a FLAC of it. It is listed only while the server's
+// library actions are switched on.
 const val OCTO_LIBRARY_ACTIONS = "octoLibraryActions"
 
-// The one action this version knows: move the song's file out of the
-// library, into the server's trash.
+// Move the song's file out of the library, into the server's trash.
 const val LIBRARY_ACTION_REMOVE = "remove"
+
+// Look for a FLAC of the song on Soulseek and swap it in once it passes the
+// server's checks; the original is kept until then. Version 2 only, and the
+// server queues it: the answer comes back at once and the work runs later.
+const val LIBRARY_ACTION_UPGRADE = "upgrade"
 
 // What the server lets the signed-in user do to the library's files.
 @Serializable
@@ -24,15 +29,25 @@ data class LibraryActions(
     // How many days a removed file is kept in the server's trash; 0 keeps
     // it until someone clears it by hand.
     val keepDays: Int = 0,
+    // How many upgrades the server runs at once; older servers leave it out.
+    val parallel: Int = 1,
 ) {
     // Whether a song can really be taken out of the library now.
     val canRemove: Boolean get() = enabled && allowed && !dryRun && LIBRARY_ACTION_REMOVE in actions
+
+    // Whether a FLAC can really be looked for now. A rehearsal would only
+    // fill the server's queue with songs it never swaps, so not then either.
+    val canUpgrade: Boolean get() = enabled && allowed && !dryRun && LIBRARY_ACTION_UPGRADE in actions
 }
 
 // How one action went, as the server tells it.
 enum class LibraryActionState(val wire: String) {
     // Done: the file is out of the library.
     Applied("applied"),
+
+    // Taken on for later: an upgrade waits in the server's queue, and
+    // upgrades() says how it goes.
+    Queued("queued"),
 
     // Only rehearsed; nothing moved.
     Rehearsed("rehearsed"),
@@ -68,4 +83,68 @@ data class LibraryActionResult(
     val detail: String? = null,
 ) {
     val outcome: LibraryActionState get() = LibraryActionState.of(state)
+}
+
+// Where one asked for FLAC has got to on the server.
+enum class UpgradeStage(val wire: String) {
+    // Waiting for its turn in the server's queue.
+    Queued("queued"),
+
+    // Held while Soulseek is out; it carries on once Soulseek is back.
+    Waiting("waiting"),
+
+    // Being searched for, downloaded or checked.
+    Working("working"),
+
+    // Done: the FLAC passed and took the original's place.
+    Upgraded("upgraded"),
+
+    // No FLAC of it could be found; the original stays.
+    NotFound("notFound"),
+
+    // Only rehearsed; nothing changed.
+    Rehearsed("rehearsed"),
+
+    // Not done, and never will be as asked: not allowed, or already lossless.
+    Skipped("skipped"),
+
+    // It tried and could not; the original stays.
+    Failed("failed"),
+
+    // A state this app does not know yet, from a newer server.
+    Unknown(""),
+    ;
+
+    // Whether the server is still on it, so it is worth asking again.
+    val pending: Boolean get() = this == Queued || this == Waiting || this == Working
+
+    companion object {
+        fun of(text: String?): UpgradeStage {
+            val wire = text?.trim().orEmpty()
+            return entries.firstOrNull { it != Unknown && it.wire.equals(wire, ignoreCase = true) } ?: Unknown
+        }
+    }
+}
+
+// One song the signed-in user asked a FLAC for. Finished ones stay listed
+// for a while, so an app that was closed still hears how they went.
+@Serializable
+data class Upgrade(
+    // The song's id in the library, which stays the same after the swap.
+    val id: String = "",
+    val title: String = "",
+    val artist: String = "",
+    val album: String? = null,
+    // As the server says it; `stage` is what it means.
+    val state: String = "",
+    // The server's own words about how it went.
+    val detail: String? = null,
+    // How far the download is, from 0 to 1, when the server knows.
+    val progress: Double? = null,
+    val updatedAt: String? = null,
+) {
+    val stage: UpgradeStage get() = UpgradeStage.of(state)
+
+    // How far along, kept between 0 and 1, or null when unknown.
+    val fraction: Float? get() = progress?.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0)?.toFloat()
 }
