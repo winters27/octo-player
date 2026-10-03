@@ -206,8 +206,9 @@ class CollectionMenuViewModel @Inject constructor(
     // Library songs downloaded to the phone, or on their way.
     val kept: StateFlow<Map<String, DownloadEntity>> = offline.byTrack
 
-    // Whether the signed-in Octo server can look for FLACs.
+    // Whether the signed-in Octo server can look for FLACs, and where.
     val canUpgrade: StateFlow<Boolean> = upgrades.canUpgrade
+    val upgradeSource: StateFlow<String?> = upgrades.source
 
     // The album's songs a FLAC could replace, by their copies on the server.
     suspend fun upgradableInAlbum(albumId: String): List<UpgradeAsk> = upgrades.upgradableInAlbum(albumId)

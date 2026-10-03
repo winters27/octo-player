@@ -39,8 +39,12 @@ class UpgradeModelTest {
     private fun versions(vararg versions: Int) =
         server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[{"name":"octoLibraryActions","versions":[${versions.joinToString(",")}]}]""", type = "octo")
 
-    private fun gate(actions: String = """["remove","upgrade"]""", dryRun: Boolean = false) =
-        server.answer("getLibraryActions", """"libraryActions":{"enabled":true,"allowed":true,"dryRun":$dryRun,"actions":$actions,"keepDays":30,"parallel":3}""", type = "octo")
+    private fun gate(actions: String = """["remove","upgrade"]""", dryRun: Boolean = false, source: String = "\"Soulseek\"") =
+        server.answer(
+            "getLibraryActions",
+            """"libraryActions":{"enabled":true,"allowed":true,"dryRun":$dryRun,"actions":$actions,"keepDays":30,"parallel":3,"upgradeSource":$source}""",
+            type = "octo",
+        )
 
     private fun upgrades(vararg rows: String) = server.answer("getUpgrades", """"upgrades":[${rows.joinToString(",")}]""", type = "octo")
 
@@ -80,6 +84,28 @@ class UpgradeModelTest {
         assertTrue(model.canUpgrade)
         assertEquals(3, model.actions?.parallel)
         assertEquals(1, calls("getLibraryActions"))
+    }
+
+    @Test
+    fun theSourceIsTheOneTheServerNames() = runBlocking {
+        versions(1, 2)
+        gate(source = "\"Lidarr\"")
+        upgrades()
+        val model = model()
+        model.start()
+        until("the action is known") { model.canUpgrade }
+        assertEquals("Lidarr", model.source)
+    }
+
+    @Test
+    fun noSourceNamedMeansNone() = runBlocking {
+        versions(1, 2)
+        gate(source = "null")
+        upgrades()
+        val model = model()
+        model.start()
+        until("the action is known") { model.canUpgrade }
+        assertNull(model.source)
     }
 
     @Test

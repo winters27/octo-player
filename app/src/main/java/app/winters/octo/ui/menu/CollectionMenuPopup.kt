@@ -257,11 +257,12 @@ private fun PlaylistRename(target: CollectionTarget, onBack: () -> Unit, onDone:
 private fun AlbumFindFlac(target: CollectionTarget, vm: CollectionMenuViewModel, onBack: () -> Unit, onDone: () -> Unit) {
     val album = target as? CollectionTarget.Album ?: return
     val asks by produceState<List<UpgradeAsk>?>(null, album) { value = vm.upgradableInAlbum(album.id) }
+    val source by vm.upgradeSource.collectAsStateWithLifecycle()
     val shown = asks
     when {
         shown == null -> GlassMenuPage { GlassMenuNote("Gathering the songs") }
         shown.isEmpty() -> GlassMenuPage { GlassMenuNote("Every song here is being looked for already") }
-        else -> PopupQuestion(findHigherQualityAsk(shown.size), KEEPS_ORIGINAL, "Find higher quality", onConfirm = {
+        else -> PopupQuestion(findHigherQualityAsk(shown.size, source), KEEPS_ORIGINAL, "Find higher quality", onConfirm = {
             vm.findFlac(shown)
             onDone()
         }, onCancel = onBack)

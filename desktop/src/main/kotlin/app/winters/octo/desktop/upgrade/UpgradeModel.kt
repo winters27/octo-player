@@ -62,6 +62,9 @@ class UpgradeModel(
 
     val canUpgrade: Boolean get() = actions?.canUpgrade == true
 
+    // Where the server looks for a better copy, when it says.
+    val source: String? get() = actions?.upgradeSource
+
     // Asks whether the server can look for FLACs now and every ten minutes
     // after, and takes on any songs it is still looking for from before.
     fun start() {

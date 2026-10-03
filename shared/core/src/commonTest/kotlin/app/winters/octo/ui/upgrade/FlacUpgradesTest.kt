@@ -27,8 +27,17 @@ class FlacUpgradesTest {
     fun theMenuWordsCountSongs() {
         assertEquals("Find higher quality for 1 song", findHigherQualityLabel(1))
         assertEquals("Find higher quality for 9 songs", findHigherQualityLabel(9))
-        assertEquals("Look for a higher quality copy of 9 songs on Soulseek? Each original is kept until its replacement passes.", findHigherQualityQuestion(9))
+        assertEquals("Look for a higher quality copy of 9 songs on Soulseek? Each original is kept until its replacement passes.", findHigherQualityQuestion(9, "Soulseek"))
+        assertEquals("Look for a higher quality copy of 1 song on Lidarr?", findHigherQualityAsk(1, "Lidarr"))
         assertEquals("Find higher quality", FIND_HIGHER_QUALITY)
+    }
+
+    @Test
+    fun theQuestionNamesNoSourceTheServerDidNotSay() {
+        assertEquals("Look for a higher quality copy of 9 songs? Each original is kept until its replacement passes.", findHigherQualityQuestion(9))
+        assertEquals("Look for a higher quality copy of 2 songs?", findHigherQualityAsk(2, null))
+        assertEquals("Look for a higher quality copy of 2 songs?", findHigherQualityAsk(2, "  "))
+        assertFalse(findHigherQualityQuestion(3).contains("Soulseek"))
     }
 
     @Test

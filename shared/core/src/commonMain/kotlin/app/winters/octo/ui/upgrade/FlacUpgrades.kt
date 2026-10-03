@@ -27,7 +27,8 @@ const val UPGRADE_MISSES = 10
 // The song menu's row.
 const val FIND_HIGHER_QUALITY = "Find higher quality"
 
-// What the line says while Soulseek is out and the server holds on.
+// What the line says while Soulseek is out and the server holds on: the
+// server's own outage state, so it names Soulseek.
 const val WAITING_FOR_SOULSEEK = "Waiting for Soulseek"
 
 // "1 song", "12 songs".
@@ -37,12 +38,17 @@ fun songsText(count: Int): String = if (count == 1) "1 song" else "$count songs"
 fun findHigherQualityLabel(count: Int): String = "Find higher quality for ${songsText(count)}"
 
 // What is asked before an album's songs go to the server, and the
-// promise under it; together they are findHigherQualityQuestion.
-fun findHigherQualityAsk(count: Int): String = "Look for a higher quality copy of ${songsText(count)} on Soulseek?"
+// promise under it; together they are findHigherQualityQuestion. `source`
+// is where the server says it looks, named only when it said; some servers
+// download through Lidarr, not Soulseek.
+fun findHigherQualityAsk(count: Int, source: String? = null): String {
+    val where = source?.trim()?.takeIf(String::isNotEmpty)?.let { " on $it" }.orEmpty()
+    return "Look for a higher quality copy of ${songsText(count)}$where?"
+}
 
 const val KEEPS_ORIGINAL = "Each original is kept until its replacement passes."
 
-fun findHigherQualityQuestion(count: Int): String = "${findHigherQualityAsk(count)} $KEEPS_ORIGINAL"
+fun findHigherQualityQuestion(count: Int, source: String? = null): String = "${findHigherQualityAsk(count, source)} $KEEPS_ORIGINAL"
 
 // One song to look for, with the title the line uses until the server
 // says its own.

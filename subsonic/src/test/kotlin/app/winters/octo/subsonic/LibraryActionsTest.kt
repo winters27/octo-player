@@ -94,6 +94,20 @@ class LibraryActionsTest {
     }
 
     @Test
+    fun readsWhereTheServerLooksForABetterCopy() = runTest {
+        answer(ok(""""libraryActions":{"enabled":true,"allowed":true,"dryRun":false,"actions":["remove","upgrade"],"keepDays":30,"parallel":3,"upgradeSource":"Lidarr"}"""))
+        assertEquals("Lidarr", client().libraryActions().upgradeSource)
+    }
+
+    @Test
+    fun noUpgradeSourceMeansNoneIsNamed() = runTest {
+        answer(ok(""""libraryActions":{"enabled":true,"allowed":true,"dryRun":false,"actions":["remove"],"keepDays":30,"upgradeSource":null}"""))
+        assertEquals(null, client().libraryActions().upgradeSource)
+        answer(ok(""""libraryActions":{"enabled":true,"allowed":true,"dryRun":false,"actions":["remove"],"keepDays":30}"""))
+        assertEquals(null, client().libraryActions().upgradeSource)
+    }
+
+    @Test
     fun anOlderServerRunsOneAtATimeAndCannotUpgrade() = runTest {
         answer(ok(""""libraryActions":{"enabled":true,"allowed":true,"dryRun":false,"actions":["remove"],"keepDays":30}"""))
         val actions = client().libraryActions()

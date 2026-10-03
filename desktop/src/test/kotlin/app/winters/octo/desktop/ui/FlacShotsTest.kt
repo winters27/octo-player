@@ -30,7 +30,7 @@ class FlacShotsTest {
                     """"openSubsonicExtensions":[{"name":"songLyrics","versions":[1]},{"name":"octoLibraryActions","versions":[1,2]}]""",
                     type = "octo",
                 )
-                server.answer("getLibraryActions", """"libraryActions":{"enabled":true,"allowed":true,"dryRun":false,"actions":["remove","upgrade"],"keepDays":30,"parallel":3}""", type = "octo")
+                server.answer("getLibraryActions", """"libraryActions":{"enabled":true,"allowed":true,"dryRun":false,"actions":["remove","upgrade"],"keepDays":30,"parallel":3,"upgradeSource":"Soulseek"}""", type = "octo")
                 server.answer("getUpgrades", """"upgrades":[]""", type = "octo")
                 server.answer("libraryAction", """"libraryAction":{"id":"dup-2","action":"upgrade","state":"queued","detail":null}""", type = "octo")
                 rig.signIn()

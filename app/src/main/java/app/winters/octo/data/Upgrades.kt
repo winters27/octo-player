@@ -193,6 +193,9 @@ class Upgrades @Inject constructor(
     // Whether the server can really look for a FLAC now.
     val canUpgrade: StateFlow<Boolean> = _actions.map { it?.canUpgrade == true }.stateIn(scope, SharingStarted.Eagerly, false)
 
+    // Where the server looks for a better copy, when it says.
+    val source: StateFlow<String?> = _actions.map { it?.upgradeSource }.stateIn(scope, SharingStarted.Eagerly, null)
+
     private val watch = UpgradeWatch(
         object : UpgradeHost {
             override suspend fun ask(serverId: String): LibraryActionResult {

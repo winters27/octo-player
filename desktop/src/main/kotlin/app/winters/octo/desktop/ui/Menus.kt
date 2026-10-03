@@ -317,7 +317,7 @@ private fun askToFindFlac(app: AppState, upgrades: UpgradeModel, name: String, s
     app.popups.showCentred { close ->
         MenuTitle(name)
         PopupPadding {
-            Txt(findHigherQualityQuestion(songs.size), DesktopType.body, OctoColors.TextPrimary, maxLines = 6)
+            Txt(findHigherQualityQuestion(songs.size, upgrades.source), DesktopType.body, OctoColors.TextPrimary, maxLines = 6)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
                 GlazeCapsule(null, "Cancel", close)
                 GlazeCapsule(OctoIcons.Lossless, "Find higher quality", {
