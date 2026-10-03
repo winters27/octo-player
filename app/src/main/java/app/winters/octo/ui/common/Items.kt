@@ -262,6 +262,7 @@ fun SongRow(
     offerAdd: Boolean = false,
     librarySpace: Boolean = offerAdd,
     ownership: Boolean = false,
+    highlight: Boolean = false,
     onClick: (() -> Unit)? = null,
 ) {
     val swap = if (isFind(track.id)) rememberFindSwap(track.id, offerAdd, LocalReduceMotion.current) else null
@@ -270,7 +271,7 @@ fun SongRow(
     val nowId = LocalNowPlayingId.current.trackId
     val isNow = nowId == track.id || nowId == song.id
     val face: @Composable (TrackEntity) -> Unit = { shown ->
-        SongFace(shown, lead, subtitle(shown), trailing, offerAdd, librarySpace, selectKey, isNow, ownership)
+        SongFace(shown, lead, subtitle(shown), trailing, offerAdd, librarySpace, selectKey, isNow, ownership, highlight)
     }
     if (swipeToPlayNext) {
         val menu = LocalSongMenu.current
@@ -379,6 +380,7 @@ private fun SongFace(
     selectKey: String,
     isNow: Boolean,
     ownership: Boolean = false,
+    highlight: Boolean = false,
 ) {
     val sign = rowAddSign(track.id, LocalAdoptedFinds.current, offerAdd)
     val end: (@Composable () -> Unit)? = when (rowEnd(sign, librarySpace, hasTrailing = trailing != null)) {
@@ -416,7 +418,18 @@ private fun SongFace(
         }
         if (ownership) OwnershipMark(track)
         Column(Modifier.weight(1f)) {
-            Text(track.title, style = OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // The album's main song, starred as Apple Music marks it.
+                if (highlight) {
+                    Icon(
+                        painterResource(OctoIcons.StarFilled),
+                        contentDescription = "Most popular",
+                        tint = OctoColors.Accent,
+                        modifier = Modifier.padding(end = 6.dp).size(14.dp),
+                    )
+                }
+                Text(track.title, style = OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             if (!subtitle.isNullOrEmpty()) {
                 Text(subtitle, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }

@@ -36,6 +36,8 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.elevation3
 import app.winters.octo.discovery.Discovery
+import app.winters.octo.discovery.TopSongsSource
+import app.winters.octo.discovery.albumHighlight
 import app.winters.octo.discovery.DownloadState
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.wholeAlbum
@@ -93,6 +95,7 @@ class AlbumViewModel @AssistedInject constructor(
     private val playback: PlaybackConnection,
     private val discovery: Discovery,
     private val downloads: Downloads,
+    private val topSongs: TopSongsSource,
 ) : ViewModel() {
     val album: StateFlow<AlbumEntity?> =
         dao.album(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -113,6 +116,15 @@ class AlbumViewModel @AssistedInject constructor(
 
     // How each song asked for is getting on.
     val downloadStates: StateFlow<Map<String, DownloadState>> = downloads.states
+
+    // The album's main song, starred as Apple Music does: the one first in
+    // the artist's top songs on the server. None until known, or when no song
+    // here is among them.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val highlight: StateFlow<String?> = album.map { it?.artist }.distinctUntilChanged()
+        .flatMapLatest { artist -> if (artist == null) flowOf(emptyList()) else flowOf(topSongs.forArtist(artist)) }
+        .combine(tracks) { ranked, tracks -> albumHighlight(tracks, ranked) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     init {
         // Asked once the library's songs are known, then again when a song
@@ -181,6 +193,7 @@ fun AlbumScreen(
     // songs are in the library.
     val mixed = tracks.any { isFind(it.id) }
     val moreByArtist by vm.moreByArtist.collectAsStateWithLifecycle()
+    val highlight by vm.highlight.collectAsStateWithLifecycle()
     PageArtwork(AlbumRoute(id), album?.artwork)
 
     val pickable = remember(tracks) { tracks.map { Pickable(it.id, it) } }
@@ -245,6 +258,7 @@ fun AlbumScreen(
                             subtitle = { it.artist.takeIf { artist -> artist != album?.artist } },
                             menuContext = menuContext,
                             ownership = mixed,
+                            highlight = track.id == highlight,
                         ) { vm.play(tracks.indexOf(track)) }
                     }
                 }

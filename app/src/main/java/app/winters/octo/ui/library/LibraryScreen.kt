@@ -78,6 +78,22 @@ import app.winters.octo.ui.nav.LibraryHealthRoute
 import app.winters.octo.ui.nav.LiveListEditRoute
 import app.winters.octo.ui.nav.PlaylistsRoute
 import app.winters.octo.ui.nav.SongsRoute
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Constraints
+import kotlin.math.roundToInt
 
 // One way into the library, like Albums or Songs.
 private class Section(@DrawableRes val icon: Int, val label: String, val route: NavKey)
@@ -219,16 +235,27 @@ fun SongsScreen(onBack: () -> Unit, onOpen: (NavKey) -> Unit = {}, vm: LibraryVi
     val shown by vm.shownSongs.collectAsStateWithLifecycle()
     val query by vm.songFilter.collectAsStateWithLifecycle()
     val choices by vm.songChoices.collectAsStateWithLifecycle()
+    // The filter shows while it is open, and always while it narrows the list.
+    var filterOpen by rememberSaveable { mutableStateOf(false) }
+    val filtering = filterOpen || query.filters || query.text.isNotEmpty()
     LibraryPage("Songs", onBack, action = {
-        songs?.let { SortButton(SortList.Songs, it.order, onChange = { order -> vm.setOrder(SortList.Songs, order) }) }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            songs?.let { SortButton(SortList.Songs, it.order, onChange = { order -> vm.setOrder(SortList.Songs, order) }) }
+            RoundIconButton(OctoIcons.Filter, if (filtering) "Hide the filters" else "Filter these songs", lit = filtering) {
+                filterOpen = !filtering
+                if (!filterOpen) vm.filterSongs(query.cleared())
+            }
+        }
     }, buttons = {
         val all = songs?.items?.size ?: 0
         PlayButtons(shown, "song", vm::playSongs, details = if (query.filters) filteredCount(shown?.items?.size ?: 0, all) else null)
-    }) {
-        Loaded(songs) { _ ->
+        if (filtering && songs != null) {
             SongFilterRow(query, choices, vm::filterSongs) {
                 onOpen(LiveListEditRoute(start = liveListQueryFrom(emptyList(), query, songs?.order)))
             }
+        }
+    }) {
+        Loaded(songs) { _ ->
             val list = shown
             when {
                 list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -291,13 +318,59 @@ private fun LibraryPage(
     content: @Composable () -> Unit,
 ) {
     Refreshable {
-        Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            Spacer(Modifier.height(DetailTopGap))
-            TitleWithSort(title, sort = action)
-            buttons()
-            content()
-        }
+        CollapsingHeader(
+            Modifier.fillMaxSize().statusBarsPadding(),
+            header = {
+                Column {
+                    Spacer(Modifier.height(DetailTopGap))
+                    TitleWithSort(title, sort = action)
+                    buttons()
+                }
+            },
+            content = content,
+        )
         BackButton(onBack)
+    }
+}
+
+// A header over a list that slides up out of the way as the list scrolls
+// down, giving the list the whole screen, and comes back as soon as the
+// list is pulled down from its top. The list itself is left as it is: the
+// header gives up its height first, then the list scrolls.
+@Composable
+private fun CollapsingHeader(modifier: Modifier, header: @Composable () -> Unit, content: @Composable () -> Unit) {
+    val state = remember { HeaderSlide() }
+    Column(modifier.nestedScroll(state)) {
+        Box(
+            Modifier.clipToBounds().layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+                state.height = placeable.height
+                val moved = state.offset.roundToInt().coerceIn(-placeable.height, 0)
+                layout(placeable.width, placeable.height + moved) { placeable.place(0, moved) }
+            },
+        ) { header() }
+        Box(Modifier.weight(1f)) { content() }
+    }
+}
+
+// How far the header has slid up, in pixels (0 to minus its height).
+private class HeaderSlide : NestedScrollConnection {
+    var height = 0
+    var offset by mutableFloatStateOf(0f)
+
+    // Scrolling down the list: the header goes first.
+    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset =
+        if (available.y < 0f) slide(available.y) else Offset.Zero
+
+    // Pulled down with the list at its top: the header comes back.
+    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
+        if (available.y > 0f) slide(available.y) else Offset.Zero
+
+    private fun slide(by: Float): Offset {
+        val next = (offset + by).coerceIn(-height.toFloat(), 0f)
+        val used = next - offset
+        offset = next
+        return Offset(0f, used)
     }
 }
 
@@ -314,12 +387,50 @@ private fun PlayButtons(
 ) {
     if (list == null || list.items.isEmpty()) return
     val count = list.items.size
-    PlayRow(
-        details = details ?: if (count == 1) "1 $noun" else "$count ${noun}s",
-        onPlay = { onPlay(false) },
-        onShuffle = { onPlay(true) },
-        modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
-    ) { extra() }
+    Row(
+        Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            details ?: "%,d %s".format(count, if (count == 1) noun else "${noun}s"),
+            style = OctoType.caption,
+            color = OctoColors.TextMuted,
+            maxLines = 1,
+            modifier = Modifier.weight(1f),
+        )
+        extra()
+        RoundIconButton(OctoIcons.Shuffle, "Shuffle") { onPlay(true) }
+        RoundIconButton(OctoIcons.Play, "Play", filled = true) { onPlay(false) }
+    }
+}
+
+// A round button with one icon: a faint disc, the accent's when `filled`
+// (Play), the darker pill's while `lit` (a filter that is open).
+@Composable
+private fun RoundIconButton(@DrawableRes icon: Int, label: String, filled: Boolean = false, lit: Boolean = false, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(
+                when {
+                    filled -> OctoColors.Accent
+                    lit -> OctoColors.AccentSelected
+                    else -> OctoColors.TextPrimary.copy(alpha = 0.08f)
+                },
+            )
+            .clickable(role = Role.Button, onClickLabel = label, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painterResource(icon),
+            contentDescription = null,
+            tint = if (filled) OctoColors.Background else OctoColors.TextPrimary,
+            modifier = Modifier.size(20.dp),
+        )
+    }
 }
 
 // Shows a spinner until the first read, a note if there is nothing, and

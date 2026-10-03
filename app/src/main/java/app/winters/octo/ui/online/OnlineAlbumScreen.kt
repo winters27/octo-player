@@ -25,6 +25,8 @@ import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.DownloadState
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.OnlineAlbumPage
+import app.winters.octo.discovery.TopSongsSource
+import app.winters.octo.discovery.albumHighlight
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.ui.album.AlbumHeader
 import app.winters.octo.ui.common.BackButton
@@ -55,7 +57,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -65,6 +69,7 @@ class OnlineAlbumViewModel @AssistedInject constructor(
     private val discovery: Discovery,
     private val downloads: Downloads,
     private val playback: PlaybackConnection,
+    private val topSongs: TopSongsSource,
 ) : ViewModel() {
     private val _page = MutableStateFlow<LoadState<OnlineAlbumPage>>(LoadState.Loading)
     val page: StateFlow<LoadState<OnlineAlbumPage>> = _page.asStateFlow()
@@ -91,6 +96,15 @@ class OnlineAlbumViewModel @AssistedInject constructor(
             }
         }
     }
+
+    // The album's main song, starred as Apple Music does: the one first in
+    // the artist's top songs on the server. None until known, or when no song
+    // here is among them.
+    val highlight: StateFlow<String?> = _page
+        .map { (it as? LoadState.Ready)?.data }
+        .distinctUntilChanged()
+        .map { found -> found?.let { albumHighlight(it.songs, topSongs.forArtist(it.album.artist)) } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun reload() {
         _page.value = LoadState.Loading
@@ -136,6 +150,7 @@ fun OnlineAlbumScreen(
 ) {
     val page by vm.page.collectAsStateWithLifecycle()
     val downloading by vm.downloading.collectAsStateWithLifecycle()
+    val highlight by vm.highlight.collectAsStateWithLifecycle()
 
     Box(Modifier.fillMaxSize()) {
         LoadStateContent(page, onRetry = vm::reload) { found ->
@@ -186,14 +201,19 @@ fun OnlineAlbumScreen(
                     )
                 }
                 // Songs found online have no track numbers, so every song is
-                // numbered by where it sits on the album.
+                // numbered by where it sits on the album. As on a library
+                // album, whether each song is in the library is said beside
+                // its number, so the rows run to the edge of the screen and
+                // no space is kept empty at their end.
+                val mixed = found.songs.any { isFind(it.id) }
                 itemsIndexed(found.songs, key = { _, track -> track.id }) { index, track ->
                     // Only say who is singing when it is not the album's artist.
                     SongRow(
                         track,
                         SongLead.Number(index + 1),
                         subtitle = { it.artist.takeIf { artist -> artist != album.artist } },
-                        offerAdd = true,
+                        ownership = mixed,
+                        highlight = track.id == highlight,
                     ) { vm.play(index) }
                 }
             }
