@@ -18,9 +18,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -44,8 +49,9 @@ import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.choiceAnchor
 
-// The Songs list's filters: a field for words, then a row of chips, the
-// same quick filters the desktop offers. A chip that is on sits in the
+// The Songs list's search: a field for words, then a row of chips, the
+// same quick filters the desktop offers. With `focusOnOpen` the field takes
+// the keyboard as soon as it is on screen, then says so with `onFocused`. A chip that is on sits in the
 // darker pill; a tap turns it off. Rating, Genre and Year ask which first.
 // Picking one on a field that already has a filter replaces it.
 @Composable
@@ -55,8 +61,20 @@ internal fun SongFilterRow(
     onChange: (LibraryQuery) -> Unit,
     // Keeps these filters as a live list.
     onSaveAsLive: (() -> Unit)? = null,
+    focusOnOpen: Boolean = false,
+    onFocused: () -> Unit = {},
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
+    val field = remember { FocusRequester() }
+    LaunchedEffect(focusOnOpen) {
+        if (focusOnOpen) {
+            // One frame, so the field is laid out before it is asked.
+            withFrameNanos { }
+            field.requestFocus()
+            keyboard?.show()
+            onFocused()
+        }
+    }
     val sheet = LocalChoiceSheet.current
     fun toggle(rule: QueryRule) = onChange(if (rule in query.rules) query.without(rule) else query.setting(rule))
     // A chip that asks: on, it shows the filter and a tap takes it off.
@@ -74,14 +92,14 @@ internal fun SongFilterRow(
         val decades = choices.decades.asReversed()
         sheet.show(ChoiceRequest("Year", decades.map { Choice("The ${it}s") }, -1) { onChange(query.setting(FilterPresets.decade(decades[it]))) })
     }
-    Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+    Column(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 10.dp)) {
         GlassInput(
             value = query.text,
             onValueChange = { onChange(query.copy(text = it)) },
-            placeholder = "Filter these songs",
+            placeholder = "Search songs",
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
-            modifier = Modifier.padding(horizontal = 20.dp),
+            modifier = Modifier.padding(horizontal = 20.dp).focusRequester(field),
             trailing = if (query.text.isEmpty()) null else ({ ClearWords { onChange(query.copy(text = "")) } }),
         )
         LazyRow(

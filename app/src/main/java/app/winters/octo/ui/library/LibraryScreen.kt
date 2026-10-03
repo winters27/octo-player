@@ -1,6 +1,17 @@
 package app.winters.octo.ui.library
 
+import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,11 +38,27 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -47,9 +74,11 @@ import app.winters.octo.ui.common.ArtistRow
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.EmptyLibraryNote
+import app.winters.octo.ui.common.GlassIconButton
 import app.winters.octo.ui.common.LetterRail
+import app.winters.octo.ui.common.LocalReduceMotion
 import app.winters.octo.ui.common.Pickable
-import app.winters.octo.ui.common.PlayRow
+import app.winters.octo.ui.common.PlayPills
 import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.RAIL_MIN_ITEMS
 import app.winters.octo.ui.common.Refreshable
@@ -78,21 +107,6 @@ import app.winters.octo.ui.nav.LibraryHealthRoute
 import app.winters.octo.ui.nav.LiveListEditRoute
 import app.winters.octo.ui.nav.PlaylistsRoute
 import app.winters.octo.ui.nav.SongsRoute
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.layout.layout
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.Constraints
 import kotlin.math.roundToInt
 
 // One way into the library, like Albums or Songs.
@@ -227,7 +241,7 @@ fun ArtistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: LibraryViewM
     }
 }
 
-// Every song, in the chosen order, which the filter row above narrows. A
+// Every song, in the chosen order, which the search above narrows. A
 // tap plays the list as shown from that song.
 @Composable
 fun SongsScreen(onBack: () -> Unit, onOpen: (NavKey) -> Unit = {}, vm: LibraryViewModel = hiltViewModel()) {
@@ -235,25 +249,55 @@ fun SongsScreen(onBack: () -> Unit, onOpen: (NavKey) -> Unit = {}, vm: LibraryVi
     val shown by vm.shownSongs.collectAsStateWithLifecycle()
     val query by vm.songFilter.collectAsStateWithLifecycle()
     val choices by vm.songChoices.collectAsStateWithLifecycle()
-    // The filter shows while it is open, and always while it narrows the list.
-    var filterOpen by rememberSaveable { mutableStateOf(false) }
-    val filtering = filterOpen || query.filters || query.text.isNotEmpty()
+    // Search opens from the title's line and stays open while it narrows the
+    // list. Closing it (its button, or Back) clears the words and the chips.
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    val searching = searchOpen || query.filters
+    // Set by a tap on Search, so the field takes the keyboard then, and not
+    // when the page comes back with a search already in it.
+    var focusOnOpen by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    fun closeSearch() {
+        focusManager.clearFocus()
+        searchOpen = false
+        focusOnOpen = false
+        vm.filterSongs(query.cleared())
+    }
+    BackHandler(enabled = searching) { closeSearch() }
     LibraryPage("Songs", onBack, action = {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            songs?.let { SortButton(SortList.Songs, it.order, onChange = { order -> vm.setOrder(SortList.Songs, order) }) }
-            RoundIconButton(OctoIcons.Filter, if (filtering) "Hide the filters" else "Filter these songs", lit = filtering) {
-                filterOpen = !filtering
-                if (!filterOpen) vm.filterSongs(query.cleared())
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            if (songs?.items?.isNotEmpty() == true) {
+                GlassIconButton(
+                    if (searching) OctoIcons.Close else OctoIcons.Search,
+                    if (searching) "Close the search" else "Search these songs",
+                    onClick = {
+                        if (searching) {
+                            closeSearch()
+                        } else {
+                            searchOpen = true
+                            focusOnOpen = true
+                        }
+                    },
+                    lit = searching,
+                )
             }
+            songs?.let { SortButton(SortList.Songs, it.order, onChange = { order -> vm.setOrder(SortList.Songs, order) }) }
         }
     }, buttons = {
-        val all = songs?.items?.size ?: 0
-        PlayButtons(shown, "song", vm::playSongs, details = if (query.filters) filteredCount(shown?.items?.size ?: 0, all) else null)
-        if (filtering && songs != null) {
-            SongFilterRow(query, choices, vm::filterSongs) {
-                onOpen(LiveListEditRoute(start = liveListQueryFrom(emptyList(), query, songs?.order)))
+        if (songs != null) {
+            SearchPanel(searching) {
+                SongFilterRow(
+                    query,
+                    choices,
+                    vm::filterSongs,
+                    onSaveAsLive = { onOpen(LiveListEditRoute(start = liveListQueryFrom(emptyList(), query, songs?.order))) },
+                    focusOnOpen = focusOnOpen,
+                    onFocused = { focusOnOpen = false },
+                )
             }
         }
+        val all = songs?.items?.size ?: 0
+        PlayButtons(shown, "song", vm::playSongs, details = if (query.filters) filteredCount(shown?.items?.size ?: 0, all) else null)
     }) {
         Loaded(songs) { _ ->
             val list = shown
@@ -374,9 +418,34 @@ private class HeaderSlide : NestedScrollConnection {
     }
 }
 
+// The search under the title. It grows open from the top on a soft spring,
+// pushing the list down rather than jumping it, while its field and chips
+// drift down a little and fade in a beat behind; closing folds it back up,
+// quicker. With the phone's animations off it only fades.
+@Composable
+private fun SearchPanel(open: Boolean, content: @Composable () -> Unit) {
+    val still = LocalReduceMotion.current
+    AnimatedVisibility(
+        visible = open,
+        enter = if (still) {
+            fadeIn(tween(120))
+        } else {
+            expandVertically(spring(0.9f, Spring.StiffnessMediumLow, IntSize.VisibilityThreshold), expandFrom = Alignment.Top) +
+                slideInVertically(spring(0.85f, Spring.StiffnessMediumLow, IntOffset.VisibilityThreshold)) { -it / 5 } +
+                fadeIn(tween(220, delayMillis = 60))
+        },
+        exit = if (still) {
+            fadeOut(tween(100))
+        } else {
+            shrinkVertically(spring(1f, Spring.StiffnessMedium, IntSize.VisibilityThreshold), shrinkTowards = Alignment.Top) +
+                fadeOut(tween(120))
+        },
+    ) { content() }
+}
+
 // Play and Shuffle for the whole list, once it has something in it: how
 // many `noun`s it holds on the left (or `details`), then room for one
-// quieter action.
+// quieter action, then the small glass Play and Shuffle.
 @Composable
 private fun PlayButtons(
     list: Sorted<*>?,
@@ -388,48 +457,22 @@ private fun PlayButtons(
     if (list == null || list.items.isEmpty()) return
     val count = list.items.size
     Row(
-        Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
+        // The right edge lines up with the sort capsule's above: the glass
+        // sits 7dp inside its 48dp touch target.
+        Modifier.fillMaxWidth().padding(start = 20.dp, end = 13.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
             details ?: "%,d %s".format(count, if (count == 1) noun else "${noun}s"),
             style = OctoType.caption,
             color = OctoColors.TextMuted,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
         extra()
-        RoundIconButton(OctoIcons.Shuffle, "Shuffle") { onPlay(true) }
-        RoundIconButton(OctoIcons.Play, "Play", filled = true) { onPlay(false) }
-    }
-}
-
-// A round button with one icon: a faint disc, the accent's when `filled`
-// (Play), the darker pill's while `lit` (a filter that is open).
-@Composable
-private fun RoundIconButton(@DrawableRes icon: Int, label: String, filled: Boolean = false, lit: Boolean = false, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .size(44.dp)
-            .clip(CircleShape)
-            .background(
-                when {
-                    filled -> OctoColors.Accent
-                    lit -> OctoColors.AccentSelected
-                    else -> OctoColors.TextPrimary.copy(alpha = 0.08f)
-                },
-            )
-            .clickable(role = Role.Button, onClickLabel = label, onClick = onClick)
-            .semantics { contentDescription = label },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            painterResource(icon),
-            contentDescription = null,
-            tint = if (filled) OctoColors.Background else OctoColors.TextPrimary,
-            modifier = Modifier.size(20.dp),
-        )
+        PlayPills(onPlay = { onPlay(false) }, onShuffle = { onPlay(true) })
     }
 }
 

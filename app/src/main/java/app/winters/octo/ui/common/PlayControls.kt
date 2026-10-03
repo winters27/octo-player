@@ -1,8 +1,10 @@
 package app.winters.octo.ui.common
 
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -32,11 +34,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.Glaze
 import app.winters.octo.design.GlazeLight
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoDuration
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 
@@ -150,6 +154,95 @@ private fun PlayCapsule(
         }
     }
 }
+
+// Play and Shuffle kept small, for a list page whose header should stay
+// short (the library's lists): Play as a glass pill with its word, Shuffle as
+// a round glass button beside it, both the sort capsule's height so the
+// header's glass all matches. Play catches more light, as in PlayShuffle.
+@Composable
+fun PlayPills(onPlay: () -> Unit, onShuffle: () -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        PlayPill(onPlay)
+        GlassIconButton(OctoIcons.Shuffle, "Shuffle", onShuffle)
+    }
+}
+
+@Composable
+private fun PlayPill(onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val press by animateFloatAsState(if (pressed) SmallPressScale else 1f, spring(0.45f, 600f), label = "play pill press")
+    Box(
+        Modifier
+            .height(TouchSize)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = "Play" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Glaze(
+            Modifier
+                .height(GlassButtonHeight)
+                .graphicsLayer {
+                    scaleX = press
+                    scaleY = press
+                },
+            light = GlazeLight.Lifted,
+        ) {
+            Row(
+                Modifier.padding(start = 11.dp, end = 15.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Icon(painterResource(OctoIcons.Play), contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                Text("Play", style = OctoType.label.copy(fontWeight = FontWeight.Medium), color = OctoColors.TextPrimary, maxLines = 1)
+            }
+        }
+    }
+}
+
+// A round glass button the sort capsule's height, inside a 48dp touch
+// target: Shuffle beside Play, Search beside the sort. `lit` while what it
+// opens is open. A new `icon` fades in over the old one, so Search turning
+// into Close reads as the same button changing.
+@Composable
+fun GlassIconButton(
+    @DrawableRes icon: Int,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    lit: Boolean = false,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val press by animateFloatAsState(if (pressed) SmallPressScale else 1f, spring(0.45f, 600f), label = "glass button press")
+    Box(
+        modifier
+            .size(TouchSize)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Glaze(
+            Modifier
+                .size(GlassButtonHeight)
+                .graphicsLayer {
+                    scaleX = press
+                    scaleY = press
+                },
+            light = if (lit || pressed) GlazeLight.Lifted else GlazeLight.Rest,
+        ) {
+            Crossfade(icon, animationSpec = tween(OctoDuration.Swap), label = "glass button icon") { shown ->
+                Icon(painterResource(shown), contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+            }
+        }
+    }
+}
+
+// The sort capsule's height (Sorting.kt), shared by the small glass buttons.
+private val GlassButtonHeight = 34.dp
+
+// Small glass gives as much as the sort capsule does.
+private const val SmallPressScale = 0.94f
 
 // A lesser action on the line above Play and Shuffle, like More: a plain
 // white icon with no glass, a step quieter than the capsules below.
