@@ -45,8 +45,8 @@ fun FavouriteHeart(kind: FavouriteKind, id: String, modifier: Modifier = Modifie
                 vm.favourites.toggle(kind, id)
             }
             .semantics {
-                contentDescription = "Favourite"
-                stateDescription = if (on) "In favourites" else "Not in favourites"
+                contentDescription = "Favorite"
+                stateDescription = if (on) "In favorites" else "Not in favorites"
             },
         contentAlignment = Alignment.Center,
     ) {

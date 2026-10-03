@@ -230,7 +230,7 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
                 val starred = app.isStarred(song)
                 IconAction(
                     if (starred) OctoIcons.Liked else OctoIcons.Like,
-                    if (starred) "Remove from favourites" else "Add to favourites",
+                    if (starred) "Remove from favorites" else "Add to favorites",
                     { app.setStarred(listOf(song), !starred) },
                     size = 40.dp,
                     iconSize = 22.dp,

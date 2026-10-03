@@ -52,13 +52,13 @@ class LiveListStoreTest {
     fun listsAreKeptAndChangedPerAccount() = runBlocking {
         val store = store()
         assertEquals(emptyList<LiveList>(), store.lists.first())
-        val made = store.save(LiveList.new(" Favourites ", favourites, 0, "f"))
-        assertEquals("Favourites", made.name)
+        val made = store.save(LiveList.new(" Favorites ", favourites, 0, "f"))
+        assertEquals("Favorites", made.name)
         assertEquals(1_000L, made.created)
         now = 2_000
         val copy = store.duplicate(made)
         store.rename("f", "Hearts")
-        assertEquals(listOf("Hearts", "Favourites (copy)"), store.lists.first().map { it.name })
+        assertEquals(listOf("Hearts", "Favorites (copy)"), store.lists.first().map { it.name })
         assertEquals(2_000L, store.byId("f")?.changed)
 
         // Another account starts with none, and the first keeps its own.
@@ -72,7 +72,7 @@ class LiveListStoreTest {
         assertEquals(listOf(copy.id), store.lists.first().map { it.id })
         assertNull(store.byId("f"))
         // Read again, as after a restart.
-        assertEquals(listOf("Favourites (copy)"), store().lists.first().map { it.name })
+        assertEquals(listOf("Favorites (copy)"), store().lists.first().map { it.name })
     }
 
     @Test
@@ -100,7 +100,7 @@ class LiveListStoreTest {
         val liked = MutableStateFlow(listOf("1"))
         val played = MutableStateFlow(emptyList<PlayedTrack>())
         val songs = LiveListSongs(tracks, liked, played)
-        val lossless = LiveList.new("Lossless favourites", LibraryQuery(listOf(FilterPresets.Favourites, FilterPresets.Lossless)), 0)
+        val lossless = LiveList.new("Lossless favorites", LibraryQuery(listOf(FilterPresets.Favourites, FilterPresets.Lossless)), 0)
         assertEquals(listOf("1"), songs.now(lossless).map { it.id })
         liked.value = listOf("1", "2", "3")
         assertEquals(listOf("1", "3"), songs.now(lossless).map { it.id })

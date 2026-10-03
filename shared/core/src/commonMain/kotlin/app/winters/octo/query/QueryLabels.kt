@@ -22,7 +22,7 @@ fun QueryField.label(): String = when (this) {
     QueryField.Bpm -> "BPM"
     QueryField.Added -> "Added"
     QueryField.LastPlayed -> "Played"
-    QueryField.Favourite -> "Favourite"
+    QueryField.Favourite -> "Favorite"
     QueryField.Lossless -> "Lossless"
 }
 
@@ -41,7 +41,7 @@ fun QueryRule.label(zone: ZoneId = ZoneId.systemDefault()): String {
         FieldKind.Date -> dateLabel(zone)
         FieldKind.Flag -> when (field) {
             QueryField.Lossless -> if (flag == true) "Lossless" else "Lossy"
-            else -> if (flag == true) "Favourites" else "Not favourites"
+            else -> if (flag == true) "Favorites" else "Not favorites"
         }
     }
 }

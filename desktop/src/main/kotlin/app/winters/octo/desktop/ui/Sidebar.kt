@@ -87,7 +87,7 @@ private val LibraryPlaces = listOf(
 )
 
 private val YourPlaces = listOf(
-    Place(Page.Favourites, "Favourites", OctoIcons.Like),
+    Place(Page.Favourites, "Favorites", OctoIcons.Like),
     Place(Page.History, "Recently played", OctoIcons.History),
     Place(Page.RecentlyAdded, "Recently added", OctoIcons.AddToLibrary),
 )

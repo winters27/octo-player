@@ -77,7 +77,7 @@ val LiveListRuleGroups: List<RuleGroup> = listOf(
     RuleGroup(
         "Other",
         listOf(
-            RuleChoice("Favourites", FilterPresets.Favourites),
+            RuleChoice("Favorites", FilterPresets.Favourites),
             RuleChoice("Lossless", FilterPresets.Lossless),
         ),
     ),
@@ -139,8 +139,8 @@ val LiveListStarters: List<LiveListStarter> = listOf(
         ),
     ),
     LiveListStarter(
-        "Lossless favourites",
-        "Favourite songs in lossless files",
+        "Lossless favorites",
+        "Favorite songs in lossless files",
         LibraryQuery(listOf(FilterPresets.Favourites, FilterPresets.Lossless), sort = QuerySort.of(SortOrder(SongSort.Artist, descending = false))),
     ),
 )

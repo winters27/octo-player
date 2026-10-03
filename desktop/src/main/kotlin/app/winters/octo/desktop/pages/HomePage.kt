@@ -123,7 +123,7 @@ fun HomePage(app: AppState, visit: Visit) {
                 }
                 albums(app, "Recently added", home.recentlyAdded) { app.navigator.go(Page.RecentlyAdded) }
                 albums(app, "Most played", home.mostPlayed, whole = home.mostPlayed.size < SHELF_SIZE, seeAll = open(AlbumShelf.MostPlayed))
-                albums(app, "Favourite albums", home.favourites) {
+                albums(app, "Favorite albums", home.favourites) {
                     app.navigator.go(Page.Favourites)
                     app.navigator.keepTab(app.navigator.current, "Albums")
                 }

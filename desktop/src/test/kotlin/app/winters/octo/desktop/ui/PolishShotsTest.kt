@@ -322,7 +322,7 @@ class PolishShotsTest {
                 SwingUtilities.invokeAndWait { app.navigator.go(Page.Playlist(PolishData.SMALL_PLAYLIST)) }
                 rig.shot(scene, "empty/offline-playlist-${size.label}", 2_500)
                 SwingUtilities.invokeAndWait { app.navigator.go(Page.Favourites) }
-                rig.shot(scene, "empty/offline-favourites-${size.label}", 2_500)
+                rig.shot(scene, "empty/offline-favorites-${size.label}", 2_500)
                 SwingUtilities.invokeAndWait { app.navigator.go(Page.Home) }
                 rig.shot(scene, "empty/offline-home-${size.label}", 2_500)
             }

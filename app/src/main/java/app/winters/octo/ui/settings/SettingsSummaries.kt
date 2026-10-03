@@ -108,7 +108,7 @@ fun scrobblingSummary(prefs: ListenBrainzPrefs): String = when {
     else -> "ListenBrainz as ${prefs.user}"
 }
 
-const val BACKUP_SUMMARY = "Settings, playlists, likes and favourites"
+const val BACKUP_SUMMARY = "Settings, playlists, likes and favorites"
 
 fun aboutSummary(version: String, updateReady: String? = null): String =
     if (updateReady != null) "Update ready: $updateReady" else "Version $version"

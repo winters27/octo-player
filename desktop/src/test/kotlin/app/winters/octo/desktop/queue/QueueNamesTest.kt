@@ -20,7 +20,7 @@ class QueueNamesTest {
         assertEquals("Radiohead", name(Page.Artist("r1", "Radiohead"), mixed))
         assertEquals("Rock", name(Page.Genre("Rock"), mixed))
         assertEquals("Songs", name(Page.Songs, mixed))
-        assertEquals("Favourites", name(Page.Favourites, mixed))
+        assertEquals("Favorites", name(Page.Favourites, mixed))
         assertEquals("Recently played", name(Page.History, mixed))
         assertEquals("Recently added", name(Page.RecentlyAdded, mixed))
         assertEquals("OK Computer", name(Page.Album("a1"), okComputer))

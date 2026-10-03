@@ -66,7 +66,7 @@ class CoverGalleryScreenShotsTest {
     private fun music(argb: Long) = listOf(listOf(Swatch(argb.toInt(), 0.8f)))
 
     private val names = listOf("Late night", "Running", "Sunday morning", "Focus", "Dinner with friends", "Chill", "Road trip", "Heavy rotation",
-        "Rainy days", "Gym", "Old favourites", "Discover", "Summer 2026", "Deep work", "Kitchen dancing", "Sleep")
+        "Rainy days", "Gym", "Old favorites", "Discover", "Summer 2026", "Deep work", "Kitchen dancing", "Sleep")
 
     // The server's sheet of 24 lists, drawn by the app's own painter (the
     // background chosen and turned, the veil, the words), to check a page

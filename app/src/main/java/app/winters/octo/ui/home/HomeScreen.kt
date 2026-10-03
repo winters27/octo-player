@@ -90,7 +90,7 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
                     shelf("Recently played", recentlyPlayed, onOpen, onTitle = { onOpen(HistoryRoute()) })
                     stationShelf(vm.stations, vm.startingStation, vm::playStation)
                     shelf("Recently added", recent.orEmpty(), onOpen)
-                    shelf("Favourite albums", favouriteAlbums, onOpen, onTitle = { onOpen(FavouritesRoute(albums = true)) })
+                    shelf("Favorite albums", favouriteAlbums, onOpen, onTitle = { onOpen(FavouritesRoute(albums = true)) })
                     songShelf("Most played", mostPlayed, vm::play, onTitle = { onOpen(HistoryRoute(mostPlayed = true)) })
                     shelf("Something different", vm.surprise, onOpen)
                     shelf("Not played in 6 months", rediscovery.notPlayedLately, onOpen)

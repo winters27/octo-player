@@ -112,9 +112,9 @@ class FavouritesViewModel @Inject constructor(
 
     private fun songIds() = songs.value?.items.orEmpty().map { it.id }
 
-    fun playSongs(index: Int) = playback.playTracks(songIds(), index, source = "Favourites")
+    fun playSongs(index: Int) = playback.playTracks(songIds(), index, source = "Favorites")
 
-    fun shuffleSongs() = playback.playTracks(songIds(), shuffle = true, source = "Favourites")
+    fun shuffleSongs() = playback.playTracks(songIds(), shuffle = true, source = "Favorites")
 
     fun setOrder(order: SortOrder) {
         viewModelScope.launch { sorting.set(SortList.Favourites, order) }
@@ -173,7 +173,7 @@ fun FavouritesScreen(
     Refreshable {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Spacer(Modifier.height(DetailTopGap))
-            TitleWithSort("Favourites") {
+            TitleWithSort("Favorites") {
                 when (segment) {
                     null -> Unit
                     FavouriteSegment.Songs -> songs?.let { SortButton(SortList.Liked, it.order, vm::setSongOrder) }

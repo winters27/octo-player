@@ -56,7 +56,7 @@ fun sortWords(sort: QuerySort): String? {
         SongSort.MostPlayed -> if (down) "most played first" else "least played first"
         SongSort.RecentlyPlayed -> if (down) "last played first" else "longest unplayed first"
         SongSort.Rating -> if (down) "highest rated first" else "lowest rated first"
-        SongSort.Liked, SongSort.DateLiked -> if (down) "newest favourites first" else "oldest favourites first"
+        SongSort.Liked, SongSort.DateLiked -> if (down) "newest favorites first" else "oldest favorites first"
         SongSort.FolderOrder -> "in folder order"
     }
 }

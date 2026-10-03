@@ -126,7 +126,7 @@ fun AlbumPage(app: AppState, visit: Visit, id: String) {
                         PlayAndShuffle({ app.play(songs) }, { app.play(songs, shuffle = true) }, enabled = songs.isNotEmpty())
                         if (inLibrary) {
                             val starred = app.isAlbumStarred(album.id, album.starred ?: app.library?.index?.albums?.firstOrNull { it.id == album.id }?.starred)
-                            HeaderIcon(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favourites" else "Add to favourites", { app.setAlbumStarred(album.id, !starred) })
+                            HeaderIcon(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favorites" else "Add to favorites", { app.setAlbumStarred(album.id, !starred) })
                         }
                         HeaderIcon(OctoIcons.AddToQueue, "Add to queue", { app.addToQueue(songs) }, enabled = songs.isNotEmpty())
                         MoreButton(app, "More for this album") { close -> AlbumMenu(app, album.asAlbum(), close, outside = !inLibrary) }

@@ -360,8 +360,8 @@ fun describeBackup(backup: Backup): List<String> = buildList {
     }
     if (backup.likes.isNotEmpty()) add(plural(backup.likes.size, "liked song", "liked songs"))
     if (backup.ratings.isNotEmpty()) add(plural(backup.ratings.size, "rating", "ratings"))
-    if (backup.favouriteAlbums.isNotEmpty()) add(plural(backup.favouriteAlbums.size, "favourite album", "favourite albums"))
-    if (backup.favouriteArtists.isNotEmpty()) add(plural(backup.favouriteArtists.size, "favourite artist", "favourite artists"))
+    if (backup.favouriteAlbums.isNotEmpty()) add(plural(backup.favouriteAlbums.size, "favorite album", "favorite albums"))
+    if (backup.favouriteArtists.isNotEmpty()) add(plural(backup.favouriteArtists.size, "favorite artist", "favorite artists"))
     if (backup.pins.isNotEmpty()) add(plural(backup.pins.size, "pin on Home", "pins on Home"))
     backup.lyrics?.offsets?.takeIf { it.isNotEmpty() }?.let { add("Lyrics timing for " + plural(it.size, "song", "songs")) }
     backup.lyrics?.outputOffsets?.takeIf { it.isNotEmpty() }?.let { add("Lyrics timing for " + plural(it.size, "sound output", "sound outputs")) }
@@ -384,10 +384,10 @@ fun describePlan(plan: RestorePlan): List<String> = buildList {
     if (plan.likesTotal > 0) add("Likes: ${plan.likes.size.grouped()} of ${plan.likesTotal.grouped()} found")
     if (plan.ratingsTotal > 0) add("Ratings: ${plan.ratings.size.grouped()} of ${plan.ratingsTotal.grouped()} found")
     if (plan.favouriteAlbumsTotal > 0) {
-        add("Favourite albums: ${plan.favouriteAlbums.size.grouped()} of ${plan.favouriteAlbumsTotal.grouped()} found")
+        add("Favorite albums: ${plan.favouriteAlbums.size.grouped()} of ${plan.favouriteAlbumsTotal.grouped()} found")
     }
     if (plan.favouriteArtistsTotal > 0) {
-        add("Favourite artists: ${plan.favouriteArtists.size.grouped()} of ${plan.favouriteArtistsTotal.grouped()} found")
+        add("Favorite artists: ${plan.favouriteArtists.size.grouped()} of ${plan.favouriteArtistsTotal.grouped()} found")
     }
     if (plan.pinsTotal > 0) add("Pins: ${plan.pins.size.grouped()} of ${plan.pinsTotal.grouped()} found")
     if (plan.lyricsOffsetsTotal > 0) {

@@ -339,7 +339,7 @@ class ScreenShotsTest {
                 val starters = LiveListStarters.associateBy { it.name }
                 app.liveLists.save(LiveList.new("Most played this month", starters.getValue("Most played this month").query, System.currentTimeMillis()))
                 tripHop = app.liveLists.save(LiveList.new("Trip hop nights", LibraryQuery(listOf(FilterPresets.genre("Trip Hop"), FilterPresets.Lossless), sort = QuerySort("Title")), System.currentTimeMillis()))
-                lossless = app.liveLists.save(LiveList.new("Lossless favourites", starters.getValue("Lossless favourites").query, System.currentTimeMillis()))
+                lossless = app.liveLists.save(LiveList.new("Lossless favorites", starters.getValue("Lossless favorites").query, System.currentTimeMillis()))
                 app.navigator.go(Page.LiveList(tripHop.id))
             }
             shot("livelist")

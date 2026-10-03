@@ -91,7 +91,7 @@ fun songActionLabel(action: SongAction, starred: Boolean, last: String? = null):
     SongAction.AddToLibrary -> "Add to your library"
     SongAction.AddToLastPlaylist -> "Add to last playlist: ${last.orEmpty()}"
     SongAction.AddToPlaylist -> "Add to playlist"
-    SongAction.Favourite -> if (starred) "Remove from favourites" else "Add to favourites"
+    SongAction.Favourite -> if (starred) "Remove from favorites" else "Add to favorites"
     SongAction.Rate -> "Rate"
     SongAction.FindFlac -> FIND_HIGHER_QUALITY
     SongAction.GoToAlbum -> "Go to album"

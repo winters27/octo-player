@@ -408,7 +408,7 @@ object SettingsIndex {
 
     // Backup and restore
     val SaveBackup = add(
-        "save_backup", SettingsPage.Backup, "Save a backup", "Your settings, playlists, likes and favourites in a file",
+        "save_backup", SettingsPage.Backup, "Save a backup", "Your settings, playlists, likes and favorites in a file",
         listOf("export", "file", "save settings"),
     )
     val RestoreBackup = add(

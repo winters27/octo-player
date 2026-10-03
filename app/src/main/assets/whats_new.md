@@ -1,4 +1,4 @@
-A big update: a new **equalizer**, **sorting** for every list, **favourites**, **downloads**, lyrics that follow the song, and much more.
+A big update: a new **equalizer**, **sorting** for every list, **favorites**, **downloads**, lyrics that follow the song, and much more.
 
 ## Sound
 
@@ -10,7 +10,7 @@ A big update: a new **equalizer**, **sorting** for every list, **favourites**, *
 ## Library
 
 - **Sort any list**, and each list remembers its order.
-- **Favourites** in one place: your liked songs, albums and artists, with a shelf on Home.
+- **Favorites** in one place: your liked songs, albums and artists, with a shelf on Home.
 - **Pin** albums, artists and playlists to the top of Home.
 - Browse your music **by folder**, on the phone or your server.
 - **History** shows what you played lately and what you play most.
@@ -74,4 +74,4 @@ A big update: a new **equalizer**, **sorting** for every list, **favourites**, *
 - Settings has **a page for each topic**, and a search for any setting.
 - The artwork's colours can glow softly behind the app.
 - Send your plays to **ListenBrainz**, with or without a server.
-- **Back up** your settings, playlists, likes, favourites and more to a file, and bring them back.
+- **Back up** your settings, playlists, likes, favorites and more to a file, and bring them back.

@@ -204,8 +204,8 @@ private fun CollectionActionsPage(
                 CollectionAction.Download -> OctoIcons.Download to "Download"
                 CollectionAction.FindFlac -> OctoIcons.Lossless to findHigherQualityLabel(lossy)
                 CollectionAction.StartRadio -> OctoIcons.Radio to "Start radio"
-                CollectionAction.AddToFavourites -> OctoIcons.Like to "Add to favourites"
-                CollectionAction.RemoveFromFavourites -> OctoIcons.Liked to "Remove from favourites"
+                CollectionAction.AddToFavourites -> OctoIcons.Like to "Add to favorites"
+                CollectionAction.RemoveFromFavourites -> OctoIcons.Liked to "Remove from favorites"
                 CollectionAction.PinToHome -> OctoIcons.Pin to "Pin to Home"
                 CollectionAction.Unpin -> OctoIcons.Pin to "Unpin"
                 CollectionAction.MoveToFront -> OctoIcons.Pin to "Move to front"

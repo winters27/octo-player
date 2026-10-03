@@ -26,7 +26,7 @@ enum class HotkeyAction(val id: String, val label: String, val usual: String) {
     VolumeDown("volumeDown", "Volume down", "Ctrl+Alt+Down"),
     ShowHide("showHide", "Show or hide Octo", "Ctrl+Alt+Home"),
     MiniPlayer("miniPlayer", "Mini player", "Ctrl+Alt+End"),
-    Like("like", "Add the song to favourites, or take it out", "Ctrl+Alt+Insert"),
+    Like("like", "Add the song to favorites, or take it out", "Ctrl+Alt+Insert"),
     ;
 
     // Holding the keys down repeats only the volume.

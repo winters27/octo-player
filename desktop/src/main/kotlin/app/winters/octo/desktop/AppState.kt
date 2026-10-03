@@ -611,7 +611,7 @@ class AppState(
                 if (starred) client.star(ids) else client.unstar(ids)
             } catch (e: SubsonicException) {
                 ids.forEach { starOverrides.remove(it) }
-                notice = "Couldn't change favourites: ${e.userMessage()}"
+                notice = "Couldn't change favorites: ${e.userMessage()}"
             }
         }
     }
@@ -638,7 +638,7 @@ class AppState(
                 call(client)
             } catch (e: SubsonicException) {
                 starOverrides.remove(key)
-                notice = "Couldn't change favourites: ${e.userMessage()}"
+                notice = "Couldn't change favorites: ${e.userMessage()}"
             }
         }
     }

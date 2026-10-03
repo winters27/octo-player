@@ -99,7 +99,7 @@ class QueueActionsTest {
         app.play(songs)
         app.clearUpcoming()
         assertEquals("Upcoming songs cleared", app.notice)
-        app.notice = "Couldn't change favourites: offline"
+        app.notice = "Couldn't change favorites: offline"
         assertNull(app.actionFor(app.notice!!))
         // Ctrl+Z still takes the clearing back.
         assertTrue(app.undoQueue())

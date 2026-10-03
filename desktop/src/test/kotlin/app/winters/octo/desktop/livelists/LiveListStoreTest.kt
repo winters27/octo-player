@@ -44,8 +44,8 @@ class LiveListStoreTest {
         val store = store()
         store.open(file)
         assertEquals(emptyList<LiveList>(), store.lists.value)
-        val made = store.save(LiveList.new(" Lossless favourites ", favourites, 0, "a"))
-        assertEquals("Lossless favourites", made.name)
+        val made = store.save(LiveList.new(" Lossless favorites ", favourites, 0, "a"))
+        assertEquals("Lossless favorites", made.name)
         assertEquals(1_000L, made.created)
         now = 2_000
         store.save(LiveList.new("Recent", LibraryQuery(listOf(FilterPresets.AddedThisMonth)), 0, "b"))
@@ -55,7 +55,7 @@ class LiveListStoreTest {
 
         val again = store()
         again.open(file)
-        assertEquals(listOf("Lossless favourites", "Lossless favourites (copy)", "Just in"), again.lists.value.map { it.name })
+        assertEquals(listOf("Lossless favorites", "Lossless favorites (copy)", "Just in"), again.lists.value.map { it.name })
         assertEquals(favourites, again.byId(copy.id)?.query)
         assertEquals(1_000L, again.byId("a")?.created)
         assertEquals(2_000L, again.byId("b")?.changed)
@@ -151,7 +151,7 @@ class LiveListStoreTest {
         assertFalse(LiveListDraft.of(list).changes(list))
         assertTrue(LiveListDraft.of(list).copy(name = "Other").changes(list))
         assertTrue(LiveListDraft.of(list).copy(query = LibraryQuery()).changes(list))
-        assertEquals("Favourites, lossless", LiveListDraft("  ", favourites).savedName)
+        assertEquals("Favorites, lossless", LiveListDraft("  ", favourites).savedName)
         assertEquals("Mine", LiveListDraft(" Mine ", favourites).savedName)
     }
 

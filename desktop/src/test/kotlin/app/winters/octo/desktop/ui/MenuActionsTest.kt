@@ -15,7 +15,7 @@ class MenuActionsTest {
         assertEquals(
             listOf(
                 listOf("Play", "Play next", "Add to queue", "Start radio"),
-                listOf("Add to playlist", "Add to favourites", "Rate"),
+                listOf("Add to playlist", "Add to favorites", "Rate"),
                 listOf("Go to album", "Go to artist"),
                 listOf("Song details"),
             ),
@@ -36,7 +36,7 @@ class MenuActionsTest {
         assertEquals(
             listOf(
                 listOf("Play", "Play next", "Add to queue"),
-                listOf("Add to playlist", "Remove from favourites", "Rate"),
+                listOf("Add to playlist", "Remove from favorites", "Rate"),
             ),
             labels(3, starred = true),
         )
@@ -47,12 +47,12 @@ class MenuActionsTest {
         val place = SongPlace.Playlist("p1", listOf(4, 7))
         assertEquals(listOf(listOf("Move"), listOf("Remove from this playlist")), labels(2, place, owns = true).takeLast(2))
         // Someone else's playlist, or one the server keeps, cannot be changed.
-        assertEquals(listOf("Add to playlist", "Add to favourites", "Rate"), labels(2, place, owns = false).last())
+        assertEquals(listOf("Add to playlist", "Add to favorites", "Rate"), labels(2, place, owns = false).last())
     }
 
     @Test
     fun theLastPlaylistComesFirstAmongTheWaysToKeepSongs() {
-        assertEquals(listOf("Add to last playlist: Late night", "Add to playlist", "Add to favourites", "Rate"), labels(1, last = "Late night")[1])
+        assertEquals(listOf("Add to last playlist: Late night", "Add to playlist", "Add to favorites", "Rate"), labels(1, last = "Late night")[1])
     }
 
     @Test
@@ -66,7 +66,7 @@ class MenuActionsTest {
     fun inTheQueuePlayingAndQueueingGiveWayToItsOwnRows() {
         // Play, Play next and Add to queue would play or queue a second copy.
         assertEquals(listOf("Start radio"), labels(1, SongPlace.Queue(listOf(12L))).first())
-        assertEquals(listOf("Add to playlist", "Add to favourites", "Rate"), labels(2, SongPlace.Queue(listOf(12L, 13L))).first())
+        assertEquals(listOf("Add to playlist", "Add to favorites", "Rate"), labels(2, SongPlace.Queue(listOf(12L, 13L))).first())
     }
 
     @Test
@@ -104,7 +104,7 @@ class MenuActionsTest {
     @Test
     fun findInFlacComesLastAmongTheWaysToKeepALibrarySong() {
         assertEquals(
-            listOf("Add to playlist", "Add to favourites", "Rate", "Find higher quality"),
+            listOf("Add to playlist", "Add to favorites", "Rate", "Find higher quality"),
             songMenuActions(1, SongPlace.Library, canUpgrade = true)[1].map { songActionLabel(it, false) },
         )
         // Several picked: still offered, for those a FLAC could replace.

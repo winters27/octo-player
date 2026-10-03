@@ -26,7 +26,7 @@ class HomeDataTest {
         assertEquals(listOf("a1", "a2"), home.recentlyAdded.map { it.id })
         val types = server.calls.map { it.url.queryParameter("type") }.filterNotNull().toSet()
         assertEquals("no random shelf: Home shows only what the library says", setOf("newest", "recent", "frequent"), types)
-        assertTrue("favourites come from the starred list", "getStarred2" in server.endpoints())
+        assertTrue("favorites come from the starred list", "getStarred2" in server.endpoints())
     }
 
     @Test

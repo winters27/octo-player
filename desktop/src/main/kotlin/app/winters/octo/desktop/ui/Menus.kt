@@ -293,7 +293,7 @@ fun ColumnScope.AlbumMenu(app: AppState, album: Album, close: () -> Unit, outsid
                 CollectionAction.StartRadio -> MenuRow("Start radio", { app.startAlbumRadio(album.id); close() }, OctoIcons.Radio)
                 CollectionAction.Favourite -> {
                     val starred = app.isAlbumStarred(album.id, album.starred)
-                    MenuRow(if (starred) "Remove from favourites" else "Add to favourites", { app.setAlbumStarred(album.id, !starred); close() }, if (starred) OctoIcons.Liked else OctoIcons.Like)
+                    MenuRow(if (starred) "Remove from favorites" else "Add to favorites", { app.setAlbumStarred(album.id, !starred); close() }, if (starred) OctoIcons.Liked else OctoIcons.Like)
                 }
                 CollectionAction.GoToArtist -> MenuRow("Go to artist", { album.artistId?.let { app.navigator.go(Page.Artist(it, album.artist)) }; close() }, OctoIcons.Artist, enabled = !album.artistId.isNullOrEmpty())
                 CollectionAction.FindFlac -> MenuRow(findHigherQualityLabel(lossy.size), {
@@ -342,7 +342,7 @@ fun ColumnScope.ArtistMenu(app: AppState, id: String, name: String, starred: Str
                 CollectionAction.StartRadio -> MenuRow("Start radio", { app.startArtistRadio(id, name); close() }, OctoIcons.Radio)
                 CollectionAction.Favourite -> {
                     val on = app.isArtistStarred(id, starred)
-                    MenuRow(if (on) "Remove from favourites" else "Add to favourites", { app.setArtistStarred(id, !on); close() }, if (on) OctoIcons.Liked else OctoIcons.Like)
+                    MenuRow(if (on) "Remove from favorites" else "Add to favorites", { app.setArtistStarred(id, !on); close() }, if (on) OctoIcons.Liked else OctoIcons.Like)
                 }
                 else -> CollectionRow(app, action, { app.artistSongs(id) }, close) {}
             }

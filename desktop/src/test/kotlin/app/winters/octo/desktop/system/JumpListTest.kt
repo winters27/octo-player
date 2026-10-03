@@ -24,7 +24,7 @@ class JumpListTest {
     private val okComputer = JumpTarget(JumpKind.Album, "al-1", "OK Computer", "Radiohead")
     private val kidA = JumpTarget(JumpKind.Album, "al-2", "Kid A", "Radiohead")
     private val roadTrip = JumpTarget(JumpKind.Playlist, "pl 7/x", "Road trip")
-    private val lossless = JumpTarget(JumpKind.LiveList, "live-3", "Lossless favourites")
+    private val lossless = JumpTarget(JumpKind.LiveList, "live-3", "Lossless favorites")
 
     @Test
     fun playLinksNameWhatToPlay() {
@@ -44,7 +44,7 @@ class JumpListTest {
         assertEquals("Play OK Computer by Radiohead", okComputer.tip)
         assertEquals("Play Untitled", JumpTarget(JumpKind.Album, "x", "Untitled").tip)
         assertEquals("Play the playlist Road trip", roadTrip.tip)
-        assertEquals("Play the live list Lossless favourites", lossless.tip)
+        assertEquals("Play the live list Lossless favorites", lossless.tip)
     }
 
     @Test
@@ -81,7 +81,7 @@ class JumpListTest {
 
     @Test
     fun whatWasPlayedFromAPageIsSomethingTheJumpListCanPlayAgain() {
-        val names = mapOf("pl-1" to "Road trip", "live-3" to "Lossless favourites")
+        val names = mapOf("pl-1" to "Road trip", "live-3" to "Lossless favorites")
         val album = listOf(song("1", "OK Computer", "al-1"), song("2", "OK Computer", "al-1"))
         assertEquals(JumpTarget(JumpKind.Album, "al-1", "OK Computer", "Radiohead"), jumpTargetFor(Page.Home, album, names::get))
         // One song from an album counts only on the album's own page.
@@ -91,7 +91,7 @@ class JumpListTest {
         assertNull(jumpTargetFor(Page.Songs, album + song("3", "Kid A", "al-2"), names::get))
         assertNull(jumpTargetFor(Page.Songs, listOf(song("4", null, null), song("5", null, null)), names::get))
         assertEquals(JumpTarget(JumpKind.Playlist, "pl-1", "Road trip"), jumpTargetFor(Page.Playlist("pl-1"), album, names::get))
-        assertEquals(JumpTarget(JumpKind.LiveList, "live-3", "Lossless favourites"), jumpTargetFor(Page.LiveList("live-3"), album, names::get))
+        assertEquals(JumpTarget(JumpKind.LiveList, "live-3", "Lossless favorites"), jumpTargetFor(Page.LiveList("live-3"), album, names::get))
         assertNull(jumpTargetFor(Page.Playlist("gone"), album, names::get), "a list with no name yet")
     }
 

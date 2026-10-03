@@ -187,7 +187,7 @@ fun FavouritesPage(app: AppState, visit: Visit) {
     val fields = rememberShownFields(app)
     val title: @Composable (String?) -> Unit = { detail ->
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            PageTitle("Favourites", Modifier.weight(1f), detail = detail)
+            PageTitle("Favorites", Modifier.weight(1f), detail = detail)
             GlazeSegments(FavouriteKind.entries, kind, { it.label }, { kind = it; app.navigator.keepTab(visit, it.name) })
         }
     }
@@ -204,7 +204,7 @@ fun FavouritesPage(app: AppState, visit: Visit) {
                     id = "favourites",
                     empty = {
                         if (query.filters && all.isNotEmpty()) NoMatches { filter(query.cleared()) }
-                        else NothingHere("No favourite songs yet", "Right-click a song and pick Add to favourites.")
+                        else NothingHere("No favorite songs yet", "Right-click a song and pick Add to favorites.")
                     },
                 ) {
                     item(key = "title") { title(if (query.filters) filteredCount(songs.size, all.size, true) else null) }
@@ -215,11 +215,11 @@ fun FavouritesPage(app: AppState, visit: Visit) {
                 header { title(null) }
                 if (kind == FavouriteKind.Albums) {
                     val albums = starred.album.filter { app.isAlbumStarred(it.id, it.starred) }
-                    if (albums.isEmpty()) header { NothingHere("No favourite albums yet") }
+                    if (albums.isEmpty()) header { NothingHere("No favorite albums yet") }
                     items(albums, key = { it.id }) { AlbumCard(app, it) }
                 } else {
                     val artists = starred.artist.filter { app.isArtistStarred(it.id, it.starred) }
-                    if (artists.isEmpty()) header { NothingHere("No favourite artists yet") }
+                    if (artists.isEmpty()) header { NothingHere("No favorite artists yet") }
                     items(artists, key = { it.id }) { ArtistCard(app, it) }
                 }
             }

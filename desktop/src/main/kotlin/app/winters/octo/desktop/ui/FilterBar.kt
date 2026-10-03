@@ -176,7 +176,7 @@ private fun ColumnScope.AddFilterMenu(query: LibraryQuery, onChange: (LibraryQue
             MenuRow("Never", { pick(FilterPresets.NeverPlayed) }, checked = on(FilterPresets.NeverPlayed))
             MenuRow("Not in the last 6 months", { pick(FilterPresets.NotPlayedLately) }, checked = on(FilterPresets.NotPlayedLately))
             MenuSeparator()
-            MenuRow("Favourites", { pick(FilterPresets.Favourites) }, checked = on(FilterPresets.Favourites))
+            MenuRow("Favorites", { pick(FilterPresets.Favourites) }, checked = on(FilterPresets.Favourites))
             MenuRow("Lossless", { pick(FilterPresets.Lossless) }, checked = on(FilterPresets.Lossless))
             MenuRow("Rating", { page = FilterPage.Rating }, more = true)
             MenuRow("Genre", { page = FilterPage.Genre }, more = true, enabled = genres.isNotEmpty())

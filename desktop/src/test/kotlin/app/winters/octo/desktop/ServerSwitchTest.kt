@@ -161,16 +161,16 @@ class ServerSwitchTest {
     @Test
     fun eachServerKeepsItsOwnLiveLists() {
         val app = app()
-        app.liveLists.save(LiveList.new("Home favourites", LibraryQuery(listOf(FilterPresets.Favourites)), 0, "hl"))
+        app.liveLists.save(LiveList.new("Home favorites", LibraryQuery(listOf(FilterPresets.Favourites)), 0, "hl"))
         app.switchTo(workId)
         waitFor { app.onWork() }
         assertTrue("work has none of home's", app.liveLists.lists.value.isEmpty())
         val homeFile = File(listeningFolder(temp.root, "winters", home.address), LiveListStore.FILE_NAME)
         waitFor { homeFile.exists() }
-        assertEquals(listOf("Home favourites"), LiveListsJson.decode(homeFile.readText()).map { it.name })
+        assertEquals(listOf("Home favorites"), LiveListsJson.decode(homeFile.readText()).map { it.name })
         app.switchTo(accounts.servers.first().id)
         waitFor { !app.onWork() && app.liveLists.lists.value.isNotEmpty() }
-        assertEquals(listOf("Home favourites"), app.liveLists.lists.value.map { it.name })
+        assertEquals(listOf("Home favorites"), app.liveLists.lists.value.map { it.name })
     }
 
     @Test

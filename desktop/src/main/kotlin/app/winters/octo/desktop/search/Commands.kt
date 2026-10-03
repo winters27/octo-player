@@ -34,7 +34,7 @@ fun commandsFor(app: AppState): List<Command> = buildList {
     page("Artists", Page.Artists, "library")
     page("Genres", Page.Genres, "library")
     page("Folders", Page.Folders, "files")
-    page("Favourites", Page.Favourites, "liked starred hearts")
+    page("Favorites", Page.Favourites, "liked starred hearts")
     page("Recently played", Page.History, "history")
     page("Recently added", Page.RecentlyAdded, "new")
     page("Library health", Page.LibraryHealth, "duplicates missing tags problems")
@@ -86,7 +86,7 @@ fun commandsFor(app: AppState): List<Command> = buildList {
     add(Command("New playlist", library, "create make") { newPlaylist(app) })
     add(Command("New live list", library, "create make smart playlist rules auto") { newLiveList(app) })
     add(Command("Shuffle all songs", library, "random play everything") { app.library?.index?.songs?.let { app.play(it, shuffle = true) } })
-    add(Command("Play favourites", library, "liked starred hearts") { playFavourites(app) })
+    add(Command("Play favorites", library, "liked starred hearts") { playFavourites(app) })
     add(Command("Read the library again", library, "refresh reload rescan scan") { app.library?.load(); app.refreshPlaylists() })
 }
 
@@ -96,9 +96,9 @@ private fun playFavourites(app: AppState) {
     app.scope.launch {
         try {
             val songs = client.starred().song.filter(app::isStarred)
-            if (songs.isEmpty()) app.notice = "No favourite songs yet." else app.play(songs, shuffle = true)
+            if (songs.isEmpty()) app.notice = "No favorite songs yet." else app.play(songs, shuffle = true)
         } catch (e: SubsonicException) {
-            app.notice = "Couldn't read your favourites."
+            app.notice = "Couldn't read your favorites."
         }
     }
 }

@@ -34,7 +34,7 @@ class LiveListTest {
     private fun ids(list: LiveList) = list.songsOf(library, now, SubsonicSongs).map { it.id }
 
     private val lossless = LiveList(
-        "a", "Lossless favourites",
+        "a", "Lossless favorites",
         LibraryQuery(listOf(FilterPresets.Favourites, FilterPresets.Lossless), sort = QuerySort("Title"), limit = 10),
         created = 5, changed = 9,
     )
@@ -85,7 +85,7 @@ class LiveListTest {
         // Played before but not in a year: never played is left out.
         assertEquals(listOf("3"), ids(byName.getValue("Not played in a year")))
         assertEquals(listOf("1", "4"), ids(byName.getValue("Most played this month")))
-        assertEquals(listOf("3", "1"), ids(byName.getValue("Lossless favourites")))
+        assertEquals(listOf("3", "1"), ids(byName.getValue("Lossless favorites")))
         assertEquals(4, LiveListStarters.map { it.name }.toSet().size)
     }
 
@@ -96,11 +96,11 @@ class LiveListTest {
         val lists = listOf(lossless, b).saving(c)
         assertEquals(listOf("a", "b", "c"), lists.map { it.id })
         val renamed = b.copy(name = "Bee")
-        assertEquals(listOf("Lossless favourites", "Bee", "C"), lists.saving(renamed).map { it.name })
+        assertEquals(listOf("Lossless favorites", "Bee", "C"), lists.saving(renamed).map { it.name })
         assertEquals(listOf("a", "c"), lists.removing("b").map { it.id })
         val (copied, copy) = lists.duplicating(lossless, now, "d")
         assertEquals(listOf("a", "d", "b", "c"), copied.map { it.id })
-        assertEquals("Lossless favourites (copy)", copy.name)
+        assertEquals("Lossless favorites (copy)", copy.name)
         assertEquals(lossless.query, copy.query)
         assertEquals(now, copy.created)
     }
@@ -120,7 +120,7 @@ class LiveListTest {
         assertEquals("With “live”, 3 songs", liveListSummary(LibraryQuery(text = " live "), 3, utc))
         // Capitals inside a word stay.
         val bpm = QueryRule(QueryField.Bpm, QueryOp.AtLeast, number = 120)
-        assertEquals("Favourites, BPM at least 120, 0 songs", liveListSummary(LibraryQuery(listOf(FilterPresets.Favourites, bpm)), 0, utc))
+        assertEquals("Favorites, BPM at least 120, 0 songs", liveListSummary(LibraryQuery(listOf(FilterPresets.Favourites, bpm)), 0, utc))
         assertEquals("1 song matches right now", matchWords(1))
         assertEquals("1,204 songs match right now", matchWords(1204))
         // No dashes of any kind in what the apps show.
@@ -130,7 +130,7 @@ class LiveListTest {
     @Test
     fun aNameIsSuggestedFromTheRules() {
         assertEquals("Added in the last month", liveListName(LibraryQuery(listOf(FilterPresets.AddedThisMonth)), utc))
-        assertEquals("Favourites, lossless", liveListName(LibraryQuery(listOf(FilterPresets.Favourites, FilterPresets.Lossless, FilterPresets.NeverPlayed)), utc))
+        assertEquals("Favorites, lossless", liveListName(LibraryQuery(listOf(FilterPresets.Favourites, FilterPresets.Lossless, FilterPresets.NeverPlayed)), utc))
         assertEquals("Remix", liveListName(LibraryQuery(text = "remix"), utc))
         assertEquals("New live list", liveListName(LibraryQuery(), utc))
     }

@@ -105,7 +105,7 @@ class LiveListActionsTest {
     @Test
     fun aListPicksFromTheLibraryAsTheWindowShowsIt() {
         val app = app()
-        val list = app.liveLists.save(LiveList.new("Lossless favourites", losslessFavourites, 0))
+        val list = app.liveLists.save(LiveList.new("Lossless favorites", losslessFavourites, 0))
         assertEquals(listOf("s1", "s3"), app.liveListSongs(list)?.map { it.id })
         // A heart taken off a moment ago counts before the server catches up.
         app.setStarred(listOf(app.library!!.index!!.songs.first { it.id == "s3" }), false)
@@ -140,14 +140,14 @@ class LiveListActionsTest {
     fun aCopyOnTheServerIsAPlaylistOfTheSongsItHoldsNow() {
         server.answer("createPlaylist", """"playlist":{"id":"p9","name":"Lossless favourites"}""")
         val app = app()
-        val list = app.liveLists.save(LiveList.new("Lossless favourites", losslessFavourites, 0))
+        val list = app.liveLists.save(LiveList.new("Lossless favorites", losslessFavourites, 0))
         app.saveLiveListToServer(list)
         waitFor { callsTo("createPlaylist").isNotEmpty() }
         val call = callsTo("createPlaylist").single()
-        assertEquals("Lossless favourites", call.url.queryParameter("name"))
+        assertEquals("Lossless favorites", call.url.queryParameter("name"))
         assertEquals(listOf("s1", "s3"), call.url.queryParameterValues("songId"))
         waitFor { app.notice != null }
-        assertEquals("Saved a copy of Lossless favourites to the server, 2 songs", app.notice)
+        assertEquals("Saved a copy of Lossless favorites to the server, 2 songs", app.notice)
         // The live list stays as it is.
         assertNotNull(app.liveLists.byId(list.id))
     }
@@ -165,19 +165,19 @@ class LiveListActionsTest {
     @Test
     fun playingFromItsPageNamesTheQueueAfterIt() {
         val app = app()
-        val list = app.liveLists.save(LiveList.new("Lossless favourites", losslessFavourites, 0))
+        val list = app.liveLists.save(LiveList.new("Lossless favorites", losslessFavourites, 0))
         app.navigator.go(Page.LiveList(list.id))
         app.play(app.liveListSongs(list)!!)
-        assertEquals(QueueSource.Played("Lossless favourites"), player.state.value.queue.first().source)
+        assertEquals(QueueSource.Played("Lossless favorites"), player.state.value.queue.first().source)
     }
 
     @Test
     fun theCommandsOfferANewOneAndEachList() {
         val app = app()
-        val list = app.liveLists.save(LiveList.new("Lossless favourites", losslessFavourites, 0))
+        val list = app.liveLists.save(LiveList.new("Lossless favorites", losslessFavourites, 0))
         val commands = commandsFor(app)
         assertNotNull(commands.firstOrNull { it.title == "New live list" })
-        commands.first { it.title == "Lossless favourites" }.run()
+        commands.first { it.title == "Lossless favorites" }.run()
         assertEquals(Page.LiveList(list.id), app.navigator.current.page)
         commands.first { it.title == "New live list" }.run()
         assertTrue(app.navigator.current.page is Page.NewLiveList)
@@ -219,11 +219,11 @@ class LiveListActionsTest {
     @Test
     fun theSidebarListsLiveListsAbovePlaylistsAndOpensThem() {
         val app = app()
-        val list = app.liveLists.save(LiveList.new("Lossless favourites", losslessFavourites, 0))
+        val list = app.liveLists.save(LiveList.new("Lossless favorites", losslessFavourites, 0))
         val scene = ImageComposeScene(300, 900, Density(1f)) { Sidebar(app, HazeState()) }
         try {
             repeat(3) { scene.render() }
-            val live = need(scene.node("Lossless favourites"))
+            val live = need(scene.node("Lossless favorites"))
             val playlist = need(scene.node("Road trip"))
             assertTrue(live.boundsInRoot.top < playlist.boundsInRoot.top)
             scene.click(live)
@@ -231,7 +231,7 @@ class LiveListActionsTest {
             // A list deleted elsewhere leaves the sidebar.
             app.liveLists.remove(list.id)
             repeat(2) { scene.render() }
-            assertNull(scene.node("Lossless favourites"))
+            assertNull(scene.node("Lossless favorites"))
         } finally {
             scene.close()
         }
@@ -240,13 +240,13 @@ class LiveListActionsTest {
     @Test
     fun aListsPageSaysWhatItPicksAndItsEditorPreviewsAChange() {
         val app = app()
-        val list = app.liveLists.save(LiveList.new("Lossless favourites", losslessFavourites, 0))
+        val list = app.liveLists.save(LiveList.new("Lossless favorites", losslessFavourites, 0))
         app.navigator.go(Page.LiveList(list.id))
         val visit = app.navigator.current
         val scene = ImageComposeScene(1200, 900, Density(1f)) { LiveListPage(app, visit, list.id) }
         try {
             repeat(3) { scene.render() }
-            assertNotNull(scene.node("Favourites, lossless, by title, 2 songs"))
+            assertNotNull(scene.node("Favorites, lossless, by title, 2 songs"))
             assertNotNull(scene.node("Three"))
             assertNull(scene.node("Four"))
             // Its rules show as words, not as pills to change, until Edit rules.
@@ -274,7 +274,7 @@ class LiveListActionsTest {
             assertNotNull(scene.node("3 songs match right now"))
             scene.click(need(scene.node("Make live list")))
             val made = app.liveLists.lists.value.single()
-            assertEquals("Favourites", made.name)
+            assertEquals("Favorites", made.name)
             assertEquals(listOf(FilterPresets.Favourites), made.query.rules)
             assertEquals(Page.LiveList(made.id), app.navigator.current.page)
         } finally {
@@ -292,8 +292,8 @@ class LiveListActionsTest {
             repeat(3) { scene.render() }
             assertNotNull(scene.node("Or start with one of these"))
             assertTrue(app.liveLists.lists.value.isEmpty())
-            scene.click(need(scene.node("Lossless favourites")))
-            assertEquals(listOf("Lossless favourites"), app.liveLists.lists.value.map { it.name })
+            scene.click(need(scene.node("Lossless favorites")))
+            assertEquals(listOf("Lossless favorites"), app.liveLists.lists.value.map { it.name })
         } finally {
             scene.close()
         }

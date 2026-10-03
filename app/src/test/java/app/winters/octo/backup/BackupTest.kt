@@ -226,8 +226,8 @@ class BackupTest {
                 "Playlists: 1 of 1 song found",
                 "Likes: 1 of 1 found",
                 "Ratings: 0 of 1 found",
-                "Favourite albums: 2 of 2 found",
-                "Favourite artists: 1 of 1 found",
+                "Favorite albums: 2 of 2 found",
+                "Favorite artists: 1 of 1 found",
                 "Pins: 3 of 4 found",
                 "Lyrics timing: 1 of 1 songs found",
             ),
@@ -268,8 +268,8 @@ class BackupTest {
     fun describesFavouritesPinsAndLyrics() {
         val lines = describeBackup(withFavourites)
         assertEquals("Settings: player, streaming, sound, library, lyrics", lines.first())
-        assertTrue("2 favourite albums" in lines)
-        assertTrue("1 favourite artist" in lines)
+        assertTrue("2 favorite albums" in lines)
+        assertTrue("1 favorite artist" in lines)
         assertTrue("4 pins on Home" in lines)
         assertTrue("Lyrics timing for 1 song" in lines)
     }

@@ -421,7 +421,7 @@ private fun Heart(app: AppState, state: PlayerState) {
     val song = state.current?.song ?: return
     if (isOpenedFile(song.id) || isOutside(app, song)) return
     val starred = app.isStarred(song)
-    IconAction(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favourites" else "Add to favourites", { app.setStarred(listOf(song), !starred) }, size = ControlHeight.S, iconSize = IconSize.Toolbar)
+    IconAction(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favorites" else "Add to favorites", { app.setStarred(listOf(song), !starred) }, size = ControlHeight.S, iconSize = IconSize.Toolbar)
 }
 
 // Lyrics or the queue: shows it under the player (growing the window when

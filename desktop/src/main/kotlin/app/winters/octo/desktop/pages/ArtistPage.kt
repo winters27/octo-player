@@ -214,7 +214,7 @@ private fun ArtistBody(app: AppState, id: String, fallbackName: String, artist: 
                 ) {
                     PlayAndShuffle({ playAll(false) }, { playAll(true) }, enabled = artist.albums.isNotEmpty())
                     val starred = app.isArtistStarred(id, index?.artists?.firstOrNull { it.id == id }?.starred)
-                    HeaderIcon(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favourites" else "Add to favourites", { app.setArtistStarred(id, !starred) })
+                    HeaderIcon(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favorites" else "Add to favorites", { app.setArtistStarred(id, !starred) })
                     HeaderIcon(OctoIcons.Radio, "Start radio", { app.startArtistRadio(id, name) })
                     MoreButton(app, "More for this artist") { close -> ArtistMenu(app, id, name, index?.artists?.firstOrNull { it.id == id }?.starred, close) }
                 }

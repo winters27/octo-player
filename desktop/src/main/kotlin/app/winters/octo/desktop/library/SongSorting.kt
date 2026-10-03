@@ -32,7 +32,7 @@ enum class SongColumn(val title: String, val sort: SongSort?) {
     Format("Format", null),
     Bpm("BPM", null),
     Size("Size", null),
-    Favourite("Favourite", SongSort.Liked),
+    Favourite("Favorite", SongSort.Liked),
     Length("Length", SongSort.Length),
     ;
 

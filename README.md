@@ -28,7 +28,7 @@ These need Octo 2026.09.29 or newer.
 
 With Navidrome or any Subsonic server, both apps are full players for the music you have:
 
-- Browse by artist, album, song, genre or folder, with favourites, ratings and playlists shared with your other apps.
+- Browse by artist, album, song, genre or folder, with favorites, ratings and playlists shared with your other apps.
 - Synced lyrics, gapless playback, an equalizer with presets, ReplayGain and a sleep timer.
 - A queue that follows you between the desktop and the phone, and plays reported to your server.
 

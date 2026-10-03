@@ -24,7 +24,7 @@ class LiveListEditingTest {
         assertEquals("", editorStart(null, favourites).name)
         assertEquals(LibraryQuery(sort = DefaultLiveListSort), editorStart(null, null).query)
         // The name it would get is the rules', until one is typed.
-        assertEquals("Favourites", editorStart(null, favourites).savedName)
+        assertEquals("Favorites", editorStart(null, favourites).savedName)
     }
 
     @Test
@@ -39,7 +39,7 @@ class LiveListEditingTest {
     @Test
     fun addARuleListsTheSameGroupsAsTheDesktop() {
         val words = ruleMenu().map { it.first }
-        assertEquals(listOf("Added", "Played", "Times played", "Length", "Rating", "Genre", "Artist", "Year", "Favourites", "Lossless"), words)
+        assertEquals(listOf("Added", "Played", "Times played", "Length", "Rating", "Genre", "Artist", "Year", "Favorites", "Lossless"), words)
         assertEquals(RulePick.Rule(FilterPresets.Lossless), ruleMenu().last().second)
         assertEquals(LiveListRuleGroups.size - 1 + 4 + 2, words.size)
         assertEquals(listOf("5 stars", "4 stars or more", "3 stars or more", "2 stars or more", "1 star or more"), RatingRules.map { it.first })
