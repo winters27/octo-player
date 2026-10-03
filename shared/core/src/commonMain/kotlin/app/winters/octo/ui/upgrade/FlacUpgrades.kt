@@ -36,9 +36,13 @@ fun songsText(count: Int): String = if (count == 1) "1 song" else "$count songs"
 // The album menu's row: "Find FLAC for 9 songs".
 fun findFlacLabel(count: Int): String = "Find FLAC for ${songsText(count)}"
 
-// What is asked before an album's songs go to the server.
-fun findFlacQuestion(count: Int): String =
-    "Look for a FLAC of ${songsText(count)} on Soulseek? Each original is kept until its FLAC passes."
+// What is asked before an album's songs go to the server, and the
+// promise under it; together they are findFlacQuestion.
+fun findFlacAsk(count: Int): String = "Look for a FLAC of ${songsText(count)} on Soulseek?"
+
+const val FLAC_KEEPS_ORIGINAL = "Each original is kept until its FLAC passes."
+
+fun findFlacQuestion(count: Int): String = "${findFlacAsk(count)} $FLAC_KEEPS_ORIGINAL"
 
 // One song to look for, with the title the line uses until the server
 // says its own.
