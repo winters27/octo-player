@@ -75,8 +75,8 @@ import app.winters.octo.design.PopupPadding
 import app.winters.octo.desktop.system.isOpenedFile
 import app.winters.octo.desktop.upgrade.UpgradeModel
 import app.winters.octo.query.isUpgradable
-import app.winters.octo.ui.upgrade.findFlacLabel
-import app.winters.octo.ui.upgrade.findFlacQuestion
+import app.winters.octo.ui.upgrade.findHigherQualityLabel
+import app.winters.octo.ui.upgrade.findHigherQualityQuestion
 import kotlinx.coroutines.launch
 
 private enum class MenuPage { Main, Playlists, Rate, Move }
@@ -296,7 +296,7 @@ fun ColumnScope.AlbumMenu(app: AppState, album: Album, close: () -> Unit, outsid
                     MenuRow(if (starred) "Remove from favourites" else "Add to favourites", { app.setAlbumStarred(album.id, !starred); close() }, if (starred) OctoIcons.Liked else OctoIcons.Like)
                 }
                 CollectionAction.GoToArtist -> MenuRow("Go to artist", { album.artistId?.let { app.navigator.go(Page.Artist(it, album.artist)) }; close() }, OctoIcons.Artist, enabled = !album.artistId.isNullOrEmpty())
-                CollectionAction.FindFlac -> MenuRow(findFlacLabel(lossy.size), {
+                CollectionAction.FindFlac -> MenuRow(findHigherQualityLabel(lossy.size), {
                     close()
                     if (upgrades != null) askToFindFlac(app, upgrades, album.name, lossy)
                 }, OctoIcons.Lossless)
@@ -317,10 +317,10 @@ private fun askToFindFlac(app: AppState, upgrades: UpgradeModel, name: String, s
     app.popups.showCentred { close ->
         MenuTitle(name)
         PopupPadding {
-            Txt(findFlacQuestion(songs.size), DesktopType.body, OctoColors.TextPrimary, maxLines = 6)
+            Txt(findHigherQualityQuestion(songs.size), DesktopType.body, OctoColors.TextPrimary, maxLines = 6)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
                 GlazeCapsule(null, "Cancel", close)
-                GlazeCapsule(OctoIcons.Lossless, "Find FLAC", {
+                GlazeCapsule(OctoIcons.Lossless, "Find higher quality", {
                     close()
                     upgrades.request(songs)
                 }, lit = true)

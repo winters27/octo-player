@@ -18,7 +18,7 @@ import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
-// "Find in FLAC" against a pretend Octo server: the live check for the
+// "Find higher quality" against a pretend Octo server: the live check for the
 // action, asking for songs, following them only while any is still on,
 // reading the library again and the words said.
 class UpgradeModelTest {
@@ -133,11 +133,11 @@ class UpgradeModelTest {
         assertEquals("a", asked.url.queryParameter("id"))
         assertEquals("upgrade", asked.url.queryParameter("action"))
         until("the server's list was read") { model.pending["a"]?.state == "working" }
-        assertEquals("Looking for FLAC for 1 song", notices.first())
+        assertEquals("Looking for higher quality for 1 song", notices.first())
 
         upgrades(row("a", "upgraded", "Holocene"))
         until("it was done") { model.pending.isEmpty() }
-        until("the line was said") { "Found FLAC for 1 song" in notices }
+        until("the line was said") { "Found higher quality for 1 song" in notices }
         assertEquals(1, reloads.get())
         // Nothing still on, so the list is no longer asked for.
         val looks = calls("getUpgrades")
@@ -151,7 +151,7 @@ class UpgradeModelTest {
         queueEverything()
         upgrades(row("a", "notFound", "Towers"))
         model.request(listOf(song("a", "Towers")))
-        until("the line was said") { "No FLAC found for: Towers" in notices }
+        until("the line was said") { "No higher quality copy found for: Towers" in notices }
         assertEquals(0, reloads.get())
     }
 
@@ -199,7 +199,7 @@ class UpgradeModelTest {
         model.request((1..60).map { song("s$it") })
         until("the line was said") { notices.isNotEmpty() }
         assertEquals(50, calls("libraryAction"))
-        assertEquals("Looking for FLAC for 50 songs. At most 50 songs at a time, so 10 songs were left out", notices.first())
+        assertEquals("Looking for higher quality for 50 songs. At most 50 songs at a time, so 10 songs were left out", notices.first())
     }
 
     @Test
@@ -208,7 +208,7 @@ class UpgradeModelTest {
         server.answer("libraryAction", """"libraryAction":{"id":"a","action":"upgrade","state":"skipped","detail":"It is lossless already."}""", type = "octo")
         model.request(listOf(song("a", "Holocene")))
         until("the line was said") { notices.isNotEmpty() }
-        assertEquals("Could not look for a FLAC of Holocene: It is lossless already", notices.first())
+        assertEquals("Could not look for higher quality for Holocene: It is lossless already", notices.first())
         assertTrue(model.pending.isEmpty())
     }
 
@@ -223,7 +223,7 @@ class UpgradeModelTest {
         assertNull(model.pending["b"])
         upgrades(row("a", "upgraded"), row("b", "upgraded"))
         until("it was done") { model.pending.isEmpty() }
-        until("the line was said") { "Found FLAC for 1 song" in notices }
+        until("the line was said") { "Found higher quality for 1 song" in notices }
     }
 
     @Test

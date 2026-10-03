@@ -25,7 +25,7 @@ const val UPGRADE_RELOAD_GAP_MS = 30_000L
 const val UPGRADE_MISSES = 10
 
 // The song menu's row.
-const val FIND_IN_FLAC = "Find in FLAC"
+const val FIND_HIGHER_QUALITY = "Find higher quality"
 
 // What the line says while Soulseek is out and the server holds on.
 const val WAITING_FOR_SOULSEEK = "Waiting for Soulseek"
@@ -33,16 +33,16 @@ const val WAITING_FOR_SOULSEEK = "Waiting for Soulseek"
 // "1 song", "12 songs".
 fun songsText(count: Int): String = if (count == 1) "1 song" else "$count songs"
 
-// The album menu's row: "Find FLAC for 9 songs".
-fun findFlacLabel(count: Int): String = "Find FLAC for ${songsText(count)}"
+// The album menu's row: "Find higher quality for 9 songs".
+fun findHigherQualityLabel(count: Int): String = "Find higher quality for ${songsText(count)}"
 
 // What is asked before an album's songs go to the server, and the
-// promise under it; together they are findFlacQuestion.
-fun findFlacAsk(count: Int): String = "Look for a FLAC of ${songsText(count)} on Soulseek?"
+// promise under it; together they are findHigherQualityQuestion.
+fun findHigherQualityAsk(count: Int): String = "Look for a higher quality copy of ${songsText(count)} on Soulseek?"
 
-const val FLAC_KEEPS_ORIGINAL = "Each original is kept until its FLAC passes."
+const val KEEPS_ORIGINAL = "Each original is kept until its replacement passes."
 
-fun findFlacQuestion(count: Int): String = "${findFlacAsk(count)} $FLAC_KEEPS_ORIGINAL"
+fun findHigherQualityQuestion(count: Int): String = "${findHigherQualityAsk(count)} $KEEPS_ORIGINAL"
 
 // One song to look for, with the title the line uses until the server
 // says its own.
@@ -116,11 +116,11 @@ class UpgradeFollower(
     @Synchronized
     fun askedNotice(): String? {
         val parts = buildList {
-            if (queued > 0) add("Looking for FLAC for ${songsText(queued)}")
+            if (queued > 0) add("Looking for higher quality for ${songsText(queued)}")
             when (refused.size) {
                 0 -> Unit
-                1 -> add("Could not look for a FLAC of ${refused[0].first}: ${refused[0].second}")
-                else -> add("Could not look for a FLAC of ${songsText(refused.size)}: ${refused[0].second}")
+                1 -> add("Could not look for higher quality for ${refused[0].first}: ${refused[0].second}")
+                else -> add("Could not look for higher quality for ${songsText(refused.size)}: ${refused[0].second}")
             }
             if (over > 0) add("At most $UPGRADE_BATCH songs at a time, so ${songsText(over)} were left out")
         }
@@ -211,8 +211,8 @@ internal fun doneNotice(done: List<Upgrade>, startsWaiting: Boolean = false): St
     val skipped = of(UpgradeStage.Skipped)
     val rehearsed = of(UpgradeStage.Rehearsed)
     val parts = buildList {
-        if (upgraded.isNotEmpty()) add("Found FLAC for ${songsText(upgraded.size)}")
-        if (missing.isNotEmpty()) add("No FLAC found for: ${titles(missing)}")
+        if (upgraded.isNotEmpty()) add("Found higher quality for ${songsText(upgraded.size)}")
+        if (missing.isNotEmpty()) add("No higher quality copy found for: ${titles(missing)}")
         when (failed.size) {
             0 -> Unit
             1 -> add("Could not upgrade ${failed[0].title}: ${why(failed[0])}")

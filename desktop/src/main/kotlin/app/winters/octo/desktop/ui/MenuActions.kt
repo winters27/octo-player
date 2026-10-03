@@ -1,6 +1,6 @@
 package app.winters.octo.desktop.ui
 
-import app.winters.octo.ui.upgrade.FIND_IN_FLAC
+import app.winters.octo.ui.upgrade.FIND_HIGHER_QUALITY
 
 // What each menu offers, and in which groups, worked out apart from how the
 // rows are drawn so the choices can be checked without a window. Every menu
@@ -40,10 +40,10 @@ enum class SongAction {
 // come out of it only when the listener's own playlist (`ownsPlaylist`).
 // `lastPlaylist` is whether there is a playlist added to lately, offered
 // first among the ways to keep the songs. Show in folder needs the server
-// to have said which folder the song is in (`inFolder`). Find in FLAC needs
-// an Octo server that can look for one and a picked library song of a kind
-// that loses detail (`canUpgrade`); a song found online has no file to
-// replace.
+// to have said which folder the song is in (`inFolder`). Find higher
+// quality needs an Octo server that can look for a better copy and a
+// picked library song of a kind that loses detail (`canUpgrade`); a song
+// found online has no file to replace.
 fun songMenuActions(
     count: Int,
     place: SongPlace,
@@ -93,7 +93,7 @@ fun songActionLabel(action: SongAction, starred: Boolean, last: String? = null):
     SongAction.AddToPlaylist -> "Add to playlist"
     SongAction.Favourite -> if (starred) "Remove from favourites" else "Add to favourites"
     SongAction.Rate -> "Rate"
-    SongAction.FindFlac -> FIND_IN_FLAC
+    SongAction.FindFlac -> FIND_HIGHER_QUALITY
     SongAction.GoToAlbum -> "Go to album"
     SongAction.GoToArtist -> "Go to artist"
     SongAction.ShowInFolder -> "Show in folder"

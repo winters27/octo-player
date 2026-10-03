@@ -25,16 +25,21 @@ class FlacUpgradesTest {
 
     @Test
     fun theMenuWordsCountSongs() {
-        assertEquals("Find FLAC for 1 song", findFlacLabel(1))
-        assertEquals("Find FLAC for 9 songs", findFlacLabel(9))
-        assertEquals("Look for a FLAC of 9 songs on Soulseek? Each original is kept until its FLAC passes.", findFlacQuestion(9))
-        assertEquals("Find in FLAC", FIND_IN_FLAC)
+        assertEquals("Find higher quality for 1 song", findHigherQualityLabel(1))
+        assertEquals("Find higher quality for 9 songs", findHigherQualityLabel(9))
+        assertEquals("Look for a higher quality copy of 9 songs on Soulseek? Each original is kept until its replacement passes.", findHigherQualityQuestion(9))
+        assertEquals("Find higher quality", FIND_HIGHER_QUALITY)
     }
 
     @Test
-    fun theWordsHaveNoDashes() {
-        val words = listOf(findFlacLabel(2), findFlacQuestion(2), FIND_IN_FLAC, WAITING_FOR_SOULSEEK)
-        words.forEach { assertFalse(it, it.contains('-') || it.contains('—') || it.contains('–')) }
+    fun theWordsHaveNoDashesAndNameNoFormat() {
+        val words = listOf(findHigherQualityLabel(2), findHigherQualityQuestion(2), FIND_HIGHER_QUALITY, WAITING_FOR_SOULSEEK)
+        words.forEach { assertFalse(it, it.contains('-') || it.contains('\u2014') || it.contains('\u2013')) }
+        // A person reads "higher quality", never the file format it may turn out to be.
+        words.forEach { assertFalse(it, it.contains("FLAC", ignoreCase = true)) }
+        follow("a", "b")
+        val news = follower.seen(listOf(up("a", "upgraded"), up("b", "notFound")))
+        assertFalse(news.notice!!, news.notice!!.contains("FLAC", ignoreCase = true))
     }
 
     @Test
@@ -46,7 +51,7 @@ class FlacUpgradesTest {
         // Being looked for already: not sent again.
         assertTrue(follower.ask(songs.take(5)).isEmpty())
         taken.forEach { follower.answered(it.id, queued(it.id)) }
-        assertEquals("Looking for FLAC for 50 songs. At most 50 songs at a time, so 10 songs were left out", follower.askedNotice())
+        assertEquals("Looking for higher quality for 50 songs. At most 50 songs at a time, so 10 songs were left out", follower.askedNotice())
         assertNull(follower.askedNotice())
     }
 
@@ -63,7 +68,7 @@ class FlacUpgradesTest {
         follower.ask(listOf(UpgradeAsk("a", "Holocene"), UpgradeAsk("b", "Towers")))
         follower.answered("a", LibraryActionResult("a", "upgrade", "skipped", "It is lossless already."))
         follower.answered("b", queued("b"))
-        assertEquals("Looking for FLAC for 1 song. Could not look for a FLAC of Holocene: It is lossless already", follower.askedNotice())
+        assertEquals("Looking for higher quality for 1 song. Could not look for higher quality for Holocene: It is lossless already", follower.askedNotice())
         assertEquals(setOf("b"), follower.pending().keys)
     }
 
@@ -71,7 +76,7 @@ class FlacUpgradesTest {
     fun aSongThatCouldNotBeAskedSaysSo() {
         follower.ask(listOf(UpgradeAsk("a", "Holocene")))
         follower.answered("a", null, "Couldn't reach the server.")
-        assertEquals("Could not look for a FLAC of Holocene: Couldn't reach the server", follower.askedNotice())
+        assertEquals("Could not look for higher quality for Holocene: Couldn't reach the server", follower.askedNotice())
         assertFalse(follower.isPending())
     }
 
@@ -96,7 +101,7 @@ class FlacUpgradesTest {
     fun foundAndNotFoundAreSaidInOneLine() {
         follow("a", "b", "c")
         val news = follower.seen(listOf(up("a", "upgraded"), up("b", "upgraded"), up("c", "notFound", title = "Towers")))
-        assertEquals("Found FLAC for 2 songs. No FLAC found for: Towers", news.notice)
+        assertEquals("Found higher quality for 2 songs. No higher quality copy found for: Towers", news.notice)
         assertTrue(news.reload)
         assertFalse(follower.isPending())
     }
@@ -114,7 +119,7 @@ class FlacUpgradesTest {
     fun manyNotFoundAreShortened() {
         follow("a", "b", "c", "d", "e")
         val news = follower.seen(listOf("a", "b", "c", "d", "e").map { up(it, "notFound") })
-        assertEquals("No FLAC found for: Song a, Song b, Song c and 2 more", news.notice)
+        assertEquals("No higher quality copy found for: Song a, Song b, Song c and 2 more", news.notice)
     }
 
     @Test
@@ -178,7 +183,7 @@ class FlacUpgradesTest {
     fun songsStillOnFromBeforeAreTakenOnQuietly() {
         follower.adopt(listOf(up("a", "working"), up("b", "upgraded"), up("c", "waiting")))
         assertEquals(setOf("a", "c"), follower.pending().keys)
-        assertEquals("Found FLAC for 1 song", follower.seen(listOf(up("a", "upgraded"), up("c", "waiting"))).notice)
+        assertEquals("Found higher quality for 1 song", follower.seen(listOf(up("a", "upgraded"), up("c", "waiting"))).notice)
     }
 
     @Test

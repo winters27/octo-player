@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
 // updated while the app is open gains the action without a new sign-in.
 const val UPGRADE_RECHECK_MS = 10 * 60_000L
 
-// "Find in FLAC" for one server: whether it can, the songs being looked
+// "Find higher quality" for one server: whether it can, the songs being looked
 // for, and the line said when some are done. The server queues each song
 // and answers at once; its getUpgrades list says how each goes, asked
 // only while something is still on. Made with each connection and closed

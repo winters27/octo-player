@@ -148,7 +148,7 @@ class AppState(
     var fetches by mutableStateOf<Fetches?>(null)
         private set
 
-    // "Find in FLAC" on an Octo server; null on any other.
+    // "Find higher quality" on an Octo server; null on any other.
     var upgrades by mutableStateOf<UpgradeModel?>(null)
         private set
     var search by mutableStateOf<SearchModel?>(null)

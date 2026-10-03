@@ -9,7 +9,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import javax.swing.SwingUtilities
 
-// "Find in FLAC" as it looks: the song menu's row, the album menu's row,
+// "Find higher quality" as it looks: the song menu's row, the album menu's row,
 // the question an album asks, and the ring on a row being looked for.
 // Only when asked: OCTO_SHOTS=1 ./gradlew :desktop:test --tests '*FlacShotsTest*'.
 // Saved under build/shots/polish/flac/.
@@ -56,7 +56,7 @@ class FlacShotsTest {
                     }
                     rig.shot(scene, "flac/album-menu", 1_500)
 
-                    rig.clickText(scene, "Find FLAC for 1 song")
+                    rig.clickText(scene, "Find higher quality for 1 song")
                     rig.shot(scene, "flac/album-confirm", 1_500)
 
                     // Asked for, and on its way down.

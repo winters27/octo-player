@@ -845,7 +845,7 @@ private fun SongCell(
 
 // What a song's ring says when hovered.
 internal fun upgradeHint(upgrade: Upgrade): String =
-    if (upgrade.stage == UpgradeStage.Waiting) WAITING_FOR_SOULSEEK else "Looking for a FLAC"
+    if (upgrade.stage == UpgradeStage.Waiting) WAITING_FOR_SOULSEEK else "Looking for higher quality"
 
 // A song's rating as five small stars, the given ones filled.
 @Composable

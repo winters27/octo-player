@@ -169,7 +169,7 @@ class UpgradeWatch(
     }
 }
 
-// "Find in FLAC" on the signed-in Octo server: whether it can, which
+// "Find higher quality" on the signed-in Octo server: whether it can, which
 // library songs it could do it for, and following what was asked. Whether
 // it can is read from the extensions the session asks for at each start,
 // so a server updated since sign-in is known at the next one.

@@ -35,10 +35,10 @@ import app.winters.octo.ui.playlist.PlaylistCover
 import app.winters.octo.ui.playlist.PlaylistPickerPage
 import app.winters.octo.ui.playlist.PlaylistSheetsViewModel
 import app.winters.octo.ui.common.PopupQuestion
-import app.winters.octo.ui.upgrade.FLAC_KEEPS_ORIGINAL
+import app.winters.octo.ui.upgrade.KEEPS_ORIGINAL
 import app.winters.octo.ui.upgrade.UpgradeAsk
-import app.winters.octo.ui.upgrade.findFlacAsk
-import app.winters.octo.ui.upgrade.findFlacLabel
+import app.winters.octo.ui.upgrade.findHigherQualityAsk
+import app.winters.octo.ui.upgrade.findHigherQualityLabel
 import dev.chrisbanes.haze.HazeState
 
 // The menu for an album, an artist or a playlist, a glass card like the
@@ -184,7 +184,7 @@ private fun CollectionActionsPage(
     actions: List<CollectionAction>,
     state: CollectionMenuState,
     vm: CollectionMenuViewModel,
-    // How many songs Find FLAC would ask for, for its words.
+    // How many songs Find higher quality would ask for, for its words.
     lossy: Int = 0,
     other: (CollectionAction) -> Unit,
 ) {
@@ -202,7 +202,7 @@ private fun CollectionActionsPage(
                 CollectionAction.AddToQueue -> OctoIcons.AddToQueue to "Add to queue"
                 CollectionAction.AddToPlaylist -> OctoIcons.AddToPlaylist to "Add to playlist"
                 CollectionAction.Download -> OctoIcons.Download to "Download"
-                CollectionAction.FindFlac -> OctoIcons.Lossless to findFlacLabel(lossy)
+                CollectionAction.FindFlac -> OctoIcons.Lossless to findHigherQualityLabel(lossy)
                 CollectionAction.StartRadio -> OctoIcons.Radio to "Start radio"
                 CollectionAction.AddToFavourites -> OctoIcons.Like to "Add to favourites"
                 CollectionAction.RemoveFromFavourites -> OctoIcons.Liked to "Remove from favourites"
@@ -261,7 +261,7 @@ private fun AlbumFindFlac(target: CollectionTarget, vm: CollectionMenuViewModel,
     when {
         shown == null -> GlassMenuPage { GlassMenuNote("Gathering the songs") }
         shown.isEmpty() -> GlassMenuPage { GlassMenuNote("Every song here is being looked for already") }
-        else -> PopupQuestion(findFlacAsk(shown.size), FLAC_KEEPS_ORIGINAL, "Find FLAC", onConfirm = {
+        else -> PopupQuestion(findHigherQualityAsk(shown.size), KEEPS_ORIGINAL, "Find higher quality", onConfirm = {
             vm.findFlac(shown)
             onDone()
         }, onCancel = onBack)

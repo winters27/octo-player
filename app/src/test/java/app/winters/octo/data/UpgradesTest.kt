@@ -77,13 +77,13 @@ class UpgradesTest {
         assertTrue("a" in watch.pending.value)
         runCurrent()
         assertEquals(listOf("a"), host.asked)
-        assertEquals("Looking for FLAC for 1 song", host.said.first())
+        assertEquals("Looking for higher quality for 1 song", host.said.first())
         assertEquals("working", watch.pending.value.getValue("a").state)
 
         host.list = listOf(row("a", "upgraded", "Holocene"))
         advanceTimeBy(UPGRADE_POLL_MS + 1)
         assertTrue(watch.pending.value.isEmpty())
-        assertEquals("Found FLAC for 1 song", host.said.last())
+        assertEquals("Found higher quality for 1 song", host.said.last())
         runCurrent()
         assertEquals(1, host.reloads)
         // Nothing still on: no more questions.
@@ -117,7 +117,7 @@ class UpgradesTest {
         val watch = watchOf(host)
         watch.request(listOf(UpgradeAsk("a", "Towers")))
         runCurrent()
-        assertEquals("No FLAC found for: Towers", host.said.last())
+        assertEquals("No higher quality copy found for: Towers", host.said.last())
         assertEquals(0, host.reloads)
     }
 
@@ -149,7 +149,7 @@ class UpgradesTest {
         val watch = watchOf(host)
         watch.request(listOf(UpgradeAsk("a", "Holocene")))
         runCurrent()
-        assertTrue(host.said.single().startsWith("Could not look for a FLAC of Holocene: "))
+        assertTrue(host.said.single().startsWith("Could not look for higher quality for Holocene: "))
         assertTrue(watch.pending.value.isEmpty())
         assertEquals(0, host.looks)
     }

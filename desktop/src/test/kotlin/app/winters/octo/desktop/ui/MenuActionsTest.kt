@@ -1,6 +1,6 @@
 package app.winters.octo.desktop.ui
 
-import app.winters.octo.ui.upgrade.findFlacLabel
+import app.winters.octo.ui.upgrade.findHigherQualityLabel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -104,7 +104,7 @@ class MenuActionsTest {
     @Test
     fun findInFlacComesLastAmongTheWaysToKeepALibrarySong() {
         assertEquals(
-            listOf("Add to playlist", "Add to favourites", "Rate", "Find in FLAC"),
+            listOf("Add to playlist", "Add to favourites", "Rate", "Find higher quality"),
             songMenuActions(1, SongPlace.Library, canUpgrade = true)[1].map { songActionLabel(it, false) },
         )
         // Several picked: still offered, for those a FLAC could replace.
@@ -135,8 +135,8 @@ class MenuActionsTest {
         // None to replace, or an album found online: no row.
         assertEquals(albumMenuActions(), albumMenuActions(lossy = 0))
         assertEquals(albumMenuActions(outside = true), albumMenuActions(outside = true, lossy = 4))
-        assertEquals("Find FLAC for 9 songs", findFlacLabel(9))
-        assertEquals("Find FLAC for 1 song", findFlacLabel(1))
+        assertEquals("Find higher quality for 9 songs", findHigherQualityLabel(9))
+        assertEquals("Find higher quality for 1 song", findHigherQualityLabel(1))
     }
 
     @Test

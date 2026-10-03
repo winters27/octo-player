@@ -54,7 +54,7 @@ import app.winters.octo.ui.playlist.PlaylistPickerPage
 import app.winters.octo.ui.playlist.PlaylistSheetsViewModel
 import app.winters.octo.ui.server.ShareLinkPage
 import app.winters.octo.ui.server.ShareRequest
-import app.winters.octo.ui.upgrade.FIND_IN_FLAC
+import app.winters.octo.ui.upgrade.FIND_HIGHER_QUALITY
 import app.winters.octo.ui.upgrade.UpgradeAsk
 import dev.chrisbanes.haze.HazeState
 
@@ -220,7 +220,7 @@ private fun SongActionsPage(
                         }
                     })
                 }
-                SongAction.FindFlac -> GlassMenuAction(OctoIcons.Lossless, FIND_IN_FLAC, onClick = {
+                SongAction.FindFlac -> GlassMenuAction(OctoIcons.Lossless, FIND_HIGHER_QUALITY, onClick = {
                     state.close()
                     vm.findFlac(upgradable)
                 })
