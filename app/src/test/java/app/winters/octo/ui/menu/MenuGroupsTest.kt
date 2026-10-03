@@ -4,6 +4,7 @@ import app.winters.octo.ui.menu.SongAction.AddToPlaylist
 import app.winters.octo.ui.menu.SongAction.AddToQueue
 import app.winters.octo.ui.menu.SongAction.DeleteFromPhone
 import app.winters.octo.ui.menu.SongAction.Download
+import app.winters.octo.ui.menu.SongAction.FindFlac
 import app.winters.octo.ui.menu.SongAction.GoToAlbum
 import app.winters.octo.ui.menu.SongAction.GoToArtist
 import app.winters.octo.ui.menu.SongAction.Info
@@ -89,6 +90,24 @@ class MenuGroupsTest {
                 listOf(CollectionAction.GoToArtist),
             ),
             collectionMenuGroups(albumActions(canDownload = true)),
+        )
+    }
+
+    @Test
+    fun findInFlacIsAWayToKeepASong() {
+        assertEquals(
+            listOf(
+                listOf(PlayNext, AddToQueue),
+                listOf(AddToPlaylist, Like, Rate, KeepOffline, FindFlac),
+                listOf(GoToAlbum, GoToArtist),
+                listOf(Info),
+            ),
+            songMenuGroups(songActions(find = false, radio = false, offline = true, upgrade = true)),
+        )
+        // And an album's, after its download.
+        assertEquals(
+            listOf(CollectionAction.AddToPlaylist, CollectionAction.AddToFavourites, CollectionAction.Download, CollectionAction.FindFlac),
+            collectionMenuGroups(albumActions(canDownload = true, lossy = 4))[1],
         )
     }
 

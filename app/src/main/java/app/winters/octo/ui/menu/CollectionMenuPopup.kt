@@ -34,6 +34,11 @@ import app.winters.octo.ui.playlist.ConfirmDelete
 import app.winters.octo.ui.playlist.PlaylistCover
 import app.winters.octo.ui.playlist.PlaylistPickerPage
 import app.winters.octo.ui.playlist.PlaylistSheetsViewModel
+import app.winters.octo.ui.common.PopupQuestion
+import app.winters.octo.ui.upgrade.FLAC_KEEPS_ORIGINAL
+import app.winters.octo.ui.upgrade.UpgradeAsk
+import app.winters.octo.ui.upgrade.findFlacAsk
+import app.winters.octo.ui.upgrade.findFlacLabel
 import dev.chrisbanes.haze.HazeState
 
 // The menu for an album, an artist or a playlist, a glass card like the
@@ -76,6 +81,7 @@ fun CollectionMenuHost(
                 }
                 CollectionPage.Rename -> PlaylistRename(target, onBack = back, onDone = state::close)
                 CollectionPage.Delete -> PlaylistDelete(target, vm, onBack = back, onDone = state::close)
+                CollectionPage.FindFlac -> AlbumFindFlac(target, vm, onBack = back, onDone = state::close)
             }
         }
     }
@@ -89,11 +95,25 @@ private fun AlbumMenu(target: CollectionTarget.Album, state: CollectionMenuState
     val favourites by vm.favouriteAlbums.collectAsStateWithLifecycle()
     val pinned by vm.pinned.collectAsStateWithLifecycle()
     val radio by vm.radio.collectAsStateWithLifecycle()
+    val canUpgrade by vm.canUpgrade.collectAsStateWithLifecycle()
+    // Read again when the album's songs change, as after a FLAC lands.
+    val lossy by produceState(emptyList<UpgradeAsk>(), target, canUpgrade, tracks) {
+        value = if (canUpgrade) vm.upgradableInAlbum(target.id) else emptyList()
+    }
     val shown = album ?: return
     val waiting = tracks.filter { !it.onPhone && it.id !in kept }.map { it.id }
     val pin = PinKey(PinKind.Album, target.id)
-    val actions = albumActions(canDownload = waiting.isNotEmpty(), favourite = target.id in favourites, pin = pinSpot(pinned, pin), radio = radio)
-    CollectionActionsPage(shown.title, shown.artist, { Artwork(shown.artwork, 40.dp, shape = RoundedCornerShape(6.dp)) }, target, actions, state, vm) { action ->
+    val actions = albumActions(canDownload = waiting.isNotEmpty(), favourite = target.id in favourites, pin = pinSpot(pinned, pin), radio = radio, lossy = lossy.size)
+    CollectionActionsPage(
+        shown.title,
+        shown.artist,
+        { Artwork(shown.artwork, 40.dp, shape = RoundedCornerShape(6.dp)) },
+        target,
+        actions,
+        state,
+        vm,
+        lossy = lossy.size,
+    ) { action ->
         when (action) {
             CollectionAction.Download -> vm.download(waiting)
             CollectionAction.GoToArtist -> onOpen(ArtistRoute(shown.artistId))
@@ -164,6 +184,8 @@ private fun CollectionActionsPage(
     actions: List<CollectionAction>,
     state: CollectionMenuState,
     vm: CollectionMenuViewModel,
+    // How many songs Find FLAC would ask for, for its words.
+    lossy: Int = 0,
     other: (CollectionAction) -> Unit,
 ) {
     GlassMenuPage(
@@ -180,6 +202,7 @@ private fun CollectionActionsPage(
                 CollectionAction.AddToQueue -> OctoIcons.AddToQueue to "Add to queue"
                 CollectionAction.AddToPlaylist -> OctoIcons.AddToPlaylist to "Add to playlist"
                 CollectionAction.Download -> OctoIcons.Download to "Download"
+                CollectionAction.FindFlac -> OctoIcons.Lossless to findFlacLabel(lossy)
                 CollectionAction.StartRadio -> OctoIcons.Radio to "Start radio"
                 CollectionAction.AddToFavourites -> OctoIcons.Like to "Add to favourites"
                 CollectionAction.RemoveFromFavourites -> OctoIcons.Liked to "Remove from favourites"
@@ -195,6 +218,7 @@ private fun CollectionActionsPage(
                 CollectionAction.AddToPlaylist -> CollectionPage.AddToPlaylist
                 CollectionAction.Rename -> CollectionPage.Rename
                 CollectionAction.Delete -> CollectionPage.Delete
+                CollectionAction.FindFlac -> CollectionPage.FindFlac
                 else -> null
             }
             GlassMenuAction(icon, label, opensPage = page != null, destructive = action == CollectionAction.Delete, onClick = {
@@ -225,6 +249,23 @@ private fun PlaylistRename(target: CollectionTarget, onBack: () -> Unit, onDone:
         sheets.rename(playlist.id, typed)
         onDone()
     })
+}
+
+// Asking before an album's songs go to the server to be looked for, a page
+// of its menu, since it may be many downloads.
+@Composable
+private fun AlbumFindFlac(target: CollectionTarget, vm: CollectionMenuViewModel, onBack: () -> Unit, onDone: () -> Unit) {
+    val album = target as? CollectionTarget.Album ?: return
+    val asks by produceState<List<UpgradeAsk>?>(null, album) { value = vm.upgradableInAlbum(album.id) }
+    val shown = asks
+    when {
+        shown == null -> GlassMenuPage { GlassMenuNote("Gathering the songs") }
+        shown.isEmpty() -> GlassMenuPage { GlassMenuNote("Every song here is being looked for already") }
+        else -> PopupQuestion(findFlacAsk(shown.size), FLAC_KEEPS_ORIGINAL, "Find FLAC", onConfirm = {
+            vm.findFlac(shown)
+            onDone()
+        }, onCancel = onBack)
+    }
 }
 
 // Asking before a playlist is deleted, a page of its menu.

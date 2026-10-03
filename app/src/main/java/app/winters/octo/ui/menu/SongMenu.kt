@@ -12,6 +12,7 @@ import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.isFind
+import app.winters.octo.data.Upgrades
 import app.winters.octo.design.PopupPages
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.DownloadState
@@ -29,6 +30,7 @@ import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.common.SelectionBarState
 import app.winters.octo.ui.common.SongSelection
+import app.winters.octo.ui.upgrade.UpgradeAsk
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -111,7 +113,7 @@ val LocalSongMenu = staticCompositionLocalOf<SongMenuState> { error("No song men
 
 // The choices in a song's menu, in the order shown.
 enum class SongAction {
-    PlayNext, AddToQueue, StartRadio, Download, AddToLastPlaylist, AddToPlaylist, RemoveFromPlaylist, Select, KeepOffline, ShareFile, Share, Like,
+    PlayNext, AddToQueue, StartRadio, Download, AddToLastPlaylist, AddToPlaylist, RemoveFromPlaylist, Select, KeepOffline, FindFlac, ShareFile, Share, Like,
     Rate, GoToAlbum, GoToArtist, SetAsSound, DeleteFromPhone, Info,
 }
 
@@ -142,7 +144,8 @@ fun menuPlace(context: SongMenuContext, albumId: String, artistId: String): Menu
 // server (`offline`) can be downloaded to the phone. One with a file on the
 // phone (`phone`) can send that file, ring with it, or delete it.
 // `lastPlaylist` is whether a playlist was added to lately, offered first
-// among the ways to keep the song.
+// among the ways to keep the song. `upgrade` is whether an Octo server can
+// look for a FLAC to take the place of its copy there, one that loses detail.
 fun songActions(
     find: Boolean,
     radio: Boolean,
@@ -151,6 +154,7 @@ fun songActions(
     place: MenuPlace = MenuPlace(),
     phone: Boolean = false,
     lastPlaylist: Boolean = false,
+    upgrade: Boolean = false,
 ): List<SongAction> = buildList {
     add(SongAction.PlayNext)
     add(SongAction.AddToQueue)
@@ -165,6 +169,7 @@ fun songActions(
         if (place.inPlaylist) add(SongAction.RemoveFromPlaylist)
         if (place.selectable) add(SongAction.Select)
         if (offline) add(SongAction.KeepOffline)
+        if (upgrade) add(SongAction.FindFlac)
         if (phone) add(SongAction.ShareFile)
         if (share) add(SongAction.Share)
         add(SongAction.Like)
@@ -184,7 +189,7 @@ fun songActions(
 // what takes it away. A hairline parts the groups.
 private val SongMenuOrder = listOf(
     listOf(SongAction.PlayNext, SongAction.AddToQueue, SongAction.StartRadio),
-    listOf(SongAction.AddToLastPlaylist, SongAction.AddToPlaylist, SongAction.Like, SongAction.Rate, SongAction.Download, SongAction.KeepOffline),
+    listOf(SongAction.AddToLastPlaylist, SongAction.AddToPlaylist, SongAction.Like, SongAction.Rate, SongAction.Download, SongAction.KeepOffline, SongAction.FindFlac),
     listOf(SongAction.GoToAlbum, SongAction.GoToArtist),
     listOf(SongAction.Share, SongAction.ShareFile, SongAction.SetAsSound, SongAction.Info, SongAction.Select),
     listOf(SongAction.RemoveFromPlaylist, SongAction.DeleteFromPhone),
@@ -231,6 +236,7 @@ class SongMenuViewModel @Inject constructor(
     private val playlists: PlaylistStore,
     private val userDao: UserDao,
     private val feedback: Feedback,
+    private val upgrades: Upgrades,
 ) : ViewModel() {
     val liked: StateFlow<Set<String>> = likes.liked
     val downloadStates: StateFlow<Map<String, DownloadState>> = downloads.states
@@ -248,6 +254,15 @@ class SongMenuViewModel @Inject constructor(
 
     // Whether the signed-in server can make shared links.
     val sharing: StateFlow<Boolean> = controls.sharing
+
+    // Whether the signed-in Octo server can look for FLACs.
+    val canUpgrade: StateFlow<Boolean> = upgrades.canUpgrade
+
+    // The song's copy on the server, when a FLAC could replace it; empty
+    // for a find, which has no copy of its own yet.
+    suspend fun upgradable(trackId: String): List<UpgradeAsk> = if (isFind(trackId)) emptyList() else upgrades.upgradable(listOf(trackId))
+
+    fun findFlac(asks: List<UpgradeAsk>) = upgrades.request(asks)
 
     // The server's id for a song, when it has a copy there to share.
     suspend fun shareId(trackId: String): String? = if (isFind(trackId)) null else controls.serverSongId(trackId)

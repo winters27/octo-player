@@ -2,6 +2,7 @@ package app.winters.octo
 
 import android.app.Application
 import app.winters.octo.data.SessionRepository
+import app.winters.octo.data.Upgrades
 import app.winters.octo.device.DeviceArtworkFetcher
 import app.winters.octo.device.DeviceArtworkKeyer
 import app.winters.octo.device.DeviceLibrary
@@ -29,6 +30,7 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var offline: OfflineDownloads
     @Inject lateinit var listenBrainz: ListenBrainzSync
     @Inject lateinit var updates: AppUpdates
+    @Inject lateinit var upgrades: Upgrades
 
     override fun onCreate() {
         super.onCreate()
@@ -42,6 +44,8 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
         listenBrainz.start()
         // New versions of Octo, in the release build only.
         updates.start()
+        // FLACs asked for last time are followed until they are done.
+        upgrades.start()
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader =

@@ -13,6 +13,7 @@ import app.winters.octo.catalog.PlaylistSummary
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.byPlayCount
+import app.winters.octo.data.Upgrades
 import app.winters.octo.design.PopupPages
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.favourites.FavouriteStore
@@ -27,6 +28,7 @@ import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.playlist.copiedMessage
 import app.winters.octo.ui.playlist.playlistCopyName
+import app.winters.octo.ui.upgrade.UpgradeAsk
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
@@ -46,7 +48,7 @@ sealed interface CollectionTarget {
 
 // The pages of a collection's menu: its actions first, then what some of
 // them open in its place.
-enum class CollectionPage { Actions, AddToPlaylist, Rename, Delete }
+enum class CollectionPage { Actions, AddToPlaylist, Rename, Delete, FindFlac }
 
 // Which album, artist or playlist the menu is open for, if any. A long
 // press on its card or row opens it.
@@ -75,7 +77,7 @@ class CollectionMenuState {
 
 // The choices in a collection's menu, in the order shown.
 enum class CollectionAction {
-    Play, Shuffle, PlayNext, AddToQueue, AddToPlaylist, Download, StartRadio,
+    Play, Shuffle, PlayNext, AddToQueue, AddToPlaylist, Download, FindFlac, StartRadio,
     AddToFavourites, RemoveFromFavourites, PinToHome, Unpin, MoveToFront,
     GoToArtist, Rename, Duplicate, Delete,
 }
@@ -102,12 +104,20 @@ private fun MutableList<CollectionAction>.pin(spot: PinSpot) {
 // An album can be downloaded when some of its songs are only on a server
 // and not downloaded yet.
 // A radio needs a server signed in; the desktop offers one from an album
-// too, started from its most played song.
-fun albumActions(canDownload: Boolean, favourite: Boolean = false, pin: PinSpot = PinSpot.None, radio: Boolean = false): List<CollectionAction> = buildList {
+// too, started from its most played song. `lossy` is how many of its songs
+// an Octo server could look for a FLAC of; none leaves the choice out.
+fun albumActions(
+    canDownload: Boolean,
+    favourite: Boolean = false,
+    pin: PinSpot = PinSpot.None,
+    radio: Boolean = false,
+    lossy: Int = 0,
+): List<CollectionAction> = buildList {
     addAll(Playing)
     if (radio) add(CollectionAction.StartRadio)
     add(CollectionAction.AddToPlaylist)
     if (canDownload) add(CollectionAction.Download)
+    if (lossy > 0) add(CollectionAction.FindFlac)
     favourite(favourite)
     pin(pin)
     add(CollectionAction.GoToArtist)
@@ -135,7 +145,7 @@ fun playlistActions(empty: Boolean, pin: PinSpot = PinSpot.None): List<Collectio
 // Home, going to its artist, and last, renaming, copying and deleting.
 private val CollectionMenuOrder = listOf(
     listOf(CollectionAction.Play, CollectionAction.Shuffle, CollectionAction.PlayNext, CollectionAction.AddToQueue, CollectionAction.StartRadio),
-    listOf(CollectionAction.AddToPlaylist, CollectionAction.AddToFavourites, CollectionAction.RemoveFromFavourites, CollectionAction.Download),
+    listOf(CollectionAction.AddToPlaylist, CollectionAction.AddToFavourites, CollectionAction.RemoveFromFavourites, CollectionAction.Download, CollectionAction.FindFlac),
     listOf(CollectionAction.PinToHome, CollectionAction.Unpin, CollectionAction.MoveToFront),
     listOf(CollectionAction.GoToArtist),
     listOf(CollectionAction.Rename, CollectionAction.Duplicate, CollectionAction.Delete),
@@ -164,6 +174,7 @@ class CollectionMenuViewModel @Inject constructor(
     private val feedback: Feedback,
     private val favourites: FavouriteStore,
     private val pins: PinStore,
+    private val upgrades: Upgrades,
 ) : ViewModel() {
     val favouriteAlbums: StateFlow<Set<String>> = favourites.albums
     val favouriteArtists: StateFlow<Set<String>> = favourites.artists
@@ -194,6 +205,14 @@ class CollectionMenuViewModel @Inject constructor(
 
     // Library songs downloaded to the phone, or on their way.
     val kept: StateFlow<Map<String, DownloadEntity>> = offline.byTrack
+
+    // Whether the signed-in Octo server can look for FLACs.
+    val canUpgrade: StateFlow<Boolean> = upgrades.canUpgrade
+
+    // The album's songs a FLAC could replace, by their copies on the server.
+    suspend fun upgradableInAlbum(albumId: String): List<UpgradeAsk> = upgrades.upgradableInAlbum(albumId)
+
+    fun findFlac(asks: List<UpgradeAsk>) = upgrades.request(asks)
 
     fun album(id: String): Flow<AlbumEntity?> = catalog.album(id)
     fun albumTracks(id: String): Flow<List<TrackEntity>> = catalog.albumTracks(id)

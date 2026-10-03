@@ -8,6 +8,7 @@ import app.winters.octo.ui.menu.CollectionAction.AddToQueue
 import app.winters.octo.ui.menu.CollectionAction.Delete
 import app.winters.octo.ui.menu.CollectionAction.Download
 import app.winters.octo.ui.menu.CollectionAction.Duplicate
+import app.winters.octo.ui.menu.CollectionAction.FindFlac
 import app.winters.octo.ui.menu.CollectionAction.GoToArtist
 import app.winters.octo.ui.menu.CollectionAction.MoveToFront
 import app.winters.octo.ui.menu.CollectionAction.PinToHome
@@ -22,6 +23,19 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class CollectionActionsTest {
+    @Test
+    fun anAlbumOffersFindFlacOnlyWithSongsAFlacCouldReplace() {
+        assertEquals(
+            listOf(Play, Shuffle, PlayNext, AddToQueue, AddToPlaylist, Download, FindFlac, AddToFavourites, PinToHome, GoToArtist),
+            albumActions(canDownload = true, lossy = 3),
+        )
+        assertEquals(albumActions(canDownload = false), albumActions(canDownload = false, lossy = 0))
+        assertEquals(
+            listOf(Play, Shuffle, PlayNext, AddToQueue, AddToPlaylist, FindFlac, AddToFavourites, PinToHome, GoToArtist),
+            albumActions(canDownload = false, lossy = 1),
+        )
+    }
+
     @Test
     fun anAlbumOffersADownloadOnlyWithSongsLeftToDownload() {
         assertEquals(

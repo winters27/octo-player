@@ -7,6 +7,7 @@ import app.winters.octo.ui.menu.SongAction.AddToPlaylist
 import app.winters.octo.ui.menu.SongAction.AddToQueue
 import app.winters.octo.ui.menu.SongAction.DeleteFromPhone
 import app.winters.octo.ui.menu.SongAction.Download
+import app.winters.octo.ui.menu.SongAction.FindFlac
 import app.winters.octo.ui.menu.SongAction.GoToAlbum
 import app.winters.octo.ui.menu.SongAction.GoToArtist
 import app.winters.octo.ui.menu.SongAction.Info
@@ -22,6 +23,21 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class SongActionsTest {
+    @Test
+    fun aLibrarySongOffersFindInFlacWhenTheServerCan() {
+        assertEquals(
+            listOf(PlayNext, AddToQueue, StartRadio, AddToPlaylist, FindFlac, Like, Rate, GoToAlbum, GoToArtist, Info),
+            songActions(find = false, radio = true, upgrade = true),
+        )
+        // Among the ways to keep it, after downloading it to the phone.
+        assertEquals(listOf(AddToPlaylist, Like, Rate, KeepOffline, FindFlac), songMenuGroups(songActions(find = false, radio = true, offline = true, upgrade = true))[1])
+    }
+
+    @Test
+    fun aSongFoundOnlineNeverOffersFindInFlac() {
+        assertEquals(listOf(PlayNext, AddToQueue, Download, Info), songActions(find = true, radio = false, upgrade = true))
+    }
+
     @Test
     fun aLibrarySongOffersEverything() {
         assertEquals(

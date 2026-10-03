@@ -54,6 +54,8 @@ import app.winters.octo.ui.playlist.PlaylistPickerPage
 import app.winters.octo.ui.playlist.PlaylistSheetsViewModel
 import app.winters.octo.ui.server.ShareLinkPage
 import app.winters.octo.ui.server.ShareRequest
+import app.winters.octo.ui.upgrade.FIND_IN_FLAC
+import app.winters.octo.ui.upgrade.UpgradeAsk
 import dev.chrisbanes.haze.HazeState
 
 // The song menu, a glass card that floats beside the row held or the button
@@ -136,12 +138,23 @@ private fun SongActionsPage(
     val downloads by vm.downloadStates.collectAsStateWithLifecycle()
     val kept by vm.kept.collectAsStateWithLifecycle()
     val radio by vm.radio.collectAsStateWithLifecycle()
+    val canUpgrade by vm.canUpgrade.collectAsStateWithLifecycle()
+    val upgradable by produceState(emptyList<UpgradeAsk>(), trackId, canUpgrade) { value = if (canUpgrade) vm.upgradable(trackId) else emptyList() }
     val isLiked = trackId in liked
     val keptRow = kept[trackId]
     val byHand = keptRow?.reasons?.contains(Reasons.MANUAL) == true
     val place = menuPlace(context, song.albumId, song.artistId)
     val phone = song.onPhone && !isFind(trackId)
-    val actions = songActions(isFind(trackId), radio, share = shareId != null, offline = !song.onPhone || keptRow != null, place = place, phone = phone, lastPlaylist = last != null)
+    val actions = songActions(
+        isFind(trackId),
+        radio,
+        share = shareId != null,
+        offline = !song.onPhone || keptRow != null,
+        place = place,
+        phone = phone,
+        lastPlaylist = last != null,
+        upgrade = upgradable.isNotEmpty(),
+    )
 
     GlassMenuPage(
         header = {
@@ -207,6 +220,10 @@ private fun SongActionsPage(
                         }
                     })
                 }
+                SongAction.FindFlac -> GlassMenuAction(OctoIcons.Lossless, FIND_IN_FLAC, onClick = {
+                    state.close()
+                    vm.findFlac(upgradable)
+                })
                 SongAction.ShareFile -> GlassMenuAction(OctoIcons.ShareFile, "Share file", onClick = {
                     state.close()
                     phoneFiles.share(listOf(trackId))
