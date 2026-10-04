@@ -56,6 +56,8 @@ class Fetches(
     private val scope: CoroutineScope,
     // Called when a song has arrived, so the library is read again.
     private val onArrived: () -> Unit = {},
+    // Called when a song was asked for, so the downloads drawer looks now.
+    private val onAsked: () -> Unit = {},
     private val pollMs: Long = FETCH_POLL_MS,
 ) {
     private val _phases = MutableStateFlow<Map<String, FetchPhase>>(emptyMap())
@@ -83,6 +85,7 @@ class Fetches(
         scope.launch {
             try {
                 client.star(listOf(id))
+                onAsked()
                 follow()
             } catch (e: SubsonicException) {
                 _phases.update { it + (id to FetchPhase.Failed("the server could not be asked")) }

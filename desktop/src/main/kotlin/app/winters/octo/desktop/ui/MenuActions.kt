@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.ui.downloads.FIND_SONGS
 import app.winters.octo.ui.upgrade.FIND_HIGHER_QUALITY
 
 // What each menu offers, and in which groups, worked out apart from how the
@@ -25,7 +26,7 @@ enum class SongAction {
     Play, PlayNext, AddToQueue, StartRadio,
     AddToLibrary, AddToLastPlaylist, AddToPlaylist, Favourite, Rate, FindFlac,
     GoToAlbum, GoToArtist, ShowInFolder,
-    Details,
+    Details, FindSongs,
     Move,
     RemoveFromPlaylist, RemoveFromQueue,
 }
@@ -43,7 +44,9 @@ enum class SongAction {
 // to have said which folder the song is in (`inFolder`). Find higher
 // quality needs an Octo server that can look for a better copy and a
 // picked library song of a kind that loses detail (`canUpgrade`); a song
-// found online has no file to replace.
+// found online has no file to replace. Find songs, which runs one song's
+// search again on the server's download sources to pick the copy, needs an
+// Octo server that keeps a log of its downloads (`canFind`).
 fun songMenuActions(
     count: Int,
     place: SongPlace,
@@ -53,6 +56,7 @@ fun songMenuActions(
     inFolder: Boolean = false,
     canAdd: Boolean = false,
     canUpgrade: Boolean = false,
+    canFind: Boolean = false,
 ): List<List<SongAction>> {
     val one = count == 1
     val editable = place is SongPlace.Playlist && ownsPlaylist && place.positions.isNotEmpty()
@@ -71,7 +75,7 @@ fun songMenuActions(
             SongAction.FindFlac.takeIf { canUpgrade && !outside },
         ),
         if (one && !outside) listOfNotNull(SongAction.GoToAlbum, SongAction.GoToArtist, SongAction.ShowInFolder.takeIf { inFolder }) else emptyList(),
-        listOfNotNull(SongAction.Details.takeIf { one }),
+        listOfNotNull(SongAction.Details.takeIf { one }, SongAction.FindSongs.takeIf { one && canFind }),
         listOfNotNull(SongAction.Move.takeIf { editable }),
         listOfNotNull(
             SongAction.RemoveFromPlaylist.takeIf { editable },
@@ -98,6 +102,7 @@ fun songActionLabel(action: SongAction, starred: Boolean, last: String? = null):
     SongAction.GoToArtist -> "Go to artist"
     SongAction.ShowInFolder -> "Show in folder"
     SongAction.Details -> "Song details"
+    SongAction.FindSongs -> FIND_SONGS
     SongAction.Move -> "Move"
     SongAction.RemoveFromPlaylist -> "Remove from this playlist"
     SongAction.RemoveFromQueue -> "Remove from the queue"

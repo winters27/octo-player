@@ -105,6 +105,28 @@ class SubsonicClient(
     suspend fun acquisitions(): List<Acquisition> =
         get("getAcquisitions", key = "acquisitions", serializer = Acquisitions.serializer(), default = Acquisitions()).acquisition
 
+    // One download with its whole log, by the key the list gives it. Only
+    // for servers that list octoAcquisitions at version 2.
+    suspend fun acquisition(key: String): Acquisition =
+        get("getAcquisition", mapOf("key" to key), "acquisition", Acquisition.serializer())
+
+    // Takes the finished downloads off the signed-in user's list, or only
+    // the one with this key, and answers how many left it.
+    suspend fun clearAcquisitions(key: String? = null): Int =
+        get("clearAcquisitions", key?.let { mapOf("key" to it) }.orEmpty(), "cleared", Cleared.serializer(), Cleared()).count
+
+    // Starts a search for one song (a found song's id, or a library song's)
+    // on the user's download sources, answered at once while it runs.
+    suspend fun findSongs(id: String): FoundSongs = get("findSongs", mapOf("id" to id), "foundSongs", FoundSongs.serializer())
+
+    // A Find songs search as it stands, by the id findSongs answered.
+    suspend fun foundSongs(search: String): FoundSongs =
+        get("getFoundSongs", mapOf("search" to search), "foundSongs", FoundSongs.serializer())
+
+    // Fetches exactly the copy at `index` on a Find songs list.
+    suspend fun pickFoundSong(search: String, index: Int): PickResult =
+        get("pickFoundSong", mapOf("search" to search, "candidate" to index.toString()), "pick", PickResult.serializer())
+
     // What the signed-in user may do to the library's files. Only for
     // servers that list the octoLibraryActions extension.
     suspend fun libraryActions(): LibraryActions =

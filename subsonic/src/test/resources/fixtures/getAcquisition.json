@@ -1,0 +1,6 @@
+{"subsonic-response":{"status":"ok","version":"1.16.1","type":"octo","acquisition":{"id":"3kX9Qm","artist":"Daft Punk","title":"Da Funk","album":"Homework","state":"downloading","progress":0.42,"bytesDone":12180000,"bytesTotal":29000000,"source":"Soulseek","startedAt":"2026-10-04T18:00:00Z","updatedAt":"2026-10-04T18:00:09Z","error":null,"libraryId":null,"ahead":null,"note":null,"key":"soulseek:3kX9Qm","kind":"download","quality":"FLAC 16-bit 44.1 kHz","peer":"peer1","coverArt":"3kX9Qm","logLines":4,"event":[
+{"at":"2026-10-04T18:00:00Z","kind":"queued","text":"Asked for","detail":"By winters","candidate":null},
+{"at":"2026-10-04T18:00:01Z","kind":"search","text":"Looking on Soulseek","detail":null,"candidate":null},
+{"at":"2026-10-04T18:00:05Z","kind":"found","text":"2 copies fit, best first","detail":"143 files from 37 peers","candidate":[{"source":"Soulseek","peer":"peer1","file":"03 - Da Funk.flac","folder":"Daft Punk/Homework","title":"Da Funk","album":"Homework","format":"flac","quality":"FLAC 16-bit 44.1 kHz","bitRate":null,"bitDepth":16,"sampleRate":44100,"size":31000000,"length":330,"queueLength":0,"freeSlot":true,"speed":1500000,"rank":1,"note":null}]},
+{"at":"2026-10-04T18:00:06Z","kind":"sparkles","text":"A step from a newer server","detail":null,"candidate":null}
+]}}}

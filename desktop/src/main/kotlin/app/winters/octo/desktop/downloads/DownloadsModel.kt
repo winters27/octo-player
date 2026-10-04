@@ -1,0 +1,178 @@
+package app.winters.octo.desktop.downloads
+
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import app.winters.octo.subsonic.Acquisition
+import app.winters.octo.subsonic.FoundSongs
+import app.winters.octo.subsonic.OCTO_ACQUISITIONS
+import app.winters.octo.subsonic.OCTO_DOWNLOAD_LOG_VERSION
+import app.winters.octo.subsonic.PickResult
+import app.winters.octo.subsonic.SubsonicClient
+import app.winters.octo.subsonic.Upgrade
+import app.winters.octo.ui.downloads.DownloadLogWatch
+import app.winters.octo.ui.downloads.DownloadRow
+import app.winters.octo.ui.downloads.DownloadsSource
+import app.winters.octo.ui.downloads.DownloadsWatch
+import app.winters.octo.ui.downloads.FindSongsWatch
+import app.winters.octo.ui.downloads.FindSource
+import app.winters.octo.subsonic.OCTO_LIBRARY_ACTIONS
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+
+// What the downloads drawer shows: the list, one download's log, or Find
+// songs for one song.
+sealed interface DrawerView {
+    data object List : DrawerView
+
+    data class Log(val key: String) : DrawerView
+
+    // `id` is the song's id on the server; `title` names it until the
+    // server answers.
+    data class Find(val id: String, val title: String, val from: String? = null) : DrawerView
+}
+
+// The downloads drawer for one Octo server: every download it is doing for
+// this person or did lately, each one's log, and Find songs. Whether the
+// server keeps logs is asked live, as "Find higher quality" is, since the
+// extensions saved at sign-in may be older than the server. Made with each
+// connection and closed with it.
+@Stable
+class DownloadsModel(private val client: SubsonicClient, parent: CoroutineScope) {
+    private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
+
+    private val watch = DownloadsWatch(
+        object : DownloadsSource {
+            override suspend fun acquisitions(): List<Acquisition> = client.acquisitions()
+
+            override suspend fun upgrades(): List<Upgrade> =
+                if (upgradesToo) client.upgrades() else emptyList()
+
+            override suspend fun clear(key: String?) {
+                client.clearAcquisitions(key)
+            }
+        },
+        scope,
+    )
+
+    private val logWatch = DownloadLogWatch({ client.acquisition(it) }, scope)
+
+    private val findWatch = FindSongsWatch(
+        object : FindSource {
+            override suspend fun start(id: String): FoundSongs = client.findSongs(id)
+
+            override suspend fun get(search: String): FoundSongs = client.foundSongs(search)
+
+            override suspend fun pick(search: String, index: Int): PickResult = client.pickFoundSong(search, index)
+        },
+        scope,
+    )
+
+    // Whether the server lists its upgrades too (octoLibraryActions 2).
+    @Volatile
+    private var upgradesToo = false
+
+    // Whether this server keeps a log of its downloads. Null until it said.
+    var supported by mutableStateOf<Boolean?>(null)
+        private set
+
+    var view by mutableStateOf<DrawerView>(DrawerView.List)
+        private set
+
+    val rows: StateFlow<List<DownloadRow>> get() = watch.rows
+    val loaded: StateFlow<Boolean> get() = watch.loaded
+    val log: StateFlow<Acquisition?> get() = logWatch.row
+    val logProblem: StateFlow<String?> get() = logWatch.problem
+    val found: StateFlow<FoundSongs?> get() = findWatch.found
+    val findProblem: StateFlow<String?> get() = findWatch.problem
+    val picked: StateFlow<PickResult?> get() = findWatch.picked
+
+    // Asks whether the server keeps logs, and follows its downloads if so.
+    fun start() {
+        scope.launch {
+            val logs = client.supports(OCTO_ACQUISITIONS, OCTO_DOWNLOAD_LOG_VERSION)
+            upgradesToo = client.supports(OCTO_LIBRARY_ACTIONS, 2)
+            supported = logs
+            if (logs) watch.start()
+        }
+    }
+
+    // The drawer is on screen: asked for often while it is.
+    var open: Boolean
+        get() = watch.open
+        set(value) {
+            watch.open = value
+            if (!value) {
+                logWatch.close()
+                findWatch.close()
+                view = DrawerView.List
+            }
+        }
+
+    // A song was asked for here: the list is asked again now.
+    fun wake() = watch.wake()
+
+    // The log of a song's newest download, by the id it was asked for with.
+    // False when this server keeps no log or has no download of it.
+    fun showLogOf(id: String): Boolean {
+        if (supported != true) return false
+        val key = watch.keyFor(id) ?: return false
+        showLog(key)
+        return true
+    }
+
+    fun showList() {
+        logWatch.close()
+        findWatch.close()
+        view = DrawerView.List
+    }
+
+    fun showLog(key: String) {
+        findWatch.close()
+        logWatch.follow(key)
+        view = DrawerView.Log(key)
+    }
+
+    // Find songs for a song, from a download's row or a song's menu.
+    fun find(id: String, title: String, from: String? = null) {
+        logWatch.close()
+        findWatch.search(id)
+        view = DrawerView.Find(id, title, from)
+    }
+
+    fun searchAgain() {
+        (view as? DrawerView.Find)?.let { findWatch.search(it.id) }
+    }
+
+    // Fetches one copy from the Find songs list. A queued pick opens its
+    // download's log, so the person can follow it from the start.
+    fun pick(index: Int) {
+        scope.launch {
+            val result = findWatch.pick(index)
+            if (result.queued) {
+                watch.wake()
+                // A replacement waits in the upgrade queue before it has a log
+                // of its own; the list shows it meanwhile.
+                val key = result.key
+                if (key != null) showLog(key) else showList()
+            }
+        }
+    }
+
+    fun clear(key: String? = null) {
+        scope.launch { watch.clear(key) }
+    }
+
+    // The server is left: nothing more is asked of it.
+    fun close() {
+        watch.stop()
+        logWatch.close()
+        findWatch.close()
+        scope.cancel()
+    }
+}

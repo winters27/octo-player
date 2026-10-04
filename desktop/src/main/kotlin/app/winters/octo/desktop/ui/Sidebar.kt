@@ -67,6 +67,11 @@ import app.winters.octo.design.Txt
 import app.winters.octo.design.chromeFilm
 import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.SidePanel
+import app.winters.octo.design.ProgressRing
+import app.winters.octo.ui.downloads.DOWNLOADS
+import app.winters.octo.ui.downloads.overallFraction
+import app.winters.octo.ui.downloads.runningCount
 import app.winters.octo.desktop.importPlaylistFile
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.nav.Page
@@ -139,6 +144,7 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
             }
         }
         Separator(Modifier.padding(vertical = Space.S))
+        DownloadsRow(app, rail)
         NavRow("Sound", OctoIcons.Sound, lit == SidebarItem.Top(Page.Sound), rail) { go(Page.Sound) }
         // A small dot while an update waits to go in; the news itself is in Settings > About.
         NavRow("Settings", OctoIcons.Settings, lit == SidebarItem.Top(Page.Settings), rail, mark = app.updates?.ready != null) { go(Page.Settings) }
@@ -206,11 +212,40 @@ private fun LazyListScope.group(
     if (!shut) rows()
 }
 
-// One place to go: an icon and its name, the chosen one on the darker
-// pill. On the rail, the icon alone with its name in a tooltip.
+// The downloads drawer's way in, on a server that keeps a log of its
+// downloads: it opens and closes the side panel's Downloads tab, and a
+// ring beside it fills while anything is on its way.
 @Composable
-private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Boolean, modifier: Modifier = Modifier, mark: Boolean = false, onClick: () -> Unit) {
-    val named = if (mark) "$label, update ready" else label
+private fun DownloadsRow(app: AppState, rail: Boolean) {
+    val drawer = app.downloads?.takeIf { it.supported == true } ?: return
+    val rows by drawer.rows.collectAsState()
+    val running = runningCount(rows)
+    NavRow(
+        DOWNLOADS,
+        OctoIcons.Download,
+        app.sidePanel == SidePanel.Downloads,
+        rail,
+        state = if (running > 0) "$running on the way" else null,
+        trailing = if (running > 0) ({ ProgressRing(overallFraction(rows), size = IconSize.Table) }) else null,
+    ) { app.toggleSidePanel(SidePanel.Downloads) }
+}
+
+// One place to go: an icon and its name, the chosen one on the darker
+// pill. On the rail, the icon alone with its name in a tooltip. `trailing`
+// sits at the row's end, or over the icon's corner on the rail.
+@Composable
+private fun NavRow(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    rail: Boolean,
+    modifier: Modifier = Modifier,
+    mark: Boolean = false,
+    state: String? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    onClick: () -> Unit,
+) {
+    val named = listOfNotNull(label, "update ready".takeIf { mark }, state).joinToString(", ")
     val row: @Composable () -> Unit = {
         Box(
             modifier
@@ -231,8 +266,9 @@ private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Bo
                     // On the rail the dot sits on the icon's corner.
                     if (mark && rail) NavMark(Modifier.align(Alignment.TopEnd))
                 }
-                if (!rail) Txt(label, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary)
+                if (!rail) Txt(label, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f, fill = trailing != null))
                 if (mark && !rail) NavMark()
+                if (trailing != null && !rail) trailing()
             }
         }
     }

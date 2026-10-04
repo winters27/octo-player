@@ -82,6 +82,9 @@ class Downloads @Inject constructor(
     private val admin: OctoAdmin,
     private val feedback: Feedback,
     private val hint: AddHint,
+    // The server downloads sheet, told when a song is asked for so its
+    // list looks now. Lazy: it only follows, and nothing here waits on it.
+    private val serverDownloads: Lazy<app.winters.octo.data.ServerDownloads>,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var checks: Job? = null
@@ -183,6 +186,7 @@ class Downloads @Inject constructor(
             hint.added()
             arrivals.askedSong(track.id, track.title)
             tracker.retry(track.id)
+            serverDownloads.get().wake()
             follow()
             true
         } catch (e: SubsonicException) {
@@ -203,6 +207,7 @@ class Downloads @Inject constructor(
             val coming = finds.filter { state(it.id) != DownloadState.Done }
             arrivals.askedAlbum(title.ifBlank { coming.firstOrNull()?.album.orEmpty() }, coming.map { it.id })
             coming.forEach { tracker.retry(it.id) }
+            serverDownloads.get().wake()
             follow()
             true
         } catch (e: SubsonicException) {

@@ -54,6 +54,10 @@ fun findHigherQualityQuestion(count: Int, source: String? = null): String = "${f
 // says its own.
 data class UpgradeAsk(val id: String, val title: String)
 
+// What asking for songs came to: the line for those the server took on,
+// and the line for those it would not, each null when there is none.
+data class AskedLines(val asked: String?, val problems: String?)
+
 // What one look at the server's list means: a line to show, if any, and
 // whether the library should be read again now.
 data class UpgradeNews(val notice: String?, val reload: Boolean)
@@ -119,21 +123,27 @@ class UpgradeFollower(
 
     // The line once every song sent has been answered, or null when there
     // is nothing to say.
+    fun askedNotice(): String? =
+        askedLines().let { listOfNotNull(it.asked, it.problems).joinToString(". ").ifEmpty { null } }
+
+    // The same, in two parts: what the server took on, which an app with a
+    // downloads drawer shows there, and what it would not, which is said
+    // where the listener reads it.
     @Synchronized
-    fun askedNotice(): String? {
-        val parts = buildList {
-            if (queued > 0) add("Looking for higher quality for ${songsText(queued)}")
+    fun askedLines(): AskedLines {
+        val asked = if (queued > 0) "Looking for higher quality for ${songsText(queued)}" else null
+        val problems = buildList {
             when (refused.size) {
                 0 -> Unit
                 1 -> add("Could not look for higher quality for ${refused[0].first}: ${refused[0].second}")
                 else -> add("Could not look for higher quality for ${songsText(refused.size)}: ${refused[0].second}")
             }
-            if (over > 0) add("At most $UPGRADE_BATCH songs at a time, so ${songsText(over)} were left out")
+            if (over > 0) add("At most $UPGRADE_BATCH songs at a time, so ${songsText(over)} ${if (over == 1) "was" else "were"} left out")
         }
         queued = 0
         over = 0
         refused.clear()
-        return parts.joinToString(". ").ifEmpty { null }
+        return AskedLines(asked, problems.joinToString(". ").ifEmpty { null })
     }
 
     // Takes on the songs the server is still on from before, such as from

@@ -164,6 +164,9 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
                             SidePanel.Info -> Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f), RoundedCornerShape(20.dp)).padding(top = 8.dp)) {
                                 InfoPanel(app, Modifier.fillMaxSize())
                             }
+                            SidePanel.Downloads -> Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f), RoundedCornerShape(20.dp)).padding(top = 8.dp)) {
+                                DownloadsPanel(app, Modifier.fillMaxSize())
+                            }
                         }
                     }
                 }

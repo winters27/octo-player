@@ -228,6 +228,35 @@ class UpgradeModelTest {
         assertEquals("Looking for higher quality for 50 songs. At most 50 songs at a time, so 10 songs were left out", notices.first())
     }
 
+    // With a downloads drawer, how the looking goes is the drawer's: only
+    // what the server would not do stays in the notice (the line that used
+    // to sit at the top of the page for good).
+    @Test
+    fun withADrawerOnlyARefusalIsANotice() = runBlocking {
+        versions(1, 2)
+        gate()
+        upgrades()
+        val asked = CopyOnWriteArrayList<String>()
+        val done = CopyOnWriteArrayList<String>()
+        val model = UpgradeModel(
+            server.client(), scope, reload = {}, notify = { notices += it },
+            asked = { asked += it }, done = { done += it }, pollMs = 30, recheckMs = 60_000,
+        )
+        model.start()
+        until("the action is known") { model.canUpgrade }
+        queueEverything()
+        upgrades(row("a", "working"))
+        model.request((1..51).map { song(if (it == 1) "a" else "s$it") })
+        until("the asking was said") { asked.isNotEmpty() && notices.isNotEmpty() }
+        assertEquals(listOf("Looking for higher quality for 50 songs"), asked)
+        assertEquals(listOf("At most 50 songs at a time, so 1 song was left out"), notices)
+
+        upgrades(row("a", "upgraded"))
+        until("the end was said") { done.isNotEmpty() }
+        assertEquals("Found higher quality for 1 song", done.first())
+        assertEquals(1, notices.size)
+    }
+
     @Test
     fun aSongTheServerWillNotDoIsNotFollowed() = runBlocking {
         val model = ready()

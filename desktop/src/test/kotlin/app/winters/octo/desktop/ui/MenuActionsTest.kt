@@ -114,6 +114,15 @@ class MenuActionsTest {
     }
 
     @Test
+    fun findSongsSitsBesideTheDetails_ForOneSongOnAServerThatKeepsLogs() {
+        assertEquals(listOf("Song details", "Find songs"), songMenuActions(1, SongPlace.Library, canFind = true)[3].map { songActionLabel(it, false) })
+        // A song found online can be looked for too, to pick its copy before it downloads.
+        assertEquals(true, songMenuActions(1, SongPlace.Library, outside = true, canFind = true).flatten().contains(SongAction.FindSongs))
+        assertEquals(false, songMenuActions(2, SongPlace.Library, canFind = true).flatten().contains(SongAction.FindSongs))
+        assertEquals(false, songMenuActions(1, SongPlace.Library).flatten().contains(SongAction.FindSongs))
+    }
+
+    @Test
     fun findInFlacNeedsAServerThatCanAndNeverForSongsFoundOnline() {
         // Not offered when the server cannot, or no picked song loses detail.
         assertEquals(false, songMenuActions(1, SongPlace.Library).flatten().contains(SongAction.FindFlac))

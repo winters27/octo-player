@@ -1,0 +1,323 @@
+package app.winters.octo.ui.downloads
+
+import app.winters.octo.subsonic.Acquisition
+import app.winters.octo.subsonic.AcquisitionKind
+import app.winters.octo.subsonic.AcquisitionStage
+import app.winters.octo.subsonic.FoundCandidate
+import app.winters.octo.subsonic.LogKind
+import app.winters.octo.subsonic.Upgrade
+import app.winters.octo.subsonic.UpgradeStage
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+// The downloads drawer, as the phone and the desktop both show it: one row
+// for each download the server is doing for this person, or did lately,
+// and the words for its log and for Find songs. The apps run the calls and
+// draw; what each answer means is worked out here, once.
+
+// The drawer's title, and the name of its button.
+const val DOWNLOADS = "Downloads"
+
+// The power user's way back into a search: the button and its page title.
+const val FIND_SONGS = "Find songs"
+
+// A finished upgrade the server keeps for a week shows this long in the
+// drawer, as a finished download does.
+const val FINISHED_SHOWN_MS = 3 * 60 * 60_000L
+
+// What a row is for.
+enum class RowKind { Download, Upgrade, Pick }
+
+// Where a row has got to, as the drawer draws it.
+enum class RowPhase {
+    Waiting,
+    Searching,
+    Downloading,
+    Checking,
+    Adding,
+    Done,
+    Failed,
+    ;
+
+    val finished: Boolean get() = this == Done || this == Failed
+}
+
+// One row of the drawer.
+data class DownloadRow(
+    // The row's own key: a download's, or "upgrade:<id>" for a higher
+    // quality copy that has not started downloading.
+    val key: String,
+    val title: String,
+    val artist: String,
+    val album: String?,
+    // The picture to draw, by its id on the server.
+    val coverArt: String?,
+    val kind: RowKind,
+    val phase: RowPhase,
+    // How far, from 0 to 1, while it downloads and the server knows.
+    val fraction: Float?,
+    // The one line under the title: "Downloading from Soulseek, 42%".
+    val status: String,
+    // The copy being fetched, once chosen: "FLAC 16-bit 44.1 kHz".
+    val quality: String?,
+    val source: String?,
+    val startedAt: String?,
+    val updatedAt: String?,
+    // The download whose log opens from this row, when there is one.
+    val logKey: String?,
+    // What Find songs looks for from this row: the library song once it is
+    // there, otherwise the found song.
+    val findId: String?,
+) {
+    val finished: Boolean get() = phase.finished
+}
+
+// The rows to show, running ones first and newest first within each:
+// every download the server lists, and every higher quality copy asked
+// for, joined to its download once it has one. Finished upgrades leave
+// after FINISHED_SHOWN_MS, and rows in `hidden` (cleared here) not at all.
+fun drawerRows(
+    acquisitions: List<Acquisition>,
+    upgrades: List<Upgrade>,
+    now: Long = System.currentTimeMillis(),
+    hidden: Set<String> = emptySet(),
+): List<DownloadRow> {
+    val byKey = upgrades.filter { it.acquisition != null }.associateBy { it.acquisition!! }
+    val fromDownloads = acquisitions.map { rowOf(it, it.key?.let(byKey::get)) }
+    val joined = fromDownloads.map { it.key }.toSet()
+    val fromUpgrades = upgrades
+        .groupBy { it.id }
+        .mapNotNull { (_, entries) -> entries.firstOrNull { it.stage.pending } ?: entries.maxByOrNull { it.updatedAt.orEmpty() } }
+        .filter { it.acquisition == null || it.acquisition !in joined }
+        .map(::rowOf)
+        .filter { !it.finished || ageMs(it.updatedAt, now)?.let { age -> age < FINISHED_SHOWN_MS } ?: false }
+    return (fromDownloads + fromUpgrades)
+        .filter { it.key !in hidden }
+        .sortedWith(compareBy<DownloadRow> { it.finished }.thenByDescending { if (it.finished) it.updatedAt.orEmpty() else it.startedAt.orEmpty() })
+}
+
+// A download as a row. `upgrade` is the higher quality copy it fetches,
+// whose verdict comes after the download's own end.
+fun rowOf(acquisition: Acquisition, upgrade: Upgrade? = null): DownloadRow {
+    val kind = when (acquisition.kind) {
+        AcquisitionKind.UPGRADE -> RowKind.Upgrade
+        AcquisitionKind.PICK -> RowKind.Pick
+        else -> if (upgrade != null) RowKind.Upgrade else RowKind.Download
+    }
+    var phase = phaseOf(acquisition.stage)
+    var status = statusOf(acquisition)
+    // The upgrade's own answer is the last word: in the library is not yet
+    // "upgraded", and a download that failed may still have kept your copy.
+    if (upgrade != null) {
+        when (upgrade.stage) {
+            UpgradeStage.Upgraded -> { phase = RowPhase.Done; status = upgrade.detail?.let(::sentence) ?: "Upgraded" }
+            UpgradeStage.NotFound -> { phase = RowPhase.Failed; status = "No higher quality copy found" }
+            UpgradeStage.Failed, UpgradeStage.Skipped -> { phase = RowPhase.Failed; status = upgrade.detail?.let(::sentence) ?: "Your copy is unchanged" }
+            UpgradeStage.Rehearsed -> { phase = RowPhase.Done; status = "Only rehearsed; nothing changed" }
+            // Downloaded, but still being judged before it takes the old one's place.
+            else -> if (phase.finished) { phase = RowPhase.Checking; status = "Checking it before it replaces your copy" }
+        }
+    }
+    val title = acquisition.title.ifBlank { upgrade?.title.orEmpty() }
+    return DownloadRow(
+        key = acquisition.key ?: "${acquisition.id}:${acquisition.startedAt.orEmpty()}",
+        title = title.ifBlank { "A song" },
+        artist = acquisition.artist.ifBlank { upgrade?.artist.orEmpty() },
+        album = acquisition.album ?: upgrade?.album,
+        coverArt = acquisition.coverArt ?: acquisition.libraryId ?: acquisition.id.takeIf(String::isNotBlank),
+        kind = kind,
+        phase = phase,
+        fraction = if (phase == RowPhase.Downloading) acquisition.fraction else null,
+        status = status,
+        quality = acquisition.quality,
+        source = acquisition.source,
+        startedAt = acquisition.startedAt,
+        updatedAt = maxOf(acquisition.updatedAt.orEmpty(), upgrade?.updatedAt.orEmpty()).ifEmpty { null },
+        logKey = acquisition.key,
+        findId = upgrade?.id ?: acquisition.libraryId ?: acquisition.id.takeIf(String::isNotBlank),
+    )
+}
+
+// A higher quality copy that has no download of its own yet, or whose
+// download is gone from the server's list.
+fun rowOf(upgrade: Upgrade): DownloadRow {
+    val (phase, status) = when (upgrade.stage) {
+        UpgradeStage.Queued -> RowPhase.Waiting to "Waiting its turn"
+        UpgradeStage.Waiting -> RowPhase.Waiting to "Waiting for Soulseek"
+        UpgradeStage.Working -> RowPhase.Searching to "Looking for a higher quality copy"
+        UpgradeStage.Upgraded -> RowPhase.Done to (upgrade.detail?.let(::sentence) ?: "Upgraded")
+        UpgradeStage.NotFound -> RowPhase.Failed to "No higher quality copy found"
+        UpgradeStage.Rehearsed -> RowPhase.Done to "Only rehearsed; nothing changed"
+        UpgradeStage.Skipped, UpgradeStage.Failed -> RowPhase.Failed to (upgrade.detail?.let(::sentence) ?: "Your copy is unchanged")
+        UpgradeStage.Unknown -> RowPhase.Searching to "Looking for a higher quality copy"
+    }
+    return DownloadRow(
+        key = "upgrade:${upgrade.id}",
+        title = upgrade.title.ifBlank { "A song" },
+        artist = upgrade.artist,
+        album = upgrade.album,
+        coverArt = upgrade.id,
+        kind = if (upgrade.picked != null) RowKind.Pick else RowKind.Upgrade,
+        phase = phase,
+        fraction = upgrade.fraction.takeIf { phase == RowPhase.Searching },
+        status = status,
+        quality = null,
+        source = null,
+        startedAt = upgrade.updatedAt,
+        updatedAt = upgrade.updatedAt,
+        logKey = upgrade.acquisition,
+        findId = upgrade.id,
+    )
+}
+
+fun phaseOf(stage: AcquisitionStage): RowPhase = when (stage) {
+    AcquisitionStage.Queued -> RowPhase.Waiting
+    AcquisitionStage.Searching, AcquisitionStage.Unknown -> RowPhase.Searching
+    AcquisitionStage.Downloading -> RowPhase.Downloading
+    AcquisitionStage.Verifying -> RowPhase.Checking
+    AcquisitionStage.Importing -> RowPhase.Adding
+    AcquisitionStage.Done -> RowPhase.Done
+    AcquisitionStage.Failed -> RowPhase.Failed
+}
+
+// The line under a download's title.
+fun statusOf(acquisition: Acquisition): String = when (acquisition.stage) {
+    AcquisitionStage.Queued -> acquisition.ahead?.takeIf { it > 0 }?.let { "Waiting, $it ahead" } ?: "Waiting its turn"
+    AcquisitionStage.Searching, AcquisitionStage.Unknown ->
+        acquisition.note?.let(::sentence) ?: acquisition.source?.let { "Looking on $it" } ?: "Looking for a copy"
+    AcquisitionStage.Downloading -> buildString {
+        append("Downloading")
+        acquisition.source?.takeIf(String::isNotBlank)?.let { append(" from $it") }
+        acquisition.fraction?.let { append(", ${(it * 100).toInt()}%") }
+    }
+    AcquisitionStage.Verifying -> "Checking the file"
+    AcquisitionStage.Importing -> "Adding to your library"
+    AcquisitionStage.Done -> "In your library"
+    AcquisitionStage.Failed -> acquisition.error?.let(::sentence) ?: "Could not get it"
+}
+
+// "What it is for", as a small word beside the title, or null for a plain
+// download.
+fun kindLabel(kind: RowKind): String? = when (kind) {
+    RowKind.Download -> null
+    RowKind.Upgrade -> "Higher quality"
+    RowKind.Pick -> "Picked"
+}
+
+// The line over the list: "2 on the way, 5 finished".
+fun drawerSummary(rows: List<DownloadRow>): String {
+    val running = runningCount(rows)
+    val finished = rows.size - running
+    return listOfNotNull(
+        running.takeIf { it > 0 }?.let { "$it on the way" },
+        finished.takeIf { it > 0 }?.let { "$it finished" },
+    ).joinToString(", ")
+}
+
+// What the drawer says with nothing in it.
+const val DOWNLOADS_EMPTY = "Nothing downloading. Songs you add show here, with every step on the way."
+
+// What Find songs says about picking, for a song in the library and one
+// that is not.
+const val FIND_REPLACES = "Only a lossless copy can take your copy's place, and yours stays until the new one passes every check."
+const val FIND_DOWNLOADS = "Pick a copy to download that one. It goes through the same checks as any download."
+
+// The library's copy of a song, in words: "Your copy: MP3 220 kbps, 7.0 MB".
+fun ownedCopyText(quality: String?, size: Long?, locale: Locale = Locale.getDefault()): String? {
+    val what = listOfNotNull(quality?.takeIf(String::isNotBlank), size?.takeIf { it > 0 }?.let { bytesText(it, locale) })
+    return if (what.isEmpty()) null else "Your copy: ${what.joinToString(", ")}"
+}
+
+// How many rows are still running, for the drawer's button.
+fun runningCount(rows: List<DownloadRow>): Int = rows.count { !it.finished }
+
+// The overall progress the drawer's button shows: the mean of the rows
+// downloading, or null when none says how far it is.
+fun overallFraction(rows: List<DownloadRow>): Float? =
+    rows.mapNotNull { it.fraction.takeIf { _ -> !it.finished } }.takeIf { it.isNotEmpty() }?.average()?.toFloat()
+
+// ---------------------------------------------------------------------------
+// The log
+// ---------------------------------------------------------------------------
+
+// What a line of the log is drawn with. The apps pick an icon for each.
+enum class LogMark { Queued, Search, Found, Try, Transfer, Check, Tags, Cover, Lyrics, Library, Done, Failed, Note }
+
+fun markOf(kind: LogKind): LogMark = when (kind) {
+    LogKind.Queued -> LogMark.Queued
+    LogKind.Search -> LogMark.Search
+    LogKind.Found -> LogMark.Found
+    LogKind.Try -> LogMark.Try
+    LogKind.Transfer -> LogMark.Transfer
+    LogKind.Check -> LogMark.Check
+    LogKind.Tags -> LogMark.Tags
+    LogKind.Cover -> LogMark.Cover
+    LogKind.Lyrics -> LogMark.Lyrics
+    LogKind.Library -> LogMark.Library
+    LogKind.Done -> LogMark.Done
+    LogKind.Failed -> LogMark.Failed
+    LogKind.Note, LogKind.Unknown -> LogMark.Note
+}
+
+// The clock time of a line, "18:04:31", in this computer's time zone.
+fun logTime(at: String?, zone: ZoneId = ZoneId.systemDefault()): String =
+    at?.let { runCatching { Instant.parse(it) }.getOrNull() }
+        ?.let { DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT).withZone(zone).format(it) }
+        .orEmpty()
+
+// The facts of a copy, in the order a person weighs them: its quality, its
+// size and length, then where it comes from and how soon.
+fun candidateFacts(copy: FoundCandidate, locale: Locale = Locale.getDefault()): List<String> = buildList {
+    (copy.quality ?: copy.format?.uppercase(Locale.ROOT))?.takeIf(String::isNotBlank)?.let(::add)
+    copy.size?.takeIf { it > 0 }?.let { add(bytesText(it, locale)) }
+    copy.length?.takeIf { it > 0 }?.let { add(clockText(it)) }
+    copy.source.takeIf(String::isNotBlank)?.let(::add)
+    copy.peer?.takeIf(String::isNotBlank)?.let(::add)
+    val queue = copy.queueLength
+    when {
+        copy.freeSlot == true -> add("Free to send now")
+        queue != null && queue > 0 -> add("$queue in queue")
+    }
+    copy.speed?.takeIf { it > 0 }?.let { add(speedText(it, locale)) }
+}
+
+// The line a copy is known by: its title, or its file's name.
+fun candidateTitle(copy: FoundCandidate): String =
+    copy.title?.takeIf(String::isNotBlank) ?: copy.file?.takeIf(String::isNotBlank) ?: copy.source
+
+// "Octo's first choice", or the server's reason for passing it over.
+fun candidateVerdict(copy: FoundCandidate): String? = when {
+    copy.rank == 1 -> "Octo's first choice"
+    copy.rank != null -> "Octo's choice ${copy.rank}"
+    else -> copy.note?.let(::sentence)
+}
+
+// Whether a copy is lossless, by its kind.
+fun isLosslessCopy(copy: FoundCandidate): Boolean =
+    copy.format?.trim()?.trimStart('.')?.lowercase(Locale.ROOT)?.substringBefore(' ')?.substringBefore('-') in LOSSLESS
+
+private val LOSSLESS = setOf("flac", "wav", "alac", "ape", "aiff", "aif", "wv")
+
+// Kilobytes under a megabyte, megabytes above.
+fun bytesText(bytes: Long, locale: Locale = Locale.getDefault()): String = when {
+    bytes < 1_048_576 -> "%.0f KB".format(locale, bytes / 1024.0)
+    bytes < 1_073_741_824 -> "%.1f MB".format(locale, bytes / 1_048_576.0)
+    else -> "%.2f GB".format(locale, bytes / 1_073_741_824.0)
+}
+
+// "3:07".
+fun clockText(seconds: Int): String = "%d:%02d".format(Locale.ROOT, seconds / 60, seconds % 60)
+
+// Bytes a second as "1.4 MB/s" or "340 KB/s".
+fun speedText(bytesPerSecond: Int, locale: Locale = Locale.getDefault()): String =
+    if (bytesPerSecond >= 1_048_576) "%.1f MB/s".format(locale, bytesPerSecond / 1_048_576.0)
+    else "%d KB/s".format(locale, maxOf(1, bytesPerSecond / 1024))
+
+// How long ago an ISO time was, or null when it cannot be read.
+internal fun ageMs(at: String?, now: Long): Long? =
+    at?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }?.let { now - it }
+
+// The server's words as one line: trimmed, without a closing full stop.
+internal fun sentence(text: String): String? = text.trim().trimEnd('.').trim().ifEmpty { null }

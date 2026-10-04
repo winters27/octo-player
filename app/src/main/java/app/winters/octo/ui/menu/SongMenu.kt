@@ -114,7 +114,7 @@ val LocalSongMenu = staticCompositionLocalOf<SongMenuState> { error("No song men
 // The choices in a song's menu, in the order shown.
 enum class SongAction {
     PlayNext, AddToQueue, StartRadio, Download, AddToLastPlaylist, AddToPlaylist, RemoveFromPlaylist, Select, KeepOffline, FindFlac, ShareFile, Share, Like,
-    Rate, GoToAlbum, GoToArtist, SetAsSound, DeleteFromPhone, Info,
+    Rate, GoToAlbum, GoToArtist, SetAsSound, DeleteFromPhone, Info, FindSongs,
 }
 
 // Where the menu was opened, as the choices care about it.
@@ -146,6 +146,8 @@ fun menuPlace(context: SongMenuContext, albumId: String, artistId: String): Menu
 // `lastPlaylist` is whether a playlist was added to lately, offered first
 // among the ways to keep the song. `upgrade` is whether an Octo server can
 // look for a FLAC to take the place of its copy there, one that loses detail.
+// `findSongs` is whether the server can run the song's search again so a
+// copy can be picked (Find songs), for a found song or one it has a copy of.
 fun songActions(
     find: Boolean,
     radio: Boolean,
@@ -155,6 +157,7 @@ fun songActions(
     phone: Boolean = false,
     lastPlaylist: Boolean = false,
     upgrade: Boolean = false,
+    findSongs: Boolean = false,
 ): List<SongAction> = buildList {
     add(SongAction.PlayNext)
     add(SongAction.AddToQueue)
@@ -182,6 +185,7 @@ fun songActions(
         }
     }
     add(SongAction.Info)
+    if (findSongs) add(SongAction.FindSongs)
 }
 
 // How a song's menu groups its actions, top to bottom: playing it, keeping
@@ -191,7 +195,7 @@ private val SongMenuOrder = listOf(
     listOf(SongAction.PlayNext, SongAction.AddToQueue, SongAction.StartRadio),
     listOf(SongAction.AddToLastPlaylist, SongAction.AddToPlaylist, SongAction.Like, SongAction.Rate, SongAction.Download, SongAction.KeepOffline, SongAction.FindFlac),
     listOf(SongAction.GoToAlbum, SongAction.GoToArtist),
-    listOf(SongAction.Share, SongAction.ShareFile, SongAction.SetAsSound, SongAction.Info, SongAction.Select),
+    listOf(SongAction.Share, SongAction.ShareFile, SongAction.SetAsSound, SongAction.Info, SongAction.FindSongs, SongAction.Select),
     listOf(SongAction.RemoveFromPlaylist, SongAction.DeleteFromPhone),
 )
 
@@ -237,6 +241,7 @@ class SongMenuViewModel @Inject constructor(
     private val userDao: UserDao,
     private val feedback: Feedback,
     private val upgrades: Upgrades,
+    private val serverDownloads: app.winters.octo.data.ServerDownloads,
 ) : ViewModel() {
     val liked: StateFlow<Set<String>> = likes.liked
     val downloadStates: StateFlow<Map<String, DownloadState>> = downloads.states
@@ -263,6 +268,16 @@ class SongMenuViewModel @Inject constructor(
     suspend fun upgradable(trackId: String): List<UpgradeAsk> = if (isFind(trackId)) emptyList() else upgrades.upgradable(listOf(trackId))
 
     fun findFlac(asks: List<UpgradeAsk>) = upgrades.request(asks)
+
+    // Whether the signed-in server can run a song's search again (Find songs).
+    val canFindSongs: StateFlow<Boolean> = serverDownloads.supported
+
+    // Opens Find songs for a song, by its copy on the server or its found id.
+    fun findSongs(trackId: String, title: String) {
+        viewModelScope.launch {
+            if (!serverDownloads.findTrack(trackId, title)) feedback.show("This server has no copy of the song to look for")
+        }
+    }
 
     // The server's id for a song, when it has a copy there to share.
     suspend fun shareId(trackId: String): String? = if (isFind(trackId)) null else controls.serverSongId(trackId)
