@@ -126,6 +126,7 @@ fun ColumnScope.SongMenu(
                 inFolder = !one?.parent.isNullOrEmpty(),
                 canAdd = fetches != null,
                 canUpgrade = upgradable.isNotEmpty(),
+                canFind = app.downloads?.supported == true,
             ).forEachIndexed { index, group ->
                 if (index > 0) MenuSeparator()
                 group.forEach { action ->
@@ -165,6 +166,7 @@ fun ColumnScope.SongMenu(
                         SongAction.GoToArtist -> MenuRow(label, { one?.artistId?.let { app.navigator.go(Page.Artist(it, one.artist.orEmpty())) }; close() }, OctoIcons.Artist, enabled = !one?.artistId.isNullOrEmpty())
                         SongAction.ShowInFolder -> MenuRow(label, { one?.parent?.let { app.navigator.go(Page.Folder(it, "", focus = one.id)) }; close() }, OctoIcons.Folder)
                         SongAction.Details -> MenuRow(label, { app.showInfo(one); close() }, OctoIcons.Info)
+                        SongAction.FindSongs -> MenuRow(label, { one?.let(app::findSongs); close() }, OctoIcons.Search)
                         SongAction.Move -> MenuRow(label, { page = MenuPage.Move }, OctoIcons.Sort, more = true)
                         SongAction.RemoveFromPlaylist -> MenuRow(label, {
                             (place as? SongPlace.Playlist)?.let { app.removeFromPlaylist(it.id, it.positions) }

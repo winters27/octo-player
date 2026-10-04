@@ -66,6 +66,7 @@ fun commandsFor(app: AppState): List<Command> = buildList {
     add(Command("Show the queue", view, "up next panel") { app.showSidePanel(SidePanel.Queue) })
     add(Command("Show lyrics", view, "words panel") { app.showSidePanel(SidePanel.Lyrics) })
     add(Command("Show song details", view, "info panel") { app.showInfo(null) })
+    if (app.downloads?.supported == true) add(Command("Show downloads", view, "downloads log progress drawer") { app.showSidePanel(SidePanel.Downloads) })
     if (app.sidePanel != null) add(Command("Close the side panel", view, "hide panel") { app.showSidePanel(null) })
     add(Command(if (app.settings.current.frame.sidebarRail) "Unfold the sidebar" else "Fold the sidebar to icons", view, "sidebar rail compact") { app.updateFrame { it.copy(sidebarRail = !it.sidebarRail) } })
     app.toggleMiniPlayer?.let { toggle -> add(Command("Mini player", view, "small window compact") { toggle() }) }

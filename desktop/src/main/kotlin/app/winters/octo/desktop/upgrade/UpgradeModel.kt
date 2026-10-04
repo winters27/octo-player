@@ -39,8 +39,13 @@ class UpgradeModel(
     parent: CoroutineScope,
     // Reads the library again, for the new files' kind and size.
     private val reload: () -> Unit,
-    // Shows one line in the window's notice.
+    // Shows one line in the window's notice: what went wrong asking, and,
+    // when the two below are not given, every other line too.
     private val notify: (String) -> Unit,
+    // Told when the server took songs on, and when some are done. With a
+    // downloads drawer these lines belong there, not in a notice that stays.
+    private val asked: ((String) -> Unit)? = null,
+    private val done: ((String) -> Unit)? = null,
     private val pollMs: Long = UPGRADE_POLL_MS,
     private val recheckMs: Long = UPGRADE_RECHECK_MS,
     reloadGapMs: Long = UPGRADE_RELOAD_GAP_MS,
@@ -116,7 +121,13 @@ class UpgradeModel(
                 }
                 show()
             }
-            follower.askedNotice()?.let(notify)
+            if (asked == null) {
+                follower.askedNotice()?.let(notify)
+            } else {
+                val lines = follower.askedLines()
+                lines.asked?.let(asked)
+                lines.problems?.let(notify)
+            }
             follow()
         }
     }
@@ -141,7 +152,7 @@ class UpgradeModel(
         }
         val news = follower.seen(list)
         show()
-        news.notice?.let(notify)
+        news.notice?.let(done ?: notify)
         if (news.reload) reload()
     }
 

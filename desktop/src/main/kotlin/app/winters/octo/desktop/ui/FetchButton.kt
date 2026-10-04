@@ -83,17 +83,19 @@ fun FetchButton(
     val phases by fetches.phases.collectAsState()
     val phase = phases[song.id] ?: FetchPhase.None
     val canAsk = phase == FetchPhase.None || phase is FetchPhase.Failed
+    // On its way, a press follows it in the downloads drawer, where there is one.
+    val canFollow = !canAsk && phase != FetchPhase.Done && app.downloads?.supported == true
     val hint = when (phase) {
         FetchPhase.None -> "Add to your library"
         is FetchPhase.Failed -> "Couldn't add it: ${phase.reason}. Press to try again."
-        else -> phaseText(phase)
+        else -> if (canFollow) "${phaseText(phase)}. Press to follow it." else phaseText(phase)
     }
     OctoTooltip(hint) {
         Box(
             Modifier
                 .size(size)
-                .hoverLift(CircleShape, clickable = canAsk)
-                .clickable(enabled = canAsk) { fetches.request(song.id) }
+                .hoverLift(CircleShape, clickable = canAsk || canFollow)
+                .clickable(enabled = canAsk || canFollow) { if (canAsk) fetches.request(song.id) else app.followDownload(song.id) }
                 .semantics {
                     contentDescription = "Add to your library"
                     stateDescription = phaseText(phase)

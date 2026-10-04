@@ -40,6 +40,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import app.winters.octo.desktop.search.Fetches
 import app.winters.octo.desktop.upgrade.UpgradeModel
+import app.winters.octo.desktop.downloads.DownloadsModel
+import kotlinx.coroutines.delay
 import app.winters.octo.desktop.search.OmniboxState
 import app.winters.octo.desktop.search.SearchModel
 import app.winters.octo.desktop.server.Accounts
@@ -78,11 +80,17 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
+// How long a notice said in passing stays up.
+const val PASSING_NOTICE_MS = 6_000L
+
 // The panel that can open on the right of the main area.
 enum class SidePanel(val key: String) {
     Queue("queue"),
     Lyrics("lyrics"),
     Info("info"),
+
+    // The downloads drawer, on a server that keeps a log of its downloads.
+    Downloads("downloads"),
     ;
 
     companion object {
@@ -150,6 +158,10 @@ class AppState(
 
     // "Find higher quality" on an Octo server; null on any other.
     var upgrades by mutableStateOf<UpgradeModel?>(null)
+        private set
+
+    // The downloads drawer on an Octo server; null on any other.
+    var downloads by mutableStateOf<DownloadsModel?>(null)
         private set
     var search by mutableStateOf<SearchModel?>(null)
         private set
@@ -314,6 +326,7 @@ class AppState(
     fun signedIn(connection: Connection, note: String? = null, page: Page = Page.Home) {
         val views = viewsOf(connection)
         val old = upgrades
+        val oldDownloads = downloads
         together {
             show(connection, views)
             notice = note
@@ -328,6 +341,7 @@ class AppState(
             navigator.startOver(page)
         }
         old?.close()
+        oldDownloads?.close()
         startReading(views)
         startListening(connection)
     }
@@ -336,8 +350,10 @@ class AppState(
     private fun useConnection(connection: Connection) {
         val views = viewsOf(connection)
         val old = upgrades
+        val oldDownloads = downloads
         together { show(connection, views) }
         old?.close()
+        oldDownloads?.close()
         startReading(views)
     }
 
@@ -349,19 +365,76 @@ class AppState(
         val search: SearchModel,
         val home: HomeStore,
         val upgrades: UpgradeModel?,
+        val downloads: DownloadsModel?,
     )
 
     private fun viewsOf(connection: Connection): ServerViews {
         val store = LibraryStore(connection.client, scope)
         return ServerViews(
             store,
-            if (connection.acquires) Fetches(connection.client, scope, onArrived = { store.load() }) else null,
+            if (connection.acquires) Fetches(connection.client, scope, onArrived = { store.load() }, onAsked = { downloads?.wake() }) else null,
             SearchModel(connection, { store.index }, { playlists }, scope),
             HomeStore(connection, scope),
             // Any Octo server: whether it can look for FLACs is asked live,
             // since the extensions saved at sign-in may be older than it.
-            if (connection.isOcto) UpgradeModel(connection.client, scope, reload = { store.load() }, notify = { notice = it }) else null,
+            // How the looking goes is the drawer's to show; only a refusal
+            // stays in the notice.
+            if (connection.isOcto) {
+                UpgradeModel(
+                    connection.client, scope, reload = { store.load() }, notify = { notice = it },
+                    asked = ::upgradeAsked, done = ::upgradeDone,
+                )
+            } else {
+                null
+            },
+            // The same for the downloads drawer.
+            if (connection.isOcto) DownloadsModel(connection.client, scope) else null,
         )
+    }
+
+    // Songs the server took on for a higher quality copy: said in passing,
+    // with the drawer one click away when there is one.
+    private fun upgradeAsked(line: String) {
+        val drawer = downloads?.takeIf { it.supported == true }
+        drawer?.wake()
+        passingNotice(line, drawer?.let { NoticeAction(line, "Show downloads") { showSidePanel(SidePanel.Downloads) } })
+    }
+
+    // Some are done: the drawer says how each went. Without one, said in
+    // passing, never left at the top of the page.
+    private fun upgradeDone(line: String) {
+        val drawer = downloads?.takeIf { it.supported == true }
+        if (drawer != null) drawer.wake() else passingNotice(line)
+    }
+
+    // A notice that leaves on its own a few seconds later, unless another
+    // took its place meanwhile.
+    fun passingNotice(line: String, action: NoticeAction? = null) {
+        notice = line
+        noticeDetail = null
+        noticeAction = action
+        scope.launch {
+            delay(PASSING_NOTICE_MS)
+            if (notice == line) {
+                notice = null
+                if (noticeAction?.text == line) noticeAction = null
+            }
+        }
+    }
+
+    // Opens the downloads drawer on a song's download, or on the list when
+    // the server has not listed it yet.
+    fun followDownload(id: String) {
+        val drawer = downloads?.takeIf { it.supported == true } ?: return
+        if (!drawer.showLogOf(id)) drawer.showList()
+        showSidePanel(SidePanel.Downloads)
+    }
+
+    // Opens the downloads drawer on Find songs for one song.
+    fun findSongs(song: Song) {
+        val drawer = downloads?.takeIf { it.supported == true } ?: return
+        drawer.find(song.id, song.title)
+        showSidePanel(SidePanel.Downloads)
     }
 
     private fun show(connection: Connection, views: ServerViews) {
@@ -369,6 +442,7 @@ class AppState(
         library = views.library
         fetches = views.fetches
         upgrades = views.upgrades
+        downloads = views.downloads
         search = views.search
         home = views.home
         health.forget()
@@ -378,6 +452,7 @@ class AppState(
     private fun startReading(views: ServerViews) {
         views.library.load()
         views.upgrades?.start()
+        views.downloads?.start()
         refreshPlaylists()
     }
 
@@ -440,12 +515,14 @@ class AppState(
     private fun signedOut() {
         val form = SignInForm(accounts.last)
         upgrades?.close()
+        downloads?.close()
         together {
             signInForm = form
             connection = null
             library = null
             fetches = null
             upgrades = null
+            downloads = null
             search = null
             home = null
             health.forget()

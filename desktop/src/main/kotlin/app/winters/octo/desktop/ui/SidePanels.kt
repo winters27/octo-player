@@ -127,13 +127,19 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 
 // The panel down the right of the frame, in its glass: the queue, the
 // lyrics, or the song's details, on tabs, so it can stay open while the
-// listener browses. The lyrics' menu sits beside the tabs; the queue has
-// its own over its list.
+// listener browses, or the downloads drawer on its own. The lyrics' menu
+// sits beside the tabs; the queue has its own over its list.
 @Composable
 fun ContextPanel(app: AppState, panel: SidePanel, backdrop: HazeState, modifier: Modifier = Modifier) {
     Column(modifier.chromeFilm(backdrop).padding(top = Space.M)) {
         Row(Modifier.fillMaxWidth().padding(start = Space.L, end = Space.S), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
-            GlazeSegments(SidePanel.entries, panel, { it.title }, app::showSidePanel)
+            // The downloads drawer is a sheet of its own, under its name; the
+            // others share the tabs.
+            if (panel == SidePanel.Downloads) {
+                Txt(panel.title, DesktopType.section, OctoColors.TextPrimary, Modifier.padding(vertical = Space.S))
+            } else {
+                GlazeSegments(SidePanel.entries - SidePanel.Downloads, panel, { it.title }, app::showSidePanel)
+            }
             Spacer(Modifier.weight(1f))
             if (panel == SidePanel.Lyrics) LyricsMenuButton(app)
             IconAction(OctoIcons.Close, "Close the panel", { app.showSidePanel(null) }, size = ControlHeight.M, iconSize = IconSize.Toolbar)
@@ -142,6 +148,7 @@ fun ContextPanel(app: AppState, panel: SidePanel, backdrop: HazeState, modifier:
             SidePanel.Queue -> QueueList(app)
             SidePanel.Lyrics -> LyricsView(app, Modifier.fillMaxSize())
             SidePanel.Info -> InfoPanel(app, Modifier.fillMaxSize())
+            SidePanel.Downloads -> DownloadsPanel(app, Modifier.fillMaxSize())
         }
     }
 }
@@ -152,6 +159,7 @@ private val SidePanel.title: String
         SidePanel.Queue -> "Queue"
         SidePanel.Lyrics -> "Lyrics"
         SidePanel.Info -> "Info"
+        SidePanel.Downloads -> "Downloads"
     }
 
 // One line of the queue's list: a part's heading, or a song.
