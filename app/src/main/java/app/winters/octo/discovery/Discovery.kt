@@ -158,21 +158,32 @@ class Discovery @Inject constructor(
         return resolveEach(sourceId, songs).map { it.id }
     }
 
+    // The same, one for each song sent and in its place, null where a
+    // library song is gone: for lists whose places mean something, like a
+    // ranking. Nothing when no server is signed in.
+    internal suspend fun resolveInPlace(songs: List<Song>): List<TrackEntity?> {
+        val (_, sourceId) = server() ?: return emptyList()
+        return resolvedInPlace(sourceId, songs)
+    }
+
     // Songs from the server as the app shows them, in the order sent: a
     // library song as it is in the library, anything else as a find. A find
     // already downloaded is the library song it became.
-    private suspend fun resolve(client: SubsonicClient, sourceId: String, songs: List<Song>): List<TrackEntity> {
+    private suspend fun resolve(client: SubsonicClient, sourceId: String, songs: List<Song>): List<TrackEntity> =
+        resolvedInPlace(sourceId, songs).filterNotNull().distinctBy { it.id }
+
+    private suspend fun resolvedInPlace(sourceId: String, songs: List<Song>): List<TrackEntity?> {
         if (songs.isEmpty()) return emptyList()
         val each = resolveEach(sourceId, songs)
         val adopted = each.filterIsInstance<Resolved.Found>().mapNotNull { it.song.adoptedId.ifEmpty { null } }
         val library = catalog.tracksByIds(each.filterIsInstance<Resolved.InLibrary>().map { it.trackId } + adopted).associateBy { it.id }
         val resolved = each.map { asAdopted(it, library.keys) }
-        return resolved.mapNotNull { r ->
+        return resolved.map { r ->
             when (r) {
                 is Resolved.InLibrary -> library[r.trackId]
                 is Resolved.Found -> r.song.asTrack()
             }
-        }.distinctBy { it.id }
+        }
     }
 
     // What each song sent is, in order, with the finds among them kept.
