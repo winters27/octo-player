@@ -27,6 +27,23 @@ class LyricsStorageTest {
     }
 
     @Test
+    fun serverLyricsWithoutWordsAreAskedAgain() {
+        val lines = Lyrics(synced = true, lines = listOf(LyricLine(1_000, text = "line")), source = LyricsSource.Server)
+        val words = lines.copy(lines = listOf(LyricLine(1_000, text = "word", words = listOf(LyricWord(1_000, null, "word", 0, 4)))))
+        val fresh = CachedLyrics(savedAt = 0, lyrics = lines, askedOnline = true, lookupVersion = ONLINE_LOOKUP_VERSION)
+
+        // Saved before the server ranked a song's own lyrics: asked again at once.
+        assertFalse(fresh.copy(lookupVersion = 3).stillGood(now = 1, onlineAllowed = true))
+        // Line-timed: an hour, then asked again.
+        assertTrue(fresh.stillGood(now = SERVER_RECHECK_MS - 1, onlineAllowed = true))
+        assertFalse(fresh.stillGood(now = SERVER_RECHECK_MS, onlineAllowed = true))
+        // Word-timed: kept.
+        assertTrue(fresh.copy(lyrics = words, lookupVersion = 3).stillGood(now = 365L * NONE_FOUND_FOR_MS, onlineAllowed = true))
+        // Other sources: as before.
+        assertTrue(fresh.copy(lyrics = lines.copy(source = LyricsSource.SongFile)).stillGood(now = 365L * NONE_FOUND_FOR_MS, onlineAllowed = true))
+    }
+
+    @Test
     fun cachedAnswersKeepAndExpire() {
         val cache = LyricsCache(temp.newFolder("lyrics"))
         val lyrics = Lyrics(synced = true, lines = listOf(LyricLine(1_000, text = "Café 日本")), source = LyricsSource.SongFile)

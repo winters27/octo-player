@@ -15,7 +15,17 @@ const val SHORT_NONE_FOR_MS = 10 * 60 * 1000L
 
 // Raised when the online lookup learns a new way to find synced lyrics, so
 // songs that only got plain ones are asked again once.
-const val ONLINE_LOOKUP_VERSION = 3
+const val ONLINE_LOOKUP_VERSION = 4
+
+// The first answers saved once the server ranked a song's own lyrics among
+// its sources: lyrics it sent without word timing before that are asked
+// again once, as it may have word-timed ones now.
+private const val SERVER_RANKS_OWN_VERSION = 4
+
+// How long lyrics from the server without word timing are believed before it
+// is asked again: it may have found word-timed ones since (it keeps looking
+// after the phone stops waiting), or had its sources reordered.
+const val SERVER_RECHECK_MS = 60 * 60 * 1000L
 
 // The online lookup that could take another song's lyrics: it matched a
 // search result by length alone. What it found is asked again once.
@@ -54,8 +64,12 @@ data class CachedLyrics(
     // when it may be wrong (see SHORT_NONE_FOR_MS). An answer found
     // without asking online (it was off, or only plain lyrics were found)
     // is asked again once online lookups are allowed, in case synced ones
-    // are there.
+    // are there. The server's lyrics without word timing last an hour (see
+    // SERVER_RECHECK_MS).
     fun stillGood(now: Long, onlineAllowed: Boolean): Boolean {
+        if (lyrics != null && lyrics.source == LyricsSource.Server && !lyrics.instrumental && lyrics.lines.none { it.words.isNotEmpty() }) {
+            if (lookupVersion < SERVER_RANKS_OWN_VERSION || now - savedAt >= SERVER_RECHECK_MS) return false
+        }
         if (onlineAllowed && !askedOnline && lyrics?.synced != true) return false
         if (onlineAllowed && lyrics != null && !lyrics.synced && lookupVersion < ONLINE_LOOKUP_VERSION) return false
         if (onlineAllowed && lyrics?.source == LyricsSource.Online && lookupVersion == LOOSE_SEARCH_VERSION) return false
