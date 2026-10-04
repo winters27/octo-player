@@ -35,6 +35,7 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.PopupPager
 import app.winters.octo.discovery.DownloadState
+import app.winters.octo.health.DELETE_FROM_DISK
 import app.winters.octo.offline.DownloadStatus
 import app.winters.octo.offline.Reasons
 import app.winters.octo.offline.reasons
@@ -111,6 +112,13 @@ fun SongMenuHost(
                     ShareLinkPage(request, onBack = back, onDone = state::close)
                 }
                 SongPage.Info -> SongInfoPage(trackId, onBack = back)
+                SongPage.DeleteFromDisk -> {
+                    val keepDays by vm.keepDays.collectAsStateWithLifecycle()
+                    DiskDeleteQuestion(1, song.title, keepDays, onCancel = back) {
+                        vm.deleteFromDisk(song)
+                        state.close()
+                    }
+                }
             }
         }
     }
@@ -140,6 +148,8 @@ private fun SongActionsPage(
     val radio by vm.radio.collectAsStateWithLifecycle()
     val canUpgrade by vm.canUpgrade.collectAsStateWithLifecycle()
     val upgradable by produceState(emptyList<UpgradeAsk>(), trackId, canUpgrade) { value = if (canUpgrade) vm.upgradable(trackId) else emptyList() }
+    val canRemove by vm.canRemove.collectAsStateWithLifecycle()
+    val onDisk by produceState(false, trackId, canRemove) { value = canRemove && vm.deletable(trackId) }
     val isLiked = trackId in liked
     val keptRow = kept[trackId]
     val byHand = keptRow?.reasons?.contains(Reasons.MANUAL) == true
@@ -154,6 +164,7 @@ private fun SongActionsPage(
         phone = phone,
         lastPlaylist = last != null,
         upgrade = upgradable.isNotEmpty(),
+        disk = onDisk,
     )
 
     GlassMenuPage(
@@ -256,6 +267,9 @@ private fun SongActionsPage(
                 SongAction.DeleteFromPhone -> GlassMenuAction(OctoIcons.Delete, "Delete from phone", destructive = true, onClick = {
                     state.close()
                     phoneFiles.delete(listOf(trackId))
+                })
+                SongAction.DeleteFromDisk -> GlassMenuAction(OctoIcons.Delete, DELETE_FROM_DISK, destructive = true, opensPage = true, onClick = {
+                    state.pages.open(SongPage.DeleteFromDisk)
                 })
                 SongAction.Info -> GlassMenuAction(OctoIcons.Info, "Song info", opensPage = true, onClick = { state.pages.open(SongPage.Info) })
             }
