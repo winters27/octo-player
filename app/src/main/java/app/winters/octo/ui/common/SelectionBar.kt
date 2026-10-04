@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,6 +47,9 @@ import app.winters.octo.design.OctoType
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.health.DELETE_FROM_DISK
+import app.winters.octo.ui.menu.DiskDeleteHost
+import app.winters.octo.ui.menu.DiskDeleteViewModel
 import app.winters.octo.ui.menu.PhoneFileActions
 import app.winters.octo.ui.playlist.LocalPlaylistSheets
 import app.winters.octo.ui.playlist.PlaylistSheet
@@ -79,9 +83,14 @@ class SelectionBarViewModel @Inject constructor(
 // The bar that acts on picked songs, in place of the bottom bar while a
 // list is picking. Back, the close button, or taking the last song off ends
 // the picking; so does any action. `phoneFiles` acts on the songs' files
-// on the phone.
+// on the phone; `disk` asks before deleting them from the server's disk.
 @Composable
-fun SelectionBarHost(bar: SelectionBarState, phoneFiles: PhoneFileActions, vm: SelectionBarViewModel = hiltViewModel()) {
+fun SelectionBarHost(
+    bar: SelectionBarState,
+    phoneFiles: PhoneFileActions,
+    vm: SelectionBarViewModel = hiltViewModel(),
+    disk: DiskDeleteViewModel = hiltViewModel(),
+) {
     val target = bar.selecting
     BackHandler(enabled = target != null) { target?.selection?.clear() }
     // Keeps the last list drawn while the bar slides away.
@@ -94,13 +103,14 @@ fun SelectionBarHost(bar: SelectionBarState, phoneFiles: PhoneFileActions, vm: S
             exit = fadeOut() + slideOutVertically { it / 2 },
         ) {
             val shown = last ?: return@AnimatedVisibility
-            SelectionBar(shown, phoneFiles, vm)
+            SelectionBar(shown, phoneFiles, vm, disk)
         }
     }
+    DiskDeleteHost(disk)
 }
 
 @Composable
-private fun SelectionBar(target: SelectionTarget, phoneFiles: PhoneFileActions, vm: SelectionBarViewModel) {
+private fun SelectionBar(target: SelectionTarget, phoneFiles: PhoneFileActions, vm: SelectionBarViewModel, disk: DiskDeleteViewModel) {
     val liked by vm.liked.collectAsStateWithLifecycle()
     val sheets = LocalPlaylistSheets.current
     val picked = target.picked()
@@ -110,6 +120,13 @@ private fun SelectionBar(target: SelectionTarget, phoneFiles: PhoneFileActions, 
     val canDownload = picked.any { !it.track.onPhone && !isFind(it.track.id) }
     // Files are shared or deleted only when every picked song has one.
     val allOnPhone = picked.isNotEmpty() && picked.all { it.track.onPhone && !isFind(it.track.id) }
+    // Deleted from the server's disk only when every picked song has a
+    // copy there and the server lets this user.
+    val canRemove by disk.canRemove.collectAsStateWithLifecycle()
+    val onDisk by produceState(emptyList<String>(), library, canRemove) { value = if (canRemove) disk.deletable(library) else emptyList() }
+    val allOnDisk = library.isNotEmpty() && library.size == ids.size && onDisk.size == library.size
+    val choices = LocalChoiceSheet.current
+    val askDisk = { disk.ask(library, picked.map { it.track.title }) }
     val remove = target.remove
     // Every action ends the picking once done.
     val act = { action: () -> Unit ->
@@ -138,7 +155,21 @@ private fun SelectionBar(target: SelectionTarget, phoneFiles: PhoneFileActions, 
                 // Beside the count, where there is room, for songs on the phone.
                 if (allOnPhone) {
                     BarButton(OctoIcons.ShareFile, if (picked.size == 1) "Share file" else "Share files", Modifier.size(44.dp)) { act { phoneFiles.share(ids) } }
-                    BarButton(OctoIcons.Delete, "Delete from phone", Modifier.size(44.dp)) { act { phoneFiles.delete(ids) } }
+                }
+                // One delete button; when the songs are both on the phone and
+                // on the server's disk, it asks which.
+                when {
+                    allOnPhone && allOnDisk -> BarButton(OctoIcons.Delete, "Delete", Modifier.size(44.dp).choiceAnchor(choices)) {
+                        act {
+                            choices.show(
+                                ChoiceRequest("Delete", listOf(Choice("Delete from phone"), Choice(DELETE_FROM_DISK)), selected = -1) { index ->
+                                    if (index == 0) phoneFiles.delete(ids) else askDisk()
+                                },
+                            )
+                        }
+                    }
+                    allOnPhone -> BarButton(OctoIcons.Delete, "Delete from phone", Modifier.size(44.dp)) { act { phoneFiles.delete(ids) } }
+                    allOnDisk -> BarButton(OctoIcons.Delete, DELETE_FROM_DISK, Modifier.size(44.dp)) { act { askDisk() } }
                 }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

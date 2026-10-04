@@ -93,6 +93,13 @@ class PhoneHealth(
     private val duplicateWords: List<Pair<String, String>> = emptyList(),
     // How each copy in a set sounds, by library song.
     private val quality: Map<String, String> = emptyMap(),
+    // Each set of copies as the source keeps them, in the report's order:
+    // the files a fix keeps and removes.
+    val copyGroups: List<DuplicateGroup<SourceTrackEntity>> = emptyList(),
+    // Every library song and every source's copy, as checked.
+    val tracks: List<TrackEntity> = emptyList(),
+    val copies: List<SourceTrackEntity> = emptyList(),
+    val fields: TrackHealth = TrackHealth(),
 ) {
     // A check's list: headings and songs.
     fun lines(check: HealthCheck): List<HealthLine> = when (check) {
@@ -119,6 +126,7 @@ fun phoneHealth(tracks: List<TrackEntity>, albums: List<AlbumEntity>, copies: Li
     val byId = tracks.associateBy { it.id }
     val fields = TrackHealth(albums.associate { it.id to it.artist })
     val groups = ArrayList<DuplicateGroup<TrackEntity>>()
+    val sourceGroups = ArrayList<DuplicateGroup<SourceTrackEntity>>()
     val words = ArrayList<Pair<String, String>>()
     val quality = HashMap<String, String>()
     for (group in findDuplicates(copies, SourceCopyHealth)) {
@@ -126,6 +134,7 @@ fun phoneHealth(tracks: List<TrackEntity>, albums: List<AlbumEntity>, copies: Li
             .distinctBy { it.id }
         if (mapped.size < 2) continue
         groups += DuplicateGroup(mapped, group.basis, group.bestReason)
+        sourceGroups += group
         words += group.heading(SourceCopyHealth) to group.summary(SourceCopyHealth)
     }
     val report = HealthReport(
@@ -135,5 +144,5 @@ fun phoneHealth(tracks: List<TrackEntity>, albums: List<AlbumEntity>, copies: Li
         noLength = tracks.filter { fields.seconds(it) <= 0 },
         missing = findMissingTags(tracks, fields),
     )
-    return PhoneHealth(report, words, quality)
+    return PhoneHealth(report, words, quality, sourceGroups, tracks, copies, fields)
 }

@@ -5,6 +5,7 @@ import app.winters.octo.offline.DownloadStatus
 import app.winters.octo.ui.menu.SongAction.AddToLastPlaylist
 import app.winters.octo.ui.menu.SongAction.AddToPlaylist
 import app.winters.octo.ui.menu.SongAction.AddToQueue
+import app.winters.octo.ui.menu.SongAction.DeleteFromDisk
 import app.winters.octo.ui.menu.SongAction.DeleteFromPhone
 import app.winters.octo.ui.menu.SongAction.Download
 import app.winters.octo.ui.menu.SongAction.FindFlac
@@ -143,5 +144,15 @@ class SongActionsTest {
         assertEquals("Add to your library", downloadLabel(DownloadState.None))
         assertEquals("Adding to your library", downloadLabel(DownloadState.Requested))
         assertEquals("In your library", downloadLabel(DownloadState.Done))
+    }
+
+    @Test
+    fun deleteFromDiskIsLastAndOnlyForALibrarySongTheServerLetsGo() {
+        val actions = songActions(find = false, radio = false, phone = true, disk = true)
+        assertEquals(listOf(SetAsSound, DeleteFromPhone, DeleteFromDisk, Info), actions.takeLast(4))
+        assertEquals(listOf(DeleteFromPhone, DeleteFromDisk), songMenuGroups(actions).last())
+        // A find has no file on any disk yet.
+        assertEquals(false, DeleteFromDisk in songActions(find = true, radio = false, disk = true))
+        assertEquals(false, DeleteFromDisk in songActions(find = false, radio = false))
     }
 }
