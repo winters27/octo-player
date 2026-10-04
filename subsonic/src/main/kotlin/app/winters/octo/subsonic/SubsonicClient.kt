@@ -236,6 +236,28 @@ class SubsonicClient(
             SongList(),
         ).song
 
+    // An artist's most played songs, ranked, each in the library or found
+    // online. `artistId` may be the artist's id from a search, which names
+    // the artist more surely than the name. Only for servers that list the
+    // octoTopSongs extension.
+    suspend fun artistTopSongs(artistName: String, artistId: String? = null, count: Int = 20): TopSongs =
+        get(
+            "getArtistTopSongs",
+            buildMap {
+                put("artist", artistName)
+                put("count", "$count")
+                artistId?.let { put("id", it) }
+            },
+            "topSongs",
+            TopSongs.serializer(),
+            TopSongs(),
+        )
+
+    // The songs played most right now, ranked like an artist's top songs.
+    // Only for servers that list the octoTopSongs extension.
+    suspend fun topChart(count: Int = 20): TopSongs =
+        get("getTopChart", mapOf("count" to "$count"), "topSongs", TopSongs.serializer(), TopSongs())
+
     // On Octo this call also sets up per-user playlists and the radio
     // profile, so callers keep the result for the session.
     suspend fun playlists(): List<Playlist> =
