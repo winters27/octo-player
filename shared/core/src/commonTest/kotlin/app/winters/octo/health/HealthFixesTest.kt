@@ -222,4 +222,19 @@ class HealthFixesTest {
         ) + SongTag.all.map(::tagName)
         for (line in words) assertFalse(line, line.contains('—') || line.contains('–') || line.contains(" - "))
     }
+
+    @Test
+    fun deletingSaysWhereTheFileGoesAndForHowLong() {
+        assertEquals("Delete this song from disk?", deleteTitle(1))
+        assertEquals("Delete 3 songs from disk?", deleteTitle(3))
+        val body = deleteBody("Teardrop", 30)
+        assertTrue("for 30 days" in body)
+        assertTrue("until someone clears it" in deleteBody("Teardrop", 0))
+        val day = 86_400_000L
+        assertEquals("Deleted for good in 12 days", goneText(13 * day - 1, 0))
+        assertEquals("Deleted for good tomorrow", goneText(day + 5, 0))
+        assertEquals("Kept until someone clears the trash", goneText(null, 0))
+        for (line in listOf(body, deletedLine(2, null)) + HealthCheck.entries.flatMap { listOf(it.fixAllLabel(2), it.fixMeaning()) })
+            assertFalse(line, line.contains('—') || line.contains('–') || line.contains(" - "))
+    }
 }
