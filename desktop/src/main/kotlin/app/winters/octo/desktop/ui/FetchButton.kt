@@ -84,7 +84,7 @@ fun FetchButton(
     val phase = phases[song.id] ?: FetchPhase.None
     val canAsk = phase == FetchPhase.None || phase is FetchPhase.Failed
     val hint = when (phase) {
-        FetchPhase.None -> "Add to your library"
+        FetchPhase.None -> "Not in your library. Press to add it"
         is FetchPhase.Failed -> "Couldn't add it: ${phase.reason}. Press to try again."
         else -> phaseText(phase)
     }

@@ -40,6 +40,23 @@ class SearchTest {
         song = listOf(Song("lib1", "Karma Police", artist = "Radiohead"), Song("ext1", "Lift", artist = "Radiohead", duration = 250)),
     )
 
+    // Brandon, 2026-10-04: some of his songs in search had checkmarks, some
+    // did not, though all were his. Octo had sent an online copy of a song
+    // he owns; it went among his songs, marked, so that one row had a "+"
+    // and every other row a check. The library's songs are now only his.
+    @Test
+    fun anOnlineCopyOfALibrarySongIsTheLibrarysOwn() {
+        val copy = Song("ext-kp", "Karma Police", artist = "Radiohead", duration = 264, isExternal = true)
+        val withCopy = sent.copy(song = listOf(copy, Song("lib1", "Karma Police", artist = "Radiohead", duration = 264), Song("ext1", "Lift", artist = "Radiohead", duration = 250, isExternal = true)))
+        val found = splitResults(withCopy, "radiohead", SearchFilter.All, emptyList(), library, outsideOn = true)
+        assertEquals(listOf("lib1"), found.library.songs.map { it.id })
+        assertFalse(found.library.songs.any { it.isExternal })
+        assertEquals(listOf("ext1"), found.outside.songs.map { it.id })
+        // Alone, it still stands for the library's song.
+        val alone = splitResults(sent.copy(song = listOf(copy)), "radiohead", SearchFilter.All, emptyList(), library, outsideOn = true)
+        assertEquals(listOf("lib1"), alone.library.songs.map { it.id })
+    }
+
     @Test
     fun anOctoServerSplitsOutWhatIsNotInTheLibrary() {
         val found = splitResults(sent, "radiohead", SearchFilter.All, emptyList(), library, outsideOn = true)

@@ -541,7 +541,12 @@ private fun HeaderRow(
             horizontalArrangement = Arrangement.spacedBy(ColumnGap),
         ) {
             shown.forEachIndexed { at, column ->
-                if (marks && at == markAt(shown)) Box(Modifier.width(MarkWidth))
+                // The mark column's heading says what its checks and "+"s mean.
+                if (marks && at == markAt(shown)) {
+                    OctoTooltip(MarkHeading, Modifier.width(MarkWidth)) {
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Glyph(OctoIcons.Check, size = IconSize.Inline, tint = OctoColors.TextMuted) }
+                    }
+                }
                 val sortable = onSort != null && order != null && column.sort != null
                 val active = sortable && order.by == column.sort
                 // A sortable heading is a target as tall as the heading row.
@@ -583,6 +588,9 @@ private fun HeaderRow(
         Separator()
     }
 }
+
+// The tooltip on the mark column's heading.
+internal const val MarkHeading = "Which songs are in your library: a check is in it, a + adds a song found online"
 
 // Nearly solid, so rows passing under it do not show through as a ghost.
 private val StuckFill = OctoColors.Background.copy(alpha = 0.97f)
