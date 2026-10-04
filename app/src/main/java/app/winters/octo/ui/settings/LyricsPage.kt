@@ -16,6 +16,9 @@ import app.winters.octo.lyrics.LyricsLookSettings
 import app.winters.octo.lyrics.LyricsStyle
 import app.winters.octo.lyrics.LyricsTiming
 import app.winters.octo.lyrics.OUTPUT_TIMING_LIMIT_MS
+import app.winters.octo.lyrics.OutputTiming
+import app.winters.octo.lyrics.automaticOutputTiming
+import app.winters.octo.lyrics.outputTimingAbout
 import app.winters.octo.lyrics.signedTiming
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
@@ -55,7 +58,8 @@ class LyricsSettingsViewModel @Inject constructor(
 
     // The output playing now and its lyrics timing.
     val output: StateFlow<AudioOutput> = sound.output
-    val outputOffset: StateFlow<Long> = timing.outputOffsetFor(sound.output).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+    val outputTiming: StateFlow<OutputTiming> = timing.outputTimingFor(sound.output)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), OutputTiming(automaticOutputTiming(sound.output.value.key), automatic = true))
 
     fun stepOutput(steps: Int) {
         val key = sound.output.value.key
@@ -111,7 +115,7 @@ fun LyricsPage(onBack: () -> Unit, highlight: String?, vm: LyricsSettingsViewMod
     val keepScreenOn by vm.keepScreenOn.collectAsStateWithLifecycle()
     val look by vm.look.collectAsStateWithLifecycle()
     val output by vm.output.collectAsStateWithLifecycle()
-    val outputOffset by vm.outputOffset.collectAsStateWithLifecycle()
+    val outputTiming by vm.outputTiming.collectAsStateWithLifecycle()
     val sheet = LocalChoiceSheet.current
 
     SettingsPageFrame("Lyrics", onBack, highlight, icon = OctoIcons.Lyrics) {
@@ -147,16 +151,18 @@ fun LyricsPage(onBack: () -> Unit, highlight: String?, vm: LyricsSettingsViewMod
         ) {
             InfoRow(
                 SettingsIndex.LyricsOutputTiming,
-                value = signedTiming(outputOffset),
+                value = signedTiming(outputTiming.ms),
                 title = output.label,
-                helper = "Every song on this output.",
+                helper = outputTimingAbout(output.key, outputTiming.automatic),
             )
             TimingButtons(
-                outputOffset,
+                outputTiming.ms,
                 OUTPUT_TIMING_LIMIT_MS,
                 onStep = vm::stepOutput,
                 onReset = vm::resetOutput,
                 modifier = Modifier.padding(top = 12.dp, start = 8.dp, end = 8.dp),
+                canReset = !outputTiming.automatic,
+                resetLabel = "Use automatic",
             )
         }
         SettingsGroup(title = "Look", icon = OctoIcons.Appearance, footer = "For the Flowing style.") {

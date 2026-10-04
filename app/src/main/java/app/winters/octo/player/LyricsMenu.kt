@@ -71,6 +71,9 @@ import app.winters.octo.lyrics.candidateList
 import app.winters.octo.lyrics.showingPick
 import app.winters.octo.lyrics.OUTPUT_TIMING_LIMIT_MS
 import app.winters.octo.lyrics.sourceLine
+import app.winters.octo.lyrics.OutputTiming
+import app.winters.octo.lyrics.automaticOutputTiming
+import app.winters.octo.lyrics.outputTimingAbout
 import app.winters.octo.lyrics.timingSummary
 import app.winters.octo.subsonic.LYRICS_AUTO
 import app.winters.octo.playback.NowPlaying
@@ -117,8 +120,8 @@ class LyricsMenuViewModel @Inject constructor(
     // The output playing now, and its own timing, for every song on it.
     val output: StateFlow<AudioOutput> = sound.output
 
-    val outputOffset: StateFlow<Long> = timing.outputOffsetFor(sound.output)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+    val outputTiming: StateFlow<OutputTiming> = timing.outputTimingFor(sound.output)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), OutputTiming(automaticOutputTiming(sound.output.value.key), automatic = true))
 
     fun stepOutput(steps: Int) {
         val key = sound.output.value.key
@@ -305,7 +308,7 @@ private fun MenuOptions(
 ) {
     val offset by remember(trackId) { model.offsetFor(trackId) }.collectAsStateWithLifecycle(0L)
     val output by model.output.collectAsStateWithLifecycle()
-    val outputOffset by model.outputOffset.collectAsStateWithLifecycle()
+    val outputTiming by model.outputTiming.collectAsStateWithLifecycle()
     val lyrics = (state as? LyricsState.Found)?.lyrics
     val entries = buildList<Pair<Choice, () -> Unit>> {
         if (state == LyricsState.HiddenForSong) {
@@ -319,7 +322,7 @@ private fun MenuOptions(
         } else {
             add(Choice(if (lyrics == null) "Find lyrics" else "Choose other lyrics", "Every copy that can be found for this song") to onChooseOther)
             if (lyrics != null && lyrics.synced && !lyrics.instrumental) {
-                val moved = timingSummary(offset, outputOffset, output.label)
+                val moved = timingSummary(offset, outputTiming.ms, output.label, outputTiming.automatic)
                 add(Choice("Adjust timing", moved ?: "Move the words earlier or later") to onTiming)
             }
             if (lyrics != null) {
@@ -343,7 +346,7 @@ private fun MenuOptions(
 private fun TimingControl(trackId: String, model: LyricsMenuViewModel) {
     val offset by remember(trackId) { model.offsetFor(trackId) }.collectAsStateWithLifecycle(0L)
     val output by model.output.collectAsStateWithLifecycle()
-    val outputOffset by model.outputOffset.collectAsStateWithLifecycle()
+    val outputTiming by model.outputTiming.collectAsStateWithLifecycle()
     Text(
         "If the words light up late, tap Earlier. If early, tap Later.",
         style = OctoType.caption,
@@ -363,11 +366,13 @@ private fun TimingControl(trackId: String, model: LyricsMenuViewModel) {
     Spacer(Modifier.height(8.dp))
     TimingAdjuster(
         title = output.label,
-        about = "Applies to every song on this output.",
-        offsetMs = outputOffset,
+        about = outputTimingAbout(output.key, outputTiming.automatic),
+        offsetMs = outputTiming.ms,
         limitMs = OUTPUT_TIMING_LIMIT_MS,
         onStep = model::stepOutput,
         onReset = model::resetOutput,
+        canReset = !outputTiming.automatic,
+        resetLabel = "Use automatic",
     )
 }
 

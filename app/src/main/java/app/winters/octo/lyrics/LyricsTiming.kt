@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import app.winters.octo.sound.AudioOutput
+import app.winters.octo.sound.BLUETOOTH_OUTPUT_PREFIX
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -61,8 +62,36 @@ fun screenLeadMs(refreshHz: Float): Long {
     return -Math.round(SCREEN_FRAMES * 1000.0 / hz)
 }
 
-// An output's offset from what is kept, 0 for an output never moved.
-fun outputOffsetIn(offsets: Map<String, Long>, outputKey: String): Long = offsets[outputKey] ?: 0L
+// Where an output's timing starts when the listener never set one: the
+// words are mostly heard this much late, about 0.3 s on the phone's own
+// speaker, a cable or USB, and 0.5 s over Bluetooth, which holds more
+// sound back. Starting there leaves most listeners nothing to move.
+const val WIRED_OUTPUT_TIMING_MS = -300L
+const val BLUETOOTH_OUTPUT_TIMING_MS = -500L
+
+fun automaticOutputTiming(outputKey: String): Long =
+    if (outputKey.startsWith(BLUETOOTH_OUTPUT_PREFIX)) BLUETOOTH_OUTPUT_TIMING_MS else WIRED_OUTPUT_TIMING_MS
+
+// An output's timing, and whether it is the automatic one (never set by the
+// listener) rather than one they set, 0 included.
+data class OutputTiming(val ms: Long, val automatic: Boolean)
+
+fun outputTimingIn(offsets: Map<String, Long>, outputKey: String): OutputTiming =
+    offsets[outputKey]?.let { OutputTiming(it, automatic = false) } ?: OutputTiming(automaticOutputTiming(outputKey), automatic = true)
+
+// An output's offset from what is kept, the automatic one for an output
+// never moved.
+fun outputOffsetIn(offsets: Map<String, Long>, outputKey: String): Long = outputTimingIn(offsets, outputKey).ms
+
+// What an output's timing applies to, and, while it is the automatic one,
+// what that is.
+fun outputTimingAbout(outputKey: String, automatic: Boolean): String =
+    if (automatic) "Every song on this output. ${automaticTimingNote(outputKey)}" else "Every song on this output."
+
+// What the automatic timing is, in words, for the settings.
+fun automaticTimingNote(outputKey: String): String =
+    if (outputKey.startsWith(BLUETOOTH_OUTPUT_PREFIX)) "Automatic: ${timingLabel(BLUETOOTH_OUTPUT_TIMING_MS)}, the usual for Bluetooth."
+    else "Automatic: ${timingLabel(WIRED_OUTPUT_TIMING_MS)}, the usual for a speaker or a cable."
 
 // Every output's offset out of the stored settings, by output key.
 fun outputOffsetsIn(stored: Map<String, Any?>): Map<String, Long> = stored.entries
@@ -73,10 +102,10 @@ fun outputOffsetsIn(stored: Map<String, Any?>): Map<String, Long> = stored.entri
     .toMap()
 
 // The offsets in words, song and output, for a menu line; null when
-// neither was moved.
-fun timingSummary(songMs: Long, outputMs: Long, outputLabel: String): String? = listOfNotNull(
+// neither was moved. An output on its automatic timing was not moved.
+fun timingSummary(songMs: Long, outputMs: Long, outputLabel: String, outputAutomatic: Boolean = false): String? = listOfNotNull(
     songMs.takeIf { it != 0L }?.let { "This song ${signedTiming(it)}" },
-    outputMs.takeIf { it != 0L }?.let { "$outputLabel ${signedTiming(it)}" },
+    outputMs.takeIf { it != 0L && !outputAutomatic }?.let { "$outputLabel ${signedTiming(it)}" },
 ).joinToString(" · ").ifEmpty { null }
 
 // The offset in words: "In time", "0.25 s later", "1.5 s earlier".
@@ -111,7 +140,8 @@ private fun outputOffsetKey(outputKey: String) = longPreferencesKey("$OUTPUT_OFF
 private fun Preferences.byName(): Map<String, Any?> = asMap().mapKeys { (key, _) -> key.name }
 
 // Each song's lyrics timing and each output's, kept only for those that
-// were moved, and whether the screen stays on while lyrics show.
+// were moved (an output's even when moved back to 0, so it stays off its
+// automatic timing), and whether the screen stays on while lyrics show.
 @Singleton
 class LyricsTiming @Inject constructor(@ApplicationContext private val context: Context) {
     fun offsetFor(trackId: String): Flow<Long> =
@@ -144,18 +174,23 @@ class LyricsTiming @Inject constructor(@ApplicationContext private val context: 
 
     // The timing of whichever output is playing now, following it as it
     // changes, in the same milliseconds and direction as a song's: minus is
-    // sooner.
-    fun outputOffsetFor(output: Flow<AudioOutput>): Flow<Long> =
-        combine(output, context.lyricsData.data) { out, prefs -> outputOffsetIn(outputOffsetsIn(prefs.byName()), out.key) }
+    // sooner. An output never moved has its automatic timing.
+    fun outputOffsetFor(output: Flow<AudioOutput>): Flow<Long> = outputTimingFor(output).map { it.ms }.distinctUntilChanged()
+
+    fun outputTimingFor(output: Flow<AudioOutput>): Flow<OutputTiming> =
+        combine(output, context.lyricsData.data) { out, prefs -> outputTimingIn(outputOffsetsIn(prefs.byName()), out.key) }
             .distinctUntilChanged()
 
+    // Moves an output's timing from where it is now, its automatic one at
+    // first, and keeps it, 0 included.
     suspend fun stepOutput(outputKey: String, steps: Int) {
         context.lyricsData.edit { prefs ->
-            val moved = stepTiming(prefs[outputOffsetKey(outputKey)] ?: 0L, steps, OUTPUT_TIMING_LIMIT_MS)
-            if (moved == 0L) prefs.remove(outputOffsetKey(outputKey)) else prefs[outputOffsetKey(outputKey)] = moved
+            val from = prefs[outputOffsetKey(outputKey)] ?: automaticOutputTiming(outputKey)
+            prefs[outputOffsetKey(outputKey)] = stepTiming(from, steps, OUTPUT_TIMING_LIMIT_MS)
         }
     }
 
+    // Back to the automatic timing.
     suspend fun resetOutput(outputKey: String) {
         context.lyricsData.edit { it.remove(outputOffsetKey(outputKey)) }
     }
@@ -163,10 +198,11 @@ class LyricsTiming @Inject constructor(@ApplicationContext private val context: 
     // Every output whose timing was moved, by output key, for a backup.
     suspend fun outputOffsets(): Map<String, Long> = outputOffsetsIn(context.lyricsData.data.first().byName())
 
-    // Puts back one output's timing from a backup.
+    // Puts back one output's timing from a backup, 0 included: a backup
+    // names only outputs that were set.
     suspend fun setOutputOffset(outputKey: String, offsetMs: Long) {
         val moved = offsetMs.coerceIn(-OUTPUT_TIMING_LIMIT_MS, OUTPUT_TIMING_LIMIT_MS)
-        context.lyricsData.edit { if (moved == 0L) it.remove(outputOffsetKey(outputKey)) else it[outputOffsetKey(outputKey)] = moved }
+        context.lyricsData.edit { it[outputOffsetKey(outputKey)] = moved }
     }
 
     // On unless switched off.
