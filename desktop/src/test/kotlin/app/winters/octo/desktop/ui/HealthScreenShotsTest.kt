@@ -17,7 +17,16 @@ import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.SignInOutcome
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.desktop.pages.askToFill
+import app.winters.octo.desktop.pages.askToFixCopies
+import app.winters.octo.desktop.pages.askToFixDuplicates
+import app.winters.octo.desktop.pages.askToJoinAlbums
+import app.winters.octo.desktop.pages.lookUpSong
+import app.winters.octo.desktop.pages.showTrash
 import app.winters.octo.health.HealthCheck
+import app.winters.octo.health.HealthTag
+import app.winters.octo.health.SubsonicHealth
+import app.winters.octo.health.fillsFromAlbum
 import app.winters.octo.lyrics.OnlineLyrics
 import java.io.File
 import javax.swing.SwingUtilities
@@ -33,8 +42,9 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
-// Pictures of the Library health page, with findings and with none, and
-// of asking before a copy leaves the library. Only when asked:
+// Pictures of the Library health page, with findings and with none, its
+// fixes shown before they run, the trash, and deleting from disk. Only
+// when asked:
 // OCTO_SHOTS=1 ./gradlew :desktop:test --tests '*ScreenShotsTest*'.
 // Saved as build/shots/health-*.png.
 class HealthScreenShotsTest {
@@ -105,18 +115,36 @@ class HealthScreenShotsTest {
         assumeTrue(System.getenv("OCTO_SHOTS") == "1")
         val out = File("build/shots").apply { mkdirs() }
         draw(out, sickLibrary(), removable = true) { app, shot, click ->
+            fun report() = app.health.report!!
+            fun popup(open: () -> Unit) = SwingUtilities.invokeAndWait {
+                app.popups.close()
+                open()
+            }
             shot("health-duplicates", 2_500)
-            SwingUtilities.invokeAndWait { app.health.picked = HealthCheck.SplitAlbums }
+            popup { askToFixDuplicates(app, report().duplicates) }
+            shot("health-fix-all", 1_000)
+            // The three copies of one song, keeping a plain FLAC instead of the master.
+            popup { report().duplicates.first { it.copies.size == 3 }.let { askToFixCopies(app, it, it.copies.last()) } }
+            shot("health-fix-copies", 1_000)
+            popup { app.health.picked = HealthCheck.SplitAlbums }
             shot("health-split", 1_000)
-            SwingUtilities.invokeAndWait { app.health.picked = HealthCheck.NoGenre }
+            popup { askToJoinAlbums(app, report().splitAlbums) }
+            shot("health-join", 1_000)
+            popup { app.health.picked = HealthCheck.NoGenre }
             shot("health-no-genre", 1_000)
-            // The second copy of Holocene: its menu, then the question.
-            SwingUtilities.invokeAndWait { app.health.picked = HealthCheck.Duplicates }
+            popup { askToFill(app, HealthCheck.NoYear, fillsFromAlbum(report().songs(HealthCheck.NoYear), app.library!!.index!!.songs, HealthTag.Year, SubsonicHealth)) }
+            shot("health-fill-year", 1_000)
+            popup { lookUpSong(app, report().songs(HealthCheck.NoGenre).first { it.title == "Angel" }, HealthCheck.NoGenre) }
+            shot("health-lookup", 2_000)
+            popup { showTrash(app) }
+            shot("health-trash", 1_500)
+            popup { askToDelete(app, report().songs(HealthCheck.NoGenre).take(1)) }
+            shot("delete-from-disk", 1_000)
+            // The second copy of Holocene: its menu.
+            popup { app.health.picked = HealthCheck.Duplicates }
             shot(null, 1_000)
             click(ROW_X, SECOND_ROW_Y, true)
             shot("health-menu", 800)
-            click(MENU_REMOVE_X, MENU_REMOVE_Y, false)
-            shot("health-remove", 800)
         }
         draw(out, tidyLibrary(), removable = false) { _, shot, _ -> shot("health-clean", 2_500) }
     }
@@ -128,10 +156,29 @@ class HealthScreenShotsTest {
         steps: (AppState, shot: (String?, Long) -> Unit, click: (Float, Float, Boolean) -> Unit) -> Unit,
     ) {
         FakeServer().use { server ->
-            val extensions = if (removable) """{"name":"octoLibraryActions","versions":[1]}""" else """{"name":"songLyrics","versions":[1]}"""
+            val extensions = if (removable) """{"name":"octoLibraryActions","versions":[1,2,3]}""" else """{"name":"songLyrics","versions":[1]}"""
             server.answer("ping", type = "octo")
             server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[$extensions]""", type = "octo")
-            server.answer("getLibraryActions", """"libraryActions":{"enabled":true,"allowed":true,"dryRun":false,"actions":["remove"],"keepDays":30}""", type = "octo")
+            server.answer(
+                "getLibraryActions",
+                """"libraryActions":{"enabled":true,"allowed":true,"dryRun":false,"admin":true,"actions":["remove","retag","joinAlbum","lookup","undo","restore","cover"],"keepDays":30}""",
+                type = "octo",
+            )
+            server.answer(
+                "getLibraryTrash",
+                """"libraryTrash":{"keepDays":30,"songs":[{"id":"t1","title":"Holocene","artist":"Bon Iver","album":"Holocene","goneAt":"${java.time.Instant.now().plus(java.time.Duration.ofDays(27))}"},""" +
+                    """{"id":"t2","title":"Nightcall","artist":"Kavinsky","album":"OutRun","goneAt":"${java.time.Instant.now().plus(java.time.Duration.ofDays(3))}"}]}""",
+                type = "octo",
+            )
+            server.answerBy("libraryAction") { request ->
+                server.ok(
+                    """"libraryAction":{"id":"${request.url.queryParameter("id")}","action":"lookup","state":"found",""" +
+                        """"current":{"title":"Angel","artist":"Massive Attack","album":"Mezzanine","year":null,"genre":null,"track":null},""" +
+                        """"suggested":{"title":"Angel","artist":"Massive Attack","album":"Mezzanine","albumArtist":"Massive Attack","year":"1998","genre":"Trip Hop","track":"1"},""" +
+                        """"confidence":"Strong","source":"Fingerprint","release":"'Mezzanine' (Album) 1998"}""",
+                    type = "octo",
+                )
+            }
             server.answer("getAlbumList2", """"albumList2":{"album":[]}""")
             server.answer("getArtists", """"artists":{"index":[]}""")
             server.answer("search3", """"searchResult3":{"song":[$songs]}""")
@@ -184,11 +231,9 @@ class HealthScreenShotsTest {
     }
 
     private companion object {
-        // Where the second copy's row is, and the menu's Remove row, in the
-        // 1440 by 900 window; found by looking at the pictures.
+        // Where the second copy's row is in the 1440 by 900 window; found by
+        // looking at the pictures.
         const val ROW_X = 700f
-        const val SECOND_ROW_Y = 615f
-        const val MENU_REMOVE_X = 800f
-        const val MENU_REMOVE_Y = 229f
+        const val SECOND_ROW_Y = 761f
     }
 }

@@ -36,6 +36,24 @@ fun <T> tagValues(song: T, fields: HealthFields<T>): Map<String, String?> {
     )
 }
 
+// The report with songs fixed for one check left out of that check only,
+// until the server's list catches up: a song given its year still lacks
+// its genre.
+fun <T> HealthReport<T>.settledFor(check: HealthCheck, ids: Set<String>, fields: HealthFields<T>): HealthReport<T> {
+    if (ids.isEmpty()) return this
+    val only = without(ids, fields)
+    return when (check) {
+        HealthCheck.Duplicates -> copy(duplicates = only.duplicates)
+        HealthCheck.SplitAlbums -> copy(splitAlbums = only.splitAlbums)
+        HealthCheck.NoLength -> copy(noLength = only.noLength)
+        else -> {
+            val tag = check.tag ?: return this
+            val left = missing[tag].orEmpty().filter { fields.id(it) !in ids }
+            copy(missing = if (left.isEmpty()) missing - tag else missing + (tag to left))
+        }
+    }
+}
+
 // One tag a fix would write: what the song says now and what it gets.
 data class TagChange(val tag: String, val now: String?, val value: String, val from: String? = null)
 

@@ -57,7 +57,7 @@ fun HealthCheck.fixMeaning(): String = when (this) {
     HealthCheck.NoLength ->
         "Asks the server for a higher quality copy of each song, which takes the damaged file's place once it passes the server's checks."
     HealthCheck.NoYear, HealthCheck.NoGenre, HealthCheck.NoAlbumArtist ->
-        "Fills in the tag where the rest of the album agrees on it. Look up the others one at a time."
+        "Fills in the tag where the rest of the album agrees on it. The others can be looked up the way a download is tagged, and every change is shown before it is written."
     HealthCheck.NoTrackNumber ->
         "Looks each song up the way a download is tagged, and shows what it found before anything is written."
 }

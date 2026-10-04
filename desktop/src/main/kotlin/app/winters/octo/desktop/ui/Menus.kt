@@ -126,6 +126,7 @@ fun ColumnScope.SongMenu(
                 inFolder = !one?.parent.isNullOrEmpty(),
                 canAdd = fetches != null,
                 canUpgrade = upgradable.isNotEmpty(),
+                canDelete = canDeleteFromDisk(app, songs),
             ).forEachIndexed { index, group ->
                 if (index > 0) MenuSeparator()
                 group.forEach { action ->
@@ -174,6 +175,10 @@ fun ColumnScope.SongMenu(
                             (place as? SongPlace.Queue)?.let { app.removeFromQueue(it.keys) }
                             close()
                         }, OctoIcons.Close, destructive = true)
+                        SongAction.DeleteFromDisk -> MenuRow(label, {
+                            close()
+                            askToDelete(app, songs)
+                        }, OctoIcons.Delete, destructive = true, detail = if (songs.size > 1) "${songs.size}" else null)
                     }
                 }
             }
