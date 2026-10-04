@@ -234,7 +234,9 @@ sealed interface FixStep {
     // The song, for what is said about it.
     val title: String
 
-    data class Remove(override val id: String, override val title: String) : FixStep
+    // `copy`: one copy of a song the library keeps another of, so the song
+    // itself is still wanted and the server does not refuse it later.
+    data class Remove(override val id: String, override val title: String, val copy: Boolean = false) : FixStep
     data class Retag(override val id: String, override val title: String, val tags: Map<String, String>) : FixStep
     data class JoinAlbum(override val id: String, override val title: String, val like: String) : FixStep
     data class AddCover(override val id: String, override val title: String) : FixStep
@@ -255,6 +257,7 @@ sealed interface FixStep {
         get() = when (this) {
             is Retag -> tags
             is JoinAlbum -> mapOf("like" to like)
+            is Remove -> if (copy) mapOf("copy" to "true") else emptyMap()
             else -> emptyMap()
         }
 
@@ -272,7 +275,7 @@ sealed interface FixStep {
 // then remove the others.
 fun <T> DuplicateFix<T>.steps(fields: HealthFields<T>, fills: List<TagChange> = this.fills): List<FixStep> = buildList {
     if (fills.isNotEmpty()) add(FixStep.Retag(fields.id(keep), fields.title(keep), fills.associate { it.tag to it.value }))
-    remove.forEach { add(FixStep.Remove(fields.id(it), fields.title(it))) }
+    remove.forEach { add(FixStep.Remove(fields.id(it), fields.title(it), copy = true)) }
 }
 
 fun <T> AlbumJoin<T>.steps(fields: HealthFields<T>): List<FixStep> =

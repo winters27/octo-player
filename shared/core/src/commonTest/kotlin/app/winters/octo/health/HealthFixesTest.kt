@@ -60,7 +60,10 @@ class HealthFixesTest {
         val steps = fix.steps(SubsonicHealth)
         // The tags first, while the copy they come from is still there.
         assertTrue(steps[0] is FixStep.Retag && steps[0].id == "flac")
-        assertEquals(FixStep.Remove("mp3", "Teardrop"), steps[1])
+        assertEquals(FixStep.Remove("mp3", "Teardrop", copy = true), steps[1])
+        // Only that copy is unwanted, so the server is told.
+        assertEquals(mapOf("copy" to "true"), steps[1].with)
+        assertEquals(emptyMap<String, String>(), FixStep.Remove("mp3", "Teardrop").with)
     }
 
     @Test

@@ -212,6 +212,7 @@ class HealthPageTest {
         val calls = server.calls.filter { it.url.encodedPath.endsWith("libraryAction") }
         assertEquals(listOf("flac" to "retag", "mp3" to "remove"), calls.map { it.url.queryParameter("id") to it.url.queryParameter("action") })
         assertEquals("Folk", calls[0].url.queryParameter("genre"))
+        assertEquals("true", calls[1].url.queryParameter("copy"))
         // Nothing went near a rating.
         assertTrue(server.calls.none { it.url.encodedPath.endsWith("setRating") || it.url.queryParameter("rating") != null })
         // The set is down to one copy, so it is no longer a duplicate.
