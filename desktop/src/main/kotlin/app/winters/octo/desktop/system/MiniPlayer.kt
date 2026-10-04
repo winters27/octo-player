@@ -1,8 +1,12 @@
 package app.winters.octo.desktop.system
 
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,8 +31,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -95,6 +102,7 @@ import app.winters.octo.desktop.player.wash.WashCover
 import app.winters.octo.desktop.ui.OctoArt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.withContext
 import java.awt.Dimension
@@ -141,8 +149,23 @@ fun MiniPlayerWindow(
         windowState.position = WindowPosition(to.x.dp, to.y.dp)
         windowState.size = DpSize(to.width.dp, to.height.dp)
     }
+    // A word on what the pin did, for a moment: pinned is the usual state,
+    // so a click that unpins it changes nothing to be seen until another
+    // window comes up over it.
+    var pinNote by remember { mutableStateOf<String?>(null) }
+    var pinClicks by remember { mutableIntStateOf(0) }
+    LaunchedEffect(pinClicks) {
+        if (pinClicks == 0) return@LaunchedEffect
+        delay(PIN_NOTE_MS)
+        pinNote = null
+    }
     val actions = MiniActions(
-        pin = { app.settings.update { it.copy(system = it.system.copy(miniPlayerOnTop = !it.system.miniPlayerOnTop)) } },
+        pin = {
+            val on = !app.settings.current.system.miniPlayerOnTop
+            app.settings.update { it.copy(system = it.system.copy(miniPlayerOnTop = on)) }
+            pinNote = pinNoteFor(on)
+            pinClicks++
+        },
         resize = ::jumpTo,
         showPanel = { panel ->
             app.settings.update { it.copy(system = it.system.copy(miniPlayerPanel = panel?.name?.lowercase())) }
@@ -202,6 +225,7 @@ fun MiniPlayerWindow(
                         panel = prefs.miniPlayerPanel.toMiniPanel(),
                         onTop = prefs.miniPlayerOnTop,
                         actions = actions,
+                        note = pinNote,
                         dragArea = { modifier -> WindowDraggableArea(modifier) {} },
                     )
                     ResizeEdges(frame, thickness = Space.Xs)
@@ -223,6 +247,8 @@ fun MiniPlayerView(
     panel: MiniPanel?,
     onTop: Boolean,
     actions: MiniActions,
+    // A short line over the bottom of it, for a moment, if any.
+    note: String? = null,
     dragArea: @Composable (Modifier) -> Unit,
 ) {
     val state by app.player.state.collectAsState()
@@ -237,7 +263,29 @@ fun MiniPlayerView(
                 MiniShape.Panel -> MiniWithPanel(app, state, panel ?: MiniPanel.Lyrics, onTop, actions)
             }
         }
+        if (note != null) MiniNote(note, Modifier.align(Alignment.BottomCenter))
         Box(Modifier.matchParentSize().border(FrameSize.Hairline, ChromeEdge, MenuShape))
+    }
+}
+
+// How long the pin's word stays.
+private const val PIN_NOTE_MS = 2_400L
+
+// What the pin did, in words.
+fun pinNoteFor(onTop: Boolean): String = if (onTop) "Kept on top of other windows" else "Other windows can cover it now"
+
+// A line in a dark capsule, over whatever is under it.
+@Composable
+private fun MiniNote(text: String, modifier: Modifier) {
+    Box(
+        modifier
+            .padding(bottom = Space.S)
+            .background(OctoColors.Background.copy(alpha = 0.92f), CircleShape)
+            .border(FrameSize.Hairline, ChromeEdge, CircleShape)
+            .padding(horizontal = Space.M, vertical = Space.Xs)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+    ) {
+        Txt(text, DesktopType.meta, OctoColors.TextPrimary, maxLines = 1)
     }
 }
 
