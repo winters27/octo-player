@@ -61,6 +61,7 @@ import app.winters.octo.desktop.settings.TablePrefs
 import app.winters.octo.desktop.sound.SoundController
 import app.winters.octo.desktop.system.JumpListHooks
 import app.winters.octo.desktop.system.jumpTargetFor
+import app.winters.octo.desktop.system.openInBrowser
 import app.winters.octo.desktop.update.DesktopUpdates
 import app.winters.octo.lyrics.OnlineLyrics
 import app.winters.octo.playback.skippedLine
@@ -70,6 +71,7 @@ import app.winters.octo.subsonic.FORM_POST_EXTENSION
 import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.ui.imports.ImportModel
 import app.winters.octo.ui.search.withRecent
 import app.winters.octo.desktop.library.PlaylistArtStore
 import java.io.File
@@ -171,6 +173,9 @@ class AppState(
     // The Library health page's report, its fixes and what the server lets
     // this user do to its files (deleting from disk too), for this sign-in.
     val health = HealthModel({ connection?.client }, scope)
+
+    // The Spotify import page, on an Octo server.
+    val imports = ImportModel({ connection?.client }, scope, openUrl = { openInBrowser(it) })
 
     // How the kept servers answer, and the scan and user of the one in use,
     // for Settings > Servers.
@@ -447,6 +452,7 @@ class AppState(
         search = views.search
         home = views.home
         health.forget()
+        imports.forget()
         serverFacts.forget()
     }
 

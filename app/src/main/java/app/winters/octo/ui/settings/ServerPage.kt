@@ -62,6 +62,7 @@ import app.winters.octo.ui.common.PopupQuestion
 import app.winters.octo.ui.common.rememberOpenedBeside
 import app.winters.octo.ui.nav.EditConnectionRoute
 import app.winters.octo.ui.nav.OctoAdminRoute
+import app.winters.octo.ui.nav.SpotifyImportRoute
 import app.winters.octo.ui.nav.SignInRoute
 import app.winters.octo.ui.settings.rows.ActionRow
 import app.winters.octo.ui.settings.rows.ChoiceRow
@@ -184,6 +185,7 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
                     ActionRow(SettingsIndex.EditConnection, onClick = { onOpen(EditConnectionRoute) })
                     if (client.authMode != AuthMode.ApiKey) ActionRow(SettingsIndex.ChangePassword, onClick = { changing = true })
                     if (current.session.runsOcto) ActionRow(SettingsIndex.OctoAdmin, onClick = { onOpen(OctoAdminRoute) })
+                    if (current.session.runsOcto) ActionRow(SettingsIndex.SpotifyImport, onClick = { onOpen(SpotifyImportRoute) })
                 }
 
                 ServerFacts(vm, current.session)

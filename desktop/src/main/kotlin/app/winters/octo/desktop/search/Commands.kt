@@ -38,6 +38,7 @@ fun commandsFor(app: AppState): List<Command> = buildList {
     page("Recently played", Page.History, "history")
     page("Recently added", Page.RecentlyAdded, "new")
     page("Library health", Page.LibraryHealth, "duplicates missing tags problems")
+    if (app.connection?.isOcto == true) page("Spotify import", Page.Imports, "import spotify playlists liked songs missing download")
     page("Sound", Page.Sound, "equalizer eq loudness crossfade")
     page("Settings", Page.Settings, "preferences options")
     app.liveLists.lists.value.forEach { list -> page(list.name, Page.LiveList(list.id), "live list smart playlist") }

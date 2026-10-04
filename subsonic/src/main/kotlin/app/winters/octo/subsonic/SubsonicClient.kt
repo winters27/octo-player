@@ -159,6 +159,29 @@ class SubsonicClient(
     suspend fun upgrades(): List<Upgrade> =
         get("getUpgrades", key = "upgrades", serializer = ListSerializer(Upgrade.serializer()), default = emptyList())
 
+    // The signed-in user's Spotify import: sign-in, lists and trickle. Only for
+    // servers that list octoImports.
+    suspend fun imports(): ImportOverview =
+        get("getImports", key = "imports", serializer = ImportOverview.serializer(), default = ImportOverview())
+
+    // One imported list and every song in it.
+    suspend fun importList(id: String): ImportListDetail =
+        get("getImport", mapOf("id" to id), "import", ImportListDetail.serializer())
+
+    // One import action (see ImportActions). Keys name songs, and may repeat.
+    suspend fun importAction(
+        action: String,
+        params: Map<String, String> = emptyMap(),
+        keys: List<String> = emptyList(),
+    ): ImportAnswer =
+        getWith(
+            "importAction",
+            listOf("action" to action) + params.toList() + keys.map { "key" to it },
+            "importAction",
+            ImportAnswer.serializer(),
+            ImportAnswer(),
+        )
+
     // One song, by its id on the server.
     suspend fun song(id: String): Song = get("getSong", mapOf("id" to id), "song", Song.serializer())
 

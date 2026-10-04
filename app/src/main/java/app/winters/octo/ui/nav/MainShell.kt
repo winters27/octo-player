@@ -48,6 +48,7 @@ import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.player.PlayerArtCorner
 import app.winters.octo.player.PlayerOverlay
 import app.winters.octo.ui.admin.OctoAdminScreen
+import app.winters.octo.ui.imports.SpotifyImportScreen
 import app.winters.octo.ui.album.AlbumScreen
 import app.winters.octo.ui.artist.ArtistScreen
 import app.winters.octo.ui.common.ChoiceSheet
@@ -246,6 +247,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             entry<SignInRoute> { SignInScreen(back) }
                             entry<EditConnectionRoute> { SignInScreen(back, editing = true) }
                             entry<OctoAdminRoute> { OctoAdminScreen(back) }
+                            entry<SpotifyImportRoute> { SpotifyImportScreen(back) }
                             entry<SoundRoute> { SoundScreen(back) }
                             entry<SharesRoute> { SharesScreen(back) }
                             entry<RadioStationsRoute> { RadioStationsScreen(back) }
