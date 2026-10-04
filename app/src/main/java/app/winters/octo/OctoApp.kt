@@ -3,6 +3,7 @@ package app.winters.octo
 import android.app.Application
 import app.winters.octo.data.ServerDownloads
 import app.winters.octo.data.SessionRepository
+import app.winters.octo.data.LibraryFiles
 import app.winters.octo.data.Upgrades
 import app.winters.octo.device.DeviceArtworkFetcher
 import app.winters.octo.device.DeviceArtworkKeyer
@@ -33,6 +34,7 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var updates: AppUpdates
     @Inject lateinit var upgrades: Upgrades
     @Inject lateinit var serverDownloads: ServerDownloads
+    @Inject lateinit var libraryFiles: LibraryFiles
 
     override fun onCreate() {
         super.onCreate()
@@ -50,6 +52,8 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
         upgrades.start()
         // The server's downloads, for their sheet.
         serverDownloads.start()
+        // What the server lets Library health and Delete from disk do.
+        libraryFiles.start()
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader =

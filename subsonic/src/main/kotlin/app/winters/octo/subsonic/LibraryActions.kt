@@ -4,7 +4,8 @@ import kotlinx.serialization.Serializable
 
 // The OpenSubsonic extension an Octo server lists when it can act on the
 // library's files for an app: take a song out of the library and, from
-// version 2, look for a FLAC of it. It is listed only while the server's
+// version 2, look for a FLAC of it; from version 3, fix its tags, album and
+// cover and put a removed song back. It is listed only while the server's
 // library actions are switched on.
 const val OCTO_LIBRARY_ACTIONS = "octoLibraryActions"
 
@@ -16,6 +17,43 @@ const val LIBRARY_ACTION_REMOVE = "remove"
 // original is kept until then. Version 2 only, and the server queues it:
 // the answer comes back at once and the work runs later.
 const val LIBRARY_ACTION_UPGRADE = "upgrade"
+
+// From version 3: what Library health fixes a song with, and the way back.
+// Each needs a server admin on the allowed list. Write the tags sent into
+// the song's file, in place.
+const val LIBRARY_ACTION_RETAG = "retag"
+
+// Give the song the album tags of another song (`like`), which mends an
+// album the server shows as two.
+const val LIBRARY_ACTION_JOIN_ALBUM = "joinAlbum"
+
+// Find the album's cover and put it inside a file that has no picture.
+const val LIBRARY_ACTION_COVER = "cover"
+
+// The tags a download of the song would get, beside what the file says;
+// it writes nothing.
+const val LIBRARY_ACTION_LOOKUP = "lookup"
+
+// Put back the song's last retag, album join or cover.
+const val LIBRARY_ACTION_UNDO = "undo"
+
+// Put a removed song back from the server's trash.
+const val LIBRARY_ACTION_RESTORE = "restore"
+
+// The tag names the server reads and writes, as it spells them.
+object SongTag {
+    const val TITLE = "title"
+    const val ARTIST = "artist"
+    const val ALBUM = "album"
+    const val ALBUM_ARTIST = "albumArtist"
+    const val YEAR = "year"
+    const val GENRE = "genre"
+    const val TRACK = "track"
+    const val DISC = "disc"
+    const val ISRC = "isrc"
+
+    val all = listOf(TITLE, ARTIST, ALBUM, ALBUM_ARTIST, YEAR, GENRE, TRACK, DISC, ISRC)
+}
 
 // What the server lets the signed-in user do to the library's files.
 @Serializable
@@ -35,9 +73,32 @@ data class LibraryActions(
     // Where the server looks for a better copy, in its own words, like
     // "Soulseek"; null when it does not offer upgrades or does not say.
     val upgradeSource: String? = null,
+    // Whether this user is one of the server's admins. From version 3,
+    // removing and every fix need it; older servers leave it out and did
+    // not ask, so it counts as yes.
+    val admin: Boolean = true,
 ) {
+    // Whether files can really be changed now: on, allowed, an admin and
+    // not a rehearsal.
+    private val real: Boolean get() = enabled && allowed && admin && !dryRun
+
     // Whether a song can really be taken out of the library now.
-    val canRemove: Boolean get() = enabled && allowed && !dryRun && LIBRARY_ACTION_REMOVE in actions
+    val canRemove: Boolean get() = real && LIBRARY_ACTION_REMOVE in actions
+
+    // Whether a removed song can be put back from the server's trash.
+    val canRestore: Boolean get() = real && LIBRARY_ACTION_RESTORE in actions
+
+    // Whether tags can be written, albums joined and changes undone.
+    val canEdit: Boolean get() = real && LIBRARY_ACTION_RETAG in actions && LIBRARY_ACTION_UNDO in actions
+
+    // Whether the server can join one album's songs onto another's.
+    val canJoinAlbums: Boolean get() = real && LIBRARY_ACTION_JOIN_ALBUM in actions
+
+    // Whether the server can look up a song's tags.
+    val canLookUp: Boolean get() = real && LIBRARY_ACTION_LOOKUP in actions
+
+    // Whether the server can find a cover and put it in a file.
+    val canAddCover: Boolean get() = real && LIBRARY_ACTION_COVER in actions
 
     // Whether a FLAC can really be looked for now. A rehearsal would only
     // fill the server's queue with songs it never swaps, so not then either.
@@ -85,9 +146,53 @@ data class LibraryActionResult(
     val state: String = "",
     // The server's own words about what happened.
     val detail: String? = null,
+    // For a fix: the song's tags before and after, by SongTag name.
+    val before: Map<String, String?>? = null,
+    val after: Map<String, String?>? = null,
 ) {
     val outcome: LibraryActionState get() = LibraryActionState.of(state)
 }
+
+// What a lookup found for one song: its tags now and the ones a download
+// would get (only those found), with how sure the match is and where from.
+@Serializable
+data class SongLookup(
+    val id: String = "",
+    val state: String = "",
+    val detail: String? = null,
+    val current: Map<String, String?> = emptyMap(),
+    val suggested: Map<String, String?> = emptyMap(),
+    // Strong, Medium, Ambiguous, Low or None, as the server says it.
+    val confidence: String? = null,
+    // Where the tags came from, like "Fingerprint" or "Deezer".
+    val source: String? = null,
+    // The release it matched, in the server's words.
+    val release: String? = null,
+) {
+    val found: Boolean get() = state == "found"
+
+    // Strong or Medium: what a download would have written without asking.
+    val sure: Boolean get() = confidence.equals("Strong", ignoreCase = true) || confidence.equals("Medium", ignoreCase = true)
+}
+
+// One song in the server's trash.
+@Serializable
+data class TrashedSong(
+    val id: String = "",
+    val title: String = "",
+    val artist: String = "",
+    val album: String = "",
+    val removedBy: String? = null,
+    val removedAt: String? = null,
+    // When the server deletes it for good; null keeps it until cleared.
+    val goneAt: String? = null,
+)
+
+@Serializable
+data class LibraryTrash(
+    val keepDays: Int = 0,
+    val songs: List<TrashedSong> = emptyList(),
+)
 
 // Where one asked for FLAC has got to on the server.
 enum class UpgradeStage(val wire: String) {

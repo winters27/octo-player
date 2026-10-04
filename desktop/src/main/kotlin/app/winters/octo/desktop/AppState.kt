@@ -168,7 +168,8 @@ class AppState(
     var home by mutableStateOf<HomeStore?>(null)
         private set
 
-    // The Library health page's report and removals, for this sign-in.
+    // The Library health page's report, its fixes and what the server lets
+    // this user do to its files (deleting from disk too), for this sign-in.
     val health = HealthModel({ connection?.client }, scope)
 
     // How the kept servers answer, and the scan and user of the one in use,
@@ -453,6 +454,8 @@ class AppState(
         views.library.load()
         views.upgrades?.start()
         views.downloads?.start()
+        // Whether songs can be deleted from disk, for every song menu.
+        if (connection?.isOcto == true) health.askServer()
         refreshPlaylists()
     }
 

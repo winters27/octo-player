@@ -178,4 +178,15 @@ class MenuActionsTest {
             playlistMenuActions(empty = true, owns = true),
         )
     }
+
+    @Test
+    fun deleteFromDiskIsLastOfAll_OnlyWhereTheServerAllowsIt_AndNeverForASongFoundOnline() {
+        val allowed = songMenuActions(1, SongPlace.Library, canDelete = true)
+        assertEquals(listOf("Delete from disk"), allowed.last().map { songActionLabel(it, false) })
+        assertEquals(false, songMenuActions(1, SongPlace.Library).flatten().contains(SongAction.DeleteFromDisk))
+        assertEquals(false, songMenuActions(1, SongPlace.Library, outside = true, canDelete = true).flatten().contains(SongAction.DeleteFromDisk))
+        // In a playlist it comes after taking the songs out of the playlist.
+        val inPlaylist = songMenuActions(2, SongPlace.Playlist("p", listOf(0, 1)), ownsPlaylist = true, canDelete = true).last()
+        assertEquals(listOf(SongAction.RemoveFromPlaylist, SongAction.DeleteFromDisk), inPlaylist)
+    }
 }

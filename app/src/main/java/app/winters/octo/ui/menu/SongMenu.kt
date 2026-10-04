@@ -12,6 +12,7 @@ import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.isFind
+import app.winters.octo.data.LibraryFiles
 import app.winters.octo.data.Upgrades
 import app.winters.octo.design.PopupPages
 import app.winters.octo.discovery.Discovery
@@ -65,7 +66,7 @@ interface QuickSongActions {
 
 // The pages of a song's menu: its actions first, and what some of them open
 // in its place, each with a way back.
-enum class SongPage { Actions, AddToPlaylist, AddToLastPlaylist, Rate, Share, Info }
+enum class SongPage { Actions, AddToPlaylist, AddToLastPlaylist, Rate, Share, Info, DeleteFromDisk }
 
 // Which song the menu is open for, if any. Any song on any screen can
 // open it: a long press on a row, or the more button in the player. It also
@@ -114,7 +115,7 @@ val LocalSongMenu = staticCompositionLocalOf<SongMenuState> { error("No song men
 // The choices in a song's menu, in the order shown.
 enum class SongAction {
     PlayNext, AddToQueue, StartRadio, Download, AddToLastPlaylist, AddToPlaylist, RemoveFromPlaylist, Select, KeepOffline, FindFlac, ShareFile, Share, Like,
-    Rate, GoToAlbum, GoToArtist, SetAsSound, DeleteFromPhone, Info, FindSongs,
+    Rate, GoToAlbum, GoToArtist, SetAsSound, DeleteFromPhone, DeleteFromDisk, Info, FindSongs,
 }
 
 // Where the menu was opened, as the choices care about it.
@@ -148,6 +149,7 @@ fun menuPlace(context: SongMenuContext, albumId: String, artistId: String): Menu
 // look for a FLAC to take the place of its copy there, one that loses detail.
 // `findSongs` is whether the server can run the song's search again so a
 // copy can be picked (Find songs), for a found song or one it has a copy of.
+// `disk` is whether that server lets this user delete its copy from disk.
 fun songActions(
     find: Boolean,
     radio: Boolean,
@@ -158,6 +160,7 @@ fun songActions(
     lastPlaylist: Boolean = false,
     upgrade: Boolean = false,
     findSongs: Boolean = false,
+    disk: Boolean = false,
 ): List<SongAction> = buildList {
     add(SongAction.PlayNext)
     add(SongAction.AddToQueue)
@@ -183,6 +186,7 @@ fun songActions(
             add(SongAction.SetAsSound)
             add(SongAction.DeleteFromPhone)
         }
+        if (disk) add(SongAction.DeleteFromDisk)
     }
     add(SongAction.Info)
     if (findSongs) add(SongAction.FindSongs)
@@ -196,7 +200,7 @@ private val SongMenuOrder = listOf(
     listOf(SongAction.AddToLastPlaylist, SongAction.AddToPlaylist, SongAction.Like, SongAction.Rate, SongAction.Download, SongAction.KeepOffline, SongAction.FindFlac),
     listOf(SongAction.GoToAlbum, SongAction.GoToArtist),
     listOf(SongAction.Share, SongAction.ShareFile, SongAction.SetAsSound, SongAction.Info, SongAction.FindSongs, SongAction.Select),
-    listOf(SongAction.RemoveFromPlaylist, SongAction.DeleteFromPhone),
+    listOf(SongAction.RemoveFromPlaylist, SongAction.DeleteFromPhone, SongAction.DeleteFromDisk),
 )
 
 // The actions offered, in their groups, leaving out empty groups.
@@ -242,6 +246,7 @@ class SongMenuViewModel @Inject constructor(
     private val feedback: Feedback,
     private val upgrades: Upgrades,
     private val serverDownloads: app.winters.octo.data.ServerDownloads,
+    private val files: LibraryFiles,
 ) : ViewModel() {
     val liked: StateFlow<Set<String>> = likes.liked
     val downloadStates: StateFlow<Map<String, DownloadState>> = downloads.states
@@ -278,6 +283,19 @@ class SongMenuViewModel @Inject constructor(
             if (!serverDownloads.findTrack(trackId, title)) feedback.show("This server has no copy of the song to look for")
         }
     }
+
+    // Whether the signed-in Octo server lets this user delete its files.
+    val canRemove: StateFlow<Boolean> = files.actions.map { it?.canRemove == true }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    // How many days the server keeps a deleted file in its trash.
+    val keepDays: StateFlow<Int> = files.actions.map { it?.keepDays ?: 0 }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    // Whether the song has a copy on that server to delete; never a find.
+    suspend fun deletable(trackId: String): Boolean = !isFind(trackId) && files.deletable(listOf(trackId)).isNotEmpty()
+
+    fun deleteFromDisk(track: TrackEntity) = files.deleteFromDisk(listOf(track.id), track.title)
 
     // The server's id for a song, when it has a copy there to share.
     suspend fun shareId(trackId: String): String? = if (isFind(trackId)) null else controls.serverSongId(trackId)

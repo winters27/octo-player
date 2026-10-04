@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.ui
 
 import app.winters.octo.ui.downloads.FIND_SONGS
+import app.winters.octo.health.DELETE_FROM_DISK
 import app.winters.octo.ui.upgrade.FIND_HIGHER_QUALITY
 
 // What each menu offers, and in which groups, worked out apart from how the
@@ -29,6 +30,7 @@ enum class SongAction {
     Details, FindSongs,
     Move,
     RemoveFromPlaylist, RemoveFromQueue,
+    DeleteFromDisk,
 }
 
 // The song menu's rows in their groups. A radio and the details are for
@@ -46,7 +48,9 @@ enum class SongAction {
 // picked library song of a kind that loses detail (`canUpgrade`); a song
 // found online has no file to replace. Find songs, which runs one song's
 // search again on the server's download sources to pick the copy, needs an
-// Octo server that keeps a log of its downloads (`canFind`).
+// Octo server that keeps a log of its downloads (`canFind`). Delete from
+// disk needs an Octo server that lets this user (an admin) take files off
+// its disk (`canDelete`), and is last of all, asked first.
 fun songMenuActions(
     count: Int,
     place: SongPlace,
@@ -57,6 +61,7 @@ fun songMenuActions(
     canAdd: Boolean = false,
     canUpgrade: Boolean = false,
     canFind: Boolean = false,
+    canDelete: Boolean = false,
 ): List<List<SongAction>> {
     val one = count == 1
     val editable = place is SongPlace.Playlist && ownsPlaylist && place.positions.isNotEmpty()
@@ -80,6 +85,7 @@ fun songMenuActions(
         listOfNotNull(
             SongAction.RemoveFromPlaylist.takeIf { editable },
             SongAction.RemoveFromQueue.takeIf { place is SongPlace.Queue && place.keys.isNotEmpty() },
+            SongAction.DeleteFromDisk.takeIf { canDelete && !outside },
         ),
     )
     return groups.filter { it.isNotEmpty() }
@@ -106,6 +112,7 @@ fun songActionLabel(action: SongAction, starred: Boolean, last: String? = null):
     SongAction.Move -> "Move"
     SongAction.RemoveFromPlaylist -> "Remove from this playlist"
     SongAction.RemoveFromQueue -> "Remove from the queue"
+    SongAction.DeleteFromDisk -> DELETE_FROM_DISK
 }
 
 // "3 stars", or nothing for a song not rated yet, as the phone says it.
