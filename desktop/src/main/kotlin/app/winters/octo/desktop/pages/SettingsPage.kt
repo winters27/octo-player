@@ -1,5 +1,18 @@
 package app.winters.octo.desktop.pages
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.text.style.TextAlign
+import app.winters.octo.design.ControlHeight
+import app.winters.octo.design.GlazeCapsule
+import app.winters.octo.design.SettingsSize
+import app.winters.octo.desktop.lyrics.BLUETOOTH_OUTPUT_TIMING_MS
+import app.winters.octo.desktop.lyrics.OUTPUT_TIMING_LIMIT_MS
+import app.winters.octo.desktop.lyrics.WIRED_OUTPUT_TIMING_MS
+import app.winters.octo.desktop.lyrics.outputTimingAbout
+import app.winters.octo.desktop.lyrics.outputTimingOf
+import app.winters.octo.desktop.lyrics.signedTiming
+import app.winters.octo.desktop.lyrics.timingWords
 import app.winters.octo.desktop.settings.MaxTextScale
 import app.winters.octo.desktop.settings.DesktopOs
 import androidx.compose.foundation.layout.Row
@@ -196,6 +209,33 @@ private fun LyricsRows(app: AppState, settings: AppSettings) {
         ) { on ->
             app.settings.update { it.copy(lyrics = it.lyrics.copy(online = on)) }
             app.lyrics.state.value.song?.let { song -> app.lyrics.sources.refresh(song.id) }
+        }
+        OutputTimingRow(app, settings)
+    }
+}
+
+// The lyrics timing on the output playing now: its automatic one, said so,
+// until moved; Earlier and Later a twentieth of a second a click.
+@Composable
+private fun OutputTimingRow(app: AppState, settings: AppSettings) {
+    val player by app.player.state.collectAsState()
+    val bluetooth by app.lyrics.bluetooth.collectAsState()
+    val device = player.playingOn
+    if (device == null) {
+        InfoRow(
+            "Lyrics timing",
+            "Each output keeps its own. Until moved, lyrics show ${timingWords(WIRED_OUTPUT_TIMING_MS)} on speakers or a cable and ${timingWords(BLUETOOTH_OUTPUT_TIMING_MS)} on Bluetooth. Play a song to move it for the output in use.",
+            "Automatic",
+        )
+        return
+    }
+    val timing = outputTimingOf(settings.lyrics.outputOffsets[device.id], bluetooth)
+    SettingRow("Lyrics timing on ${device.name}", outputTimingAbout(bluetooth, timing.automatic)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
+            if (!timing.automatic) RowAction("Use automatic", { app.lyrics.resetOutput(device.id) })
+            GlazeCapsule(null, "Earlier", { app.lyrics.stepOutput(device.id, -1) }, enabled = timing.ms > -OUTPUT_TIMING_LIMIT_MS, height = ControlHeight.M)
+            Txt(signedTiming(timing.ms), DesktopType.body.copy(fontFeatureSettings = "tnum"), OctoColors.TextSecondary, Modifier.width(SettingsSize.Reading), align = TextAlign.Center)
+            GlazeCapsule(null, "Later", { app.lyrics.stepOutput(device.id, 1) }, enabled = timing.ms < OUTPUT_TIMING_LIMIT_MS, height = ControlHeight.M)
         }
     }
 }
