@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 
 // Where fetching one song into the library has got to, as the "+" button
 // shows it: the plus, a ring filling, a check, or an alert.
@@ -64,7 +65,15 @@ class Fetches(
 
     private var watch: Job? = null
 
+    // The library's own id for each song brought in, once the server names
+    // it, so the song plays from the file it fetched rather than streaming
+    // from where it was found.
+    private val landed = ConcurrentHashMap<String, String>()
+
     fun phase(id: String): FetchPhase = phases.value[id] ?: FetchPhase.None
+
+    // The library copy of a song asked for here, if it has landed.
+    fun landedId(id: String): String? = landed[id]
 
     // Asks the server to fetch a song. A failed one can be asked again.
     fun request(id: String) {
@@ -105,7 +114,11 @@ class Fetches(
             phases.mapValues { (id, phase) ->
                 if (!phase.inFlight) return@mapValues phase
                 val entry = list.filter { it.id == id }.maxByOrNull { it.startedAt.orEmpty() } ?: return@mapValues phase
-                phaseOf(entry).also { if (it == FetchPhase.Done) arrived = true }
+                phaseOf(entry).also {
+                    if (it != FetchPhase.Done) return@also
+                    arrived = true
+                    entry.libraryId?.takeIf(String::isNotBlank)?.let { library -> landed[id] = library }
+                }
             }
         }
         if (arrived) onArrived()

@@ -205,10 +205,18 @@ class EnginePlayer(
             val current = queue.currentEntry ?: return
             if (playing) return
             playing = true
-            // At the very end of the last song, Play starts it over; the
-            // engine does the same.
-            if (engine.state() == PlaybackState.ENDED) setPending(current.key, 0)
-            engine.play()
+            if (problem?.song?.id == current.song.id) {
+                // The song that could not play is tried again from its
+                // start, in an engine queue made afresh: the engine gave up
+                // on it and would not try it again by itself.
+                problem = null
+                load(startMs = 0, play = true)
+            } else {
+                // At the very end of the last song, Play starts it over; the
+                // engine does the same.
+                if (engine.state() == PlaybackState.ENDED) setPending(current.key, 0)
+                engine.play()
+            }
             publish()
         }
     }
