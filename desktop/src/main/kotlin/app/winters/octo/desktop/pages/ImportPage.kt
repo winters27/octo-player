@@ -1,6 +1,5 @@
 package app.winters.octo.desktop.pages
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -8,11 +7,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -26,9 +23,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.Corner
+import app.winters.octo.design.CutTxt
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.GlassField
 import app.winters.octo.design.GlazeCapsule
+import app.winters.octo.design.IconSize
+import app.winters.octo.design.MeterLine
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoSwitch
@@ -139,7 +139,7 @@ private fun SpotifySection(model: ImportModel, overview: ImportOverview) {
                 if (reading.busy) "Reading your lists" else "Read your lists again",
                 reading.step?.let { "$it…" } ?: reading.error ?: "Octo reads them again on its own every few hours while a list is kept or fetching.",
             ) {
-                if (reading.busy) ProgressRing(null, size = 20.dp) else RowAction("Read again", model::readAgain, enabled = spotify.connected && !model.working)
+                if (reading.busy) ProgressRing(null, size = IconSize.Transport) else RowAction("Read again", model::readAgain, enabled = spotify.connected && !model.working)
             }
         }
         if (spotify.connected || spotify.problem != null) {
@@ -213,7 +213,7 @@ private fun ListRow(model: ImportModel, list: ImportListSummary) {
             Txt(list.countsLine(), DesktopType.meta, OctoColors.TextSecondary)
             RowAction("Open", { model.open(list.id) })
         }
-        Meter(list.fraction)
+        MeterLine(list.fraction)
         list.partial?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted, maxLines = 3) }
         list.playlistNote?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted, maxLines = 2) }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xl)) {
@@ -239,14 +239,6 @@ private fun PauseSwitch(model: ImportModel, paused: Boolean) {
     LabelledSwitch("Paused", paused, enabled = !model.working) { if (it) model.pause() else model.resume() }
 }
 
-// A thin line, filled as far as the library has the list.
-@Composable
-private fun Meter(fraction: Float) {
-    Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(OctoColors.TextMuted.copy(alpha = 0.25f))) {
-        Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(3.dp).background(OctoColors.Accent))
-    }
-}
-
 @Composable
 private fun OpenedList(model: ImportModel, list: ImportListSummary) {
     val detail = model.detail?.takeIf { it.list.id == list.id }
@@ -256,7 +248,7 @@ private fun OpenedList(model: ImportModel, list: ImportListSummary) {
         }
     }
     if (detail == null) {
-        Rows { SettingRow("Reading the list", null) { ProgressRing(null, size = 20.dp) } }
+        Rows { SettingRow("Reading the list", null) { ProgressRing(null, size = IconSize.Transport) } }
         return
     }
     val askable = detail.tracks.filter { it.stage.askable }
@@ -284,12 +276,12 @@ private fun TrackRow(track: ImportTrack, action: (@Composable () -> Unit)? = nul
         horizontalArrangement = Arrangement.spacedBy(Space.L),
     ) {
         Column(Modifier.weight(1f)) {
-            Txt(track.title, DesktopType.tableTitle)
+            CutTxt(track.title, DesktopType.tableTitle)
             Txt(listOfNotNull(track.artist, track.album).joinToString(" · "), DesktopType.meta, OctoColors.TextMuted)
         }
         Column(Modifier.width(240.dp), horizontalAlignment = Alignment.End) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
-                if (track.stage == ImportTrackState.Downloading) ProgressRing(track.progress?.toFloat(), size = 14.dp)
+                if (track.stage == ImportTrackState.Downloading) ProgressRing(track.progress?.toFloat(), size = IconSize.Inline)
                 Txt(track.stage.label(), DesktopType.meta, stateColor(track.stage))
             }
             track.detail?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted, maxLines = 2, align = androidx.compose.ui.text.style.TextAlign.End) }

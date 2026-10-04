@@ -236,7 +236,8 @@ private fun DownloadsRow(app: AppState, rail: Boolean) {
 
 // One place to go: an icon and its name, the chosen one on the darker
 // pill. On the rail, the icon alone with its name in a tooltip. `trailing`
-// sits at the row's end, or over the icon's corner on the rail.
+// sits at the row's end; the rail has no room for it, so there `state`
+// says the same in the tooltip.
 @Composable
 private fun NavRow(
     label: String,

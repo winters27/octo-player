@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -194,6 +195,21 @@ fun ProgressRing(fraction: Float?, modifier: Modifier = Modifier, size: Dp = 22.
         drawArc(Color.White, -90f, 360f * shown, false, inset, box, style = Stroke(stroke, cap = StrokeCap.Round))
     }
 }
+
+// The ring laid flat: a thin line that fills, for how far a download has
+// come or how much of a list the library has. With no fraction known it
+// is the empty track alone.
+@Composable
+fun MeterLine(fraction: Float?, modifier: Modifier = Modifier) {
+    val shown by animateFloatAsState((fraction ?: 0f).coerceIn(0f, 1f), octoTween(motionScale(), OctoDuration.Neutral), label = "line")
+    Canvas(modifier.fillMaxWidth().height(MeterLineHeight)) {
+        val round = CornerRadius(size.height / 2)
+        drawRoundRect(Color.White.copy(alpha = 0.18f), cornerRadius = round)
+        if (fraction != null && shown > 0f) drawRoundRect(Color.White, size = Size(size.width * shown, size.height), cornerRadius = round)
+    }
+}
+
+val MeterLineHeight = 4.dp
 
 // The thumb width a line slider grows to under the pointer.
 private val ThumbHover = 6.dp

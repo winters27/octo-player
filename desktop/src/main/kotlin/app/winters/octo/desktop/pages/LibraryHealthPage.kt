@@ -21,10 +21,12 @@ import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.GlazeSelected
+import app.winters.octo.design.IconSize
 import app.winters.octo.design.MenuRow
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.PageSize
+import app.winters.octo.design.ProgressRing
 import app.winters.octo.design.RowHeight
 import app.winters.octo.design.Separator
 import app.winters.octo.design.Space
@@ -109,8 +111,8 @@ fun LibraryHealthPage(app: AppState, visit: Visit) {
     }
 }
 
-// Under the title: how a fix is going while one runs, with Stop, and the
-// server's trash.
+// Under the title: how a fix is going while one runs, its ring filling as
+// the downloads drawer's do, with Stop; and the server's trash.
 @Composable
 private fun Tools(app: AppState, health: HealthModel) {
     val running = health.running
@@ -122,6 +124,7 @@ private fun Tools(app: AppState, health: HealthModel) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (running != null) {
+            ProgressRing(running.done.toFloat() / running.total.coerceAtLeast(1), size = IconSize.Table)
             Txt(running.words, DesktopType.body, OctoColors.TextSecondary, Modifier.weight(1f))
             GlazeCapsule(null, "Stop", { health.stop() })
         } else {

@@ -50,7 +50,7 @@ import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
 import app.winters.octo.design.MenuTitle
-import app.winters.octo.design.OctoTooltip
+import app.winters.octo.design.MeterLine
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.PopupPadding
@@ -62,6 +62,7 @@ import app.winters.octo.design.Space
 import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.design.hoverLift
+import app.winters.octo.design.scrollbar
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.downloads.DownloadsModel
 import app.winters.octo.desktop.downloads.DrawerView
@@ -131,7 +132,8 @@ private fun DownloadList(model: DownloadsModel, modifier: Modifier) {
             Txt(if (loaded) DOWNLOADS_EMPTY else "Asking the server", DesktopType.body, OctoColors.TextMuted, Modifier.padding(Space.L), maxLines = 4)
             return
         }
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(start = Space.S, end = Space.S, top = Space.Xs, bottom = Space.Xl)) {
+        val list = rememberLazyListState()
+        LazyColumn(Modifier.weight(1f).scrollbar(list), list, contentPadding = PaddingValues(start = Space.S, end = Space.S, top = Space.Xs, bottom = Space.Xl)) {
             items(rows, key = { it.key }) { row ->
                 DownloadLine(
                     row,
@@ -221,7 +223,7 @@ private fun DownloadLog(app: AppState, model: DownloadsModel, key: String, modif
         val atEnd = list.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it >= list.layoutInfo.totalItemsCount - 3 } ?: true
         if (atEnd) list.animateScrollToItem(list.layoutInfo.totalItemsCount.coerceAtLeast(1) - 1)
     }
-    LazyColumn(modifier, state = list, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.S, bottom = Space.Xl)) {
+    LazyColumn(modifier.scrollbar(list), state = list, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.S, bottom = Space.Xl)) {
         item(key = "bar") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconAction(OctoIcons.Back, "Back to downloads", model::showList, size = ControlHeight.M, iconSize = IconSize.Toolbar, tint = OctoColors.TextSecondary)
@@ -256,17 +258,9 @@ private fun LogHead(row: DownloadRow) {
             if (!row.finished) ProgressRing(row.fraction, size = IconSize.Table)
             Txt(row.status, DesktopType.table, if (row.phase == RowPhase.Failed) OctoColors.SignalOrange else OctoColors.TextPrimary, maxLines = 3)
         }
-        if (row.phase == RowPhase.Downloading) Bar(row.fraction)
+        if (row.phase == RowPhase.Downloading) MeterLine(row.fraction)
         val facts = listOfNotNull(row.quality, row.source, kindLabel(row.kind))
         if (facts.isNotEmpty()) Txt(facts.joinToString(" · "), DesktopType.meta, OctoColors.TextMuted, maxLines = 2)
-    }
-}
-
-// A thin line filling as the file comes in; still, when nobody knows how far.
-@Composable
-private fun Bar(fraction: Float?) {
-    Box(Modifier.fillMaxWidth().height(BarHeight).clip(CircleShape).background(Track)) {
-        if (fraction != null) Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).fillMaxHeight().background(OctoColors.TextPrimary))
     }
 }
 
@@ -329,7 +323,8 @@ private fun FindSongs(app: AppState, model: DownloadsModel, view: DrawerView.Fin
     val problem by model.findProblem.collectAsState()
     val picked by model.picked.collectAsState()
     val searching = found?.searching != false && problem == null
-    LazyColumn(modifier, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.S, bottom = Space.Xl)) {
+    val list = rememberLazyListState()
+    LazyColumn(modifier.scrollbar(list), list, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.S, bottom = Space.Xl)) {
         item(key = "bar") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconAction(
@@ -422,9 +417,7 @@ private fun CopyLine(copy: FoundCandidate, cover: String?, compact: Boolean, onP
             candidateVerdict(copy)?.let { Txt(it, DesktopType.meta, if (copy.rank != null) OctoColors.TextSecondary else OctoColors.TextMuted, maxLines = 2) }
         }
         if (onPick != null) {
-            OctoTooltip("Get this copy") {
-                IconAction(OctoIcons.Download, "Get this copy", onPick, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = hovered, tint = if (hovered) OctoColors.TextPrimary else OctoColors.TextSecondary)
-            }
+            IconAction(OctoIcons.Download, "Get this copy", onPick, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = hovered, tint = if (hovered) OctoColors.TextPrimary else OctoColors.TextSecondary)
         }
     }
 }
@@ -458,6 +451,4 @@ private val LineCover = RowHeight.Regular
 private val HeadCover = FrameSize.PlayerCover + Space.Xs
 private val TimeWidth = Space.Wide + Space.Xl
 private val MarkSize = IconSize.Transport + Space.Xs
-private val BarHeight = Space.Xs
 private val Chip = Color.White.copy(alpha = 0.08f)
-private val Track = Color.White.copy(alpha = 0.14f)
