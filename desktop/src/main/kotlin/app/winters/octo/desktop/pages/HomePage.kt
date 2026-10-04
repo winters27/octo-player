@@ -111,6 +111,9 @@ fun HomePage(app: AppState, visit: Visit) {
                                 app.scope.launch {
                                     try {
                                         app.play(connection.client.playlist(station.id).entry)
+                                    } catch (e: SubsonicException.NotFound) {
+                                        store.stationGone(station.id)
+                                        app.notice = "${station.name} isn't on the server any more."
                                     } catch (e: SubsonicException) {
                                         app.notice = "Couldn't start ${station.name}: ${e.userMessage()}"
                                     } finally {

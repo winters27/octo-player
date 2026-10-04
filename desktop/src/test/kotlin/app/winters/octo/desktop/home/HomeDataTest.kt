@@ -4,6 +4,8 @@ import app.winters.octo.desktop.FakeServer
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.SubsonicException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -38,6 +40,27 @@ class HomeDataTest {
         assertFalse("getInternetRadioStations" in server.endpoints())
         val octo = loadHome(server.connection(listOf("octoAcquisitions:1")))
         assertEquals(listOf("Discover Weekly"), octo.stations.map { it.name })
+    }
+
+    // A station Octo has since made anew is taken off the shelf at once,
+    // and the shelves are read again.
+    @Test
+    fun aStationTheServerNoLongerHasLeavesTheShelf() {
+        server.answer("getAlbumList2", albums("a1"))
+        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly"},{"id":"st2","name":"Chill"}]}""")
+        val store = HomeStore(server.connection(listOf("octoAcquisitions:1")), CoroutineScope(Dispatchers.Unconfined))
+        store.refresh()
+        waitFor { store.data?.stations?.size == 2 }
+        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st2","name":"Chill"},{"id":"st3","name":"Morning"}]}""")
+        store.stationGone("st1")
+        assertFalse(store.data!!.stations.any { it.id == "st1" })
+        waitFor { store.data?.stations?.map { it.id } == listOf("st2", "st3") }
+    }
+
+    private fun waitFor(what: () -> Boolean) {
+        val until = System.currentTimeMillis() + 5_000
+        while (!what() && System.currentTimeMillis() < until) Thread.sleep(20)
+        assertTrue("waited too long", what())
     }
 
     @Test
