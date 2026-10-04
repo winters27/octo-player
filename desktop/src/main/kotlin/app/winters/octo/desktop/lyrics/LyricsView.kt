@@ -1,6 +1,8 @@
 package app.winters.octo.desktop.lyrics
 
 import app.winters.octo.design.motionScale
+import androidx.compose.foundation.lazy.rememberLazyListState
+import app.winters.octo.design.scrollbar
 import app.winters.octo.design.OctoDuration
 import androidx.compose.ui.semantics.Role
 import androidx.compose.animation.Crossfade
@@ -119,7 +121,8 @@ private fun Quiet(text: String, color: Color, onClick: (() -> Unit)? = null) {
 // Lyrics with no timing, as text to read.
 @Composable
 private fun PlainLyrics(lines: List<String>, color: Color) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 24.dp, vertical = 32.dp)) {
+    val list = rememberLazyListState()
+    LazyColumn(Modifier.fillMaxSize().scrollbar(list), list, contentPadding = PaddingValues(horizontal = 24.dp, vertical = 32.dp)) {
         items(lines) { line ->
             Txt(line.ifBlank { " " }, OctoType.body, color.copy(alpha = 0.9f), Modifier.padding(vertical = 4.dp), maxLines = 6)
         }

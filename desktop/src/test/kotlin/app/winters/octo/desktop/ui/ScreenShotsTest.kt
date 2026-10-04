@@ -295,6 +295,10 @@ class ScreenShotsTest {
                 app.navigator.go(Page.Songs)
             }
             shot("songs")
+            // The scroll bar, woken by the pointer moving over the list.
+            SwingUtilities.invokeAndWait { scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Move, androidx.compose.ui.geometry.Offset(700f, 500f)) }
+            shot("scrollbar", 500)
+            SwingUtilities.invokeAndWait { scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Exit, androidx.compose.ui.geometry.Offset(-1f, -1f)) }
             // Two filters on as pills, and the count of what is left.
             SwingUtilities.invokeAndWait {
                 val rules = listOf(FilterPresets.Lossless, QueryRule(QueryField.Artist, QueryOp.Is, text = "Radiohead"))

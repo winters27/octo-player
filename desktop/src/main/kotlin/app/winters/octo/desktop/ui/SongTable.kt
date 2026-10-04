@@ -15,6 +15,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import app.winters.octo.design.LocalFocusVisibility
+import app.winters.octo.design.scrollbar
 import app.winters.octo.design.LocalKeyboardHere
 import app.winters.octo.design.LocalTabStops
 import app.winters.octo.design.drawFocusRing
@@ -387,7 +388,7 @@ fun SongTable(
                 state.firstVisibleItemIndex > at || (state.firstVisibleItemIndex == at && state.firstVisibleItemScrollOffset > 0)
             }
         }
-        LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = padding) {
+        LazyColumn(Modifier.fillMaxSize().scrollbar(state, LocalBottomRoom.current), state = state, contentPadding = padding) {
             header()
             if (songs.isEmpty()) {
                 item(key = "empty") { empty() }

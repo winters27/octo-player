@@ -3,6 +3,8 @@ package app.winters.octo.desktop.ui
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.focus.onFocusChanged
 import app.winters.octo.design.LocalFocusVisibility
+import androidx.compose.foundation.lazy.rememberLazyListState
+import app.winters.octo.design.scrollbar
 import app.winters.octo.design.LocalKeyboardHere
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -110,7 +112,8 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
     Column(modifier.chromeFilm(backdrop).padding(horizontal = Space.M, vertical = Space.M)) {
         if (rail) RailSearch(app) else OmniField(app, Modifier.fillMaxWidth())
         Spacer(Modifier.height(Space.S))
-        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+        val list = rememberLazyListState()
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().scrollbar(list), list) {
             item(key = "home") { NavRow("Home", OctoIcons.Home, lit == SidebarItem.Top(Page.Home), rail) { go(Page.Home) } }
             group(app, "library", "Library", rail, frame.foldedGroups) {
                 LibraryPlaces.forEach { place ->

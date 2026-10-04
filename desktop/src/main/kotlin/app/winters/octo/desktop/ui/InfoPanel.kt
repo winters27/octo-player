@@ -17,6 +17,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import app.winters.octo.design.ControlHeight
+import androidx.compose.foundation.lazy.rememberLazyListState
+import app.winters.octo.design.scrollbar
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
@@ -56,7 +58,8 @@ fun InfoPanel(app: AppState, modifier: Modifier = Modifier) {
     // streams, and the head offers to add it to the library.
     val outside = isOutside(app, song)
     val facts = songFacts(song, server, outside = outside)
-    LazyColumn(modifier, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.M, bottom = Space.Xl)) {
+    val list = rememberLazyListState()
+    LazyColumn(modifier.scrollbar(list), list, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.M, bottom = Space.Xl)) {
         if (picked != null) {
             item(key = "back") {
                 Row(Modifier.fillMaxWidth().padding(bottom = Space.M), verticalAlignment = Alignment.CenterVertically) {

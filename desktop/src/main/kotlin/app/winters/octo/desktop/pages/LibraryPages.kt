@@ -21,6 +21,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.GlazeCapsule
+import app.winters.octo.design.scrollbar
 import app.winters.octo.design.GlazeSegments
 import app.winters.octo.design.MenuRow
 import app.winters.octo.design.MenuSeparator
@@ -116,7 +117,7 @@ fun AlbumsPage(app: AppState, visit: Visit) {
     WithLibrary(app) { index ->
         val order = app.albumOrder
         val albums = remember(index, order) { sortAlbums(index.albums, order) }
-        LazyVerticalGrid(GridCells.Adaptive(GridCard), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
+        LazyVerticalGrid(GridCells.Adaptive(GridCard), Modifier.scrollbar(grid, LocalBottomRoom.current), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
             header {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     PageTitle("Albums", Modifier.weight(1f), detail = countText(albums.size, "album"))
@@ -135,7 +136,7 @@ fun RecentlyAddedPage(app: AppState, visit: Visit) {
     val grid = rememberGridState(app.navigator, visit)
     WithLibrary(app) { index ->
         val albums = remember(index) { sortAlbums(index.albums, SortOrder(AlbumSort.RecentlyAdded, descending = true)) }
-        LazyVerticalGrid(GridCells.Adaptive(GridCard), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
+        LazyVerticalGrid(GridCells.Adaptive(GridCard), Modifier.scrollbar(grid, LocalBottomRoom.current), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
             header { PageTitle("Recently added", detail = if (albums.isEmpty()) null else countText(albums.size, "album") + ", newest first") }
             if (albums.isEmpty()) header { NothingHere("Nothing added yet", "Albums added to your server show here, newest first.") }
             items(albums, key = { it.id }) { AlbumCard(app, it) }
@@ -149,7 +150,7 @@ fun ArtistsPage(app: AppState, visit: Visit) {
     val grid = rememberGridState(app.navigator, visit)
     WithLibrary(app) { index ->
         val artists = remember(index) { sortedByName(index.artists) { it.name } }
-        LazyVerticalGrid(GridCells.Adaptive(GridCard), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
+        LazyVerticalGrid(GridCells.Adaptive(GridCard), Modifier.scrollbar(grid, LocalBottomRoom.current), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
             header { PageTitle("Artists", detail = countText(artists.size, "artist")) }
             if (artists.isEmpty()) header { NothingHere("No artists yet", "Once your server has music, every artist shows here.") }
             items(artists, key = { it.id }) { ArtistCard(app, it) }
@@ -211,7 +212,7 @@ fun FavouritesPage(app: AppState, visit: Visit) {
                     if (all.isNotEmpty()) item(key = "filters") { FilterBar(app, query, filter, all, onSaveAsLive = { saveAsLiveList(app, listOf(FilterPresets.Favourites), query, null) }) }
                 }
             }
-            FavouriteKind.Albums, FavouriteKind.Artists -> LazyVerticalGrid(GridCells.Adaptive(GridCard), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
+            FavouriteKind.Albums, FavouriteKind.Artists -> LazyVerticalGrid(GridCells.Adaptive(GridCard), Modifier.scrollbar(grid, LocalBottomRoom.current), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
                 header { title(null) }
                 if (kind == FavouriteKind.Albums) {
                     val albums = starred.album.filter { app.isAlbumStarred(it.id, it.starred) }

@@ -46,6 +46,7 @@ import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalFocusManager
 import app.winters.octo.design.Corner
+import app.winters.octo.design.scrollbar
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.FrameSize
@@ -208,7 +209,7 @@ fun OmniPanel(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier)
             sections.all { section -> section.items.all { it is OmniItem.SeeAll } } ->
                 Txt("Nothing found. Try other words, or fewer of them.", DesktopType.body, OctoColors.TextMuted, Modifier.padding(Space.L), maxLines = 2)
         }
-        LazyColumn(Modifier.heightIn(max = FrameSize.OmniHeight), state = list) {
+        LazyColumn(Modifier.heightIn(max = FrameSize.OmniHeight).scrollbar(list), state = list) {
             var at = 0
             sections.forEach { section ->
                 val first = at

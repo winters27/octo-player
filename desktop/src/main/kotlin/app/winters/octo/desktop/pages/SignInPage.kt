@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import app.winters.octo.connection.formatFingerprint
 import app.winters.octo.design.AccentButton
+import app.winters.octo.design.scrollbar
 import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.GlassField
@@ -153,10 +154,12 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
     BoxWithConstraints(Modifier.fillMaxSize().alpha(asking)) {
         // On a short window the card packs tighter, so Sign in shows without scrolling.
         val short = maxHeight < ShortWindow
+        val scroll = rememberScrollState()
         Column(
             Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .scrollbar(scroll)
+                .verticalScroll(scroll)
                 .heightIn(min = maxHeight)
                 .padding(vertical = if (short) 12.dp else 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
