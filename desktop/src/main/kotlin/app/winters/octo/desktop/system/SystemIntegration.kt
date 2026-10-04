@@ -355,6 +355,7 @@ class SystemIntegration(
         window.addWindowFocusListener(object : WindowAdapter() {
             override fun windowGainedFocus(e: WindowEvent?) {
                 windowInFront = true
+                app.windowCameBack()
             }
 
             override fun windowLostFocus(e: WindowEvent?) {

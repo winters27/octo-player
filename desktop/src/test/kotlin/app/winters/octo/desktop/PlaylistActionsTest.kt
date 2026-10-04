@@ -313,4 +313,49 @@ class PlaylistActionsTest {
         assertEquals("Imported 2 of 3 songs into \"Mix\"", app.notice)
         assertEquals("Not found: Nobody - Nothing", app.noticeDetail)
     }
+
+    // Brandon: a click on a playlist said "That isn't on the server any
+    // more." One the server no longer has leaves the sidebar, its pin and
+    // its page, and the list is read again.
+    @Test
+    fun aPlaylistTheServerNoLongerHasLeavesTheList() {
+        val app = app()
+        app.setPinned("p2", true)
+        server.answerBy("getPlaylist") { request ->
+            if (request.url.queryParameter("id") == "p2") server.failed(70, "Playlist not found") else server.ok()
+        }
+        val listed = callsTo("getPlaylists").size
+        // The server's list has lost it too by now.
+        server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"p1","name":"Late night","owner":"winters","songCount":3}]}""")
+        val why = runBlocking { app.loadPlaylist("p2") }
+        assertEquals(PLAYLIST_GONE, why)
+        assertEquals(listOf("p1"), app.playlists.map { it.id })
+        assertTrue("unpinned", !app.isPinned("p2"))
+        waitFor { callsTo("getPlaylists").size > listed }
+        assertEquals(listOf("p1"), app.playlists.map { it.id })
+    }
+
+    @Test
+    fun anyOtherFailureKeepsThePlaylist() {
+        val app = app()
+        server.answerBy("getPlaylist") { server.failed(0, "Something broke") }
+        val why = runBlocking { app.loadPlaylist("p2") }
+        assertTrue(why != PLAYLIST_GONE)
+        assertEquals(listOf("p1", "p2"), app.playlists.map { it.id })
+    }
+
+    // Deleted on the phone, say: coming back to the window reads the list
+    // again once it is a minute old, and not before.
+    @Test
+    fun comingBackToTheWindowReadsAnOldListAgain() {
+        val app = app()
+        waitFor { callsTo("getPlaylists").isNotEmpty() }
+        val listed = callsTo("getPlaylists").size
+        app.windowCameBack()
+        Thread.sleep(200)
+        assertEquals("just read", listed, callsTo("getPlaylists").size)
+        server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"p1","name":"Late night","owner":"winters","songCount":3}]}""")
+        app.windowCameBack(System.currentTimeMillis() + PLAYLISTS_FRESH_MS)
+        waitFor { app.playlists.map { it.id } == listOf("p1") }
+    }
 }

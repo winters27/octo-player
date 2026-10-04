@@ -9,6 +9,7 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.listening.listeningFolder
 import app.winters.octo.desktop.liveListSongs
 import app.winters.octo.desktop.library.LibraryState
+import app.winters.octo.desktop.playlistGone
 import app.winters.octo.desktop.playlistSongs
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.key
@@ -37,6 +38,9 @@ interface JumpListHooks {
     fun isPinned(target: JumpTarget): Boolean
 
     fun setPinned(target: JumpTarget, pinned: Boolean)
+
+    // Takes something the server no longer has out of the jump list.
+    fun forget(target: JumpTarget) {}
 }
 
 // Octo on the Windows shell: the taskbar button, the jump list and starting
@@ -153,6 +157,10 @@ class ShellIntegration internal constructor(
                         list?.let { app.liveListSongs(it) }.orEmpty()
                     }
                 }
+            } catch (e: SubsonicException.NotFound) {
+                // Gone from the server: gone from the jump list too.
+                if (kind == JumpKind.Playlist) app.playlistGone(id) else forget(JumpTarget(kind, id, ""))
+                emptyList()
             } catch (e: SubsonicException) {
                 emptyList()
             }
@@ -175,6 +183,8 @@ class ShellIntegration internal constructor(
     override fun isPinned(target: JumpTarget): Boolean = jumpStore.entries.value.isPinned(target)
 
     override fun setPinned(target: JumpTarget, pinned: Boolean) = jumpStore.setPinned(target, pinned)
+
+    override fun forget(target: JumpTarget) = jumpStore.forget(listOf(target.link))
 
     override fun close() {
         jobs.forEach { it.cancel() }

@@ -28,11 +28,13 @@ import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.PLAYLIST_GONE
 import app.winters.octo.desktop.asPlaylist
 import app.winters.octo.desktop.library.SongColumn
 import app.winters.octo.desktop.library.filteredCount
 import app.winters.octo.desktop.library.rememberFiltered
 import app.winters.octo.desktop.loadPlaylist
+import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.playlistView
 import app.winters.octo.desktop.playlists.movedPositions
@@ -70,6 +72,13 @@ fun PlaylistPage(app: AppState, visit: Visit, id: String) {
     var failed by remember(id) { mutableStateOf<String?>(null) }
     var round by remember(id) { mutableIntStateOf(0) }
     LaunchedEffect(connection, id, known?.songCount, known?.changed, round) { failed = app.loadPlaylist(id) }
+    // One the server no longer has is not shown: the page goes back, and
+    // a line says why.
+    LaunchedEffect(failed) {
+        if (failed != PLAYLIST_GONE) return@LaunchedEffect
+        app.notice = PLAYLIST_GONE
+        if (!app.navigator.back()) app.navigator.replace(Page.Home)
+    }
     val view = app.playlistView(id)
     val state = when {
         view != null -> Load.Ready(view)

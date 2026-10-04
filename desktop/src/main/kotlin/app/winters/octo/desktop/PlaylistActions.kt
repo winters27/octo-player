@@ -7,6 +7,8 @@ import app.winters.octo.desktop.playlists.m3uLinesOf
 import app.winters.octo.desktop.playlists.missedDetail
 import app.winters.octo.desktop.playlists.movedBy
 import app.winters.octo.desktop.server.userMessage
+import app.winters.octo.desktop.system.JumpKind
+import app.winters.octo.desktop.system.JumpTarget
 import app.winters.octo.playlists.PLAYLIST_FILE_LIMIT
 import app.winters.octo.playlists.playlistText
 import app.winters.octo.playlists.writeM3u
@@ -44,17 +46,36 @@ class PlaylistView(val client: SubsonicClient, val playlist: PlaylistWithSongs)
 fun AppState.playlistView(id: String): PlaylistWithSongs? =
     playlistViews[id]?.takeIf { it.client === connection?.client }?.playlist
 
-// Reads a playlist for its page. Null once read, or why it could not be.
-// A read that lands while an edit is on its way is not shown.
+// Reads a playlist for its page. Null once read, or why it could not be
+// (PLAYLIST_GONE for one the server no longer has, which leaves the
+// sidebar). A read that lands while an edit is on its way is not shown.
 suspend fun AppState.loadPlaylist(id: String): String? {
     val client = connection?.client ?: return null
     return try {
         val read = client.playlist(id)
         if ((playlistSaves[id] ?: 0) == 0) playlistViews[id] = PlaylistView(client, read)
         null
+    } catch (e: SubsonicException.NotFound) {
+        playlistGone(id)
+        PLAYLIST_GONE
     } catch (e: SubsonicException) {
         e.userMessage()
     }
+}
+
+// Why a playlist's page closed by itself.
+const val PLAYLIST_GONE = "That playlist isn't on the server any more, so it's gone from your list."
+
+// A playlist the server says it does not have (deleted on another device,
+// or one of Octo's own mixes or stations it has since made anew): out of
+// the sidebar, its pin, its page and the jump list at once, and the list
+// read again.
+fun AppState.playlistGone(id: String) {
+    dropPlaylist(id)
+    if (isPinned(id)) setPinned(id, false)
+    playlistViews.remove(id)
+    jumpList?.forget(JumpTarget(JumpKind.Playlist, id, ""))
+    refreshPlaylists()
 }
 
 // The playlist as a list of playlists has it, for its menus: the sidebar's
