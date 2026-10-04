@@ -106,11 +106,11 @@ class HealthFixPlansTest {
         assertEquals(listOf("mp3"), plan.remove.map { it.nativeId })
         assertEquals(listOf(TagChange("genre", null, "Folk", "mp3")), plan.fills)
         assertEquals(
-            listOf(FixStep.Retag("flac", "Holocene", mapOf("genre" to "Folk")), FixStep.Remove("mp3", "Holocene")),
+            listOf(FixStep.Retag("flac", "Holocene", mapOf("genre" to "Folk")), FixStep.Remove("mp3", "Holocene", copy = true)),
             plan.serverSteps(plan.fills, edit = true),
         )
         // A server that cannot write tags only removes.
-        assertEquals(listOf(FixStep.Remove("mp3", "Holocene")), plan.serverSteps(plan.fills, edit = false))
+        assertEquals(listOf(FixStep.Remove("mp3", "Holocene", copy = true)), plan.serverSteps(plan.fills, edit = false))
         assertEquals(listOf(plan to plan.serverSteps(plan.fills, edit = true)), health.fixAllDuplicates(server, edit = true))
     }
 
@@ -194,7 +194,7 @@ class HealthFixPlansTest {
             listOf("Keeps Holocene (FLAC, 16-bit, 44.1 kHz)" to "Removes Holocene (MP3, 320 kbps). Fills in Genre: Folk."),
             preview.lines,
         )
-        assertEquals(listOf(FixStep.Retag("flac", "Holocene", mapOf("genre" to "Folk")), FixStep.Remove("mp3", "Holocene")), preview.steps)
+        assertEquals(listOf(FixStep.Retag("flac", "Holocene", mapOf("genre" to "Folk")), FixStep.Remove("mp3", "Holocene", copy = true)), preview.steps)
     }
 
     @Test
