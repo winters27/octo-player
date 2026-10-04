@@ -120,6 +120,10 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
                 YourPlaces.forEach { place ->
                     item(key = "p:${place.label}") { NavRow(place.label, place.icon, lit == SidebarItem.Top(place.page), rail) { go(place.page) } }
                 }
+                // Only an Octo server imports; the page itself says when one is too old to.
+                if (app.connection?.isOcto == true) {
+                    item(key = "p:imports") { NavRow("Spotify import", OctoIcons.Cloud, lit == SidebarItem.Top(Page.Imports), rail) { go(Page.Imports) } }
+                }
             }
             val pinned = frame.pinnedPlaylists
             val playlists = app.playlists.sortedBy { pinned.indexOf(it.id).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE }
