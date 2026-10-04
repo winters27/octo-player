@@ -84,6 +84,12 @@ class PlaylistsViewModel @Inject constructor(
     private val _importState = MutableStateFlow<ImportState?>(null)
     val importState: StateFlow<ImportState?> = _importState
 
+    init {
+        // A playlist deleted on another device leaves the list, and one
+        // made there comes in, without waiting for the next library copy.
+        store.freshen()
+    }
+
     fun setOrder(order: SortOrder) {
         viewModelScope.launch { sorting.set(SortList.Playlists, order) }
     }

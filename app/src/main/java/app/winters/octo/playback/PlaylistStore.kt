@@ -125,4 +125,7 @@ class PlaylistStore @Inject constructor(
 
     // Makes a playlist only on the phone on the server too, and keeps them in step.
     fun saveToServer(id: String) = sync.saveToServer(id)
+
+    // Brings in what changed in the server's playlists since the last look.
+    fun freshen() = sync.freshen()
 }

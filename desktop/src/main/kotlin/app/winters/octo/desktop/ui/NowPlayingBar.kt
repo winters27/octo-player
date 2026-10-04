@@ -93,7 +93,9 @@ import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.formatLabel
+import app.winters.octo.desktop.startRadio
 import app.winters.octo.desktop.system.MiniPlayerButton
+import app.winters.octo.desktop.system.isOpenedFile
 import app.winters.octo.playback.SLEEP_EXTENSIONS
 import app.winters.octo.playback.SLEEP_MINUTES
 import app.winters.octo.playback.SLEEP_SONG_COUNTS
@@ -149,6 +151,7 @@ fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier,
                         .semantics { contentDescription = "Open the player" },
                     shape = Corner.ArtMShape,
                     placeholder = OctoIcons.Songs,
+                    retry = true,
                 )
             }
             Column(Modifier.weight(1f)) {
@@ -292,8 +295,8 @@ private fun UtilityZone(app: AppState, state: PlayerState, compact: Boolean = fa
 }
 
 // What is used now and then: the full player, where the sound goes, the
-// sleep timer, stopping after this song, the song's details (with its
-// format) and the mini player. Lit while a timer is set.
+// sleep timer, stopping after this song, a radio from it, the song's
+// details (with its format) and the mini player. Lit while a timer is set.
 @Composable
 private fun MoreButton(app: AppState, state: PlayerState, compact: Boolean) {
     var anchor by remember { mutableStateOf(IntRect.Zero) }
@@ -331,6 +334,10 @@ private fun ColumnScope.MoreMenu(app: AppState, close: () -> Unit, compact: Bool
                 enabled = now.current != null,
             )
             MenuSeparator()
+            // Songs like this one after it, as the song menu's Start radio.
+            // A file opened from this computer has none on the server.
+            val song = now.current?.song
+            MenuRow("Start radio", { song?.let(app::startRadio); close() }, OctoIcons.Radio, enabled = song != null && app.connection != null && !isOpenedFile(song.id))
             MenuRow("Song details", { app.showInfo(null); close() }, OctoIcons.Info, enabled = now.current != null, detail = formatLabel(now.format))
             app.toggleMiniPlayer?.let { toggle -> MenuRow("Mini player", { toggle(); close() }, OctoIcons.Expand) }
         }

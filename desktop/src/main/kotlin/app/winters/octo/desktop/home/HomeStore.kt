@@ -64,6 +64,13 @@ class HomeStore(
         }
     }
 
+    // A station the server no longer has (Octo makes its stations anew now
+    // and then): off the shelf at once, and the shelves read again.
+    fun stationGone(id: String) {
+        data = data?.let { it.copy(stations = it.stations.filterNot { station -> station.id == id }) }
+        refresh()
+    }
+
     // Tried again by hand, after a failure or on an empty Home: everything
     // read afresh.
     fun retry() {

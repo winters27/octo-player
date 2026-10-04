@@ -68,6 +68,7 @@ fun LyricsView(app: AppState, modifier: Modifier = Modifier, textColor: Color = 
     val shown by model.state.collectAsState()
     val player by app.player.state.collectAsState()
     val settings by app.settings.state.collectAsState()
+    val bluetooth by model.bluetooth.collectAsState()
     val song = shown.song
     Crossfade(shown.answer, animationSpec = tween(motionScale().ms(OctoDuration.Neutral)), modifier = modifier, label = "lyrics") { answer ->
         when {
@@ -77,7 +78,7 @@ fun LyricsView(app: AppState, modifier: Modifier = Modifier, textColor: Color = 
                 val lyrics = answer.lyrics
                 val screenLead = remember { screenLeadMs(screenRefreshHz()) }
                 val device = player.playingOn?.id
-                val outputOffset = (settings.lyrics.outputOffsets[device] ?: 0L) + screenLead
+                val outputOffset = outputTimingOf(device?.let { settings.lyrics.outputOffsets[it] }, bluetooth).ms + screenLead
                 val offset = settings.lyrics.offsets[song.id] ?: 0L
                 when {
                     lyrics.instrumental -> Quiet("Instrumental", textColor)
@@ -202,25 +203,39 @@ private fun TimingControl(app: AppState, song: Song) {
         val device = player.playingOn
         if (device != null) {
             Separator()
-            val kept = settings.lyrics.outputOffsets[device.id] ?: 0L
-            TimingRow(device.name, "For every song on this output.", kept, { model.stepOutput(device.id, it) }) {
-                model.stepOutput(device.id, -(kept / TIMING_STEP_MS).toInt())
-            }
+            val bluetooth by model.bluetooth.collectAsState()
+            val timing = outputTimingOf(settings.lyrics.outputOffsets[device.id], bluetooth)
+            TimingRow(
+                device.name,
+                outputTimingAbout(bluetooth, timing.automatic),
+                timing.ms,
+                { model.stepOutput(device.id, it) },
+                canReset = !timing.automatic,
+                resetLabel = "Use automatic",
+            ) { model.resetOutput(device.id) }
         }
     }
 }
 
 @Composable
-private fun TimingRow(title: String, about: String, offset: Long, step: (Int) -> Unit, reset: () -> Unit) {
+private fun TimingRow(
+    title: String,
+    about: String,
+    offset: Long,
+    step: (Int) -> Unit,
+    canReset: Boolean = offset != 0L,
+    resetLabel: String = "Reset",
+    reset: () -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Txt(title, OctoType.label)
-        Txt(about, OctoType.caption, OctoColors.TextMuted)
+        Txt(about, OctoType.caption, OctoColors.TextMuted, maxLines = 3)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             GlazeCapsule(null, "Earlier", { step(-1) }, height = 32.dp)
             Txt(signedTiming(offset), OctoType.label.copy(fontFeatureSettings = "tnum"), modifier = Modifier.weight(1f), align = TextAlign.Center)
             GlazeCapsule(null, "Later", { step(1) }, height = 32.dp)
         }
-        if (offset != 0L) Row { TextAction("Reset", reset) }
+        if (canReset) Row { TextAction(resetLabel, reset) }
     }
 }
 

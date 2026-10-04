@@ -74,7 +74,24 @@ class PlaylistSync @Inject constructor(
     // Runs after each copy of the server's library.
     suspend fun afterSync() {
         val server = signedIn() ?: return
+        reconciledAt = System.currentTimeMillis()
         lock.withLock { reconcile(server) }
+    }
+
+    // When the server's playlists were last brought together with the
+    // phone's.
+    @Volatile private var reconciledAt = 0L
+
+    // The playlists are on screen: one deleted or made on another device
+    // since the last copy of the library is taken out or brought in now,
+    // at most once a minute.
+    fun freshen(now: Long = System.currentTimeMillis()) {
+        if (!playlistsStale(now, reconciledAt)) return
+        reconciledAt = now
+        scope.launch {
+            val server = signedIn() ?: return@launch
+            lock.withLock { failureOf { reconcile(server) } }
+        }
     }
 
     // A playlist was made on the phone. With saving new playlists turned

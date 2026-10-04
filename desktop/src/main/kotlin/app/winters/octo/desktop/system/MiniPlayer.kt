@@ -1,8 +1,12 @@
 package app.winters.octo.desktop.system
 
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,8 +31,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -97,6 +104,7 @@ import app.winters.octo.desktop.player.wash.WashCover
 import app.winters.octo.desktop.ui.OctoArt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.withContext
 import java.awt.Dimension
@@ -143,8 +151,23 @@ fun MiniPlayerWindow(
         windowState.position = WindowPosition(to.x.dp, to.y.dp)
         windowState.size = DpSize(to.width.dp, to.height.dp)
     }
+    // A word on what the pin did, for a moment: pinned is the usual state,
+    // so a click that unpins it changes nothing to be seen until another
+    // window comes up over it.
+    var pinNote by remember { mutableStateOf<String?>(null) }
+    var pinClicks by remember { mutableIntStateOf(0) }
+    LaunchedEffect(pinClicks) {
+        if (pinClicks == 0) return@LaunchedEffect
+        delay(PIN_NOTE_MS)
+        pinNote = null
+    }
     val actions = MiniActions(
-        pin = { app.settings.update { it.copy(system = it.system.copy(miniPlayerOnTop = !it.system.miniPlayerOnTop)) } },
+        pin = {
+            val on = !app.settings.current.system.miniPlayerOnTop
+            app.settings.update { it.copy(system = it.system.copy(miniPlayerOnTop = on)) }
+            pinNote = pinNoteFor(on)
+            pinClicks++
+        },
         resize = ::jumpTo,
         showPanel = { panel ->
             app.settings.update { it.copy(system = it.system.copy(miniPlayerPanel = panel?.name?.lowercase())) }
@@ -204,6 +227,7 @@ fun MiniPlayerWindow(
                         panel = prefs.miniPlayerPanel.toMiniPanel(),
                         onTop = prefs.miniPlayerOnTop,
                         actions = actions,
+                        note = pinNote,
                         dragArea = { modifier -> WindowDraggableArea(modifier) {} },
                     )
                     ResizeEdges(frame, thickness = Space.Xs)
@@ -225,6 +249,8 @@ fun MiniPlayerView(
     panel: MiniPanel?,
     onTop: Boolean,
     actions: MiniActions,
+    // A short line over the bottom of it, for a moment, if any.
+    note: String? = null,
     dragArea: @Composable (Modifier) -> Unit,
 ) {
     val state by app.player.state.collectAsState()
@@ -239,7 +265,29 @@ fun MiniPlayerView(
                 MiniShape.Panel -> MiniWithPanel(app, state, panel ?: MiniPanel.Lyrics, onTop, actions)
             }
         }
+        if (note != null) MiniNote(note, Modifier.align(Alignment.BottomCenter))
         Box(Modifier.matchParentSize().border(FrameSize.Hairline, ChromeEdge, MenuShape))
+    }
+}
+
+// How long the pin's word stays.
+private const val PIN_NOTE_MS = 2_400L
+
+// What the pin did, in words.
+fun pinNoteFor(onTop: Boolean): String = if (onTop) "Kept on top of other windows" else "Other windows can cover it now"
+
+// A line in a dark capsule, over whatever is under it.
+@Composable
+private fun MiniNote(text: String, modifier: Modifier) {
+    Box(
+        modifier
+            .padding(bottom = Space.S)
+            .background(OctoColors.Background.copy(alpha = 0.92f), CircleShape)
+            .border(FrameSize.Hairline, ChromeEdge, CircleShape)
+            .padding(horizontal = Space.M, vertical = Space.Xs)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+    ) {
+        Txt(text, DesktopType.meta, OctoColors.TextPrimary, maxLines = 1)
     }
 }
 
@@ -259,10 +307,10 @@ private fun MiniBackdrop(app: AppState, state: PlayerState, modifier: Modifier) 
     val song = state.current?.song
     val connection = app.connection
     val cover by produceState<WashCover?>(null, song?.coverArt, song == null, connection, tuning) {
-        value = if (song == null || connection == null) {
-            withContext(Dispatchers.Default) { OctoArt.cover(tuning) }
+        if (song == null || connection == null) {
+            value = withContext(Dispatchers.Default) { OctoArt.cover(tuning) }
         } else {
-            app.washCovers.prepare(connection.client, song.coverArt, tuning)
+            app.washCovers.follow(connection.client, song.coverArt, tuning).collect { value = it }
         }
     }
     ImmersiveBackdrop(cover, look.glowStrength, bpm = 0f, fps = 1, speed = 0f, moving = false, modifier = modifier, quiet = song == null)
@@ -274,7 +322,7 @@ private fun MiniBackdrop(app: AppState, state: PlayerState, modifier: Modifier) 
 private fun MiniBar(app: AppState, state: PlayerState, onTop: Boolean, actions: MiniActions, wide: Boolean) {
     val song = state.current?.song
     Row(Modifier.fillMaxSize().padding(Space.L), horizontalArrangement = Arrangement.spacedBy(Space.L), verticalAlignment = Alignment.CenterVertically) {
-        Cover(song?.coverArt, Modifier.fillMaxHeight().aspectRatio(1f), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs)
+        Cover(song?.coverArt, Modifier.fillMaxHeight().aspectRatio(1f), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs, retry = true)
         Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
             Row(verticalAlignment = Alignment.Top) {
                 SongWords(state, Modifier.weight(1f))
@@ -300,7 +348,7 @@ private fun MiniCover(app: AppState, state: PlayerState, panel: MiniPanel?, onTo
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
             val side = minOf(maxWidth, maxHeight)
             Box(Modifier.size(side)) {
-                Cover(song?.coverArt, Modifier.fillMaxSize(), shape = Corner.ArtLShape, placeholder = OctoIcons.Songs)
+                Cover(song?.coverArt, Modifier.fillMaxSize(), shape = Corner.ArtLShape, placeholder = OctoIcons.Songs, retry = true)
                 // A soft shade at the top, so the buttons read on any cover.
                 Box(Modifier.fillMaxWidth().height(ControlHeight.L + Space.Xl).background(TopShade, Corner.ArtLShape))
                 Box(Modifier.align(Alignment.TopEnd).padding(Space.Xs)) { WindowButtons(onTop, bar = false, actions) }
@@ -330,7 +378,7 @@ private fun MiniWithPanel(app: AppState, state: PlayerState, panel: MiniPanel, o
     val song = state.current?.song
     Column(Modifier.fillMaxSize().padding(top = Space.L, start = Space.L, end = Space.L)) {
         Row(Modifier.fillMaxWidth().height(FrameSize.PlayerThumb), horizontalArrangement = Arrangement.spacedBy(Space.L), verticalAlignment = Alignment.CenterVertically) {
-            Cover(song?.coverArt, Modifier.size(FrameSize.PlayerThumb), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs)
+            Cover(song?.coverArt, Modifier.size(FrameSize.PlayerThumb), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs, retry = true)
             SongWords(state, Modifier.weight(1f))
             WindowButtons(onTop, bar = false, actions)
         }

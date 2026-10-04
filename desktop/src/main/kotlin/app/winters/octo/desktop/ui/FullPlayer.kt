@@ -129,7 +129,7 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
     // The cover made ready, keeping the last one while the next is made.
     var cover by remember { mutableStateOf<WashCover?>(null) }
     LaunchedEffect(song.coverArt, tuning, app.connection) {
-        cover = app.washCovers.prepare(app.connection?.client, song.coverArt, tuning)
+        app.washCovers.follow(app.connection?.client, song.coverArt, tuning).collect { cover = it }
     }
     val ink = remember(cover) { cover?.playerInk() }.color()
     val dolly = remember { Animatable(0f) }
@@ -208,6 +208,7 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
             },
             shape = RoundedCornerShape(14.dp),
             placeholder = OctoIcons.Songs,
+            retry = true,
         )
         Spacer(Modifier.height(28.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

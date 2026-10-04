@@ -41,6 +41,7 @@ import app.winters.octo.desktop.system.MiniActions
 import app.winters.octo.desktop.system.MiniPanel
 import app.winters.octo.desktop.system.MiniPlayerView
 import app.winters.octo.desktop.system.SystemIntegration
+import app.winters.octo.desktop.system.pinNoteFor
 import app.winters.octo.lyrics.OnlineLyrics
 import java.io.File
 import javax.swing.SwingUtilities
@@ -124,15 +125,16 @@ class MiniPlayerScreenShotsTest {
                 val image = scene.render(t)
                 if (name != null) File(out, "$name.png").writeBytes(image.encodeToData(EncodedImageFormat.PNG)!!.bytes)
             }
-            fun mini(name: String, width: Float, height: Float, panel: MiniPanel? = null, onTop: Boolean = true, settleMs: Long = 2_000) {
+            fun mini(name: String, width: Float, height: Float, panel: MiniPanel? = null, onTop: Boolean = true, settleMs: Long = 2_000, note: String? = null) {
                 val scene = ImageComposeScene(width.toInt(), height.toInt(), Density(1f)) {
-                    Provided(app, system) { MiniPlayerView(app, panel, onTop, actions) {} }
+                    Provided(app, system) { MiniPlayerView(app, panel, onTop, actions, note) {} }
                 }
                 draw(scene, name, settleMs)
                 scene.close()
             }
 
             mini("mini-bar-idle", MINI_WIDTH, MINI_HEIGHT)
+            mini("mini-bar-unpinned", MINI_WIDTH, MINI_HEIGHT, onTop = false, note = pinNoteFor(false))
             SwingUtilities.invokeAndWait {
                 val list = app.library!!.index!!.songs.sortedBy { it.track }
                 app.play(list, 0)

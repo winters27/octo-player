@@ -23,6 +23,7 @@ import app.winters.octo.home.Rediscovery
 import app.winters.octo.listening.PlayHistory
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.server.ServerSync
+import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.common.Feedback
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -152,6 +153,13 @@ class HomeViewModel @Inject constructor(
                 playback.playTracks(songs.map { it.id }, 0)
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: SubsonicException.NotFound) {
+                // Made anew on the server since the list was read: off Home,
+                // and the list read again.
+                stations = stations.filterNot { it.id == station.id }
+                stationsLoadedAt = null
+                loadStations()
+                feedback.show(stationGoneLine(station.name))
             } catch (e: Exception) {
                 Log.w("Octo", "station failed to start: ${e.javaClass.simpleName}")
                 feedback.show("Could not start ${station.name}")

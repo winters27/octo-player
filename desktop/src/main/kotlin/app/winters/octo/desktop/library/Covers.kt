@@ -8,7 +8,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,7 +35,9 @@ import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.asImage
 import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
 import coil3.compose.LocalPlatformContext
+import coil3.decode.DataSource
 import coil3.decode.DecodeResult
 import coil3.decode.Decoder
 import coil3.decode.ImageSource
@@ -37,11 +45,16 @@ import coil3.disk.DiskCache
 import coil3.fetch.SourceFetchResult
 import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import coil3.request.Options
 import coil3.request.crossfade
 import coil3.size.Scale
 import coil3.size.pxOrElse
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
 import org.jetbrains.skia.Bitmap
@@ -112,8 +125,25 @@ fun coverLoader(context: PlatformContext, http: OkHttpClient, cacheDir: File): I
         .crossfade(true)
         .build()
 
+// Covers fetched from the server as they come in, by id, so what waits on
+// one (the wash behind the playing song) can try again at once.
+object CoverArrivals {
+    private val flow = MutableSharedFlow<String>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    val arrived: SharedFlow<String> = flow
+
+    fun arrived(coverId: String) {
+        flow.tryEmit(coverId)
+    }
+}
+
+// How long a cover that did not come waits before it is asked for again,
+// each time, where it is worth asking again; then the glyph stays.
+val COVER_RETRY_MS = listOf(2_000L, 5_000L, 15_000L, 45_000L)
+
 // A cover from the signed-in server, filling its box, with the faint rim
 // the phone draws. With no cover it shows the tile with a quiet glyph.
+// With `retry`, a cover that did not come is asked for again a few times:
+// for the playing song, whose cover Octo may still be looking up.
 @Composable
 fun Cover(
     coverId: String?,
@@ -121,6 +151,7 @@ fun Cover(
     shape: Shape = ArtworkShape,
     online: Boolean = false,
     placeholder: ImageVector = OctoIcons.Album,
+    retry: Boolean = false,
 ) {
     val client = LocalCovers.current
     val context = LocalPlatformContext.current
@@ -134,15 +165,42 @@ fun Cover(
             val key = coverKey(client.primaryUrl.host, coverId, bucket, online)
             // With motion reduced a cover is simply there, without fading in.
             val still = LocalReduceMotion.current
-            val request = remember(key, still) {
+            var attempt by remember(key) { mutableIntStateOf(0) }
+            var failed by remember(key, attempt) { mutableStateOf(false) }
+            // Asking again goes to the server, past a copy on disk that
+            // would not draw.
+            val again = attempt > 0
+            val request = remember(key, still, again) {
                 ImageRequest.Builder(context)
                     .data(client.coverArtUrl(coverId, bucket).toString())
                     .memoryCacheKey(key)
                     .diskCacheKey(key)
+                    .apply { if (again) diskCachePolicy(CachePolicy.WRITE_ONLY) }
                     .crossfade(!still)
                     .build()
             }
-            AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(), filterQuality = FilterQuality.Medium)
+            LaunchedEffect(failed) {
+                val wait = COVER_RETRY_MS.getOrNull(attempt)?.takeIf { failed && retry } ?: return@LaunchedEffect
+                delay(wait)
+                attempt++
+            }
+            // A new attempt is a new image, which asks again.
+            key(attempt) {
+                AsyncImage(
+                    model = request,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    filterQuality = FilterQuality.Medium,
+                    onState = { state ->
+                        when (state) {
+                            is AsyncImagePainter.State.Error -> failed = true
+                            is AsyncImagePainter.State.Success -> if (state.result.dataSource == DataSource.NETWORK) CoverArrivals.arrived(coverId)
+                            else -> Unit
+                        }
+                    },
+                )
+            }
         }
         Box(Modifier.matchParentSize().artworkRim(shape))
     }

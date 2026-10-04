@@ -1,9 +1,13 @@
 package app.winters.octo.desktop.lyrics
 
+import app.winters.octo.desktop.audio.isBluetoothOutput
 import app.winters.octo.desktop.player.DesktopPlayer
+import app.winters.octo.desktop.player.OutputDevice
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.desktop.settings.currentOs
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,6 +16,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.math.BigDecimal
 import kotlin.math.abs
 import kotlin.math.roundToLong
@@ -40,6 +45,37 @@ fun screenLeadMs(refreshHz: Float): Long {
     return -(SCREEN_FRAMES * 1000.0 / hz).roundToLong()
 }
 
+// Where an output's timing starts when the listener never set one: the
+// words are mostly heard this much late, about 0.3 s on built-in speakers
+// or a cable and 0.5 s over Bluetooth, which holds more sound back.
+// Starting there leaves most listeners nothing to move.
+const val WIRED_OUTPUT_TIMING_MS = -300L
+const val BLUETOOTH_OUTPUT_TIMING_MS = -500L
+
+fun automaticOutputTiming(bluetooth: Boolean): Long = if (bluetooth) BLUETOOTH_OUTPUT_TIMING_MS else WIRED_OUTPUT_TIMING_MS
+
+// An output's timing, and whether it is the automatic one (never set by
+// the listener) rather than one they set, 0 included.
+data class OutputTiming(val ms: Long, val automatic: Boolean)
+
+fun outputTimingOf(kept: Long?, bluetooth: Boolean): OutputTiming =
+    kept?.let { OutputTiming(it, automatic = false) } ?: OutputTiming(automaticOutputTiming(bluetooth), automatic = true)
+
+// What an output's timing applies to, and, while it is the automatic one,
+// what that is.
+fun outputTimingAbout(bluetooth: Boolean, automatic: Boolean): String = when {
+    !automatic -> "For every song on this output."
+    bluetooth -> "For every song on this output. Automatic: ${timingWords(BLUETOOTH_OUTPUT_TIMING_MS)}, the usual for Bluetooth."
+    else -> "For every song on this output. Automatic: ${timingWords(WIRED_OUTPUT_TIMING_MS)}, the usual for speakers or a cable."
+}
+
+// The offset in words: "in time", "0.25 s later", "0.3 s earlier".
+fun timingWords(offsetMs: Long): String {
+    if (offsetMs == 0L) return "in time"
+    val seconds = BigDecimal.valueOf(abs(offsetMs), 3).stripTrailingZeros().toPlainString()
+    return if (offsetMs > 0) "$seconds s later" else "$seconds s earlier"
+}
+
 // The offset as a signed number of seconds: "0 s", "+0.75 s", "-1.5 s".
 fun signedTiming(offsetMs: Long): String {
     if (offsetMs == 0L) return "0 s"
@@ -55,14 +91,33 @@ fun screenRefreshHz(): Float = runCatching {
 // The lyrics of the song playing now, fetched once per song however many
 // views show them (the side panel and the full player), and again when
 // the listener chose other lyrics, hid them or showed them again.
-class LyricsModel(private val player: DesktopPlayer, val sources: LyricsSources, private val settings: SettingsStore, scope: CoroutineScope) {
+class LyricsModel(
+    private val player: DesktopPlayer,
+    val sources: LyricsSources,
+    private val settings: SettingsStore,
+    scope: CoroutineScope,
+    // Whether an output is Bluetooth, asked of the system.
+    private val route: (OutputDevice?) -> Boolean = { isBluetoothOutput(it, currentOs()) },
+) {
     // The song, and its lyrics once found (null while looking).
     data class Shown(val song: Song?, val answer: LyricsAnswer?)
 
     private val _state = MutableStateFlow(Shown(null, null))
     val state: StateFlow<Shown> = _state
 
+    // Whether the output playing now is Bluetooth, for its automatic
+    // timing; found out again whenever the output changes.
+    private val _bluetooth = MutableStateFlow(false)
+    val bluetooth: StateFlow<Boolean> = _bluetooth
+
     init {
+        @OptIn(ExperimentalCoroutinesApi::class)
+        scope.launch {
+            player.state.map { it.playingOn }
+                .distinctUntilChanged()
+                .mapLatest { device -> withContext(Dispatchers.IO) { route(device) } }
+                .collect { _bluetooth.value = it }
+        }
         @OptIn(ExperimentalCoroutinesApi::class)
         scope.launch {
             combine(player.state.map { it.current?.song }.distinctUntilChanged(), sources.revisions) { song, revisions ->
@@ -84,7 +139,11 @@ class LyricsModel(private val player: DesktopPlayer, val sources: LyricsSources,
 
     fun songOffset(songId: String): Long = settings.current.lyrics.offsets[songId] ?: 0L
 
-    fun outputOffset(device: String?): Long = device?.let { settings.current.lyrics.outputOffsets[it] } ?: 0L
+    fun outputOffset(device: String?): Long = outputTiming(device).ms
+
+    // The output's timing: the one set for it, or the automatic one.
+    fun outputTiming(device: String?): OutputTiming =
+        outputTimingOf(device?.let { settings.current.lyrics.outputOffsets[it] }, _bluetooth.value)
 
     fun stepSong(songId: String, steps: Int) = settings.update { s ->
         val moved = stepTiming(s.lyrics.offsets[songId] ?: 0L, steps)
@@ -92,9 +151,18 @@ class LyricsModel(private val player: DesktopPlayer, val sources: LyricsSources,
         s.copy(lyrics = s.lyrics.copy(offsets = offsets))
     }
 
-    fun stepOutput(device: String, steps: Int) = settings.update { s ->
-        val moved = stepTiming(s.lyrics.outputOffsets[device] ?: 0L, steps, OUTPUT_TIMING_LIMIT_MS)
-        val offsets = if (moved == 0L) s.lyrics.outputOffsets - device else s.lyrics.outputOffsets + (device to moved)
-        s.copy(lyrics = s.lyrics.copy(outputOffsets = offsets))
+    // Moves an output's timing from where it is now, its automatic one at
+    // first, and keeps it, 0 included.
+    fun stepOutput(device: String, steps: Int) {
+        val bluetooth = _bluetooth.value
+        settings.update { s ->
+            val moved = stepTiming(s.lyrics.outputOffsets[device] ?: automaticOutputTiming(bluetooth), steps, OUTPUT_TIMING_LIMIT_MS)
+            s.copy(lyrics = s.lyrics.copy(outputOffsets = s.lyrics.outputOffsets + (device to moved)))
+        }
+    }
+
+    // Back to the output's automatic timing.
+    fun resetOutput(device: String) = settings.update { s ->
+        s.copy(lyrics = s.lyrics.copy(outputOffsets = s.lyrics.outputOffsets - device))
     }
 }

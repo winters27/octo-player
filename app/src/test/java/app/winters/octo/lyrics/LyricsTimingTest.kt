@@ -56,22 +56,41 @@ class LyricsTimingTest {
         assertEquals(-OUTPUT_TIMING_LIMIT_MS, stepTiming(-OUTPUT_TIMING_LIMIT_MS, -1, OUTPUT_TIMING_LIMIT_MS))
     }
 
+    // Brandon: on average the words need to show 0.3 s earlier on a
+    // speaker or a cable and 0.5 s earlier over Bluetooth, so an output
+    // nobody set starts there. One that was set keeps its timing, 0 too.
     @Test
-    fun anOutputNeverMovedIsInTime() {
+    fun anOutputNeverMovedStartsFromItsAutomaticTiming() {
         val stored = mapOf<String, Any?>(
             "lyrics_output_offset:bluetooth:AA:BB" to -150L,
             "lyrics_output_offset:speaker" to 50L,
+            "lyrics_output_offset:usb:DAC" to 0L,
             // A song's timing and other settings are not outputs.
             "offset:track-1" to 750L,
             "lyrics_style" to "Flowing",
         )
         val outputs = outputOffsetsIn(stored)
-        assertEquals(mapOf("bluetooth:AA:BB" to -150L, "speaker" to 50L), outputs)
+        assertEquals(mapOf("bluetooth:AA:BB" to -150L, "speaker" to 50L, "usb:DAC" to 0L), outputs)
         assertEquals(-150L, outputOffsetIn(outputs, "bluetooth:AA:BB"))
         assertEquals(50L, outputOffsetIn(outputs, "speaker"))
-        assertEquals(0L, outputOffsetIn(outputs, "wired"))
-        assertEquals(0L, outputOffsetIn(outputs, "bluetooth:CC:DD"))
-        assertEquals(0L, outputOffsetIn(emptyMap(), "speaker"))
+        assertEquals(OutputTiming(0L, automatic = false), outputTimingIn(outputs, "usb:DAC"))
+        assertEquals(OutputTiming(-300L, automatic = true), outputTimingIn(outputs, "wired"))
+        assertEquals(OutputTiming(-500L, automatic = true), outputTimingIn(outputs, "bluetooth:CC:DD"))
+        assertEquals(-300L, outputOffsetIn(emptyMap(), "speaker"))
+        assertEquals(-300L, outputOffsetIn(emptyMap(), "usb:DAC"))
+    }
+
+    @Test
+    fun movingAnOutputStartsFromItsAutomaticTiming() {
+        assertEquals(-550L, stepTiming(automaticOutputTiming("bluetooth:AA"), -1, OUTPUT_TIMING_LIMIT_MS))
+        assertEquals(-250L, stepTiming(automaticOutputTiming("speaker"), 1, OUTPUT_TIMING_LIMIT_MS))
+    }
+
+    @Test
+    fun theAutomaticTimingIsSaidInPlainWords() {
+        assertEquals("Every song on this output. Automatic: 0.5 s earlier, the usual for Bluetooth.", outputTimingAbout("bluetooth:AA", automatic = true))
+        assertEquals("Every song on this output. Automatic: 0.3 s earlier, the usual for a speaker or a cable.", outputTimingAbout("speaker", automatic = true))
+        assertEquals("Every song on this output.", outputTimingAbout("speaker", automatic = false))
     }
 
     @Test
@@ -100,6 +119,9 @@ class LyricsTimingTest {
         assertEquals("This song +0.25 s", timingSummary(250, 0, "Galaxy Buds"))
         assertEquals("Galaxy Buds -0.15 s", timingSummary(0, -150, "Galaxy Buds"))
         assertEquals("This song -0.1 s · Phone speaker +0.05 s", timingSummary(-100, 50, "Phone speaker"))
+        // The automatic timing was not moved by anyone.
+        assertEquals(null, timingSummary(0, -500, "Galaxy Buds", outputAutomatic = true))
+        assertEquals("This song +0.25 s", timingSummary(250, -300, "Phone speaker", outputAutomatic = true))
     }
 
     @Test

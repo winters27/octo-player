@@ -69,6 +69,13 @@ fun stampOf(changed: String?, songCount: Int) = "${changed.orEmpty()}|$songCount
 fun importable(playlists: List<Playlist>, stationIds: Set<String>, username: String): List<Playlist> =
     playlists.filter { !it.readonly && it.id !in stationIds && ownedBy(it.owner, username) }
 
+// How long the phone's copy of the server's playlists counts as fresh when
+// the playlists come on screen.
+const val PLAYLISTS_FRESH_MS = 60_000L
+
+// Whether the server's playlists are worth bringing in again now.
+fun playlistsStale(now: Long, lastMs: Long): Boolean = now - lastMs >= PLAYLISTS_FRESH_MS
+
 // Playlists that could be stations the server did not mark read-only, so
 // the list of stations is worth asking for.
 fun stationSuspects(playlists: List<Playlist>): List<Playlist> =

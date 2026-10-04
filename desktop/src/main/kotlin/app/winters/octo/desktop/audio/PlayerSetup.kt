@@ -25,6 +25,8 @@ fun openPlayer(
     scope: CoroutineScope,
     client: () -> SubsonicClient?,
     headers: () -> Map<String, String> = { emptyMap() },
+    // The library id of a song found online once fetched into the library.
+    landed: (String) -> String? = { null },
     // The engine, opened beforehand off the window's thread (Startup), or
     // why it would not open.
     opened: Result<AudioEngine> = runCatching { NativeAudioEngine.open() },
@@ -34,7 +36,7 @@ fun openPlayer(
         val engine = opened.getOrThrow()
         keepTrust(engine, settings, scope)
         val device = playback.outputDevice?.takeUnless { it == DEFAULT_OUTPUT }
-        OpenedPlayer(EnginePlayer(engine, LocalOrServer(ServerSongs(headers, client)), volume = playback.volume, device = device), null)
+        OpenedPlayer(EnginePlayer(engine, LocalOrServer(ServerSongs(headers, landed, client)), volume = playback.volume, device = device), null)
     } catch (e: Throwable) {
         if (e is VirtualMachineError) throw e
         OpenedPlayer(

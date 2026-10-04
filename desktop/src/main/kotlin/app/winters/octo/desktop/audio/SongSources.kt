@@ -24,14 +24,17 @@ fun interface SongSources {
 // it is ("format=raw", the original quality), at an address signed the way
 // every other call is, with the server's extra headers. The engine reuses
 // the address for range requests and reconnects, so it is signed when the
-// song is queued.
+// song is queued. A song found online that the server has since fetched
+// into the library (`landed` names its library id) plays from that file.
 class ServerSongs(
     private val headers: () -> Map<String, String> = { emptyMap() },
+    private val landed: (String) -> String? = { null },
     private val client: () -> SubsonicClient?,
 ) : SongSources {
     override fun addressOf(song: Song): SongAddress? {
         val server = client() ?: return null
-        return SongAddress(server.url("stream", mapOf("id" to song.id, "format" to "raw")).toString(), headers())
+        val id = landed(song.id) ?: song.id
+        return SongAddress(server.url("stream", mapOf("id" to id, "format" to "raw")).toString(), headers())
     }
 }
 

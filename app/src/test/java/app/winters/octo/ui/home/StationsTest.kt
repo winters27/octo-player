@@ -1,5 +1,6 @@
 package app.winters.octo.ui.home
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -32,5 +33,10 @@ class StationsTest {
     @Test
     fun loadsAgainOnceStale() {
         assertTrue(stationsDue(now, loadedAt = now - STATIONS_STALE_MS, failed = false, loading = false))
+    }
+
+    @Test
+    fun aStationTheServerNoLongerHasSaysSo() {
+        assertEquals("Chill mix isn't on the server any more", stationGoneLine("Chill mix"))
     }
 }

@@ -150,6 +150,36 @@ class DiscordActivityTest {
         assertEquals("a blank first line falls back to the title", "Karma Police", blank.details)
     }
 
+    // Brandon: songs whose album is their own title need no album in Discord.
+    @Test
+    fun anAlbumThatOnlyRepeatsTheTitleIsLeftOut() {
+        val single = discordActivityFor(now(title = "Creep", album = "Creep - Single"), 0, clock, on, DiscordArtwork(cover = "https://covers.example/creep.jpg"))!!
+        assertEquals("Creep", single.details)
+        assertNull("no album under the cover", single.largeText)
+        listOf("Creep", "creep", "CREEP!", "Creep (Single)", "Creep [EP]", "Creep - EP", "Creep: Single").forEach { album ->
+            assertEquals(album, "", discordAlbum("Creep", album))
+        }
+        assertEquals("Don't Stop Me Now", "", discordAlbum("Don't Stop Me Now", "Dont Stop Me Now"))
+        assertEquals("another album keeps its name", "Pablo Honey", discordAlbum("Creep", "Pablo Honey"))
+        assertEquals("a title inside a longer album name keeps it", "Creep (Live at Glastonbury)", discordAlbum("Creep", "Creep (Live at Glastonbury)"))
+        assertEquals("a title of only marks keeps its album", "Hits", discordAlbum("...", "Hits"))
+        assertEquals("", discordAlbum("Creep", ""))
+        // With the icon in place of a cover, the icon's own name still shows.
+        val iconOnly = discordActivityFor(now(title = "Creep", album = "Creep"), 0, clock, on.copy(picture = DiscordPicture.Icon))!!
+        assertEquals("Octo", iconOnly.largeText)
+    }
+
+    @Test
+    fun aTemplateLeavesNoTraceOfAnAlbumLeftOut() {
+        val brackets = discordActivityFor(now(title = "Creep", album = "Creep"), 0, clock, on.copy(firstLine = "{title} ({album})", secondLine = "{artist} - {album}"))!!
+        assertEquals("Creep", brackets.details)
+        assertEquals("Radiohead", brackets.state)
+        val kept = discordActivityFor(now(), 0, clock, on.copy(secondLine = "{artist} - {album}"))!!
+        assertEquals("Radiohead - OK Computer", kept.state)
+        val dashTitle = discordActivityFor(now(title = "Song -"), 0, clock, on)!!
+        assertEquals("a title is left as it is when nothing was taken out", "Song -", dashTitle.details)
+    }
+
     @Test
     fun timeShowsWhatIsLeftWhatWasPlayedOrNothing() {
         val left = discordActivityFor(now(), 64_000, clock, on)!!

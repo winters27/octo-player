@@ -110,8 +110,11 @@ fun discordActivityFor(
     if (!prefs.on || now == null) return null
     if (!now.playing && !prefs.whilePaused) return null
     if (isOpenedFile(now.songId) && !prefs.openedFiles) return null
-    fun fill(template: String) =
-        template.replace("{title}", now.title).replace("{artist}", now.artist).replace("{album}", now.album)
+    val album = discordAlbum(now.title, now.album)
+    fun fill(template: String): String {
+        val line = template.replace("{title}", now.title).replace("{artist}", now.artist).replace("{album}", album)
+        return if ("{album}" in template && album.isBlank()) tidyLine(line) else line
+    }
     val speed = now.speed.takeIf { it.isFinite() && it > 0f } ?: 1f
     val length = now.durationMs.takeIf { it > 0 }
     val played = positionMs.coerceIn(0, length ?: Long.MAX_VALUE)
@@ -132,7 +135,7 @@ fun discordActivityFor(
         startMs = start.takeIf { timed },
         endMs = length?.let { start + (it / speed).toLong() }?.takeIf { timed && prefs.time == DiscordTime.Remaining },
         largeImage = cover ?: DISCORD_ICON,
-        largeText = (if (prefs.albumName) discordText(now.album) else null) ?: if (cover == null) "Octo" else null,
+        largeText = (if (prefs.albumName) discordText(album) else null) ?: if (cover == null) "Octo" else null,
         smallImage = small,
         smallText = smallText.takeIf { small != null },
         detailsUrl = track?.takeIf { it.length <= URL_MAX },
@@ -140,6 +143,27 @@ fun discordActivityFor(
         button = track?.takeIf { it.length <= BUTTON_URL_MAX }?.let { DiscordButton("Open on Last.fm", it) },
     )
 }
+
+// The album as Discord shows it: none when it only says the song's title
+// again, as a single named after its song does ("Creep" from "Creep -
+// Single"). Case, punctuation and a Single or EP ending make no difference.
+fun discordAlbum(title: String, album: String): String =
+    if (album.isNotBlank() && plainName(album.replace(ReleaseKind, "")).let { it.isNotEmpty() && it == plainName(title) }) "" else album
+
+// " - Single", " (EP)", " [Single]" at the end of an album's name.
+private val ReleaseKind = Regex("""\s*(?:[-–:]\s*|[(\[]\s*)(?:single|ep)\s*[)\]]?\s*$""", RegexOption.IGNORE_CASE)
+
+// Only the letters and digits of a name, in lower case.
+private fun plainName(name: String): String = name.lowercase().filter(Char::isLetterOrDigit)
+
+// A filled line without what an empty part left behind: "()" or "[]", and
+// a separator at either end ("Radiohead - " from "{artist} - {album}").
+fun tidyLine(line: String): String =
+    line.replace(EmptyBrackets, "").replace(Spaces, " ").trim().trim(*LineSeparators).trim()
+
+private val EmptyBrackets = Regex("""\(\s*\)|\[\s*]""")
+private val Spaces = Regex("""\s{2,}""")
+private val LineSeparators = charArrayOf('-', '–', '·', '|', '•', ',', ':', '/', ' ')
 
 // The public Last.fm pages of a song and an artist. Last.fm writes a space
 // as + in its addresses, as form encoding does.

@@ -90,6 +90,7 @@ import app.winters.octo.lyrics.endOf
 import app.winters.octo.lyrics.heardAt
 import app.winters.octo.lyrics.lineAt
 import app.winters.octo.lyrics.lyricsClock
+import app.winters.octo.lyrics.automaticOutputTiming
 import app.winters.octo.lyrics.screenLeadMs
 import app.winters.octo.lyrics.shownLines
 import app.winters.octo.lyrics.totalOffset
@@ -149,10 +150,10 @@ class LyricsTimingViewModel @Inject constructor(
 ) : ViewModel() {
     val keepScreenOn: StateFlow<Boolean> = timing.keepScreenOn.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
-    // The timing kept for the output playing now; it follows the output as
-    // earbuds or a cable come and go.
+    // The timing kept for the output playing now, or its automatic one; it
+    // follows the output as earbuds or a cable come and go.
     val outputOffset: StateFlow<Long> = timing.outputOffsetFor(sound.output)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), automaticOutputTiming(sound.output.value.key))
 
     // Null until read, so the chosen style shows from the first frame.
     val look: StateFlow<LyricsLook?> = lookSettings.look.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)

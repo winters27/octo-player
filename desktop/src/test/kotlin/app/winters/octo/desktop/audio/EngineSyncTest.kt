@@ -278,6 +278,29 @@ class EngineSyncTest {
         assertNull(p.state.value.problem)
     }
 
+    // Brandon: pressing play on a song did nothing. The last song failed,
+    // the queue ended on it, and Play only asked the engine to carry on
+    // with a song it had given up on.
+    @Test
+    fun playOnASongThatFailedTriesItAgain() {
+        val (p, engine) = setUp()
+        p.play(songs, 4)
+        engine.emit(EngineEvent.Error(ErrorKind.NETWORK, "timed out", itemId(p.key("s5"))))
+        engine.emit(EngineEvent.QueueEnded)
+        engine.engineState = PlaybackState.ENDED
+        engine.calls.clear()
+        p.togglePlay()
+        assertTrue(p.state.value.playing)
+        assertNull(p.state.value.problem)
+        assertEquals(listOf("load 5 at 4 from 0 playing"), engine.calls)
+        // A pause and play on a song that is fine only carries on.
+        p.pause()
+        engine.calls.clear()
+        engine.engineState = PlaybackState.PAUSED
+        p.resume()
+        assertEquals(listOf("play"), engine.calls)
+    }
+
     @Test
     fun aFailureNamesTheSongAndKeepsTheEnginesWords() {
         val (p, engine) = setUp()

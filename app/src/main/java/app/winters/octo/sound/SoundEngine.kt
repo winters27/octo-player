@@ -34,6 +34,9 @@ data class AudioOutput(val key: String, val label: String)
 
 val PhoneSpeaker = AudioOutput("speaker", "Phone speaker")
 
+// The start of a Bluetooth output's key; the rest is the device's address.
+const val BLUETOOTH_OUTPUT_PREFIX = "bluetooth:"
+
 private val Context.soundData by preferencesDataStore("sound")
 
 // The sound settings, for the output playing now. With "each output its
@@ -119,7 +122,7 @@ class SoundEngine @Inject constructor(@ApplicationContext private val context: C
         val name = best.productName?.toString()?.trim().orEmpty()
         return when (best.type) {
             AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER ->
-                AudioOutput("bluetooth:${best.address.ifEmpty { name }}", name.ifEmpty { "Bluetooth" })
+                AudioOutput("$BLUETOOTH_OUTPUT_PREFIX${best.address.ifEmpty { name }}", name.ifEmpty { "Bluetooth" })
             AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE ->
                 AudioOutput("usb:$name", name.ifEmpty { "USB audio" })
             else -> AudioOutput("wired", "Headphones")

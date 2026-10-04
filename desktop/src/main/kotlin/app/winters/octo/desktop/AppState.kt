@@ -536,10 +536,26 @@ class AppState(
         scope.launch {
             try {
                 playlists = client.playlists()
+                playlistsReadAt = System.currentTimeMillis()
             } catch (e: SubsonicException) {
                 // The sidebar keeps what it had.
             }
         }
+    }
+
+    // Takes a playlist out of the sidebar's list at once.
+    internal fun dropPlaylist(id: String) {
+        playlists = playlists.filterNot { it.id == id }
+    }
+
+    // When the sidebar's playlists were last read.
+    private var playlistsReadAt = 0L
+
+    // The window is in front again: playlists may have been deleted or
+    // made on another device, and Octo makes its mixes and stations anew
+    // now and then, so a list older than a minute is read again.
+    fun windowCameBack(now: Long = System.currentTimeMillis()) {
+        if (now - playlistsReadAt >= PLAYLISTS_FRESH_MS) refreshPlaylists()
     }
 
     fun toggleSidePanel(panel: SidePanel) = showSidePanel(if (sidePanel == panel) null else panel)
@@ -742,3 +758,6 @@ class AppState(
         return true
     }
 }
+
+// How long the sidebar's playlists count as fresh when the window comes back.
+const val PLAYLISTS_FRESH_MS = 60_000L

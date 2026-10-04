@@ -30,6 +30,8 @@ import app.winters.octo.lyrics.timingLabel
 
 // One lyrics timing to set: its name with the timing now beside it, a line
 // on what it applies to, then Earlier and Later a step a tap, and Reset.
+// `canReset` and `resetLabel` are for a timing whose starting point is not
+// 0, like an output's automatic one.
 @Composable
 fun TimingAdjuster(
     title: String,
@@ -39,6 +41,8 @@ fun TimingAdjuster(
     onStep: (Int) -> Unit,
     onReset: () -> Unit,
     modifier: Modifier = Modifier,
+    canReset: Boolean = offsetMs != 0L,
+    resetLabel: String = "Reset",
 ) {
     Column(modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -66,23 +70,31 @@ fun TimingAdjuster(
             color = OctoColors.TextMuted,
             modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 10.dp),
         )
-        TimingButtons(offsetMs, limitMs, onStep, onReset)
+        TimingButtons(offsetMs, limitMs, onStep, onReset, canReset = canReset, resetLabel = resetLabel)
     }
 }
 
 // Earlier and Later a step a tap, and Reset under them, dimmed while there
 // is nothing to reset. Earlier always shows the words sooner.
 @Composable
-fun TimingButtons(offsetMs: Long, limitMs: Long, onStep: (Int) -> Unit, onReset: () -> Unit, modifier: Modifier = Modifier) {
+fun TimingButtons(
+    offsetMs: Long,
+    limitMs: Long,
+    onStep: (Int) -> Unit,
+    onReset: () -> Unit,
+    modifier: Modifier = Modifier,
+    canReset: Boolean = offsetMs != 0L,
+    resetLabel: String = "Reset",
+) {
     Column(modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             GlazeButton("Earlier", onClick = { onStep(-1) }, modifier = Modifier.weight(1f), enabled = offsetMs > -limitMs)
             GlazeButton("Later", onClick = { onStep(1) }, modifier = Modifier.weight(1f), enabled = offsetMs < limitMs)
         }
-        val moved = offsetMs != 0L
+        val moved = canReset
         Box(Modifier.fillMaxWidth().heightIn(min = 44.dp), contentAlignment = Alignment.Center) {
             Text(
-                "Reset",
+                resetLabel,
                 style = OctoType.label,
                 color = OctoColors.TextSecondary,
                 maxLines = 1,
