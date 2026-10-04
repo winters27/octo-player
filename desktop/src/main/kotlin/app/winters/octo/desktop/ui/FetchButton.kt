@@ -52,6 +52,15 @@ fun isOutside(app: AppState, song: Song): Boolean {
     return remember(song, index, canFetch) { isOutsideSong(song, index, canFetch) }
 }
 
+// A list's songs with each one found online that the library already holds
+// as the library's own copy, the way search's songs show them: so it plays
+// from the library and has the check, not a "+".
+@Composable
+fun rememberLibraryCopies(app: AppState, songs: List<Song>): List<Song> {
+    val index = rememberLibraryIndex(app)
+    return remember(songs, index) { if (index == null) songs else songs.map { if (it.isExternal) index.copyOf(it) ?: it else it } }
+}
+
 // The ids of a list's songs that are outside the library.
 @Composable
 fun rememberOutside(app: AppState, songs: List<Song>): Set<String> {

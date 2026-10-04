@@ -37,6 +37,7 @@ import app.winters.octo.desktop.ui.SectionTitle
 import app.winters.octo.desktop.ui.SongMenu
 import app.winters.octo.desktop.ui.isOutside
 import app.winters.octo.desktop.ui.onRightClick
+import app.winters.octo.desktop.ui.rememberLibraryCopies
 import app.winters.octo.discovery.SEARCH_TOP_SHOWN
 import app.winters.octo.discovery.TOP_CHART_SHOWN
 import app.winters.octo.discovery.knownLengthMs
@@ -48,8 +49,9 @@ import app.winters.octo.subsonic.TopSongs
 
 // The searched artist's most played songs, ranked, under the artists: the
 // first few until "Show all". Songs in the library play from it and have
-// its check; the others play from the server and have the "+" that adds
-// them. Only from an Octo server that ranks them.
+// its check, a copy found online of one it holds included; the others play
+// from the server and have the "+" that adds them. Only from an Octo
+// server that ranks them.
 internal fun LazyListScope.artistTopSongs(app: AppState, tops: SearchTops) {
     val list = tops.artist ?: return
     rankedSongs(
@@ -119,8 +121,9 @@ private fun LazyListScope.rankedSongs(
 // and whether it is in the library. A click plays the list from it, as the
 // songs found online do; a right click opens its menu.
 @Composable
-private fun RankedSong(app: AppState, songs: List<Song>, index: Int, entry: TopSong, withArtist: Boolean) {
-    val song = entry.song ?: return
+private fun RankedSong(app: AppState, ranked: List<Song>, index: Int, entry: TopSong, withArtist: Boolean) {
+    val songs = rememberLibraryCopies(app, ranked)
+    val song = songs.getOrNull(index) ?: return
     val outside = isOutside(app, song)
     val pointer = LocalPointer.current
     val clicks = remember { longArrayOf(0L) }
