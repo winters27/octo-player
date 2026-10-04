@@ -54,6 +54,8 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.rememberWindowState
 import app.winters.octo.design.ChromeEdge
+import androidx.compose.foundation.lazy.rememberLazyListState
+import app.winters.octo.design.scrollbar
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
@@ -484,7 +486,8 @@ private fun UpNext(app: AppState, state: PlayerState) {
         }
         return
     }
-    LazyColumn(Modifier.fillMaxSize()) {
+    val list = rememberLazyListState()
+    LazyColumn(Modifier.fillMaxSize().scrollbar(list), list) {
         item { Txt("UP NEXT", DesktopType.label, OctoColors.TextMuted, Modifier.padding(top = Space.M, bottom = Space.Xs, start = Space.Xs)) }
         items(upcoming.take(UP_NEXT_LIMIT), key = { it.key }) { entry ->
             Row(

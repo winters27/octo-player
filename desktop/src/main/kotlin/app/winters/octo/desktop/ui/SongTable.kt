@@ -15,6 +15,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import app.winters.octo.design.LocalFocusVisibility
+import app.winters.octo.design.scrollbar
 import app.winters.octo.design.LocalKeyboardHere
 import app.winters.octo.design.LocalTabStops
 import app.winters.octo.design.drawFocusRing
@@ -387,7 +388,7 @@ fun SongTable(
                 state.firstVisibleItemIndex > at || (state.firstVisibleItemIndex == at && state.firstVisibleItemScrollOffset > 0)
             }
         }
-        LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = padding) {
+        LazyColumn(Modifier.fillMaxSize().scrollbar(state, LocalBottomRoom.current), state = state, contentPadding = padding) {
             header()
             if (songs.isEmpty()) {
                 item(key = "empty") { empty() }
@@ -540,7 +541,12 @@ private fun HeaderRow(
             horizontalArrangement = Arrangement.spacedBy(ColumnGap),
         ) {
             shown.forEachIndexed { at, column ->
-                if (marks && at == markAt(shown)) Box(Modifier.width(MarkWidth))
+                // The mark column's heading says what its checks and "+"s mean.
+                if (marks && at == markAt(shown)) {
+                    OctoTooltip(MarkHeading, Modifier.width(MarkWidth)) {
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Glyph(OctoIcons.Check, size = IconSize.Inline, tint = OctoColors.TextMuted) }
+                    }
+                }
                 val sortable = onSort != null && order != null && column.sort != null
                 val active = sortable && order.by == column.sort
                 // A sortable heading is a target as tall as the heading row.
@@ -562,7 +568,9 @@ private fun HeaderRow(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (column == SongColumn.Favourite) {
-                            Glyph(OctoIcons.Like, size = IconSize.Inline, tint = if (active) OctoColors.TextPrimary else OctoColors.TextMuted)
+                            OctoTooltip(if (sortable) "Sort by favorites" else "Favorites") {
+                                Glyph(OctoIcons.Like, size = IconSize.Inline, tint = if (active) OctoColors.TextPrimary else OctoColors.TextMuted)
+                            }
                         } else {
                             Txt(column.title.uppercase(), DesktopType.label, if (active) OctoColors.TextPrimary else OctoColors.TextMuted)
                         }
@@ -580,6 +588,9 @@ private fun HeaderRow(
         Separator()
     }
 }
+
+// The tooltip on the mark column's heading.
+internal const val MarkHeading = "Which songs are in your library: a check is in it, a + adds a song found online"
 
 // Nearly solid, so rows passing under it do not show through as a ghost.
 private val StuckFill = OctoColors.Background.copy(alpha = 0.97f)

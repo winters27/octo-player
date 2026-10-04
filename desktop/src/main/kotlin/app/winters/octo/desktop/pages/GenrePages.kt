@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.pages
 
 import app.winters.octo.design.LocalReduceMotion
+import app.winters.octo.design.scrollbar
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -75,6 +76,7 @@ fun GenresPage(app: AppState, visit: Visit) {
         }
         LazyVerticalGrid(
             GridCells.Adaptive(PageSize.GenreLine),
+            Modifier.scrollbar(grid, LocalBottomRoom.current),
             state = grid,
             contentPadding = pagePadding(LocalBottomRoom.current),
             horizontalArrangement = Arrangement.spacedBy(Space.M),

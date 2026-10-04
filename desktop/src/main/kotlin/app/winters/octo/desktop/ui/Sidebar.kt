@@ -3,6 +3,8 @@ package app.winters.octo.desktop.ui
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.focus.onFocusChanged
 import app.winters.octo.design.LocalFocusVisibility
+import androidx.compose.foundation.lazy.rememberLazyListState
+import app.winters.octo.design.scrollbar
 import app.winters.octo.design.LocalKeyboardHere
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -55,6 +57,7 @@ import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoTooltip
+import app.winters.octo.design.TooltipSide
 import app.winters.octo.design.PopupPadding
 import app.winters.octo.design.RowHeight
 import app.winters.octo.design.Separator
@@ -109,7 +112,8 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
     Column(modifier.chromeFilm(backdrop).padding(horizontal = Space.M, vertical = Space.M)) {
         if (rail) RailSearch(app) else OmniField(app, Modifier.fillMaxWidth())
         Spacer(Modifier.height(Space.S))
-        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+        val list = rememberLazyListState()
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().scrollbar(list), list) {
             item(key = "home") { NavRow("Home", OctoIcons.Home, lit == SidebarItem.Top(Page.Home), rail) { go(Page.Home) } }
             group(app, "library", "Library", rail, frame.foldedGroups) {
                 LibraryPlaces.forEach { place ->
@@ -232,7 +236,7 @@ private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Bo
             }
         }
     }
-    if (rail) OctoTooltip(named) { row() } else row()
+    if (rail) OctoTooltip(named, side = TooltipSide.Right) { row() } else row()
 }
 
 // The quiet dot that says something waits in Settings.
@@ -281,7 +285,7 @@ private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, ra
             }
         }
     }
-    if (rail) OctoTooltip(playlist.name) { row() } else row()
+    if (rail) OctoTooltip(playlist.name, side = TooltipSide.Right) { row() } else row()
 }
 
 // A small form for naming a new, empty playlist, in the middle of the

@@ -248,6 +248,7 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
                     // Clicks on the card stay on the card.
                     .pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false).consume() } },
             ) {
+                val scroll = rememberScrollState()
                 Column(
                     Modifier
                         .focusRequester(card)
@@ -255,7 +256,8 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
                         .focusProperties { onExit = { if (host.request === request) cancelFocusChange() } }
                         .focusGroup()
                         .heightIn(max = request.maxHeight)
-                        .verticalScroll(rememberScrollState())
+                        .scrollbar(scroll)
+                        .verticalScroll(scroll)
                         .padding(vertical = 6.dp),
                 ) {
                     request.content(this) { host.close() }

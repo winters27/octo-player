@@ -74,6 +74,15 @@ class LibraryIndex(val songs: List<Song>, val albums: List<Album>, val artists: 
         return candidates.any { sameSong(song.title, song.artist.orEmpty(), length, it.title, it.artist.orEmpty(), knownLengthMs(it), song.isrc, it.isrc) }
     }
 
+    // The library's own copy of a song it holds, by the same rules; nothing
+    // when it does not hold it.
+    fun copyOf(song: Song): Song? {
+        if (song.id in songIds) return songs.firstOrNull { it.id == song.id }
+        val length = knownLengthMs(song)
+        val candidates = byTitle.candidates(song.title, song.artist.orEmpty()) + byIsrc.candidates(song.isrc)
+        return candidates.firstOrNull { sameSong(song.title, song.artist.orEmpty(), length, it.title, it.artist.orEmpty(), knownLengthMs(it), song.isrc, it.isrc) }
+    }
+
     // Songs that have been played, most recently first.
     val history: List<Song> = recentlyPlayed(songs)
 

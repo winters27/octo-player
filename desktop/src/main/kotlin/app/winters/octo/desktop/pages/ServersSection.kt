@@ -46,7 +46,6 @@ import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoSwitch
-import app.winters.octo.design.OctoTooltip
 import app.winters.octo.design.PopupPadding
 import app.winters.octo.design.RowHeight
 import app.winters.octo.design.SettingsSize
@@ -149,30 +148,28 @@ private fun InUseMark() {
 private fun ServerMenuButton(app: AppState, server: SavedServer, inUse: Boolean) {
     var anchor by remember { mutableStateOf(IntRect.Zero) }
     val words = "More for ${server.name}"
-    OctoTooltip(words) {
-        IconAction(
-            OctoIcons.More,
-            words,
-            {
-                app.popups.showUnder(anchor, width = FrameSize.Menu) { close ->
-                    MenuTitle(server.name)
-                    MenuRow("Edit", { close(); editServer(app, server) }, OctoIcons.Rename)
-                    if (inUse && server.authMode != AuthMode.ApiKey) MenuRow("Change password", { close(); changePassword(app) }, OctoIcons.Settings)
-                    if (server.signedOut) {
-                        MenuRow("Sign in", { close(); signInTo(app, server) }, OctoIcons.Forward)
-                    } else {
-                        MenuRow("Sign out", { close(); app.signOutOf(server.id) }, OctoIcons.Back)
-                    }
-                    MenuSeparator()
-                    MenuRow("Remove", { close(); askToRemove(app, server) }, OctoIcons.Delete, destructive = true)
+    IconAction(
+        OctoIcons.More,
+        words,
+        {
+            app.popups.showUnder(anchor, width = FrameSize.Menu) { close ->
+                MenuTitle(server.name)
+                MenuRow("Edit", { close(); editServer(app, server) }, OctoIcons.Rename)
+                if (inUse && server.authMode != AuthMode.ApiKey) MenuRow("Change password", { close(); changePassword(app) }, OctoIcons.Settings)
+                if (server.signedOut) {
+                    MenuRow("Sign in", { close(); signInTo(app, server) }, OctoIcons.Forward)
+                } else {
+                    MenuRow("Sign out", { close(); app.signOutOf(server.id) }, OctoIcons.Back)
                 }
-            },
-            Modifier.onGloballyPositioned { anchor = it.windowRect() },
-            size = ControlHeight.M,
-            iconSize = IconSize.Toolbar,
-            tint = OctoColors.TextSecondary,
-        )
-    }
+                MenuSeparator()
+                MenuRow("Remove", { close(); askToRemove(app, server) }, OctoIcons.Delete, destructive = true)
+            }
+        },
+        Modifier.onGloballyPositioned { anchor = it.windowRect() },
+        size = ControlHeight.M,
+        iconSize = IconSize.Toolbar,
+        tint = OctoColors.TextSecondary,
+    )
 }
 
 // What the server in use is, what it holds and offers, who is signed in,

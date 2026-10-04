@@ -80,6 +80,10 @@ import app.winters.octo.design.Space
 import app.winters.octo.design.Spinner
 import app.winters.octo.design.Txt
 import app.winters.octo.design.hoverLift
+import app.winters.octo.design.OctoTooltip
+import app.winters.octo.design.TooltipPopup
+import app.winters.octo.design.rememberTooltipState
+import app.winters.octo.design.tooltipTarget
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.library.Cover
@@ -136,15 +140,17 @@ fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier,
     FloatingGlaze(backdrop, modifier.dropTarget(PlayerDrop, "Add to the queue", layer = 1) { app.addToQueue(it) }, shape = MenuShape, film = IslandFilm, frost = IslandFrost, saturation = IslandSaturation, halo = true, seesAll = true) {
         if (over) Box(Modifier.matchParentSize().background(DropLit, MenuShape))
         Row(Modifier.fillMaxSize().padding(horizontal = Space.L), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
-            Cover(
-                song?.coverArt,
-                Modifier
-                    .size(FrameSize.PlayerThumb)
-                    .clickable(enabled = song != null, role = Role.Button) { app.fullPlayer = true }
-                    .semantics { contentDescription = "Open the player" },
-                shape = Corner.ArtMShape,
-                placeholder = OctoIcons.Songs,
-            )
+            OctoTooltip(if (song != null) "Open the player" else "") {
+                Cover(
+                    song?.coverArt,
+                    Modifier
+                        .size(FrameSize.PlayerThumb)
+                        .clickable(enabled = song != null, role = Role.Button) { app.fullPlayer = true }
+                        .semantics { contentDescription = "Open the player" },
+                    shape = Corner.ArtMShape,
+                    placeholder = OctoIcons.Songs,
+                )
+            }
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { SongZone(app, song) }
@@ -252,15 +258,18 @@ private fun ProgressLine(app: AppState, state: PlayerState) {
             onScrub = { scrubbing = it },
         )
         val end = if (left && duration > 0) "-" + lengthText(((duration - shownMs).coerceAtLeast(0) / 1000).toInt()).ifEmpty { "0:00" } else lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }
+        val tip = rememberTooltipState()
         Box(
             Modifier
                 .width(TimeWidth)
                 .heightIn(min = Focus.MinTarget)
+                .tooltipTarget(tip)
                 .clickable(role = Role.Button) { app.updateFrame { it.copy(showTimeLeft = !left) } }
                 .semantics { contentDescription = if (left) "Time left, $end. Show the length instead" else "Length, $end. Show the time left instead" },
             contentAlignment = Alignment.CenterEnd,
         ) {
             Txt(end, TimeStyle, OctoColors.TextMuted, align = TextAlign.End)
+            TooltipPopup(tip, if (left) "Show the length" else "Show the time left")
         }
     }
 }
@@ -357,10 +366,12 @@ private fun ColumnScope.SleepMenu(app: AppState, sleep: SleepState, back: () -> 
 // waiting for sound, a spinner turns inside it.
 @Composable
 fun PlayButton(playing: Boolean, enabled: Boolean, size: Dp = FrameSize.PlayButtonLarge, waiting: Boolean = false, onClick: () -> Unit) {
+    val tip = rememberTooltipState()
     Glaze(
         Modifier
             .size(size)
             .hoverLift(CircleShape, clickable = enabled)
+            .tooltipTarget(tip)
             .clickable(enabled = enabled, role = Role.Button, interactionSource = null, indication = FocusRing(CircleShape), onClick = onClick)
             .semantics { contentDescription = if (playing) "Pause" else "Play" },
         light = GlazeLight.Lifted,
@@ -370,6 +381,7 @@ fun PlayButton(playing: Boolean, enabled: Boolean, size: Dp = FrameSize.PlayButt
             playing -> PauseGlyph(OctoColors.TextPrimary, size = size * 0.48f)
             else -> Glyph(OctoIcons.Play, size = size * 0.48f)
         }
+        TooltipPopup(tip, if (playing) "Pause" else "Play")
     }
 }
 

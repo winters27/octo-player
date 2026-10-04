@@ -47,7 +47,8 @@ import androidx.compose.ui.unit.dp
 // A round icon button with no glass: a white glyph that lifts faintly under
 // the pointer. `active` marks a mode that is on (shuffle, repeat, an open
 // panel) with the accent, never a border. `toggled`, when given, tells a
-// screen reader it is a switch that is on or off.
+// screen reader it is a switch that is on or off. Resting the pointer on
+// it shows `tooltip` (its description, unless told otherwise).
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun IconAction(
@@ -61,8 +62,10 @@ fun IconAction(
     active: Boolean = false,
     tint: Color = Color.White,
     toggled: Boolean? = null,
+    tooltip: String = description,
 ) {
     val interaction = remember { MutableInteractionSource() }
+    val tip = rememberTooltipState()
     val pressed by interaction.collectIsPressedAsState()
     val motion = motionScale()
     val press by animateFloatAsState(if (pressed) motion.scale(0.9f) else 1f, octoTween(motion, OctoDuration.Press), label = "press")
@@ -78,6 +81,7 @@ fun IconAction(
             .alpha(if (enabled) 1f else 0.35f)
             .hoverLift(CircleShape, clickable = enabled)
             .tabStop(LocalTabStops.current)
+            .tooltipTarget(tip)
             .clickable(interactionSource = interaction, indication = FocusRing(CircleShape), enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics {
                 contentDescription = description
@@ -90,6 +94,7 @@ fun IconAction(
     ) {
         // An active one (shuffle on, a panel open) glows rather than changing colour.
         GlowIcon(rememberVectorPainter(icon), tint = tint, lit = active, modifier = Modifier.size(iconSize))
+        TooltipPopup(tip, tooltip)
     }
 }
 

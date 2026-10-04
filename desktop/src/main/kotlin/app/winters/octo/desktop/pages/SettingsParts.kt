@@ -55,6 +55,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import app.winters.octo.design.CardEdge
+import app.winters.octo.design.scrollbar
 import app.winters.octo.design.CardFill
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
@@ -210,8 +211,9 @@ private fun SectionColumn(section: PageSection, modifier: Modifier, start: Dp, e
     val bottom = LocalBottomRoom.current + Space.Section
     key(section.key) {
         Box(modifier.fillMaxSize().topFade(Space.Xl)) {
+            val scroll = rememberScrollState()
             Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = start, end = end, top = Space.Xl, bottom = bottom),
+                Modifier.fillMaxSize().scrollbar(scroll, LocalBottomRoom.current).verticalScroll(scroll).padding(start = start, end = end, top = Space.Xl, bottom = bottom),
             ) {
                 Column(Modifier.widthIn(max = SettingsSize.Column).fillMaxWidth()) { Section(section) }
             }

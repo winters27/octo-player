@@ -20,6 +20,8 @@ import app.winters.octo.desktop.ui.ShelfCardWidth
 import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.rememberGridState
 import app.winters.octo.design.GlazeCapsule
+import app.winters.octo.design.scrollbar
+import androidx.compose.ui.Modifier
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.Space
 import app.winters.octo.subsonic.Album
@@ -36,7 +38,7 @@ fun ShelfPage(app: AppState, visit: Visit, shelf: AlbumShelf) {
             value = withContext(Dispatchers.Default) { albumsOn(shelf, index, System.currentTimeMillis()) }
         }
         val shown = albums ?: return@WithLibrary PageLoadingLine()
-        LazyVerticalGrid(GridCells.Adaptive(ShelfCardWidth), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
+        LazyVerticalGrid(GridCells.Adaptive(ShelfCardWidth), Modifier.scrollbar(grid, LocalBottomRoom.current), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
             header { PageTitle(shelf.title, detail = if (shown.isEmpty()) null else "${if (shown.size == 1) "1 album" else "${shown.size} albums"}, ${shelf.detail}") }
             if (shown.isEmpty()) {
                 header {

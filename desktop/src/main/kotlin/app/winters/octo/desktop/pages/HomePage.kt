@@ -46,6 +46,7 @@ import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.playlistMenu
 import app.winters.octo.desktop.ui.rememberListState
 import app.winters.octo.design.ControlHeight
+import app.winters.octo.design.scrollbar
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
@@ -85,7 +86,7 @@ fun HomePage(app: AppState, visit: Visit) {
     val list = rememberListState(app.navigator, visit)
     var starting by remember { mutableStateOf<String?>(null) }
     fun open(shelf: AlbumShelf): () -> Unit = { app.navigator.go(Page.Shelf(shelf)) }
-    LazyColumn(state = list, contentPadding = pagePadding(LocalBottomRoom.current)) {
+    LazyColumn(Modifier.scrollbar(list, LocalBottomRoom.current), state = list, contentPadding = pagePadding(LocalBottomRoom.current)) {
         item(key = "title") { PageTitle("Home") }
         app.queueSync.offer?.let { offer -> item(key = "resume") { ResumeCard(app, offer) } }
         when {

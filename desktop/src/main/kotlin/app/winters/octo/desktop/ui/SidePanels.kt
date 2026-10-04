@@ -8,6 +8,7 @@ import androidx.compose.ui.semantics.focused
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import app.winters.octo.design.LocalFocusVisibility
+import app.winters.octo.design.scrollbar
 import app.winters.octo.design.LocalKeyboardHere
 import app.winters.octo.design.LocalTabStops
 import app.winters.octo.design.drawFocusRing
@@ -348,7 +349,7 @@ fun QueueList(app: AppState, modifier: Modifier = Modifier.fillMaxSize()) {
             return@Column
         }
         LazyColumn(
-            Modifier.fillMaxSize(),
+            Modifier.fillMaxSize().scrollbar(list),
             state = list,
             contentPadding = PaddingValues(start = Space.M, end = Space.M, top = Space.Xs, bottom = Space.Xl),
         ) {

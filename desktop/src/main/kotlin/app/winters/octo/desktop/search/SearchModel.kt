@@ -91,7 +91,12 @@ fun splitResults(
 ): SearchFound {
     val caps = searchCaps(filter)
     val telling = outsideOn && index != null
-    val (songs, outsideSongs) = if (telling) sent.song.partition { index.holds(it) } else sent.song to emptyList()
+    val (held, outsideSongs) = if (telling) sent.song.partition { index.holds(it) } else sent.song to emptyList()
+    // A song found online that the library already holds (under another id,
+    // or another version Octo did not fold into it) is the library's own
+    // copy here, once: the library's songs are only library songs, so none
+    // of them reads as "not in your library" with a "+" beside it.
+    val songs = if (telling) held.map { if (it.isExternal) index.copyOf(it) ?: it else it }.distinctBy { it.id } else held
     val (albums, outsideAlbums) = if (telling) sent.album.partition { index.hasAlbum(it.id) } else sent.album to emptyList()
     val (artists, outsideArtists) = if (telling) sent.artist.partition { index.hasArtist(it.id) } else sent.artist to emptyList()
     val key = searchKey(query)
