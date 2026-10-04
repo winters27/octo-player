@@ -23,6 +23,10 @@ import app.winters.octo.ui.common.ArtworkFill
 // when Home comes back.
 internal const val STATIONS_STALE_MS = 10 * 60 * 1000L
 
+// The words for a station the server no longer has: Octo makes its
+// stations anew now and then, and an old one is taken off Home.
+internal fun stationGoneLine(name: String): String = "$name isn't on the server any more"
+
 // Whether Home should ask for the stations again: never while a load is
 // running, always after one failed, otherwise once the list is stale.
 internal fun stationsDue(now: Long, loadedAt: Long?, failed: Boolean, loading: Boolean): Boolean = when {

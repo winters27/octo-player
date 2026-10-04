@@ -53,6 +53,7 @@ import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.radioId
 import app.winters.octo.server.ServerControls
 import app.winters.octo.subsonic.RadioStationDetails
+import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.LoadState
@@ -193,6 +194,9 @@ class RadioStationsViewModel @Inject constructor(
                 }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: SubsonicException.NotFound) {
+                // Octo made it anew since the list was read: read it again.
+                reload()
             } catch (e: Exception) {
                 Log.w("Octo", "station failed to start: ${e.javaClass.simpleName}")
             } finally {

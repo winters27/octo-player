@@ -228,4 +228,16 @@ class PlaylistPlanTest {
         assertEquals("1 song is only on this phone and is not in the server's copy", phoneOnlyNote(1))
         assertEquals("3 songs are only on this phone and are not in the server's copy", phoneOnlyNote(3))
     }
+
+    // Brandon: a playlist that no longer exists should not be shown. The
+    // phone's copy of the server's playlists is brought up to date when the
+    // playlists come on screen, at most once a minute.
+    @Test
+    fun theServersPlaylistsAreLookedAtAgainOnceAMinuteOld() {
+        val now = 10_000_000L
+        assertTrue("never looked at", playlistsStale(now, 0L))
+        assertTrue(playlistsStale(now, now - PLAYLISTS_FRESH_MS))
+        assertTrue(!playlistsStale(now, now - PLAYLISTS_FRESH_MS + 1))
+        assertTrue(!playlistsStale(now, now))
+    }
 }
