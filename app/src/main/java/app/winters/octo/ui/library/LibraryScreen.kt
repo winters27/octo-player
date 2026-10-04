@@ -104,6 +104,7 @@ import app.winters.octo.ui.nav.FoldersRoute
 import app.winters.octo.ui.nav.GenresRoute
 import app.winters.octo.ui.nav.HistoryRoute
 import app.winters.octo.ui.nav.LibraryHealthRoute
+import app.winters.octo.ui.nav.LibraryRoute
 import app.winters.octo.ui.nav.LiveListEditRoute
 import app.winters.octo.ui.nav.PlaylistsRoute
 import app.winters.octo.ui.nav.SongsRoute
@@ -129,8 +130,14 @@ private val sections = listOf(
 // The library's front page: a menu of ways in, then the newest albums,
 // two covers to a row.
 @Composable
-fun LibraryScreen(onOpen: (NavKey) -> Unit, vm: LibraryViewModel = hiltViewModel()) {
+fun LibraryScreen(
+    onOpen: (NavKey) -> Unit,
+    vm: LibraryViewModel = hiltViewModel(),
+    server: app.winters.octo.ui.downloads.ServerDownloadsViewModel = hiltViewModel(),
+) {
     val recent by vm.recent.collectAsStateWithLifecycle()
+    val serverDownloads by server.downloads.supported.collectAsStateWithLifecycle()
+    val serverRows by server.downloads.rows.collectAsStateWithLifecycle()
     Refreshable {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding()) {
             item { ScreenTitle("Library") }
@@ -139,6 +146,19 @@ fun LibraryScreen(onOpen: (NavKey) -> Unit, vm: LibraryViewModel = hiltViewModel
                     Column {
                         if (index > 0) Separator()
                         SectionRow(section) { onOpen(section.route) }
+                    }
+                }
+            }
+            // What the server is downloading, on a server that keeps a log of it.
+            if (serverDownloads) {
+                item(key = "server-downloads") {
+                    Column {
+                        Separator()
+                        val running = app.winters.octo.ui.downloads.runningCount(serverRows)
+                        SectionRow(
+                            Section(OctoIcons.Cloud, app.winters.octo.ui.downloads.SERVER_DOWNLOADS, LibraryRoute),
+                            detail = if (running > 0) "$running on the way" else null,
+                        ) { server.downloads.open() }
                     }
                 }
             }
@@ -162,7 +182,7 @@ fun LibraryScreen(onOpen: (NavKey) -> Unit, vm: LibraryViewModel = hiltViewModel
 }
 
 @Composable
-private fun SectionRow(section: Section, onClick: () -> Unit) {
+private fun SectionRow(section: Section, detail: String? = null, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -174,6 +194,7 @@ private fun SectionRow(section: Section, onClick: () -> Unit) {
     ) {
         Icon(painterResource(section.icon), contentDescription = null, tint = OctoColors.Accent, modifier = Modifier.size(24.dp))
         Text(section.label, style = OctoType.body, color = OctoColors.TextPrimary, modifier = Modifier.weight(1f))
+        detail?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
         Icon(painterResource(OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(22.dp))
     }
 }

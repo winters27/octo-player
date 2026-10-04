@@ -42,8 +42,15 @@ class DownloadsViewModel @Inject constructor(
     private val downloads: Downloads,
     private val feedback: Feedback,
     player: PlayerSettings,
+    private val serverDownloads: app.winters.octo.data.ServerDownloads,
 ) : ViewModel() {
     val phases: StateFlow<Map<String, DownloadPhase>> = downloads.phases
+
+    // Whether the server keeps a log of its downloads, so a song on its way
+    // can be followed in the server downloads sheet.
+    val canFollow: StateFlow<Boolean> = serverDownloads.supported
+
+    fun follow(trackId: String) = serverDownloads.followTrack(trackId)
 
     // Octo's own Reduce motion, beside the phone's.
     val reduceMotion: StateFlow<Boolean> = player.prefs
@@ -98,18 +105,21 @@ fun AddToLibraryButton(
         onStopOrDispose { release() }
     }
     val failed = phase as? DownloadPhase.Failed
+    val canFollow by vm.canFollow.collectAsStateWithLifecycle()
+    // On its way, a tap follows it in the server downloads sheet.
+    val follows = canFollow && phase != DownloadPhase.None && phase != DownloadPhase.Done && failed == null
     Box(
         modifier
             .size(size)
             .combinedClickable(
                 interactionSource = null,
                 indication = null,
-                enabled = phase == DownloadPhase.None || failed != null,
+                enabled = phase == DownloadPhase.None || failed != null || follows,
                 role = Role.Button,
-                onClickLabel = if (failed != null) "Try again" else null,
+                onClickLabel = if (failed != null) "Try again" else if (follows) "Follow it" else null,
                 onLongClickLabel = if (failed != null) "Why" else null,
                 onLongClick = failed?.let { { vm.explain(it.reason) } },
-            ) { vm.request(track) }
+            ) { if (follows) vm.follow(track.id) else vm.request(track) }
             .semantics {
                 contentDescription = AddToLibraryText
                 stateDescription = downloadStateText(phase)

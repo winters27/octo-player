@@ -1,6 +1,7 @@
 package app.winters.octo
 
 import android.app.Application
+import app.winters.octo.data.ServerDownloads
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.Upgrades
 import app.winters.octo.device.DeviceArtworkFetcher
@@ -31,6 +32,7 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var listenBrainz: ListenBrainzSync
     @Inject lateinit var updates: AppUpdates
     @Inject lateinit var upgrades: Upgrades
+    @Inject lateinit var serverDownloads: ServerDownloads
 
     override fun onCreate() {
         super.onCreate()
@@ -46,6 +48,8 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
         updates.start()
         // FLACs asked for last time are followed until they are done.
         upgrades.start()
+        // The server's downloads, for their sheet.
+        serverDownloads.start()
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader =

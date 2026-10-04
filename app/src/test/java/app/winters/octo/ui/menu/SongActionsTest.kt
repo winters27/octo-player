@@ -8,6 +8,7 @@ import app.winters.octo.ui.menu.SongAction.AddToQueue
 import app.winters.octo.ui.menu.SongAction.DeleteFromPhone
 import app.winters.octo.ui.menu.SongAction.Download
 import app.winters.octo.ui.menu.SongAction.FindFlac
+import app.winters.octo.ui.menu.SongAction.FindSongs
 import app.winters.octo.ui.menu.SongAction.GoToAlbum
 import app.winters.octo.ui.menu.SongAction.GoToArtist
 import app.winters.octo.ui.menu.SongAction.Info
@@ -31,6 +32,13 @@ class SongActionsTest {
         )
         // Among the ways to keep it, after downloading it to the phone.
         assertEquals(listOf(AddToPlaylist, Like, Rate, KeepOffline, FindFlac), songMenuGroups(songActions(find = false, radio = true, offline = true, upgrade = true))[1])
+    }
+
+    @Test
+    fun findSongsComesAfterTheInfo_ForFoundAndLibrarySongsAlike() {
+        assertEquals(listOf(PlayNext, AddToQueue, Download, Info, FindSongs), songActions(find = true, radio = false, findSongs = true))
+        assertEquals(listOf(Info, FindSongs), songMenuGroups(songActions(find = false, radio = false, findSongs = true))[3])
+        assertEquals(false, FindSongs in songActions(find = false, radio = true))
     }
 
     @Test

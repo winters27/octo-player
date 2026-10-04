@@ -139,6 +139,7 @@ private fun SongActionsPage(
     val kept by vm.kept.collectAsStateWithLifecycle()
     val radio by vm.radio.collectAsStateWithLifecycle()
     val canUpgrade by vm.canUpgrade.collectAsStateWithLifecycle()
+    val canFindSongs by vm.canFindSongs.collectAsStateWithLifecycle()
     val upgradable by produceState(emptyList<UpgradeAsk>(), trackId, canUpgrade) { value = if (canUpgrade) vm.upgradable(trackId) else emptyList() }
     val isLiked = trackId in liked
     val keptRow = kept[trackId]
@@ -154,6 +155,7 @@ private fun SongActionsPage(
         phone = phone,
         lastPlaylist = last != null,
         upgrade = upgradable.isNotEmpty(),
+        findSongs = canFindSongs,
     )
 
     GlassMenuPage(
@@ -258,6 +260,10 @@ private fun SongActionsPage(
                     phoneFiles.delete(listOf(trackId))
                 })
                 SongAction.Info -> GlassMenuAction(OctoIcons.Info, "Song info", opensPage = true, onClick = { state.pages.open(SongPage.Info) })
+                SongAction.FindSongs -> GlassMenuAction(OctoIcons.Search, app.winters.octo.ui.downloads.FIND_SONGS, onClick = {
+                    state.close()
+                    vm.findSongs(trackId, song.title)
+                })
             }
         }
     }

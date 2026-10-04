@@ -181,6 +181,7 @@ class Upgrades @Inject constructor(
     private val catalog: CatalogDao,
     private val sync: ServerSync,
     private val feedback: Feedback,
+    private val serverDownloads: ServerDownloads,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var running = false
@@ -218,7 +219,9 @@ class Upgrades @Inject constructor(
                 }
             }
 
-            override fun say(text: String) = feedback.show(text)
+            // With the server downloads sheet, the line offers to show it.
+            override fun say(text: String) =
+                if (serverDownloads.supported.value) feedback.show(text, "Show", onAction = { serverDownloads.open() }) else feedback.show(text)
         },
         scope,
     )
