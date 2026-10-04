@@ -117,6 +117,21 @@ class SubsonicClient(
     suspend fun libraryAction(id: String, action: String = LIBRARY_ACTION_REMOVE): LibraryActionResult =
         get("libraryAction", mapOf("id" to id, "action" to action), "libraryAction", LibraryActionResult.serializer())
 
+    // A version 3 fix with what it needs: the tags to write for
+    // LIBRARY_ACTION_RETAG (by SongTag name; an empty one clears it), `like`
+    // for LIBRARY_ACTION_JOIN_ALBUM, `preview` for LIBRARY_ACTION_COVER.
+    suspend fun libraryAction(id: String, action: String, with: Map<String, String>): LibraryActionResult =
+        get("libraryAction", with + mapOf("id" to id, "action" to action), "libraryAction", LibraryActionResult.serializer())
+
+    // The tags a download of the song would get, beside what its file says
+    // now. Writes nothing. Version 3.
+    suspend fun lookUpTags(id: String): SongLookup =
+        get("libraryAction", mapOf("id" to id, "action" to LIBRARY_ACTION_LOOKUP), "libraryAction", SongLookup.serializer())
+
+    // The songs in the server's trash, newest first. Version 3.
+    suspend fun libraryTrash(): LibraryTrash =
+        get("getLibraryTrash", key = "libraryTrash", serializer = LibraryTrash.serializer(), default = LibraryTrash())
+
     // The FLACs the signed-in user asked for, and how each is going. Only for
     // servers that list octoLibraryActions at version 2.
     suspend fun upgrades(): List<Upgrade> =

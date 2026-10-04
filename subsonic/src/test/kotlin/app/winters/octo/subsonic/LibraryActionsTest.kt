@@ -220,4 +220,63 @@ class LibraryActionsTest {
             // expected
         }
     }
+
+    // Version 3
+
+    private val v3 = LibraryActions(
+        enabled = true, allowed = true, dryRun = false, keepDays = 30, admin = true,
+        actions = listOf("remove", "retag", "joinAlbum", "lookup", "undo", "restore", "cover"),
+    )
+
+    @Test
+    fun everyFixNeedsAnAdmin_AndAnOlderServerThatDoesNotSayCountsAsOne() = runTest {
+        assertTrue(v3.canRemove && v3.canEdit && v3.canRestore && v3.canJoinAlbums && v3.canLookUp && v3.canAddCover)
+        val notAdmin = v3.copy(admin = false)
+        assertFalse(notAdmin.canRemove || notAdmin.canEdit || notAdmin.canRestore || notAdmin.canJoinAlbums || notAdmin.canLookUp || notAdmin.canAddCover)
+        assertFalse(v3.copy(dryRun = true).canEdit)
+        // A version 1 server never sends "admin" and never asked for one.
+        answer(ok(""""libraryActions":{"enabled":true,"allowed":true,"dryRun":false,"actions":["remove"],"keepDays":30}"""))
+        val old = client().libraryActions()
+        assertTrue(old.canRemove)
+        assertFalse(old.canEdit)
+    }
+
+    @Test
+    fun retagSendsTheTagsByTheServersNames_AndReadsBeforeAndAfter() = runTest {
+        answer(ok(""""libraryAction":{"id":"abc","action":"retag","state":"applied","detail":"Changed the year.","before":{"year":null,"title":"Angel"},"after":{"year":"1998","title":"Angel"}}"""))
+        val result = client().libraryAction("abc", LIBRARY_ACTION_RETAG, mapOf(SongTag.YEAR to "1998", SongTag.GENRE to ""))
+
+        val request = server.takeRequest()
+        assertEquals("retag", request.url.queryParameter("action"))
+        assertEquals("abc", request.url.queryParameter("id"))
+        assertEquals("1998", request.url.queryParameter("year"))
+        assertEquals("", request.url.queryParameter("genre"))
+        assertEquals(LibraryActionState.Applied, result.outcome)
+        assertEquals(null, result.before?.get("year"))
+        assertEquals("1998", result.after?.get("year"))
+    }
+
+    @Test
+    fun aLookupReadsTheFileAndWhatWasFound() = runTest {
+        answer(ok(""""libraryAction":{"id":"abc","action":"lookup","state":"found","detail":null,"current":{"title":"Angel","year":null},"suggested":{"title":"Angel","year":"1998"},"confidence":"Strong","source":"Fingerprint","release":"'Mezzanine' 1998"}"""))
+        val lookup = client().lookUpTags("abc")
+
+        assertEquals("lookup", server.takeRequest().url.queryParameter("action"))
+        assertTrue(lookup.found)
+        assertTrue(lookup.sure)
+        assertEquals(null, lookup.current["year"])
+        assertEquals("1998", lookup.suggested["year"])
+        assertEquals("Fingerprint", lookup.source)
+    }
+
+    @Test
+    fun readsTheTrash() = runTest {
+        answer(ok(""""libraryTrash":{"keepDays":30,"songs":[{"id":"abc","title":"Angel","artist":"Massive Attack","album":"Mezzanine","removedBy":"winters","removedAt":"2026-10-04T10:00:00Z","goneAt":"2026-11-04T00:00:00Z"}]}"""))
+        val trash = client().libraryTrash()
+
+        assertEquals("/rest/getLibraryTrash", server.takeRequest().url.encodedPath)
+        assertEquals(30, trash.keepDays)
+        assertEquals("Angel", trash.songs.single().title)
+        assertEquals("2026-11-04T00:00:00Z", trash.songs.single().goneAt)
+    }
 }
