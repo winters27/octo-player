@@ -143,6 +143,9 @@ class SearchModel(
     var state by mutableStateOf<SearchState>(SearchState.Idle)
         private set
 
+    // The top songs of an artist searched for, and the chart for an empty search.
+    val tops = SearchTops(connection, scope)
+
     private var job: Job? = null
 
     fun type(value: String) {
@@ -160,6 +163,7 @@ class SearchModel(
 
     private fun ask(pause: Boolean) {
         job?.cancel()
+        tops.forget()
         val query = text.trim()
         if (searchKey(query).length < 2) {
             state = SearchState.Idle
@@ -170,7 +174,7 @@ class SearchModel(
         job = scope.launch {
             if (pause) delay(SEARCH_AFTER_MS)
             state = try {
-                SearchState.Done(search(query, filter))
+                SearchState.Done(search(query, filter).also { tops.follow(query, it, filter) })
             } catch (e: SubsonicException) {
                 SearchState.Failed(e.userMessage())
             }

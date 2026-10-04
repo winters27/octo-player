@@ -95,7 +95,10 @@ fun SearchPage(app: AppState, visit: Visit) {
             }
         }
         when (state) {
-            SearchState.Idle -> item(key = "idle") { Txt("Type at least two letters in the search field.", OctoType.bodySmall, OctoColors.TextMuted, Modifier.padding(top = Space.Page)) }
+            SearchState.Idle -> {
+                item(key = "idle") { Txt("Type at least two letters in the search field.", OctoType.bodySmall, OctoColors.TextMuted, Modifier.padding(top = Space.Page)) }
+                topChart(app, model.tops)
+            }
             SearchState.Looking -> item(key = "looking") { LoadingLine("Searching") }
             is SearchState.Failed -> item(key = "failed") { FailedLine(state.message, model::again) }
             is SearchState.Done -> before(app, state.found)
@@ -120,6 +123,7 @@ private fun LazyListScope.before(app: AppState, found: SearchFound) {
             CardRow(library.artists.size) { i -> ArtistCard(app, library.artists[i]) }
         }
     }
+    artistTopSongs(app, model.tops)
     if (library.albums.isNotEmpty()) {
         item(key = "albums") {
             SectionTitle("Albums", action = seeAll(app, library.moreAlbums)) { model.pick(SearchFilter.Albums) }

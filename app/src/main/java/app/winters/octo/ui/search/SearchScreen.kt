@@ -57,6 +57,11 @@ import app.winters.octo.design.GlassInput
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.discovery.Discovered
+import app.winters.octo.discovery.RankedTracks
+import app.winters.octo.discovery.SEARCH_TOP_SHOWN
+import app.winters.octo.discovery.TOP_CHART_SHOWN
+import app.winters.octo.discovery.playsText
+import app.winters.octo.discovery.rankedBy
 import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.Pickable
 import app.winters.octo.ui.common.AlbumCard
@@ -67,7 +72,9 @@ import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.Segmented
+import app.winters.octo.ui.common.SongLead
 import app.winters.octo.ui.common.SongRow
+import app.winters.octo.ui.common.rowAlbum
 import app.winters.octo.ui.common.songs
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
@@ -84,6 +91,8 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
     val discover by vm.discover.collectAsStateWithLifecycle()
     val recent by vm.recent.collectAsStateWithLifecycle()
     val addHint by vm.addHint.collectAsStateWithLifecycle()
+    val top by vm.topSongs.collectAsStateWithLifecycle()
+    val chart by vm.chart.collectAsStateWithLifecycle()
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 120.dp
     val keyboard = LocalSoftwareKeyboardController.current
     val list = rememberLazyListState()
@@ -123,7 +132,7 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
         // Nothing to show online: not looking, or looked and found nothing.
         val nothingOnline = online is DiscoverState.Idle || (online is DiscoverState.Done && online.found.isEmpty)
         when {
-            vm.text.isBlank() && recent.isNotEmpty() -> RecentList(
+            vm.text.isBlank() && (recent.isNotEmpty() || chart != null) -> RecentList(
                 recent,
                 hider,
                 onSearch = {
@@ -132,18 +141,32 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
                 },
                 onForget = vm::forget,
                 onForgetAll = vm::forgetAll,
-            )
+            ) {
+                chart?.let { list ->
+                    rankedSection(
+                        "chart", "Popular right now", list, TOP_CHART_SHOWN, vm.chartOpen, { vm.chartOpen = it },
+                        withArtist = true, top = recent.isNotEmpty(),
+                    ) { vm.playRanked(list, it) }
+                }
+            }
             found == null -> Hint(if (signedIn) "Search your music and discover more" else "Search the music on your phone")
             found.isEmpty && nothingOnline -> Hint("No results for \"${vm.text.trim()}\"")
             // Songs from the library and from the server can be picked together.
-            else -> SelectableSongs(pickableResults(found, online)) {
+            else -> SelectableSongs(pickableResults(found, online, top)) {
                 LazyColumn(
                     Modifier.fillMaxSize().nestedScroll(hider),
                     state = list,
                     contentPadding = PaddingValues(top = 12.dp, bottom = bottom),
                 ) {
                     if (filter == SearchFilter.All) {
-                        everything(found, open, pick, vm::playSong)
+                        everything(found, open, pick, vm::playSong) {
+                            top?.let { list ->
+                                rankedSection(
+                                    "top", "Top songs", list, SEARCH_TOP_SHOWN, vm.topOpen, { vm.topOpen = it },
+                                    withArtist = false, top = true,
+                                ) { vm.playRanked(list, it) }
+                            }
+                        }
                     } else {
                         oneKind(found, open, vm::playSong)
                     }
@@ -166,6 +189,7 @@ private fun LazyListScope.everything(
     onOpen: (NavKey) -> Unit,
     onSeeAll: (SearchFilter) -> Unit,
     onPlay: (TrackEntity) -> Unit,
+    afterArtists: LazyListScope.() -> Unit = {},
 ) {
     var first = true
     fun title(text: String, more: Boolean, kind: SearchFilter) {
@@ -188,6 +212,7 @@ private fun LazyListScope.everything(
             }
         }
     }
+    afterArtists()
     if (found.albums.isNotEmpty()) {
         title("Albums", found.moreAlbums, SearchFilter.Albums)
         item(key = "albums") {
@@ -261,12 +286,15 @@ private fun RecentList(
     onSearch: (String) -> Unit,
     onForget: (String) -> Unit,
     onForgetAll: () -> Unit,
+    after: LazyListScope.() -> Unit = {},
 ) {
     LazyColumn(Modifier.fillMaxSize().nestedScroll(hider), contentPadding = PaddingValues(top = 12.dp, bottom = 140.dp)) {
-        item(key = "recent:title") {
-            Row(Modifier.fillMaxWidth().padding(end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                SectionTitle("Recent searches", Modifier.weight(1f))
-                QuietButton("Clear all", onForgetAll)
+        if (recent.isNotEmpty()) {
+            item(key = "recent:title") {
+                Row(Modifier.fillMaxWidth().padding(end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    SectionTitle("Recent searches", Modifier.weight(1f))
+                    QuietButton("Clear all", onForgetAll)
+                }
             }
         }
         items(recent, key = { "recent:$it" }) { query ->
@@ -290,6 +318,7 @@ private fun RecentList(
                 CrossButton("Remove $query") { onForget(query) }
             }
         }
+        after()
     }
 }
 
@@ -443,9 +472,65 @@ private fun Hint(text: String) {
 
 // Every song shown, library ones first, each once, for picking several.
 @Composable
-private fun pickableResults(found: SearchResults, online: DiscoverState): List<Pickable> {
+private fun pickableResults(found: SearchResults, online: DiscoverState, top: RankedTracks?): List<Pickable> {
     val discovered = (online as? DiscoverState.Done)?.found?.songs.orEmpty()
-    return remember(found, discovered) {
-        (found.songs + discovered).distinctBy { it.id }.map { Pickable(it.id, it) }
+    return remember(found, discovered, top) {
+        (found.songs + discovered + top?.songs.orEmpty().map { it.track }).distinctBy { it.id }.map { Pickable(it.id, it) }
+    }
+}
+
+// A ranked list: its title, with "Show all" when it has more than `shown`,
+// a quiet line saying what it is ranked by, and its songs, each with its
+// place and cover, and a check for one in the library or a plus that adds
+// it. A tap plays the list from that song.
+private fun LazyListScope.rankedSection(
+    key: String,
+    title: String,
+    list: RankedTracks,
+    shown: Int,
+    open: Boolean,
+    onOpen: (Boolean) -> Unit,
+    withArtist: Boolean,
+    top: Boolean,
+    onPlay: (Int) -> Unit,
+) {
+    item(key = "$key:title") {
+        Row(
+            Modifier.fillMaxWidth().padding(top = if (top) 12.dp else 0.dp, end = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SectionTitle(title, Modifier.weight(1f))
+            when {
+                list.songs.size <= shown -> Unit
+                open -> QuietButton("Show fewer") { onOpen(false) }
+                else -> QuietButton("Show all") { onOpen(true) }
+            }
+        }
+    }
+    val about = listOfNotNull(list.artist.takeUnless { withArtist }, rankedBy(list.source)).joinToString(" · ")
+    if (about.isNotEmpty()) {
+        item(key = "$key:about") {
+            Text(
+                about,
+                style = OctoType.caption,
+                color = OctoColors.TextMuted,
+                modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 4.dp),
+            )
+        }
+    }
+    val rows = if (open) list.songs else list.songs.take(shown)
+    items(rows, key = { "$key:${it.track.id}" }) { ranked ->
+        SongRow(
+            ranked.track,
+            SongLead.Ranked(ranked.rank),
+            subtitle = { shownTrack ->
+                listOfNotNull(
+                    shownTrack.artist.takeIf { withArtist && it.isNotEmpty() },
+                    rowAlbum(shownTrack).ifEmpty { null },
+                    ranked.plays?.let(::playsText),
+                ).joinToString(" • ")
+            },
+            ownership = true,
+        ) { onPlay(list.songs.indexOf(ranked)) }
     }
 }

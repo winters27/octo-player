@@ -197,6 +197,9 @@ internal fun CloudMark(description: String = "Streams from your server") {
 sealed interface SongLead {
     data object Artwork : SongLead
     data class Number(val track: Int?) : SongLead
+
+    // A place in a ranking, then the artwork.
+    data class Ranked(val rank: Int) : SongLead
 }
 
 // The album a row names. A song found online often has its own title for
@@ -395,13 +398,26 @@ private fun SongFace(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        when (lead) {
-            SongLead.Artwork -> Box(contentAlignment = Alignment.Center) {
+        val artwork: @Composable () -> Unit = {
+            Box(contentAlignment = Alignment.Center) {
                 Artwork(track.artwork, 44.dp, shape = RoundedCornerShape(6.dp), outside = sign == AddSign.Mark)
                 when {
                     picked -> LeadMark { PickedMark() }
                     isNow -> LeadMark { NowPlayingBars(playing, Modifier.size(16.dp)) }
                 }
+            }
+        }
+        when (lead) {
+            SongLead.Artwork -> artwork()
+            is SongLead.Ranked -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    lead.rank.toString(),
+                    style = OctoType.caption,
+                    color = OctoColors.TextMuted,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.width(20.dp),
+                )
+                artwork()
             }
             is SongLead.Number -> Box(Modifier.width(28.dp), contentAlignment = Alignment.CenterEnd) {
                 when {

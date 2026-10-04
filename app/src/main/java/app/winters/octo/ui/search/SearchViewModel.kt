@@ -16,6 +16,10 @@ import app.winters.octo.discovery.AddHint
 import app.winters.octo.discovery.Discovered
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.Downloads
+import app.winters.octo.discovery.OnlineArtist
+import app.winters.octo.discovery.RankedTracks
+import app.winters.octo.discovery.SearchTopSongs
+import app.winters.octo.discovery.searchedArtist
 import app.winters.octo.discovery.showsAddHint
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.PlaylistStore
@@ -112,9 +116,15 @@ class SearchViewModel @Inject constructor(
     playlists: PlaylistStore,
     private val downloads: Downloads,
     private val hint: AddHint,
+    private val tops: SearchTopSongs,
 ) : ViewModel() {
     var text by mutableStateOf("")
     var filter by mutableStateOf(SearchFilter.All)
+
+    // Whether the artist's top songs, and the chart, show every song or
+    // only the first few.
+    var topOpen by mutableStateOf(false)
+    var chartOpen by mutableStateOf(false)
 
     // Goes up each time the server is asked anew, so the library is too.
     private val rounds = MutableStateFlow(0)
@@ -189,6 +199,33 @@ class SearchViewModel @Inject constructor(
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DiscoverState.Idle)
 
+    // The top songs of the artist a search names, from the library's artists
+    // or those found online, on the server that ranks them; null while
+    // there are none. Only for everything at once.
+    @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
+    val topSongs: StateFlow<RankedTracks?> = combine(
+        snapshotFlow { text.trim() }.debounce(150),
+        snapshotFlow { filter },
+        results,
+        discover,
+    ) { q, filter, found, online ->
+        if (filter != SearchFilter.All || found == null) null else namedArtist(q, found.artists, (online as? DiscoverState.Done)?.found?.artists.orEmpty())
+    }
+        .distinctUntilChanged()
+        .transformLatest { named ->
+            topOpen = false
+            emit(null)
+            if (named != null) emit(tops.forArtist(named.name, named.libraryId, named.serverId))
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // The chart of the moment, for the search before anything is typed.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val chart: StateFlow<RankedTracks?> = discovery.available
+        .distinctUntilChanged()
+        .transformLatest { on -> emit(if (on) tops.chart() else null) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     // Whether this visit has counted the line saying what the plus does.
     @Volatile
     private var hintCounted = false
@@ -231,10 +268,27 @@ class SearchViewModel @Inject constructor(
         playback.playTracks(songs.map { it.id }, songs.indexOf(track).coerceAtLeast(0))
     }
 
+    // Plays a ranked list from the song tapped.
+    fun playRanked(list: RankedTracks, index: Int) {
+        if (list.artist != null) keepSearch()
+        playback.playTracks(list.songs.map { it.track.id }, index.coerceAtLeast(0))
+    }
+
     // Plays the songs found online from the one tapped.
     fun playFound(track: TrackEntity) {
         val songs = (discover.value as? DiscoverState.Done)?.found?.songs ?: return
         keepSearch()
         playback.playTracks(songs.map { it.id }, songs.indexOf(track).coerceAtLeast(0))
     }
+}
+
+// The artist a search names: a library artist, or one the server found.
+internal data class NamedArtist(val name: String, val libraryId: String? = null, val serverId: String? = null)
+
+// The artist `query` names whole, the library's first, then the server's
+// finds; none when it names nobody.
+internal fun namedArtist(query: String, library: List<ArtistEntity>, online: List<OnlineArtist>): NamedArtist? {
+    searchedArtist(query, library) { it.name }?.let { return NamedArtist(it.name, libraryId = it.id) }
+    searchedArtist(query, online) { it.name }?.let { return NamedArtist(it.name, serverId = it.id) }
+    return null
 }
