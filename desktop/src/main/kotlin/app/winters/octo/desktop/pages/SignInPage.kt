@@ -299,9 +299,7 @@ internal fun ColumnScope.Advanced(form: SignInForm, submit: () -> Unit) {
                         password = true,
                         onSubmit = submit,
                     )
-                    OctoTooltip("Remove header") {
-                        IconAction(OctoIcons.Close, "Remove header", { form.removeHeader(index) }, size = 32.dp, iconSize = 16.dp)
-                    }
+                    IconAction(OctoIcons.Close, "Remove header", { form.removeHeader(index) }, size = 32.dp, iconSize = 16.dp)
                 }
             }
             GlazeCapsule(null, "Add header", form::addHeader, height = 32.dp)
@@ -323,18 +321,16 @@ internal fun SecretField(value: String, onChange: (String) -> Unit, placeholder:
         onSubmit = submit,
         trailing = {
             val words = if (reveal) "Hide" else "Show"
-            OctoTooltip(words) {
-                IconAction(
-                    if (reveal) OctoIcons.Conceal else OctoIcons.Reveal,
-                    words,
-                    { reveal = !reveal },
-                    // Tab goes from field to field, past the eye.
-                    Modifier.focusProperties { canFocus = false },
-                    size = 32.dp,
-                    iconSize = 18.dp,
-                    tint = OctoColors.TextSecondary,
-                )
-            }
+            IconAction(
+                if (reveal) OctoIcons.Conceal else OctoIcons.Reveal,
+                words,
+                { reveal = !reveal },
+                // Tab goes from field to field, past the eye.
+                Modifier.focusProperties { canFocus = false },
+                size = 32.dp,
+                iconSize = 18.dp,
+                tint = OctoColors.TextSecondary,
+            )
         },
     )
 }

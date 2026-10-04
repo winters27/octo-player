@@ -42,6 +42,7 @@ import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoTooltip
+import app.winters.octo.design.TooltipSide
 import app.winters.octo.design.RowHeight
 import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
@@ -108,7 +109,7 @@ fun LiveListRow(app: AppState, list: LiveList, selected: Boolean, rail: Boolean)
             }
         }
     }
-    if (rail) OctoTooltip("${list.name}, live list") { row() } else row()
+    if (rail) OctoTooltip("${list.name}, live list", side = TooltipSide.Right) { row() } else row()
 }
 
 // A live list's menu, in the sidebar and on its page: play it, change its

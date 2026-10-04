@@ -55,6 +55,7 @@ import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoTooltip
+import app.winters.octo.design.TooltipSide
 import app.winters.octo.design.PopupPadding
 import app.winters.octo.design.RowHeight
 import app.winters.octo.design.Separator
@@ -232,7 +233,7 @@ private fun NavRow(label: String, icon: ImageVector, selected: Boolean, rail: Bo
             }
         }
     }
-    if (rail) OctoTooltip(named) { row() } else row()
+    if (rail) OctoTooltip(named, side = TooltipSide.Right) { row() } else row()
 }
 
 // The quiet dot that says something waits in Settings.
@@ -281,7 +282,7 @@ private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, ra
             }
         }
     }
-    if (rail) OctoTooltip(playlist.name) { row() } else row()
+    if (rail) OctoTooltip(playlist.name, side = TooltipSide.Right) { row() } else row()
 }
 
 // A small form for naming a new, empty playlist, in the middle of the

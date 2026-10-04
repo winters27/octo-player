@@ -40,6 +40,10 @@ import androidx.compose.ui.window.WindowState
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.TooltipPopup
+import app.winters.octo.design.TooltipSide
+import app.winters.octo.design.rememberTooltipState
+import app.winters.octo.design.tooltipTarget
 import app.winters.octo.desktop.settings.WindowSpot
 import java.awt.Cursor
 import java.awt.Dimension
@@ -256,6 +260,7 @@ private fun WindowButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
+    val tip = rememberTooltipState()
     Box(
         Modifier
             .width(46.dp)
@@ -271,11 +276,13 @@ private fun WindowButton(
             // Like a system title bar's, these are not Tab stops: the keyboard
             // has Alt+Space and Alt+F4.
             .focusProperties { canFocus = false }
+            .tooltipTarget(tip)
             .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
         Glyph(icon, size = 16.dp, tint = if (hovered) Color.White else OctoColors.TextSecondary)
+        TooltipPopup(tip, description, TooltipSide.Bottom)
     }
 }
 

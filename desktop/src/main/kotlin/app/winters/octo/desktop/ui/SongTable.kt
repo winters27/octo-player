@@ -562,7 +562,9 @@ private fun HeaderRow(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (column == SongColumn.Favourite) {
-                            Glyph(OctoIcons.Like, size = IconSize.Inline, tint = if (active) OctoColors.TextPrimary else OctoColors.TextMuted)
+                            OctoTooltip(if (sortable) "Sort by favorites" else "Favorites") {
+                                Glyph(OctoIcons.Like, size = IconSize.Inline, tint = if (active) OctoColors.TextPrimary else OctoColors.TextMuted)
+                            }
                         } else {
                             Txt(column.title.uppercase(), DesktopType.label, if (active) OctoColors.TextPrimary else OctoColors.TextMuted)
                         }

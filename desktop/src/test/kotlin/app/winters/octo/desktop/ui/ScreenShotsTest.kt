@@ -419,6 +419,10 @@ class ScreenShotsTest {
                 app.search?.type("radiohead")
             }
             shot("search", 2_000)
+            // A tooltip: the pointer resting on the player's Shuffle.
+            SwingUtilities.invokeAndWait { scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Move, androidx.compose.ui.geometry.Offset(797f, 833f)) }
+            shot("tooltip", 1_500)
+            SwingUtilities.invokeAndWait { scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Exit, androidx.compose.ui.geometry.Offset(-1f, -1f)) }
             SwingUtilities.invokeAndWait {
                 app.navigator.go(Page.Songs)
                 app.openSearch()
