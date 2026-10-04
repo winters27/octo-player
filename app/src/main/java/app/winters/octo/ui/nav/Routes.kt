@@ -54,6 +54,7 @@ import kotlinx.serialization.Serializable
 // The sign-in form, starting from the saved connection to change it.
 @Serializable data object EditConnectionRoute : NavKey
 @Serializable data object OctoAdminRoute : NavKey
+@Serializable data object SpotifyImportRoute : NavKey
 
 // The server's shared links, and its internet radio stations.
 @Serializable data object SharesRoute : NavKey
