@@ -71,6 +71,7 @@ import app.winters.octo.ui.genre.GenresScreen
 import app.winters.octo.ui.history.HistoryScreen
 import app.winters.octo.ui.library.health.HealthCheckScreen
 import app.winters.octo.ui.library.health.LibraryHealthScreen
+import app.winters.octo.ui.library.health.RecentlyRemovedScreen
 import app.winters.octo.ui.home.HomeScreen
 import app.winters.octo.ui.library.AlbumsScreen
 import app.winters.octo.ui.library.ArtistsScreen
@@ -251,6 +252,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             entry<HistoryRoute> { HistoryScreen(it.mostPlayed, back) }
                             entry<LibraryHealthRoute> { LibraryHealthScreen(open, back) }
                             entry<HealthCheckRoute> { HealthCheckScreen(it.check, back) }
+                            entry<HealthTrashRoute> { RecentlyRemovedScreen(back) }
                         },
                     )
                 }
