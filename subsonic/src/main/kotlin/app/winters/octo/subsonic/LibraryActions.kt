@@ -146,6 +146,10 @@ data class Upgrade(
     // How far the download is, from 0 to 1, when the server knows.
     val progress: Double? = null,
     val updatedAt: String? = null,
+    // The download fetching the replacement, by its key, once there is one.
+    val acquisition: String? = null,
+    // The copy picked in Find songs, in words, when one was.
+    val picked: String? = null,
 ) {
     val stage: UpgradeStage get() = UpgradeStage.of(state)
 

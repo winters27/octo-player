@@ -3,7 +3,8 @@ package app.winters.octo.subsonic
 import kotlinx.serialization.Serializable
 
 // The OpenSubsonic extension an Octo server lists when it can say how the
-// downloads it was asked for are going.
+// downloads it was asked for are going. Version 2 adds each download's log,
+// clearing finished ones, and Find songs.
 const val OCTO_ACQUISITIONS = "octoAcquisitions"
 
 // Where one download on the server has got to.
@@ -50,6 +51,21 @@ data class Acquisition(
     val error: String? = null,
     // The song's id in the library once it is there, when the server knows it.
     val libraryId: String? = null,
+    // How many downloads are ahead of a queued one.
+    val ahead: Int? = null,
+    // A short line about where it is, such as which source it tries now.
+    val note: String? = null,
+    // From version 2 on: the row's own key for its log, what it is for
+    // (AcquisitionKind), the copy being fetched and its peer, the picture
+    // to draw, and how many lines its log has.
+    val key: String? = null,
+    val kind: String? = null,
+    val quality: String? = null,
+    val peer: String? = null,
+    val coverArt: String? = null,
+    val logLines: Int = 0,
+    // The log, oldest first; only getAcquisition sends it.
+    val event: List<AcquisitionEvent> = emptyList(),
 ) {
     val stage: AcquisitionStage get() = AcquisitionStage.of(state)
 
