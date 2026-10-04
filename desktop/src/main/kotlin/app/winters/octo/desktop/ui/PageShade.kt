@@ -123,10 +123,10 @@ fun rememberPageShade(app: AppState): PageShade {
     val connection = app.connection
     // The same prepared copy the ambience draws from (kept, so no extra work).
     val cover by produceState<WashCover?>(null, coverId, playing, connection, tuning) {
-        value = if (!playing || connection == null) {
-            withContext(Dispatchers.Default) { OctoArt.cover(tuning) }
+        if (!playing || connection == null) {
+            value = withContext(Dispatchers.Default) { OctoArt.cover(tuning) }
         } else {
-            app.washCovers.prepare(connection.client, coverId, tuning)
+            app.washCovers.follow(connection.client, coverId, tuning).collect { value = it }
         }
     }
     val target = shadeFor(look, cover, playing)

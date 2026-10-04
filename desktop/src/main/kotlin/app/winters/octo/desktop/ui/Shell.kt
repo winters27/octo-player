@@ -459,7 +459,8 @@ private fun rememberKeyColour(app: AppState): Color {
     val wash = settings.appearance.wash
     val tuning = WashTuning(wash.contrast, wash.saturation / 100f, wash.brightnessCap / 100f)
     val key by produceState(OctoKey, coverId, connection, tuning) {
-        value = if (coverId == null || connection == null) OctoKey else app.washCovers.prepare(connection.client, coverId, tuning).keyColour()
+        if (coverId == null || connection == null) value = OctoKey
+        else app.washCovers.follow(connection.client, coverId, tuning).collect { value = it.keyColour() }
     }
     return key
 }

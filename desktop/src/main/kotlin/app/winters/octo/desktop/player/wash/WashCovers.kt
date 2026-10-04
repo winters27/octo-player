@@ -9,9 +9,18 @@ import app.winters.octo.player.immersive.washColorMatrix
 import app.winters.octo.player.immersive.WashRange
 import app.winters.octo.player.immersive.washRange
 import app.winters.octo.player.immersive.washPeak
+import app.winters.octo.desktop.library.CoverArrivals
 import app.winters.octo.subsonic.SubsonicClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jetbrains.skia.Bitmap
@@ -41,6 +50,10 @@ class WashCover(
     val glowPeak: Int = peak,
 )
 
+// How long the wash waits before asking again for a cover the server did
+// not send, each time; then it keeps the blend.
+val WASH_RETRY_MS = listOf(3_000L, 8_000L, 20_000L, 60_000L, 120_000L)
+
 // The pixels of a 512 square, as ARGB, and back.
 private val SquareInfo = ImageInfo(WashSize, WashSize, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
 
@@ -48,29 +61,64 @@ private val SquareInfo = ImageInfo(WashSize, WashSize, ColorType.BGRA_8888, Colo
 // does: cropped to the middle square and brought to 512, then contrast and
 // saturation through the colour matrix and the brightness cap, pixel by
 // pixel, with the shared maths. The last few are kept, so going back a
-// song is instant.
-class WashCovers(private val http: OkHttpClient) {
+// song is instant. A cover the server did not send is not kept: the soft
+// blend stands in for it, and it is asked for again (see follow).
+class WashCovers(private val http: OkHttpClient, private val retryMs: List<Long> = WASH_RETRY_MS) {
     private val kept = object : LinkedHashMap<String, WashCover>(8, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, WashCover>?) = size > 4
     }
 
-    suspend fun prepare(client: SubsonicClient?, coverId: String?, tuning: WashTuning): WashCover {
+    // One fetch per cover at a time, however many places draw it.
+    private val work = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val fetching = HashMap<String, Deferred<Made>>()
+
+    // A cover made ready, and whether it is the real one: false while the
+    // server has not sent it, and the blend stands in.
+    private class Made(val cover: WashCover, val real: Boolean)
+
+    suspend fun prepare(client: SubsonicClient?, coverId: String?, tuning: WashTuning): WashCover = make(client, coverId, tuning).cover
+
+    // The cover made ready, and again once it can be had when the server
+    // did not send it: after a while, a few times, and at once when the
+    // same cover comes in anywhere on screen.
+    fun follow(client: SubsonicClient?, coverId: String?, tuning: WashTuning): Flow<WashCover> = flow {
+        var made = make(client, coverId, tuning)
+        emit(made.cover)
+        for (wait in retryMs) {
+            if (made.real) return@flow
+            withTimeoutOrNull(wait) { CoverArrivals.arrived.first { it == coverId } }
+            made = make(client, coverId, tuning)
+            if (made.real) emit(made.cover)
+        }
+    }
+
+    private suspend fun make(client: SubsonicClient?, coverId: String?, tuning: WashTuning): Made {
         val key = "${client?.primaryUrl?.host}|$coverId|${tuning.contrast}|${tuning.saturation}|${tuning.brightnessCap}"
-        synchronized(kept) { kept[key] }?.let { return it }
+        synchronized(kept) { kept[key] }?.let { return Made(it, true) }
+        val job = synchronized(fetching) { fetching.getOrPut(key) { work.async { fetch(key, client, coverId, tuning) } } }
+        return try {
+            job.await()
+        } finally {
+            synchronized(fetching) { if (fetching[key] === job) fetching.remove(key) }
+        }
+    }
+
+    private suspend fun fetch(key: String, client: SubsonicClient?, coverId: String?, tuning: WashTuning): Made {
         val bytes = if (client != null && coverId != null) {
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    http.newCall(Request.Builder().url(client.coverArtUrl(coverId, 600)).build()).execute().use { r ->
-                        if (r.isSuccessful) r.body.bytes() else null
-                    }
-                }.getOrNull()
-            }
+            runCatching {
+                http.newCall(Request.Builder().url(client.coverArtUrl(coverId, 600)).build()).execute().use { r ->
+                    if (r.isSuccessful) r.body.bytes() else null
+                }
+            }.getOrNull()
         } else {
             null
         }
-        val cover = withContext(Dispatchers.Default) { prepared(key, bytes?.let { runCatching { Image.makeFromEncoded(it) }.getOrNull() }, tuning) }
-        synchronized(kept) { kept[key] = cover }
-        return cover
+        val image = bytes?.let { runCatching { Image.makeFromEncoded(it) }.getOrNull() }
+        val cover = withContext(Dispatchers.Default) { prepared(key, image, tuning) }
+        // With no cover to ask for, the blend is the answer, and is kept.
+        val real = image != null || client == null || coverId == null
+        if (real) synchronized(kept) { kept[key] = cover }
+        return Made(cover, real)
     }
 
     companion object {

@@ -93,7 +93,7 @@ private val FactLabelWidth = Space.Wide * 2 + Space.Xl
 @Composable
 private fun Head(app: AppState, song: Song, outside: Boolean) {
     Row(Modifier.fillMaxWidth().padding(bottom = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
-        Cover(song.coverArt, Modifier.size(FrameSize.PlayerCover + Space.Section), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs)
+        Cover(song.coverArt, Modifier.size(FrameSize.PlayerCover + Space.Section), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs, retry = true)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
             Txt(song.title, DesktopType.emphasis, maxLines = 2)
             LinkText(song.displayArtist ?: song.artist.orEmpty(), song.artistId) { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }

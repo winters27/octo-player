@@ -146,6 +146,7 @@ fun PlayerBar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier,
                     .semantics { contentDescription = "Open the player" },
                 shape = Corner.ArtMShape,
                 placeholder = OctoIcons.Songs,
+                retry = true,
             )
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

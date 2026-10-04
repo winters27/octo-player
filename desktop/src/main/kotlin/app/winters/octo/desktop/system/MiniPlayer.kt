@@ -305,10 +305,10 @@ private fun MiniBackdrop(app: AppState, state: PlayerState, modifier: Modifier) 
     val song = state.current?.song
     val connection = app.connection
     val cover by produceState<WashCover?>(null, song?.coverArt, song == null, connection, tuning) {
-        value = if (song == null || connection == null) {
-            withContext(Dispatchers.Default) { OctoArt.cover(tuning) }
+        if (song == null || connection == null) {
+            value = withContext(Dispatchers.Default) { OctoArt.cover(tuning) }
         } else {
-            app.washCovers.prepare(connection.client, song.coverArt, tuning)
+            app.washCovers.follow(connection.client, song.coverArt, tuning).collect { value = it }
         }
     }
     ImmersiveBackdrop(cover, look.glowStrength, bpm = 0f, fps = 1, speed = 0f, moving = false, modifier = modifier, quiet = song == null)
@@ -320,7 +320,7 @@ private fun MiniBackdrop(app: AppState, state: PlayerState, modifier: Modifier) 
 private fun MiniBar(app: AppState, state: PlayerState, onTop: Boolean, actions: MiniActions, wide: Boolean) {
     val song = state.current?.song
     Row(Modifier.fillMaxSize().padding(Space.L), horizontalArrangement = Arrangement.spacedBy(Space.L), verticalAlignment = Alignment.CenterVertically) {
-        Cover(song?.coverArt, Modifier.fillMaxHeight().aspectRatio(1f), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs)
+        Cover(song?.coverArt, Modifier.fillMaxHeight().aspectRatio(1f), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs, retry = true)
         Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
             Row(verticalAlignment = Alignment.Top) {
                 SongWords(state, Modifier.weight(1f))
@@ -346,7 +346,7 @@ private fun MiniCover(app: AppState, state: PlayerState, panel: MiniPanel?, onTo
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
             val side = minOf(maxWidth, maxHeight)
             Box(Modifier.size(side)) {
-                Cover(song?.coverArt, Modifier.fillMaxSize(), shape = Corner.ArtLShape, placeholder = OctoIcons.Songs)
+                Cover(song?.coverArt, Modifier.fillMaxSize(), shape = Corner.ArtLShape, placeholder = OctoIcons.Songs, retry = true)
                 // A soft shade at the top, so the buttons read on any cover.
                 Box(Modifier.fillMaxWidth().height(ControlHeight.L + Space.Xl).background(TopShade, Corner.ArtLShape))
                 Box(Modifier.align(Alignment.TopEnd).padding(Space.Xs)) { WindowButtons(onTop, bar = false, actions) }
@@ -376,7 +376,7 @@ private fun MiniWithPanel(app: AppState, state: PlayerState, panel: MiniPanel, o
     val song = state.current?.song
     Column(Modifier.fillMaxSize().padding(top = Space.L, start = Space.L, end = Space.L)) {
         Row(Modifier.fillMaxWidth().height(FrameSize.PlayerThumb), horizontalArrangement = Arrangement.spacedBy(Space.L), verticalAlignment = Alignment.CenterVertically) {
-            Cover(song?.coverArt, Modifier.size(FrameSize.PlayerThumb), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs)
+            Cover(song?.coverArt, Modifier.size(FrameSize.PlayerThumb), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs, retry = true)
             SongWords(state, Modifier.weight(1f))
             WindowButtons(onTop, bar = false, actions)
         }

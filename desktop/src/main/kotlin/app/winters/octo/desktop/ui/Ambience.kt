@@ -168,10 +168,10 @@ fun ImmersiveAmbience(app: AppState, modifier: Modifier = Modifier) {
     val song = state.current?.song
     val connection = app.connection
     val cover by produceState<WashCover?>(null, song?.coverArt, song == null, connection, tuning) {
-        value = if (song == null || connection == null) {
-            withContext(Dispatchers.Default) { OctoArt.cover(tuning) }
+        if (song == null || connection == null) {
+            value = withContext(Dispatchers.Default) { OctoArt.cover(tuning) }
         } else {
-            app.washCovers.prepare(connection.client, song.coverArt, tuning)
+            app.washCovers.follow(connection.client, song.coverArt, tuning).collect { value = it }
         }
     }
     val moving = ambienceMoves(
