@@ -77,6 +77,15 @@ class SubsonicClient(
             .apply { params.forEach { (key, value) -> addQueryParameter(key, value) } }
             .build()
 
+    // Signs an address outside /rest, such as Octo's admin pages, with the
+    // same sign-in as every Subsonic call. A fresh salt each time.
+    fun signed(url: HttpUrl): HttpUrl =
+        url.newBuilder()
+            .apply { credentials.authParams().forEach { (key, value) -> addQueryParameter(key, value) } }
+            .addQueryParameter("v", API_VERSION)
+            .addQueryParameter("c", clientName)
+            .build()
+
     fun coverArtUrl(coverId: String, size: Int): HttpUrl =
         url("getCoverArt", mapOf("id" to coverId, "size" to size.toString()))
 
