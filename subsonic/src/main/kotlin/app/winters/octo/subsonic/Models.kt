@@ -154,6 +154,10 @@ data class Song(
     // found online, which it can stream or download. Such a song has no
     // path, size or date added.
     val isExternal: Boolean = false,
+    // Which of Octo's radio sources suggested this song ("YouTube Music",
+    // "Last.fm", "ListenBrainz", "Sounds alike", "Your library"). Only radio
+    // answers carry it, and only from Octo.
+    val octoSuggestedBy: String? = null,
 )
 
 @Serializable

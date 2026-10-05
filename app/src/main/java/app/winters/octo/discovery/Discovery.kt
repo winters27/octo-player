@@ -81,6 +81,12 @@ class OnlineAlbumPage(val album: OnlineAlbum, val songs: List<TrackEntity>)
 
 class OnlineArtistPage(val artist: OnlineArtist, val albums: List<OnlineAlbum>)
 
+// Radio answers remembered for "Suggested by" before the oldest are dropped,
+// and how long one is believed: a later radio may suggest the song again
+// from another source, and an old answer would name the wrong one.
+private const val SUGGESTIONS_KEPT = 5_000
+private const val SUGGESTION_LIFETIME_MS = 12 * 60 * 60 * 1000L
+
 // What the signed-in server offers beyond the library: songs, albums and
 // artists found online, radio from any song, and stations. Songs come back
 // shaped like library songs; one found online has an id starting "find:"
@@ -219,6 +225,12 @@ class Discovery @Inject constructor(
         return resolvedInPlace(sourceId, songs)
     }
 
+    // Which of Octo's radio sources suggested a track, as its last radio
+    // answer said, for the song's info. Kept while the app runs, not saved.
+    private val suggested = Suggestions(SUGGESTIONS_KEPT, SUGGESTION_LIFETIME_MS)
+
+    fun suggestedBy(trackId: String): String? = suggested[trackId]
+
     // Songs from the server as the app shows them, in the order sent: a
     // library song as it is in the library, anything else as a find. A find
     // already downloaded is the library song it became.
@@ -231,12 +243,14 @@ class Discovery @Inject constructor(
         val adopted = each.filterIsInstance<Resolved.Found>().mapNotNull { it.song.adoptedId.ifEmpty { null } }
         val library = catalog.tracksByIds(each.filterIsInstance<Resolved.InLibrary>().map { it.trackId } + adopted).associateBy { it.id }
         val resolved = each.map { asAdopted(it, library.keys) }
-        return resolved.map { r ->
+        val tracks = resolved.map { r ->
             when (r) {
                 is Resolved.InLibrary -> library[r.trackId]
                 is Resolved.Found -> r.song.asTrack()
             }
         }
+        suggested.putAll(suggestionsOf(tracks.map { it?.id }, songs))
+        return tracks
     }
 
     // What each song sent is, in order, with the finds among them kept.
@@ -297,5 +311,36 @@ class Discovery @Inject constructor(
     private fun server(): Pair<SubsonicClient, String>? {
         val client = (sessions.state.value as? SessionState.SignedIn)?.session?.client ?: return null
         return client to serverSourceId(client.primaryUrl)
+    }
+}
+
+// Which source suggested each track, newest last: past the cap the oldest
+// answers go, and one older than its lifetime is forgotten, so the song info
+// never names a source from a radio long gone. Safe across threads.
+internal class Suggestions(
+    private val kept: Int,
+    private val lifetimeMs: Long,
+    private val now: () -> Long = System::currentTimeMillis,
+) {
+    private val entries = LinkedHashMap<String, Pair<String, Long>>()
+
+    @Synchronized
+    fun putAll(sources: Map<String, String>) {
+        val at = now()
+        for ((id, by) in sources) {
+            // Taken out first, so a song suggested again moves to the newest end.
+            entries.remove(id)
+            entries[id] = by to at
+        }
+        val over = entries.size - kept
+        if (over > 0) entries.keys.take(over).forEach(entries::remove)
+    }
+
+    @Synchronized
+    operator fun get(id: String): String? {
+        val (by, at) = entries[id] ?: return null
+        if (now() - at <= lifetimeMs) return by
+        entries.remove(id)
+        return null
     }
 }

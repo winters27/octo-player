@@ -78,6 +78,17 @@ class OutsideSongsTest {
     }
 
     @Test
+    fun aRadioSongSaysWhichSourceSuggestedIt() = runTest {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = MockResponse.Builder().body(
+                """{"subsonic-response":{"status":"ok","similarSongs2":{"song":[{"id":"s1","title":"Mine","octoSuggestedBy":"Sounds alike"},{"id":"s2","title":"Found online","isExternal":true,"octoSuggestedBy":"YouTube Music"},{"id":"s3","title":"Plain"}]}}}""",
+            ).build()
+        }
+        val songs = client().similarSongs("seed")
+        assertEquals(listOf("Sounds alike", "YouTube Music", null), songs.map { it.octoSuggestedBy })
+    }
+
+    @Test
     fun readingTheLibraryFromAnEmptySearchLeavesOutSongsOutsideIt() = runTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {

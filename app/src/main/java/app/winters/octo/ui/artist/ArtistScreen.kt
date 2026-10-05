@@ -59,19 +59,18 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.discovery.ArtistExtras
 import app.winters.octo.discovery.ArtistExtrasSource
-import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.DownloadState
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.OnlineArtist
 import app.winters.octo.discovery.SimilarArtist
 import app.winters.octo.listening.FavouriteKind
 import app.winters.octo.listening.PlayHistory
+import app.winters.octo.playback.LibraryRadio
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.sort.SortList
 import app.winters.octo.sort.SortOrder
 import app.winters.octo.sort.Sorted
 import app.winters.octo.sort.SortedLibrary
-import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistCircle
 import app.winters.octo.ui.common.Artwork
@@ -93,6 +92,7 @@ import app.winters.octo.ui.common.albums
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.common.songs
 import app.winters.octo.ui.menu.SongMenuContext
+import app.winters.octo.ui.menu.playRadio
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
 import app.winters.octo.ui.nav.OnlineArtistRoute
@@ -101,7 +101,6 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -116,7 +115,6 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel(assistedFactory = ArtistViewModel.Factory::class)
@@ -127,7 +125,7 @@ class ArtistViewModel @AssistedInject constructor(
     history: PlayHistory,
     private val sorted: SortedLibrary,
     private val playback: PlaybackConnection,
-    private val discovery: Discovery,
+    private val libraryRadio: LibraryRadio,
     private val feedback: Feedback,
     downloads: Downloads,
 ) : ViewModel() {
@@ -170,9 +168,8 @@ class ArtistViewModel @AssistedInject constructor(
         combine(dao.artistTracks(id), history.tracks) { tracks, played -> artistSongOrder(tracks, played) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // Whether a server is signed in, so there can be a radio.
-    val radio: StateFlow<Boolean> =
-        discovery.available.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    // Whether there can be a radio: always, since the library alone can make one.
+    val radio: StateFlow<Boolean> = MutableStateFlow(true)
 
     // Plays all their songs in the order shown, or shuffled.
     fun play(shuffle: Boolean) {
@@ -183,25 +180,11 @@ class ArtistViewModel @AssistedInject constructor(
         playback.playTracks(songs.value.map { it.id }, index, source = artist.value?.name)
     }
 
-    // Plays their most played song, then songs like it from the server.
-    // When the server cannot answer, nothing changes.
+    // Plays their most played song, then songs like theirs, theirs among them.
     fun startRadio() {
-        val seed = songs.value.firstOrNull() ?: return
-        viewModelScope.launch {
-            val found = try {
-                withContext(Dispatchers.IO) { discovery.radio(seed) }
-            } catch (e: SubsonicException) {
-                Log.w("Octo", "artist radio failed: ${e.javaClass.simpleName}")
-                feedback.show("Could not start a radio for this artist")
-                return@launch
-            }
-            // Only the song itself back means the server found nothing like it.
-            if (found.size > 1) {
-                playback.playTracks(found.map { it.id }, 0, source = "${seed.title} radio")
-            } else {
-                feedback.show("No similar songs found")
-            }
-        }
+        val seeds = songs.value.take(200)
+        if (seeds.isEmpty()) return
+        viewModelScope.launch { playRadio(seeds, libraryRadio, playback, feedback) }
     }
 
     init {

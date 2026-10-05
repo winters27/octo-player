@@ -15,7 +15,6 @@ import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.byPlayCount
 import app.winters.octo.data.Upgrades
 import app.winters.octo.design.PopupPages
-import app.winters.octo.discovery.Discovery
 import app.winters.octo.favourites.FavouriteStore
 import app.winters.octo.favourites.PinKey
 import app.winters.octo.favourites.PinStore
@@ -23,6 +22,7 @@ import app.winters.octo.listening.FavouriteKind
 import app.winters.octo.listening.PlayHistory
 import app.winters.octo.offline.DownloadEntity
 import app.winters.octo.offline.OfflineDownloads
+import app.winters.octo.playback.LibraryRadio
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.ui.common.Feedback
@@ -31,11 +31,10 @@ import app.winters.octo.ui.playlist.playlistCopyName
 import app.winters.octo.ui.upgrade.UpgradeAsk
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -168,7 +167,7 @@ class CollectionMenuViewModel @Inject constructor(
     private val userDao: UserDao,
     private val store: PlaylistStore,
     private val playback: PlaybackConnection,
-    private val discovery: Discovery,
+    private val libraryRadio: LibraryRadio,
     private val offline: OfflineDownloads,
     private val history: PlayHistory,
     private val feedback: Feedback,
@@ -199,9 +198,8 @@ class CollectionMenuViewModel @Inject constructor(
         viewModelScope.launch { pins.moveToFront(key) }
     }
 
-    // Whether an artist can start a radio: only with a server signed in.
-    val radio: StateFlow<Boolean> = discovery.available
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    // Whether an artist can start a radio: always, since the library alone can make one.
+    val radio: StateFlow<Boolean> = MutableStateFlow(true)
 
     // Library songs downloaded to the phone, or on their way.
     val kept: StateFlow<Map<String, DownloadEntity>> = offline.byTrack
@@ -260,31 +258,35 @@ class CollectionMenuViewModel @Inject constructor(
 
     fun download(trackIds: List<String>) = offline.download(trackIds)
 
-    // A radio from the artist's most played song, or their first song when
-    // none has been played yet.
-    // A radio from an album: its most played song here, else its first.
+    // A radio from an album: its most played song here, else its first, then
+    // songs like the album, leaving the rest of the album out.
     fun startAlbumRadio(albumId: String) {
         viewModelScope.launch {
+            val tracks = catalog.albumTracks(albumId).first()
             val played = history.tracks.first().filter { it.track.albumId == albumId }
-            val seed = byPlayCount(played, 1).firstOrNull() ?: catalog.albumTracks(albumId).first().firstOrNull()
+            val seed = byPlayCount(played, 1).firstOrNull() ?: tracks.firstOrNull()
             if (seed == null) {
                 feedback.show("No songs to start a radio from")
                 return@launch
             }
-            playRadio(seed, discovery, playback, feedback, "this album")
+            val seeds = (listOf(seed) + tracks).distinctBy { it.id }
+            playRadio(seeds, libraryRadio, playback, feedback, exclude = tracks.map { it.id }.toSet())
         }
     }
 
+    // A radio from the artist's most played song, or their first song when
+    // none has been played yet, then songs like theirs, theirs among them.
     fun startRadio(artistId: String) {
         viewModelScope.launch {
             val played = history.tracks.first().filter { it.track.artistId == artistId }
-            val seed = byPlayCount(played, 1).firstOrNull()
-                ?: songIds(CollectionTarget.Artist(artistId)).firstOrNull()?.let { catalog.track(it) }
+            val ids = songIds(CollectionTarget.Artist(artistId))
+            val seed = byPlayCount(played, 1).firstOrNull() ?: ids.firstOrNull()?.let { catalog.track(it) }
             if (seed == null) {
                 feedback.show("No songs to start a radio from")
                 return@launch
             }
-            playRadio(seed, discovery, playback, feedback, "this artist")
+            val more = catalog.tracksByIdsUnordered(ids.take(200))
+            playRadio((listOf(seed) + more).distinctBy { it.id }, libraryRadio, playback, feedback)
         }
     }
 }

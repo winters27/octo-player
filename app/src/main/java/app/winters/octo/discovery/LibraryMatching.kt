@@ -12,6 +12,15 @@ import app.winters.octo.subsonic.Song
 // The matching rules themselves live in shared core (Matching.kt); this is
 // the part that works on the catalog's database rows.
 
+// Which source each resolved track came from, by the id playback uses: a
+// server song's octoSuggestedBy paired with the track it became. A song that
+// resolved to nothing, or carries no source, is left out.
+internal fun suggestionsOf(ids: List<String?>, songs: List<Song>): Map<String, String> =
+    ids.zip(songs).mapNotNull { (id, song) ->
+        val by = song.octoSuggestedBy?.trim()
+        if (id == null || by.isNullOrEmpty()) null else id to by
+    }.toMap()
+
 // What one song from the server is to the app: a song already in the
 // library, or one found online.
 sealed interface Resolved {

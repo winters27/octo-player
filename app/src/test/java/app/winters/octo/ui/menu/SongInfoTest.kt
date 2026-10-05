@@ -110,6 +110,14 @@ class SongInfoTest {
     }
 
     @Test
+    fun aRadioSongSaysWhichSourceSuggestedIt_RightAfterWhereItIs() {
+        val keys = infoLines(SongFacts(title = "Roads", artist = "Portishead", album = "Dummy", suggestedBy = "Sounds alike"), utc, us)
+            .map { it.label }
+        assertEquals(keys.indexOf("Source") + 1, keys.indexOf("Suggested by"))
+        assertEquals("Sounds alike", lines(SongFacts(title = "Roads", artist = "", album = "", suggestedBy = "Sounds alike"))["Suggested by"])
+    }
+
+    @Test
     fun whatIsNotKnownIsLeftOut() {
         val shown = lines(SongFacts(title = "Untitled", artist = "", album = ""))
         assertEquals(listOf("Title", "Source", "Plays"), shown.keys.toList())
