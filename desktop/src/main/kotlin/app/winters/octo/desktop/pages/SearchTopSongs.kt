@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.desktop.ui.MarkedTitle
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -145,7 +146,7 @@ private fun RankedSong(app: AppState, ranked: List<Song>, index: Int, entry: Top
         Txt("${entry.rank.takeIf { it > 0 } ?: (index + 1)}", OctoType.caption, OctoColors.TextMuted, Modifier.width(24.dp), align = TextAlign.End)
         Cover(song.coverArt, Modifier.size(38.dp), shape = RoundedCornerShape(6.dp), online = outside, placeholder = OctoIcons.Songs)
         Column(Modifier.weight(1f)) {
-            Txt(song.title, OctoType.bodySmall)
+            MarkedTitle(song, OctoType.bodySmall) { Txt(song.title, OctoType.bodySmall, modifier = it) }
             val about = listOfNotNull(
                 (song.displayArtist ?: song.artist).takeIf { withArtist && !it.isNullOrBlank() },
                 shownAlbum(song).ifBlank { null },

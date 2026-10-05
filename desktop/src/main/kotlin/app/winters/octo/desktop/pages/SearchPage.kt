@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.desktop.ui.MarkedTitle
 import app.winters.octo.design.Corner
 import app.winters.octo.design.FrameSize
 import app.winters.octo.desktop.ui.PlaylistPicture
@@ -227,7 +228,7 @@ private fun OutsideSong(app: AppState, songs: List<Song>, index: Int, song: Song
     ) {
         Cover(song.coverArt, Modifier.size(38.dp), shape = RoundedCornerShape(6.dp), online = outside, placeholder = OctoIcons.Songs)
         Column(Modifier.weight(1f)) {
-            Txt(song.title, OctoType.bodySmall)
+            MarkedTitle(song, OctoType.bodySmall) { Txt(song.title, OctoType.bodySmall, modifier = it) }
             Txt(listOfNotNull(song.displayArtist ?: song.artist, song.album).joinToString(" · "), OctoType.caption, OctoColors.TextMuted)
         }
         Txt(lengthText((knownLengthMs(song) / 1000).toInt()), OctoType.caption, OctoColors.TextMuted, Modifier.width(52.dp))

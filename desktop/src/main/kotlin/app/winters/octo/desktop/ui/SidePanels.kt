@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.catalog.isExplicit
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -502,7 +503,7 @@ private fun QueueRow(
                 }
             }
             .clearAndSetSemantics {
-                contentDescription = queueSpeech(song.title, song.displayArtist ?: song.artist, lengthText(song.duration), kind, picked, failed)
+                contentDescription = queueSpeech(song.title, song.displayArtist ?: song.artist, lengthText(song.duration), kind, picked, failed, song.isExplicit)
                 selected = picked
                 this.focused = focused
             },
@@ -530,15 +531,18 @@ private fun QueueRow(
             Column(Modifier.weight(1f)) {
                 // The keyboard's row shows its cut title whole.
                 CompositionLocalProvider(LocalKeyboardHere provides (focused && ringed)) {
-                    CutTxt(
-                        song.title,
-                        DesktopType.tableTitle,
-                        when {
-                            playing -> OctoColors.Accent
-                            failed -> OctoColors.TextMuted
-                            else -> OctoColors.TextPrimary
-                        },
-                    )
+                    MarkedTitle(song, DesktopType.tableTitle) { title ->
+                        CutTxt(
+                            song.title,
+                            DesktopType.tableTitle,
+                            when {
+                                playing -> OctoColors.Accent
+                                failed -> OctoColors.TextMuted
+                                else -> OctoColors.TextPrimary
+                            },
+                            title,
+                        )
+                    }
                 }
                 CutTxt(song.displayArtist ?: song.artist.orEmpty(), DesktopType.meta, OctoColors.TextMuted)
             }
@@ -554,8 +558,9 @@ private fun QueueRow(
 }
 
 // What a screen reader says for a song in the queue.
-internal fun queueSpeech(title: String, artist: String?, length: String, kind: SectionKind, picked: Boolean, failed: Boolean): String = buildString {
+internal fun queueSpeech(title: String, artist: String?, length: String, kind: SectionKind, picked: Boolean, failed: Boolean, explicit: Boolean = false): String = buildString {
     append(title)
+    if (explicit) append(", explicit")
     artist?.takeIf(String::isNotBlank)?.let { append(", ").append(it) }
     if (length.isNotBlank()) append(", ").append(length)
     when (kind) {
