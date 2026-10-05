@@ -4,7 +4,9 @@ import app.winters.octo.catalog.SourceTrackEntity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.health.FixStep
 import app.winters.octo.health.HealthCheck
+import app.winters.octo.health.SplitBasis
 import app.winters.octo.health.TagChange
+import app.winters.octo.health.words
 import app.winters.octo.subsonic.LibraryActions
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -159,6 +161,39 @@ class HealthFixPlansTest {
         assertNull(health.joinPlan(0, ids - "c"))
         assertEquals(steps, health.joinAll(ids))
         assertEquals(1, health.fixAllPreview(HealthCheck.SplitAlbums, healthOffers(actions("joinAlbum")), server, ids).count)
+    }
+
+    @Test
+    fun anAlbumFiledUnderEachOfItsArtistsJoinsOntoTheLargerPart() {
+        val title = "\$ome \$exy \$ongs 4 U"
+        val tracks = listOf(
+            track("p1", "CELIBACY", album = title, albumId = "pnd").copy(artist = "PARTYNEXTDOOR"),
+            track("p2", "CN TOWER", album = title, albumId = "pnd").copy(artist = "PARTYNEXTDOOR"),
+            track("p3", "NOKIA", album = title, albumId = "pnd").copy(artist = "Drake"),
+            track("d1", "GIMME A HUG", album = title, albumId = "drake", year = null).copy(artist = "Drake"),
+        )
+        val health = phoneHealth(tracks, emptyList(), emptyList())
+        val ids = mapOf("p1" to "np1", "p2" to "np2", "p3" to "np3", "d1" to "nd1")
+
+        val (join, steps) = health.joinPlan(0, ids)!!
+        assertEquals("One album filed under two artists: the part by PARTYNEXTDOOR has NOKIA by Drake.", health.report.splitAlbums.single().reasons.single().words())
+        assertEquals(listOf(FixStep.JoinAlbum("nd1", "GIMME A HUG", like = "np1")), steps)
+        assertEquals("Moves 1 song onto $title, the part with 3 songs. Their album artist becomes PARTYNEXTDOOR.", join.words)
+    }
+
+    @Test
+    fun aSourcesReleaseGroupTiesPartsByDifferentArtists() {
+        val tracks = listOf(
+            track("z1", "Time", album = "Inception", albumId = "zimmer").copy(artist = "Hans Zimmer"),
+            track("b1", "Old Souls", album = "Inception", albumId = "balfe").copy(artist = "Lorne Balfe"),
+        )
+        val copies = listOf(
+            copy("z", "Time", merged = "z1", album = "Inception").copy(mbReleaseGroupId = "5b5f2a1e-1111-4111-8111-111111111111"),
+            copy("b", "Old Souls", merged = "b1", album = "Inception").copy(mbReleaseGroupId = "5b5f2a1e-1111-4111-8111-111111111111"),
+        )
+
+        assertTrue(phoneHealth(tracks, emptyList(), emptyList()).report.splitAlbums.isEmpty())
+        assertEquals(SplitBasis.SameReleaseGroup, phoneHealth(tracks, emptyList(), copies).report.splitAlbums.single().reasons.single().basis)
     }
 
     @Test

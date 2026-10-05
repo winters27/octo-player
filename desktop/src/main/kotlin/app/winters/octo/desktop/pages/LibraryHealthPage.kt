@@ -78,7 +78,7 @@ fun LibraryHealthPage(app: AppState, visit: Visit) {
     val health = app.health
     LaunchedEffect(app.connection) { health.askServer() }
     WithLibrary(app) { index ->
-        LaunchedEffect(index) { health.check(index.songs) }
+        LaunchedEffect(index) { health.check(index.songs, index.albums) }
         val report = health.report ?: return@WithLibrary Column(Modifier.padding(start = PageSide, end = PageSide, top = Space.Xxl)) {
             PageTitle("Library health")
             LoadingLine("Checking your library")

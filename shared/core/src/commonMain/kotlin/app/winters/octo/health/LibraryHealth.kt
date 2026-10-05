@@ -4,6 +4,7 @@ import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.catalog.SongMatchOptions
 import app.winters.octo.catalog.SongRef
 import app.winters.octo.query.isLosslessFormat
+import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Song
 import java.util.stream.IntStream
 import kotlin.math.abs
@@ -43,6 +44,20 @@ interface HealthFields<T> {
     fun recordingId(song: T): String?
     fun cover(song: T): String?
 
+    // Every artist the song credits, and every album artist it names, as
+    // the server lists them. One credit each, when that is all there is.
+    fun artists(song: T): List<String> = listOfNotNull(artist(song))
+    fun albumArtists(song: T): List<String> = listOfNotNull(albumArtist(song))
+
+    // What names the release the song came out on, when the app keeps it:
+    // its MusicBrainz release and release group, its barcode, and its
+    // record labels. Parts of one name by different album artists are
+    // taken for one album when these agree.
+    fun releaseId(song: T): String? = null
+    fun releaseGroupId(song: T): String? = null
+    fun barcode(song: T): String? = null
+    fun labels(song: T): List<String> = emptyList()
+
     // Where the song is kept (a server, the phone). Copies in two places
     // are not duplicates, and an album is never split across places.
     fun place(song: T): String = ""
@@ -73,6 +88,19 @@ object SubsonicHealth : HealthFields<Song> {
     override fun isrcs(song: Song) = song.isrc
     override fun recordingId(song: Song) = song.musicBrainzId
     override fun cover(song: Song) = song.coverArt
+    override fun artists(song: Song) = song.artists.map { it.name }.filter(String::isNotBlank).ifEmpty { listOfNotNull(artist(song)) }
+    override fun albumArtists(song: Song) = song.albumArtists.map { it.name }.filter(String::isNotBlank).ifEmpty { listOfNotNull(albumArtist(song)) }
+}
+
+// A server's songs with what its album list says of their albums: the
+// release's MusicBrainz id and its record labels.
+class SubsonicAlbumHealth(albums: List<Album>) : HealthFields<Song> by SubsonicHealth {
+    private val byId = albums.associateBy { it.id }
+
+    private fun albumOf(song: Song) = song.albumId?.let(byId::get)
+
+    override fun releaseId(song: Song) = albumOf(song)?.musicBrainzId?.takeIf(String::isNotBlank)
+    override fun labels(song: Song) = albumOf(song)?.recordLabels?.map { it.name }.orEmpty()
 }
 
 // Why copies were taken for one recording.
@@ -110,13 +138,49 @@ data class AlbumDifferenceValues(val kind: AlbumDifference, val values: List<Str
 // One album entry the server shows, and its songs in album order.
 data class AlbumPart<T>(val albumId: String, val songs: List<T>)
 
+// Why parts of one name with different album artists are one album.
+enum class SplitBasis {
+    // One part's album artist is credited on the other part too: a song
+    // there is by them, or its album artist names them. A collaboration
+    // album filed under each of its artists.
+    SharedArtist,
+
+    // The parts name the same MusicBrainz release.
+    SameRelease,
+
+    // The parts name the same MusicBrainz release group.
+    SameReleaseGroup,
+
+    // The parts carry the same barcode.
+    SameBarcode,
+
+    // The parts came out on the same label in the same year.
+    SameLabelAndYear,
+}
+
+// One reason, with what it rests on: for a shared artist, `artist` is one
+// part's album artist, `other` the other part's, and `song` a song of the
+// other part by `artist` (empty when its album artist names them); for the
+// rest, `value` is what the parts share.
+data class SplitReason(
+    val basis: SplitBasis,
+    val artist: String = "",
+    val other: String = "",
+    val song: String = "",
+    val value: String = "",
+)
+
 // An album the server shows as two or more, because its songs' tags do
-// not agree.
+// not agree. The first part is the one the others join: the largest, or
+// the one whose album artist names every part's artist. `reasons` says why
+// parts with different album artists were taken for one album; parts by
+// one album artist need none.
 data class SplitAlbum<T>(
     val title: String,
     val artist: String,
     val parts: List<AlbumPart<T>>,
     val differences: List<AlbumDifferenceValues>,
+    val reasons: List<SplitReason> = emptyList(),
 )
 
 // What one check is about. The order is the order they are shown in.
@@ -327,53 +391,178 @@ private fun <T> bestReason(copies: List<T>, fields: HealthFields<T>): BestReason
     }
 }
 
-// Albums the server shows as more than one: the same title by the same
-// album artist, in one place, under two or more album ids, with years that
-// do not tell them apart (the same year, or none on one side). Two albums
-// of one name from different years stay apart.
+// Albums the server shows as more than one: one title, in one place,
+// under two or more album ids, with years that do not tell them apart (the
+// same year, or none on one side). Parts by the same album artist belong
+// together. Parts by different album artists belong together only when
+// something shows they are one release: the same MusicBrainz release or
+// release group, the same barcode, the same label in the same year, or one
+// part's album artist credited on the other part, as a collaboration album
+// filed under each of its artists is. A shared credit alone does not join
+// a title many artists use ("Greatest Hits", "Live") or an artist's own
+// name. Two albums of one name from different years stay apart, and so do
+// albums of one name by artists with nothing in common.
 fun <T> findSplitAlbums(songs: List<T>, fields: HealthFields<T>): List<SplitAlbum<T>> {
     val byAlbum = LinkedHashMap<String, MutableList<T>>()
     for (song in songs) {
         val id = fields.albumId(song)?.takeIf(String::isNotEmpty) ?: continue
         byAlbum.getOrPut(id) { ArrayList() } += song
     }
-    val buckets = HashMap<String, MutableList<String>>()
-    val years = HashMap<String, Set<Int>>()
+    val buckets = HashMap<String, MutableList<PartFacts>>()
     for ((id, members) in byAlbum) {
         val first = members[0]
         val title = SongIdentity.key(fields.album(first))
         if (title.isEmpty()) continue
-        val artist = SongIdentity.key(SongIdentity.primaryArtist(albumArtistOf(members, fields)))
-        if (artist.isEmpty()) continue
-        buckets.getOrPut("${fields.place(first)}\u0000$title\u0000$artist") { ArrayList(1) } += id
-        years[id] = members.mapNotNullTo(HashSet()) { fields.year(it)?.takeIf { y -> y > 0 } }
+        val facts = partFacts(id, members, fields) ?: continue
+        buckets.getOrPut("${fields.place(first)}\u0000$title") { ArrayList(1) } += facts
     }
     val found = ArrayList<SplitAlbum<T>>()
-    for (ids in buckets.values) {
-        if (ids.size < 2) continue
-        // Parts whose years agree, or that lack one, belong together.
-        val sets = Sets(ids.size)
-        for (i in ids.indices) for (j in i + 1 until ids.size) {
-            val a = years.getValue(ids[i])
-            val b = years.getValue(ids[j])
-            if (a.isEmpty() || b.isEmpty() || a.any(b::contains)) sets.join(i, j)
+    for ((bucket, parts) in buckets) {
+        if (parts.size < 2) continue
+        val title = bucket.substringAfter('\u0000')
+        val sets = Sets(parts.size)
+        val reasons = ArrayList<Pair<Int, SplitReason>>()
+        for (i in parts.indices) for (j in i + 1 until parts.size) {
+            val a = parts[i]
+            val b = parts[j]
+            if (!yearsAgree(a.years, b.years)) continue
+            if (a.artistKey == b.artistKey) {
+                sets.join(i, j)
+                continue
+            }
+            val reason = sameRelease(a, b) ?: sharedArtist(a, b, title) ?: continue
+            sets.join(i, j)
+            reasons += i to reason
         }
-        ids.indices.groupBy(sets::root).values.filter { it.size > 1 }.forEach { together ->
-            val parts = together.map { i ->
-                val id = ids[i]
+        parts.indices.groupBy(sets::root).values.filter { it.size > 1 }.forEach { together ->
+            val bySize = together.sortedWith(compareByDescending<Int> { parts[it].size }.thenBy { parts[it].id })
+            // A part whose album artist already names every part's artist
+            // leads; otherwise the largest does.
+            val artists = together.mapTo(HashSet()) { parts[it].artistKey }
+            val lead = (if (artists.size > 1) bySize.firstOrNull { i -> artists.all(parts[i].albumArtists::containsKey) } else null) ?: bySize[0]
+            val ordered = (listOf(lead) + bySize.filter { it != lead }).map { i ->
+                val id = parts[i].id
                 AlbumPart(id, byAlbum.getValue(id).sortedWith(albumOrder(fields)))
-            }.sortedWith(compareByDescending<AlbumPart<T>> { it.songs.size }.thenBy { it.albumId })
-            val lead = parts[0].songs
+            }
+            val leadSongs = ordered[0].songs
+            val root = sets.root(together[0])
             found += SplitAlbum(
-                title = fields.album(lead[0]).orEmpty(),
-                artist = albumArtistOf(lead, fields),
-                parts = parts,
-                differences = differencesOf(parts, fields),
+                title = fields.album(leadSongs[0]).orEmpty(),
+                artist = albumArtistOf(leadSongs, fields),
+                parts = ordered,
+                differences = differencesOf(ordered, fields),
+                reasons = reasons.filter { sets.root(it.first) == root }.map { it.second }.distinct(),
             )
         }
     }
     return found.sortedWith(compareBy<SplitAlbum<T>> { sortKey(it.artist) }.thenBy { sortKey(it.title) }.thenBy { it.parts[0].albumId })
 }
+
+// What the split check reads of one album part.
+private class PartFacts(
+    val id: String,
+    val size: Int,
+    // The album artist as shown, and the key of its first artist.
+    val artist: String,
+    val artistKey: String,
+    // Every artist the album artist names, by key, as written.
+    val albumArtists: Map<String, String>,
+    // Every artist the songs credit, by key, with one song of theirs.
+    val credits: Map<String, String>,
+    val years: Set<Int>,
+    val releases: Set<String>,
+    val groups: Set<String>,
+    val barcodes: Set<String>,
+    // Labels by key, as written.
+    val labels: Map<String, String>,
+)
+
+private fun <T> partFacts(id: String, members: List<T>, fields: HealthFields<T>): PartFacts? {
+    val artist = albumArtistOf(members, fields)
+    val artistKey = SongIdentity.key(SongIdentity.primaryArtist(artist))
+    if (artistKey.isEmpty()) return null
+    val albumArtists = LinkedHashMap<String, String>()
+    val named = members.flatMap(fields::albumArtists).filter(String::isNotBlank).distinct().ifEmpty { listOf(artist) }
+    for (credit in named) for (name in namesIn(credit)) albumArtists.putIfAbsent(SongIdentity.key(name), name)
+    val credits = HashMap<String, String>()
+    for (song in members) {
+        for (credit in fields.artists(song)) for (name in namesIn(credit)) credits.putIfAbsent(SongIdentity.key(name), fields.title(song))
+    }
+    fun codes(of: (T) -> String?, clean: (String) -> String) =
+        members.mapNotNullTo(HashSet()) { song -> of(song)?.let(clean)?.takeIf(String::isNotEmpty) }
+    val labels = LinkedHashMap<String, String>()
+    for (song in members) {
+        for (label in fields.labels(song)) SongIdentity.key(label).takeIf(String::isNotEmpty)?.let { labels.putIfAbsent(it, label.trim()) }
+    }
+    return PartFacts(
+        id = id,
+        size = members.size,
+        artist = artist,
+        artistKey = artistKey,
+        albumArtists = albumArtists,
+        credits = credits,
+        years = members.mapNotNullTo(HashSet()) { fields.year(it)?.takeIf { y -> y > 0 } },
+        releases = codes(fields::releaseId) { it.trim().lowercase() },
+        groups = codes(fields::releaseGroupId) { it.trim().lowercase() },
+        barcodes = codes(fields::barcode) { code -> code.filter(Char::isDigit).trimStart('0') },
+        labels = labels,
+    )
+}
+
+// The artists a credit names, a guest in brackets left out: both of
+// "PARTYNEXTDOOR & Drake".
+private fun namesIn(credit: String): List<String> =
+    SongIdentity.parseArtists(credit).names.filter { SongIdentity.key(it).isNotEmpty() }
+
+// Years that do not tell two parts apart: the same year, or none on one side.
+private fun yearsAgree(a: Set<Int>, b: Set<Int>) = a.isEmpty() || b.isEmpty() || a.any(b::contains)
+
+// The same release by its codes, or by its label and year.
+private fun sameRelease(a: PartFacts, b: PartFacts): SplitReason? {
+    if (a.releases.any(b.releases::contains)) return SplitReason(SplitBasis.SameRelease)
+    if (a.groups.any(b.groups::contains)) return SplitReason(SplitBasis.SameReleaseGroup)
+    a.barcodes.firstOrNull(b.barcodes::contains)?.let { return SplitReason(SplitBasis.SameBarcode, value = it) }
+    val label = a.labels.keys.firstOrNull(b.labels::containsKey) ?: return null
+    val year = a.years.filter(b.years::contains).minOrNull() ?: return null
+    return SplitReason(SplitBasis.SameLabelAndYear, value = "${a.labels.getValue(label)}, $year")
+}
+
+// One part's album artist credited on the other part: a song there by
+// them, though that part is filed under someone else, or else both album
+// artists naming them ("Drake & Future" and "Future"). Never for a title
+// many artists use, or one that is an artist's own name.
+private fun sharedArtist(a: PartFacts, b: PartFacts, title: String): SplitReason? {
+    if (isCommonTitle(title) || title in a.albumArtists || title in b.albumArtists) return null
+    var named: SplitReason? = null
+    for ((mine, theirs) in listOf(a to b, b to a)) {
+        for ((key, name) in mine.albumArtists) {
+            if (key in theirs.albumArtists) {
+                // Said of the credit that names more than its own artist.
+                if (named == null) named = SplitReason(SplitBasis.SharedArtist, artist = name, other = if (mine.artistKey == key) theirs.artist else mine.artist)
+                continue
+            }
+            theirs.credits[key]?.let { song -> return SplitReason(SplitBasis.SharedArtist, artist = name, other = theirs.artist, song = song) }
+        }
+    }
+    return named
+}
+
+// Album titles many artists use, by key: sharing one says nothing about
+// being one album.
+private val CommonTitles = setOf(
+    "album", "thealbum", "untitled", "unknown", "unknownalbum", "single", "singles", "thesingles", "ep", "theep",
+    "live", "unplugged", "acoustic", "demo", "demos", "remixes", "theremixes", "bsides", "rarities", "hits", "thehits",
+    "collection", "thecollection", "essentials", "anthology", "mixtape", "soundtrack", "originalsoundtrack", "ost",
+    "christmas", "christmasalbum", "achristmasalbum", "lovesongs", "covers", "instrumentals", "deluxe", "deluxeedition",
+    "remastered", "nonalbumsingle", "nonalbumsingles", "greatest", "thebest",
+)
+
+private val CommonTitleStarts = listOf(
+    "greatesthits", "thegreatesthits", "bestof", "thebestof", "theverybestof", "theessential", "essential",
+    "liveat", "livein", "livefrom", "mtvunplugged", "unplugged",
+)
+
+private fun isCommonTitle(title: String) = title in CommonTitles || CommonTitleStarts.any(title::startsWith)
 
 // The album artist most of an album's songs name, or their artist.
 private fun <T> albumArtistOf(songs: List<T>, fields: HealthFields<T>): String {

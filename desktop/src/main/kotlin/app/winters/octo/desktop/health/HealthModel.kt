@@ -11,10 +11,12 @@ import app.winters.octo.health.FixOutcome
 import app.winters.octo.health.FixStep
 import app.winters.octo.health.HealthCheck
 import app.winters.octo.health.HealthReport
+import app.winters.octo.health.SubsonicAlbumHealth
 import app.winters.octo.health.SubsonicHealth
 import app.winters.octo.health.checkLibrary
 import app.winters.octo.health.runFix
 import app.winters.octo.health.settledFor
+import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.LibraryActions
 import app.winters.octo.subsonic.LibraryActionResult
 import app.winters.octo.subsonic.LibraryTrash
@@ -94,13 +96,15 @@ class HealthModel(
     // Whether songs can be taken off the server's disk from here.
     val canDelete: Boolean get() = actions?.canRemove == true
 
-    // Checks these songs, unless they are the ones checked already.
-    fun check(songs: List<Song>) {
+    // Checks these songs, unless they are the ones checked already. Their
+    // albums tell the release a part came out on, for albums split across
+    // album artists.
+    fun check(songs: List<Song>, albums: List<Album> = emptyList()) {
         if (songs === checkedSongs) return
         checkedSongs = songs
         job?.cancel()
         job = scope.launch {
-            val found = withContext(work) { checkLibrary(songs, SubsonicHealth) }
+            val found = withContext(work) { checkLibrary(songs, SubsonicAlbumHealth(albums)) }
             full = found
             // What the server list now shows is what the server holds.
             removed = removed.filterTo(HashSet()) { id -> songs.any { it.id == id } }

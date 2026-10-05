@@ -55,7 +55,8 @@ fun HealthCheck.fixMeaning(): String = when (this) {
     HealthCheck.Duplicates ->
         "Keeps the best copy of each song, fills in the tags it lacks from the others, and moves the others to the server's trash, where they can be put back."
     HealthCheck.SplitAlbums ->
-        "Gives the songs of the smaller parts the album tags of the largest part, so each album shows as one."
+        "Gives the songs of the other parts the album tags of the largest part, album artist and all, so each album shows as one. " +
+            "When one part's album artist already names every part's artist, that part leads instead."
     HealthCheck.NoCover ->
         "Looks for each album's cover and puts it inside songs that have no picture. A picture already there is never replaced."
     HealthCheck.NoLength ->

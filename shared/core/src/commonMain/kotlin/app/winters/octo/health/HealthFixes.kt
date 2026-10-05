@@ -153,14 +153,21 @@ fun tagName(tag: String): String = when (tag) {
 // "Year: 1998" or, over a value, "Year: 1998, was 1997".
 fun TagChange.words(): String = if (now == null) "${tagName(tag)}: $value" else "${tagName(tag)}: $value, was $now"
 
-// A split album put right: every song of the smaller parts takes the album
-// tags of the part with the most songs.
+// A split album put right: every song of the other parts takes the album
+// tags of the first part, the largest unless another's album artist names
+// every part's artist. Where the album artists differ, the moved songs take
+// the first part's.
 data class AlbumJoin<T>(val album: SplitAlbum<T>, val lead: T, val moving: List<T>) {
     val words: String
         get() {
             val count = countText(moving.size, "song", "songs")
             val kept = album.parts[0].songs.size
-            return "Moves $count onto ${album.title.trim()}, the part with ${countText(kept, "song", "songs")}."
+            val named = kept < album.parts.maxOf { it.songs.size }
+            val why = if (named) ", since its album artist names every part's artist" else ""
+            val head = "Moves $count onto ${album.title.trim()}, the part with ${countText(kept, "song", "songs")}$why."
+            val artist = album.artist.trim()
+            val differs = album.reasons.isNotEmpty() || album.differences.any { it.kind == AlbumDifference.AlbumArtist }
+            return if (differs && artist.isNotEmpty()) "$head Their album artist becomes $artist." else head
         }
 }
 

@@ -55,8 +55,13 @@ object SourceCopyHealth : HealthFields<SourceTrackEntity> {
 }
 
 // The library's songs as the phone shows them. An album's artist is the
-// album's own; the phone keeps none per song.
-class TrackHealth(private val albumArtists: Map<String, String> = emptyMap()) : HealthFields<TrackEntity> {
+// album's own; the phone keeps none per song. A source's copy of a song
+// (by library song) adds every artist it credits and the MusicBrainz
+// release it came out on.
+class TrackHealth(
+    private val albumArtists: Map<String, String> = emptyMap(),
+    private val copies: Map<String, SourceTrackEntity> = emptyMap(),
+) : HealthFields<TrackEntity> {
     override fun id(song: TrackEntity) = song.id
     override fun title(song: TrackEntity) = song.title
     override fun artist(song: TrackEntity) = song.artist.ifBlank { null }
@@ -76,6 +81,9 @@ class TrackHealth(private val albumArtists: Map<String, String> = emptyMap()) : 
     override fun isrcs(song: TrackEntity): List<String> = emptyList()
     override fun recordingId(song: TrackEntity): String? = null
     override fun cover(song: TrackEntity) = song.artwork
+    override fun artists(song: TrackEntity) = (listOfNotNull(artist(song)) + splitLines(copies[song.id]?.artists.orEmpty())).distinct()
+    override fun releaseId(song: TrackEntity) = copies[song.id]?.mbAlbumId?.ifBlank { null }
+    override fun releaseGroupId(song: TrackEntity) = copies[song.id]?.mbReleaseGroupId?.ifBlank { null }
     override val seen = setOf(HealthTag.Genre, HealthTag.Year, HealthTag.TrackNumber, HealthTag.Cover)
 }
 
@@ -124,7 +132,7 @@ class PhoneHealth(
 // as shown.
 fun phoneHealth(tracks: List<TrackEntity>, albums: List<AlbumEntity>, copies: List<SourceTrackEntity>): PhoneHealth {
     val byId = tracks.associateBy { it.id }
-    val fields = TrackHealth(albums.associate { it.id to it.artist })
+    val fields = TrackHealth(albums.associate { it.id to it.artist }, copies.filter { it.mergedId.isNotEmpty() }.associateBy { it.mergedId })
     val groups = ArrayList<DuplicateGroup<TrackEntity>>()
     val sourceGroups = ArrayList<DuplicateGroup<SourceTrackEntity>>()
     val words = ArrayList<Pair<String, String>>()

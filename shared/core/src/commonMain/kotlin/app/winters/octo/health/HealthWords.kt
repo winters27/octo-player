@@ -93,7 +93,23 @@ fun <T> SplitAlbum<T>.heading(): String {
     return "$by, shown as ${parts.size} albums"
 }
 
-fun <T> SplitAlbum<T>.summary(): String = differences.joinToString(" ") { it.words() }
+// Why the parts are one album, when their album artists differ, then
+// what they disagree on.
+fun <T> SplitAlbum<T>.summary(): String = (reasons.map { it.words() } + differences.map { it.words() }).joinToString(" ")
+
+// Why parts by different album artists were taken for one album.
+fun SplitReason.words(): String = when (basis) {
+    SplitBasis.SharedArtist ->
+        if (song.isNotBlank()) {
+            "One album filed under two artists: the part by ${other.trim()} has ${song.trim()} by ${artist.trim()}."
+        } else {
+            "One album filed under two artists: the part by ${other.trim()} names ${artist.trim()} too."
+        }
+    SplitBasis.SameRelease -> "The parts are tagged as the same MusicBrainz release."
+    SplitBasis.SameReleaseGroup -> "The parts are tagged as the same MusicBrainz release group."
+    SplitBasis.SameBarcode -> "The parts carry the same barcode, $value."
+    SplitBasis.SameLabelAndYear -> "The parts came out on the same label in the same year: $value."
+}
 
 fun AlbumDifferenceValues.words(): String {
     val listed = values.joinToString(", ") { it.trim().ifBlank { "none" } }

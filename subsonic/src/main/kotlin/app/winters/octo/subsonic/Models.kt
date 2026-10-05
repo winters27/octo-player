@@ -82,7 +82,13 @@ data class Album(
     // count when the server did not look.
     val isExternal: Boolean = false,
     val ownedCount: Int? = null,
+    // The record labels it came out on, on OpenSubsonic servers.
+    val recordLabels: List<RecordLabel> = emptyList(),
 )
+
+// A record label, as an OpenSubsonic server names one.
+@Serializable
+data class RecordLabel(val name: String = "")
 
 // A date an OpenSubsonic server sends in parts, any of which can be missing.
 @Serializable

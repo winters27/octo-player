@@ -411,7 +411,8 @@ fun SongTable(
                 groupTitle(index)?.let { title ->
                     val detail = groupDetail(index)
                     Txt(title, DesktopType.emphasis, OctoColors.TextSecondary, Modifier.padding(start = Space.M, top = if (index == 0) Space.Xs else Space.Xl, bottom = if (detail == null) Space.S else Space.None))
-                    if (detail != null) Txt(detail, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(start = Space.M, top = Space.Xxs, bottom = Space.S))
+                    // A detail says why, so it wraps rather than being cut short.
+                    if (detail != null) Txt(detail, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(start = Space.M, end = Space.M, top = Space.Xxs, bottom = Space.S), maxLines = 3)
                 }
                 SongRow(
                     app, row, index, shown, rowHeight,
