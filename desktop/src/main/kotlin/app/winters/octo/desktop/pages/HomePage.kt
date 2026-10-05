@@ -69,14 +69,18 @@ import kotlinx.coroutines.launch
 
 // Home: picking up where another device left off, what was played lately,
 // the lists Octo made for the listener and its stations, what came in, what
-// is played most, favorites, playlists, then albums worth going back to. Every shelf is one row that
-// fills the width, with See all where a full list exists.
+// is played most, favorites, playlists, then albums worth going back to.
+// Every shelf is one row that fills the width, with See all where a full
+// list exists.
 @Composable
 fun HomePage(app: AppState, visit: Visit) {
     val connection = app.connection ?: return
     val store = app.home ?: return
     // The shelves read before show at once; they are refreshed behind them.
-    LaunchedEffect(store) { store.refresh() }
+    LaunchedEffect(store) {
+        store.refresh()
+        app.refreshPlaylistsIfOld()
+    }
     val library = app.library?.state?.collectAsState()?.value
     val index = (library as? LibraryState.Ready)?.index
     LaunchedEffect(store, index) { index?.let(store::rediscover) }
