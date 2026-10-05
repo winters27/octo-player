@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.queue
 
+import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.library.LibraryIndex
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.SilentPlayer
@@ -143,6 +144,16 @@ class AutoplayTest {
         assertTrue(without.none { it.startsWith("r") })
         val with = autoplaySongs(drifted, emptySet(), client = null, index = index, anchors = rock.take(2), random = Random(1)).map { it.id }
         assertTrue(with.any { it.startsWith("r") })
+    }
+
+    @Test
+    fun aLibrarySongTheServerSuggested_KeepsTheServersSource() = runBlocking {
+        FakeServer().use { server ->
+            server.answer("getSimilarSongs2", """"similarSongs2":{"song":[{"id":"g1","title":"G1","genre":"Rock","octoSuggestedBy":"ListenBrainz"}]}""")
+            val seed = Song("seed", "Seed", artistId = "r1", genre = "Rock")
+            val picks = autoplaySongs(seed, setOf("a1", "a2"), client = server.connection().client, index = library)
+            assertEquals("ListenBrainz", picks.single { it.id == "g1" }.octoSuggestedBy)
+        }
     }
 
     @Test

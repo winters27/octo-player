@@ -37,6 +37,7 @@ import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
+import app.winters.octo.discovery.Discovery
 import app.winters.octo.catalog.songDetails
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
@@ -122,6 +123,8 @@ data class SongFacts(
     val mbAlbumId: String? = null,
     val mbReleaseGroupId: String? = null,
     val mbArtistIds: List<String> = emptyList(),
+    // Which of Octo's radio sources suggested it, when a radio played it.
+    val suggestedBy: String? = null,
 )
 
 // One line of the sheet. A copyable one gets a Copy button.
@@ -166,6 +169,7 @@ fun infoLines(facts: SongFacts, zone: ZoneId = ZoneId.systemDefault(), locale: L
         }
         SongSource.Found -> add(InfoLine("Source", "Found online"))
     }
+    facts.suggestedBy?.takeIf { it.isNotBlank() }?.let { add(InfoLine("Suggested by", it)) }
     if (facts.addedAtSeconds > 0) add(InfoLine("Added", dateText(facts.addedAtSeconds * 1000, zone, locale)))
     add(InfoLine("Plays", "%,d".format(locale, facts.plays)))
     if (facts.lastPlayedAt > 0) add(InfoLine("Last played", dateText(facts.lastPlayedAt, zone, locale)))
@@ -224,6 +228,7 @@ class SongInfoViewModel @Inject constructor(
     private val history: PlayHistory,
     private val sessions: SessionRepository,
     private val offline: OfflineDownloads,
+    private val discovery: Discovery,
 ) : ViewModel() {
     // Read once as the sheet opens.
     fun info(trackId: String): Flow<SongInfo?> = flow { emit(load(trackId)) }.flowOn(Dispatchers.IO)
@@ -231,7 +236,7 @@ class SongInfoViewModel @Inject constructor(
     private suspend fun load(trackId: String): SongInfo? {
         if (isFind(trackId)) {
             val track = online.songFlow(trackId).first()?.asTrack() ?: return null
-            return SongInfo(track, track.facts(SongSource.Found))
+            return SongInfo(track, track.facts(SongSource.Found).copy(suggestedBy = discovery.suggestedBy(trackId)))
         }
         val track = catalog.track(trackId) ?: return null
         val album = catalog.album(track.albumId).first()
@@ -252,6 +257,7 @@ class SongInfoViewModel @Inject constructor(
             SongSource.Server(signedInServer(), download?.path)
         }
         val facts = track.facts(source).copy(
+            suggestedBy = discovery.suggestedBy(trackId),
             albumArtist = album?.artist,
             mimeType = playing?.mimeType ?: track.mimeType,
             sizeBytes = playing?.sizeBytes ?: track.sizeBytes,

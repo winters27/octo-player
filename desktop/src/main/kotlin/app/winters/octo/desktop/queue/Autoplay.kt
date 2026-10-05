@@ -142,6 +142,9 @@ suspend fun autoplaySongs(
     val known = HashMap<String, Song>()
     similar.forEach { known[it.id] = it }
     index?.songs?.forEach { known[it.id] = it }
+    // The library's copy of a song the server suggested has no word of who suggested it.
+    val suggestedBy = similar.mapNotNull { s -> s.octoSuggestedBy?.let { s.id to it } }.toMap()
+    fun Song.withSource() = suggestedBy[id]?.let { copy(octoSuggestedBy = it) } ?: this
     val mixed = radioMix(
         RadioInput(
             seeds = (listOf(seed) + anchors).distinctBy { it.id }.map { it.radioSong(rating(it)) },
@@ -154,9 +157,9 @@ suspend fun autoplaySongs(
         AUTOPLAY_BATCH,
         random,
     )
-    if (mixed.isNotEmpty()) return mixed.mapNotNull { known[it.id] }
+    if (mixed.isNotEmpty()) return mixed.mapNotNull { known[it.id]?.withSource() }
     val fromServer = autoplayPicks(similar.map { it.id }, emptyList(), emptyList(), skip)
-    if (fromServer.isNotEmpty()) return fromServer.mapNotNull(known::get)
+    if (fromServer.isNotEmpty()) return fromServer.mapNotNull { known[it]?.withSource() }
     if (index == null) return emptyList()
     val artist = index.songs.filter { song ->
         if (seed.artistId != null) song.artistId == seed.artistId else song.artist != null && song.artist.equals(seed.artist, ignoreCase = true)

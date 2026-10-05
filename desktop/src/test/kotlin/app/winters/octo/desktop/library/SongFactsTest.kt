@@ -4,6 +4,7 @@ import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SongReplayGain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Test
 import java.time.ZoneOffset
 import java.util.Locale
@@ -52,6 +53,15 @@ class SongFactsTest {
 
     private fun outsideFacts(song: Song) =
         songFacts(song, "Your server (Octo)", ZoneOffset.UTC, Locale.UK, outside = true).associate { it.label to it.value }
+
+    @Test
+    fun aRadioSongSaysWhichSourceSuggestedIt_RightAfterWhereItIs() {
+        val labels = songFacts(Song("s1", "Roads", octoSuggestedBy = "Sounds alike"), "Your server (Octo)", ZoneOffset.UTC, Locale.UK)
+            .map { it.label }
+        assertEquals(labels.indexOf("Source") + 1, labels.indexOf("Suggested by"))
+        assertEquals("YouTube Music", outsideFacts(online.copy(octoSuggestedBy = "YouTube Music"))["Suggested by"])
+        assertNull(facts(Song("s2", "Bare"))["Suggested by"])
+    }
 
     @Test
     fun aSongFoundOnlineIsNotSaidToBeOnTheServer() {

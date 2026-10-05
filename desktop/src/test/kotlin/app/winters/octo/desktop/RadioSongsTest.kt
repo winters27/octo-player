@@ -22,6 +22,15 @@ class RadioSongsTest {
     )
 
     @Test
+    fun aLibrarySongTheServerSuggested_KeepsTheServersSource() {
+        val first = library.songs[0]
+        val similar = listOf(Song("s3", "Three", artist = "B", genre = "Rock", octoSuggestedBy = "Sounds alike"))
+        val picks = radioSongs(first, listOf(first), similar, library, emptySet(), { 0 }, random = Random(1))
+        assertEquals("Sounds alike", picks.single { it.id == "s3" }.octoSuggestedBy)
+        assertTrue(picks.filter { it.id != "s3" }.all { it.octoSuggestedBy == null })
+    }
+
+    @Test
     fun theLibraryAloneMakesARadio() {
         val first = library.songs.first { it.id == "s1" }
         val picks = radioSongs(first, listOf(first), emptyList(), library, emptySet(), { 0 }, random = Random(1)).map { it.id }

@@ -61,6 +61,9 @@ class OnlineArtistPage(val artist: OnlineArtist, val albums: List<OnlineAlbum>)
 // shaped like library songs; one found online has an id starting "find:"
 // and plays as a stream. Every call throws SubsonicException when the server
 // cannot answer, and answers nothing when no server is signed in.
+// Radio answers remembered for "Suggested by" before the oldest are dropped.
+private const val SUGGESTIONS_KEPT = 5_000
+
 @Singleton
 class Discovery @Inject constructor(
     private val sessions: SessionRepository,
@@ -158,6 +161,12 @@ class Discovery @Inject constructor(
         return resolveEach(sourceId, songs).map { it.id }
     }
 
+    // Which of Octo's radio sources suggested a track, as its last radio
+    // answer said, for the song's info. Kept while the app runs, not saved.
+    private val suggested = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    fun suggestedBy(trackId: String): String? = suggested[trackId]
+
     // Songs from the server as the app shows them, in the order sent: a
     // library song as it is in the library, anything else as a find. A find
     // already downloaded is the library song it became.
@@ -167,12 +176,18 @@ class Discovery @Inject constructor(
         val adopted = each.filterIsInstance<Resolved.Found>().mapNotNull { it.song.adoptedId.ifEmpty { null } }
         val library = catalog.tracksByIds(each.filterIsInstance<Resolved.InLibrary>().map { it.trackId } + adopted).associateBy { it.id }
         val resolved = each.map { asAdopted(it, library.keys) }
-        return resolved.mapNotNull { r ->
+        val tracks = resolved.map { r ->
             when (r) {
                 is Resolved.InLibrary -> library[r.trackId]
                 is Resolved.Found -> r.song.asTrack()
             }
-        }.distinctBy { it.id }
+        }
+        val sources = suggestionsOf(tracks.map { it?.id }, songs)
+        if (sources.isNotEmpty()) {
+            if (suggested.size > SUGGESTIONS_KEPT) suggested.clear()
+            suggested.putAll(sources)
+        }
+        return tracks.filterNotNull().distinctBy { it.id }
     }
 
     // What each song sent is, in order, with the finds among them kept.

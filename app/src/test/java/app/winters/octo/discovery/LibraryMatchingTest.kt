@@ -10,6 +10,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LibraryMatchingTest {
+    @Test
+    fun eachTrackKeepsTheSourceThatSuggestedIt() {
+        val songs = listOf(
+            Song("s1", "One", octoSuggestedBy = "YouTube Music"),
+            Song("s2", "Two", octoSuggestedBy = " "),
+            Song("s3", "Three"),
+            Song("s4", "Four", octoSuggestedBy = "Sounds alike"),
+        )
+        assertEquals(mapOf("t1" to "YouTube Music", "t4" to "Sounds alike"),
+            suggestionsOf(listOf("t1", "t2", "t3", "t4"), songs))
+        assertEquals(emptyMap<String, String>(), suggestionsOf(listOf(null), listOf(songs[0])))
+    }
+
     private fun track(id: String, title: String, artist: String, ms: Long = 200_000) = TrackEntity(
         id = id, sourceId = "device", nativeId = id, title = title, searchKey = title.lowercase(), sortKey = title.lowercase(),
         artist = artist, artistId = "a", album = "Album", albumId = "al", trackNo = null, discNo = null, year = null,

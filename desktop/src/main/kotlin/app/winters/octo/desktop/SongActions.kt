@@ -86,6 +86,8 @@ fun radioSongs(
     val known = HashMap<String, Song>()
     index?.songs?.forEach { known[it.id] = it }
     similar.forEach { known.putIfAbsent(it.id, it) }
+    // The library's copy of a song the server suggested has no word of who suggested it.
+    val suggestedBy = similar.mapNotNull { s -> s.octoSuggestedBy?.let { s.id to it } }.toMap()
     val mixed = radioMix(
         RadioInput(
             seeds = seeds.map { it.radioSong(rating(it)) },
@@ -98,6 +100,7 @@ fun radioSongs(
         RADIO_SONGS,
         random,
     ).mapNotNull { known[it.id] }
+        .map { song -> suggestedBy[song.id]?.let { song.copy(octoSuggestedBy = it) } ?: song }
     return mixed.ifEmpty { radioPicks(first, similar).filter { it.id !in exclude } }
 }
 
