@@ -9,6 +9,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import app.winters.octo.sound.AudioOutput
 import app.winters.octo.sound.BLUETOOTH_OUTPUT_PREFIX
+import app.winters.octo.sound.savedFor
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -93,6 +94,13 @@ fun automaticTimingNote(outputKey: String): String =
     if (outputKey.startsWith(BLUETOOTH_OUTPUT_PREFIX)) "Automatic: ${timingLabel(BLUETOOTH_OUTPUT_TIMING_MS)}, the usual for Bluetooth."
     else "Automatic: ${timingLabel(WIRED_OUTPUT_TIMING_MS)}, the usual for a speaker or a cable."
 
+// The same for an output that may have been saved under another key
+// before: what it was set to there, else its automatic timing.
+fun outputTimingIn(offsets: Map<String, Long>, output: AudioOutput): OutputTiming =
+    savedFor(offsets, output)?.let { OutputTiming(it, automatic = false) } ?: OutputTiming(automaticOutputTiming(output.key), automatic = true)
+
+fun outputOffsetIn(offsets: Map<String, Long>, output: AudioOutput): Long = outputTimingIn(offsets, output).ms
+
 // Every output's offset out of the stored settings, by output key.
 fun outputOffsetsIn(stored: Map<String, Any?>): Map<String, Long> = stored.entries
     .mapNotNull { (name, value) ->
@@ -174,25 +182,28 @@ class LyricsTiming @Inject constructor(@ApplicationContext private val context: 
 
     // The timing of whichever output is playing now, following it as it
     // changes, in the same milliseconds and direction as a song's: minus is
-    // sooner. An output never moved has its automatic timing.
+    // sooner. An output never moved has its automatic timing; one saved
+    // under a key it had before keeps what it was set to there.
     fun outputOffsetFor(output: Flow<AudioOutput>): Flow<Long> = outputTimingFor(output).map { it.ms }.distinctUntilChanged()
 
     fun outputTimingFor(output: Flow<AudioOutput>): Flow<OutputTiming> =
-        combine(output, context.lyricsData.data) { out, prefs -> outputTimingIn(outputOffsetsIn(prefs.byName()), out.key) }
+        combine(output, context.lyricsData.data) { out, prefs -> outputTimingIn(outputOffsetsIn(prefs.byName()), out) }
             .distinctUntilChanged()
 
-    // Moves an output's timing from where it is now, its automatic one at
-    // first, and keeps it, 0 included.
-    suspend fun stepOutput(outputKey: String, steps: Int) {
+    // Moves the output's timing on from what it has (its automatic one at
+    // first, or what was saved under a key it had before) and keeps it under
+    // the output's key alone, 0 included.
+    suspend fun stepOutput(output: AudioOutput, steps: Int) {
         context.lyricsData.edit { prefs ->
-            val from = prefs[outputOffsetKey(outputKey)] ?: automaticOutputTiming(outputKey)
-            prefs[outputOffsetKey(outputKey)] = stepTiming(from, steps, OUTPUT_TIMING_LIMIT_MS)
+            val moved = stepTiming(outputOffsetIn(outputOffsetsIn(prefs.byName()), output), steps, OUTPUT_TIMING_LIMIT_MS)
+            output.formerKeys.forEach { prefs.remove(outputOffsetKey(it)) }
+            prefs[outputOffsetKey(output.key)] = moved
         }
     }
 
-    // Back to the automatic timing.
-    suspend fun resetOutput(outputKey: String) {
-        context.lyricsData.edit { it.remove(outputOffsetKey(outputKey)) }
+    // Back to the automatic timing, wherever it was saved.
+    suspend fun resetOutput(output: AudioOutput) {
+        context.lyricsData.edit { prefs -> output.keys.forEach { prefs.remove(outputOffsetKey(it)) } }
     }
 
     // Every output whose timing was moved, by output key, for a backup.

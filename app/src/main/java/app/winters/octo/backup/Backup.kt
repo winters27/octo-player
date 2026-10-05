@@ -77,7 +77,7 @@ data class LyricsOffsetBackup(val song: SongKey, val offsetMs: Long)
 
 // Whether the screen stays on while lyrics show, each song's timing, how
 // synced lyrics look (missing from older backups), and each sound output's
-// timing by output key, like "speaker" or "bluetooth:<address>" (missing
+// timing by output key, like "speaker" or "bluetooth:<name>" (missing
 // from older backups too).
 @Serializable
 data class LyricsBackup(

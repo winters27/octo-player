@@ -29,13 +29,50 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 // Where the sound is going: the phone's speaker, a cable, or one Bluetooth
-// or USB device, each keeping its own sound settings.
-data class AudioOutput(val key: String, val label: String)
+// or USB device, each keeping its own sound settings. `formerKeys` are the
+// keys the same output was saved under before, read when nothing is saved
+// under `key` yet.
+data class AudioOutput(val key: String, val label: String, val formerKeys: List<String> = emptyList()) {
+    // Every key this output's settings may be saved under, the current one first.
+    val keys: List<String> get() = listOf(key) + formerKeys
+}
 
 val PhoneSpeaker = AudioOutput("speaker", "Phone speaker")
 
-// The start of a Bluetooth output's key; the rest is the device's address.
+// The start of a Bluetooth output's key; the rest is the device's name.
 const val BLUETOOTH_OUTPUT_PREFIX = "bluetooth:"
+
+// One output device as Android lists it.
+data class OutputDevice(val kind: OutputKind, val name: String, val address: String)
+
+enum class OutputKind(val rank: Int) { Bluetooth(0), Usb(1), Wired(2), Other(9) }
+
+// The output music goes to: a Bluetooth or USB device or a cable when one
+// is connected, otherwise the speaker. A pair of earbuds is often listed
+// more than once, once for each bud or each way it connects, each with its
+// own address and in no fixed order, so a Bluetooth output is known by its
+// name. Its addresses are where its settings were saved before.
+fun outputFor(devices: List<OutputDevice>): AudioOutput {
+    val kind = devices.minOfOrNull { it.kind.rank }?.let { rank -> OutputKind.entries.first { it.rank == rank } }
+    if (kind == null || kind == OutputKind.Other) return PhoneSpeaker
+    val listed = devices.filter { it.kind == kind }.sortedWith(compareBy({ it.name.isEmpty() }, { it.name }, { it.address }))
+    val name = listed.first().name
+    return when (kind) {
+        OutputKind.Bluetooth -> {
+            val same = listed.filter { it.name == name }
+            val addresses = same.map { it.address }.filter(String::isNotEmpty).distinct()
+            val key = BLUETOOTH_OUTPUT_PREFIX + name.ifEmpty { addresses.firstOrNull().orEmpty() }
+            val former = if (name.isEmpty()) addresses.drop(1) else addresses
+            AudioOutput(key, name.ifEmpty { "Bluetooth" }, former.map { "$BLUETOOTH_OUTPUT_PREFIX$it" })
+        }
+        OutputKind.Usb -> AudioOutput("usb:$name", name.ifEmpty { "USB audio" })
+        else -> AudioOutput("wired", "Headphones")
+    }
+}
+
+// The settings saved for an output: under its key, or else under a key it
+// had before.
+fun <T> savedFor(saved: Map<String, T>, output: AudioOutput): T? = output.keys.firstNotNullOfOrNull { saved[it] }
 
 private val Context.soundData by preferencesDataStore("sound")
 
@@ -63,7 +100,7 @@ class SoundEngine @Inject constructor(@ApplicationContext private val context: C
 
     // What plays now. Starts from defaults until the saved settings are read.
     val current: StateFlow<SoundSettings> = combine(saved, perOutput, _output) { all, split, out ->
-        all[keyFor(split, out)] ?: all[SHARED] ?: SoundSettings()
+        (if (split) savedFor(all, out) else null) ?: all[SHARED] ?: SoundSettings()
     }.stateIn(scope, SharingStarted.Eagerly, SoundSettings())
 
     init {
@@ -81,9 +118,12 @@ class SoundEngine @Inject constructor(@ApplicationContext private val context: C
         scope.launch {
             context.soundData.edit { p ->
                 val all = p[PROFILES]?.let { runCatching { json.decodeFromString(mapSerializer, it) }.getOrNull() }.orEmpty()
-                val key = keyFor(p[PER_OUTPUT] ?: false, _output.value)
-                val before = all[key] ?: all[SHARED] ?: SoundSettings()
-                p[PROFILES] = json.encodeToString(mapSerializer, all + (key to change(before)))
+                val split = p[PER_OUTPUT] ?: false
+                val out = _output.value
+                val before = (if (split) savedFor(all, out) else null) ?: all[SHARED] ?: SoundSettings()
+                // Saved under the output's key from now on, and nowhere else.
+                val kept = if (split) all - out.formerKeys.toSet() else all
+                p[PROFILES] = json.encodeToString(mapSerializer, kept + (keyFor(split, out) to change(before)))
             }
         }
     }
@@ -114,30 +154,21 @@ class SoundEngine @Inject constructor(@ApplicationContext private val context: C
 
     private fun keyFor(perOutput: Boolean, output: AudioOutput) = if (perOutput) output.key else SHARED
 
-    // The output Android routes music to: a Bluetooth or USB device or a
-    // cable when one is connected, otherwise the speaker.
-    private fun currentOutput(): AudioOutput {
-        val devices = audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-        val best = devices.minByOrNull { rank(it.type) }?.takeIf { rank(it.type) < SPEAKER_RANK } ?: return PhoneSpeaker
-        val name = best.productName?.toString()?.trim().orEmpty()
-        return when (best.type) {
-            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER ->
-                AudioOutput("$BLUETOOTH_OUTPUT_PREFIX${best.address.ifEmpty { name }}", name.ifEmpty { "Bluetooth" })
-            AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE ->
-                AudioOutput("usb:$name", name.ifEmpty { "USB audio" })
-            else -> AudioOutput("wired", "Headphones")
-        }
-    }
+    // The output Android routes music to; see outputFor.
+    private fun currentOutput(): AudioOutput = outputFor(
+        audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map {
+            OutputDevice(kindOf(it.type), it.productName?.toString()?.trim().orEmpty(), it.address.orEmpty())
+        },
+    )
 
-    private fun rank(type: Int): Int = when (type) {
-        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER -> 0
-        AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE -> 1
-        AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET -> 2
-        else -> SPEAKER_RANK
+    private fun kindOf(type: Int): OutputKind = when (type) {
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER -> OutputKind.Bluetooth
+        AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE -> OutputKind.Usb
+        AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET -> OutputKind.Wired
+        else -> OutputKind.Other
     }
 
     private companion object {
-        const val SPEAKER_RANK = 9
         const val SHARED = "all"
         val PROFILES = stringPreferencesKey("profiles")
         val PER_OUTPUT = booleanPreferencesKey("per_output")
