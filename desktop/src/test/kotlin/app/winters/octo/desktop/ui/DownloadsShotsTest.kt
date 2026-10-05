@@ -2,6 +2,7 @@ package app.winters.octo.desktop.ui
 
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.SidePanel
+import org.junit.Assert.assertEquals
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
@@ -9,8 +10,9 @@ import org.junit.rules.TemporaryFolder
 import javax.swing.SwingUtilities
 
 // The downloads drawer as it looks: the list with a download on its way, a
-// higher quality copy, a picked one and a failure; one download's log; and
-// Find songs with its copies. Only when asked:
+// higher quality copy, a picked one and a failure; the pill beside the
+// player while the drawer is closed; one download's log; and Find songs
+// with its copies. Only when asked:
 // OCTO_SHOTS=1 ./gradlew :desktop:test --tests '*DownloadsShotsTest*'.
 // Saved under build/shots/polish/downloads/.
 class DownloadsShotsTest {
@@ -38,6 +40,12 @@ class DownloadsShotsTest {
         """{"at":"2026-10-04T18:01:02Z","kind":"lyrics","text":"Synced lyrics from LRCLIB","detail":"Embedded in the song"}""",
         """{"at":"2026-10-04T18:01:04Z","kind":"done","text":"In your library"}""",
     )
+
+    @Test
+    fun thePillCountsTheSongsOnTheirWay() {
+        assertEquals("1 downloading", downloadingText(1))
+        assertEquals("3 downloading", downloadingText(3))
+    }
 
     @Test
     fun drawTheDownloadsDrawer() {
@@ -90,6 +98,8 @@ class DownloadsShotsTest {
                 check(app.downloads?.rows?.value?.size == 6) { "the drawer never read the list" }
                 rig.scene(PolishShotsTest.Size.Hd) { scene ->
                     rig.reset(scene)
+                    // Panel closed: the pill beside the player says what is on its way.
+                    rig.shot(scene, "downloads/pill", 1_500)
                     SwingUtilities.invokeAndWait { app.showSidePanel(SidePanel.Downloads) }
                     rig.shot(scene, "downloads/list", 1_500)
 

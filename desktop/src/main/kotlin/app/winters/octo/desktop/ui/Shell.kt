@@ -339,6 +339,12 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus)
             Box(Modifier.fillMaxSize().padding(start = start, end = end)) {
                 val width = playerWidth(fit.page, window)
                 PlayerBar(app, backdrop, Modifier.align(Alignment.BottomCenter).padding(bottom = FrameSize.PlayerGap).width(width).height(FrameSize.Player).part(parts, parts.player, app), compact = playerIsCompact(width))
+                // Songs on their way: a small pill at the page's foot, level
+                // with the player where there is room beside it, else just
+                // above it, so it never covers the player.
+                val beside = (fit.page - width) / 2 >= DownloadsPillRoom
+                val pillBottom = if (beside) FrameSize.PlayerGap + (FrameSize.Player - DownloadsPillHeight) / 2 else FrameSize.PlayerGap + FrameSize.Player + Space.M
+                DownloadsPill(app, backdrop, Modifier.align(Alignment.BottomEnd).padding(end = Space.Page, bottom = pillBottom))
             }
         }
     }
