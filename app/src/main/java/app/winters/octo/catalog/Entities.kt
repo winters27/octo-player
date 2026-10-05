@@ -44,6 +44,9 @@ data class TrackEntity(
     // The listener's rating, 1 to 5 stars, or 0 for none: the server's when
     // it has one, otherwise the one made on the phone.
     @ColumnInfo(defaultValue = "0") val rating: Int = 0,
+    // True when a copy is marked explicit, false when marked clean, null
+    // when nothing says. Rows show the "E" only for true.
+    val explicit: Boolean? = null,
 )
 
 @Entity(

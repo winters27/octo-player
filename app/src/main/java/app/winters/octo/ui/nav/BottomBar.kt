@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
+import app.winters.octo.ui.common.SongTitle
 import app.winters.octo.R
 import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.GlazeSelected
@@ -345,12 +346,11 @@ private fun PlayerCapsule(
                 ProgressRing(progress, Modifier.matchParentSize().padding(1.dp))
             }
             Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                Text(
+                SongTitle(
                     now.title.orEmpty(),
+                    explicit = now.explicit,
                     style = OctoType.label,
                     color = OctoColors.TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     now.artist.orEmpty(),

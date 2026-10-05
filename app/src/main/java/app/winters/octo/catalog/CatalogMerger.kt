@@ -47,6 +47,8 @@ private const val SAME_LENGTH_MS = 3_000L
 //   - artist: the fullest credit, the copy naming the most artists (say,
 //     "A, B" over "A"); on equal credits the first copy's stays.
 //   - track and disc numbers and the server rating: the first copy's.
+//   - explicit or clean: the first copy that says, so a server's mark
+//     reaches a phone file whose tags say nothing.
 //   - composer, tempo, MusicBrainz ids and the other details the library
 //     does not keep: read from the copies when needed, by the same order
 //     (songDetails).
@@ -217,6 +219,7 @@ private class MergingSong(
     var originalYear = base.originalYear
     var genre = base.genre
     var rating = base.rating?.takeIf { it in 1..5 }
+    var explicit = base.explicit
     var addedAt = base.addedAt
     var artist = base.artist
     var credits = splitLines(base.artists).size
@@ -230,6 +233,7 @@ private class MergingSong(
         originalYear = originalYear ?: copy.originalYear
         if (genre.isEmpty()) genre = copy.genre
         rating = rating ?: copy.rating?.takeIf { it in 1..5 }
+        explicit = explicit ?: copy.explicit
         addedAt = earliestAdded(listOf(addedAt, copy.addedAt))
         val copyCredits = splitLines(copy.artists).size
         if (copyCredits > credits && copy.artist.isNotBlank()) {
@@ -263,6 +267,7 @@ private class MergingSong(
         genre = genre,
         onPhone = onPhone,
         rating = rating ?: 0,
+        explicit = explicit,
     )
 }
 

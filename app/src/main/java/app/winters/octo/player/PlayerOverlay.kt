@@ -102,6 +102,7 @@ import androidx.core.view.WindowCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
+import app.winters.octo.ui.common.SongTitle
 import app.winters.octo.catalog.isFind
 import app.winters.octo.design.AccentFill
 import app.winters.octo.design.GlassPopup
@@ -707,12 +708,15 @@ private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit) {
         label = "song title",
     ) { song ->
         Column(Modifier.fillMaxWidth()) {
-            Text(
+            // A long title scrolls; the "E" stays put after it.
+            SongTitle(
                 song.title.orEmpty(),
+                explicit = song.explicit,
                 style = OctoType.title.copy(fontWeight = FontWeight.Bold),
                 color = LocalContentColor.current,
-                maxLines = 1,
-                modifier = Modifier.basicMarquee(),
+                markColor = accentInk,
+                titleModifier = Modifier.basicMarquee(),
+                overflow = TextOverflow.Clip,
             )
             Text(
                 song.artist.orEmpty(),

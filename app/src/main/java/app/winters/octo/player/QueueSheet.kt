@@ -38,6 +38,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.winters.octo.ui.common.SongTitle
 import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.GlassSheet
 import app.winters.octo.design.GlazeInset
@@ -374,7 +375,7 @@ private fun SongLine(entry: QueueEntry, modifier: Modifier = Modifier, handle: M
     ) {
         Artwork(entry.artwork, 44.dp, shape = RoundedCornerShape(6.dp), outside = isOutsideLibrary(entry.trackId))
         Column(Modifier.weight(1f)) {
-            Text(entry.title, style = OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            SongTitle(entry.title, explicit = entry.explicit, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
             Text(entry.artist, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (entry.autoplay) Text("Autoplay", style = OctoType.caption, color = OctoColors.TextMuted)

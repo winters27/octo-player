@@ -37,6 +37,8 @@ data class NowPlaying(
     // Playing on a TV or speaker, and that device's volume from 0 to 1.
     val casting: Boolean = false,
     val deviceVolume: Float? = null,
+    // Marked explicit, for the "E" by its title.
+    val explicit: Boolean = false,
 )
 
 // The app's line to the playback service. Screens ask it to play things and
@@ -273,6 +275,7 @@ class PlaybackConnection @Inject constructor(
             repeatMode = player.repeatMode,
             casting = player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE,
             deviceVolume = deviceVolumeOf(player),
+            explicit = meta?.isExplicit() == true,
         )
     }
 
@@ -301,6 +304,7 @@ class PlaybackConnection @Inject constructor(
                 artist = meta.artist?.toString().orEmpty(),
                 artwork = meta.artworkRef(),
                 durationMs = meta.durationMs ?: 0,
+                explicit = meta.isExplicit(),
                 autoplay = item.isAutoplay,
                 source = item.queueSource,
             )

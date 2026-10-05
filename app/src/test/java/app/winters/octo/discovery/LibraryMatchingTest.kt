@@ -89,6 +89,15 @@ class LibraryMatchingTest {
     }
 
     @Test
+    fun aFindKeepsTheServersExplicitMarkThroughToItsRow() {
+        val explicit = song("e2", "Dracula", "Tame Impala").copy(explicitStatus = "explicit").toFind("server:x", 0)
+        assertEquals(true, explicit.explicit)
+        assertEquals(true, explicit.asTrack().explicit)
+        assertEquals(false, song("e3", "Dracula", "Tame Impala").copy(explicitStatus = "clean").toFind("server:x", 0).explicit)
+        assertEquals(null, song("e4", "Dracula", "Tame Impala").toFind("server:x", 0).asTrack().explicit)
+    }
+
+    @Test
     fun aFinishedDownloadIsKnownByTitleAndArtist() {
         val find = OnlineSongEntity("find:e1", "s", "e1", "Genesis", "Justice", "", null, null, 0, null, null, null, 0)
         assertTrue(downloadMatches(find, DownloadRecord(artist = "Justice", title = "Genesis")))

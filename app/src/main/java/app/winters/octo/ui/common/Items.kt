@@ -172,12 +172,11 @@ fun SongCard(track: TrackEntity, onClick: () -> Unit) {
     ) {
         ArtworkFill(track.artwork, outside = isOutsideLibrary(track.id))
         Spacer(Modifier.height(8.dp))
-        Text(
+        SongTitle(
             track.title,
+            explicit = track.explicit == true,
             style = OctoType.bodySmall.copy(fontWeight = FontWeight.SemiBold),
             color = OctoColors.TextPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
         )
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
@@ -446,18 +445,25 @@ private fun SongFace(
         }
         if (ownership) OwnershipMark(track)
         Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // The album's main song, starred as Apple Music marks it.
-                if (highlight) {
-                    Icon(
-                        painterResource(OctoIcons.StarFilled),
-                        contentDescription = "Most popular",
-                        tint = OctoColors.Accent,
-                        modifier = Modifier.padding(end = 6.dp).size(14.dp),
-                    )
-                }
-                Text(track.title, style = OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+            SongTitle(
+                track.title,
+                explicit = track.explicit == true,
+                style = OctoType.bodySmall,
+                color = OctoColors.TextPrimary,
+                leading = if (highlight) {
+                    {
+                        // The album's main song, starred as Apple Music marks it.
+                        Icon(
+                            painterResource(OctoIcons.StarFilled),
+                            contentDescription = "Most popular",
+                            tint = OctoColors.Accent,
+                            modifier = Modifier.padding(end = 6.dp).size(14.dp),
+                        )
+                    }
+                } else {
+                    null
+                },
+            )
             if (!subtitle.isNullOrEmpty()) {
                 Text(subtitle, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }

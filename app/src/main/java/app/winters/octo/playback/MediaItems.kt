@@ -26,6 +26,11 @@ const val EXTRA_ARTIST_ID = "app.winters.octo.artistId"
 const val EXTRA_MIME = "app.winters.octo.mime"
 const val EXTRA_ALBUM_ORDER = "app.winters.octo.albumOrder"
 
+// Android's own key for an explicit song (MediaConstants.METADATA_KEY_IS_EXPLICIT),
+// so a car's screen marks it too, and the value that says it is.
+const val EXTRA_IS_EXPLICIT = "android.media.IS_EXPLICIT"
+private const val ATTRIBUTE_PRESENT = 1L
+
 // A song's stored loudness, for when the sound itself carries no tags.
 private const val EXTRA_TRACK_GAIN = "app.winters.octo.trackGain"
 private const val EXTRA_TRACK_PEAK = "app.winters.octo.trackPeak"
@@ -67,6 +72,7 @@ fun TrackEntity.toMediaItem(uri: String?, mimeType: String?, loudness: ReplayGai
                         putString(EXTRA_ARTIST_ID, artistId)
                         putString(EXTRA_MIME, mimeType)
                         putInt(EXTRA_ALBUM_ORDER, albumOrder)
+                        if (explicit == true) putLong(EXTRA_IS_EXPLICIT, ATTRIBUTE_PRESENT)
                         loudness?.trackGain?.let { putFloat(EXTRA_TRACK_GAIN, it) }
                         loudness?.trackPeak?.let { putFloat(EXTRA_TRACK_PEAK, it) }
                         loudness?.albumGain?.let { putFloat(EXTRA_ALBUM_GAIN, it) }
@@ -110,6 +116,9 @@ class OctoArtLoader(private val context: Context, private val fallback: BitmapLo
 fun MediaMetadata.artworkRef(): String? = (extras ?: Bundle.EMPTY).getString(EXTRA_ARTWORK)
 
 fun MediaMetadata.extra(key: String): String? = (extras ?: Bundle.EMPTY).getString(key)
+
+// Whether a song was sent marked explicit.
+fun MediaMetadata.isExplicit(): Boolean = (extras ?: Bundle.EMPTY).getLong(EXTRA_IS_EXPLICIT, 0L) == ATTRIBUTE_PRESENT
 
 // The loudness a song was sent with, if its source knew it.
 fun MediaMetadata.storedLoudness(): ReplayGainInfo? {

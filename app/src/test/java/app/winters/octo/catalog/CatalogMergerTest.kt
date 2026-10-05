@@ -79,6 +79,27 @@ class CatalogMergerTest {
     }
 
     @Test
+    fun theFirstCopyThatSaysGivesTheExplicitMark() {
+        val serverSide = server(
+            tracks = listOf(
+                track("s1", "server", "Hotline Bling", "server:album").copy(explicit = true),
+                track("s2", "server", "One Dance", "server:album").copy(explicit = false),
+            ),
+            albums = listOf(album("server:album", "server", songs = 2)),
+            artists = listOf(artist("server:artist", "server")),
+        )
+        // The phone's files say nothing, so the server's marks reach them.
+        val merged = mergeCatalogs(listOf(phoneOnly, serverSide)).tracks.associateBy { it.id }
+        assertEquals(true, merged.getValue("p1").explicit)
+        assertEquals(false, merged.getValue("p2").explicit)
+        // A phone file's own mark goes first.
+        val tagged = phoneOnly.copy(tracks = phoneOnly.tracks.map { if (it.id == "p1") it.copy(explicit = false) else it })
+        assertEquals(false, mergeCatalogs(listOf(tagged, serverSide)).tracks.single { it.id == "p1" }.explicit)
+        // A song only one source has keeps its mark, or none.
+        assertEquals(null, mergeCatalogs(listOf(phoneOnly)).tracks.first().explicit)
+    }
+
+    @Test
     fun albumsOfTheSameNameInOneSourceStayApart() {
         val twin = phone(
             tracks = listOf(track("a", "device", "Intro", "device:a"), track("b", "device", "Intro", "device:b")),
