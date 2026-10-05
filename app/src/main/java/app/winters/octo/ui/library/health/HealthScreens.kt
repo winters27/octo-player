@@ -87,6 +87,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
@@ -187,6 +188,15 @@ class HealthViewModel @Inject constructor(
     // An admin may have changed what the server allows since sign-in.
     init {
         viewModelScope.launch { files.refresh() }
+        // Another server in use: a plan or a look-up holds the last one's
+        // song ids, so it closes; a run already sent says how it went.
+        viewModelScope.launch {
+            files.servers.drop(1).collect {
+                looking?.cancel()
+                lookups = Lookups(round = lookups.round + 1)
+                if (sheet != HealthSheet.Running && sheet !is HealthSheet.Done) sheet = null
+            }
+        }
     }
 
     // Plays a check's songs from the one tapped.
