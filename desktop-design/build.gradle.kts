@@ -29,6 +29,7 @@ val sharedDesignFiles = listOf(
     "Blur.kt",
     "Buttons.kt",
     "ChromeButtons.kt",
+    "ExplicitMark.kt",
     "GlassPanel.kt",
     "Glaze.kt",
     "GlazeButton.kt",
