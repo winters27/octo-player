@@ -310,6 +310,22 @@ class DownloadsTest {
     }
 
     @Test
+    fun aSearchIsShownUntilClosedOrReplaced() = runTest {
+        val source = FakeFind()
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val watch = FindSongsWatch(source, scope)
+        watch.search("nd-1")
+        scope.runCurrent()
+        assertTrue(watch.showing("f1"))
+        watch.search("nd-1")
+        scope.runCurrent()
+        assertFalse(watch.showing("f1"))
+        assertTrue(watch.showing("f2"))
+        watch.close()
+        assertFalse(watch.showing("f2"))
+    }
+
+    @Test
     fun aCopysKeyIsItsIdOrItsPlace() {
         assertEquals("id:c1", copyKey(FoundCandidate(index = 0, id = "c1")))
         assertEquals("at:0", copyKey(FoundCandidate(index = 0)))

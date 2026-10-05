@@ -1,6 +1,8 @@
 package app.winters.octo.desktop.downloads
 
 import app.winters.octo.desktop.FakeServer
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -104,6 +106,32 @@ class DownloadsModelTest {
         val pick = server.calls.last { it.url.pathSegments.last() == "pickFoundSong" }
         assertEquals("f1", pick.url.queryParameter("search"))
         assertEquals("c-1", pick.url.queryParameter("copy"))
+        model.close()
+    }
+
+    @Test
+    fun aPickAnsweredAfterTheDrawerClosedLeavesItClosed() = runBlocking {
+        extensions("[1,2]")
+        downloads()
+        server.answer("findSongs", """"foundSongs":{"id":"f1","state":"done","song":{"title":"Sexy Boy","artist":"Air"},"candidate":[{"source":"Soulseek","peer":"p1","index":0,"id":"c-1"}]}""", type = "octo")
+        val answer = CountDownLatch(1)
+        server.answerBy("pickFoundSong") {
+            answer.await(5, TimeUnit.SECONDS)
+            server.ok(""""pick":{"state":"queued","detail":"Getting it.","key":"soulseek:ab"}""", type = "octo")
+        }
+        val model = DownloadsModel(server.client(), scope)
+        model.start()
+        model.open = true
+        model.find("ab", "Sexy Boy")
+        until("the search ended") { model.found.value?.state == "done" }
+
+        model.pick("f1", model.found.value!!.candidate.single())
+        until("the pick was sent") { "pickFoundSong" in server.endpoints() }
+        model.open = false
+        answer.countDown()
+        delay(300)
+        assertEquals(DrawerView.List, model.view)
+        assertTrue("No log is followed", "getAcquisition" !in server.endpoints())
         model.close()
     }
 }

@@ -276,9 +276,13 @@ class FindSongsWatch(
         } catch (e: SubsonicException) {
             PickResult("skipped", e.message ?: "The server could not be asked")
         }
-        if (_found.value?.id == search) _picked.value = result
+        if (showing(search)) _picked.value = result
         return result
     }
+
+    // Whether the search `search` is still the one followed: not closed,
+    // and not replaced by another.
+    fun showing(search: String): Boolean = _found.value?.id == search
 
     fun close() {
         job?.cancel()

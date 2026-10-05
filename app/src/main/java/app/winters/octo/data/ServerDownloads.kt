@@ -204,15 +204,17 @@ class ServerDownloads @Inject constructor(
 
     // Fetches one copy from the Find songs search `search`. A queued pick
     // opens its download's log; a replacement waits in the upgrade queue
-    // first, so the list shows it.
+    // first, so the list shows it. Only while the sheet still shows that
+    // search: closed meanwhile, or gone on to something else, it is left as
+    // it is and only the list is asked again.
     fun pick(search: String, copy: FoundCandidate) {
         scope.launch {
             val result = findWatch.pick(search, copy)
-            if (result.queued) {
-                watch.wake()
-                val key = result.key
-                if (key != null) showLog(key) else showList()
-            }
+            if (!result.queued) return@launch
+            watch.wake()
+            if (!(_view.value is SheetView.Find && findWatch.showing(search))) return@launch
+            val key = result.key
+            if (key != null) showLog(key) else showList()
         }
     }
 

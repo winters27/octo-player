@@ -151,17 +151,19 @@ class DownloadsModel(private val client: SubsonicClient, parent: CoroutineScope)
     }
 
     // Fetches one copy from the Find songs search `search`. A queued pick
-    // opens its download's log, so the person can follow it from the start.
+    // opens its download's log, so the person can follow it from the start,
+    // but only while the drawer still shows that search: closed meanwhile,
+    // or gone on to something else, it is left as it is.
     fun pick(search: String, copy: FoundCandidate) {
         scope.launch {
             val result = findWatch.pick(search, copy)
-            if (result.queued) {
-                watch.wake()
-                // A replacement waits in the upgrade queue before it has a log
-                // of its own; the list shows it meanwhile.
-                val key = result.key
-                if (key != null) showLog(key) else showList()
-            }
+            if (!result.queued) return@launch
+            watch.wake()
+            if (!(view is DrawerView.Find && findWatch.showing(search))) return@launch
+            // A replacement waits in the upgrade queue before it has a log
+            // of its own; the list shows it meanwhile.
+            val key = result.key
+            if (key != null) showLog(key) else showList()
         }
     }
 
