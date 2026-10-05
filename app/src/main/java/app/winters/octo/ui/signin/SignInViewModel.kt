@@ -13,24 +13,33 @@ import app.winters.octo.connection.isHeaderName
 import app.winters.octo.connection.isHeaderValue
 import app.winters.octo.connection.legacyRetry
 import app.winters.octo.connection.pinKey
+import app.winters.octo.data.ConnectionDraft
 import app.winters.octo.data.HeaderDraft
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SignInError
 import app.winters.octo.data.SignInRequest
 import app.winters.octo.data.userMessage
+import app.winters.octo.playback.ServerSwitch
+import app.winters.octo.server.accountLine
+import app.winters.octo.server.serverName
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.isPrivateHost
 import app.winters.octo.subsonic.Scheme
 import app.winters.octo.subsonic.automaticScheme
+import app.winters.octo.subsonic.normalizeServerUrl
 import app.winters.octo.subsonic.serverUrl
 import app.winters.octo.subsonic.splitScheme
+import app.winters.octo.ui.nav.ServerForm
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
 import okhttp3.HttpUrl
 import javax.inject.Inject
 
 @HiltViewModel
-class SignInViewModel @Inject constructor(private val sessions: SessionRepository) : ViewModel() {
+class SignInViewModel @Inject constructor(
+    private val sessions: SessionRepository,
+    private val switcher: ServerSwitch,
+) : ViewModel() {
     // The address in two parts, as the desktop keeps it: the scheme, shown
     // as a button at the start of the field, and the rest as typed.
     var address by mutableStateOf("")
@@ -51,6 +60,29 @@ class SignInViewModel @Inject constructor(private val sessions: SessionRepositor
     // starts on its own.
     var signedIn by mutableStateOf(false)
         private set
+
+    // What to say once done, if anything: the switch notice, or that a
+    // server was added or saved.
+    var notice by mutableStateOf<String?>(null)
+        private set
+
+    // What the form is for when opened from the list of servers, and which
+    // kept server; null for signing in from scratch.
+    var form by mutableStateOf<ServerForm?>(null)
+        private set
+    private var serverId: String? = null
+
+    // The name the listener gives the server, when adding or editing one.
+    var label by mutableStateOf("")
+
+    // What the screen says it is for, when opened from the list of servers.
+    var heading by mutableStateOf<String?>(null)
+        private set
+    var subheading by mutableStateOf<String?>(null)
+        private set
+
+    // The connection as the form started, to tell a new name alone apart.
+    private var started: ConnectionDraft? = null
 
     // Changing the saved connection rather than signing in fresh. Secrets
     // left empty keep their saved values.
@@ -113,12 +145,54 @@ class SignInViewModel @Inject constructor(private val sessions: SessionRepositor
         error = null
     }
 
-    // Starts from the saved connection. Nothing secret is filled in.
+    // Starts from the saved connection of the server in use. Nothing secret
+    // is filled in.
     fun startEditing() {
         if (editing) return
-        val draft = sessions.connectionDraft() ?: return
+        serverId = sessions.servers.value.active ?: return
         editing = true
-        typeAddress(draft.address.removeSuffix("/"))
+        fill(sessions.connectionDraft(serverId) ?: return)
+    }
+
+    // Opened from the list of servers: a new one to keep, a kept one to
+    // edit, or a kept one to sign in to again (its password asked for).
+    fun start(form: ServerForm, id: String?, note: String?) {
+        if (this.form != null) return
+        this.form = form
+        serverId = id
+        error = note
+        val kept = id?.let { sessions.servers.value.find(it) }
+        heading = when (form) {
+            ServerForm.Add -> "Add a server"
+            ServerForm.Edit -> "Edit ${kept?.name.orEmpty()}"
+            ServerForm.SignIn -> "Sign in to ${kept?.name.orEmpty()}"
+        }
+        subheading = when (form) {
+            ServerForm.Add -> "Keep another server here and switch to it in one tap."
+            ServerForm.Edit -> "Octo signs in with the new details before it saves them."
+            ServerForm.SignIn -> kept?.let { accountLine(it.username, it.serverUrl) }
+        }
+        if (form == ServerForm.Add || id == null) return
+        val draft = sessions.connectionDraft(id) ?: return
+        editing = form == ServerForm.Edit
+        fill(draft)
+        if (form == ServerForm.SignIn) {
+            // Signed out, so no password or key is kept to fall back on.
+            savedPassword = false
+            savedKey = false
+        }
+    }
+
+    private fun fill(draft: ConnectionDraft) {
+        started = draft
+        label = draft.label
+        // A saved address carries its scheme, which then stays as saved.
+        val (saved, rest) = splitScheme(draft.address.removeSuffix("/"))
+        if (saved != null) {
+            scheme = saved
+            schemePicked = true
+        }
+        address = rest
         username = draft.username
         legacyPassword = draft.authMode == AuthMode.LegacyPassword
         useApiKey = draft.authMode == AuthMode.ApiKey
@@ -192,9 +266,27 @@ class SignInViewModel @Inject constructor(private val sessions: SessionRepositor
             headers = headers.toList(),
             pins = pins.toMap(),
             clientCertAlias = clientCert,
+            label = label.takeIf { form == ServerForm.Add || form == ServerForm.Edit },
         )
         viewModelScope.launch {
-            when (val failed = sessions.signIn(request)) {
+            val id = serverId
+            val failed = when {
+                // A new name alone needs nothing from the server.
+                form == ServerForm.Edit && id != null && !changesConnection(request) -> {
+                    switcher.onItsOwn { sessions.rename(id, label) }
+                    notice = "Saved ${sessions.servers.value.find(id)?.name.orEmpty()}."
+                    null
+                }
+                editing && id != null -> switcher.onItsOwn { sessions.edit(id, request) }.also { if (it == null) notice = savedWords(id) }
+                form == ServerForm.Add -> switcher.onItsOwn { sessions.add(request) }.also { failed ->
+                    if (failed == null) notice = "Added ${addedName(request)}. Switch to it whenever you like."
+                }
+                else -> switcher.signIn(request).let { (failed, words) ->
+                    notice = words
+                    failed
+                }
+            }
+            when (failed) {
                 null -> {
                     // Once in, the secrets are kept only in the sealed vault.
                     password = ""
@@ -222,6 +314,30 @@ class SignInViewModel @Inject constructor(private val sessions: SessionRepositor
             busy = false
         }
     }
+
+    // Whether the form changes more than the name: the address, the sign-in,
+    // a secret typed in, or anything under Advanced.
+    private fun changesConnection(request: SignInRequest): Boolean {
+        val was = started ?: return true
+        return request.address.trim().removeSuffix("/") != was.address ||
+            request.username.trim() != was.username ||
+            request.secret.isNotEmpty() ||
+            request.authMode != was.authMode ||
+            request.home.trim().removeSuffix("/") != was.home ||
+            request.headers.any { !it.saved || it.value.isNotEmpty() } ||
+            request.headers.map { it.name.trim().lowercase() }.filter(String::isNotEmpty) != was.headers.map { it.name.trim().lowercase() } ||
+            request.pins != was.pins ||
+            request.clientCertAlias != was.clientCertAlias
+    }
+
+    private fun savedWords(id: String): String {
+        // An edit that changed the username keeps the server under a new id.
+        val name = sessions.servers.value.find(id)?.name ?: label.trim().ifEmpty { url?.host ?: address }
+        return "Saved $name."
+    }
+
+    private fun addedName(request: SignInRequest): String =
+        serverName(request.label.orEmpty(), normalizeServerUrl(request.address)?.toString() ?: request.address)
 
     // Trusts the certificate asked about, for its host only, and tries again.
     fun trust() {

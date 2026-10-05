@@ -46,17 +46,22 @@ class SearchTopSongs @Inject constructor(
         if (!offers(session)) return null
         val id = serverId ?: libraryId?.let { serverArtistIdOf(it, session.sourceId) }
         val list = answerOf { session.client.artistTopSongs(name, id, SEARCH_TOP_SONGS) } ?: return null
+        if (session()?.id != session.id) return null
         return ranked(list)
     }
 
-    // The chart of the moment, kept an hour per server.
+    // The chart of the moment, kept an hour per kept server: its songs are
+    // matched to that server's library.
     suspend fun chart(): RankedTracks? {
         val session = session() ?: return null
+        val key = session.id.ifEmpty { session.sourceId }
         val now = System.currentTimeMillis()
-        chart?.let { (source, at, kept) -> if (source == session.sourceId && now - at < CHART_KEPT_MS) return kept }
+        chart?.let { (server, at, kept) -> if (server == key && now - at < CHART_KEPT_MS) return kept }
         if (!offers(session)) return null
         val list = answerOf { session.client.topChart(TOP_CHART_SONGS) } ?: return null
-        return ranked(list)?.also { chart = Triple(session.sourceId, now, it) }
+        // Another server in use by the time it came: not this one's chart.
+        if (session()?.id != session.id) return null
+        return ranked(list)?.also { chart = Triple(key, now, it) }
     }
 
     // The server's songs as the app shows them, each in its place.

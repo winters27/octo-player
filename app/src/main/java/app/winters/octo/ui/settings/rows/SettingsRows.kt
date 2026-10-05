@@ -143,7 +143,7 @@ private fun Hairline(inset: Dp) {
 // What every row shares: its height and padding, a tap when it has one,
 // and the brief light when search pointed at it.
 @Composable
-private fun RowFrame(
+internal fun RowFrame(
     entry: SettingEntry?,
     modifier: Modifier = Modifier,
     minHeight: Dp = 56.dp,

@@ -141,6 +141,7 @@ object OctoIcons {
     val Sparkle = R.drawable.sym_sparkle
     val Sync = R.drawable.sym_sync
     val Storage = R.drawable.sym_database
+    val Servers = R.drawable.sym_servers
     val Timer = R.drawable.sym_timer
     val Listeners = R.drawable.sym_listeners
     val Layout = R.drawable.sym_layout

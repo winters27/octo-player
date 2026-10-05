@@ -26,7 +26,7 @@ private val Context.liveListPrefs by preferencesDataStore("live_lists")
 internal fun accountOf(state: SessionState): String? = when (state) {
     SessionState.Loading -> null
     SessionState.SignedOut -> PHONE_ACCOUNT
-    is SessionState.SignedIn -> accountKey(state.session.client.username, state.session.client.primaryUrl.toString())
+    is SessionState.SignedIn -> state.session.id.ifEmpty { accountKey(state.session.client.username, state.session.client.primaryUrl.toString()) }
 }
 
 // The lists kept while no server is signed in.
@@ -75,6 +75,11 @@ class LiveListStore internal constructor(
         var made: LiveList? = null
         change { lists -> lists.duplicating(list, clock()).also { made = it.second }.first }
         return made!!
+    }
+
+    // Forgets the lists of a server taken off the list.
+    suspend fun forget(account: String) {
+        data.edit { it.remove(keyOf(account)) }
     }
 
     private suspend fun change(edit: (List<LiveList>) -> List<LiveList>) {

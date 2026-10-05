@@ -56,6 +56,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -77,10 +78,12 @@ import app.winters.octo.design.glassPanel
 import app.winters.octo.subsonic.Scheme
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
+import app.winters.octo.ui.common.LocalFeedback
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.LocalReduceMotion
 import app.winters.octo.ui.common.PopupQuestion
 import app.winters.octo.ui.common.rememberLast
+import app.winters.octo.ui.nav.ServerForm
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -89,10 +92,27 @@ private val CardShape = RoundedCornerShape(20.dp)
 // Opened from Settings. Signing in goes back there, and the server's
 // music starts copying on its own. When editing, it starts from the saved
 // connection and signs in again with the changes.
+//
+// From the list of servers it is the sheet for adding a server (the one in
+// use stays), editing a kept one, or signing in to one again.
 @Composable
-fun SignInScreen(onBack: () -> Unit, editing: Boolean = false, vm: SignInViewModel = hiltViewModel()) {
+fun SignInScreen(
+    onBack: () -> Unit,
+    editing: Boolean = false,
+    form: ServerForm? = null,
+    serverId: String? = null,
+    note: String? = null,
+    vm: SignInViewModel = hiltViewModel(),
+) {
+    val feedback = LocalFeedback.current
     LaunchedEffect(editing) { if (editing) vm.startEditing() }
-    LaunchedEffect(vm.signedIn) { if (vm.signedIn) onBack() }
+    LaunchedEffect(form) { if (form != null) vm.start(form, serverId, note) }
+    LaunchedEffect(vm.signedIn) {
+        if (vm.signedIn) {
+            vm.notice?.let(feedback::done)
+            onBack()
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
         SignInForm(vm)
@@ -148,13 +168,28 @@ private fun SignInForm(vm: SignInViewModel) {
                 Modifier.entrance(words, rise, still),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text("Octo", style = OctoType.display, color = OctoColors.TextPrimary)
-                Text(
-                    if (vm.editing) "Change how Octo connects" else "Sign in to your music server",
-                    style = OctoType.bodySmall,
-                    color = OctoColors.TextSecondary,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+                // From the list of servers it says what the form is for.
+                val heading = vm.heading
+                if (heading == null) {
+                    Text("Octo", style = OctoType.display, color = OctoColors.TextPrimary)
+                    Text(
+                        if (vm.editing) "Change how Octo connects" else "Sign in to your music server",
+                        style = OctoType.bodySmall,
+                        color = OctoColors.TextSecondary,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                } else {
+                    Text(heading, style = OctoType.title, color = OctoColors.TextPrimary, textAlign = TextAlign.Center)
+                    vm.subheading?.let {
+                        Text(
+                            it,
+                            style = OctoType.bodySmall,
+                            color = OctoColors.TextSecondary,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                }
             }
             Spacer(Modifier.height(28.dp))
 
@@ -173,6 +208,15 @@ private fun SignInForm(vm: SignInViewModel) {
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
                         leading = { SchemeButton(vm.scheme, onClick = vm::toggleScheme) },
                     )
+                    if (vm.form == ServerForm.Add || vm.form == ServerForm.Edit) {
+                        GlassInput(
+                            value = vm.label,
+                            onValueChange = { vm.label = it },
+                            placeholder = "Name (optional, like Home or Work)",
+                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
+                            leading = { FieldIcon(OctoIcons.Rename) },
+                        )
+                    }
                     GlassInput(
                         value = vm.username,
                         onValueChange = { vm.username = it },
@@ -199,7 +243,12 @@ private fun SignInForm(vm: SignInViewModel) {
                 ConnectionNote(vm)
 
                 AccentButton(
-                    text = if (vm.editing) "Save and reconnect" else "Sign in",
+                    text = when (vm.form) {
+                        ServerForm.Add -> "Add"
+                        ServerForm.Edit -> "Save"
+                        ServerForm.SignIn -> "Sign in"
+                        null -> if (vm.editing) "Save and reconnect" else "Sign in"
+                    },
                     onClick = vm::submit,
                     loading = vm.busy,
                     enabled = vm.ready,

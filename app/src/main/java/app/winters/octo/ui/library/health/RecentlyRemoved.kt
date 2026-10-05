@@ -46,6 +46,7 @@ import app.winters.octo.ui.common.ScreenTitle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.OffsetDateTime
 import javax.inject.Inject
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 // When the server deletes a song for good, from its "goneAt", or null when
@@ -73,14 +74,29 @@ class RecentlyRemovedViewModel @Inject constructor(private val files: LibraryFil
 
     val canRestore = files.actions
 
+    // The server the trash shown is from: a song is put back there only.
+    private var from: String? = null
+
     init {
         load()
+        // Another server in use: its own trash is read instead.
+        viewModelScope.launch {
+            files.servers.drop(1).collect {
+                trash = null
+                problem = null
+                load()
+            }
+        }
     }
 
     fun load() {
         viewModelScope.launch {
+            val on = files.server()
             try {
-                trash = files.trash()
+                val read = files.trash()
+                if (files.server() != on) return@launch
+                from = on
+                trash = read
                 problem = null
             } catch (e: SubsonicException) {
                 problem = "Could not read the server's trash. ${e.userMessage()}"
@@ -94,7 +110,7 @@ class RecentlyRemovedViewModel @Inject constructor(private val files: LibraryFil
         if (songs.isEmpty()) return
         val ids = songs.mapTo(HashSet()) { it.id }
         trash = trash?.let { it.copy(songs = it.songs.filterNot { song -> song.id in ids }) }
-        files.launch(songs.map { FixStep.Restore(it.id, it.title) }) { _ ->
+        files.launch(songs.map { FixStep.Restore(it.id, it.title) }, on = from) { _ ->
             load()
             false
         }

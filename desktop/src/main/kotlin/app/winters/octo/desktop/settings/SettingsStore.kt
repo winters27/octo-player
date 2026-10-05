@@ -6,8 +6,9 @@ import app.winters.octo.desktop.discord.DiscordPrefs
 import app.winters.octo.desktop.hotkeys.HotkeyPrefs
 import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.livelists.accountKey
+import app.winters.octo.server.serverName
+import app.winters.octo.server.settleServers
 import app.winters.octo.subsonic.AuthMode
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import app.winters.octo.update.UpdatePrefs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -196,8 +197,7 @@ data class SavedServer(
 val SavedServer.key: String get() = id.ifEmpty { accountKey(username, address) }
 
 // What the server is called in the app: its label, else its host.
-val SavedServer.name: String
-    get() = label.trim().ifEmpty { address.toHttpUrlOrNull()?.host ?: address.removeSuffix("/") }
+val SavedServer.name: String get() = serverName(label, address)
 
 private fun SavedServer.withId(): SavedServer = if (id.isEmpty()) copy(id = key) else this
 
@@ -207,12 +207,14 @@ private fun SavedServer.withId(): SavedServer = if (id.isEmpty()) copy(id = key)
 // one, a server an older Octo signed in to since is added (or brought up to
 // date) and made the one in use, and one it signed out of leaves none in use.
 internal fun AppSettings.settledServers(): AppSettings {
-    val listed = servers.map { it.withId() }.distinctBy { it.id }
-    val legacy = server?.withId() ?: return copy(servers = listed, activeServer = null)
-    val same = listed.firstOrNull { it.id == legacy.id || (it.username == legacy.username && it.address == legacy.address) }
-    val kept = if (same == null) legacy else legacy.copy(id = same.id, label = legacy.label.ifEmpty { same.label }, signedOut = false)
-    val list = if (same == null) listed + kept else listed.map { if (it.id == same.id) kept else it }
-    return copy(servers = list, activeServer = kept.id, server = kept)
+    val (list, kept) = settleServers(
+        servers.map { it.withId() },
+        server?.withId(),
+        id = { it.id },
+        same = { a, b -> a.username == b.username && a.address == b.address },
+        adopt = { legacy, same -> if (same == null) legacy else legacy.copy(id = same.id, label = legacy.label.ifEmpty { same.label }, signedOut = false) },
+    )
+    return copy(servers = list, activeServer = kept?.id, server = kept)
 }
 
 // The settings as they are written: `server` a copy of the one in use.

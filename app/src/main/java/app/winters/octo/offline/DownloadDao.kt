@@ -86,9 +86,9 @@ interface DownloadDao {
     @Query("SELECT * FROM download WHERE trackId = :trackId")
     suspend fun forTrack(trackId: String): List<DownloadEntity>
 
-    // The oldest download still waiting.
-    @Query("SELECT * FROM download WHERE state = 'Queued' ORDER BY addedAt, title LIMIT 1")
-    suspend fun nextQueued(): DownloadEntity?
+    // The oldest download from this server still waiting.
+    @Query("SELECT * FROM download WHERE state = 'Queued' AND sourceId = :sourceId ORDER BY addedAt, title LIMIT 1")
+    suspend fun nextQueued(sourceId: String): DownloadEntity?
 
     @Query("SELECT * FROM download WHERE sourceId = :sourceId AND serverId = :serverId")
     suspend fun get(sourceId: String, serverId: String): DownloadEntity?

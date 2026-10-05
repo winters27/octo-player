@@ -20,8 +20,10 @@ import app.winters.octo.ui.common.rememberOpenedBeside
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 // What the question names: the song's title for one, "3 songs" for more.
@@ -34,8 +36,9 @@ fun DiskDeleteQuestion(count: Int, names: String, keepDays: Int, onCancel: () ->
     PopupQuestion(deleteTitle(count), deleteBody(names, keepDays), "Delete", onConfirm = onConfirm, onCancel = onCancel)
 }
 
-// Songs picked in a list, waiting for the answer to deleting them from disk.
-class DiskDeleteAsk(val trackIds: List<String>, val titles: List<String>)
+// Songs picked in a list, waiting for the answer to deleting them from disk,
+// on the server in use when they were picked.
+class DiskDeleteAsk(val trackIds: List<String>, val titles: List<String>, val server: String? = null)
 
 @HiltViewModel
 class DiskDeleteViewModel @Inject constructor(private val files: LibraryFiles) : ViewModel() {
@@ -51,8 +54,13 @@ class DiskDeleteViewModel @Inject constructor(private val files: LibraryFiles) :
     // The songs among these the server has a copy of, to delete.
     suspend fun deletable(trackIds: List<String>): List<String> = files.deletable(trackIds)
 
+    // Another server in use: the question was about the last one's songs.
+    init {
+        viewModelScope.launch { files.servers.drop(1).collect { asking = null } }
+    }
+
     fun ask(trackIds: List<String>, titles: List<String>) {
-        if (trackIds.isNotEmpty()) asking = DiskDeleteAsk(trackIds, titles)
+        if (trackIds.isNotEmpty()) asking = DiskDeleteAsk(trackIds, titles, files.server())
     }
 
     fun cancel() {
@@ -62,7 +70,7 @@ class DiskDeleteViewModel @Inject constructor(private val files: LibraryFiles) :
     fun confirm() {
         val ask = asking ?: return
         asking = null
-        files.deleteFromDisk(ask.trackIds, ask.titles.singleOrNull())
+        files.deleteFromDisk(ask.trackIds, ask.titles.singleOrNull(), on = ask.server)
     }
 }
 

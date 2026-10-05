@@ -56,6 +56,23 @@ import kotlinx.serialization.Serializable
 
 // The sign-in form, starting from the saved connection to change it.
 @Serializable data object EditConnectionRoute : NavKey
+
+// What the sign-in form is for, opened from the list of servers.
+@Serializable
+enum class ServerForm {
+    // Keep another server without leaving the one in use.
+    Add,
+
+    // Change a kept server's details.
+    Edit,
+
+    // Sign in again to a kept server, which then is the one in use.
+    SignIn,
+}
+
+// The sign-in form for one of the kept servers (`id`), or a new one, with a
+// note to show first (why its password is asked for).
+@Serializable data class ServerFormRoute(val form: ServerForm, val id: String? = null, val note: String? = null) : NavKey
 @Serializable data object OctoAdminRoute : NavKey
 @Serializable data object SpotifyImportRoute : NavKey
 

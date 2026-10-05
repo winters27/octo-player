@@ -3,6 +3,8 @@ package app.winters.octo.server
 import android.content.Context
 import android.os.SystemClock
 import android.util.Log
+import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -12,8 +14,10 @@ import app.winters.octo.catalog.CatalogMerge
 import app.winters.octo.listening.FavouriteSync
 import app.winters.octo.listening.ListeningSync
 import app.winters.octo.catalog.SourceDao
+import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
+import app.winters.octo.data.StoredServer
 import app.winters.octo.data.userMessage
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.offline.OfflineDownloads
@@ -33,11 +37,15 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -61,9 +69,19 @@ private const val STALE_MS = 6 * 60 * 60 * 1000L
 // album holding one.
 private const val ROWS_VERSION = 5
 
-// Keeps a copy of the signed-in server's library beside the phone's music:
+// Whose library is in place: a kept server's id, or this for the phone's
+// music alone.
+const val PHONE_LIBRARY = "phone"
+
+// The source a kept server's music is kept under.
+val StoredServer.sourceId: String? get() = serverUrl.toHttpUrlOrNull()?.let(::serverSourceId)
+
+// Keeps a copy of each kept server's library beside the phone's music:
 // copied after signing in, at app start when the last copy is old, and when
-// asked. Disconnecting, or losing the sign-in, takes the server's music out.
+// asked. Only the server in use joins the library (CatalogMerge); the
+// others' copies wait for a switch, which then needs no new copy unless it
+// is old. Removing a server takes its copy away. Two accounts on one
+// address share one copy, made again when the other one is in use.
 @Singleton
 class ServerSync @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -88,35 +106,60 @@ class ServerSync @Inject constructor(
     private val _problem = MutableStateFlow<String?>(null)
     val problem: StateFlow<String?> = _problem
 
-    val last: Flow<LastSync?> = context.syncData.data.map { p ->
+    // Whose library the screens show now: the id of the server in use once
+    // its music has joined, or PHONE_LIBRARY. Null until the first is in place.
+    private val _ready = MutableStateFlow<String?>(null)
+    val ready: StateFlow<String?> = _ready
+
+    // The last copy of the server in use.
+    val last: Flow<LastSync?> = combine(sessions.state, context.syncData.data) { state, p ->
+        val session = (state as? SessionState.SignedIn)?.session ?: return@combine null
         LastSync(
-            sourceId = p[SOURCE_ID] ?: return@map null,
-            at = p[SYNCED_AT] ?: return@map null,
-            songs = p[SONGS] ?: 0,
-            albums = p[ALBUMS] ?: 0,
+            sourceId = p[sourceKey(session.id)] ?: return@combine null,
+            at = p[syncedAtKey(session.id)] ?: return@combine null,
+            songs = p[songsKey(session.id)] ?: 0,
+            albums = p[albumsKey(session.id)] ?: 0,
         )
-    }
+    }.distinctUntilChanged()
 
     fun start() {
         if (started) return
         started = true
         scope.launch {
-            sessions.state.collect { state ->
-                when (state) {
-                    is SessionState.SignedIn -> {
-                        val sourceId = state.session.sourceId
-                        dropServers(keep = sourceId)
-                        val done = last.first()
-                        val older = context.syncData.data.first()[ROWS] != ROWS_VERSION
-                        val stale = done == null || done.sourceId != sourceId || older ||
-                            System.currentTimeMillis() - done.at > STALE_MS
-                        if (stale) syncNow()
-                    }
-                    SessionState.SignedOut -> dropServers(keep = null)
-                    SessionState.Loading -> Unit
-                }
-            }
+            // The kept servers are known once the saved sign-in is read.
+            sessions.state.first { it !is SessionState.Loading }
+            takeInOneServersRecord()
+            sessions.state
+                .filter { it !is SessionState.Loading }
+                .map { (it as? SessionState.SignedIn)?.session }
+                .distinctUntilChanged { a, b -> a?.id == b?.id && a?.sourceId == b?.sourceId }
+                .collect { session -> arrived(session) }
         }
+    }
+
+    // Another server (or none) is in use: a copy of the last one stops, the
+    // library becomes the new one's, and its copy is made again when old.
+    private suspend fun arrived(session: Session?) {
+        synchronized(this) { job }?.cancelAndJoin()
+        _problem.value = null
+        dropUnkept()
+        val want = session?.sourceId.orEmpty()
+        if (context.syncData.data.first()[LIBRARY] != want) {
+            merge.rebuild()
+            context.syncData.edit { it[LIBRARY] = want }
+        }
+        _ready.value = session?.id ?: PHONE_LIBRARY
+        if (session != null && stale(session)) syncNow()
+    }
+
+    // Whether the server's copy should be made again: never made, made by an
+    // older version, old, or made for another account on the same address.
+    private suspend fun stale(session: Session): Boolean {
+        val p = context.syncData.data.first()
+        val at = p[syncedAtKey(session.id)] ?: return true
+        return p[rowsKey(session.id)] != ROWS_VERSION ||
+            p[copyOfKey(session.sourceId)] != session.id ||
+            System.currentTimeMillis() - at > STALE_MS
     }
 
     // Starts a copy unless one is already running.
@@ -144,14 +187,26 @@ class ServerSync @Inject constructor(
         }
     }
 
-    // Signs out and takes the server's music out of the library. Nothing
-    // on the server changes.
+    // Signs out of the server in use. Its music leaves the library; its copy
+    // stays for signing in again. Nothing on the server changes.
     fun disconnect() {
         scope.launch {
             synchronized(this@ServerSync) { job }?.cancelAndJoin()
             sessions.signOut()
-            dropServers(keep = null)
         }
+    }
+
+    // Takes a kept server off the list, and its copy of the library with it
+    // (unless another kept account shares the address). Nothing on the
+    // server changes.
+    suspend fun remove(id: String): StoredServer? {
+        if (sessions.state.value.let { it is SessionState.SignedIn && it.session.id == id }) {
+            synchronized(this) { job }?.cancelAndJoin()
+        }
+        val gone = sessions.remove(id) ?: return null
+        dropUnkept()
+        context.syncData.edit { p -> listOf(syncedAtKey(id), songsKey(id), albumsKey(id), rowsKey(id), sourceKey(id)).forEach { p.remove(it) } }
+        return gone
     }
 
     // Puts one song from the server into the library at once, with the rest
@@ -212,11 +267,12 @@ class ServerSync @Inject constructor(
             // Downloads follow their songs, and songs kept downloaded that just arrived start.
             offline.afterSync()
             context.syncData.edit { p ->
-                p[SOURCE_ID] = sourceId
-                p[SYNCED_AT] = System.currentTimeMillis()
-                p[SONGS] = catalog.tracks.size
-                p[ALBUMS] = catalog.albums.size
-                p[ROWS] = ROWS_VERSION
+                p[sourceKey(session.id)] = sourceId
+                p[syncedAtKey(session.id)] = System.currentTimeMillis()
+                p[songsKey(session.id)] = catalog.tracks.size
+                p[albumsKey(session.id)] = catalog.albums.size
+                p[rowsKey(session.id)] = ROWS_VERSION
+                p[copyOfKey(sourceId)] = session.id
             }
             _problem.value = null
             // Counts only, like the phone scan's line.
@@ -236,20 +292,41 @@ class ServerSync @Inject constructor(
         }
     }
 
-    // Removes every server's music but the one to keep, and forgets the
-    // last copy when no server is kept.
-    private suspend fun dropServers(keep: String?) = dropLock.withLock {
-        val gone = sources.sourceIds().filter { isServerSource(it) && it != keep }
-        if (gone.isNotEmpty()) {
-            gone.forEach { sources.deleteSource(it) }
-            merge.rebuild()
-        }
+    // Removes the music of every server no longer kept. A signed-out server
+    // is still kept, so signing in again needs no new copy.
+    private suspend fun dropUnkept() = dropLock.withLock {
+        val kept = sessions.servers.value.servers.mapNotNullTo(HashSet()) { it.sourceId }
+        val gone = sources.sourceIds().filter { isServerSource(it) && it !in kept }
+        // Their songs are no library songs already; the rows just go.
+        gone.forEach { sources.deleteSource(it) }
+        if (gone.isNotEmpty()) context.syncData.edit { p -> gone.forEach { p.remove(copyOfKey(it)) } }
         // Playlists kept with a server that is gone stay, only on the phone.
-        playlists.keepOnly(keep)
-        if (keep == null) {
-            if (last.first() != null) context.syncData.edit { it.clear() }
-            _problem.value = null
+        playlists.keepOnly(kept)
+    }
+
+    // An older version kept one record of its one server's copy. It belongs
+    // to the kept account on that address, the one in use first.
+    private suspend fun takeInOneServersRecord() {
+        val kept = sessions.servers.value
+        context.syncData.edit { p ->
+            val source = p[SOURCE_ID] ?: return@edit
+            val owner = (listOfNotNull(kept.inUse) + kept.servers).firstOrNull { it.sourceId == source }
+            if (owner != null && p[syncedAtKey(owner.id)] == null) {
+                p[sourceKey(owner.id)] = source
+                p[SYNCED_AT]?.let { p[syncedAtKey(owner.id)] = it }
+                p[songsKey(owner.id)] = p[SONGS] ?: 0
+                p[albumsKey(owner.id)] = p[ALBUMS] ?: 0
+                p[ROWS]?.let { p[rowsKey(owner.id)] = it }
+                p[copyOfKey(source)] = owner.id
+                // The library the older version merged holds that server.
+                if (p[LIBRARY] == null) p[LIBRARY] = source
+            }
+            p.forgetOneServersRecord()
         }
+    }
+
+    private fun MutablePreferences.forgetOneServersRecord() {
+        listOf<Preferences.Key<*>>(SOURCE_ID, SYNCED_AT, SONGS, ALBUMS, ROWS).forEach { remove(it) }
     }
 
     // An album with its songs, as the album list would have listed it.
@@ -270,6 +347,20 @@ class ServerSync @Inject constructor(
     )
 
     private companion object {
+        // The server source the library was last merged with, "" for none.
+        val LIBRARY = stringPreferencesKey("library_server")
+
+        // Each kept server's last copy, by its id.
+        fun sourceKey(id: String) = stringPreferencesKey("source_id@$id")
+        fun syncedAtKey(id: String) = longPreferencesKey("synced_at@$id")
+        fun songsKey(id: String) = intPreferencesKey("songs@$id")
+        fun albumsKey(id: String) = intPreferencesKey("albums@$id")
+        fun rowsKey(id: String) = intPreferencesKey("rows_version@$id")
+
+        // Which account's copy an address's rows are.
+        fun copyOfKey(sourceId: String) = stringPreferencesKey("copy_of@$sourceId")
+
+        // Where an older version kept its one server's record.
         val SOURCE_ID = stringPreferencesKey("source_id")
         val SYNCED_AT = longPreferencesKey("synced_at")
         val SONGS = intPreferencesKey("songs")

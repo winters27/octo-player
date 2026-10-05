@@ -17,9 +17,11 @@ import app.winters.octo.desktop.secrets.secretAccount
 import app.winters.octo.desktop.settings.SavedServer
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.settings.name
-import app.winters.octo.livelists.accountKey
 import app.winters.octo.server.PasswordChange
 import app.winters.octo.server.changeOwnPassword
+import app.winters.octo.server.freshServerId
+import app.winters.octo.server.passwordRefusedWords
+import app.winters.octo.server.switchFailedWords
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.Credentials
 import app.winters.octo.subsonic.Extension
@@ -147,18 +149,10 @@ sealed interface SwitchOutcome {
 
 // How a kept server answered a quick look: whether it is there, and how
 // long it took.
-data class ServerCheck(val reach: Reach, val ms: Long? = null)
+// The words and shapes are shared with the phone.
+typealias ServerCheck = app.winters.octo.server.ServerCheck
 
-enum class Reach {
-    Answers,
-
-    // It is there, but did not take the saved password.
-    WrongPassword,
-    Unreachable,
-
-    // Signed out, so not asked.
-    Unknown,
-}
+typealias Reach = app.winters.octo.server.Reach
 
 // A change of password, and a note when the system's store would not keep
 // the new one.
@@ -326,11 +320,8 @@ class Accounts(
 
     // An id for a new server: the account's key, as older versions named its
     // folder, unless another kept server has it already.
-    private fun freshId(username: String, address: String, except: String? = null): String {
-        val taken = servers.map { it.id }.toSet() - setOfNotNull(except)
-        val first = accountKey(username, address)
-        return generateSequence(1) { it + 1 }.map { n -> if (n == 1) first else "$first-$n" }.first { it !in taken }
-    }
+    private fun freshId(username: String, address: String, except: String? = null): String =
+        freshServerId(username, address, servers.map { it.id }.toSet() - setOfNotNull(except))
 
     // Makes another kept server the one in use, signed in with its saved
     // secret. It is asked first, so one out of reach leaves the listener
@@ -347,9 +338,9 @@ class Accounts(
             reach(main, home, creds, headers)
         } catch (e: SubsonicException) {
             if (e is SubsonicException.WrongCredentials) {
-                return SwitchOutcome.NeedsPassword(server, "${server.name} didn't take the saved password. It may have been changed.")
+                return SwitchOutcome.NeedsPassword(server, passwordRefusedWords(server.name))
             }
-            return SwitchOutcome.Failed("Couldn't switch to ${server.name}. " + e.userMessage())
+            return SwitchOutcome.Failed(switchFailedWords(server.name, e.userMessage()))
         }
         val extensions = if (info.openSubsonic) {
             runCatching { SubsonicClient(reachedUrl, creds, http, headers = headers).extensions() }.getOrNull()

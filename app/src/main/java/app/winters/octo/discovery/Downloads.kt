@@ -16,8 +16,10 @@ import app.winters.octo.catalog.isFind
 import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
+import app.winters.octo.data.accountId
 import app.winters.octo.server.ServerSync
 import app.winters.octo.server.serverSourceId
+import app.winters.octo.server.sourceId
 import app.winters.octo.subsonic.Acquisition
 import app.winters.octo.subsonic.OCTO_ACQUISITIONS
 import app.winters.octo.subsonic.SubsonicException
@@ -33,6 +35,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -100,10 +105,7 @@ class Downloads @Inject constructor(
 
     private val tracker = ProgressWatch(
         object : AcquisitionHost {
-            override suspend fun waiting(): List<OnlineSongEntity> {
-                val now = System.currentTimeMillis()
-                return online.waiting().filter { now - it.requestedAt < GIVE_UP_MS }
-            }
+            override suspend fun waiting(): List<OnlineSongEntity> = watchedWaiting()
 
             override suspend fun acquisitions(): List<Acquisition>? {
                 val session = session() ?: return null
@@ -163,6 +165,14 @@ class Downloads @Inject constructor(
         scope.launch { announceArrivals() }
         scope.launch { announceAlbumFailures() }
         scope.launch { resume() }
+        // Another kept server in use: the last one's are no longer asked
+        // about, and this one's own carry on being followed.
+        scope.launch {
+            sessions.state.filter { it !is SessionState.Loading }.map { it.accountId }.distinctUntilChanged().drop(1).collect {
+                synchronized(this@Downloads) { checks?.cancel() }
+                resume()
+            }
+        }
     }
 
     fun state(trackId: String): DownloadState = states.value[trackId] ?: DownloadState.None
@@ -229,7 +239,8 @@ class Downloads @Inject constructor(
     suspend fun afterSync() {
         val client = client() ?: return
         val now = System.currentTimeMillis()
-        online.prune(serverSourceId(client.primaryUrl), now - FORGET_MS)
+        val kept = sessions.servers.value.servers.mapNotNull { it.sourceId }
+        online.prune(serverSourceId(client.primaryUrl), kept + serverSourceId(client.primaryUrl), now - FORGET_MS)
         val waiting = online.waiting().ifEmpty { return }
         val candidates = waiting.flatMap { titleKeys(it.title) }.distinct().chunked(900).flatMap { catalog.tracksWithKeys(it) }
         val adopted = adoptions(waiting, candidates.filter { !isFind(it.id) })
@@ -276,9 +287,12 @@ class Downloads @Inject constructor(
         if (watchedWaiting().isNotEmpty() && reportsProgress()) follow()
     }
 
+    // The songs asked for lately on the server in use: another kept
+    // server's are followed once it is in use again.
     private suspend fun watchedWaiting(): List<OnlineSongEntity> {
+        val here = session()?.sourceId ?: return emptyList()
         val now = System.currentTimeMillis()
-        return online.waiting().filter { now - it.requestedAt < GIVE_UP_MS }
+        return online.waiting().filter { it.sourceId == here && now - it.requestedAt < GIVE_UP_MS }
     }
 
     // Whether the signed-in server says how its downloads are going: from
@@ -341,7 +355,7 @@ class Downloads @Inject constructor(
         val until = System.currentTimeMillis() + WATCH_FOR_MS
         while (System.currentTimeMillis() < until) {
             delay(WATCH_EVERY_MS)
-            val waiting = online.waiting().ifEmpty { return }
+            val waiting = watchedWaiting().ifEmpty { return }
             val finished = try {
                 admin.downloads(base)
             } catch (e: AdminUnavailable) {

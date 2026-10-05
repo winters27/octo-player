@@ -6,6 +6,7 @@ import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.Upgrade
 import app.winters.octo.ui.upgrade.UPGRADE_POLL_MS
 import app.winters.octo.ui.upgrade.UpgradeAsk
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -90,6 +91,28 @@ class UpgradesTest {
         val looks = host.looks
         advanceTimeBy(UPGRADE_POLL_MS * 5)
         assertEquals(looks, host.looks)
+    }
+
+    @Test
+    fun anotherServerStopsTheSongsNotSentYet() = runTest {
+        val host = FakeHost()
+        host.list = listOf(row("a", "working"))
+        val watch = watchOf(host)
+        val sent = mutableListOf<String>()
+        watch.request(listOf(UpgradeAsk("a", "Holocene"), UpgradeAsk("b", "Towers"), UpgradeAsk("c", "Calgary"))) { id ->
+            sent += id
+            delay(1_000)
+            LibraryActionResult(id, "upgrade", "queued")
+        }
+        runCurrent()
+        assertEquals(listOf("a"), sent)
+        // A switch to another server before the next one goes.
+        watch.forget()
+        advanceTimeBy(10_000)
+        assertEquals(listOf("a"), sent)
+        assertTrue(watch.pending.value.isEmpty())
+        // Nor is the last server's list followed.
+        assertEquals(0, host.looks)
     }
 
     @Test

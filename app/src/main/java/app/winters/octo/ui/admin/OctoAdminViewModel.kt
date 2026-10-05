@@ -16,6 +16,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import okhttp3.HttpUrl
 import javax.inject.Inject
@@ -53,12 +54,22 @@ class OctoAdminViewModel @Inject constructor(private val admin: OctoAdmin) : Vie
         private set
 
     private var job: Job? = null
+    private var stationsJob: Job? = null
 
     // Counts the loads, so one that was replaced leaves the spinner alone.
     private var generation = 0
 
     init {
         open(fresh = true)
+        // Another server in use: its own admin pages are looked for.
+        viewModelScope.launch {
+            admin.server.drop(1).collect {
+                stationsJob?.cancel()
+                refreshingStations = false
+                stationsProblem = null
+                open(fresh = true)
+            }
+        }
     }
 
     fun tryAgain() = open(fresh = true)
@@ -76,7 +87,7 @@ class OctoAdminViewModel @Inject constructor(private val admin: OctoAdmin) : Vie
         if (refreshingStations) return
         refreshingStations = true
         stationsProblem = null
-        viewModelScope.launch {
+        stationsJob = viewModelScope.launch {
             try {
                 admin.refreshStations(base)
                 // Octo rebuilds in the background, so the list is read again

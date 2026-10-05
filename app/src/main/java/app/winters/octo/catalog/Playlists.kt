@@ -44,6 +44,10 @@ fun mosaicCovers(albumArt: List<Pair<String, String?>>): List<String> =
         .take(4)
         .map { it.second }
 
+// Whether a playlist shows while this server is in use (null for none):
+// one only on the phone always, one kept with a server while it is in use.
+fun PlaylistEntity.shownWith(serverInUse: String?): Boolean = sourceId == null || sourceId == serverInUse
+
 // Every playlist with its totals, in the order the playlists were given.
 // Entries are expected in play order within each playlist.
 fun summarize(playlists: List<PlaylistEntity>, entries: List<PlaylistEntry>): List<PlaylistSummary> {

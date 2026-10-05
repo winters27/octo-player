@@ -65,6 +65,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -114,8 +116,13 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var outputs: Outputs
     @Inject lateinit var deviceMedia: DeviceMedia
     @Inject lateinit var feedback: Feedback
+    @Inject lateinit var switcher: ServerSwitch
 
     private val scope = MainScope()
+    // While the server in use changes, the emptied player is not saved over
+    // the queue handed over.
+    private var holding = false
+    private val side = Side()
     // The phone's own player (two decks for crossfade), and the player the
     // session holds, which is the phone's or, while casting, the one that
     // drives the TV or speaker.
@@ -209,6 +216,8 @@ class OctoPlaybackService : MediaLibraryService() {
         }
         // Editing the queue saves it once things settle.
         scope.launch { queueChanged.debounce(500).collect { saveQueue() } }
+        // A switch of server stops the music and brings the other's queue.
+        switcher.attach(side)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
@@ -234,6 +243,7 @@ class OctoPlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        switcher.detach(side)
         saveQueue()
         widgets.clear()
         tracker.flush()
@@ -349,8 +359,56 @@ class OctoPlaybackService : MediaLibraryService() {
     }
 
     private fun saveQueue() {
-        if (!::player.isInitialized) return
+        if (!::player.isInitialized || holding) return
         queue.save(snapshot())
+    }
+
+    // What a change of server asks of the player. Each runs on the main thread.
+    private inner class Side : PlayerSide {
+        override suspend fun leave(): LeftQueue = withContext(Dispatchers.Main) {
+            holding = true
+            val wasPlaying = player.isPlaying
+            val left = snapshot()
+            empty()
+            LeftQueue(left.takeIf { it.trackIds.isNotEmpty() }, wasPlaying)
+        }
+
+        override suspend fun restore() = withContext(Dispatchers.Main) {
+            try {
+                empty()
+                restoreQueue()
+            } finally {
+                holding = false
+            }
+            saveQueue()
+        }
+
+        override suspend fun keep() = withContext(Dispatchers.Main) {
+            holding = false
+        }
+
+        // A car reads its tabs again, since the library under them changed.
+        override fun libraryChanged() {
+            scope.launch {
+                val library = session ?: return@launch
+                for (node in listOf(CarNode.Root, CarNode.Recent, CarNode.Playlists, CarNode.Albums, CarNode.Artists)) {
+                    val id = carId(node)
+                    library.notifyChildrenChanged(id, car.children(id, 0, Int.MAX_VALUE).size, null)
+                }
+            }
+        }
+
+        // What plays stops and counts, casting ends, and the player is empty.
+        private fun empty() {
+            if (player.mediaItemCount == 0) return
+            tracker.flush()
+            positionSaver?.cancel()
+            sleep.cancel()
+            if (player.isRemote) outputs.stopCasting()
+            player.pause()
+            player.stop()
+            player.clearMediaItems()
+        }
     }
 
     private fun snapshot(): QueueSnapshot {

@@ -118,16 +118,18 @@ class HomeViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collect { reroll() }
         }
-        // A new sign-in starts over; signing out, or a server without
-        // stations, drops the old list. The server can turn out to be Octo
-        // after start, once its extensions are read again.
+        // A new sign-in or another kept server starts over, without the
+        // last one's list; signing out, or a server without stations, drops
+        // it. The server can turn out to be Octo after start, once its
+        // extensions are read again.
         viewModelScope.launch {
-            discovery.offersStations.distinctUntilChanged().collect { offered ->
-                offersStations = offered
+            discovery.stationsFrom.collect { server ->
+                offersStations = server != null
                 stationsJob?.cancel()
                 stationsLoadedAt = null
                 stationsFailed = false
-                if (offered) loadStations() else stations = emptyList()
+                stations = emptyList()
+                if (server != null) loadStations()
             }
         }
     }

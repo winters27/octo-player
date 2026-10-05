@@ -41,6 +41,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
+import app.winters.octo.data.accountId
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.GlassInput
@@ -59,14 +60,42 @@ import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.screenPadding
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 // The screen's state is the shared ImportModel, kept for as long as the
 // screen is, so a sign-in waiting for the browser outlives the screen going
-// to the background.
+// to the background. Another server in use starts it over, as the desktop's
+// does: nothing of the last server's lists stays.
 @HiltViewModel
 class SpotifyImportViewModel @Inject constructor(sessions: SessionRepository) : ViewModel() {
     val model = ImportModel({ (sessions.state.value as? SessionState.SignedIn)?.session?.client }, viewModelScope)
+
+    // Whether the screen is showing, so the new server is asked at once.
+    private var showing = false
+
+    init {
+        viewModelScope.launch {
+            sessions.state.filter { it !is SessionState.Loading }.map { it.accountId }.distinctUntilChanged().drop(1).collect {
+                model.forget()
+                if (showing) model.watch()
+            }
+        }
+    }
+
+    fun show() {
+        showing = true
+        model.watch()
+    }
+
+    fun hide() {
+        showing = false
+        model.stop()
+    }
 
     override fun onCleared() = model.forget()
 }
@@ -83,8 +112,8 @@ fun SpotifyImportScreen(onBack: () -> Unit, owner: SpotifyImportViewModel = hilt
     val context = LocalContext.current
     val vm = owner.model
     DisposableEffect(Unit) {
-        vm.watch()
-        onDispose { vm.stop() }
+        owner.show()
+        onDispose { owner.hide() }
     }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {

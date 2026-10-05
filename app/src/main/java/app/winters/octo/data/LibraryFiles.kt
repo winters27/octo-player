@@ -17,9 +17,13 @@ import app.winters.octo.ui.common.Feedback
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -172,10 +176,16 @@ class LibraryFiles @Inject constructor(
         return trackIds.filter { it in ids }
     }
 
-    // The server steps are planned for, by its source in the library: the
-    // one signed in to now. Steps carry that server's own song ids, so a run
-    // and its Undo go to it and nowhere else.
-    fun server(): String? = session()?.sourceId
+    // The server steps are planned for: the kept server signed in to now,
+    // by its id, so another account on the same address is another server
+    // here. Steps carry that server's own song ids, so a run and its Undo
+    // go to it and nowhere else.
+    fun server(): String? = session()?.key
+
+    // The kept server in use, by the same id, as it changes; null with none.
+    val servers: Flow<String?> = sessions.state.filter { it !is SessionState.Loading }
+        .map { (it as? SessionState.SignedIn)?.session?.key }
+        .distinctUntilChanged()
 
     // Runs the steps one after another on the server `on` and says nothing;
     // the caller tells how it went. A run that waited its turn while
@@ -187,7 +197,7 @@ class LibraryFiles @Inject constructor(
         stopping = false
         val session = session()
         if (on == null || session == null) return@withLock FixOutcome(failed = steps.map { it to "Not signed in" })
-        if (session.sourceId != on) return@withLock FixOutcome(failed = steps.map { it to FIX_OTHER_SERVER })
+        if (session.key != on) return@withLock FixOutcome(failed = steps.map { it to FIX_OTHER_SERVER })
         val client = session.client
         _progress.value = FixRun(0, steps.size)
         val outcome = try {
@@ -272,13 +282,13 @@ class LibraryFiles @Inject constructor(
 
     // Deletes library songs from the server's disk, once asked, then says
     // so with an Undo that puts them back from the server's trash. The
-    // server is the one signed in to when it was asked; once another is,
-    // nothing is said.
-    fun deleteFromDisk(trackIds: List<String>, title: String?) {
-        val on = server() ?: return
+    // server `on` is the one signed in to when it was asked; once another
+    // is, nothing is sent or said.
+    fun deleteFromDisk(trackIds: List<String>, title: String?, on: String? = server()) {
+        if (on == null || server() != on) return
         scope.launch {
             val copies = sources.copiesOf(trackIds.distinct())
-            val steps = deleteSteps(trackIds, copies, _source.value?.takeIf { it == on })
+            val steps = deleteSteps(trackIds, copies, _source.value?.takeIf { server() == on })
             if (steps.isEmpty()) return@launch
             val outcome = run(steps, on = on)
             if (server() != on) return@launch
@@ -300,4 +310,8 @@ class LibraryFiles @Inject constructor(
     }
 
     private fun session(): Session? = (sessions.state.value as? SessionState.SignedIn)?.session
+
+    // A kept server's id; a session from before the list had none, so its
+    // source stands in.
+    private val Session.key: String get() = id.ifEmpty { sourceId }
 }

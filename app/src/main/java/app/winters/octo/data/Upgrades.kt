@@ -24,6 +24,7 @@ import app.winters.octo.ui.upgrade.UpgradeAsk
 import app.winters.octo.ui.upgrade.UpgradeFollower
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -46,6 +47,9 @@ import javax.inject.Singleton
 // How often to ask how the upgrades are going while the app is in the
 // background; in front it is UPGRADE_POLL_MS.
 const val UPGRADE_POLL_AWAY_MS = 30_000L
+
+// Why a song asked for on one server was not sent once another was in use.
+const val UPGRADE_OTHER_SERVER = "Another server is in use now"
 
 // Whether a FLAC could take the place of this copy of a song on a server:
 // its kind is known to be audio, and it loses detail. An m4a is Apple
@@ -92,6 +96,9 @@ class UpgradeWatch(
     private var watch: Job? = null
     private val wake = Channel<Unit>(Channel.CONFLATED)
 
+    // The songs being sent, so another server stops what is left of them.
+    private val asking = HashSet<Job>()
+
     // Whether the app is in front. Coming back asks at once.
     @Volatile
     var foreground: Boolean = true
@@ -102,14 +109,15 @@ class UpgradeWatch(
         }
 
     // Sends the songs to the server one at a time, at most a batch, then
-    // says how the asking went and follows those it took on.
-    fun request(asks: List<UpgradeAsk>) {
+    // says how the asking went and follows those it took on. `send` asks
+    // for one song; the host's own ask unless the caller binds it to a server.
+    fun request(asks: List<UpgradeAsk>, send: suspend (String) -> LibraryActionResult = host::ask) {
         val taken = follower.ask(asks)
         show()
-        scope.launch {
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             for (ask in taken) {
                 try {
-                    follower.answered(ask.id, host.ask(ask.id))
+                    follower.answered(ask.id, send(ask.id))
                 } catch (e: SubsonicException) {
                     follower.answered(ask.id, null, e.userMessage())
                 }
@@ -118,6 +126,9 @@ class UpgradeWatch(
             follower.askedNotice()?.let(host::say)
             follow()
         }
+        synchronized(this) { asking += job }
+        job.invokeOnCompletion { synchronized(this) { asking -= job } }
+        job.start()
     }
 
     // Takes on the songs the server is still looking for from before.
@@ -161,9 +172,12 @@ class UpgradeWatch(
         _pending.value = follower.pending()
     }
 
-    // A different server or none: nothing more is followed.
+    // A different server or none: nothing more is sent or followed.
     fun forget() {
-        synchronized(this) { watch?.cancel() }
+        synchronized(this) {
+            watch?.cancel()
+            asking.toList().forEach { it.cancel() }
+        }
         follower.forget()
         show()
     }
@@ -270,9 +284,18 @@ class Upgrades @Inject constructor(
     // The same for an album's songs.
     suspend fun upgradableInAlbum(albumId: String): List<UpgradeAsk> = upgradable(catalog.albumTrackIds(albumId))
 
+    // The songs go to the server in use now, and to no other: should
+    // another be in use before the last of them is sent, the rest are not.
     fun request(asks: List<UpgradeAsk>) {
         if (!canUpgrade.value || asks.isEmpty()) return
-        watch.request(asks)
+        val on = session() ?: return
+        watch.request(asks) { id ->
+            if (session()?.id != on.id) {
+                LibraryActionResult(id, LIBRARY_ACTION_UPGRADE, "skipped", UPGRADE_OTHER_SERVER)
+            } else {
+                on.client.libraryAction(id, LIBRARY_ACTION_UPGRADE)
+            }
+        }
     }
 
     private fun session(): Session? = (sessions.state.value as? SessionState.SignedIn)?.session

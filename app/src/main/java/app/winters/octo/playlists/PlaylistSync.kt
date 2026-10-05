@@ -133,17 +133,19 @@ class PlaylistSync @Inject constructor(
         scope.launch {
             val server = signedIn() ?: return@launch
             if (playlist.sourceId != server.sourceId) return@launch
-            store.addDeleted(serverId)
+            store.addDeleted(server.account, serverId)
             lock.withLock { failureOf { deleteOnServer(server, serverId) } }
         }
     }
 
-    // After signing in (to this server) or out (null): playlists kept with
-    // any other server become playlists only on the phone. None is deleted.
-    suspend fun keepOnly(sourceId: String?) {
-        user.unlinkOtherServers(sourceId)
-        if (sourceId == null) store.forgetServer()
+    // Playlists kept with a server no longer kept (by its source) become
+    // playlists only on the phone. None is deleted.
+    suspend fun keepOnly(kept: Set<String>) {
+        user.unlinkServersExcept(kept.toList())
     }
+
+    // Forgets a server taken off the list: its deletions still waiting.
+    suspend fun forget(account: String, sourceId: String?) = store.forget(account, sourceId)
 
     private suspend fun send(localId: String) {
         val server = signedIn() ?: return
@@ -176,7 +178,7 @@ class PlaylistSync @Inject constructor(
             others = all.mapTo(HashSet()) { it.id } - keep.mapTo(HashSet()) { it.id },
             linked = kept.mapNotNull { it.linked() },
             waiting = kept.filter { it.serverId == null }.map { it.id },
-            deleted = store.deleted(),
+            deleted = store.deleted(server.account),
         )
         val failed = steps.count { failureOf { run(server, it) } != null }
         if (steps.isNotEmpty()) {
@@ -199,7 +201,7 @@ class PlaylistSync @Inject constructor(
             }
             is PlaylistStep.Unlink -> user.unlinkPlaylist(step.localId)
             is PlaylistStep.DeleteOnServer -> deleteOnServer(server, step.serverId)
-            is PlaylistStep.ForgetDeletion -> store.removeDeleted(step.serverId)
+            is PlaylistStep.ForgetDeletion -> store.removeDeleted(server.account, step.serverId)
         }
     }
 
@@ -304,7 +306,7 @@ class PlaylistSync @Inject constructor(
         } catch (_: SubsonicException.NotFound) {
             // Already gone.
         }
-        store.removeDeleted(serverId)
+        store.removeDeleted(server.account, serverId)
     }
 
     // The server songs a phone playlist goes to the server as, in order,
@@ -361,15 +363,15 @@ class PlaylistSync @Inject constructor(
     private fun PlaylistEntity.linked(): LinkedPlaylist? =
         serverId?.let { LinkedPlaylist(id, it, name, edited, syncedName, serverStamp) }
 
-    private class Server(val client: SubsonicClient, val sourceId: String, val formPost: Boolean)
+    private class Server(val client: SubsonicClient, val sourceId: String, val account: String, val formPost: Boolean)
 
     // The signed-in server, if there is one. Playlists linked for another
-    // user of the same server are let go first.
+    // account on the same address are let go first; other servers' links
+    // stay for when they are in use again.
     private suspend fun signedIn(): Server? {
         val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return null
-        val client = session.client
-        if (store.useServer("${client.username}@${client.primaryUrl}")) user.unlinkOtherServers(null)
-        return Server(client, session.sourceId, session.extensions.any { it.startsWith("$FORM_POST_EXTENSION:") })
+        if (store.claim(session.sourceId, session.id)) user.unlinkServer(session.sourceId)
+        return Server(session.client, session.sourceId, session.id, session.extensions.any { it.startsWith("$FORM_POST_EXTENSION:") })
     }
 
     // Runs a server call, handing back what went wrong, if anything.
