@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import app.winters.octo.desktop.AppState
+import app.winters.octo.discovery.albumShareLine
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.library.LibraryIndex
 import app.winters.octo.desktop.library.LibraryState
@@ -99,6 +100,7 @@ fun AlbumCard(app: AppState, album: Album, modifier: Modifier = Modifier, outsid
         online = outside,
         onMenu = { app.popups.showAt(pointer.point) { close -> AlbumMenu(app, album, close, outside) } },
         badge = badge,
+        note = albumShareLine(album),
     )
 }
 

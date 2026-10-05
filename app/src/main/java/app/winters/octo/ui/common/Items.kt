@@ -63,6 +63,7 @@ import app.winters.octo.design.SelectedRow
 import app.winters.octo.design.rememberPressSqueeze
 import app.winters.octo.discovery.OnlineAlbum
 import app.winters.octo.discovery.OnlineArtist
+import app.winters.octo.discovery.albumShareLine
 import app.winters.octo.discovery.shownLengthMs
 import app.winters.octo.ui.menu.CollectionTarget
 import app.winters.octo.ui.menu.LocalSongMenu
@@ -102,14 +103,15 @@ private fun Modifier.pressOrHold(haptics: HapticFeedback, spot: PressSpot, onCli
 @Composable
 fun AlbumCard(album: AlbumEntity, onClick: () -> Unit, modifier: Modifier = Modifier, width: Dp? = 150.dp) {
     val menus = LocalSongMenu.current.collections
-    AlbumCard(album.artwork, album.title, album.artist, onClick, { menus.open(CollectionTarget.Album(album.id)) }, modifier, width, outside = false)
+    AlbumCard(album.artwork, album.title, album.artist, onClick, { menus.open(CollectionTarget.Album(album.id)) }, modifier, width, outside = false, note = null)
 }
 
 // An album on the server, not in the library, drawn the same way with the
-// not-in-library mark on its cover.
+// not-in-library mark on its cover, and, when the library holds some of
+// its songs, how many.
 @Composable
 fun AlbumCard(album: OnlineAlbum, onClick: () -> Unit, modifier: Modifier = Modifier, width: Dp? = 150.dp) =
-    AlbumCard(album.artwork, album.title, album.artist, onClick, null, modifier, width, outside = true)
+    AlbumCard(album.artwork, album.title, album.artist, onClick, null, modifier, width, outside = true, note = albumShareLine(album.ownedCount, album.songCount))
 
 @Composable
 private fun AlbumCard(
@@ -121,6 +123,7 @@ private fun AlbumCard(
     modifier: Modifier,
     width: Dp?,
     outside: Boolean,
+    note: String?,
 ) {
     Column(
         (if (width != null) modifier.width(width) else modifier.fillMaxWidth())
@@ -142,6 +145,15 @@ private fun AlbumCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        if (note != null) {
+            Text(
+                note,
+                style = OctoType.caption,
+                color = OctoColors.TextMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 

@@ -57,6 +57,7 @@ import app.winters.octo.design.GlassInput
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.discovery.Discovered
+import app.winters.octo.discovery.PartlyInLibraryText
 import app.winters.octo.discovery.RankedTracks
 import app.winters.octo.discovery.SEARCH_TOP_SHOWN
 import app.winters.octo.discovery.TOP_CHART_SHOWN
@@ -362,6 +363,7 @@ private fun DiscoverState.only(filter: SearchFilter): DiscoverState {
             songs = if (filter == SearchFilter.Songs) found.songs else emptyList(),
             albums = if (filter == SearchFilter.Albums) found.albums else emptyList(),
             artists = if (filter == SearchFilter.Artists) found.artists else emptyList(),
+            partAlbums = if (filter == SearchFilter.Albums) found.partAlbums else emptyList(),
         ),
     )
 }
@@ -382,7 +384,24 @@ private fun LazyListScope.discoverSection(
     hint: Boolean,
     onHintSeen: () -> Unit,
 ) {
-    item(key = "discover") { SectionTitle(NotInLibraryText, if (top) Modifier.padding(top = 12.dp) else Modifier) }
+    // Albums the library holds some of come first, under their own title,
+    // each saying how much.
+    val part = (online as? DiscoverState.Done)?.found?.partAlbums.orEmpty()
+    if (part.isNotEmpty()) {
+        item(key = "discover:part") { SectionTitle(PartlyInLibraryText, if (top) Modifier.padding(top = 12.dp) else Modifier) }
+        item(key = "discover:part:albums") {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                items(part, key = { it.id }) { album ->
+                    AlbumCard(album, onClick = { onOpen(OnlineAlbumRoute(album.id)) })
+                }
+            }
+        }
+        if ((online as DiscoverState.Done).found.notInLibraryEmpty) return
+    }
+    item(key = "discover") { SectionTitle(NotInLibraryText, if (top || part.isNotEmpty()) Modifier.padding(top = 12.dp) else Modifier) }
     when (online) {
         DiscoverState.Loading -> item(key = "discover:looking") { QuietLine("Looking online") }
         DiscoverState.Failed -> item(key = "discover:failed") { QuietLine("Could not reach your server") }

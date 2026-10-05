@@ -96,7 +96,7 @@ fun listedFinds(adoptions: Map<String, String>, songs: List<TrackEntity>): Set<S
 // The songs found online a search shows: all but those already listed as
 // library songs.
 fun Discovered.without(listed: Set<String>): Discovered =
-    if (listed.isEmpty() || songs.none { it.id in listed }) this else Discovered(songs.filterNot { it.id in listed }, albums, artists)
+    if (listed.isEmpty() || songs.none { it.id in listed }) this else Discovered(songs.filterNot { it.id in listed }, albums, artists, partAlbums)
 
 // What searching the server has come to.
 sealed interface DiscoverState {

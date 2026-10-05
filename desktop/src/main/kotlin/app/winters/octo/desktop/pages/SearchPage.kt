@@ -63,6 +63,7 @@ import app.winters.octo.desktop.ui.pagePadding
 import app.winters.octo.desktop.ui.playlistMenu
 import app.winters.octo.desktop.ui.rememberListState
 import app.winters.octo.discovery.knownLengthMs
+import app.winters.octo.discovery.PartlyInLibraryText
 import app.winters.octo.subsonic.Song
 
 // Not in the library, in the phone app's words.
@@ -130,6 +131,16 @@ private fun LazyListScope.before(app: AppState, found: SearchFound) {
             CardRow(library.albums.size) { i -> AlbumCard(app, library.albums[i]) }
         }
     }
+    // Albums found online that the library holds some of: each card says how
+    // much, and opening one plays the library's copies and adds the rest.
+    val partly = found.outside.partAlbums
+    if (partly.isNotEmpty()) {
+        item(key = "part-albums") {
+            SectionTitle(PartlyInLibraryText)
+            Txt("Found online by your server. Open one to play the songs you have and add the rest.", OctoType.caption, OctoColors.TextMuted, Modifier.padding(bottom = 8.dp))
+            CardRow(partly.size) { i -> AlbumCard(app, partly[i], outside = true) }
+        }
+    }
     if (library.songs.isNotEmpty()) {
         item(key = "songs-title") { SectionTitle("Songs", action = seeAll(app, library.moreSongs)) { model.pick(SearchFilter.Songs) } }
     }
@@ -154,7 +165,7 @@ private fun LazyListScope.after(app: AppState, found: SearchFound) {
             }
         }
     }
-    if (!outside.isEmpty) {
+    if (!outside.notInLibraryEmpty) {
         item(key = "outside-title") {
             Column {
                 SectionTitle(NotInLibraryText)

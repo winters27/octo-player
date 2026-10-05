@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.library
 
+import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.discovery.IsrcIndex
 import app.winters.octo.discovery.TitleIndex
@@ -60,6 +61,18 @@ class LibraryIndex(val songs: List<Song>, val albums: List<Album>, val artists: 
     }
 
     fun hasAlbum(id: String) = id in albumIds
+
+    // The library's album of an album found online with its very name and
+    // artist (case, accents and punctuation aside), as the server judges
+    // it; nothing when there is none. Octo leaves such an album out of a
+    // search itself; this is for a server that does not yet.
+    fun namesake(album: Album): Album? = byNameAndArtist[nameAndArtistKey(album)]
+
+    private val byNameAndArtist: Map<String, Album> by lazy {
+        albums.filter { SongIdentity.key(it.name).isNotEmpty() }.associateBy(::nameAndArtistKey)
+    }
+
+    private fun nameAndArtistKey(album: Album) = SongIdentity.key(album.name) + "|" + SongIdentity.key(album.artist)
 
     fun hasArtist(id: String) = id in artistIds
 

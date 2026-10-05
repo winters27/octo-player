@@ -3,10 +3,13 @@ package app.winters.octo.ui.search
 import app.winters.octo.catalog.OnlineSongEntity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.discovery.Discovered
+import app.winters.octo.discovery.OnlineAlbum
+import app.winters.octo.discovery.albumShareLine
 import app.winters.octo.discovery.Resolved
 import app.winters.octo.discovery.adoptionsOf
 import app.winters.octo.discovery.asAdopted
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -59,6 +62,21 @@ class SearchSectionsTest {
         assertTrue(listedFinds(adoptions, songs).isEmpty())
         val found = Discovered(listOf(track("find:e1", "Genesis")), emptyList(), emptyList())
         assertSame(found, found.without(listedFinds(adoptions, songs)))
+    }
+
+    // Brandon, 2026-10-04: What A Time To Be Alive, two of whose songs he
+    // has, sat under "Not in your library". Albums the library holds some of
+    // are kept apart, and stay so when the songs listed change.
+    @Test
+    fun albumsHeldInPartStayApartFromTheFinds() {
+        val wattba = OnlineAlbum("e-wattba", "What A Time To Be Alive", "Drake", null, 2015, 11, null, ownedCount = 2)
+        val partOnly = Discovered(emptyList(), emptyList(), emptyList(), partAlbums = listOf(wattba))
+        assertTrue(partOnly.notInLibraryEmpty)
+        assertFalse(partOnly.isEmpty)
+        val found = Discovered(listOf(track("find:e1", "Genesis"), track("find:e2", "Phantom")), emptyList(), emptyList(), partAlbums = listOf(wattba))
+        val after = found.without(setOf("find:e1"))
+        assertEquals(listOf(wattba), after.partAlbums)
+        assertEquals("2 of 11 in your library", albumShareLine(wattba.ownedCount, wattba.songCount))
     }
 
     @Test

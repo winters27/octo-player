@@ -214,6 +214,8 @@ fun MediaCard(
     badge: @Composable (() -> Unit)? = null,
     // Draws the picture instead of the cover, like a playlist's designed one.
     picture: (@Composable (Modifier, Shape) -> Unit)? = null,
+    // A quiet third line, like how much of an album found online the library holds.
+    note: String? = null,
 ) {
     val shape = if (round) CircleShape else RoundedCornerShape(8.dp)
     val pointer = LocalPointer.current
@@ -246,6 +248,7 @@ fun MediaCard(
             // With the keyboard on the card, a cut title shows whole.
             CompositionLocalProvider(LocalKeyboardHere provides (here && keyboard)) { CutTxt(title, OctoType.label) }
             if (subtitle != null) CutTxt(subtitle, OctoType.caption, OctoColors.TextMuted)
+            if (note != null) CutTxt(note, OctoType.caption, OctoColors.TextMuted)
         }
     }
 }

@@ -77,6 +77,11 @@ data class Album(
     // What kind of release it is, from MusicBrainz tags ("Album", "EP",
     // "Single", "Compilation", "Live"...), on OpenSubsonic servers.
     @Serializable(with = LooseStrings::class) val releaseTypes: List<String> = emptyList(),
+    // Octo: an album found online rather than one in the library, and how
+    // many of its songs the library already holds, under any album. No
+    // count when the server did not look.
+    val isExternal: Boolean = false,
+    val ownedCount: Int? = null,
 )
 
 // A date an OpenSubsonic server sends in parts, any of which can be missing.

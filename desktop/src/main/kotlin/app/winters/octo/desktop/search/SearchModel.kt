@@ -5,6 +5,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.winters.octo.catalog.searchKey
+import app.winters.octo.discovery.AlbumShare
+import app.winters.octo.discovery.albumShare
 import app.winters.octo.desktop.library.LibraryIndex
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.userMessage
@@ -58,12 +60,19 @@ data class LibraryResults(
 
 // What the server found online, beyond the library: only from a server
 // that lists octoAcquisitions, which can also fetch them into the library.
+// `partAlbums` are albums found online that the library holds some of the
+// songs of (Octo counts them), kept apart from the ones it holds none of,
+// so the "Not in your library" heading is never over an album that partly is.
 data class OutsideResults(
     val songs: List<Song> = emptyList(),
     val albums: List<Album> = emptyList(),
     val artists: List<Artist> = emptyList(),
+    val partAlbums: List<Album> = emptyList(),
 ) {
-    val isEmpty get() = songs.isEmpty() && albums.isEmpty() && artists.isEmpty()
+    val isEmpty get() = notInLibraryEmpty && partAlbums.isEmpty()
+
+    // Nothing to list under "Not in your library".
+    val notInLibraryEmpty get() = songs.isEmpty() && albums.isEmpty() && artists.isEmpty()
 }
 
 data class SearchFound(val library: LibraryResults, val outside: OutsideResults)
@@ -97,7 +106,16 @@ fun splitResults(
     // copy here, once: the library's songs are only library songs, so none
     // of them reads as "not in your library" with a "+" beside it.
     val songs = if (telling) held.map { if (it.isExternal) index.copyOf(it) ?: it else it }.distinctBy { it.id } else held
-    val (albums, outsideAlbums) = if (telling) sent.album.partition { index.hasAlbum(it.id) } else sent.album to emptyList()
+    val (libraryAlbums, foundAlbums) = if (telling) sent.album.partition { index.hasAlbum(it.id) } else sent.album to emptyList()
+    // An album found online that is a library album by its very name and
+    // artist is that album. One the library holds every song of (Octo
+    // counts them) is the library's too: it opens with the library's copies.
+    val namesakes = foundAlbums.associateWith { if (telling) index.namesake(it) else null }
+    val unnamed = foundAlbums.filter { namesakes[it] == null }
+    val shares = unnamed.associateWith(::albumShare)
+    val albums = (libraryAlbums + namesakes.values.filterNotNull() + unnamed.filter { shares[it] == AlbumShare.Whole }).distinctBy { it.id }
+    val partAlbums = unnamed.filter { shares[it] == AlbumShare.Part }
+    val outsideAlbums = unnamed.filter { shares[it] == null || shares[it] == AlbumShare.None }
     val (artists, outsideArtists) = if (telling) sent.artist.partition { index.hasArtist(it.id) } else sent.artist to emptyList()
     val key = searchKey(query)
     val named = if (caps.playlists > 0) playlists.filter { searchKey(it.name).contains(key) } else emptyList()
@@ -116,6 +134,7 @@ fun splitResults(
             songs = if (caps.songs > 0) outsideSongs else emptyList(),
             albums = if (caps.albums > 0) outsideAlbums else emptyList(),
             artists = if (caps.artists > 0) outsideArtists else emptyList(),
+            partAlbums = if (caps.albums > 0) partAlbums else emptyList(),
         ),
     )
 }

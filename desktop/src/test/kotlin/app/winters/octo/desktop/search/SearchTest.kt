@@ -3,6 +3,7 @@ package app.winters.octo.desktop.search
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.library.LibraryIndex
 import app.winters.octo.desktop.songJson
+import app.winters.octo.discovery.albumShareLine
 import app.winters.octo.subsonic.Acquisition
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Artist
@@ -66,6 +67,42 @@ class SearchTest {
         assertEquals(listOf("ext1"), found.outside.songs.map { it.id })
         assertEquals(listOf("ext-alb"), found.outside.albums.map { it.id })
         assertEquals(listOf("ext-art"), found.outside.artists.map { it.id })
+    }
+
+    // Brandon, 2026-10-04: searching "drake" listed albums he owns under
+    // "Not in your library": HABIBTI (all eleven songs are in his HABIBTI
+    // (FOMO)), HABIBTI (FOMO) itself, and What A Time To Be Alive as if he
+    // had none of it, though he has two of its songs.
+    @Test
+    fun albumsFoundOnlineGoWhereTheLibraryHoldsThem() {
+        val fomo = Album("al-fomo", "HABIBTI (FOMO)", artist = "Drake", songCount = 15)
+        val library = LibraryIndex(emptyList(), listOf(Album("al-take", "Take Care", artist = "Drake"), fomo), emptyList())
+        val sent = SearchResult(
+            album = listOf(
+                Album("al-take", "Take Care", artist = "Drake"),
+                // From a server that does not leave out the library's namesake.
+                Album("e-fomo", "HABIBTI (FOMO)", artist = "Drake", songCount = 15, isExternal = true),
+                Album("e-held", "HABIBTI", artist = "Drake", songCount = 11, isExternal = true, ownedCount = 11),
+                Album("e-wattba", "What A Time To Be Alive", artist = "Drake", songCount = 11, isExternal = true, ownedCount = 2),
+                Album("e-maid", "MAID OF HONOUR", artist = "Drake", songCount = 14, isExternal = true, ownedCount = 0),
+                // Not counted: listed as before.
+                Album("e-sss", "\$ome \$exy \$ongs 4 U", artist = "PARTYNEXTDOOR", songCount = 21, isExternal = true),
+            ),
+        )
+        val found = splitResults(sent, "drake", SearchFilter.All, emptyList(), library, outsideOn = true)
+
+        assertEquals(listOf("al-take", "al-fomo", "e-held"), found.library.albums.map { it.id })
+        assertEquals(listOf("e-wattba"), found.outside.partAlbums.map { it.id })
+        assertEquals("2 of 11 in your library", albumShareLine(found.outside.partAlbums.single()))
+        assertEquals(listOf("e-maid", "e-sss"), found.outside.albums.map { it.id })
+        assertFalse(found.outside.notInLibraryEmpty)
+
+        // Only partly held albums: nothing goes under "Not in your library".
+        val partOnly = splitResults(SearchResult(album = listOf(sent.album[3])), "drake", SearchFilter.All, emptyList(), library, outsideOn = true)
+        assertTrue(partOnly.outside.notInLibraryEmpty)
+        assertFalse(partOnly.outside.isEmpty)
+        // And the Albums filter keeps them.
+        assertEquals(listOf("e-wattba"), splitResults(sent, "drake", SearchFilter.Albums, emptyList(), library, outsideOn = true).outside.partAlbums.map { it.id })
     }
 
     @Test

@@ -31,7 +31,8 @@ private const val SEARCH_SONGS = 40
 // How many songs a radio plays after the one it started from.
 private const val RADIO_SONGS = 50
 
-// An album on the server, not in the library.
+// An album on the server, not in the library. `ownedCount` is how many of
+// its songs the library holds, when Octo counted them.
 data class OnlineAlbum(
     val id: String,
     val title: String,
@@ -40,6 +41,7 @@ data class OnlineAlbum(
     val year: Int?,
     val songCount: Int,
     val artwork: String?,
+    val ownedCount: Int? = null,
 )
 
 data class OnlineArtist(val id: String, val name: String, val albumCount: Int, val artwork: String?)
@@ -47,9 +49,19 @@ data class OnlineArtist(val id: String, val name: String, val albumCount: Int, v
 // A station the server runs, played as the list of songs it has lined up.
 data class Station(val id: String, val name: String, val artwork: String?)
 
-// What a search found beyond the library.
-class Discovered(val songs: List<TrackEntity>, val albums: List<OnlineAlbum>, val artists: List<OnlineArtist>) {
-    val isEmpty get() = songs.isEmpty() && albums.isEmpty() && artists.isEmpty()
+// What a search found beyond the library. `partAlbums` are albums the
+// library holds some of the songs of, kept apart from those it holds none
+// of, so the "Not in your library" title is never over one that partly is.
+class Discovered(
+    val songs: List<TrackEntity>,
+    val albums: List<OnlineAlbum>,
+    val artists: List<OnlineArtist>,
+    val partAlbums: List<OnlineAlbum> = emptyList(),
+) {
+    val isEmpty get() = notInLibraryEmpty && partAlbums.isEmpty()
+
+    // Nothing to list under "Not in your library".
+    val notInLibraryEmpty get() = songs.isEmpty() && albums.isEmpty() && artists.isEmpty()
 }
 
 class OnlineAlbumPage(val album: OnlineAlbum, val songs: List<TrackEntity>)
@@ -80,7 +92,17 @@ class Discovery @Inject constructor(
         val (client, sourceId) = server() ?: return null
         val found = client.search(query.trim(), artists = 10, albums = 20, songs = SEARCH_SONGS)
         val songs = resolve(client, sourceId, found.song).filter { isFind(it.id) }
-        return Discovered(songs, notInLibrary(sourceId, found.album).map { it.toOnline(sourceId) }, artistsNotInLibrary(sourceId, found))
+        // Octo counts how many songs of each album the library holds. One it
+        // holds every song of is not a find (its songs are in the library);
+        // one it holds some of goes apart, saying how many.
+        val albums = notInLibrary(sourceId, found.album).filter { albumShare(it) != AlbumShare.Whole }
+        val (part, none) = albums.partition { albumShare(it) == AlbumShare.Part }
+        return Discovered(
+            songs,
+            none.map { it.toOnline(sourceId) },
+            artistsNotInLibrary(sourceId, found),
+            partAlbums = part.map { it.toOnline(sourceId) },
+        )
     }
 
     // The song first, then songs like it.
@@ -238,6 +260,7 @@ class Discovery @Inject constructor(
 
     private fun Album.toOnline(sourceId: String) = OnlineAlbum(
         id, name, artist, artistId, year, songCount, onlineArtwork(sourceId, coverArt),
+        ownedCount = ownedCount.takeIf { isExternal },
     )
 
     private fun server(): Pair<SubsonicClient, String>? {
