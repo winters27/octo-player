@@ -214,6 +214,56 @@ class DownloadsTest {
         assertEquals("A running row is never cleared", listOf("s:b"), watch.rows.value.map { it.key })
     }
 
+    @Test
+    fun aFinishedLogIsAskedForAMinuteMore_ThenNoLonger() = runTest {
+        var loads = 0
+        var state = "downloading"
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val watch = DownloadLogWatch({ key -> loads++; download(key, state).copy(updatedAt = "2026-10-04T17:59:59Z") }, scope, clock = { now })
+        watch.follow("s:a")
+        scope.advanceTimeBy(LOG_POLL_MS * 3 + 1)
+        assertEquals(4, loads)
+
+        state = "done"
+        scope.advanceTimeBy(LOG_FINISHED_GRACE_MS + LOG_POLL_MS * 3)
+        val afterGrace = loads
+        assertTrue("Still asked a while for the lyrics line", afterGrace > 4 + LOG_FINISHED_GRACE_MS / LOG_POLL_MS - 2)
+        scope.advanceTimeBy(LOG_FINISHED_GRACE_MS * 10)
+        assertEquals("Asked no more once it settled", afterGrace, loads)
+        assertFalse(watch.following)
+        assertEquals("done", watch.row.value!!.state)
+    }
+
+    @Test
+    fun aLogThatFinishedLongAgoIsReadOnce() = runTest {
+        var loads = 0
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val watch = DownloadLogWatch({ key -> loads++; download(key, "failed").copy(updatedAt = "2026-10-04T15:00:00Z") }, scope, clock = { now })
+        watch.follow("s:a")
+        scope.advanceTimeBy(LOG_POLL_MS * 20)
+        assertEquals(1, loads)
+        assertFalse(watch.following)
+    }
+
+    @Test
+    fun aLogWaitsWhileTheAppIsBehind() = runTest {
+        var loads = 0
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val watch = DownloadLogWatch({ key -> loads++; download(key, "downloading") }, scope, clock = { now })
+        watch.follow("s:a")
+        scope.runCurrent()
+        assertEquals(1, loads)
+
+        watch.foreground = false
+        scope.advanceTimeBy(LOG_POLL_MS * 100)
+        assertEquals("Not asked while behind", 1, loads)
+
+        watch.foreground = true
+        scope.runCurrent()
+        assertEquals(2, loads)
+        watch.close()
+    }
+
     // A Find songs source whose search finishes on the second look, and
     // which notes each pick it is sent.
     private class FakeFind : FindSource {

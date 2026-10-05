@@ -223,13 +223,14 @@ class ServerDownloads @Inject constructor(
     }
 
     // Whether any of the app's screens is in front: the list is asked for
-    // only at the slow pace while none is.
+    // only at the slow pace while none is, and an open log not at all.
     private inner class ForegroundCallbacks : Application.ActivityLifecycleCallbacks {
         private val started = AtomicInteger(0)
 
         override fun onActivityStarted(activity: Activity) {
             if (started.incrementAndGet() == 1) {
                 watch.foreground = true
+                logWatch.foreground = true
                 watch.wake()
             }
         }
@@ -238,6 +239,7 @@ class ServerDownloads @Inject constructor(
             if (started.decrementAndGet() <= 0) {
                 started.set(0)
                 watch.foreground = false
+                logWatch.foreground = false
             }
         }
 

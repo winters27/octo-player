@@ -1,6 +1,7 @@
 package app.winters.octo.ui.downloads
 
 import app.winters.octo.subsonic.Acquisition
+import app.winters.octo.subsonic.AcquisitionStage
 import app.winters.octo.subsonic.FoundCandidate
 import app.winters.octo.subsonic.FoundSongs
 import app.winters.octo.subsonic.PickResult
@@ -11,6 +12,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -25,6 +27,10 @@ const val DOWNLOADS_IDLE_POLL_MS = 30_000L
 // How often an open log, and a running Find songs search, are asked for.
 const val LOG_POLL_MS = 1_500L
 const val FIND_POLL_MS = 1_500L
+
+// How long a finished download's log is still asked for: its lyrics are
+// looked for once the song is in, and their line comes a little after.
+const val LOG_FINISHED_GRACE_MS = 60_000L
 
 // What following the drawer needs from the app: the server's two lists.
 interface DownloadsSource {
@@ -156,11 +162,15 @@ class DownloadsWatch(
 }
 
 // Follows one download's log while it is open: often while it runs, and
-// a little after, since lyrics are looked for once the song is in.
+// for a minute once it has finished, since lyrics are looked for once the
+// song is in; then no more. A log that finished longer ago than that is
+// read once. Behind the app it waits until the app is in front again.
 class DownloadLogWatch(
     private val load: suspend (String) -> Acquisition,
     private val scope: CoroutineScope,
     private val pollMs: Long = LOG_POLL_MS,
+    private val graceMs: Long = LOG_FINISHED_GRACE_MS,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val _row = MutableStateFlow<Acquisition?>(null)
     val row: StateFlow<Acquisition?> = _row
@@ -170,19 +180,40 @@ class DownloadLogWatch(
     // Why the log could not be read, in words, while it cannot.
     val problem: StateFlow<String?> = _problem
 
+    private val front = MutableStateFlow(true)
+
+    // Whether the app is in front; behind it, the log is not asked for.
+    var foreground: Boolean
+        get() = front.value
+        set(value) {
+            front.value = value
+        }
+
     private var job: Job? = null
 
-    // Follows the download with this key until another is followed or the
-    // log closes.
+    // Whether the log is still being asked for.
+    val following: Boolean get() = job?.isActive == true
+
+    // Follows the download with this key until it has finished a while,
+    // another is followed, or the log closes.
     fun follow(key: String) {
         job?.cancel()
         _row.value = null
         _problem.value = null
         job = scope.launch {
+            // How long it has been seen finished here.
+            var finishedFor = 0L
             while (isActive) {
+                front.first { it }
                 try {
-                    _row.value = load(key)
+                    val now = load(key)
+                    _row.value = now
                     _problem.value = null
+                    if (now.stage == AcquisitionStage.Done || now.stage == AcquisitionStage.Failed) {
+                        val age = ageMs(now.updatedAt, clock()) ?: 0L
+                        if (finishedFor >= graceMs || age >= graceMs) break
+                        finishedFor += pollMs
+                    }
                 } catch (e: SubsonicException) {
                     _problem.value = if (e is SubsonicException.NotFound) "This download is no longer on the server" else "Could not reach the server"
                     if (e is SubsonicException.NotFound) break
