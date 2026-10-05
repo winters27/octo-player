@@ -345,7 +345,7 @@ object SongIdentity {
     // a title, "Mask Off Remix", "Heat Waves Sped Up". Not "live" or "edit":
     // too many titles end in them.
     private val TrailingVersion = rx(
-        """$S+(re-?mix|rmx|sped$S*up|speed$S*up|slowed(?:$S*(?:\+|&|and|n)$S*reverb(?:ed)?)?|slowed$S+down|nightcore|instrumental|acapella|a$S*cappella|karaoke(?:$S+version)?)$""",
+        """$S+(re-?mix|rmx|sped$S*up|speed$S*up|slowed(?:$S*(?:\+|&|and|n)$S*reverb(?:ed)?)?|slowed$S+down|nightcore|instrumental|acapella|a$S*cappella|karaoke(?:$S+version)?|drumless|8d$S+audio)$""",
         ignoreCase = true,
     )
 
@@ -385,7 +385,10 @@ object SongIdentity {
     private val NeutralPhrase = rx(
         """^(?:from|taken from|as heard (?:in|on)|as featured in|as seen (?:in|on)|theme from|music from)$E""" +
             """|$B(?:soundtrack|ost|motion picture|original score)$E""" +
-            """|^bonus(?:$S+track)?$|^(?:prod|produced)$E|^(?:deluxe|expanded|anniversary|special)(?:$S+(?:edition|version))?$""" +
+            """|^bonus(?:$S+tracks?)?(?:$S+(?:edition|version))?$|^(?:prod|produced)$E""" +
+            // A release edition is the same recordings packaged again;
+            // "Drumless Edition" is a marker below.
+            """|^(?:(?:super$S+)?deluxe|expanded|(?:$D+(?:st|nd|rd|th)$S+)?anniversary|special|collector'?s|limited|tour|platinum)(?:$S+(?:edition|version))?$""" +
             """|^(?:copyright free|free download|out now|audio only|single|ep)$""",
         ignoreCase = true,
     )
@@ -414,6 +417,14 @@ object SongIdentity {
         Marker("""${B}slowed(?:$S+down)?$E""", "slowed"),
         Marker("""${B}reverb(?:ed)?$E""", "reverb"),
         Marker("""${B}nightcore$E""", "nightcore"),
+        // Editions that change what is played, unlike a deluxe or
+        // anniversary one (NeutralPhrase).
+        Marker("""${B}drumless$E""", "drumless"),
+        Marker("""${B}8d(?:$S+audio)?$E""", "8d"),
+        Marker("""${B}piano(?:$S+(?:version|edition|arrangement))?$E""", "piano"),
+        Marker("""$B(?:orchestral|symphonic)(?:$S+(?:version|edition|mix))?$E""", "orchestral"),
+        Marker("""${B}lo-?fi(?:$S+(?:version|edit|mix))?$E""", "lofi"),
+        Marker("""${B}bass$S*boost(?:ed)?$E""", "bass boosted"),
         Marker("""^(.*?)$S*$B(?:re-?mix(?:ed)?|rmx)$E""", "remix", credited = true),
         Marker("""${B}vip(?:$S+mix)?$E""", "vip"),
         Marker("""${B}bootleg$E""", "bootleg"),

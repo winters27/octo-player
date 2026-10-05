@@ -252,6 +252,24 @@ class CatalogMergerTest {
     }
 
     @Test
+    fun aDrumlessEditionIsItsOwnSongWhileAnAnniversaryCopyMerges() {
+        val serverSide = server(
+            tracks = listOf(
+                track("s1", "server", "Hotline Bling (10th Anniversary Edition)", "server:album"),
+                track("s2", "server", "One Dance (Drumless Edition)", "server:album"),
+            ),
+            albums = listOf(album("server:album", "server", songs = 2)),
+            artists = listOf(artist("server:artist", "server")),
+        )
+        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        // An anniversary edition packages the same recording again; a
+        // drumless one of the same length is another recording.
+        assertEquals("p1", merged.mergedIds["s1"])
+        assertEquals("s2", merged.mergedIds["s2"])
+        assertEquals(3, merged.tracks.size)
+    }
+
+    @Test
     fun stylizedAndCurlyTitlesStillMerge() {
         val phone = phone(
             tracks = listOf(track("p1", "device", "Huntin’ Wabbitz", "device:album"), track("p2", "device", "${'$'}UICIDE", "device:album")),
