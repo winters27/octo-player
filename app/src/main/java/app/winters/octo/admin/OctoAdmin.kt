@@ -31,6 +31,12 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
+// Whether an admin call may carry the sign-in: only to the server's own
+// addresses, or to one Octo itself announced for its stations. A saved
+// address from another network could belong to anything.
+internal fun mayCarrySignIn(target: HttpUrl, trusted: Set<HttpUrl>): Boolean =
+    target.newBuilder().encodedPath("/").query(null).build() in trusted
+
 // What Octo says about itself and the services it works with.
 @Serializable
 data class Health(val ok: Boolean = false, val detail: String = "", val warning: Boolean = false, val configured: Boolean = true)
@@ -108,6 +114,9 @@ class OctoAdmin @Inject constructor(
     private val calls = http.newBuilder().callTimeout(30, TimeUnit.SECONDS).build()
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; explicitNulls = false }
 
+    // The addresses the app trusts with its sign-in, from the last locate().
+    @Volatile private var trusted: Set<HttpUrl> = emptySet()
+
     // The address last found, shown as a hint and tried first.
     val lastFound = context.adminData.data.map { it[ADDRESS]?.toHttpUrlOrNull() }
 
@@ -119,8 +128,13 @@ class OctoAdmin @Inject constructor(
         suspend fun first(candidates: List<HttpUrl>): HttpUrl? =
             candidates.map(::root).filter(tried::add).firstOrNull { answers(it) }
         // The station addresses cost a server call, so they are only asked for last.
+        val own = listOf(client.baseUrl, client.primaryUrl).map(::root).toSet()
+        trusted = own
         val found = first(listOfNotNull(client.baseUrl, client.primaryUrl, lastFound.first()))
-            ?: first(stationHosts(client))
+            ?: stationHosts(client).map(::root).let { announced ->
+                trusted = own + announced
+                first(announced)
+            }
             ?: return null
         context.adminData.edit { it[ADDRESS] = found.toString() }
         return found
@@ -166,9 +180,10 @@ class OctoAdmin @Inject constructor(
         serializer: KSerializer<T>,
         query: List<Pair<String, String>> = emptyList(),
     ): T = withContext(Dispatchers.IO) {
-        val url = api(base, path).newBuilder().apply { query.forEach { (k, v) -> addQueryParameter(k, v) } }.build()
+        val url = sign(api(base, path).newBuilder().apply { query.forEach { (k, v) -> addQueryParameter(k, v) } }.build())
         try {
             calls.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                if (response.code == 403) throw AdminUnavailable("Needs a Navidrome admin account")
                 if (!response.isSuccessful) throw AdminUnavailable("HTTP ${response.code} from $path")
                 json.decodeFromString(serializer, response.body.string())
             }
@@ -182,7 +197,7 @@ class OctoAdmin @Inject constructor(
     // A change. Octo only takes changes that carry its admin header.
     private suspend fun send(base: HttpUrl, path: String, body: String) = withContext(Dispatchers.IO) {
         val request = Request.Builder()
-            .url(api(base, path))
+            .url(sign(api(base, path)))
             .header("X-Octo-Admin", "1")
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
@@ -197,6 +212,14 @@ class OctoAdmin @Inject constructor(
 
     private fun api(base: HttpUrl, path: String): HttpUrl =
         base.newBuilder().encodedPath("/api/admin/$path").build()
+
+    // Octo's admin pages ask who is calling; the app answers with its own
+    // sign-in, but only to an address it already trusts with it. The status
+    // probe in answers() stays unsigned, since it asks addresses that may not be Octo.
+    private fun sign(url: HttpUrl): HttpUrl {
+        val client = client() ?: return url
+        return if (mayCarrySignIn(url, trusted)) client.signed(url) else url
+    }
 
     private fun client(): SubsonicClient? = (sessions.state.value as? SessionState.SignedIn)?.session?.client
 

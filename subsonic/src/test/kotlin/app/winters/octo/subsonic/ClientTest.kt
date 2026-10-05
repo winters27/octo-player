@@ -55,6 +55,18 @@ class ClientTest {
     }
 
     @Test
+    fun anAdminAddressIsSignedLikeASubsonicCall() {
+        val admin = server.url("/api/admin/status")
+        val url = client().signed(admin)
+        assertEquals("/api/admin/status", url.encodedPath)
+        listOf("u", "t", "s", "v", "c").forEach { assertTrue(it, url.queryParameter(it) != null) }
+        assertEquals("winters", url.queryParameter("u"))
+        assertNull(url.queryParameter("p"))
+        assertFalse(url.toString().contains("horse"))
+        assertNotEquals(url.queryParameter("s"), client().signed(admin).queryParameter("s"))
+    }
+
+    @Test
     fun saltChangesPerCall() = runTest {
         answer("ping")
         answer("ping")
