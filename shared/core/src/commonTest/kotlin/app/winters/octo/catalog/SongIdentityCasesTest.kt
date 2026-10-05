@@ -61,8 +61,8 @@ class SongIdentityCasesTest {
 
     @Test
     fun theFileHasEveryCase() {
-        assertEquals(225, section("compare").size)
-        assertEquals(56, section("parse").size)
+        assertEquals(231, section("compare").size)
+        assertEquals(58, section("parse").size)
         assertEquals(6, section("queries").size)
     }
 

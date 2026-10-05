@@ -425,6 +425,12 @@ object SongIdentity {
         Marker("""$B(?:orchestral|symphonic)(?:$S+(?:version|edition|mix))?$E""", "orchestral"),
         Marker("""${B}lo-?fi(?:$S+(?:version|edit|mix))?$E""", "lofi"),
         Marker("""${B}bass$S*boost(?:ed)?$E""", "bass boosted"),
+        // Two songs or more in one: never the song asked for. Ahead of
+        // "mix", so a megamix is not a mix.
+        Marker("""${B}mash(?:$S|-)?ups?$E""", "mashup"),
+        Marker("""${B}medley$E""", "medley"),
+        Marker("""${B}mega(?:$S|-)?mix$E""", "megamix"),
+        Marker("""${B}blend$E""", "blend"),
         Marker("""^(.*?)$S*$B(?:re-?mix(?:ed)?|rmx)$E""", "remix", credited = true),
         Marker("""${B}vip(?:$S+mix)?$E""", "vip"),
         Marker("""${B}bootleg$E""", "bootleg"),
