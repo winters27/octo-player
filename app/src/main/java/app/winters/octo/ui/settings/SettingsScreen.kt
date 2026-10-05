@@ -41,8 +41,8 @@ import app.winters.octo.BuildConfig
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.connection.ConnectionChooser
 import app.winters.octo.connection.Place
-import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.KeptServers
+import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.design.GlassInput
 import app.winters.octo.design.OctoColors

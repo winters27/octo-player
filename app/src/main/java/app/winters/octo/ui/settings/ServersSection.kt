@@ -108,7 +108,7 @@ internal fun ServerList(vm: ServerViewModel, onOpen: (NavKey) -> Unit, onChangeP
         sheet.show(ChoiceRequest(server.name, actions.map { it.first }, -1) { picked -> actions.getOrNull(picked)?.second?.invoke() })
     }
 
-    SettingsGroup(title = SettingsIndex.YourServers.title) {
+    SettingsGroup(title = SettingsIndex.YourServers.title, icon = OctoIcons.Servers) {
         kept.servers.forEachIndexed { index, server ->
             val isInUse = server.id == inUse?.id
             ServerRow(
