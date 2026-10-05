@@ -1,6 +1,7 @@
 package app.winters.octo.playback
 
 import android.util.Log
+import app.winters.octo.admin.OctoAdmin
 import app.winters.octo.data.Session
 import app.winters.octo.data.SessionHandoff
 import app.winters.octo.data.SessionRepository
@@ -92,6 +93,7 @@ class ServerSwitch @Inject constructor(
     private val recent: RecentPlaylists,
     private val liveLists: LiveListStore,
     private val offline: OfflineDownloads,
+    private val admin: OctoAdmin,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var started = false
@@ -176,8 +178,9 @@ class ServerSwitch @Inject constructor(
 
     // Takes a server off the list, with its copy of the library. With
     // `forgetHere`, what the phone keeps for it goes too: its queue, plays
-    // waiting to be sent, live lists, downloads and the rest; otherwise it
-    // stays in case the server is added again.
+    // waiting to be sent, live lists, downloads, where its Octo admin pages
+    // answer and the rest; otherwise it stays in case the server is added
+    // again.
     fun remove(id: String, forgetHere: Boolean) {
         scope.launch {
             val gone = sync.remove(id) ?: return@launch
@@ -189,6 +192,7 @@ class ServerSwitch @Inject constructor(
             recent.forget(id)
             liveLists.forget(id)
             serverQueue.forget(id)
+            admin.forget(id)
             // Another kept account on the same address keeps the downloads.
             val shared = sessions.servers.value.servers.any { it.sourceId == gone.sourceId }
             if (!shared) gone.sourceId?.let { offline.forgetSource(it) }

@@ -4,11 +4,15 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
+import app.winters.octo.data.accountId
 import app.winters.octo.subsonic.SubsonicClient
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -114,30 +118,52 @@ class OctoAdmin @Inject constructor(
     private val calls = http.newBuilder().callTimeout(30, TimeUnit.SECONDS).build()
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; explicitNulls = false }
 
-    // The addresses the app trusts with its sign-in, from the last locate().
-    @Volatile private var trusted: Set<HttpUrl> = emptySet()
+    // The addresses the app trusts with its sign-in, from the last locate(),
+    // and the kept server they were found for: only that server's sign-in
+    // ever goes to them.
+    private class Trust(val server: String, val urls: Set<HttpUrl>)
 
-    // The address last found, shown as a hint and tried first.
-    val lastFound = context.adminData.data.map { it[ADDRESS]?.toHttpUrlOrNull() }
+    @Volatile private var trusted: Trust? = null
+
+    // The kept server in use, by its id, as it changes; null with none.
+    val server: Flow<String?> = sessions.state.map { it.accountId }.distinctUntilChanged()
 
     // Where the admin pages answer right now, or null when away from home
     // or not signed in to Octo.
     suspend fun locate(): HttpUrl? {
-        val client = client() ?: return null
+        val session = session() ?: return null
+        val client = session.client
         val tried = HashSet<HttpUrl>()
         suspend fun first(candidates: List<HttpUrl>): HttpUrl? =
             candidates.map(::root).filter(tried::add).firstOrNull { answers(it) }
         // The station addresses cost a server call, so they are only asked for last.
         val own = listOf(client.baseUrl, client.primaryUrl).map(::root).toSet()
-        trusted = own
-        val found = first(listOfNotNull(client.baseUrl, client.primaryUrl, lastFound.first()))
+        trusted = Trust(session.id, own)
+        val found = first(listOfNotNull(client.baseUrl, client.primaryUrl, lastFound(session.id)))
             ?: stationHosts(client).map(::root).let { announced ->
-                trusted = own + announced
+                trusted = Trust(session.id, own + announced)
                 first(announced)
             }
             ?: return null
-        context.adminData.edit { it[ADDRESS] = found.toString() }
+        context.adminData.edit {
+            it[addressKey(session.id)] = found.toString()
+            it.remove(ADDRESS)
+        }
         return found
+    }
+
+    // Forgets where a server taken off the list had its admin pages.
+    suspend fun forget(server: String) {
+        context.adminData.edit { it.remove(addressKey(server)) }
+    }
+
+    // The address last found for a kept server, tried first. An older
+    // version kept one for its only server, which stays that server's while
+    // it is the only one kept.
+    private suspend fun lastFound(server: String): HttpUrl? {
+        val saved = context.adminData.data.first()
+        val older = saved[ADDRESS].takeIf { sessions.servers.value.servers.size == 1 }
+        return (saved[addressKey(server)] ?: older)?.toHttpUrlOrNull()
     }
 
     suspend fun status(base: HttpUrl): AdminStatus = get(base, "status", AdminStatus.serializer())
@@ -216,15 +242,23 @@ class OctoAdmin @Inject constructor(
     // Octo's admin pages ask who is calling; the app answers with its own
     // sign-in, but only to an address it already trusts with it. The status
     // probe in answers() stays unsigned, since it asks addresses that may not be Octo.
+    // Another kept server's sign-in never goes to addresses found for the
+    // one before it.
     private fun sign(url: HttpUrl): HttpUrl {
-        val client = client() ?: return url
-        return if (mayCarrySignIn(url, trusted)) client.signed(url) else url
+        val session = session() ?: return url
+        val trust = trusted?.takeIf { it.server == session.id } ?: return url
+        return if (mayCarrySignIn(url, trust.urls)) session.client.signed(url) else url
     }
 
-    private fun client(): SubsonicClient? = (sessions.state.value as? SessionState.SignedIn)?.session?.client
+    private fun session(): Session? = (sessions.state.value as? SessionState.SignedIn)?.session
+
+    private fun client(): SubsonicClient? = session()?.client
 
     private companion object {
+        // An older version's one address, for its only server.
         val ADDRESS = stringPreferencesKey("address")
+
+        fun addressKey(server: String) = stringPreferencesKey("address@$server")
 
         // How long to wait for the station list when looking for Octo.
         const val STATIONS_WAIT_MS = 5_000L
