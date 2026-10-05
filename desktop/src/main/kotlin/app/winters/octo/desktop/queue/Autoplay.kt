@@ -5,8 +5,12 @@ import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.system.OPENED_FILE_PREFIX
+import app.winters.octo.playback.AUTOPLAY_BATCH
 import app.winters.octo.playback.QueueSource
 import app.winters.octo.playback.autoplayPicks
+import app.winters.octo.radio.RadioInput
+import app.winters.octo.radio.radioMix
+import app.winters.octo.radio.radioSong
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
@@ -17,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlin.random.Random
 
 // Songs played this recently are not picked again, as on the phone.
 private const val RECENT_PLAYS = 50
@@ -109,11 +114,24 @@ class Autoplay(
     }
 }
 
-// The songs Autoplay adds after `seed`, as the phone picks them: the
-// server's songs like it, else the library's songs by the same artist, then
-// in the same genre, else any from the library, never one in `exclude` or
-// played lately.
-suspend fun autoplaySongs(seed: Song, exclude: Set<String>, client: SubsonicClient?, index: LibraryIndex?): List<Song> {
+// The songs Autoplay adds after `seed`: Octo's radio for the seed and the
+// listener's own recent songs (`anchors`), over the library and the
+// server's songs like the seed (see radioMix), spaced on from the songs in
+// `before`. When the radio finds nothing (a seed with no genre and no
+// server answer), the old rules: the library's songs by the same artist,
+// then in the same genre, else any from the library. Never one in
+// `exclude` or played lately.
+suspend fun autoplaySongs(
+    seed: Song,
+    exclude: Set<String>,
+    client: SubsonicClient?,
+    index: LibraryIndex?,
+    before: List<Song> = emptyList(),
+    anchors: List<Song> = emptyList(),
+    rating: (Song) -> Int = { it.userRating ?: 0 },
+    now: Long = System.currentTimeMillis(),
+    random: Random = Random.Default,
+): List<Song> {
     val recent = index?.history?.take(RECENT_PLAYS)?.map { it.id }.orEmpty()
     val skip = exclude + recent + seed.id
     val similar = try {
@@ -123,10 +141,23 @@ suspend fun autoplaySongs(seed: Song, exclude: Set<String>, client: SubsonicClie
     }
     val known = HashMap<String, Song>()
     similar.forEach { known[it.id] = it }
+    index?.songs?.forEach { known[it.id] = it }
+    val mixed = radioMix(
+        RadioInput(
+            seeds = (listOf(seed) + anchors).distinctBy { it.id }.map { it.radioSong(rating(it)) },
+            library = index?.songs.orEmpty().map { it.radioSong(rating(it)) },
+            suggested = similar.map { it.radioSong(rating(it)) },
+            before = (before + seed).map { it.radioSong(rating(it)) },
+            exclude = skip,
+            now = now,
+        ),
+        AUTOPLAY_BATCH,
+        random,
+    )
+    if (mixed.isNotEmpty()) return mixed.mapNotNull { known[it.id] }
     val fromServer = autoplayPicks(similar.map { it.id }, emptyList(), emptyList(), skip)
     if (fromServer.isNotEmpty()) return fromServer.mapNotNull(known::get)
     if (index == null) return emptyList()
-    index.songs.forEach { known[it.id] = it }
     val artist = index.songs.filter { song ->
         if (seed.artistId != null) song.artistId == seed.artistId else song.artist != null && song.artist.equals(seed.artist, ignoreCase = true)
     }

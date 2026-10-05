@@ -258,7 +258,15 @@ class AppState(
         player,
         settings.state.map { it.playback.autoplay }.stateIn(scope, SharingStarted.Eagerly, settings.current.playback.autoplay),
         scope,
-        pick = { seed, exclude -> autoplaySongs(seed, exclude, connection?.client, library?.index) },
+        pick = { seed, exclude ->
+            val recent = player.state.value.queue.takeLast(30)
+            val before = recent.map { it.song }
+            // The listener's own songs keep Autoplay near their taste.
+            val anchors = recent.filter { it.source != QueueSource.Autoplay && it.song.id != seed.id }.map { it.song }.takeLast(10).reversed()
+            withContext(Dispatchers.Default) {
+                autoplaySongs(seed, exclude, connection?.client, library?.index, before, anchors, rating = { ratingOf(it) })
+            }
+        },
     ).also { it.start() }
 
     // ---- End of the queue's edits ----

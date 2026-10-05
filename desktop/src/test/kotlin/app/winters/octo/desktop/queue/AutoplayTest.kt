@@ -127,10 +127,22 @@ class AutoplayTest {
     )
 
     @Test
-    fun withoutTheServerTheArtistComesFirstThenTheGenre() = runBlocking {
+    fun withoutTheServerTheRadioPicksFromTheGenreAndNeverTheSameArtistBackToBack() = runBlocking {
         val seed = Song("seed", "Seed", artistId = "r1", genre = "Rock")
         val picks = autoplaySongs(seed, setOf("a2"), client = null, index = library).map { it.id }
-        assertEquals(listOf("a1", "g1"), picks)
+        assertEquals(listOf("g1", "a1"), picks)
+    }
+
+    @Test
+    fun theListenersOwnSongsPullAutoplayBackToTheirTaste() = runBlocking {
+        val rock = (1..3).map { Song("r$it", "R$it", artist = "Rock $it", genre = "Rock", duration = 200) }
+        val jazz = (1..3).map { Song("j$it", "J$it", artist = "Jazz $it", genre = "Jazz", duration = 200) }
+        val index = LibraryIndex(rock + jazz, emptyList(), emptyList())
+        val drifted = jazz.first()
+        val without = autoplaySongs(drifted, emptySet(), client = null, index = index, random = Random(1)).map { it.id }
+        assertTrue(without.none { it.startsWith("r") })
+        val with = autoplaySongs(drifted, emptySet(), client = null, index = index, anchors = rock.take(2), random = Random(1)).map { it.id }
+        assertTrue(with.any { it.startsWith("r") })
     }
 
     @Test

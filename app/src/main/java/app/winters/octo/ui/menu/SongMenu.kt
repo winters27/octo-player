@@ -1,6 +1,5 @@
 package app.winters.octo.ui.menu
 
-import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -13,31 +12,28 @@ import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.isFind
 import app.winters.octo.design.PopupPages
-import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.DownloadState
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.asTrack
 import app.winters.octo.offline.DownloadEntity
 import app.winters.octo.offline.DownloadStatus
 import app.winters.octo.offline.OfflineDownloads
+import app.winters.octo.playback.LibraryRadio
 import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.PlaylistStore
+import app.winters.octo.playback.RADIO_LENGTH
 import app.winters.octo.playback.RatingStore
 import app.winters.octo.server.ServerControls
-import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.common.SelectionBarState
 import app.winters.octo.ui.common.SongSelection
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 // Where a song's menu was opened from, so it can offer what fits there and
@@ -223,7 +219,7 @@ class SongMenuViewModel @Inject constructor(
     private val online: OnlineDao,
     private val likes: LikeStore,
     private val playback: PlaybackConnection,
-    private val discovery: Discovery,
+    private val libraryRadio: LibraryRadio,
     private val downloads: Downloads,
     private val ratings: RatingStore,
     private val controls: ServerControls,
@@ -242,9 +238,8 @@ class SongMenuViewModel @Inject constructor(
     fun removeOffline(id: String) = offline.remove(id) { restore -> feedback.undoable("Download removed", restore) }
     fun retryOffline(id: String) = offline.retry(id)
 
-    // Whether songs can start a radio: only with a server signed in.
-    val radio: StateFlow<Boolean> = discovery.available
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    // Whether songs can start a radio: always, since the library alone can make one.
+    val radio: StateFlow<Boolean> = MutableStateFlow(true)
 
     // Whether the signed-in server can make shared links.
     val sharing: StateFlow<Boolean> = controls.sharing
@@ -279,27 +274,27 @@ class SongMenuViewModel @Inject constructor(
         viewModelScope.launch { downloads.request(track) }
     }
 
-    // Plays the song and then songs like it, in place of the queue. When the
-    // server cannot answer, nothing changes.
+    // Plays the song and then songs like it, in place of the queue.
     fun startRadio(track: TrackEntity) {
-        viewModelScope.launch { playRadio(track, discovery, playback, feedback, "this song") }
+        viewModelScope.launch { playRadio(listOf(track), libraryRadio, playback, feedback) }
     }
 }
 
-// Plays a song and then songs like it, in place of the queue. When the
-// server cannot answer, nothing changes. `what` names what the radio was
-// asked for, for the message when it cannot start.
-internal suspend fun playRadio(seed: TrackEntity, discovery: Discovery, playback: PlaybackConnection, feedback: Feedback, what: String) {
-    val songs = try {
-        withContext(Dispatchers.IO) { discovery.radio(seed) }
-    } catch (e: SubsonicException) {
-        Log.w("Octo", "radio failed: ${e.javaClass.simpleName}")
-        feedback.show("Could not start a radio for $what")
-        return
-    }
-    // Only the song itself back means the server found nothing like it.
-    if (songs.size > 1) {
-        playback.playTracks(songs.map { it.id }, 0, source = "${seed.title} radio")
+// Plays the first of `seeds`, then songs like them, in place of the queue:
+// from the library and, with a server signed in, its suggestions, songs it
+// found online among them. `exclude` keeps songs out, like the rest of an
+// album.
+internal suspend fun playRadio(
+    seeds: List<TrackEntity>,
+    radio: LibraryRadio,
+    playback: PlaybackConnection,
+    feedback: Feedback,
+    exclude: Set<String> = emptySet(),
+) {
+    val seed = seeds.firstOrNull() ?: return
+    val songs = radio.songsLike(seeds, RADIO_LENGTH, exclude, before = listOf(seed.id))
+    if (songs.isNotEmpty()) {
+        playback.playTracks(listOf(seed.id) + songs, 0, source = "${seed.title} radio")
     } else {
         feedback.show("No similar songs found")
     }
