@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.union
@@ -106,6 +108,8 @@ import app.winters.octo.ui.signin.SignInScreen
 import app.winters.octo.ui.sound.SoundScreen
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
+import androidx.compose.ui.unit.dp
+import app.winters.octo.ui.downloads.DownloadsPill
 
 // The whole app: one back stack per tab, the screens, and the floating
 // bar over them. A change in openPlayer brings up the full player.
@@ -285,6 +289,16 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                         artShape = RoundedCornerShape(percent = corner),
                         film = barFilm.value,
                     )
+                }
+                // Songs on their way: a small pill above the bar, on the
+                // right, that opens the server downloads sheet when tapped.
+                AnimatedVisibility(
+                    visible = !playerOpen,
+                    enter = fadeIn(tween(300)),
+                    exit = fadeOut(tween(300)),
+                    modifier = Modifier.align(Alignment.BottomEnd),
+                ) {
+                    DownloadsPill(haze, Modifier.navigationBarsPadding().padding(end = 20.dp, bottom = BarBottomGap + BarHeight + 10.dp))
                 }
                 AnimatedVisibility(
                     visible = playerOpen && hasTrack,

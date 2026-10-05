@@ -35,6 +35,7 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.elevation3
+import app.winters.octo.data.ServerDownloads
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.TopSongsSource
 import app.winters.octo.discovery.albumHighlight
@@ -96,6 +97,7 @@ class AlbumViewModel @AssistedInject constructor(
     private val discovery: Discovery,
     private val downloads: Downloads,
     private val topSongs: TopSongsSource,
+    private val serverDownloads: ServerDownloads,
 ) : ViewModel() {
     val album: StateFlow<AlbumEntity?> =
         dao.album(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -150,6 +152,16 @@ class AlbumViewModel @AssistedInject constructor(
     fun addMissing() {
         val waiting = tracks.value.filter { isFind(it.id) && downloads.state(it.id) == DownloadState.None }
         viewModelScope.launch { waiting.forEach { downloads.request(it) } }
+    }
+
+    // Whether the server keeps a downloads list the sheet can show.
+    val canFollow: StateFlow<Boolean> = serverDownloads.supported
+
+    // The server downloads sheet, on its list, to follow the songs on their way.
+    fun showDownloads() {
+        if (!serverDownloads.supported.value) return
+        serverDownloads.showList()
+        serverDownloads.open()
     }
 
     // The artist's other albums, for the foot of the page.
@@ -224,7 +236,8 @@ fun AlbumScreen(
                                     AlbumShareButton(id, a.title)
                                     AlbumDownloadButton(library)
                                 }
-                                if (mixed) MissingSongs(tracks, states, vm::addMissing)
+                                val canFollow by vm.canFollow.collectAsStateWithLifecycle()
+                                if (mixed) MissingSongs(tracks, states, vm::addMissing, if (canFollow) vm::showDownloads else null)
                             },
                         )
                     }
@@ -275,18 +288,21 @@ fun AlbumScreen(
 
 // Under an album that has only some of its songs in the library: how many
 // are in, and the plus that adds the rest (each one not asked for yet).
+// Once they are all on their way, it opens the downloads sheet instead.
 @Composable
-private fun MissingSongs(tracks: List<TrackEntity>, states: Map<String, DownloadState>, onAdd: () -> Unit) {
+private fun MissingSongs(tracks: List<TrackEntity>, states: Map<String, DownloadState>, onAdd: () -> Unit, onFollow: (() -> Unit)?) {
     val adopted = LocalAdoptedFinds.current
     val outside = tracks.count { isOutsideLibrary(it.id, adopted) }
     val askable = tracks.count { isFind(it.id) && (states[it.id] ?: DownloadState.None) == DownloadState.None }
     val note = albumLibraryNote(tracks.size, outside)
+    val coming = tracks.count { isFind(it.id) && states[it.id] == DownloadState.Requested }
+    val follows = askable == 0 && coming > 0 && onFollow != null
     QuietActions {
         QuietAction(
             OctoIcons.AddToLibrary,
-            if (askable > 0) addMissingLabel(askable) else "Adding",
-            onClick = onAdd,
-            enabled = askable > 0,
+            if (askable > 0) addMissingLabel(askable) else if (follows) "Adding, show downloads" else "Adding",
+            onClick = { if (follows) onFollow?.invoke() else onAdd() },
+            enabled = askable > 0 || follows,
         )
         if (note != null) {
             Text(

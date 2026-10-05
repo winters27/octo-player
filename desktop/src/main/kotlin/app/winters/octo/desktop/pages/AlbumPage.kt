@@ -16,6 +16,7 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.library.LibraryShare
 import app.winters.octo.desktop.library.SongColumn
@@ -24,6 +25,7 @@ import app.winters.octo.desktop.library.discHeadings
 import app.winters.octo.desktop.library.formatSummary
 import app.winters.octo.desktop.library.libraryShareOf
 import app.winters.octo.desktop.library.sortAlbums
+import app.winters.octo.desktop.search.FetchPhase
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.ui.AlbumMenu
@@ -37,6 +39,7 @@ import app.winters.octo.desktop.ui.show
 import app.winters.octo.sort.SortList
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.AlbumWithSongs
+import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -121,7 +124,13 @@ fun AlbumPage(app: AppState, visit: Visit, id: String) {
                         // No line at all for an album with no artist, rather than an empty one.
                         subtitle = artistName?.takeIf(String::isNotBlank)?.let { name -> { LinkText(name, album.artistId) { app.navigator.go(Page.Artist(it, album.artist)) } } },
                         facts = albumFacts(app, album, songs.size, songs.sumOf { it.duration }, format),
-                        note = share?.let { { LibraryNote(it) { askableSongs(songs, outside, phases).forEach { song -> fetches?.request(song.id) } } } },
+                        note = share?.let {
+                            {
+                                LibraryNote(it, follow = if (app.downloads?.supported == true && onTheWay(songs, outside, phases)) ({ app.downloads?.showList(); app.showSidePanel(SidePanel.Downloads) }) else null) {
+                                    askableSongs(songs, outside, phases).forEach { song -> fetches?.request(song.id) }
+                                }
+                            }
+                        },
                     ) {
                         PlayAndShuffle({ app.play(songs) }, { app.play(songs, shuffle = true) }, enabled = songs.isNotEmpty())
                         if (inLibrary) {
@@ -138,14 +147,20 @@ fun AlbumPage(app: AppState, visit: Visit, id: String) {
 }
 
 // How much of an album is in the library, under its facts, with a way to
-// add the rest.
+// add the rest and, while songs are on their way, to follow them in the
+// downloads drawer.
 @Composable
-private fun LibraryNote(share: LibraryShare, addRest: () -> Unit) {
+private fun LibraryNote(share: LibraryShare, follow: (() -> Unit)? = null, addRest: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Txt(share.line, DesktopType.meta, OctoColors.TextSecondary)
         share.action?.let { TextAction(it, addRest, icon = OctoIcons.AddToLibrary) }
+        follow?.let { TextAction("Show downloads", it, icon = OctoIcons.Downloading) }
     }
 }
+
+// Whether any of the album's songs found online is being fetched now.
+private fun onTheWay(songs: List<Song>, outside: Set<String>, phases: Map<String, FetchPhase>): Boolean =
+    songs.any { it.id in outside && phases[it.id].let { phase -> phase == FetchPhase.Queued || phase is FetchPhase.Downloading || phase == FetchPhase.Adding } }
 
 // The line under an album's name: year, genre (opening the genre), how
 // many songs and how long, and the format.
