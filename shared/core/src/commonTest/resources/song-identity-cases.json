@@ -180,6 +180,7 @@
     {"a": {"title": "Song (Instrumental)", "artist": "Artist"}, "b": {"title": "Song", "artist": "Artist"}, "expect": "version", "note": "Instrumental."},
     {"a": {"title": "Song (Karaoke Version)", "artist": "Artist"}, "b": {"title": "Song", "artist": "Artist"}, "expect": "version", "note": "Karaoke."},
     {"a": {"title": "Song (Originally Performed by Artist)", "artist": "Karaoke Band"}, "b": {"title": "Song", "artist": "Karaoke Band"}, "expect": "version", "note": "A karaoke track names the original performer."},
+    {"a": {"title": "Get Lucky (In the Style of Daft Punk)", "artist": "Karaoke Band"}, "b": {"title": "Get Lucky", "artist": "Karaoke Band"}, "expect": "version", "note": "'In the style of' names the original performer the way 'originally performed by' does."},
     {"a": {"title": "Song (Cover)", "artist": "Artist"}, "b": {"title": "Song", "artist": "Artist"}, "expect": "version", "note": "Cover."},
     {"a": {"title": "Beat It (made popular by Sean Kingston ft. Chris Brown & Wiz Khalifa) [backing version]", "artist": "Party Tyme"}, "b": {"title": "Beat It", "artist": "Sean Kingston"}, "expect": "different", "note": "A karaoke backing track, by the karaoke label, is not the song."},
     {"a": {"title": "Beat It (made popular by Sean Kingston) [backing version]", "artist": "Party Tyme"}, "b": {"title": "Beat It", "artist": "Party Tyme"}, "expect": "version", "note": "Even under the karaoke label's own name it is another version."},

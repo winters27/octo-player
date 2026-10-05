@@ -435,7 +435,7 @@ object SongIdentity {
         Marker("""${B}mono(?:$S+(?:version|mix))?$E""", "mono"),
         Marker("""${B}stereo(?:$S+(?:version|mix))?$E""", "stereo"),
         Marker(
-            """${B}karaoke(?:$S+version)?$E|${B}originally performed by$E|${B}made (?:popular|famous) by$E|${B}backing (?:version|track)$E""",
+            """${B}karaoke(?:$S+version)?$E|${B}originally performed by$E|${B}in the style of$E|${B}made (?:popular|famous) by$E|${B}backing (?:version|track)$E""",
             "karaoke",
         ),
         Marker("""${B}cover(?:$S+version)?$E""", "cover"),
