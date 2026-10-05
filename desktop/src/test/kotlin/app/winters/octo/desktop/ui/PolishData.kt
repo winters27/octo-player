@@ -29,6 +29,8 @@ internal class FakeSong(
     val plays: Int = 0,
     val starred: Boolean = false,
     val added: String = "2026-09-01T10:00:00Z",
+    // OpenSubsonic's word on the lyrics: "explicit", "clean" or nothing.
+    val explicit: String? = null,
 ) {
     fun json(): String {
         val fields = buildList {
@@ -51,6 +53,7 @@ internal class FakeSong(
             if (plays > 0) add("\"playCount\":$plays")
             if (starred) add("\"starred\":\"2026-09-01T00:00:00Z\"")
             add("\"created\":${q(added)}")
+            explicit?.let { add("\"explicitStatus\":${q(it)}") }
             add("\"path\":${q("${artist ?: "Unknown"}/${album ?: "Unknown"}/$title.$suffix")}")
         }
         return "{" + fields.joinToString(",") + "}"
@@ -111,13 +114,18 @@ internal object PolishData {
     const val BIG_PLAYLIST = "pl-big"
     const val EMPTY_PLAYLIST = "pl-empty"
     const val SMALL_PLAYLIST = "pl-small"
+    const val WORD_PLAYLIST = "pl-word"
+    const val EXPLICIT_SONG = "dracula"
+    const val EXPLICIT_ALBUM = "al-deadbeat"
+    const val LONG_FOLDER = "dir-long"
 
     // The hand-made hundred.
     fun awkward(): List<FakeSong> {
         val list = mutableListOf<FakeSong>()
         // A plain album, to compare against.
         val plain = listOf("Airbag", "Paranoid Android", "Subterranean Homesick Alien", "Exit Music (For a Film)", "Let Down", "Karma Police", "Fitter Happier", "Electioneering", "Climbing Up the Walls", "No Surprises", "Lucky", "The Tourist")
-        plain.forEachIndexed { i, t -> list += FakeSong("plain-${i + 1}", t, "Radiohead", "ar-radiohead", "OK Computer", PLAIN_ALBUM, i + 1, 1, 1997, 200 + i * 13, "c-plain", genre = "Alternative", plays = i * 3, starred = i == 5) }
+        // Its first song is a clean edit, which shows no mark.
+        plain.forEachIndexed { i, t -> list += FakeSong("plain-${i + 1}", t, "Radiohead", "ar-radiohead", "OK Computer", PLAIN_ALBUM, i + 1, 1, 1997, 200 + i * 13, "c-plain", genre = "Alternative", plays = i * 3, starred = i == 5, explicit = if (i == 0) "clean" else null) }
         // Very long titles, on an album with a very long name, by a very long artist credit.
         val longAlbum = "The Idler Wheel Is Wiser Than the Driver of the Screw and Whipping Cords Will Serve You More Than Ropes Will Ever Do"
         val longTitles = listOf(
@@ -132,6 +140,8 @@ internal object PolishData {
             list += FakeSong(
                 "long-${i + 1}", t, "Sufjan Stevens", "ar-sufjan", longAlbum, LONG_ALBUM, i + 1, 1, 2005, 300 + i * 40, "c-long", genre = "Indie Folk, Chamber Pop, Singer-Songwriter",
                 displayArtist = if (i == 0) "Sufjan Stevens, The Illinoisemakers, Shara Worden, Rosie Thomas and the Chicago Children's Choir" else null, plays = 40 - i,
+                // A long title marked explicit: the title is cut before its mark.
+                explicit = if (i == 1) "explicit" else null,
             )
         }
         // Every kind of script: Japanese, Chinese, Korean, Arabic and Hebrew
@@ -165,6 +175,10 @@ internal object PolishData {
                 )
             }
         }
+        // An explicit song beside a clean one and one the server says nothing about.
+        list += FakeSong(EXPLICIT_SONG, "Dracula", "Tame Impala", "ar-tame", "Deadbeat", EXPLICIT_ALBUM, 1, 1, 2025, 223, "c-deadbeat", genre = "Psychedelic", plays = 12, explicit = "explicit")
+        list += FakeSong("deadbeat-2", "Loser", "Tame Impala", "ar-tame", "Deadbeat", EXPLICIT_ALBUM, 2, 1, 2025, 241, "c-deadbeat", genre = "Psychedelic", explicit = "clean")
+        list += FakeSong("deadbeat-3", "End of Summer", "Tame Impala", "ar-tame", "Deadbeat", EXPLICIT_ALBUM, 3, 1, 2025, 432, "c-deadbeat", genre = "Psychedelic")
         // Missing tags: no artist, no album, no year, no cover, no track.
         list += FakeSong("bare-1", "Track 01")
         list += FakeSong("bare-2", "Untitled", artist = "Unknown Artist")
@@ -209,6 +223,8 @@ internal object PolishData {
             FakePlaylist(BIG_PLAYLIST, "Everything I have ever loved, in the order I found it, from the first cassette onwards", List(2_500) { ids[it % ids.size] }),
             FakePlaylist(EMPTY_PLAYLIST, "Empty for now", emptyList()),
             FakePlaylist("pl-cjk", "夜のドライブ 🌙", ids.filter { it.startsWith("script") }.take(8)),
+            // A name with no spaces at all, longer than a narrow page's line.
+            FakePlaylist(WORD_PLAYLIST, "Radiohead_OK_Computer_OKNOTOK_1997_2017_Remastered_FLAC_24bit", ids.take(5)),
         )
         return FakeLibrary(songs, playlists)
     }
@@ -264,7 +280,12 @@ internal object PolishData {
             """"lyricsList":{"structuredLyrics":[{"lang":"en","synced":true,"line":[{"start":0,"value":"A first line of the song"},{"start":4000,"value":"And a second, much longer line that has to wrap across the width of the panel when it is narrow"},{"start":8000,"value":"初恋の歌を歌う"},{"start":12000,"value":"كيفك إنت"}]}]}""",
         )
         server.fail("getPlayQueue", 70, "No queue")
-        server.fail("getMusicDirectory", 70, "Not found")
+        // One folder, named as a ripper names one: long, with no spaces.
+        server.answerBy("getMusicDirectory") { request ->
+            if (request.url.queryParameter("id") != LONG_FOLDER) return@answerBy server.failed(70, "Not found")
+            val songs = library.songs.filter { it.albumId == EXPLICIT_ALBUM || it.albumId == PLAIN_ALBUM }.joinToString(",") { it.json().dropLast(1) + ",\"isDir\":false}" }
+            server.ok(""""directory":{"id":"$LONG_FOLDER","name":"Tame_Impala-Deadbeat-(2025)-[WEB-FLAC-24bit-96kHz]-Deluxe_Edition","child":[$songs]}""")
+        }
         server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[]}""")
         server.fileBy("getCoverArt") { request ->
             val id = request.url.queryParameter("id").orEmpty()
