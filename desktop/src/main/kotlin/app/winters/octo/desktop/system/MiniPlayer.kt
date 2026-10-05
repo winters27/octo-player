@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.system
 
+import app.winters.octo.desktop.ui.MarkedTitle
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
@@ -412,7 +413,7 @@ private fun SongWords(state: PlayerState, modifier: Modifier) {
         if (song == null) {
             Txt("Nothing playing", DesktopType.emphasis, OctoColors.TextMuted)
         } else {
-            Txt(song.title, DesktopType.emphasis, OctoColors.TextPrimary)
+            MarkedTitle(song, DesktopType.emphasis) { Txt(song.title, DesktopType.emphasis, OctoColors.TextPrimary, it) }
             Txt((song.displayArtist ?: song.artist).orEmpty(), DesktopType.meta, OctoColors.TextSecondary)
         }
     }
@@ -545,7 +546,7 @@ private fun UpNext(app: AppState, state: PlayerState) {
             ) {
                 Cover(entry.song.coverArt, Modifier.size(FrameSize.PlaylistCover), shape = Corner.ArtSShape, placeholder = OctoIcons.Songs)
                 Column(Modifier.weight(1f)) {
-                    Txt(entry.song.title, DesktopType.table, OctoColors.TextPrimary)
+                    MarkedTitle(entry.song, DesktopType.table) { Txt(entry.song.title, DesktopType.table, OctoColors.TextPrimary, it) }
                     Txt((entry.song.displayArtist ?: entry.song.artist).orEmpty(), DesktopType.meta, OctoColors.TextSecondary)
                 }
             }

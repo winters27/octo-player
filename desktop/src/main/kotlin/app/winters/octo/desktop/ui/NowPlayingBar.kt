@@ -180,19 +180,21 @@ private fun SongZone(app: AppState, song: Song?) {
                 Txt("Nothing playing", DesktopType.emphasis, OctoColors.TextMuted)
             } else {
                 val album = song.albumId?.takeIf(String::isNotBlank)
-                CutTxt(
-                    song.title,
-                    DesktopType.emphasis,
-                    OctoColors.TextPrimary,
-                    if (album != null) {
-                        Modifier
-                            .pointerHoverIcon(PointerIcon.Hand)
-                            .clickable(role = Role.Button) { app.navigator.go(Page.Album(album)) }
-                            .semantics { contentDescription = "${song.title}, open its album" }
-                    } else {
-                        Modifier
-                    },
-                )
+                MarkedTitle(song, DesktopType.emphasis) { title ->
+                    CutTxt(
+                        song.title,
+                        DesktopType.emphasis,
+                        OctoColors.TextPrimary,
+                        if (album != null) {
+                            title
+                                .pointerHoverIcon(PointerIcon.Hand)
+                                .clickable(role = Role.Button) { app.navigator.go(Page.Album(album)) }
+                                .semantics { contentDescription = "${song.title}, open its album" }
+                        } else {
+                            title
+                        },
+                    )
+                }
                 LinkText(song.displayArtist ?: song.artist.orEmpty(), song.artistId) { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }
             }
         }

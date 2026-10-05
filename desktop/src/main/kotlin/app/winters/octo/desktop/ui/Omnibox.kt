@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.catalog.isExplicit
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.stateDescription
@@ -276,7 +277,9 @@ private fun OmniLine(app: AppState, item: OmniItem, lit: Boolean, onHover: () ->
             // as the arrows move, though the keyboard stays in the field.
             .clearAndSetSemantics {
                 val (title, detail, verb) = wordsFor(item)
-                contentDescription = listOf(title, detail).filter(String::isNotBlank).joinToString(", ")
+                // A song marked explicit says so after its title, as its "E" shows.
+                val explicit = if ((item as? OmniItem.SongHit)?.song?.isExplicit == true) "explicit" else ""
+                contentDescription = listOf(title, explicit, detail).filter(String::isNotBlank).joinToString(", ")
                 if (verb.isNotEmpty()) stateDescription = verb
                 awtRole = AccessibleRole.LIST_ITEM
                 selected = lit
@@ -297,7 +300,7 @@ private fun OmniLine(app: AppState, item: OmniItem, lit: Boolean, onHover: () ->
             is OmniItem.SeeAll -> IconBox(OctoIcons.Search)
         }
         Column(Modifier.weight(1f)) {
-            Txt(title, DesktopType.emphasis)
+            MarkedTitle((item as? OmniItem.SongHit)?.song, DesktopType.emphasis) { Txt(title, DesktopType.emphasis, modifier = it) }
             if (detail.isNotEmpty()) Txt(detail, DesktopType.meta, OctoColors.TextSecondary)
         }
         if (lit && verb.isNotEmpty()) Txt(verb, DesktopType.meta, OctoColors.TextMuted)
