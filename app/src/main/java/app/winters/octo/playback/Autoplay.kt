@@ -10,20 +10,16 @@ import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.isFind
 import app.winters.octo.catalog.searchKey
-import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.asTrack
 import app.winters.octo.output.OutputSwitch
 import app.winters.octo.player.PlayerSettings
-import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -52,7 +48,7 @@ fun autoplayDue(enabled: Boolean, repeatMode: Int, hasNext: Boolean, remainingMs
 @Singleton
 class Autoplay @Inject constructor(
     private val settings: PlayerSettings,
-    private val discovery: Discovery,
+    private val radio: LibraryRadio,
     private val catalog: CatalogDao,
     private val online: OnlineDao,
     private val user: UserDao,
@@ -117,8 +113,11 @@ class Autoplay @Inject constructor(
         while (!autoplayDue(enabled, player.repeatMode, player.hasNextMediaItem(), player.remainingMs(), lead)) {
             delay(WATCH_EVERY_MS)
         }
-        val queued = List(player.mediaItemCount) { player.getMediaItemAt(it).mediaId }
-        val items = playable.items(picksAfter(seedId, queued)).map { it.markedAutoplay() }
+        val entries = List(player.mediaItemCount) { player.getMediaItemAt(it) }
+        val queued = entries.map { it.mediaId }
+        // The listener's own songs keep Autoplay near their taste.
+        val anchors = entries.takeLast(30).filterNot { it.isAutoplay }.map { it.mediaId }.filter { it != seedId }.takeLast(10).reversed()
+        val items = playable.items(picksAfter(seedId, queued, anchors)).map { it.markedAutoplay() }
         // Tried once for this song, whatever came of it.
         doneFor = key
         if (items.isEmpty()) {
@@ -137,18 +136,17 @@ class Autoplay @Inject constructor(
         Log.i("Octo", "autoplay: added ${items.size}")
     }
 
-    private suspend fun picksAfter(seedId: String, queued: List<String>): List<String> {
+    // Octo's radio for the seed and the listener's own recent songs
+    // (`anchors`), from the library and the server's suggestions; else the
+    // library's songs by the same artist, then in the same genre.
+    private suspend fun picksAfter(seedId: String, queued: List<String>, anchors: List<String>): List<String> {
         val seed = seedTrack(seedId) ?: return emptyList()
         val recent = user.playedTracks().first().sortedByDescending { it.lastPlayedAt }.take(RECENT_PLAYS).map { it.track.id }
         val exclude = (queued + recent + seed.id).toSet()
-        val similar = try {
-            withContext(Dispatchers.IO) { discovery.radio(seed) }.map { it.id }
-        } catch (e: SubsonicException) {
-            Log.w("Octo", "autoplay: server similar songs failed: ${e.javaClass.simpleName}")
-            emptyList()
-        }
-        val fromServer = autoplayPicks(similar, emptyList(), emptyList(), exclude)
-        if (fromServer.isNotEmpty()) return fromServer
+        val own = catalog.tracksByIdsUnordered(anchors).associateBy { it.id }
+        val seeds = listOf(seed) + anchors.mapNotNull(own::get)
+        val mixed = radio.songsLike(seeds, AUTOPLAY_BATCH, exclude, before = queued.takeLast(30))
+        if (mixed.isNotEmpty()) return mixed
         return autoplayPicks(emptyList(), sameArtist(seed).shuffled(), sameGenre(seed).shuffled(), exclude)
     }
 

@@ -51,6 +51,7 @@ fun songFacts(
     if (outside) {
         add("Streams as", listOfNotNull(formatName(song.suffix), bitrate).joinToString(", "))
         add("Source", "Found online")
+        add("Suggested by", song.octoSuggestedBy?.trim())
     } else {
         add("Format", formatName(song.suffix))
         add("File type", song.contentType)
@@ -59,6 +60,7 @@ fun songFacts(
         add("Bit depth", song.bitDepth?.takeIf { it > 0 }?.let { "$it-bit" })
         add("File size", song.size?.takeIf { it > 0 }?.let { sizeText(it, locale) })
         add("Source", if (isOpenedFile(song.id)) "A file on this computer" else server ?: "Your server")
+        add("Suggested by", song.octoSuggestedBy?.trim())
     }
 
     val dates = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT).withLocale(locale).withZone(zone)
