@@ -190,14 +190,15 @@ private fun FolderBody(app: AppState, visit: Visit, folder: MusicDirectory, give
             item(key = "title") {
                 Column {
                     Crumbs(app, trail, name)
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-                        PageTitle(name, Modifier.weight(1f), detail = listOfNotNull(folderFacts(folder.folders.size, songs.size, songs.sumOf { it.duration }), path).joinToString("  ·  ").ifEmpty { null })
-                        if (songs.isNotEmpty()) {
-                            Row(Modifier.padding(bottom = Space.Xl), horizontalArrangement = Arrangement.spacedBy(Space.M)) {
+                    PageTitle(
+                        name,
+                        detail = listOfNotNull(folderFacts(folder.folders.size, songs.size, songs.sumOf { it.duration }), path).joinToString("  ·  ").ifEmpty { null },
+                        actions = if (songs.isEmpty()) null else ({
+                            Row(horizontalArrangement = Arrangement.spacedBy(Space.M)) {
                                 PlayAndShuffle({ app.play(songs) }, { app.play(songs, shuffle = true) })
                             }
-                        }
-                    }
+                        }),
+                    )
                 }
             }
             val inside = trail + FolderStep(folder.id, name)

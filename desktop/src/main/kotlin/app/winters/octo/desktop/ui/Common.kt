@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.design.TitleAndActions
+import app.winters.octo.design.WholeTxt
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.focus.onFocusChanged
@@ -144,19 +146,32 @@ fun Modifier.onRightClick(action: () -> Unit): Modifier =
         if (event.buttons.isSecondaryPressed) action()
     }
 
+// A page's title, whole however long (it wraps between words rather than
+// being cut), a quiet line under it, and the page's buttons, if any: at
+// the end of the title's line while the whole title fits beside them,
+// else on a line of their own under it.
 @Composable
-fun PageTitle(text: String, modifier: Modifier = Modifier, detail: String? = null) {
-    Column(modifier.padding(bottom = Space.Xl)) {
-        Txt(text, DesktopType.pageTitle)
-        if (detail != null) Txt(detail, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xs))
+fun PageTitle(text: String, modifier: Modifier = Modifier, detail: String? = null, actions: (@Composable () -> Unit)? = null) {
+    val heading = @Composable {
+        Column {
+            WholeTxt(text, DesktopType.pageTitle)
+            if (detail != null) Txt(detail, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xs))
+        }
+    }
+    Box(modifier.padding(bottom = Space.Xl)) {
+        if (actions == null) heading() else TitleAndActions(text, DesktopType.pageTitle, heading = heading, actions = actions)
     }
 }
 
+// A section's title, whole, and its action at the end of the line, or
+// under the title when the two do not fit side by side.
 @Composable
 fun SectionTitle(text: String, modifier: Modifier = Modifier, action: String? = null, onAction: () -> Unit = {}) {
-    Row(modifier.fillMaxWidth().padding(top = 22.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Txt(text, OctoType.headline, modifier = Modifier.weight(1f))
-        if (action != null) TextAction(action, onAction)
+    val spaced = modifier.fillMaxWidth().padding(top = 22.dp, bottom = 10.dp)
+    if (action == null) {
+        WholeTxt(text, OctoType.headline, modifier = spaced)
+    } else {
+        TitleAndActions(text, OctoType.headline, spaced, Space.M, heading = { WholeTxt(text, OctoType.headline) }) { TextAction(action, onAction) }
     }
 }
 

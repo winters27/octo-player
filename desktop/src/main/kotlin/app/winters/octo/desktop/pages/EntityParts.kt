@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.design.TitleAndActions
+import app.winters.octo.design.WholeTxt
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -88,7 +90,7 @@ fun EntityHeader(
             picture(Modifier.size(art))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs)) {
                 Txt(kind.uppercase(), DesktopType.label, OctoColors.TextMuted)
-                CutTxt(title, DesktopType.pageTitle, maxLines = 2)
+                WholeTxt(title, DesktopType.pageTitle)
                 subtitle?.invoke()
                 if (facts.isNotEmpty()) FactLine(facts)
                 note?.invoke()
@@ -167,13 +169,22 @@ fun JumpLinks(links: List<Pair<String, () -> Unit>>) {
 }
 
 // A section's title, how many it holds, and an action at the far end.
+// The title is whole however long ("More by" a long credit, say), and the
+// action moves under it when the two do not fit on one line.
 @Composable
 fun GroupTitle(text: String, count: Int? = null, action: String? = null, onAction: () -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().padding(top = Space.Page, bottom = Space.S), verticalAlignment = Alignment.CenterVertically) {
-        Txt(text, DesktopType.section)
-        if (count != null) Txt("$count", DesktopType.meta, OctoColors.TextMuted, Modifier.padding(start = Space.M))
-        Spacer(Modifier.weight(1f))
-        if (action != null) TextAction(action, onAction)
+    val heading = @Composable {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            WholeTxt(text, DesktopType.section, modifier = Modifier.weight(1f, fill = false))
+            if (count != null) Txt("$count", DesktopType.meta, OctoColors.TextMuted, Modifier.padding(start = Space.M))
+        }
+    }
+    val spaced = Modifier.fillMaxWidth().padding(top = Space.Page, bottom = Space.S)
+    if (action == null) {
+        Box(spaced) { heading() }
+    } else {
+        // The count is measured with the title, so the two keep their line.
+        TitleAndActions(if (count != null) "$text   $count" else text, DesktopType.section, spaced, Space.M, heading) { TextAction(action, onAction) }
     }
 }
 
