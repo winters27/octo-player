@@ -105,7 +105,7 @@ fun HealthSheetHost(vm: HealthViewModel) {
                     title = "Done",
                     buttons = {
                         if (actions.canRunAll(undo)) {
-                            SheetButtons("Undo", onConfirm = { vm.run(undo, undo = true) }, onCancel = vm::close, cancel = "Close")
+                            SheetButtons("Undo", onConfirm = { vm.run(undo, undo = true, on = sheet.server) }, onCancel = vm::close, cancel = "Close")
                         } else {
                             AccentButton("Close", onClick = vm::close)
                         }

@@ -2,6 +2,7 @@ package app.winters.octo.desktop.health
 
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.library.SongColumn
+import app.winters.octo.health.FIX_OTHER_SERVER
 import app.winters.octo.health.FixOutcome
 import app.winters.octo.health.FixStep
 import app.winters.octo.health.HealthCheck
@@ -10,6 +11,7 @@ import app.winters.octo.health.steps
 import app.winters.octo.health.SubsonicHealth
 import app.winters.octo.health.checkLibrary
 import app.winters.octo.subsonic.Song
+import app.winters.octo.subsonic.SubsonicClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -17,7 +19,9 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -292,5 +296,42 @@ class HealthPageTest {
 
         assertTrue(model.trash!!.songs.isEmpty())
         assertEquals("Put back 1 song.", outcome!!.summary())
+    }
+
+    @Test
+    fun aRunEndingAfterAnotherServerTookItsPlaceShowsNothing_AndItsUndoIsNotSent() = runTest {
+        extensions("octoLibraryActions")
+        server.answer("getLibraryActions", allowed, type = "octo")
+        val answer = CountDownLatch(1)
+        server.answerBy("libraryAction") { request ->
+            answer.await(5, TimeUnit.SECONDS)
+            server.ok(""""libraryAction":{"id":"${request.url.queryParameter("id")}","action":"remove","state":"applied","detail":"Done."}""", type = "octo")
+        }
+        val first = client()
+        var signedIn: SubsonicClient? = first
+        val model = HealthModel({ signedIn }, this, Dispatchers.Unconfined)
+        model.check(library)
+        advanceUntilIdle()
+
+        var outcome: FixOutcome? = null
+        assertNull(model.run("Deleting", listOf(FixStep.Remove("mp3", "Holocene"))) { outcome = it })
+        advanceUntilIdle()
+        repeat(300) { if ("libraryAction" !in server.endpoints()) withContext(Dispatchers.Default) { Thread.sleep(10) } }
+
+        // Another server is signed in to while the first still answers.
+        signedIn = client()
+        model.forget()
+        answer.countDown()
+        repeat(30) { withContext(Dispatchers.Default) { Thread.sleep(10) } }
+        advanceUntilIdle()
+
+        assertNull("Its result is not this server's to show", outcome)
+        assertNull(model.running)
+        assertTrue(model.changed.isEmpty())
+
+        // Its Undo is for the first server, so it is not sent to this one.
+        assertEquals(FIX_OTHER_SERVER, model.run("Putting it back", listOf(FixStep.Restore("mp3", "Holocene")), on = first))
+        assertNull(model.running)
+        assertEquals(1, server.endpoints().count { it == "libraryAction" })
     }
 }

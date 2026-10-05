@@ -5,6 +5,7 @@ import app.winters.octo.health.FixStep
 import app.winters.octo.health.HealthCheck
 import app.winters.octo.health.deletedLine
 import app.winters.octo.subsonic.Song
+import app.winters.octo.subsonic.SubsonicClient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -16,19 +17,33 @@ import kotlinx.coroutines.launch
 // How long after a change the library is read again, in milliseconds.
 internal val CatchUpReads = listOf(15_000L, 45_000L)
 
-// Runs fix steps through the server; `line` words the notice from how it
-// went. Undo runs the steps that put it all back.
-fun AppState.runFix(label: String, steps: List<FixStep>, settle: HealthCheck? = null, line: (FixOutcome) -> String = { it.summary() }) {
-    health.run(label, steps, settle) { outcome ->
+// Runs fix steps through the server they were planned on (`on`, or the
+// signed-in one); `line` words the notice from how it went. Undo runs the
+// steps that put it all back, on that same server, and only while it is
+// still the one signed in to. A run that could not start says why.
+fun AppState.runFix(
+    label: String,
+    steps: List<FixStep>,
+    settle: HealthCheck? = null,
+    on: SubsonicClient? = null,
+    line: (FixOutcome) -> String = { it.summary() },
+) {
+    val client = on ?: connection?.client
+    val refused = health.run(label, steps, settle, client) { outcome ->
         val words = line(outcome)
         notice = words
         noticeDetail = null
         val undo = outcome.undo
-        noticeAction = if (undo.isEmpty()) null else NoticeAction(words, "Undo") {
+        noticeAction = if (undo.isEmpty() || client == null) null else NoticeAction(words, "Undo") {
             noticeAction = null
-            runFix("Putting it back", undo)
+            runFix("Putting it back", undo, on = client)
         }
         if (outcome.done.isNotEmpty()) catchUp()
+    }
+    if (refused != null) {
+        notice = refused
+        noticeDetail = null
+        noticeAction = null
     }
 }
 

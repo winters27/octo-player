@@ -20,6 +20,10 @@ fun deleteBody(names: String, keepDays: Int): String {
         "so you can put it back from Library health. Octo will not download it again by itself."
 }
 
+// Why an Undo, or a fix that waited its turn, was not sent: it was for a
+// server no longer signed in to.
+const val FIX_OTHER_SERVER = "That change was made on another server, so it cannot be undone from here."
+
 // The line after a delete.
 fun deletedLine(count: Int, title: String?): String =
     if (count == 1 && title != null) "Deleted $title from disk." else "Deleted ${countText(count, "song", "songs")} from disk."

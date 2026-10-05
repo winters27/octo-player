@@ -115,7 +115,8 @@ sealed interface HealthSheet {
     data object Running : HealthSheet
 
     // How it went.
-    data class Done(val outcome: FixOutcome) : HealthSheet
+    // `server` is the one the run went to, where its Undo goes too.
+    data class Done(val outcome: FixOutcome, val server: String? = null) : HealthSheet
 }
 
 // One song looked up: the library song, its id on the server, and what
@@ -205,12 +206,14 @@ class HealthViewModel @Inject constructor(
     }
 
     // Sends the steps, showing how far they have got, then how it went.
-    fun run(steps: List<FixStep>, undo: Boolean = false) {
+    // They go to the server `on` they were planned on: the one signed in to
+    // now, or for an Undo, the one the run it puts back went to.
+    fun run(steps: List<FixStep>, undo: Boolean = false, on: String? = files.server()) {
         if (steps.isEmpty()) return
         sheet = HealthSheet.Running
-        files.launch(steps, undo) { outcome ->
+        files.launch(steps, undo, on) { outcome ->
             if (!cleared && sheet == HealthSheet.Running) {
-                sheet = HealthSheet.Done(outcome)
+                sheet = HealthSheet.Done(outcome, on)
                 true
             } else {
                 false

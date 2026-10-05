@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.winters.octo.desktop.server.userMessage
+import app.winters.octo.health.FIX_OTHER_SERVER
 import app.winters.octo.health.FixOutcome
 import app.winters.octo.health.FixStep
 import app.winters.octo.health.HealthCheck
@@ -22,6 +23,7 @@ import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SongLookup
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -62,7 +64,9 @@ class HealthModel(
     // The fix running now, or null.
     var running by mutableStateOf<FixProgress?>(null)
         private set
-    private var stopAsked = false
+
+    // Asks the fix running now to end; each run has its own.
+    private var stopRun: (() -> Unit)? = null
 
     // Songs whose tags, album or cover were changed here, which can be put
     // back one at a time from their menu.
@@ -104,11 +108,15 @@ class HealthModel(
         }
     }
 
+    // Whether `client` is the signed-in server's now. What a server said
+    // after another took its place is not shown.
+    fun isCurrent(client: SubsonicClient): Boolean = client === client()
+
     // Asks the server what this user may do to its files.
     fun askServer() {
         val client = client() ?: return
         scope.launch {
-            actions = try {
+            val now = try {
                 when (client.supportsIfKnown(OCTO_LIBRARY_ACTIONS)) {
                     true -> client.libraryActions()
                     false -> null
@@ -118,25 +126,40 @@ class HealthModel(
             } catch (e: SubsonicException) {
                 actions
             }
+            if (isCurrent(client)) actions = now
         }
     }
 
     // Runs fix steps one after another, `label` saying what for while it
-    // goes. Songs it fixed leave `settle` (and removed songs every check)
-    // until the server's list catches up. `done` hears how it went.
-    fun run(label: String, steps: List<FixStep>, settle: HealthCheck? = null, done: (FixOutcome) -> Unit = {}) {
-        val client = client() ?: return
-        if (running != null || steps.isEmpty()) return
-        stopAsked = false
+    // goes, on the server `on` (the signed-in one when not given). Songs it
+    // fixed leave `settle` (and removed songs every check) until the
+    // server's list catches up. `done` hears how it went, unless another
+    // server has taken its place by then: the run still finishes there, but
+    // its result is not this page's to show. Answers why it did not start,
+    // or null when it did.
+    fun run(
+        label: String,
+        steps: List<FixStep>,
+        settle: HealthCheck? = null,
+        on: SubsonicClient? = null,
+        done: (FixOutcome) -> Unit = {},
+    ): String? {
+        val client = on ?: client() ?: return "Not signed in"
+        if (!isCurrent(client)) return FIX_OTHER_SERVER
+        if (steps.isEmpty()) return null
+        if (running != null) return null
+        val stopAsked = AtomicBoolean(false)
+        stopRun = { stopAsked.set(true) }
         running = FixProgress(label, 0, steps.size)
         scope.launch {
             val outcome = runFix(
                 steps,
                 send = { step -> withContext(Dispatchers.IO) { send(client, step) } },
-                progress = { at, total -> running = FixProgress(label, at, total) },
-                stop = { stopAsked },
+                progress = { at, total -> if (isCurrent(client)) running = FixProgress(label, at, total) },
+                stop = { stopAsked.get() },
                 failure = { e -> (e as? SubsonicException)?.userMessage() ?: e.message ?: "something went wrong" },
             )
+            if (!isCurrent(client)) return@launch
             removed = removed + outcome.removed
             val restored = outcome.done.filterIsInstance<FixStep.Restore>().mapTo(HashSet()) { it.id }
             if (restored.isNotEmpty()) {
@@ -148,13 +171,15 @@ class HealthModel(
             changed = changed + edited - undone
             if (settle != null && edited.isNotEmpty()) settled = settled + (settle to (settled[settle].orEmpty() + edited))
             running = null
+            stopRun = null
             done(outcome)
         }
+        return null
     }
 
     // Ends the fix running now after the song it is on.
     fun stop() {
-        stopAsked = true
+        stopRun?.invoke()
     }
 
     // The tags a download of the song would get, or null when the server
@@ -177,7 +202,9 @@ class HealthModel(
         val client = client() ?: return
         scope.launch {
             try {
-                trash = withContext(Dispatchers.IO) { client.libraryTrash() }
+                val read = withContext(Dispatchers.IO) { client.libraryTrash() }
+                if (!isCurrent(client)) return@launch
+                trash = read
                 done(null)
             } catch (e: SubsonicException) {
                 done("Could not read the server's trash. ${e.userMessage()}")
@@ -195,6 +222,7 @@ class HealthModel(
         picked = null
         actions = null
         running = null
+        stopRun = null
         changed = emptySet()
         trash = null
     }

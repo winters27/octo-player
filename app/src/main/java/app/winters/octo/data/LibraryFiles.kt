@@ -2,6 +2,7 @@ package app.winters.octo.data
 
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.SourceTrackEntity
+import app.winters.octo.health.FIX_OTHER_SERVER
 import app.winters.octo.health.FixOutcome
 import app.winters.octo.health.FixStep
 import app.winters.octo.health.deletedLine
@@ -171,13 +172,23 @@ class LibraryFiles @Inject constructor(
         return trackIds.filter { it in ids }
     }
 
-    // Runs the steps one after another and says nothing; the caller tells
-    // how it went. `stop()` ends it between two steps. What puts it back is
-    // kept as the last change, unless this run is itself an undo.
-    suspend fun run(steps: List<FixStep>, keepUndo: Boolean = true): FixOutcome = one.withLock {
+    // The server steps are planned for, by its source in the library: the
+    // one signed in to now. Steps carry that server's own song ids, so a run
+    // and its Undo go to it and nowhere else.
+    fun server(): String? = session()?.sourceId
+
+    // Runs the steps one after another on the server `on` and says nothing;
+    // the caller tells how it went. A run that waited its turn while
+    // another server was signed in to is not sent. `stop()` ends it between
+    // two steps. What puts it back is kept as the last change, unless this
+    // run is itself an undo or another server is signed in to by the end.
+    suspend fun run(steps: List<FixStep>, keepUndo: Boolean = true, on: String? = server()): FixOutcome = one.withLock {
         if (steps.isEmpty()) return@withLock FixOutcome()
         stopping = false
-        val client = session()?.client ?: return@withLock FixOutcome(failed = steps.map { it to "Not signed in" })
+        val session = session()
+        if (on == null || session == null) return@withLock FixOutcome(failed = steps.map { it to "Not signed in" })
+        if (session.sourceId != on) return@withLock FixOutcome(failed = steps.map { it to FIX_OTHER_SERVER })
+        val client = session.client
         _progress.value = FixRun(0, steps.size)
         val outcome = try {
             runFix(
@@ -190,8 +201,9 @@ class LibraryFiles @Inject constructor(
         } finally {
             _progress.value = null
         }
-        if (keepUndo && outcome.undo.isNotEmpty()) _lastUndo.value = outcome.undo
-        if (outcome.done.isNotEmpty()) reload()
+        val still = server() == on
+        if (still && keepUndo && outcome.undo.isNotEmpty()) _lastUndo.value = outcome.undo
+        if (still && outcome.done.isNotEmpty()) reload()
         outcome
     }
 
@@ -200,32 +212,46 @@ class LibraryFiles @Inject constructor(
     }
 
     // Runs the steps away from the page that asked, so leaving it does not
-    // cut a run short. `shown` hears how it went and answers whether it
-    // told the listener; when it did not (its page has gone), a line says it.
-    // An `undo` run puts back an earlier one's `FixOutcome.undo`.
-    fun launch(steps: List<FixStep>, undo: Boolean = false, shown: (FixOutcome) -> Boolean = { false }) {
+    // cut a run short, on the server `on` they were planned on. `shown`
+    // hears how it went and answers whether it told the listener; when it
+    // did not (its page has gone), a line says it. Once another server is
+    // signed in to, how it went is not told at all. An `undo` run puts back
+    // an earlier one's `FixOutcome.undo`.
+    fun launch(steps: List<FixStep>, undo: Boolean = false, on: String? = server(), shown: (FixOutcome) -> Boolean = { false }) {
         scope.launch {
-            val outcome = if (undo) undo(steps) else run(steps)
+            val outcome = if (undo) undo(steps, on) else run(steps, on = on)
+            if (on != null && server() != on) return@launch
             val heard = withContext(Dispatchers.Main) { shown(outcome) }
-            if (!heard) say(outcome.summary(), outcome)
+            if (!heard) say(outcome.summary(), outcome, on)
         }
     }
 
-    // Says how a run went, with an Undo when the server can put it back.
-    fun say(line: String, outcome: FixOutcome) {
+    // Says how a run on the server `on` went, with an Undo when the server
+    // can put it back. The Undo goes to that same server, and only while it
+    // is still the one signed in to.
+    fun say(line: String, outcome: FixOutcome, on: String? = server()) {
         val back = outcome.undo
-        if (_actions.value.canRunAll(back)) {
-            feedback.undoable(line) { scope.launch { feedback.show(undo(back).summary()) } }
+        if (on != null && _actions.value.canRunAll(back)) {
+            feedback.undoable(line) {
+                scope.launch {
+                    if (server() != on) {
+                        feedback.show(FIX_OTHER_SERVER)
+                        return@launch
+                    }
+                    val put = undo(back, on)
+                    if (server() == on) feedback.show(put.summary())
+                }
+            }
         } else {
             feedback.show(line)
         }
     }
 
-    // Puts back what a run did, from its outcome's `undo`. Once it is put
-    // back, it is no longer the last change to undo.
-    suspend fun undo(steps: List<FixStep>): FixOutcome {
+    // Puts back what a run on the server `on` did, from its outcome's
+    // `undo`. Once it is put back, it is no longer the last change to undo.
+    suspend fun undo(steps: List<FixStep>, on: String? = server()): FixOutcome {
         _lastUndo.compareAndSet(steps, emptyList())
-        return run(steps, keepUndo = false)
+        return run(steps, keepUndo = false, on = on)
     }
 
     // Puts back the last run, once.
@@ -245,17 +271,21 @@ class LibraryFiles @Inject constructor(
     }
 
     // Deletes library songs from the server's disk, once asked, then says
-    // so with an Undo that puts them back from the server's trash.
+    // so with an Undo that puts them back from the server's trash. The
+    // server is the one signed in to when it was asked; once another is,
+    // nothing is said.
     fun deleteFromDisk(trackIds: List<String>, title: String?) {
+        val on = server() ?: return
         scope.launch {
             val copies = sources.copiesOf(trackIds.distinct())
-            val steps = deleteSteps(trackIds, copies, _source.value)
+            val steps = deleteSteps(trackIds, copies, _source.value?.takeIf { it == on })
             if (steps.isEmpty()) return@launch
-            val outcome = run(steps)
+            val outcome = run(steps, on = on)
+            if (server() != on) return@launch
             val removed = outcome.removed
             val songs = trackIds.distinct().count { id -> copies.any { it.mergedId == id && it.nativeId in removed } }
             val line = if (outcome.failed.isEmpty() && !outcome.rehearsed && !outcome.stopped) deletedLine(songs, title) else outcome.summary()
-            say(line, outcome)
+            say(line, outcome, on)
         }
     }
 
