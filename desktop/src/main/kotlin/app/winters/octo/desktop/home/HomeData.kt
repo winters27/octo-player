@@ -3,6 +3,7 @@ package app.winters.octo.desktop.home
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.server.serverTime
 import app.winters.octo.subsonic.Album
+import app.winters.octo.subsonic.OCTO_LIST_KINDS
 import app.winters.octo.subsonic.AlbumListType
 import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.RadioStation
@@ -57,6 +58,17 @@ suspend fun loadHome(connection: Connection): HomeData = coroutineScope {
 // shows them.
 fun newestFavourites(albums: List<Album>): List<Album> =
     albums.sortedWith(compareByDescending<Album> { serverTime(it.starred) ?: Long.MIN_VALUE }.thenBy { it.id }).take(SHELF_SIZE)
+
+// The lists Octo made for the listener (New Releases, Rediscover, Deep
+// Cuts), in that order, from the playlists the sidebar already holds. Only
+// an Octo server that makes them marks a playlist so; any other has none.
+fun madeForYou(playlists: List<Playlist>): List<Playlist> =
+    playlists.filter { it.octoList != null }
+        .sortedBy { OCTO_LIST_KINDS.indexOf(it.octoList).takeIf { i -> i >= 0 } ?: OCTO_LIST_KINDS.size }
+
+// The playlists the listener keeps, without the Made for you lists, which
+// have a shelf of their own on Home.
+fun yourPlaylists(playlists: List<Playlist>): List<Playlist> = playlists.filter { it.octoList == null }
 
 // The playlists with the pinned ones first, in the order they were pinned,
 // as the sidebar lists them.

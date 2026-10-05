@@ -36,6 +36,12 @@ class StationsTest {
     }
 
     @Test
+    fun aMadeForYouListSaysHowManySongs() {
+        assertEquals("1 song", songCountLine(1))
+        assertEquals("24 songs", songCountLine(24))
+    }
+
+    @Test
     fun aStationTheServerNoLongerHasSaysSo() {
         assertEquals("Chill mix isn't on the server any more", stationGoneLine("Chill mix"))
     }

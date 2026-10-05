@@ -94,4 +94,20 @@ class HomeDataTest {
         val playlists = listOf(Playlist("a"), Playlist("b"), Playlist("c"), Playlist("d"))
         assertEquals(listOf("c", "a", "b", "d"), pinnedFirst(playlists, listOf("c", "a", "gone")).map { it.id })
     }
+
+    // Made for you has its own shelf, in kind order, and is not shown again
+    // among the listener's own playlists.
+    @Test
+    fun madeForYouListsHaveTheirOwnShelf() {
+        val playlists = listOf(
+            Playlist("mine"),
+            Playlist("og-deep", octoList = "deepCuts"),
+            Playlist("og-new", octoList = "newReleases"),
+            Playlist("og-later", octoList = "aKindFromANewerServer"),
+            Playlist("og-re", octoList = "rediscover"),
+        )
+        assertEquals(listOf("og-new", "og-re", "og-deep", "og-later"), madeForYou(playlists).map { it.id })
+        assertEquals(listOf("mine"), yourPlaylists(playlists).map { it.id })
+        assertTrue("a server without the lists marks none", madeForYou(listOf(Playlist("a"), Playlist("b"))).isEmpty())
+    }
 }

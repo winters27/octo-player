@@ -81,7 +81,7 @@ fun AppState.playlistGone(id: String) {
 // The playlist as a list of playlists has it, for its menus: the sidebar's
 // entry, or one made from the page's own copy.
 fun PlaylistWithSongs.asPlaylist(): Playlist =
-    Playlist(id, name, comment, owner, public, songCount = entry.size, duration = entry.sumOf { it.duration }, coverArt = coverArt, changed = changed, readonly = readonly)
+    Playlist(id, name, comment, owner, public, songCount = entry.size, duration = entry.sumOf { it.duration }, coverArt = coverArt, changed = changed, readonly = readonly, octoList = octoList)
 
 // Shows a change to a playlist's page at once, sends it, and puts the page
 // back with a line saying why when the server refuses it. The sidebar is

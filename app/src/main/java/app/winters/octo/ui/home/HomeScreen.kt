@@ -88,7 +88,8 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
                 layout.shelves -> {
                     pinnedShelf(pinned, onOpen)
                     shelf("Recently played", recentlyPlayed, onOpen, onTitle = { onOpen(HistoryRoute()) })
-                    stationShelf(vm.stations, vm.startingStation, vm::playStation)
+                    stationShelf("Made for you", vm.madeForYou, vm.startingStation, vm::playStation)
+                    stationShelf("Stations", vm.stations, vm.startingStation, vm::playStation)
                     shelf("Recently added", recent.orEmpty(), onOpen)
                     shelf("Favorite albums", favouriteAlbums, onOpen, onTitle = { onOpen(FavouritesRoute(albums = true)) })
                     songShelf("Most played", mostPlayed, vm::play, onTitle = { onOpen(HistoryRoute(mostPlayed = true)) })
@@ -181,15 +182,17 @@ private fun ShelfTitle(title: String, onClick: (() -> Unit)?) {
     }
 }
 
-// The server's stations; tapping one plays what it has lined up.
+// The server's stations, or the lists it made for the listener; tapping
+// one plays what it has lined up.
 private fun androidx.compose.foundation.lazy.LazyListScope.stationShelf(
+    title: String,
     stations: List<Station>,
     starting: String?,
     onPlay: (Station) -> Unit,
 ) {
     if (stations.isEmpty()) return
-    item(key = "title:Stations") { SectionTitle("Stations", Modifier.padding(top = 18.dp)) }
-    item(key = "row:Stations") {
+    item(key = "title:$title") { SectionTitle(title, Modifier.padding(top = 18.dp)) }
+    item(key = "row:$title") {
         LazyRow(
             contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),

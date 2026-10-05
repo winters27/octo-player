@@ -28,7 +28,9 @@ import androidx.compose.ui.Modifier
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.home.AlbumShelf
 import app.winters.octo.desktop.home.SHELF_SIZE
+import app.winters.octo.desktop.home.madeForYou
 import app.winters.octo.desktop.home.pinnedFirst
+import app.winters.octo.desktop.home.yourPlaylists
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.library.LibraryState
 import app.winters.octo.desktop.nav.Page
@@ -66,8 +68,8 @@ import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.launch
 
 // Home: picking up where another device left off, what was played lately,
-// what came in, what is played most, favourites, playlists, Octo's
-// stations, then albums worth going back to. Every shelf is one row that
+// the lists Octo made for the listener and its stations, what came in, what
+// is played most, favorites, playlists, then albums worth going back to. Every shelf is one row that
 // fills the width, with See all where a full list exists.
 @Composable
 fun HomePage(app: AppState, visit: Visit) {
@@ -79,7 +81,8 @@ fun HomePage(app: AppState, visit: Visit) {
     val index = (library as? LibraryState.Ready)?.index
     LaunchedEffect(store, index) { index?.let(store::rediscover) }
     val settings by app.settings.state.collectAsState()
-    val playlists = remember(app.playlists, settings.frame.pinnedPlaylists) { pinnedFirst(app.playlists, settings.frame.pinnedPlaylists) }
+    val playlists = remember(app.playlists, settings.frame.pinnedPlaylists) { pinnedFirst(yourPlaylists(app.playlists), settings.frame.pinnedPlaylists) }
+    val forYou = remember(app.playlists) { madeForYou(app.playlists) }
     val home = store.data
     val failure = store.failure
     val found = store.rediscovered
@@ -92,7 +95,7 @@ fun HomePage(app: AppState, visit: Visit) {
         when {
             home == null && failure != null -> item(key = "failed") { FailedLine("Couldn't read Home from your server. $failure", store::retry) }
             home == null -> item(key = "loading") { LoadingLine() }
-            home.isEmpty && playlists.isEmpty() && (found == null || found.isEmpty) -> item(key = "empty") {
+            home.isEmpty && playlists.isEmpty() && forYou.isEmpty() && (found == null || found.isEmpty) -> item(key = "empty") {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.M)) {
                     NothingHere("No music yet", "Music on your server shows up here on its own. Once some is there, look again.")
                     GlazeCapsule(null, "Look again", {
@@ -103,6 +106,9 @@ fun HomePage(app: AppState, visit: Visit) {
             }
             else -> {
                 albums(app, "Recently played", home.recentlyPlayed) { app.navigator.go(Page.History) }
+                if (forYou.isNotEmpty()) {
+                    item(key = "shelf:foryou") { ShelfRow("Made for you", forYou, { it.id }, null) { PlaylistCard(app, it) } }
+                }
                 if (home.stations.isNotEmpty()) {
                     item(key = "shelf:stations") {
                         ShelfRow("Stations", home.stations, { it.id }, null) { station ->

@@ -136,6 +136,7 @@ class PlaylistPlanTest {
             listed("theirs", owner = "someone"),
             listed("noOwner", owner = null),
             listed("orchestra"),
+            Playlist(id = "og1", name = "New Releases", owner = "winters", readonly = true, octoList = "newReleases"),
         )
         val kept = importable(all, stationIds = setOf("orStation"), username = "Winters").map { it.id }
         assertEquals(listOf("mine", "noOwner", "orchestra"), kept)
