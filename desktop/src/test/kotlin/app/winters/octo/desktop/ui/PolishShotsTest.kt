@@ -123,6 +123,8 @@ class PolishShotsTest {
                     rig.mini("mini/square-x$density", MINI_SQUARE_WIDTH, MINI_SQUARE_HEIGHT, density)
                 }
                 rig.mini("mini/bar-cjk", MINI_WIDTH, MINI_HEIGHT, 1f) { rig.play(PolishData.CJK_SONG) }
+                rig.mini("mini/bar-explicit", MINI_WIDTH, MINI_HEIGHT, 1f) { rig.play(PolishData.EXPLICIT_ALBUM) }
+                rig.mini("mini/square-explicit", MINI_SQUARE_WIDTH, MINI_SQUARE_HEIGHT, 1f) { rig.play(PolishData.EXPLICIT_ALBUM) }
             }
         }
     }
@@ -131,7 +133,7 @@ class PolishShotsTest {
     private fun matrixSteps(rig: Rig): List<Pair<String, (ImageComposeScene) -> Unit>> {
         val app = rig.app
         fun go(page: Page) = SwingUtilities.invokeAndWait { app.navigator.go(page) }
-        return listOf(
+        return listOf<Pair<String, (ImageComposeScene) -> Unit>>(
             "home" to { _ -> go(Page.Home) },
             "songs" to { _ -> go(Page.Songs) },
             "songs-scrolled" to { scene ->
@@ -219,6 +221,38 @@ class PolishShotsTest {
                     app.navigator.go(Page.Songs)
                 }
             },
+            // An explicit song: its "E" in the album's table and the bar,
+            // the full player, the queue, Song info and the search box.
+            "explicit" to { _ ->
+                rig.play(PolishData.EXPLICIT_ALBUM)
+                go(Page.Album(PolishData.EXPLICIT_ALBUM))
+            },
+            "player-explicit" to { _ ->
+                rig.play(PolishData.EXPLICIT_ALBUM)
+                SwingUtilities.invokeAndWait { app.fullPlayer = true }
+            },
+            "queue-explicit" to { _ ->
+                rig.play(PolishData.EXPLICIT_ALBUM)
+                SwingUtilities.invokeAndWait {
+                    app.navigator.go(Page.Album(PolishData.LONG_ALBUM))
+                    app.showSidePanel(SidePanel.Queue)
+                }
+            },
+            "info-explicit" to { _ ->
+                rig.play(PolishData.EXPLICIT_ALBUM)
+                SwingUtilities.invokeAndWait {
+                    app.navigator.go(Page.Songs)
+                    app.showSidePanel(SidePanel.Info)
+                }
+            },
+            "omni-explicit" to { _ ->
+                SwingUtilities.invokeAndWait {
+                    app.navigator.go(Page.Songs)
+                    app.openSearch()
+                    app.search?.type("dracula")
+                }
+            },
+        ) + narrowSteps(rig) + listOf<Pair<String, (ImageComposeScene) -> Unit>>(
             "notice" to { _ ->
                 SwingUtilities.invokeAndWait {
                     app.navigator.go(Page.Songs)
@@ -226,6 +260,37 @@ class PolishShotsTest {
                     app.noticeDetail = "HTTP 404 from the server for the song's address"
                 }
             },
+        )
+    }
+
+    // Pages with a title and buttons, or a long title, with the side panel
+    // open, which at the smallest window leaves the page its least width
+    // (FrameSize.PageMin): titles stay whole and buttons move under them.
+    private fun narrowSteps(rig: Rig): List<Pair<String, (ImageComposeScene) -> Unit>> {
+        val app = rig.app
+        fun narrow(page: Page): (ImageComposeScene) -> Unit = { _ ->
+            SwingUtilities.invokeAndWait {
+                app.navigator.go(page)
+                app.showSidePanel(SidePanel.Queue)
+            }
+        }
+        return listOf(
+            "narrow-songs" to narrow(Page.Songs),
+            "narrow-albums" to narrow(Page.Albums),
+            "narrow-favorites" to narrow(Page.Favourites),
+            "narrow-recent" to narrow(Page.RecentlyAdded),
+            "narrow-history" to narrow(Page.History),
+            "narrow-health" to narrow(Page.LibraryHealth),
+            "narrow-search" to narrow(Page.Search),
+            "narrow-settings" to narrow(Page.Settings),
+            "narrow-album-long" to narrow(Page.Album(PolishData.LONG_ALBUM)),
+            "narrow-album-discs" to narrow(Page.Album(PolishData.DISCS_ALBUM)),
+            "narrow-artist-long" to narrow(Page.Artist("ar-sufjan", "Sufjan Stevens")),
+            "narrow-playlist-big" to narrow(Page.Playlist(PolishData.BIG_PLAYLIST)),
+            "narrow-playlist-word" to narrow(Page.Playlist(PolishData.WORD_PLAYLIST)),
+            "narrow-livelist" to narrow(Page.LiveList(rig.liveList.id)),
+            "narrow-folder" to narrow(Page.Folder(PolishData.LONG_FOLDER, "Deadbeat")),
+            "narrow-genre" to narrow(Page.Genre("Indie Folk, Chamber Pop, Singer-Songwriter")),
         )
     }
 

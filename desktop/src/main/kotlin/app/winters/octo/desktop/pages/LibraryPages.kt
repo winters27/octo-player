@@ -93,9 +93,8 @@ fun SongsPage(app: AppState, visit: Visit) {
             },
         ) {
             item(key = "title") {
-                Row(Modifier.fillMaxWidth().padding(bottom = Space.L), verticalAlignment = Alignment.Bottom) {
-                    PageTitle("Songs", Modifier.weight(1f), detail = if (query.filters) filteredCount(songs.size, index.songs.size, true) else facts)
-                    Row(Modifier.padding(bottom = Space.Xl), horizontalArrangement = Arrangement.spacedBy(Space.M)) {
+                PageTitle("Songs", Modifier.padding(bottom = Space.L), detail = if (query.filters) filteredCount(songs.size, index.songs.size, true) else facts) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.M)) {
                         GlazeCapsule(OctoIcons.Play, "Play", { app.play(songs) }, lit = true, enabled = songs.isNotEmpty())
                         GlazeCapsule(OctoIcons.Shuffle, "Shuffle", { app.play(songs, shuffle = true) }, enabled = songs.isNotEmpty())
                     }
@@ -119,10 +118,7 @@ fun AlbumsPage(app: AppState, visit: Visit) {
         val albums = remember(index, order) { sortAlbums(index.albums, order) }
         LazyVerticalGrid(GridCells.Adaptive(GridCard), Modifier.scrollbar(grid, LocalBottomRoom.current), state = grid, contentPadding = pagePadding(LocalBottomRoom.current)) {
             header {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    PageTitle("Albums", Modifier.weight(1f), detail = countText(albums.size, "album"))
-                    SortButton(app, SortList.Albums, order, app::sortAlbums)
-                }
+                PageTitle("Albums", detail = countText(albums.size, "album")) { SortButton(app, SortList.Albums, order, app::sortAlbums) }
             }
             if (albums.isEmpty()) header { NothingHere("No albums yet", "Once your server has music, every album shows here.") }
             items(albums, key = { it.id }) { AlbumCard(app, it) }
@@ -187,8 +183,7 @@ fun FavouritesPage(app: AppState, visit: Visit) {
     val filter: (LibraryQuery) -> Unit = { app.navigator.keepFilter(visit, it) }
     val fields = rememberShownFields(app)
     val title: @Composable (String?) -> Unit = { detail ->
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            PageTitle("Favorites", Modifier.weight(1f), detail = detail)
+        PageTitle("Favorites", detail = detail) {
             GlazeSegments(FavouriteKind.entries, kind, { it.label }, { kind = it; app.navigator.keepTab(visit, it.name) })
         }
     }

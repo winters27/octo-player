@@ -92,7 +92,9 @@ class ServerCatalogTest {
             addedAt = 1_789_919_475,
             mimeType = "audio/flac",
             sizeBytes = 24_740_366,
-            artwork = "server:$source|al-al1_6aafffab",
+            // The album's cover, then the album's first song's own, for when
+            // the server answers the album's with its stand-in picture.
+            artwork = "server:$source|al-al1_6aafffab|mf-s1_6aafffab",
             uri = null,
             albumOrder = 0,
             relinkKey = relinkKey("Kavinsky", "Nightcall", 1, 1, "Nightcall", 179_000),
@@ -178,6 +180,32 @@ class ServerCatalogTest {
     }
 
     @Test
+    fun onlyTheSongsOwnMarkCountsNotItsAlbums() {
+        // An album is marked explicit when any one of its songs is.
+        val explicitAlbum = album.copy(explicitStatus = "explicit")
+        val plain = buildServerCatalog(source, Library(listOf(song.copy(explicitStatus = "")), listOf(explicitAlbum), emptyList()))
+        assertNull(plain.tracks.single().explicit)
+        val marked = buildServerCatalog(source, Library(listOf(song.copy(explicitStatus = "explicit")), listOf(album), emptyList()))
+        assertEquals(true, marked.tracks.single().explicit)
+    }
+
+    @Test
+    fun anAlbumsSongsShareOneCoverWithOneFallback() {
+        val songs = listOf(song("b", 1, 2).copy(coverArt = "mf-b_1"), song("a", 1, 1).copy(coverArt = "mf-a_1"))
+        val catalog = buildServerCatalog(source, Library(songs, listOf(album), emptyList()))
+        // The first song in album order gives the fallback, for every song.
+        assertEquals(setOf("server:$source|al-al1_6aafffab|mf-a_1"), catalog.tracks.map { it.artwork }.toSet())
+        assertEquals("server:$source|al-al1_6aafffab|mf-a_1", catalog.albums.single().artwork)
+    }
+
+    @Test
+    fun aSongWithNoAlbumCoverIsDrawnWithItsOwn() {
+        val bare = album.copy(coverArt = null)
+        val row = buildServerCatalog(source, Library(listOf(song), listOf(bare), emptyList())).tracks.single()
+        assertEquals("server:$source|mf-s1_6aafffab", row.artwork)
+    }
+
+    @Test
     fun aGenreTextJoiningSeveralGivesEachOne() {
         val row = buildServerCatalog(source, Library(listOf(song.copy(genre = "Rock; Pop")), listOf(album), emptyList())).tracks.single()
         assertEquals("Rock", row.genre)
@@ -200,7 +228,9 @@ class ServerCatalogTest {
             songCount = 1,
             durationMs = 179_000,
             addedAt = 1_789_919_475,
-            artwork = "server:$source|al-al1_6aafffab",
+            // The album's cover, then the album's first song's own, for when
+            // the server answers the album's with its stand-in picture.
+            artwork = "server:$source|al-al1_6aafffab|mf-s1_6aafffab",
         )
         assertEquals(listOf(expected), catalog.albums)
     }

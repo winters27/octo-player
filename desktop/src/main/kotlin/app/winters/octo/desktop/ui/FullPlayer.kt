@@ -216,7 +216,7 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
         Spacer(Modifier.height(28.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Txt(song.title, OctoType.headline, ink, maxLines = 2)
+                MarkedTitle(song, OctoType.headline, markColor = muted) { Txt(song.title, OctoType.headline, ink, it, maxLines = 2) }
                 val artist = song.displayArtist ?: song.artist.orEmpty()
                 Txt(
                     artist,

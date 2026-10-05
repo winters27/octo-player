@@ -47,8 +47,9 @@ class SearchTopShotsTest {
             ""","artistId":"r1","coverArt":"al-$albumId","isExternal":false}"""
     }
 
-    private fun outsideJson(id: String, title: String, artist: String, album: String, seconds: Int) =
-        """{"id":"$id","title":"$title","artist":"$artist","album":"$album","duration":$seconds,"coverArt":"$id","isExternal":true,"suffix":"m4a"}"""
+    // `explicit` songs carry the server's "explicit" mark, so their rows show the small "E".
+    private fun outsideJson(id: String, title: String, artist: String, album: String, seconds: Int, explicit: Boolean = false) =
+        """{"id":"$id","title":"$title","artist":"$artist","album":"$album","duration":$seconds,"coverArt":"$id","isExternal":true,"suffix":"m4a"${if (explicit) ""","explicitStatus":"explicit"""" else ""}}"""
 
     private fun serve(server: FakeServer) {
         server.answer("ping", type = "octo")
@@ -62,7 +63,7 @@ class SearchTopShotsTest {
                 server.ok(""""searchResult3":{"song":[$songs]}""", type = "octo")
             } else {
                 server.ok(
-                    """"searchResult3":{"artist":[{"id":"r1","name":"Daft Punk","albumCount":2}],"album":[{"id":"a1","name":"Discovery","artist":"Daft Punk","coverArt":"al-a1"},{"id":"a2","name":"Random Access Memories","artist":"Daft Punk","coverArt":"al-a2"}],"song":[$songs,${outsideJson("o9", "Robot Rock", "Daft Punk", "Human After All", 287)}]}""",
+                    """"searchResult3":{"artist":[{"id":"r1","name":"Daft Punk","albumCount":2}],"album":[{"id":"a1","name":"Discovery","artist":"Daft Punk","coverArt":"al-a1"},{"id":"a2","name":"Random Access Memories","artist":"Daft Punk","coverArt":"al-a2"}],"song":[$songs,${outsideJson("o9", "Robot Rock", "Daft Punk", "Human After All", 287, explicit = true)}]}""",
                     type = "octo",
                 )
             }
@@ -77,7 +78,7 @@ class SearchTopShotsTest {
         ).joinToString(",") { (rank, what, plays) ->
             val song = if (what.startsWith("lib")) ownedJson(what.removePrefix("lib").toInt()) else {
                 val (title, album, seconds) = what.removePrefix("out:").split("|")
-                outsideJson("t$rank", title, "Daft Punk", album, seconds.toInt())
+                outsideJson("t$rank", title, "Daft Punk", album, seconds.toInt(), explicit = rank == "4")
             }
             """{"rank":$rank,"plays":$plays,"listeners":${plays / 9},"inLibrary":${what.startsWith("lib")},"song":$song}"""
         }
@@ -89,7 +90,7 @@ class SearchTopShotsTest {
             "Soda Pop|Saja Boys|KPop Demon Hunters", "Abracadabra|Lady Gaga|Mayhem", "APT.|ROSÉ|rosie",
         ).mapIndexed { index, line ->
             val (title, artist, album) = line.split("|")
-            val song = if (index == 3) ownedJson(0).replace("One More Time", title).replace("Daft Punk", artist).replace("Discovery", album) else outsideJson("c$index", title, artist, album, 180 + index * 7)
+            val song = if (index == 3) ownedJson(0).replace("One More Time", title).replace("Daft Punk", artist).replace("Discovery", album) else outsideJson("c$index", title, artist, album, 180 + index * 7, explicit = index == 0 || index == 6)
             """{"rank":${index + 1},"inLibrary":${index == 3},"song":$song}"""
         }.joinToString(",")
         server.answer("getTopChart", """"topSongs":{"source":"deezer","entry":[$chart]}""", type = "octo")
@@ -132,6 +133,10 @@ class SearchTopShotsTest {
             shot("search-top-songs", 2_500)
             SwingUtilities.invokeAndWait { app.search?.tops?.artistOpen = true }
             shot("search-top-songs-all")
+            // The songs found online, under what the library has: "Robot Rock" is explicit.
+            SwingUtilities.invokeAndWait { app.search?.tops?.artistOpen = false }
+            scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Scroll, androidx.compose.ui.geometry.Offset(900f, 500f), scrollDelta = androidx.compose.ui.geometry.Offset(0f, 30f))
+            shot("search-online-explicit")
             scene.close()
         }
     }

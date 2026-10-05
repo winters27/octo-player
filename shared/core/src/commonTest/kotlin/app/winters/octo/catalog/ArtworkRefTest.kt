@@ -61,6 +61,25 @@ class ArtworkRefTest {
     }
 
     @Test
+    fun aCoverWithAFallbackRoundTrips() {
+        val art = ArtworkRef.Server("server:10.0.0.5:4533", "al-27olR01OlsFec4YYFzCF6M_6ab000f2", fallbackId = "mf-6vmwLNYasJeYulqr0ZxrZJ_2298d43e")
+        assertEquals("server:server:10.0.0.5:4533|al-27olR01OlsFec4YYFzCF6M_6ab000f2|mf-6vmwLNYasJeYulqr0ZxrZJ_2298d43e", art.encode())
+        assertEquals(art, ArtworkRef.decode(art.encode()))
+    }
+
+    @Test
+    fun aFallbackThatIsTheCoverItselfIsNotWritten() {
+        assertEquals("server:server:x|al-1", ArtworkRef.Server("server:x", "al-1", fallbackId = "al-1").encode())
+        assertEquals("server:server:x|al-1", ArtworkRef.Server("server:x", "al-1", fallbackId = "").encode())
+    }
+
+    @Test
+    fun aCoverStoredBeforeFallbacksHasNone() {
+        assertNull((ArtworkRef.decode("server:server:x|al-1") as ArtworkRef.Server).fallbackId)
+        assertNull((ArtworkRef.decode("online:server:x|tr-9") as ArtworkRef.Server).fallbackId)
+    }
+
+    @Test
     fun unknownIsNull() {
         assertNull(ArtworkRef.decode("ftp:x"))
         assertNull(ArtworkRef.decode(null))

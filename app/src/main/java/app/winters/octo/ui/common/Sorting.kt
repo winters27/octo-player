@@ -62,6 +62,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
@@ -71,6 +72,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -138,6 +140,8 @@ fun SortButton(list: SortList, order: SortOrder, onChange: (SortOrder) -> Unit, 
                     style = OctoType.label.copy(fontWeight = FontWeight.Medium),
                     color = OctoColors.TextPrimary,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
                 Icon(
                     painterResource(OctoIcons.Ascending),
@@ -174,13 +178,41 @@ fun SortBar(
 // A page's big title with its sort button at the end of the line, at the
 // page's 20dp edge. The title has more room under its words than over them,
 // so the button is lifted by the difference to sit level with the words.
+// The title is never shortened or broken inside a word: when it and the
+// buttons do not both fit whole on one line, the buttons go on a line of
+// their own under it, at the same edge.
 @Composable
 fun TitleWithSort(title: String, modifier: Modifier = Modifier, sort: @Composable () -> Unit) {
-    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        ScreenTitle(title, Modifier.weight(1f))
-        Box(Modifier.padding(end = 20.dp, bottom = 8.dp)) { sort() }
+    Layout(
+        content = {
+            ScreenTitle(title)
+            Box(Modifier.padding(end = 20.dp, bottom = 8.dp)) { sort() }
+        },
+        modifier = modifier,
+    ) { (titleText, buttons), constraints ->
+        val width = constraints.maxWidth
+        val buttonsPlaced = buttons.measure(Constraints(maxWidth = width))
+        val titleWidth = titleText.maxIntrinsicWidth(Constraints.Infinity)
+        if (titleFitsBeside(titleWidth, buttonsPlaced.width, width)) {
+            val titlePlaced = titleText.measure(Constraints(maxWidth = width - buttonsPlaced.width))
+            val height = maxOf(titlePlaced.height, buttonsPlaced.height)
+            layout(width, height) {
+                titlePlaced.place(0, (height - titlePlaced.height) / 2)
+                buttonsPlaced.place(width - buttonsPlaced.width, (height - buttonsPlaced.height) / 2)
+            }
+        } else {
+            val titlePlaced = titleText.measure(Constraints(maxWidth = width))
+            layout(width, titlePlaced.height + buttonsPlaced.height) {
+                titlePlaced.place(0, 0)
+                buttonsPlaced.place(width - buttonsPlaced.width, titlePlaced.height)
+            }
+        }
     }
 }
+
+// Whether a page title, at its whole one-line width, fits beside its
+// buttons on a line `width` wide.
+fun titleFitsBeside(titleWidth: Int, buttonsWidth: Int, width: Int): Boolean = titleWidth + buttonsWidth <= width
 
 // The sort list: the two directions on top, then the options. Flipping the
 // direction reorders the list behind at once and keeps this open; picking an

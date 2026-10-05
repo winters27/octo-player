@@ -76,12 +76,13 @@ fun SettingsPageFrame(
                                 .border(1.dp, OctoColors.TextPrimary.copy(alpha = 0.06f), TileShape),
                             contentAlignment = Alignment.Center,
                         ) { MarkOrIcon(icon, brand, OctoColors.TextPrimary, 24.dp) }
+                        // Never cut short: a long title takes another line, at
+                        // large text sizes as many as it needs.
                         Text(
                             title,
                             style = OctoType.display,
                             color = OctoColors.TextPrimary,
-                            maxLines = 2,
-                            modifier = Modifier.semantics { heading() },
+                            modifier = Modifier.weight(1f, fill = false).semantics { heading() },
                         )
                     }
                 }

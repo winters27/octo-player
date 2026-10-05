@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.design.WholeTxt
 import app.winters.octo.design.LocalReduceMotion
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -142,7 +143,7 @@ fun ListHeader(
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs)) {
                 Txt(kind.uppercase(), DesktopType.label, OctoColors.TextMuted)
-                if (titleContent != null) titleContent() else CutTxt(title, DesktopType.pageTitle, maxLines = 2)
+                if (titleContent != null) titleContent() else WholeTxt(title, DesktopType.pageTitle)
                 subtitle?.invoke()
                 if (details != null) Txt(details, DesktopType.meta, OctoColors.TextMuted)
                 // Play and Shuffle stay, greyed, on an empty list, so the row keeps its place.

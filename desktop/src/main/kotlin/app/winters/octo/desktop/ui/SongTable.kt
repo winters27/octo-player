@@ -103,6 +103,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
 import app.winters.octo.design.CutTxt
+import app.winters.octo.catalog.isExplicit
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.FloatingGlaze
@@ -760,10 +761,12 @@ private fun SongRow(
     }
 }
 
-// What a screen reader says for a row: title, artist, album and length,
-// then whether it plays, is picked, is outside the library, or failed.
+// What a screen reader says for a row: title (and "explicit" when the
+// small "E" shows after it), artist, album and length, then whether it
+// plays, is picked, is outside the library, or failed.
 internal fun rowSpeech(song: Song, playing: Boolean, sounding: Boolean, picked: Boolean, outside: Boolean, failed: String?): String = buildString {
     append(song.title)
+    if (song.isExplicit) append(", explicit")
     (song.displayArtist ?: song.artist)?.takeIf(String::isNotBlank)?.let { append(", ").append(it) }
     song.album?.takeIf(String::isNotBlank)?.let { append(", ").append(it) }
     lengthText(song.duration).takeIf(String::isNotBlank)?.let { append(", ").append(it) }
@@ -807,12 +810,9 @@ private fun SongCell(
         SongColumn.Title -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs)) {
             if (covers) Cover(song.coverArt, Modifier.size(RowHeight.Roomy - Space.L), shape = Corner.ArtSShape, placeholder = OctoIcons.Songs)
             val failed = app.failedSongs[song.id]
-            CutTxt(
-                song.title,
-                DesktopType.tableTitle,
-                if (failed != null) muted else OctoColors.TextPrimary,
-                Modifier.weight(1f, fill = false),
-            )
+            MarkedTitle(song, DesktopType.tableTitle, Modifier.weight(1f, fill = false)) { title ->
+                CutTxt(song.title, DesktopType.tableTitle, if (failed != null) muted else OctoColors.TextPrimary, title)
+            }
             if (heartInTitle && !outside && app.isStarred(song)) Glyph(OctoIcons.Liked, size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextSecondary)
             // A song that would not play this time says why on hover.
             if (failed != null) OctoTooltip(failed) { Glyph(OctoIcons.Info, size = IconSize.Inline - Space.Xxs, tint = OctoColors.SignalOrange) }

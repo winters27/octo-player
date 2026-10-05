@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.design.WholeTxt
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -130,7 +131,7 @@ internal fun SectionedPage(app: AppState, visit: Visit, title: String, sections:
         // centred in the page; without it, the column starts at the margin.
         val side = if (withList) groupSide(maxWidth) else PageSide
         Column(Modifier.fillMaxSize()) {
-            Txt(title, DesktopType.pageTitle, modifier = Modifier.padding(start = side, end = PageSide, top = Space.Xxl, bottom = Space.Xs))
+            WholeTxt(title, DesktopType.pageTitle, modifier = Modifier.padding(start = side, end = PageSide, top = Space.Xxl, bottom = Space.Xs))
             if (withList) {
                 Row(Modifier.fillMaxSize()) {
                     SectionList(sections, index, ::pick, Modifier.padding(start = side - Space.M))

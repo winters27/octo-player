@@ -5,6 +5,13 @@ import app.winters.octo.catalog.DRAWN_COVER_VERSION
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
+import coil3.decode.DataSource
+import coil3.decode.ImageSource
+import coil3.fetch.SourceFetchResult
+import okio.Buffer
+import okio.FileSystem
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class ServerArtworkTest {
@@ -59,5 +66,30 @@ class ServerArtworkTest {
     fun libraryAndOnlineCoversDoNotChangeWithTheDay() {
         assertEquals(serverCoverKey(library, 0), serverCoverKey(library, noon))
         assertEquals(serverCoverKey(found, 0), serverCoverKey(found, noon))
+    }
+
+    private fun download(bytes: ByteArray) =
+        SourceFetchResult(ImageSource(Buffer().write(bytes), FileSystem.SYSTEM), "image/jpeg", DataSource.NETWORK)
+
+    @Test
+    fun aRealCoverIsNotAStandInAndIsLeftWholeForTheDecoder() {
+        val bytes = ByteArray(120_000) { (it % 251).toByte() }
+        val result = download(bytes)
+        assertFalse(isStandIn(result))
+        assertArrayEquals(bytes, result.source.source().readByteArray())
+    }
+
+    @Test
+    fun aCoverAsLongAsTheStandInIsReadThroughAndStillWhole() {
+        val bytes = ByteArray(69_228) { 7 }
+        val result = download(bytes)
+        assertFalse(isStandIn(result))
+        assertArrayEquals(bytes, result.source.source().readByteArray())
+    }
+
+    @Test
+    fun aCoverWithAFallbackIsKeptUnderItsOwnKey() {
+        val withFallback = library.copy(fallbackId = "mf-2")
+        assertEquals(serverCoverKey(library), serverCoverKey(withFallback))
     }
 }

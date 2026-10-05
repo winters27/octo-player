@@ -15,6 +15,7 @@ data class QueueEntry(
     val artist: String,
     val artwork: String?,
     val durationMs: Long,
+    val explicit: Boolean = false,
     val autoplay: Boolean = false,
     val source: QueueSource = NoSource,
 )

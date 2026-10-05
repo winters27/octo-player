@@ -39,6 +39,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import app.winters.octo.ui.common.SongTitle
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.GlazeButton
@@ -269,7 +270,7 @@ private fun DownloadLine(
             ) {
                 Artwork(row.artwork, 44.dp, shape = RoundedCornerShape(6.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(row.title, style = OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    SongTitle(row.title, explicit = row.explicit == true, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
                     Text(
                         listOf(row.artist, detail).filter { it.isNotEmpty() }.joinToString(" · "),
                         style = OctoType.caption,

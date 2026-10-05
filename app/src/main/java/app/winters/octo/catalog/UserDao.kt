@@ -130,19 +130,19 @@ interface UserDao {
         """
         SELECT itemId, id, sourceId, nativeId, title, searchKey, sortKey, artist, artistId, album, albumId,
             trackNo, discNo, year, durationMs, addedAt, mimeType, sizeBytes, artwork, uri, albumOrder,
-            relinkKey, genre, onPhone, rating
+            relinkKey, genre, onPhone, rating, explicit
         FROM (
             SELECT i.id AS itemId, i.position AS position, t.id, t.sourceId, t.nativeId, t.title, t.searchKey,
                 t.sortKey, t.artist, t.artistId, t.album, t.albumId, t.trackNo, t.discNo, t.year, t.durationMs,
                 t.addedAt, t.mimeType, t.sizeBytes, t.artwork, t.uri, t.albumOrder, t.relinkKey, t.genre,
-                t.onPhone, t.rating
+                t.onPhone, t.rating, t.explicit
             FROM playlist_item i JOIN track t ON t.id = i.trackId
             WHERE i.playlistId = :id
             UNION ALL
             SELECT i.id, i.position, o.id, o.sourceId, o.nativeId, o.title, LOWER(o.title), LOWER(o.title),
                 o.artist, '', o.album, '', NULL, NULL, NULL, o.durationMs, 0, o.mimeType, NULL,
                 CASE WHEN o.coverId IS NULL THEN NULL ELSE 'online:' || o.sourceId || '|' || o.coverId END,
-                NULL, 0, '', '', 0, 0
+                NULL, 0, '', '', 0, 0, o.explicit
             FROM playlist_item i JOIN online_song o ON o.id = i.trackId
             WHERE i.playlistId = :id
         )

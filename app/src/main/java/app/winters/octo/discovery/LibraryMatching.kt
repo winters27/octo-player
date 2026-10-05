@@ -6,6 +6,7 @@ import app.winters.octo.catalog.findId
 import app.winters.octo.catalog.onlineArtwork
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.catalog.sortKey
+import app.winters.octo.device.explicitOf
 import app.winters.octo.subsonic.Song
 
 // The matching rules themselves live in shared core (Matching.kt); this is
@@ -51,6 +52,7 @@ fun Song.toFind(sourceId: String, now: Long) = OnlineSongEntity(
     mimeType = mimeTypeOf(this),
     bitrate = bitRate?.takeIf { it > 0 },
     seenAt = now,
+    explicit = explicitOf(explicitStatus.orEmpty()),
 )
 
 // A found song shaped like a library song, so every list, menu and the
@@ -76,6 +78,7 @@ fun OnlineSongEntity.asTrack() = TrackEntity(
     artwork = onlineArtwork(sourceId, coverId),
     uri = null,
     onPhone = false,
+    explicit = explicit,
 )
 
 // Sorts out what the server sent. A song the library has from the server is

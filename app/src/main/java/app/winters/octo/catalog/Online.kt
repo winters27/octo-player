@@ -44,6 +44,9 @@ data class OnlineSongEntity(
     @ColumnInfo(defaultValue = "0") val requestedAt: Long = 0,
     // The library song it became once downloaded, or empty.
     @ColumnInfo(defaultValue = "") val adoptedId: String = "",
+    // True when the server marks it explicit, false when clean, null when
+    // nothing says.
+    val explicit: Boolean? = null,
 )
 
 @Dao

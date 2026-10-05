@@ -549,7 +549,10 @@ private fun LazyListScope.rankedSection(
                     ranked.plays?.let(::playsText),
                 ).joinToString(" • ")
             },
-            ownership = true,
+            // As every phone song row: a song not in the library has the add
+            // button at the end, and library songs keep that space so the
+            // lengths line up.
+            offerAdd = true,
         ) { onPlay(list.songs.indexOf(ranked)) }
     }
 }
