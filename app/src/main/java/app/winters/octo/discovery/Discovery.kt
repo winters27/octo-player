@@ -56,14 +56,17 @@ class OnlineAlbumPage(val album: OnlineAlbum, val songs: List<TrackEntity>)
 
 class OnlineArtistPage(val artist: OnlineArtist, val albums: List<OnlineAlbum>)
 
+// Radio answers remembered for "Suggested by" before the oldest are dropped,
+// and how long one is believed: a later radio may suggest the song again
+// from another source, and an old answer would name the wrong one.
+private const val SUGGESTIONS_KEPT = 5_000
+private const val SUGGESTION_LIFETIME_MS = 12 * 60 * 60 * 1000L
+
 // What the signed-in server offers beyond the library: songs, albums and
 // artists found online, radio from any song, and stations. Songs come back
 // shaped like library songs; one found online has an id starting "find:"
 // and plays as a stream. Every call throws SubsonicException when the server
 // cannot answer, and answers nothing when no server is signed in.
-// Radio answers remembered for "Suggested by" before the oldest are dropped.
-private const val SUGGESTIONS_KEPT = 5_000
-
 @Singleton
 class Discovery @Inject constructor(
     private val sessions: SessionRepository,
@@ -163,7 +166,7 @@ class Discovery @Inject constructor(
 
     // Which of Octo's radio sources suggested a track, as its last radio
     // answer said, for the song's info. Kept while the app runs, not saved.
-    private val suggested = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val suggested = Suggestions(SUGGESTIONS_KEPT, SUGGESTION_LIFETIME_MS)
 
     fun suggestedBy(trackId: String): String? = suggested[trackId]
 
@@ -183,10 +186,7 @@ class Discovery @Inject constructor(
             }
         }
         val sources = suggestionsOf(tracks.map { it?.id }, songs)
-        if (sources.isNotEmpty()) {
-            if (suggested.size > SUGGESTIONS_KEPT) suggested.clear()
-            suggested.putAll(sources)
-        }
+        suggested.putAll(sources)
         return tracks.filterNotNull().distinctBy { it.id }
     }
 
@@ -247,5 +247,36 @@ class Discovery @Inject constructor(
     private fun server(): Pair<SubsonicClient, String>? {
         val client = (sessions.state.value as? SessionState.SignedIn)?.session?.client ?: return null
         return client to serverSourceId(client.primaryUrl)
+    }
+}
+
+// Which source suggested each track, newest last: past the cap the oldest
+// answers go, and one older than its lifetime is forgotten, so the song info
+// never names a source from a radio long gone. Safe across threads.
+internal class Suggestions(
+    private val kept: Int,
+    private val lifetimeMs: Long,
+    private val now: () -> Long = System::currentTimeMillis,
+) {
+    private val entries = LinkedHashMap<String, Pair<String, Long>>()
+
+    @Synchronized
+    fun putAll(sources: Map<String, String>) {
+        val at = now()
+        for ((id, by) in sources) {
+            // Taken out first, so a song suggested again moves to the newest end.
+            entries.remove(id)
+            entries[id] = by to at
+        }
+        val over = entries.size - kept
+        if (over > 0) entries.keys.take(over).forEach(entries::remove)
+    }
+
+    @Synchronized
+    operator fun get(id: String): String? {
+        val (by, at) = entries[id] ?: return null
+        if (now() - at <= lifetimeMs) return by
+        entries.remove(id)
+        return null
     }
 }

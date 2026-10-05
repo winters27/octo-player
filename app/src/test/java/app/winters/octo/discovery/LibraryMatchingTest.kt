@@ -23,6 +23,22 @@ class LibraryMatchingTest {
         assertEquals(emptyMap<String, String>(), suggestionsOf(listOf(null), listOf(songs[0])))
     }
 
+    @Test
+    fun theOldestSuggestionsGoFirst_AndAnOldOneIsForgotten() {
+        var clock = 0L
+        val memory = Suggestions(kept = 2, lifetimeMs = 1_000, now = { clock })
+        memory.putAll(mapOf("a" to "Last.fm", "b" to "YouTube Music"))
+        // Suggested again: now the newest, so "b" is the one that goes.
+        memory.putAll(mapOf("a" to "ListenBrainz"))
+        memory.putAll(mapOf("c" to "Sounds alike"))
+        assertEquals("ListenBrainz", memory["a"])
+        assertEquals(null, memory["b"])
+        assertEquals("Sounds alike", memory["c"])
+
+        clock = 1_001
+        assertEquals(null, memory["a"])
+    }
+
     private fun track(id: String, title: String, artist: String, ms: Long = 200_000) = TrackEntity(
         id = id, sourceId = "device", nativeId = id, title = title, searchKey = title.lowercase(), sortKey = title.lowercase(),
         artist = artist, artistId = "a", album = "Album", albumId = "al", trackNo = null, discNo = null, year = null,
