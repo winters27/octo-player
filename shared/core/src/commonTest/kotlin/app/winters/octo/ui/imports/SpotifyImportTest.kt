@@ -46,6 +46,15 @@ class SpotifyImportTest {
     }
 
     @Test
+    fun removingAListSaysWhatGoesAndWhatStays() {
+        assertEquals("Octo forgets Road trip. Songs already in your library stay.", ImportListSummary(name = "Road trip").removeLine())
+        assertEquals(
+            "Octo forgets Road trip and stops getting its missing songs. Songs already in your library stay, and so does its playlist.",
+            ImportListSummary(name = "Road trip", getMissing = true, playlistId = "pl-1").removeLine(),
+        )
+    }
+
+    @Test
     fun theTrickleSaysWhatItWaitsFor() {
         val running = TrickleStatus(state = "running", perHour = 20, queued = 3, nextUtc = "2026-10-04T14:05:00Z", done = 2)
         assertEquals("Waiting for the next turn", running.title())

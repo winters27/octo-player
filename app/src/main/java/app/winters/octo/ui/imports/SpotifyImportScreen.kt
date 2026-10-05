@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,6 +41,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
+import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.GlassInput
 import app.winters.octo.design.GlazeButton
@@ -172,6 +174,9 @@ private fun LazyListScope.lists(vm: ImportModel, overview: ImportOverview) {
 
 @Composable
 private fun ListRow(vm: ImportModel, list: ImportListSummary) {
+    // Remove asks once more before the list goes, as Remove all does on
+    // Downloads.
+    var confirming by remember(list.id) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { vm.open(list.id) }) {
             Text(list.name, style = OctoType.body, color = OctoColors.TextPrimary, maxLines = 2)
@@ -183,10 +188,22 @@ private fun ListRow(vm: ImportModel, list: ImportListSummary) {
         list.playlistNote?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
         SwitchLine(KEEP_AS_PLAYLIST, list.keepPlaylist, !vm.working) { vm.keepPlaylist(list.id, it) }
         SwitchLine(GET_MISSING_SONGS, list.getMissing, !vm.working) { vm.getMissing(list.id, it) }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            GlazeButton("Open", { vm.open(list.id) }, size = ButtonSize.Small)
-            if (list.canRefresh) GlazeButton("Read again", { vm.readList(list.id) }, size = ButtonSize.Small, enabled = !vm.working)
-            GlazeButton("Remove", { vm.remove(list.id) }, size = ButtonSize.Small, enabled = !vm.working)
+        if (confirming) {
+            Text(REMOVE_LIST, style = OctoType.bodySmall, color = OctoColors.TextPrimary, modifier = Modifier.padding(top = 4.dp))
+            Text(list.removeLine(), style = OctoType.caption, color = OctoColors.TextSecondary)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AccentButton("Remove", onClick = {
+                    confirming = false
+                    vm.remove(list.id)
+                }, size = ButtonSize.Small, enabled = !vm.working)
+                GlazeButton("Cancel", { confirming = false }, size = ButtonSize.Small)
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                GlazeButton("Open", { vm.open(list.id) }, size = ButtonSize.Small)
+                if (list.canRefresh) GlazeButton("Read again", { vm.readList(list.id) }, size = ButtonSize.Small, enabled = !vm.working)
+                GlazeButton("Remove", { confirming = true }, size = ButtonSize.Small, enabled = !vm.working)
+            }
         }
     }
 }

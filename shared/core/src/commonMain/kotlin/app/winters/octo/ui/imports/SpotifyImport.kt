@@ -66,6 +66,18 @@ fun ImportListSummary.countsLine(): String = listOfNotNull(
     if (notFound > 0) "$notFound not found" else null,
 ).joinToString(" · ")
 
+// Removing a list is asked first: the question, and what goes and what
+// stays. The server keeps the songs it fetched and the playlist it made.
+const val REMOVE_LIST = "Remove this list?"
+
+fun ImportListSummary.removeLine(): String = buildString {
+    append("Octo forgets $name")
+    if (getMissing) append(" and stops getting its missing songs")
+    append(". Songs already in your library stay")
+    if (playlistId != null) append(", and so does its playlist")
+    append(".")
+}
+
 // The account's line: who is connected and until when, or what to do first.
 fun SpotifyStatus.line(zone: ZoneId = ZoneId.systemDefault()): String = when {
     !configured -> "Add your Spotify app's Client ID on the Octo dashboard first, on its Spotify import page."

@@ -28,10 +28,14 @@ import app.winters.octo.design.DesktopType
 import app.winters.octo.design.GlassField
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.IconSize
+import app.winters.octo.design.LocalPopups
+import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.MeterLine
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoSwitch
+import app.winters.octo.design.PopupHost
+import app.winters.octo.design.PopupPadding
 import app.winters.octo.design.ProgressRing
 import app.winters.octo.design.RowHeight
 import app.winters.octo.design.Space
@@ -47,11 +51,13 @@ import app.winters.octo.subsonic.ImportTrackState
 import app.winters.octo.subsonic.TrickleState
 import app.winters.octo.ui.imports.GET_MISSING_SONGS
 import app.winters.octo.ui.imports.KEEP_AS_PLAYLIST
+import app.winters.octo.ui.imports.REMOVE_LIST
 import app.winters.octo.ui.imports.SPOTIFY_IMPORT
 import app.winters.octo.ui.imports.countsLine
 import app.winters.octo.ui.imports.label
 import app.winters.octo.ui.imports.line
 import app.winters.octo.ui.imports.originLine
+import app.winters.octo.ui.imports.removeLine
 import app.winters.octo.ui.imports.title
 
 // Spotify import on an Octo server: connect a Spotify account, see what the
@@ -221,7 +227,26 @@ private fun ListRow(model: ImportModel, list: ImportListSummary) {
             LabelledSwitch(GET_MISSING_SONGS, list.getMissing, enabled = !model.working) { model.getMissing(list.id, it) }
             Box(Modifier.weight(1f))
             if (list.canRefresh) RowAction("Read again", { model.readList(list.id) }, enabled = !model.working)
-            RowAction("Remove", { model.remove(list.id) }, enabled = !model.working)
+            val popups = LocalPopups.current
+            RowAction("Remove", { askToRemove(popups, model, list) }, enabled = !model.working)
+        }
+    }
+}
+
+// Asks before a list is removed, in the middle of the window, as deleting
+// from disk does.
+private fun askToRemove(popups: PopupHost, model: ImportModel, list: ImportListSummary) {
+    popups.showCentred { close ->
+        MenuTitle(REMOVE_LIST)
+        PopupPadding {
+            Txt(list.removeLine(), DesktopType.body, OctoColors.TextPrimary, maxLines = 6)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
+                GlazeCapsule(null, "Cancel", close)
+                GlazeCapsule(OctoIcons.Delete, "Remove", {
+                    close()
+                    model.remove(list.id)
+                }, lit = true)
+            }
         }
     }
 }
