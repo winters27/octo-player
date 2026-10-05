@@ -4,7 +4,7 @@ import app.winters.octo.connection.ConnectionChooser
 import app.winters.octo.connection.ConnectionSecurity
 import app.winters.octo.connection.ConnectionSettings
 import app.winters.octo.connection.FolderChoice
-import app.winters.octo.connection.ServerHeader
+import app.winters.octo.connection.ServerClients
 import app.winters.octo.connection.StoredConnection
 import app.winters.octo.connection.cleanHeaders
 import app.winters.octo.connection.decodeConnection
@@ -14,12 +14,18 @@ import app.winters.octo.connection.mask
 import app.winters.octo.connection.opened
 import app.winters.octo.connection.sealed
 import app.winters.octo.server.PasswordChange
+import app.winters.octo.server.ServerCheck
+import app.winters.octo.server.Reach
 import app.winters.octo.server.changeOwnPassword
+import app.winters.octo.server.freshServerId
+import app.winters.octo.server.passwordRefusedWords
+import app.winters.octo.server.serverName
 import app.winters.octo.server.serverSourceId
-import app.winters.octo.subsonic.ScanStatus
+import app.winters.octo.server.switchFailedWords
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.Credentials
 import app.winters.octo.subsonic.MusicFolder
+import app.winters.octo.subsonic.ScanStatus
 import app.winters.octo.subsonic.ServerInfo
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
@@ -34,7 +40,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -47,6 +53,9 @@ const val API_KEY_EXTENSION = "apiKeyAuthentication"
 // How long the home address gets to answer before the main one is used.
 private const val HOME_PING_SECONDS = 2L
 
+// How long a kept server not in use gets to answer a quick look.
+private const val GLANCE_SECONDS = 6L
+
 class Session(
     val client: SubsonicClient,
     val serverType: String?,
@@ -55,12 +64,20 @@ class Session(
     val adminReachable: Boolean,
     val extensions: Set<String>,
     val connection: ConnectionSettings = ConnectionSettings(),
+    // Which kept server this is: everything the phone keeps for the account
+    // is kept under it.
+    val id: String = "",
+    // The name the listener gave it.
+    val label: String = "",
 ) {
     // The source the library is kept under: from the main address, whichever
     // address calls go to.
     val sourceId: String get() = serverSourceId(client.primaryUrl)
 
     val takesApiKeys: Boolean get() = extensions.any { it.startsWith("$API_KEY_EXTENSION:") }
+
+    // What the server is called: its name, else its host.
+    val name: String get() = serverName(label, client.primaryUrl.toString())
 }
 
 sealed interface SessionState {
@@ -68,6 +85,10 @@ sealed interface SessionState {
     data object SignedOut : SessionState
     class SignedIn(val session: Session) : SessionState
 }
+
+// Whose things are in use: the kept server's id, or null with none in use.
+// Null too while the saved sign-in is still being read.
+val SessionState.accountId: String? get() = (this as? SessionState.SignedIn)?.session?.id
 
 // What the sign-in form sends. The secret is the password, or the key when
 // signing in with an API key. When editing the connection, an empty secret
@@ -81,12 +102,14 @@ class SignInRequest(
     val headers: List<HeaderDraft> = emptyList(),
     val pins: Map<String, String> = emptyMap(),
     val clientCertAlias: String? = null,
+    // A name of the listener's own, or null to keep the one it has.
+    val label: String? = null,
 ) {
     override fun toString() = "SignInRequest(address=$address, username=$username, secret=${mask(secret)}, authMode=$authMode)"
 }
 
-// The saved connection, as the form starts from when editing it. No secret
-// is in here: the password, key and header values stay sealed.
+// A kept server's connection, as the form starts from when editing it. No
+// secret is in here: the password, key and header values stay sealed.
 class ConnectionDraft(
     val address: String,
     val username: String,
@@ -96,6 +119,7 @@ class ConnectionDraft(
     val pins: Map<String, String>,
     val clientCertAlias: String?,
     val takesApiKeys: Boolean,
+    val label: String = "",
 )
 
 // A quick look at the signed-in server: how long it took to answer (null
@@ -113,8 +137,30 @@ sealed interface SignInError {
     // The server showed a certificate the phone does not trust. The user
     // may choose to trust exactly this one, for this host only.
     class Untrusted(val host: String, val fingerprint: String) : SignInError
+
+    // Another kept server already has this address and username.
+    class AlreadyKept(val name: String) : SignInError
+
+    // The server being edited is no longer in the list.
+    data object Gone : SignInError
 }
 
+// How moving to another kept server went.
+sealed interface SwitchResult {
+    // `from` is the server in use before, if any.
+    class Done(val session: Session, val from: Session?) : SwitchResult
+
+    // Its password is not kept here (signed out), or the server no longer
+    // takes it: ask for it.
+    class NeedsPassword(val server: StoredServer, val note: String? = null) : SwitchResult
+
+    class Failed(val message: String) : SwitchResult
+}
+
+// The servers kept on the phone, and the one in use: signing in, adding
+// another, switching between them, editing, signing out and removing. Each
+// server's password, key, header values and client certificate name are
+// stored only sealed.
 @Singleton
 class SessionRepository @Inject constructor(
     private val store: SessionStore,
@@ -123,10 +169,16 @@ class SessionRepository @Inject constructor(
     private val http: OkHttpClient,
     private val security: ConnectionSecurity,
     private val chooser: ConnectionChooser,
+    private val clients: ServerClients,
+    private val handoff: SessionHandoff,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val _state = MutableStateFlow<SessionState>(SessionState.Loading)
     val state: StateFlow<SessionState> = _state
+
+    // Every kept server in order, and the one in use.
+    private val _servers = MutableStateFlow(KeptServers())
+    val servers: StateFlow<KeptServers> = _servers
 
     // A quick client for asking whether the home address answers.
     private val quick: OkHttpClient by lazy { http.newBuilder().callTimeout(HOME_PING_SECONDS, TimeUnit.SECONDS).build() }
@@ -157,51 +209,78 @@ class SessionRepository @Inject constructor(
             // Only while the same session is still the one in use.
             val current = (_state.value as? SessionState.SignedIn)?.session
             if (current !== session) return@withLock
-            store.read()?.let { saved -> store.write(saved.copy(extensions = fresh)) }
-            _state.value = SessionState.SignedIn(
-                Session(
-                    session.client,
-                    session.serverType,
-                    session.serverVersion,
-                    session.isOcto,
-                    session.adminReachable,
-                    fresh,
-                    session.connection,
-                ),
-            )
+            _servers.value.find(session.id)?.let { saved ->
+                _servers.value = store.update { it.replacing(saved.copy(extensions = fresh)) }
+            }
+            _state.value = SessionState.SignedIn(session.withExtensions(fresh))
         }
     }
+
+    private val current: Session? get() = (_state.value as? SessionState.SignedIn)?.session
 
     suspend fun signIn(address: String, username: String, password: String): SignInError? =
         signIn(SignInRequest(address, username, password))
 
-    // Returns null on success.
-    suspend fun signIn(request: SignInRequest): SignInError? = changes.withLock {
+    // Signs in and makes the server the one in use: a new server joins the
+    // list, one already kept is brought up to date. Returns null on success.
+    suspend fun signIn(request: SignInRequest): SignInError? = changes.withLock { keep(request, base = null, use = true) }
+
+    // Keeps a server beside the others without leaving the one in use. The
+    // same account again is brought up to date rather than kept twice.
+    suspend fun add(request: SignInRequest): SignInError? = changes.withLock { keep(request, base = null, use = false) }
+
+    // Changes a kept server's address, username, headers or way of signing
+    // in, after signing in with the new details works. Empty secrets keep
+    // the saved ones. The server in use is signed in to again.
+    suspend fun edit(id: String, request: SignInRequest): SignInError? = changes.withLock {
+        val base = _servers.value.find(id) ?: return@withLock SignInError.Gone
+        keep(request, base, use = id == _servers.value.active && current != null)
+    }
+
+    // Gives a kept server a name of its own; an empty one shows its host.
+    suspend fun rename(id: String, label: String) = changes.withLock {
+        val kept = _servers.value.find(id) ?: return@withLock
+        _servers.value = store.update { it.replacing(kept.copy(label = label.trim())) }
+        current?.takeIf { it.id == id }?.let { now ->
+            _state.value = SessionState.SignedIn(now.relabelled(label.trim()))
+        }
+    }
+
+    private suspend fun keep(request: SignInRequest, base: StoredServer?, use: Boolean): SignInError? {
         val main = normalizeServerUrl(request.address) ?: return SignInError.BadAddress
         val home = if (request.home.isBlank()) null
         else (normalizeServerUrl(request.home) ?: return SignInError.BadHomeAddress).takeIf { it != main }
-        val current = (_state.value as? SessionState.SignedIn)?.session
-        val secret = request.secret.ifEmpty { savedSecret(request.authMode) ?: return SignInError.MissingSecret }
+        val username = request.username.trim()
+        val kept = _servers.value
+        // The same account already kept, when not the one edited.
+        val twin = kept.servers.firstOrNull { it.serverUrl == main.toString() && it.username == username && it.id != base?.id }
+        if (base != null && twin != null) return SignInError.AlreadyKept(twin.name)
+        val before = base ?: twin
+        val savedConnection = before?.let(::openedConnection)
+        val secret = request.secret.ifEmpty { before?.let { savedSecret(it, request.authMode) } ?: return SignInError.MissingSecret }
         val settings = ConnectionSettings(
             home = home,
             authMode = request.authMode,
-            headers = cleanHeaders(resolveHeaders(request.headers, current?.connection?.headers.orEmpty())),
+            headers = cleanHeaders(resolveHeaders(request.headers, savedConnection?.headers.orEmpty())),
             pins = request.pins,
             clientCertAlias = request.clientCertAlias,
             // The folder stays when only the way in changed.
-            folder = current?.takeIf { it.client.primaryUrl == main }?.connection?.folder,
+            folder = savedConnection?.takeIf { before?.serverUrl == main.toString() }?.folder,
         )
-        var creds = Credentials(request.username.trim(), secret, request.authMode)
+        var creds = Credentials(username, secret, request.authMode)
+        val inUse = current
 
-        // Tries the connection with the new settings, and puts the old ones
-        // back if it does not work.
+        // Tries the connection with the new settings, and puts the ones in
+        // use back if it does not work, or once it has when the server is
+        // only being kept.
         applySecurity(main, settings)
+        suspend fun putBack() = if (inUse != null) applySecurity(inUse.client.primaryUrl, inUse.connection) else security.clear()
         val reached = try {
             reach(main, home, creds)
         } catch (e: SubsonicException) {
             // The certificate is read before the settings go back, which forgets it.
             val question = untrusted(e, main, home)
-            if (current != null) applySecurity(current.client.primaryUrl, current.connection) else security.clear()
+            putBack()
             return question ?: SignInError.Failed(e)
         }
         // A home address with a certificate the phone does not trust is
@@ -210,7 +289,7 @@ class SessionRepository @Inject constructor(
             val homeError = runCatching { SubsonicClient(home, creds, quick).ping() }.exceptionOrNull()
             if (homeError is SubsonicException) {
                 untrusted(homeError, home, null)?.let { question ->
-                    if (current != null) applySecurity(current.client.primaryUrl, current.connection) else security.clear()
+                    putBack()
                     return question
                 }
             }
@@ -226,28 +305,137 @@ class SessionRepository @Inject constructor(
             .flatMap { ext -> ext.versions.map { "${ext.name}:$it" } }.toSet()
         // The status page is the only Octo signal for now, so the two match.
         val admin = probe.adminReachable(reached.url)
-        store.write(
-            StoredSession(
-                serverUrl = main.toString(),
-                username = creds.username,
-                passwordSealed = vault.seal(secret),
-                serverType = reached.info.type,
-                serverVersion = reached.info.serverVersion,
-                isOcto = admin,
-                octoAdminReachable = admin,
-                extensions = extensions,
-                connection = encodeConnection(settings.sealed(vault::seal)),
-            ),
+        val taken = kept.servers.map { it.id }.toSet() - setOfNotNull(before?.id)
+        val id = when {
+            before == null -> freshServerId(creds.username, main.toString(), taken)
+            // Another account on the server gets its own plays and queue.
+            before.username != creds.username -> freshServerId(creds.username, main.toString(), taken)
+            else -> before.id
+        }
+        val saved = StoredServer(
+            serverUrl = main.toString(),
+            username = creds.username,
+            passwordSealed = vault.seal(secret),
+            serverType = reached.info.type,
+            serverVersion = reached.info.serverVersion,
+            isOcto = admin,
+            octoAdminReachable = admin,
+            extensions = extensions,
+            connection = encodeConnection(settings.sealed(vault::seal)),
+            id = id,
+            label = request.label?.trim() ?: before?.label.orEmpty(),
         )
-        _state.value = SessionState.SignedIn(
-            activate(main, settings, creds, reached.info.type, reached.info.serverVersion, admin, admin, extensions),
-        )
-        null
+        if (!use) {
+            putBack()
+            _servers.value = store.update { now ->
+                val list = if (before == null) now.servers + saved else now.servers.map { if (it.id == before.id) saved else it }
+                now.copy(servers = list)
+            }
+            return null
+        }
+        // Another account in use puts its things away first.
+        if (inUse != null && inUse.id != id) handoff.leave(inUse, id)
+        _servers.value = store.update { now ->
+            val list = if (before == null) now.servers + saved else now.servers.map { if (it.id == before.id) saved else it }
+            now.copy(servers = list, active = id)
+        }
+        _state.value = SessionState.SignedIn(activate(main, settings, creds, saved))
+        return null
     }
 
-    suspend fun signOut() = changes.withLock {
-        store.clear()
-        vault.forget()
+    // Makes another kept server the one in use, signed in with its saved
+    // secret. It is asked first, with a client of its own, so one out of
+    // reach leaves everything as it was; what it says about itself is kept
+    // fresh. The server in use puts its things away before the new one is.
+    suspend fun switchTo(id: String): SwitchResult = changes.withLock {
+        val server = _servers.value.find(id) ?: return@withLock SwitchResult.Failed("That server isn't in your list any more.")
+        val from = current
+        if (from?.id == id) return@withLock SwitchResult.Done(from, null)
+        if (server.signedOut || server.passwordSealed.isEmpty()) return@withLock SwitchResult.NeedsPassword(server)
+        val secret = vault.open(server.passwordSealed) ?: return@withLock SwitchResult.NeedsPassword(server)
+        val settings = openedConnection(server) ?: return@withLock SwitchResult.NeedsPassword(server)
+        val main = server.serverUrl.toHttpUrlOrNull()
+            ?: return@withLock SwitchResult.Failed("That server's address can't be read. Edit it and try again.")
+        val creds = Credentials(server.username, secret, settings.authMode)
+        val own = clients.forServer(main, settings, GLANCE_SECONDS)
+        val info = try {
+            reachWith(own, main, settings.home, creds).info
+        } catch (e: SubsonicException) {
+            if (e is SubsonicException.WrongCredentials) return@withLock SwitchResult.NeedsPassword(server, passwordRefusedWords(server.name))
+            return@withLock SwitchResult.Failed(switchFailedWords(server.name, e.userMessage()))
+        }
+        val extensions = runCatching { SubsonicClient(main, creds, own).extensions() }.getOrNull()
+            ?.flatMap { ext -> ext.versions.map { "${ext.name}:$it" } }?.toSet()
+        val fresh = server.copy(
+            serverType = info.type ?: server.serverType,
+            serverVersion = info.serverVersion ?: server.serverVersion,
+            extensions = extensions ?: server.extensions,
+        )
+        if (from != null) handoff.leave(from, id)
+        _servers.value = store.update { it.replacing(fresh).copy(active = id) }
+        val session = activate(main, settings, creds, fresh)
+        _state.value = SessionState.SignedIn(session)
+        SwitchResult.Done(session, from)
+    }
+
+    // How a kept server answers a quick look, with a client of its own.
+    // One signed out of is not asked.
+    suspend fun check(id: String): ServerCheck {
+        val server = _servers.value.find(id) ?: return ServerCheck(Reach.Unknown)
+        val inUse = current?.takeIf { it.id == id }
+        val client = if (inUse != null) {
+            inUse.client
+        } else {
+            if (server.signedOut || server.passwordSealed.isEmpty()) return ServerCheck(Reach.Unknown)
+            val secret = vault.open(server.passwordSealed) ?: return ServerCheck(Reach.Unknown)
+            val settings = openedConnection(server) ?: return ServerCheck(Reach.Unknown)
+            val main = server.serverUrl.toHttpUrlOrNull() ?: return ServerCheck(Reach.Unreachable)
+            SubsonicClient(main, Credentials(server.username, secret, settings.authMode), clients.forServer(main, settings, GLANCE_SECONDS))
+        }
+        val start = System.nanoTime()
+        return try {
+            client.ping()
+            ServerCheck(Reach.Answers, (System.nanoTime() - start) / 1_000_000)
+        } catch (e: SubsonicException) {
+            ServerCheck(if (e is SubsonicException.WrongCredentials) Reach.WrongPassword else Reach.Unreachable)
+        }
+    }
+
+    // Signs out of the server in use: disconnecting keeps it in the list,
+    // without its password.
+    suspend fun signOut() = signOut(null)
+
+    // Signs out of a kept server, the one in use when `id` is null. It stays
+    // in the list without its password, so signing in again needs only that;
+    // its header values stay sealed.
+    suspend fun signOut(id: String?) = changes.withLock {
+        val kept = _servers.value
+        val server = kept.find(id ?: kept.active) ?: return@withLock
+        val inUse = current?.takeIf { it.id == server.id }
+        if (inUse != null) handoff.leave(inUse, null)
+        _servers.value = store.update { now ->
+            val out = now.replacing(server.copy(signedOut = true, passwordSealed = ""))
+            if (now.active == server.id) out.copy(active = null) else out
+        }
+        if (inUse != null) leaveSession()
+    }
+
+    // Takes a server off the list, with its password. Its music and
+    // playlists stay on the server. Answers the server removed, if it was kept.
+    suspend fun remove(id: String): StoredServer? = changes.withLock {
+        val server = _servers.value.find(id) ?: return@withLock null
+        val inUse = current?.takeIf { it.id == id }
+        if (inUse != null) handoff.leave(inUse, null)
+        _servers.value = store.update { now ->
+            now.copy(servers = now.servers.filterNot { it.id == id }, active = now.active.takeIf { it != id })
+        }
+        if (inUse != null) leaveSession()
+        // With no server kept, nothing sealed is left to open.
+        if (_servers.value.servers.isEmpty()) vault.forget()
+        server
+    }
+
+    private fun leaveSession() {
         credentials = null
         chooser.clear()
         security.clear()
@@ -258,11 +446,13 @@ class SessionRepository @Inject constructor(
     // checked first; on success the new one is sealed in place of the old,
     // and the client in use already signs in with it.
     suspend fun changePassword(current: String, new: String): PasswordChange {
-        val session = (_state.value as? SessionState.SignedIn)?.session ?: return PasswordChange.Failed("Connect a server first.")
+        val session = this.current ?: return PasswordChange.Failed("Connect a server first.")
         val result = changeOwnPassword(session.client, current, new)
         if (result != PasswordChange.Changed) return result
         changes.withLock {
-            store.read()?.let { saved -> store.write(saved.copy(passwordSealed = vault.seal(new))) }
+            _servers.value.find(session.id)?.let { saved ->
+                _servers.value = store.update { it.replacing(saved.copy(passwordSealed = vault.seal(new))) }
+            }
             credentials = credentials?.let { Credentials(it.username, new, it.mode) }
         }
         return result
@@ -271,7 +461,7 @@ class SessionRepository @Inject constructor(
     // How quickly the signed-in server answers, in milliseconds, and how its
     // folders scan stands; null for what it would not say.
     suspend fun look(): ServerLook? {
-        val session = (_state.value as? SessionState.SignedIn)?.session ?: return null
+        val session = current ?: return null
         val start = System.nanoTime()
         val answered = runCatching { session.client.ping() }.isSuccess
         val ms = if (answered) (System.nanoTime() - start) / 1_000_000 else null
@@ -281,91 +471,85 @@ class SessionRepository @Inject constructor(
 
     // The library folders on the signed-in server.
     suspend fun musicFolders(): List<MusicFolder> {
-        val session = (_state.value as? SessionState.SignedIn)?.session ?: return emptyList()
+        val session = current ?: return emptyList()
         return session.client.musicFolders()
     }
 
     // Limits the library to one folder, or null for all of them. The caller
     // copies the library again afterwards.
     suspend fun chooseMusicFolder(folder: FolderChoice?) = changes.withLock {
-        val session = (_state.value as? SessionState.SignedIn)?.session ?: return@withLock
+        val session = current ?: return@withLock
         val creds = credentials ?: return@withLock
+        val saved = _servers.value.find(session.id) ?: return@withLock
         val settings = session.connection.copy(folder = folder)
-        val saved = store.read() ?: return@withLock
-        store.write(saved.copy(connection = encodeConnection(settings.sealed(vault::seal))))
-        _state.value = SessionState.SignedIn(
-            activate(
-                session.client.primaryUrl,
-                settings,
-                creds,
-                session.serverType,
-                session.serverVersion,
-                session.isOcto,
-                session.adminReachable,
-                session.extensions,
-            ),
-        )
+        val updated = saved.copy(connection = encodeConnection(settings.sealed(vault::seal)))
+        _servers.value = store.update { it.replacing(updated) }
+        _state.value = SessionState.SignedIn(activate(session.client.primaryUrl, settings, creds, updated))
     }
 
-    // The saved connection for the edit form, with no secrets in it.
-    fun connectionDraft(): ConnectionDraft? {
-        val session = (_state.value as? SessionState.SignedIn)?.session ?: return null
-        val connection = session.connection
+    // A kept server's connection for the edit form, the one in use when `id`
+    // is null, with no secrets in it.
+    fun connectionDraft(id: String? = null): ConnectionDraft? {
+        val server = _servers.value.find(id ?: current?.id) ?: return null
+        val connection = openedConnection(server) ?: decodeConnection(server.connection.orEmpty())?.let { stored ->
+            // Secrets that can no longer be opened are asked for again.
+            ConnectionSettings(home = stored.homeUrl?.toHttpUrlOrNull(), authMode = stored.authMode, pins = stored.pins, folder = stored.folder)
+        } ?: ConnectionSettings()
         return ConnectionDraft(
-            address = session.client.primaryUrl.toString().removeSuffix("/"),
-            username = session.client.username,
+            address = server.serverUrl.removeSuffix("/"),
+            username = server.username,
             authMode = connection.authMode,
             home = connection.home?.toString()?.removeSuffix("/").orEmpty(),
             headers = connection.headers.map { HeaderDraft(it.name, "", saved = true) },
             pins = connection.pins,
             clientCertAlias = connection.clientCertAlias,
-            takesApiKeys = session.takesApiKeys,
+            takesApiKeys = server.extensions.any { it.startsWith("$API_KEY_EXTENSION:") },
+            label = server.label,
         )
     }
 
     private suspend fun restore(): SessionState {
-        val saved = store.read() ?: return SessionState.SignedOut
+        val kept = store.read()
+        _servers.value = kept
+        val saved = kept.inUse ?: return SessionState.SignedOut
         val secret = vault.open(saved.passwordSealed)
-        val stored = saved.connection?.let { decodeConnection(it) } ?: StoredConnection()
-        val settings = stored.opened(vault::open)
-        if (secret == null || settings == null) {
-            store.clear()
+        val settings = openedConnection(saved)
+        val main = saved.serverUrl.toHttpUrlOrNull()
+        if (secret == null || settings == null || main == null) {
+            // The keystore lost its key (a backup restored on a new phone):
+            // the server stays in the list, to sign in to again.
+            _servers.value = store.update { now -> now.replacing(saved.copy(signedOut = true, passwordSealed = "")).copy(active = null) }
             return SessionState.SignedOut
         }
-        val main = saved.serverUrl.toHttpUrl()
         applySecurity(main, settings)
-        return SessionState.SignedIn(
-            activate(
-                main,
-                settings,
-                Credentials(saved.username, secret, settings.authMode),
-                saved.serverType,
-                saved.serverVersion,
-                saved.isOcto,
-                saved.octoAdminReachable,
-                saved.extensions,
-            ),
-        )
+        return SessionState.SignedIn(activate(main, settings, Credentials(saved.username, secret, settings.authMode), saved))
     }
 
     // Makes a signed-in session: the network set up for the server, the
     // address chooser started, and a client whose calls follow it.
-    private suspend fun activate(
-        main: HttpUrl,
-        settings: ConnectionSettings,
-        creds: Credentials,
-        serverType: String?,
-        serverVersion: String?,
-        isOcto: Boolean,
-        adminReachable: Boolean,
-        extensions: Set<String>,
-    ): Session {
+    private suspend fun activate(main: HttpUrl, settings: ConnectionSettings, creds: Credentials, saved: StoredServer): Session {
         applySecurity(main, settings)
         credentials = creds
         chooser.use(main, settings.home) { url -> answersAt(url, creds) }
         val client = SubsonicClient(main, creds, http, musicFolderId = settings.folder?.id, route = { chooser.activeUrl(main) })
-        return Session(client, serverType, serverVersion, isOcto, adminReachable, extensions, settings)
+        return Session(
+            client,
+            saved.serverType,
+            saved.serverVersion,
+            saved.isOcto,
+            saved.octoAdminReachable,
+            saved.extensions,
+            settings,
+            id = saved.id,
+            label = saved.label,
+        )
     }
+
+    private fun Session.relabelled(label: String) =
+        Session(client, serverType, serverVersion, isOcto, adminReachable, extensions, connection, id, label)
+
+    private fun Session.withExtensions(fresh: Set<String>) =
+        Session(client, serverType, serverVersion, isOcto, adminReachable, fresh, connection, id, label)
 
     private suspend fun applySecurity(main: HttpUrl, settings: ConnectionSettings) {
         security.configure(main, settings)
@@ -375,24 +559,34 @@ class SessionRepository @Inject constructor(
         withContext(Dispatchers.IO) { http.connectionPool.evictAll() }
     }
 
-    // The saved secret, when it fits the way of signing in asked for: a
-    // saved password serves token or legacy sign-in, a saved key only a key.
-    private suspend fun savedSecret(mode: AuthMode): String? {
-        val saved = store.read() ?: return null
-        val stored = saved.connection?.let { decodeConnection(it) } ?: StoredConnection()
+    // A kept server's connection with its secrets opened, or null when one
+    // can no longer be opened.
+    private fun openedConnection(server: StoredServer): ConnectionSettings? {
+        val stored = server.connection?.let { decodeConnection(it) } ?: StoredConnection()
+        return stored.opened(vault::open)
+    }
+
+    // A kept server's saved secret, when it fits the way of signing in
+    // asked for: a saved password serves token or legacy sign-in, a saved
+    // key only a key.
+    private fun savedSecret(server: StoredServer, mode: AuthMode): String? {
+        if (server.passwordSealed.isEmpty()) return null
+        val stored = server.connection?.let { decodeConnection(it) } ?: StoredConnection()
         val sameKind = (stored.authMode == AuthMode.ApiKey) == (mode == AuthMode.ApiKey)
-        return if (sameKind) vault.open(saved.passwordSealed) else null
+        return if (sameKind) vault.open(server.passwordSealed) else null
     }
 
     private class Reached(val url: HttpUrl, val info: ServerInfo)
 
+    private suspend fun reach(main: HttpUrl, home: HttpUrl?, creds: Credentials): Reached = reachWith(http, main, home, creds)
+
     // Pings the main address. When that cannot connect and there is a home
     // address, pings that instead: at home the main address may not loop back.
-    private suspend fun reach(main: HttpUrl, home: HttpUrl?, creds: Credentials): Reached = try {
-        Reached(main, SubsonicClient(main, creds, http).ping())
+    private suspend fun reachWith(client: OkHttpClient, main: HttpUrl, home: HttpUrl?, creds: Credentials): Reached = try {
+        Reached(main, SubsonicClient(main, creds, client).ping())
     } catch (e: SubsonicException.Unreachable) {
         if (home == null || e.cause is SSLException) throw e
-        val info = runCatching { SubsonicClient(home, creds, http).ping() }.getOrNull() ?: throw e
+        val info = runCatching { SubsonicClient(home, creds, client).ping() }.getOrNull() ?: throw e
         Reached(home, info)
     }
 

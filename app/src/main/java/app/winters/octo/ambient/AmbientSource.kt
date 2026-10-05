@@ -25,6 +25,7 @@ import app.winters.octo.ui.nav.SearchRoute
 import app.winters.octo.ui.nav.SettingsPageRoute
 import app.winters.octo.ui.nav.SettingsRoute
 import app.winters.octo.ui.nav.SharesRoute
+import app.winters.octo.ui.nav.ServerFormRoute
 import app.winters.octo.ui.nav.SignInRoute
 import app.winters.octo.ui.nav.SongsRoute
 import app.winters.octo.ui.nav.SoundRoute
@@ -52,7 +53,7 @@ fun areaOf(route: NavKey?): AmbientArea? = when (route) {
     is AlbumRoute, is ArtistRoute, is OnlineAlbumRoute, is OnlineArtistRoute,
     is GenreRoute, is PlaylistRoute,
     -> AmbientArea.Library
-    SettingsRoute, SoundRoute, SignInRoute, EditConnectionRoute, OctoAdminRoute, SpotifyImportRoute,
+    SettingsRoute, SoundRoute, SignInRoute, EditConnectionRoute, is ServerFormRoute, OctoAdminRoute, SpotifyImportRoute,
     SharesRoute, RadioStationsRoute, is SettingsPageRoute,
     -> AmbientArea.Settings
     else -> null

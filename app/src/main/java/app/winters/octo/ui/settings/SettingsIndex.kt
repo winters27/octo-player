@@ -207,6 +207,16 @@ object SettingsIndex {
         "connect_server", SettingsPage.Server, "Connect a server", "Add the music on your own server",
         listOf("sign in", "login", "add server", "account"),
     )
+    val YourServers = add(
+        "your_servers", SettingsPage.Server, "Your servers", "The servers kept on this phone, and the one in use",
+        listOf("servers", "switch server", "several servers", "accounts", "sign out", "remove server", "in use"),
+        section = "Your servers",
+    )
+    val AddServer = add(
+        "add_server", SettingsPage.Server, "Add a server", "Keep another server here and switch to it in one tap",
+        listOf("add server", "another server", "second server", "new server", "account"),
+        section = "Your servers",
+    )
     val ServerAddress = add(
         "server_address", SettingsPage.Server, "Address", "Where the server is",
         listOf("server", "url", "host"), section = "Connection",
@@ -284,8 +294,8 @@ object SettingsIndex {
         listOf("others", "users", "now playing"),
     )
     val Disconnect = add(
-        "disconnect", SettingsPage.Server, "Disconnect", "Remove the server from this phone",
-        listOf("sign out", "log out", "remove server"),
+        "disconnect", SettingsPage.Server, "Sign out", "Sign out of the server in use, which stays in your list",
+        listOf("sign out", "log out", "disconnect"),
     )
 
     // Streaming and downloads

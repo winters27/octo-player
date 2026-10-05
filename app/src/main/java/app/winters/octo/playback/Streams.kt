@@ -27,6 +27,7 @@ import app.winters.octo.data.SessionState
 import app.winters.octo.offline.StreamCache
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.player.StreamPrefs
+import app.winters.octo.server.sourceId
 import app.winters.octo.subsonic.SubsonicClient
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -166,6 +167,7 @@ class Streams @Inject constructor(
     // home one while at home). Null with no server signed in.
     suspend fun deviceAddress(ref: StreamRef, request: StreamRequest): String? {
         val client = client() ?: return null
+        if (fromAnotherServer(ref, currentSourceId())) return null
         return client.url("stream", mapOf("id" to ref.serverId) + request.params).toString()
     }
 
@@ -197,6 +199,12 @@ class Streams @Inject constructor(
 
     private fun currentSourceId(): String? = (sessions.state.value as? SessionState.SignedIn)?.session?.sourceId
 
+    // Whether a song is another kept server's than the one in use.
+    private fun fromAnotherServer(ref: StreamRef, inUse: String?): Boolean {
+        val source = ref.sourceId ?: return false
+        return source != inUse && sessions.servers.value.servers.any { it.sourceId == source }
+    }
+
     // Runs on the loading thread, before the saved copy is looked for.
     private fun pin(uri: Uri): Uri {
         val ref = parseStreamUri(uri.toString()) ?: return uri
@@ -206,9 +214,14 @@ class Streams @Inject constructor(
     // Runs on the loading thread, each time a stream opens.
     private fun sign(uri: Uri): Uri {
         if (!online()) throw StreamUnavailable("No connection")
-        val client = (sessions.state.value as? SessionState.SignedIn)?.session?.client
+        val session = (sessions.state.value as? SessionState.SignedIn)?.session
             ?: throw StreamUnavailable("No server signed in")
+        val client = session.client
         val ref = parseStreamUri(uri.toString()) ?: throw StreamUnavailable("No song id")
+        // Another kept server's song never goes to this one, where its id
+        // would be some other song. (A song kept under this server's old
+        // address, before it was edited, still plays.)
+        if (fromAnotherServer(ref, session.sourceId)) throw StreamUnavailable("Another server's song")
         val request = ref.request(quality(current.value))
         return client.url("stream", mapOf("id" to ref.serverId) + request.params).toString().toUri()
     }

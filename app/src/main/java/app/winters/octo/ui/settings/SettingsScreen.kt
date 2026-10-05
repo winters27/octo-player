@@ -42,6 +42,7 @@ import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.connection.ConnectionChooser
 import app.winters.octo.connection.Place
 import app.winters.octo.data.SessionRepository
+import app.winters.octo.data.KeptServers
 import app.winters.octo.data.SessionState
 import app.winters.octo.design.GlassInput
 import app.winters.octo.design.OctoColors
@@ -112,6 +113,7 @@ class SettingsViewModel @Inject constructor(
 
     // The server, for the account card.
     val session: StateFlow<SessionState> = sessions.state
+    val servers: StateFlow<KeptServers> = sessions.servers
     val syncing: StateFlow<Boolean> = sync.syncing
     val problem: StateFlow<String?> = sync.problem
     val last: StateFlow<LastSync?> = sync.last.held(null)
@@ -151,6 +153,7 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
 @Composable
 private fun AccountCard(onOpen: (NavKey) -> Unit, vm: SettingsViewModel) {
     val state by vm.session.collectAsStateWithLifecycle()
+    val kept by vm.servers.collectAsStateWithLifecycle()
     val syncing by vm.syncing.collectAsStateWithLifecycle()
     val problem by vm.problem.collectAsStateWithLifecycle()
     val last by vm.last.collectAsStateWithLifecycle()
@@ -162,12 +165,22 @@ private fun AccountCard(onOpen: (NavKey) -> Unit, vm: SettingsViewModel) {
     SettingsGroup(separatorInset = IconRowInset) {
         when (val current = state) {
             SessionState.Loading -> Unit
-            SessionState.SignedOut -> AccountRow(
-                icon = OctoIcons.Cloud,
-                title = "Connect a music server",
-                lines = listOf("Add the music on your own server" to OctoColors.TextMuted),
-                onClick = { onOpen(SignInRoute) },
-            )
+            SessionState.SignedOut -> if (kept.servers.isEmpty()) {
+                AccountRow(
+                    icon = OctoIcons.Cloud,
+                    title = "Connect a music server",
+                    lines = listOf("Add the music on your own server" to OctoColors.TextMuted),
+                    onClick = { onOpen(SignInRoute) },
+                )
+            } else {
+                // Servers are kept, none in use: the list is where to go.
+                AccountRow(
+                    icon = OctoIcons.Cloud,
+                    title = "Your servers",
+                    lines = listOf("Signed out. Sign in to one, or add another." to OctoColors.TextMuted),
+                    onClick = { onOpen(routeFor(SettingsPage.Server)) },
+                )
+            }
             is SessionState.SignedIn -> {
                 val session = current.session
                 val copy = last?.takeIf { it.sourceId == session.sourceId }
@@ -179,7 +192,7 @@ private fun AccountCard(onOpen: (NavKey) -> Unit, vm: SettingsViewModel) {
                 )
                 AccountRow(
                     icon = OctoIcons.Cloud,
-                    title = session.client.primaryUrl.host,
+                    title = session.name,
                     lines = listOf(
                         session.client.username.ifEmpty { "Signed in with a key" } to OctoColors.TextSecondary,
                         status to if (problem != null) OctoColors.Error else OctoColors.TextMuted,

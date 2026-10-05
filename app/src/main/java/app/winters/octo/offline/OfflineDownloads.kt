@@ -120,7 +120,11 @@ class OfflineDownloads @Inject constructor(
         .distinctUntilChanged()
         .stateIn(scope, SharingStarted.Eagerly, emptySet())
 
-    val rows: Flow<List<DownloadRow>> = dao.rows()
+    // The downloads page: the server in use's downloads.
+    val rows: Flow<List<DownloadRow>> = combine(dao.rows(), sessions.state) { rows, state ->
+        val source = (state as? SessionState.SignedIn)?.session?.sourceId
+        rows.filter { it.sourceId == source }
+    }
 
     fun start() {
         if (started) return
@@ -254,6 +258,11 @@ class OfflineDownloads @Inject constructor(
         }
     }
 
+    // Deletes the downloads of a server taken off the list, files and all.
+    suspend fun forgetSource(sourceId: String) {
+        lock.withLock { dao.all().filter { it.sourceId == sourceId }.forEach { deleteRow(it) } }
+    }
+
     fun setKeepLiked(on: Boolean) {
         scope.launch { settings.setKeepLiked(on) }
     }
@@ -318,8 +327,15 @@ class OfflineDownloads @Inject constructor(
         }
     }
 
-    private suspend fun heldByTrack(): Map<String, Set<String>> =
-        dao.all().groupBy { it.trackId }.mapValues { (_, rows) -> rows.flatMapTo(HashSet()) { it.reasons } }
+    // The downloads of the server in use. Another kept server's files stay
+    // as they are until it is in use again: its songs are not in the
+    // library meanwhile, and would look unwanted.
+    private suspend fun heldByTrack(): Map<String, Set<String>> {
+        val source = serverInUse() ?: return emptyMap()
+        return dao.all().filter { it.sourceId == source }.groupBy { it.trackId }.mapValues { (_, rows) -> rows.flatMapTo(HashSet()) { it.reasons } }
+    }
+
+    private fun serverInUse(): String? = (sessions.state.value as? SessionState.SignedIn)?.session?.sourceId
 
     private suspend fun setReasons(trackId: String, reasons: Set<String>) {
         dao.forTrack(trackId).forEach { dao.setReason(it.sourceId, it.serverId, Reasons.join(reasons)) }
@@ -365,7 +381,7 @@ class OfflineDownloads @Inject constructor(
 
     private suspend fun runQueue() {
         while (true) {
-            val next = if (canDownloadNow()) dao.nextQueued() else null
+            val next = if (canDownloadNow()) serverInUse()?.let { dao.nextQueued(it) } else null
             if (next == null) {
                 wake.receive()
                 continue

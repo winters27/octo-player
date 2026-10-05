@@ -65,6 +65,7 @@ import app.winters.octo.desktop.system.openInBrowser
 import app.winters.octo.desktop.update.DesktopUpdates
 import app.winters.octo.lyrics.OnlineLyrics
 import app.winters.octo.playback.skippedLine
+import app.winters.octo.server.switchNotice
 import app.winters.octo.sort.SortList
 import app.winters.octo.sort.SortOrder
 import app.winters.octo.subsonic.FORM_POST_EXTENSION
@@ -578,11 +579,7 @@ class AppState(
         val from = this.connection?.server
         val playing = player.state.value.let { it.current != null && it.playing }
         if (from != null) leaveServer()
-        val words = when {
-            from == null -> null
-            playing -> "Now on ${connection.server.name}. The music from ${from.name} stopped, and its queue is kept for when you come back."
-            else -> "Now on ${connection.server.name}."
-        }
+        val words = switchNotice(connection.server.name, from?.name, playing)
         signedIn(connection, listOfNotNull(words, note).joinToString(" ").ifEmpty { null }, page)
     }
 

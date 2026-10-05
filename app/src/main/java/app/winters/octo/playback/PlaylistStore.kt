@@ -5,7 +5,10 @@ import app.winters.octo.catalog.PlaylistEntity
 import app.winters.octo.catalog.PlaylistItemEntity
 import app.winters.octo.catalog.PlaylistSummary
 import app.winters.octo.catalog.UserDao
+import app.winters.octo.catalog.shownWith
 import app.winters.octo.catalog.summarize
+import app.winters.octo.data.SessionRepository
+import app.winters.octo.data.SessionState
 import app.winters.octo.playlists.PlaylistSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,11 +28,17 @@ class PlaylistStore @Inject constructor(
     private val userDao: UserDao,
     private val catalog: CatalogDao,
     private val sync: PlaylistSync,
+    sessions: SessionRepository,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    // The phone's own playlists and the server in use's. Another kept
+    // server's wait for it to be in use again.
     val playlists: Flow<List<PlaylistSummary>> =
-        combine(userDao.playlists(), userDao.playlistEntries(), ::summarize)
+        combine(userDao.playlists(), userDao.playlistEntries(), sessions.state) { rows, entries, state ->
+            val server = (state as? SessionState.SignedIn)?.session?.sourceId
+            summarize(rows.filter { it.shownWith(server) }, entries)
+        }
 
     // Makes a playlist, with the songs in it if any are given, and gives
     // back the id it will have.

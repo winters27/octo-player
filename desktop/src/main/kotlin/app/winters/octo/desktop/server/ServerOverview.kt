@@ -6,11 +6,13 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.winters.octo.desktop.settings.SavedServer
+import app.winters.octo.server.accountLine
 import app.winters.octo.server.answerWords
 import app.winters.octo.server.libraryCounts
 import app.winters.octo.server.scanWords
 import app.winters.octo.server.serverKind
 import app.winters.octo.server.serverOffers
+import app.winters.octo.server.statusLine
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.ScanStatus
 import app.winters.octo.subsonic.SubsonicException
@@ -79,24 +81,12 @@ fun overviewOf(
 }
 
 // Who is signed in where, for a server's row: "winters at music.example.com".
-fun accountLine(server: SavedServer): String {
-    val where = server.address.substringAfter("://").removeSuffix("/")
-    return if (server.username.isBlank()) where else "${server.username} at $where"
-}
+fun accountLine(server: SavedServer): String = accountLine(server.username, server.address)
 
 // A server's quiet status in its row: what it is, and how it answered.
 // The one in use shows only its kind here; the rest is said below the list.
-fun statusLine(server: SavedServer, check: ServerCheck?, switching: Boolean = false, inUse: Boolean = false): String {
-    val kind = serverKind(server.serverType, server.serverVersion)
-    return when {
-        switching -> "Switching to it now"
-        server.signedOut -> "Signed out. Sign in again to use it."
-        inUse || check == null || check.reach == Reach.Unknown -> kind
-        check.reach == Reach.Answers -> listOfNotNull(kind, check.ms?.let(::answerWords)).joinToString(" · ")
-        check.reach == Reach.WrongPassword -> "$kind · Didn't take the saved password"
-        else -> "$kind · Out of reach right now"
-    }
-}
+fun statusLine(server: SavedServer, check: ServerCheck?, switching: Boolean = false, inUse: Boolean = false): String =
+    statusLine(server.serverType, server.serverVersion, server.signedOut, check, switching, inUse)
 
 // What is known about the kept servers while the Servers section is open:
 // how each answered, and the scan and user of the one in use.

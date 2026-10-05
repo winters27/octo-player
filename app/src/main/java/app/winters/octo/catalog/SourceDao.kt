@@ -78,6 +78,10 @@ interface SourceDao {
     @Query("SELECT id FROM source_artist WHERE id IN (:ids)")
     suspend fun knownArtists(ids: List<String>): List<String>
 
+    // Copies of sources left out of the library are no library song's.
+    @Query("UPDATE source_track SET mergedId = '' WHERE mergedId != '' AND sourceId NOT IN (:merged)")
+    suspend fun forgetMergedExcept(merged: List<String>)
+
     @Query("DELETE FROM source_track WHERE sourceId = :sourceId")
     suspend fun deleteTracks(sourceId: String)
 

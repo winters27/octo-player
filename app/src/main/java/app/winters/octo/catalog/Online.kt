@@ -90,17 +90,19 @@ interface OnlineDao {
         return kept
     }
 
-    // Lets go of finds from other servers, and old ones nothing needs: not
-    // asked for, and not in the saved queue or a playlist.
+    // Lets go of finds from servers no longer kept, and this server's old
+    // ones nothing needs: not asked for, and not in the saved queue or a
+    // playlist. Another kept server's wait for it (its queue and playlists
+    // may hold them).
     @Query(
         """
-        DELETE FROM online_song WHERE sourceId != :sourceId OR (
-            requestedAt = 0 AND seenAt < :before AND id NOT IN (SELECT trackId FROM queue_item)
+        DELETE FROM online_song WHERE sourceId NOT IN (:kept) OR (
+            sourceId = :sourceId AND requestedAt = 0 AND seenAt < :before AND id NOT IN (SELECT trackId FROM queue_item)
             AND id NOT IN (SELECT trackId FROM playlist_item)
         )
         """,
     )
-    suspend fun prune(sourceId: String, before: Long)
+    suspend fun prune(sourceId: String, kept: List<String>, before: Long)
 
     @Query("DELETE FROM online_song")
     suspend fun clear()

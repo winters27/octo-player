@@ -59,12 +59,12 @@ class FavouriteSync @Inject constructor(
             val albums = copies(session, FavouriteKind.Album)
             if (albums.isNotEmpty()) {
                 val times = starred.album.associate { it.id to parseServerTime(it.starred) }
-                reconcile(client, FavouriteKind.Album, albums, likedIds(FavouriteKind.Album), times)
+                reconcile(session, FavouriteKind.Album, albums, likedIds(FavouriteKind.Album), times)
             }
             val artists = copies(session, FavouriteKind.Artist)
             if (artists.isNotEmpty()) {
                 val times = starred.artist.associate { it.id to parseServerTime(it.starred) }
-                reconcile(client, FavouriteKind.Artist, artists, likedIds(FavouriteKind.Artist), times)
+                reconcile(session, FavouriteKind.Artist, artists, likedIds(FavouriteKind.Artist), times)
             }
         }
     }
@@ -87,7 +87,7 @@ class FavouriteSync @Inject constructor(
             val ids = idsToSend(copies(session, kind), libraryId, liked, likedNow = libraryId in likedIds(kind))
             if (ids.isEmpty()) return@withLock true
             val sent = failureOf { favouriteCall(session.client, kind, star = liked)(ids) } == null
-            if (sent) store.updateSynced(kind) { if (liked) it + ids else it - ids.toSet() }
+            if (sent) store.updateSynced(session.id, kind) { if (liked) it + ids else it - ids.toSet() }
             sent
         }
     }
@@ -100,13 +100,14 @@ class FavouriteSync @Inject constructor(
         }.toSet()
 
     private suspend fun reconcile(
-        client: SubsonicClient,
+        session: Session,
         kind: FavouriteKind,
         copies: List<ServerCopy>,
         liked: Set<String>,
         starredAt: Map<String, Long?>,
     ) {
-        val plan = reconcileStars(copies, liked, starredAt.keys, store.synced(kind))
+        val client = session.client
+        val plan = reconcileStars(copies, liked, starredAt.keys, store.synced(session.id, kind))
         val starFailed = inBatches(plan.star, favouriteCall(client, kind, star = true))
         val unstarFailed = inBatches(plan.unstar, favouriteCall(client, kind, star = false))
         // A favourite from the server keeps the time it was starred there.
@@ -122,7 +123,7 @@ class FavouriteSync @Inject constructor(
                 plan.unlike.forEach { favourites.unlikeArtist(it) }
             }
         }
-        store.updateSynced(kind) { plan.settled(starFailed, unstarFailed) }
+        store.updateSynced(session.id, kind) { plan.settled(starFailed, unstarFailed) }
     }
 
     // The library's albums or artists and their copies on the signed-in server.
@@ -139,11 +140,7 @@ class FavouriteSync @Inject constructor(
         ids.sorted().chunked(FAVOURITE_BATCH).filter { failureOf { call(it) } != null }.flatten().toSet()
 
     // The signed-in session, if there is one.
-    private suspend fun signedIn(): Session? {
-        val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return null
-        store.useServer("${session.client.username}@${session.client.primaryUrl}")
-        return session
-    }
+    private fun signedIn(): Session? = (sessions.state.value as? SessionState.SignedIn)?.session
 
     // Runs a server call, handing back what went wrong, if anything.
     private suspend fun failureOf(call: suspend () -> Unit): SubsonicException? =

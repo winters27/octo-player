@@ -24,4 +24,6 @@ fun SignInError.userMessage(): String = when (this) {
     SignInError.MissingSecret -> "Enter the password or key to sign in this way."
     is SignInError.Failed -> cause.userMessage()
     is SignInError.Untrusted -> "The server's certificate isn't trusted by this phone."
+    is SignInError.AlreadyKept -> "$name is already in your list with that address and username."
+    SignInError.Gone -> "That server isn't in your list any more."
 }

@@ -89,7 +89,7 @@ class Backups @Inject constructor(
                 syncQueue = queueSync.enabled.first(),
                 newPlaylistsOnServer = playlistSync.newOnServer.first(),
             ),
-            server = sessions.read()?.let { ServerBackup(plainAddress(it.serverUrl), it.username) },
+            server = sessions.read().inUse?.let { ServerBackup(plainAddress(it.serverUrl), it.username) },
             playlists = userDao.phonePlaylists().sortedBy { it.createdAt }.map { playlist ->
                 PlaylistBackup(playlist.name, songsByPlaylist[playlist.id].orEmpty().map { it.toKey() })
             },
