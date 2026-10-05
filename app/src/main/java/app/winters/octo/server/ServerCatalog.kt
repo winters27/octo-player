@@ -44,7 +44,8 @@ class ServerCatalog(
 // keys come from the same functions, and times added are in seconds.
 fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
     fun id(native: String) = "$sourceId:$native"
-    fun art(coverId: String?) = coverId?.takeIf(String::isNotEmpty)?.let { ArtworkRef.Server(sourceId, it).encode() }
+    fun art(coverId: String?, fallbackId: String? = null) =
+        coverId?.takeIf(String::isNotEmpty)?.let { ArtworkRef.Server(sourceId, it, fallbackId = fallbackId).encode() }
 
     // A library that changes while it is read can repeat a song across pages.
     // A song the server marks as outside the library (Octo lists an album's
@@ -60,6 +61,11 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
     val albumsByKey = (listed.values + unlisted).associateBy { it.id }
     // Each artist's MusicBrainz id, where the server knows it.
     val artistIds = library.artists.mapNotNull { artist -> musicId(artist.musicBrainzId)?.let { artist.id to it } }.toMap()
+
+    // Each album's first song's own cover, drawn in place of the album's when
+    // the server answers that with its stand-in picture. One per album, so
+    // its songs still share one picture and one stored cover.
+    val firstSongCovers = songs.groupBy(::albumKey).mapValues { (_, group) -> inAlbumOrder(group).first().coverArt }
 
     val albumRows = albumsByKey.values.associate { album ->
         val title = album.name.ifBlank { UNKNOWN_ALBUM }
@@ -78,7 +84,7 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
             songCount = album.songCount,
             durationMs = album.duration * 1000L,
             addedAt = seconds(album.created) ?: 0,
-            artwork = art(album.coverArt),
+            artwork = art(album.coverArt, firstSongCovers[album.id]),
             releaseTypes = joinLines(album.releaseTypes.map(String::trim).filter(String::isNotEmpty)),
         )
     }
@@ -142,7 +148,9 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
                 composer = song.displayComposer.orBlankNull(),
                 bpm = song.bpm.positive(),
                 comment = song.comment.orBlankNull(),
-                explicit = explicitOf(song.explicitStatus.orEmpty()) ?: explicitOf(listedAlbum?.explicitStatus.orEmpty()),
+                // The song's own mark only: an album is marked explicit when
+                // any one of its songs is, which says nothing of the others.
+                explicit = explicitOf(song.explicitStatus.orEmpty()),
                 discTitle = listedAlbum?.discTitles?.firstOrNull { it.disc == (song.discNumber.positive() ?: 1) }?.title.orBlankNull(),
                 mbRecordingId = musicId(song.musicBrainzId),
                 mbAlbumId = musicId(listedAlbum?.musicBrainzId),

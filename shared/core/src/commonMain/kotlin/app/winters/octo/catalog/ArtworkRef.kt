@@ -12,13 +12,22 @@ sealed interface ArtworkRef {
     // rather than one in the library, so its cover is cached apart.
     // `drawn` means Octo paints the cover itself, a station's or a mix's.
     // Its id tells, so a stored cover needs nothing new to say so.
-    data class Server(val sourceId: String, val coverId: String, val online: Boolean = false) : ArtworkRef {
+    // `fallbackId` is a second cover for the same thing, drawn when the
+    // server answers the first with its stand-in picture: a library song
+    // drawn with its album's cover keeps its own cover here.
+    data class Server(
+        val sourceId: String,
+        val coverId: String,
+        val online: Boolean = false,
+        val fallbackId: String? = null,
+    ) : ArtworkRef {
         val drawn: Boolean get() = !online && isDrawnCoverId(coverId)
     }
 
     fun encode(): String = when (this) {
         is Device -> "device:$key|$uri"
-        is Server -> "${if (online) "online" else "server"}:$sourceId|$coverId"
+        is Server -> "${if (online) "online" else "server"}:$sourceId|$coverId" +
+            fallbackId?.takeIf { it.isNotEmpty() && it != coverId }?.let { "|$it" }.orEmpty()
     }
 
     companion object {
@@ -28,8 +37,17 @@ sealed interface ArtworkRef {
             val rest = text.substringAfter(':')
             return when (kind) {
                 "device" -> Device(rest.substringBefore('|'), rest.substringAfter('|'))
-                "server" -> Server(rest.substringBefore('|'), rest.substringAfter('|'))
-                "online" -> Server(rest.substringBefore('|'), rest.substringAfter('|'), online = true)
+                "server", "online" -> {
+                    // Source, cover, then the fallback cover when there is one.
+                    // Cover ids never hold a "|".
+                    val covers = rest.substringAfter('|')
+                    Server(
+                        sourceId = rest.substringBefore('|'),
+                        coverId = covers.substringBefore('|'),
+                        online = kind == "online",
+                        fallbackId = covers.substringAfter('|', "").takeIf(String::isNotEmpty),
+                    )
+                }
                 else -> null
             }
         }
