@@ -42,14 +42,18 @@ class SearchTops(private val connection: Connection, private val scope: Coroutin
     private var chartJob: Job? = null
     private var chartAt = 0L
 
-    private suspend fun offered(): Boolean = offered ?: (
-        connection.supports(OCTO_TOP_SONGS) ||
-            connection.isOcto && try {
-                connection.client.supports(OCTO_TOP_SONGS)
-            } catch (e: SubsonicException) {
-                false
-            }
-        ).also { offered = it }
+    // Kept only once the server itself said; a server out of reach is asked
+    // again with the next search.
+    private suspend fun offered(): Boolean {
+        offered?.let { return it }
+        val yes = when {
+            connection.supports(OCTO_TOP_SONGS) -> true
+            !connection.isOcto -> false
+            else -> connection.client.supportsIfKnown(OCTO_TOP_SONGS) ?: return false
+        }
+        offered = yes
+        return yes
+    }
 
     // A search came back: the top songs of the artist it named, from among
     // the artists it found in the library and online, or none.

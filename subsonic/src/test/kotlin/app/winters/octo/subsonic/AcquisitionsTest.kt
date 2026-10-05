@@ -112,6 +112,36 @@ class AcquisitionsTest {
     }
 
     @Test
+    fun onlyTheServersOwnAnswerIsAYesOrNo() = runTest {
+        answer("getOpenSubsonicExtensionsOcto")
+        assertEquals(true, client().supportsIfKnown(OCTO_ACQUISITIONS))
+        answer("getOpenSubsonicExtensions")
+        assertEquals(false, client().supportsIfKnown(OCTO_ACQUISITIONS))
+        // No such address, or a Subsonic error: the server has none to list.
+        server.enqueue(MockResponse.Builder().code(404).body("Not found").build())
+        assertEquals(false, client().supportsIfKnown(OCTO_ACQUISITIONS))
+        server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":0,"message":"Unknown method"}}}""").build())
+        assertEquals(false, client().supportsIfKnown(OCTO_ACQUISITIONS))
+
+        // A proxy while the server restarts, or a page that is not the
+        // server's: not known yet, and never a no.
+        server.enqueue(MockResponse.Builder().code(502).body("Bad gateway").build())
+        assertNull(client().supportsIfKnown(OCTO_ACQUISITIONS))
+        server.enqueue(MockResponse.Builder().body("<html>Sign in to the Wi-Fi</html>").build())
+        assertNull(client().supportsIfKnown(OCTO_ACQUISITIONS))
+        server.enqueue(MockResponse.Builder().code(503).body("").build())
+        assertFalse("Still a plain no where only a yes counts", client().supports(OCTO_ACQUISITIONS))
+    }
+
+    @Test
+    fun aServerOutOfReachIsNotKnown() = runTest {
+        val gone = client()
+        server.close()
+        assertNull(gone.supportsIfKnown(OCTO_ACQUISITIONS))
+        assertFalse(gone.supports(OCTO_ACQUISITIONS))
+    }
+
+    @Test
     fun anOlderServerWithoutTheEndpointSaysSo() = runTest {
         // Navidrome answers an unknown endpoint with a 404; a Subsonic
         // server may answer with an error instead. Both are errors here.

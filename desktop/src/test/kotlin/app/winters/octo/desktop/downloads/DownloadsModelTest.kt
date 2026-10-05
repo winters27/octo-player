@@ -76,6 +76,24 @@ class DownloadsModelTest {
     }
 
     @Test
+    fun aServerOutOfReachAtTheStartIsAskedAgainUntilItSays() = runBlocking {
+        downloads()
+        var asked = 0
+        server.answerBy("getOpenSubsonicExtensions") {
+            asked++
+            if (asked == 1) "<html>Bad gateway</html>"
+            else server.ok(""""openSubsonicExtensions":[{"name":"octoAcquisitions","versions":[1,2]}]""", type = "octo")
+        }
+        val model = DownloadsModel(server.client(), scope, probeRetryMs = 50)
+        model.start()
+        until("the server said") { model.supported != null }
+        assertEquals("Never taken for a no", true, model.supported)
+        assertTrue(asked >= 2)
+        until("the list was read") { model.rows.value.isNotEmpty() }
+        model.close()
+    }
+
+    @Test
     fun aLogOpensFindSongsSearchesAndAPickFollowsItsDownload() = runBlocking {
         extensions("[1,2]")
         downloads()

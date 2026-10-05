@@ -91,10 +91,25 @@ class SubsonicClient(
         )
 
     // Whether the server lists an extension at this version. A server that
-    // cannot say which extensions it has lists none.
-    suspend fun supports(name: String, version: Int = 1): Boolean =
+    // cannot say which extensions it has lists none, and so does one that
+    // could not be asked; see supportsIfKnown for telling those apart.
+    suspend fun supports(name: String, version: Int = 1): Boolean = supportsIfKnown(name, version) ?: false
+
+    // Whether the server lists an extension at this version, or null when it
+    // could not be asked: out of reach, a proxy answering while it restarts,
+    // a page that is not the server's, or the sign-in refused. Only a yes or
+    // no is the server's own answer, worth keeping; a null is worth asking
+    // again. A server that answers the call with an error, or has no such
+    // address (a 404), has no extensions to list, which is a no.
+    suspend fun supportsIfKnown(name: String, version: Int = 1): Boolean? =
         try {
             extensions().lists(name, version)
+        } catch (e: SubsonicException.Unreachable) {
+            null
+        } catch (e: SubsonicException.NotSubsonic) {
+            if (e.status != null && !e.serverBusy) false else null
+        } catch (e: SubsonicException.WrongCredentials) {
+            null
         } catch (e: SubsonicException) {
             false
         }

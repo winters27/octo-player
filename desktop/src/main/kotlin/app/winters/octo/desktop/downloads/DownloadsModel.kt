@@ -23,8 +23,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+
+// How long after a server out of reach it is asked again whether it keeps
+// logs.
+const val PROBE_RETRY_MS = 15_000L
 
 // What the downloads drawer shows: the list, one download's log, or Find
 // songs for one song.
@@ -44,7 +50,11 @@ sealed interface DrawerView {
 // extensions saved at sign-in may be older than the server. Made with each
 // connection and closed with it.
 @Stable
-class DownloadsModel(private val client: SubsonicClient, parent: CoroutineScope) {
+class DownloadsModel(
+    private val client: SubsonicClient,
+    parent: CoroutineScope,
+    private val probeRetryMs: Long = PROBE_RETRY_MS,
+) {
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
 
     private val watch = DownloadsWatch(
@@ -94,12 +104,20 @@ class DownloadsModel(private val client: SubsonicClient, parent: CoroutineScope)
     val picked: StateFlow<PickResult?> get() = findWatch.picked
 
     // Asks whether the server keeps logs, and follows its downloads if so.
+    // A server out of reach is asked again a little later, until it says.
     fun start() {
         scope.launch {
-            val logs = client.supports(OCTO_ACQUISITIONS, OCTO_DOWNLOAD_LOG_VERSION)
-            upgradesToo = client.supports(OCTO_LIBRARY_ACTIONS, 2)
-            supported = logs
-            if (logs) watch.start()
+            while (isActive) {
+                val logs = client.supportsIfKnown(OCTO_ACQUISITIONS, OCTO_DOWNLOAD_LOG_VERSION)
+                val upgrades = logs?.let { client.supportsIfKnown(OCTO_LIBRARY_ACTIONS, 2) }
+                if (logs != null && upgrades != null) {
+                    upgradesToo = upgrades
+                    supported = logs
+                    if (logs) watch.start()
+                    return@launch
+                }
+                delay(probeRetryMs)
+            }
         }
     }
 

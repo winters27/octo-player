@@ -291,7 +291,8 @@ class Downloads @Inject constructor(
         synchronized(support) {
             support[session.sourceId]?.let { (yes, at) -> if (yes || now - at < RECHECK_SUPPORT_MS) return yes }
         }
-        val yes = session.client.supports(OCTO_ACQUISITIONS)
+        // Noted only when the server itself said.
+        val yes = session.client.supportsIfKnown(OCTO_ACQUISITIONS) ?: return false
         noteSupport(session, yes)
         return yes
     }

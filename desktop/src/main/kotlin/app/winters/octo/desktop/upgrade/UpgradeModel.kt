@@ -88,7 +88,11 @@ class UpgradeModel(
 
     private suspend fun check() {
         actions = try {
-            if (client.supports(OCTO_LIBRARY_ACTIONS, 2)) client.libraryActions() else null
+            when (client.supportsIfKnown(OCTO_LIBRARY_ACTIONS, 2)) {
+                true -> client.libraryActions()
+                false -> null
+                null -> actions
+            }
         } catch (e: SubsonicException) {
             // Kept as it was: a moment without the server changes nothing.
             actions

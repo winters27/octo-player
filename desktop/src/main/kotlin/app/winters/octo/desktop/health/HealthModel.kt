@@ -109,7 +109,12 @@ class HealthModel(
         val client = client() ?: return
         scope.launch {
             actions = try {
-                if (client.supports(OCTO_LIBRARY_ACTIONS)) client.libraryActions() else null
+                when (client.supportsIfKnown(OCTO_LIBRARY_ACTIONS)) {
+                    true -> client.libraryActions()
+                    false -> null
+                    // Out of reach: kept as it was.
+                    null -> actions
+                }
             } catch (e: SubsonicException) {
                 actions
             }

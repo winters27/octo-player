@@ -111,4 +111,29 @@ class SearchTopsTest {
         assertTrue(model.tops.chart!!.entry.single().song!!.isExternal)
         scope.cancel()
     }
+
+    @Test
+    fun aServerOutOfReachWhenAskedIsAskedAgain() = runBlocking {
+        server.answer("getTopChart", """"topSongs":{"source":"deezer","entry":[{"rank":1,"song":{"id":"ext1","title":"Dracula","artist":"Tame Impala","isExternal":true}}]}""", type = "octo")
+        var asked = 0
+        server.answerBy("getOpenSubsonicExtensions") {
+            asked++
+            // A page that is not the server's, then the server itself.
+            if (asked == 1) "<html>Starting up</html>"
+            else server.ok(""""openSubsonicExtensions":[{"name":"octoTopSongs","versions":[1]}]""", type = "octo")
+        }
+        val scope = CoroutineScope(Dispatchers.Default + Job())
+        // Signed in before the server ranked anything: asked live.
+        val model = model(listOf("octoAcquisitions:1"), scope)
+
+        model.tops.loadChart()
+        delay(200)
+        assertNull(model.tops.chart)
+        assertEquals(1, asked)
+
+        model.tops.loadChart()
+        withTimeout(5_000) { while (model.tops.chart == null) delay(20) }
+        assertEquals(2, asked)
+        scope.cancel()
+    }
 }

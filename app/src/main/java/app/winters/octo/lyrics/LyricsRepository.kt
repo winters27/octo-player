@@ -467,7 +467,8 @@ class LyricsRepository @Inject constructor(
             keepsChoices[session.sourceId]?.let { (yes, at) -> if (now - at < RECHECK_CHOICES_MS) return yes }
         }
         if (offersLyricsChoices(session.extensions)) return true
-        val yes = session.client.supports(OCTO_LYRICS)
+        // Noted only when the server itself said.
+        val yes = session.client.supportsIfKnown(OCTO_LYRICS) ?: return false
         noteKeepsChoices(session, yes)
         return yes
     }

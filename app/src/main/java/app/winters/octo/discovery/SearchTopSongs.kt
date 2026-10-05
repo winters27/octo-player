@@ -66,11 +66,15 @@ class SearchTopSongs @Inject constructor(
         return RankedTracks(list.artist, list.source, songs).takeIf { songs.isNotEmpty() }
     }
 
+    // Kept only once the server itself said; a server out of reach is asked
+    // again next time.
     private suspend fun offers(session: Session): Boolean {
         if ("$OCTO_TOP_SONGS:1" in session.extensions) return true
         if (!session.runsOcto) return false
         offered[session.sourceId]?.let { return it }
-        return session.client.supports(OCTO_TOP_SONGS).also { offered[session.sourceId] = it }
+        val yes = session.client.supportsIfKnown(OCTO_TOP_SONGS) ?: return false
+        offered[session.sourceId] = yes
+        return yes
     }
 
     private fun session(): Session? = (sessions.state.value as? SessionState.SignedIn)?.session
