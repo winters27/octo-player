@@ -65,7 +65,7 @@ import app.winters.octo.subsonic.FIND_SEARCHING
 import app.winters.octo.subsonic.FindSourceState
 import app.winters.octo.subsonic.FoundCandidate
 import app.winters.octo.subsonic.FoundSongs
-import app.winters.octo.ui.common.Cover
+import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.QuietButton
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -117,7 +117,7 @@ private fun ColumnScope.DownloadList(model: ServerDownloads) {
         items(rows, key = { it.key }) { row ->
             // A higher quality copy still waiting its turn has no log yet; a
             // finished one without its log can still be looked for again.
-            DownloadLine(row) {
+            DownloadLine(row, model.artwork(row.coverArt)) {
                 row.logKey?.let(model::showLog) ?: if (row.finished) row.findId?.let { model.find(it, row.title) } else Unit
             }
         }
@@ -125,7 +125,7 @@ private fun ColumnScope.DownloadList(model: ServerDownloads) {
 }
 
 @Composable
-private fun DownloadLine(row: DownloadRow, onOpen: () -> Unit) {
+private fun DownloadLine(row: DownloadRow, art: String?, onOpen: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -138,7 +138,7 @@ private fun DownloadLine(row: DownloadRow, onOpen: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Cover(row.coverArt, 48.dp, shape = RoundedCornerShape(8.dp))
+        Artwork(art, 48.dp, shape = RoundedCornerShape(8.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(row.title, style = OctoType.body, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
@@ -185,7 +185,7 @@ private fun ColumnScope.DownloadLog(model: ServerDownloads, key: String) {
         }
     }
     LazyColumn(Modifier.weight(1f, fill = false), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 16.dp)) {
-        if (row != null) item(key = "head") { LogHead(row) }
+        if (row != null) item(key = "head") { LogHead(row, model.artwork(row.coverArt)) }
         problem?.let { item(key = "problem") { Text(it, style = OctoType.caption, color = OctoColors.SignalOrange, modifier = Modifier.padding(vertical = 6.dp)) } }
         item(key = "rule") { Rule() }
         if (log == null && problem == null) item(key = "wait") { Ring(null, 22.dp) }
@@ -194,9 +194,9 @@ private fun ColumnScope.DownloadLog(model: ServerDownloads, key: String) {
 }
 
 @Composable
-private fun LogHead(row: DownloadRow) {
+private fun LogHead(row: DownloadRow, art: String?) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-        Cover(row.coverArt, 64.dp, shape = RoundedCornerShape(10.dp))
+        Artwork(art, 64.dp, shape = RoundedCornerShape(10.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(row.title, style = OctoType.headline, color = OctoColors.TextPrimary, maxLines = 2)
             if (row.artist.isNotBlank()) Text(row.artist, style = OctoType.bodySmall, color = OctoColors.TextSecondary)
@@ -288,7 +288,7 @@ private fun ColumnScope.FindSongs(model: ServerDownloads, view: SheetView.Find) 
         }
     }
     LazyColumn(Modifier.weight(1f, fill = false), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 16.dp)) {
-        item(key = "head") { FindHead(view, found) }
+        item(key = "head") { FindHead(view, found, model::artwork) }
         found?.source?.let { sources -> item(key = "sources") { Sources(sources) } }
         listOfNotNull(problem, found?.error, picked?.takeIf { !it.queued }?.detail).forEachIndexed { index, words ->
             item(key = "problem$index") { Text(words, style = OctoType.caption, color = OctoColors.SignalOrange, modifier = Modifier.padding(vertical = 6.dp)) }
@@ -321,7 +321,7 @@ private fun ColumnScope.FindSongs(model: ServerDownloads, view: SheetView.Find) 
         }
         val shown = found
         items(copies, key = ::copyKey) { copy ->
-            CopyLine(copy, shown?.song?.coverArt, compact = false, onPick = if (shown != null && canPick(shown, copy)) {
+            CopyLine(copy, model.artwork(shown?.song?.coverArt), compact = false, onPick = if (shown != null && canPick(shown, copy)) {
                 {
                     if (shown.song.libraryId != null) asking = shown.id to copy else model.pick(shown.id, copy)
                 }
@@ -333,10 +333,10 @@ private fun ColumnScope.FindSongs(model: ServerDownloads, view: SheetView.Find) 
 }
 
 @Composable
-private fun FindHead(view: SheetView.Find, found: FoundSongs?) {
+private fun FindHead(view: SheetView.Find, found: FoundSongs?, artwork: (String?) -> String?) {
     val song = found?.song
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-        Cover(song?.coverArt ?: view.id, 64.dp, shape = RoundedCornerShape(10.dp))
+        Artwork(artwork(song?.coverArt ?: view.id), 64.dp, shape = RoundedCornerShape(10.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(FIND_SONGS.uppercase(), style = OctoType.caption, color = OctoColors.TextMuted)
             Text(song?.title?.takeIf(String::isNotBlank) ?: view.title, style = OctoType.headline, color = OctoColors.TextPrimary, maxLines = 2)
@@ -378,7 +378,7 @@ private fun CopyLine(copy: FoundCandidate, cover: String?, compact: Boolean, onP
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (!compact) Cover(cover, 44.dp, shape = RoundedCornerShape(6.dp))
+        if (!compact) Artwork(cover, 44.dp, shape = RoundedCornerShape(6.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Text(candidateTitle(copy), style = if (compact) OctoType.caption else OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val where = copy.album?.takeIf(String::isNotBlank) ?: copy.folder

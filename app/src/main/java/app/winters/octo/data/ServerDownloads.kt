@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.os.Bundle
+import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.catalog.FIND_PREFIX
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.isFind
@@ -74,6 +75,13 @@ class ServerDownloads @Inject constructor(
     private fun client() = (sessions.state.value as? SessionState.SignedIn)?.session?.client
 
     private fun session() = (sessions.state.value as? SessionState.SignedIn)?.session
+
+    // The picture for a cover the server names, as the rest of the app draws
+    // it: no picture when nobody is signed in.
+    fun artwork(coverId: String?): String? {
+        val sourceId = session()?.sourceId ?: return null
+        return coverId?.takeIf(String::isNotEmpty)?.let { ArtworkRef.Server(sourceId, it).encode() }
+    }
 
     private val watch = DownloadsWatch(
         object : DownloadsSource {
