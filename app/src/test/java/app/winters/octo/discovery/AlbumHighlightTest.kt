@@ -28,6 +28,17 @@ class AlbumHighlightTest {
     }
 
     @Test
+    fun aGuestCreditInsideAVersionTagStillFindsThatVersion() {
+        // The credit goes and the radio edit stays, so the album's radio
+        // edit is the match and its plain song is not.
+        val tracks = listOf(track("t1", "Get Lucky"), track("t2", "Get Lucky (Radio Edit)"))
+        val ranked = listOf(RankedSong("online-1", "Get Lucky (Radio Edit - feat. Pharrell Williams)", "Drake"))
+        assertEquals("t2", albumHighlight(tracks, ranked))
+        val plain = listOf(RankedSong("online-2", "Get Lucky feat. Pharrell Williams", "Drake"))
+        assertEquals("t1", albumHighlight(tracks, plain))
+    }
+
+    @Test
     fun theSameTitleByAnotherArtistIsNotTheAlbumsSong() {
         val ranked = listOf(RankedSong("z9", "Quebec", "Someone Else"))
         assertNull(albumHighlight(album, ranked))

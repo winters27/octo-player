@@ -625,10 +625,33 @@ object SongIdentity {
     // The title without its guest credits, as a person would write it.
     fun stripFeatures(title: String?): String {
         var text = trimSpace(title ?: "")
-        text = Bracket.replace(text) { match -> if (read(fold(match.groupValues[1])).kind == Kind.Feature) "" else match.value }
-        TrailingFeature.find(text)?.let { trailing -> if (trailing.range.first > 0) text = text.substring(0, trailing.range.first) }
+        text = Bracket.replace(text) { match ->
+            val inner = match.groupValues[1]
+            if (read(fold(inner)).kind == Kind.Feature) return@replace ""
+            // "(Radio Edit - feat. Pharrell Williams)": the credit goes, the
+            // version stays.
+            val credit = InnerFeature.find(inner)
+            if (credit == null || credit.range.first == 0) return@replace match.value
+            val kept = trimSpace(inner.substring(0, credit.range.first)).trimEnd('-', '–', ',', ';', '/', ' ')
+            if (kept.isEmpty()) "" else match.value.replace(inner, kept)
+        }
+        TrailingFeature.find(text)?.let { trailing ->
+            if (trailing.range.first > 0) {
+                // "Song feat. X (Radio Edit)": the credit goes, a bracket
+                // after it stays.
+                val rest = text.substring(trailing.range.first)
+                val bracket = rest.indexOfAny(charArrayOf('(', '['))
+                text = text.substring(0, trailing.range.first) + (if (bracket > 0) " " + rest.substring(bracket) else "")
+            }
+        }
+        // "Song - Radio Edit - feat. X" leaves the dash that led to the credit.
+        text = trimSpace(text).trimEnd('-', '–', ',', ' ')
         return trimSpace(Whitespace.replace(text, " "))
     }
+
+    // A guest credit run on after a version inside one bracket, "Radio Edit
+    // - feat. X".
+    private val InnerFeature = rx("""$S*(?:[-–,;/]$S*)?$B(?:feat\.?|ft\.?|featuring)$S+.+$""", ignoreCase = true)
 
     // ---- artists ----------------------------------------------------------
 

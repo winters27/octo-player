@@ -52,6 +52,19 @@ class DiscordArtTest {
     }
 
     @Test
+    fun aSongsCoverIsTheTrackWithItsVersionWhateverTheGuestCredit() {
+        val body = """{"data":[
+            {"title":"Get Lucky","artist":{"name":"Daft Punk"},"album":{"cover_big":"https://e-cdns.example/ram/1000x1000.jpg"}},
+            {"title":"Get Lucky (Radio Edit) [feat. Pharrell Williams and Nile Rodgers]","artist":{"name":"Daft Punk"},"album":{"cover_big":"https://e-cdns.example/single/1000x1000.jpg"}}
+        ]}"""
+        // The credit inside the version's bracket goes; the radio edit stays,
+        // so the single's cover is the one taken and not the album's.
+        assertEquals("https://e-cdns.example/single/1000x1000.jpg",
+            deezerTrackCover(body, "Daft Punk", "Get Lucky (Radio Edit - feat. Pharrell Williams and Nile Rodgers)"))
+        assertEquals("https://e-cdns.example/ram/1000x1000.jpg", deezerTrackCover(body, "Daft Punk", "Get Lucky feat. Pharrell Williams"))
+    }
+
+    @Test
     fun deezersEmptyArtistPlaceholderIsNotAPhoto() {
         val placeholder = """{"data":[{"name":"Daft Punk","picture_medium":"https://e-cdns-images.dzcdn.net/images/artist//500x500-000000-80-0-0.jpg"}]}"""
         assertNull(deezerArtistPhoto(placeholder, "Daft Punk"))
