@@ -30,10 +30,10 @@ import java.awt.Window
 import java.io.File
 import kotlin.concurrent.thread
 
-// Brandon: "pinning the mini player does nothing". The pin does reach the
-// window: Windows' own topmost mark comes and goes with it. Pinned is the
-// usual state, so a first click unpins, which shows nothing until another
-// window comes over it; the mini player now says what the pin did.
+// Brandon: "pinning the mini player does nothing", then "if i pin
+// something, i shouldnt be able to move it". The pin held it on top, which
+// it already was by default; now pinned means it stays where it is (no
+// dragging, no edges to pull), and keeping it on top is Settings' switch.
 class MiniPlayerPinTest {
     @get:Rule val temp = TemporaryFolder()
 
@@ -43,12 +43,12 @@ class MiniPlayerPinTest {
 
     @Test
     fun thePinsWordsSayWhatItDid() {
-        assertEquals("Kept on top of other windows", pinNoteFor(true))
-        assertEquals("Other windows can cover it now", pinNoteFor(false))
+        assertEquals("Pinned in place", pinNoteFor(true))
+        assertEquals("Unpinned. Drag it anywhere", pinNoteFor(false))
     }
 
     @Test
-    fun thePinPutsTheRealWindowOnTopAndLetsItGo() {
+    fun pinningHoldsTheRealWindowAndOnTopIsItsOwnSwitch() {
         assumeTrue(currentOs() == DesktopOs.Windows)
         assumeFalse(GraphicsEnvironment.isHeadless())
         val user32 = Native.load("user32", User32::class.java)
@@ -77,6 +77,14 @@ class MiniPlayerPinTest {
             waitFor { !topmost() }
             settings.update { it.copy(system = it.system.copy(miniPlayerOnTop = true)) }
             waitFor { topmost() }
+            // Unpinned at first: its edges can be pulled. Pinned: they can't,
+            // and it stays on top all the while.
+            assertTrue((mini() as Frame).isResizable)
+            settings.update { it.copy(system = it.system.copy(miniPlayerPinned = true)) }
+            waitFor { !(mini() as Frame).isResizable }
+            assertTrue(topmost())
+            settings.update { it.copy(system = it.system.copy(miniPlayerPinned = false)) }
+            waitFor { (mini() as Frame).isResizable }
         } finally {
             quit?.invoke()
             ui.join(5_000)

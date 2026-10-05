@@ -111,7 +111,7 @@ import java.awt.Dimension
 
 // What the mini player's own buttons ask of the app.
 class MiniActions(
-    // Keep it above other windows, or not.
+    // Pin it where it is, or let it move again.
     val pin: () -> Unit,
     // Jump to another size: the bar, or the cover large.
     val resize: (width: Float, height: Float) -> Unit,
@@ -121,10 +121,11 @@ class MiniActions(
     val close: () -> Unit,
 )
 
-// A small window of its own that stays above the others (unless unpinned):
-// the playing song over its own colours behind dark glass, as the floating
-// player looks. Drag it anywhere, resize it by its edges from a bar to a
-// square with the cover large; tall enough, it shows lyrics or the queue.
+// A small window of its own that stays above the others (unless Settings
+// says not): the playing song over its own colours behind dark glass, as the
+// floating player looks. Drag it anywhere, resize it by its edges from a bar
+// to a square with the cover large; tall enough, it shows lyrics or the
+// queue. Pinned, it stays put: no dragging and no edges to pull.
 // It opens where it last was, and closing it brings Octo's window back.
 @OptIn(FlowPreview::class)
 @Composable
@@ -151,9 +152,8 @@ fun MiniPlayerWindow(
         windowState.position = WindowPosition(to.x.dp, to.y.dp)
         windowState.size = DpSize(to.width.dp, to.height.dp)
     }
-    // A word on what the pin did, for a moment: pinned is the usual state,
-    // so a click that unpins it changes nothing to be seen until another
-    // window comes up over it.
+    // A word on what the pin did, for a moment, since pinning changes
+    // nothing to be seen until the listener tries to move it.
     var pinNote by remember { mutableStateOf<String?>(null) }
     var pinClicks by remember { mutableIntStateOf(0) }
     LaunchedEffect(pinClicks) {
@@ -163,8 +163,8 @@ fun MiniPlayerWindow(
     }
     val actions = MiniActions(
         pin = {
-            val on = !app.settings.current.system.miniPlayerOnTop
-            app.settings.update { it.copy(system = it.system.copy(miniPlayerOnTop = on)) }
+            val on = !app.settings.current.system.miniPlayerPinned
+            app.settings.update { it.copy(system = it.system.copy(miniPlayerPinned = on)) }
             pinNote = pinNoteFor(on)
             pinClicks++
         },
@@ -185,7 +185,7 @@ fun MiniPlayerWindow(
         // rounds the frameless window itself.
         transparent = os == DesktopOs.Mac,
         alwaysOnTop = prefs.miniPlayerOnTop,
-        resizable = true,
+        resizable = !prefs.miniPlayerPinned,
         onPreviewKeyEvent = { event ->
             if (event.type != KeyEventType.KeyDown) return@Window false
             // Tab is the keyboard finding its way: rings show.
@@ -225,12 +225,12 @@ fun MiniPlayerWindow(
                     MiniPlayerView(
                         app,
                         panel = prefs.miniPlayerPanel.toMiniPanel(),
-                        onTop = prefs.miniPlayerOnTop,
+                        pinned = prefs.miniPlayerPinned,
                         actions = actions,
                         note = pinNote,
-                        dragArea = { modifier -> WindowDraggableArea(modifier) {} },
+                        dragArea = { modifier -> if (!prefs.miniPlayerPinned) WindowDraggableArea(modifier) {} },
                     )
-                    ResizeEdges(frame, thickness = Space.Xs)
+                    if (!prefs.miniPlayerPinned) ResizeEdges(frame, thickness = Space.Xs)
                 }
             }
         }
@@ -242,12 +242,12 @@ fun String?.toMiniPanel(): MiniPanel? = MiniPanel.entries.firstOrNull { it.name.
 
 // The mini player's face, at whatever size its window is, in the shape
 // that size calls for. `dragArea` lies under the controls and moves the
-// window (nothing, when drawn for a picture).
+// window (nothing, when pinned or drawn for a picture).
 @Composable
 fun MiniPlayerView(
     app: AppState,
     panel: MiniPanel?,
-    onTop: Boolean,
+    pinned: Boolean,
     actions: MiniActions,
     // A short line over the bottom of it, for a moment, if any.
     note: String? = null,
@@ -260,9 +260,9 @@ fun MiniPlayerView(
         dragArea(Modifier.matchParentSize())
         BoxWithConstraints(Modifier.fillMaxSize()) {
             when (miniShapeFor(maxHeight.value, panel)) {
-                MiniShape.Bar -> MiniBar(app, state, onTop, actions, wide = maxWidth.value >= MINI_TIMES_WIDTH)
-                MiniShape.Cover -> MiniCover(app, state, panel, onTop, actions)
-                MiniShape.Panel -> MiniWithPanel(app, state, panel ?: MiniPanel.Lyrics, onTop, actions)
+                MiniShape.Bar -> MiniBar(app, state, pinned, actions, wide = maxWidth.value >= MINI_TIMES_WIDTH)
+                MiniShape.Cover -> MiniCover(app, state, panel, pinned, actions)
+                MiniShape.Panel -> MiniWithPanel(app, state, panel ?: MiniPanel.Lyrics, pinned, actions)
             }
         }
         if (note != null) MiniNote(note, Modifier.align(Alignment.BottomCenter))
@@ -274,7 +274,7 @@ fun MiniPlayerView(
 private const val PIN_NOTE_MS = 2_400L
 
 // What the pin did, in words.
-fun pinNoteFor(onTop: Boolean): String = if (onTop) "Kept on top of other windows" else "Other windows can cover it now"
+fun pinNoteFor(pinned: Boolean): String = if (pinned) "Pinned in place" else "Unpinned. Drag it anywhere"
 
 // A line in a dark capsule, over whatever is under it.
 @Composable
@@ -319,14 +319,14 @@ private fun MiniBackdrop(app: AppState, state: PlayerState, modifier: Modifier) 
 // The bar: the cover on the left, the song and the window's buttons, and
 // under them the transport, the progress line, the heart and the volume.
 @Composable
-private fun MiniBar(app: AppState, state: PlayerState, onTop: Boolean, actions: MiniActions, wide: Boolean) {
+private fun MiniBar(app: AppState, state: PlayerState, pinned: Boolean, actions: MiniActions, wide: Boolean) {
     val song = state.current?.song
     Row(Modifier.fillMaxSize().padding(Space.L), horizontalArrangement = Arrangement.spacedBy(Space.L), verticalAlignment = Alignment.CenterVertically) {
         Cover(song?.coverArt, Modifier.fillMaxHeight().aspectRatio(1f), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs, retry = true)
         Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
             Row(verticalAlignment = Alignment.Top) {
                 SongWords(state, Modifier.weight(1f))
-                WindowButtons(onTop, bar = true, actions)
+                WindowButtons(pinned, bar = true, actions)
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xxs)) {
                 Transport(app, state)
@@ -342,7 +342,7 @@ private fun MiniBar(app: AppState, state: PlayerState, onTop: Boolean, actions: 
 // the progress line, the transport between the lyrics and queue buttons,
 // and the volume.
 @Composable
-private fun MiniCover(app: AppState, state: PlayerState, panel: MiniPanel?, onTop: Boolean, actions: MiniActions) {
+private fun MiniCover(app: AppState, state: PlayerState, panel: MiniPanel?, pinned: Boolean, actions: MiniActions) {
     val song = state.current?.song
     Column(Modifier.fillMaxSize().padding(Space.Xl), verticalArrangement = Arrangement.spacedBy(Space.M)) {
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -351,7 +351,7 @@ private fun MiniCover(app: AppState, state: PlayerState, panel: MiniPanel?, onTo
                 Cover(song?.coverArt, Modifier.fillMaxSize(), shape = Corner.ArtLShape, placeholder = OctoIcons.Songs, retry = true)
                 // A soft shade at the top, so the buttons read on any cover.
                 Box(Modifier.fillMaxWidth().height(ControlHeight.L + Space.Xl).background(TopShade, Corner.ArtLShape))
-                Box(Modifier.align(Alignment.TopEnd).padding(Space.Xs)) { WindowButtons(onTop, bar = false, actions) }
+                Box(Modifier.align(Alignment.TopEnd).padding(Space.Xs)) { WindowButtons(pinned, bar = false, actions) }
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -374,13 +374,13 @@ private fun MiniCover(app: AppState, state: PlayerState, panel: MiniPanel?, onTo
 // progress line and the transport, then lyrics or the queue below a
 // hairline.
 @Composable
-private fun MiniWithPanel(app: AppState, state: PlayerState, panel: MiniPanel, onTop: Boolean, actions: MiniActions) {
+private fun MiniWithPanel(app: AppState, state: PlayerState, panel: MiniPanel, pinned: Boolean, actions: MiniActions) {
     val song = state.current?.song
     Column(Modifier.fillMaxSize().padding(top = Space.L, start = Space.L, end = Space.L)) {
         Row(Modifier.fillMaxWidth().height(FrameSize.PlayerThumb), horizontalArrangement = Arrangement.spacedBy(Space.L), verticalAlignment = Alignment.CenterVertically) {
             Cover(song?.coverArt, Modifier.size(FrameSize.PlayerThumb), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs, retry = true)
             SongWords(state, Modifier.weight(1f))
-            WindowButtons(onTop, bar = false, actions)
+            WindowButtons(pinned, bar = false, actions)
         }
         Progress(app, state, Modifier.fillMaxWidth().padding(top = Space.M), times = true)
         Row(Modifier.fillMaxWidth().padding(vertical = Space.Xs), verticalAlignment = Alignment.CenterVertically) {
@@ -418,12 +418,12 @@ private fun SongWords(state: PlayerState, modifier: Modifier) {
     }
 }
 
-// Keep on top, the size, and back to Octo, quiet until wanted.
+// The pin, the size, and back to Octo, quiet until wanted.
 @Composable
-private fun WindowButtons(onTop: Boolean, bar: Boolean, actions: MiniActions) {
+private fun WindowButtons(pinned: Boolean, bar: Boolean, actions: MiniActions) {
     Row(horizontalArrangement = Arrangement.spacedBy(Space.Xxs), verticalAlignment = Alignment.CenterVertically) {
         val quiet = OctoColors.TextSecondary
-        IconAction(if (onTop) OctoIcons.Pinned else OctoIcons.Pin, if (onTop) "Stop keeping it on top" else "Keep it on top", actions.pin, size = ControlHeight.Xs, iconSize = IconSize.Inline, active = onTop, tint = if (onTop) OctoColors.TextPrimary else quiet)
+        IconAction(if (pinned) OctoIcons.Pinned else OctoIcons.Pin, if (pinned) "Unpin so it can move" else "Pin it in place", actions.pin, size = ControlHeight.Xs, iconSize = IconSize.Inline, active = pinned, tint = if (pinned) OctoColors.TextPrimary else quiet)
         if (bar) {
             IconAction(OctoIcons.Expand, "Show the cover large", { actions.resize(MINI_SQUARE_WIDTH, MINI_SQUARE_HEIGHT) }, size = ControlHeight.Xs, iconSize = IconSize.Inline, tint = quiet)
         } else {

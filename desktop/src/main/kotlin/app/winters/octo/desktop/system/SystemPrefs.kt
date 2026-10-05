@@ -18,8 +18,12 @@ data class SystemPrefs(
     // then starts hidden in the tray.
     val startWithWindows: Boolean = false,
     val startInTray: Boolean = false,
-    // The mini player stays above other windows (the pin in it), and what
-    // it shows under its header when tall enough: "lyrics", "queue" or none.
+    // The mini player stays above other windows (Settings > System), and
+    // what it shows under its header when tall enough: "lyrics", "queue"
+    // or none.
     val miniPlayerOnTop: Boolean = true,
     val miniPlayerPanel: String? = null,
+    // The pin in the mini player: pinned, it stays where it is, with no
+    // dragging it about and no pulling at its edges.
+    val miniPlayerPinned: Boolean = false,
 )

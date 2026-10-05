@@ -22,7 +22,8 @@ import app.winters.octo.desktop.pages.SettingRow
 import app.winters.octo.desktop.pages.SwitchRow
 import app.winters.octo.desktop.settings.DesktopOs
 
-// The mini player's rows in Settings > System: open it, and keep it on top.
+// The mini player's rows in Settings > System: open it, keep it on top,
+// and pin it where it is.
 @Composable
 fun MiniPlayerGroup(app: AppState) {
     val system = LocalSystem.current ?: return
@@ -32,6 +33,9 @@ fun MiniPlayerGroup(app: AppState) {
         SwitchRow("Mini player", "A small window in place of this one. $command opens it too.", system.miniPlayerOpen) { on -> system.setMiniPlayer(on) }
         SwitchRow("Keep it above other windows", null, settings.system.miniPlayerOnTop) { on ->
             app.settings.update { it.copy(system = it.system.copy(miniPlayerOnTop = on)) }
+        }
+        SwitchRow("Pin it in place", "It stays where it is. The pin in the mini player does this too.", settings.system.miniPlayerPinned) { on ->
+            app.settings.update { it.copy(system = it.system.copy(miniPlayerPinned = on)) }
         }
     }
 }

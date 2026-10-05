@@ -101,6 +101,7 @@ class MiniPlayerLayoutTest {
                 miniPlayer = WindowSpot(2400f, 200f, MINI_PANEL_WIDTH, MINI_PANEL_OPEN_HEIGHT),
                 miniPlayerOnTop = false,
                 miniPlayerPanel = "queue",
+                miniPlayerPinned = true,
             ),
             discord = DiscordPrefs(on = true, openedFiles = true),
             hotkeys = HotkeyPrefs(on = true, keys = mapOf("next" to "Ctrl+Alt+F9", "like" to "")),
@@ -115,6 +116,7 @@ class MiniPlayerLayoutTest {
         val read = SettingsStore(old).current
         assertTrue(read.system.miniPlayerOnTop)
         assertEquals(null, read.system.miniPlayerPanel)
+        assertFalse("the mini player moves freely until pinned", read.system.miniPlayerPinned)
         assertFalse("Discord is off until asked", read.discord.on)
         assertFalse(read.discord.openedFiles)
         assertFalse("global shortcuts are off until asked", read.hotkeys.on)
