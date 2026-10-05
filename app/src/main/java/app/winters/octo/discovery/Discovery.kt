@@ -12,6 +12,7 @@ import app.winters.octo.catalog.onlineArtwork
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
+import app.winters.octo.data.accountId
 import app.winters.octo.data.runsOcto
 import app.winters.octo.playback.tracksByIds
 import app.winters.octo.server.serverSourceId
@@ -20,6 +21,7 @@ import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -83,10 +85,20 @@ class Discovery @Inject constructor(
     // Whether a server is signed in, so there is anything to discover.
     val available: Flow<Boolean> = sessions.state.map { it is SessionState.SignedIn }
 
+    // Which kept server what is found comes from, by its id; null with
+    // none signed in. A switch to another kept server changes it, so what
+    // the last one found is asked again.
+    val server: Flow<String?> = sessions.state.map { it.accountId }.distinctUntilChanged()
+
     // Whether the signed-in server runs stations, which only Octo does. It
     // can turn true after sign-in, once the server's extensions are read again.
     val offersStations: Flow<Boolean> =
         sessions.state.map { (it as? SessionState.SignedIn)?.session?.runsOcto == true }
+
+    // The kept server whose stations Home shows, by its id: the one signed
+    // in to, while it runs them; null otherwise.
+    val stationsFrom: Flow<String?> =
+        sessions.state.map { state -> (state as? SessionState.SignedIn)?.session?.takeIf { it.runsOcto }?.id }.distinctUntilChanged()
 
     suspend fun search(query: String): Discovered? {
         val (client, sourceId) = server() ?: return null

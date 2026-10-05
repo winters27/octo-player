@@ -179,9 +179,11 @@ class SearchViewModel @Inject constructor(
     // pauses; new text cancels the question before it.
     @OptIn(ExperimentalCoroutinesApi::class)
     val discover: StateFlow<DiscoverState> =
-        combine(snapshotFlow { text.trim() }, discovery.available) { q, on -> q.takeIf { on && searchKey(it).length >= 2 } }
+        combine(snapshotFlow { text.trim() }, discovery.server) { q, server -> server?.let { q.takeIf { searchKey(it).length >= 2 }?.let { q to server } } }
             .distinctUntilChanged()
-            .transformLatest { q ->
+            .transformLatest { asked ->
+                // Another server in use asks it anew.
+                val q = asked?.first
                 if (q == null) {
                     emit(DiscoverState.Idle)
                     return@transformLatest
@@ -208,22 +210,31 @@ class SearchViewModel @Inject constructor(
         snapshotFlow { filter },
         results,
         discover,
-    ) { q, filter, found, online ->
-        if (filter != SearchFilter.All || found == null) null else namedArtist(q, found.artists, (online as? DiscoverState.Done)?.found?.artists.orEmpty())
+        discovery.server,
+    ) { q, filter, found, online, server ->
+        if (filter != SearchFilter.All || found == null || server == null) {
+            null
+        } else {
+            namedArtist(q, found.artists, (online as? DiscoverState.Done)?.found?.artists.orEmpty())?.let { it to server }
+        }
     }
         .distinctUntilChanged()
-        .transformLatest { named ->
+        .transformLatest { asked ->
             topOpen = false
             emit(null)
-            if (named != null) emit(tops.forArtist(named.name, named.libraryId, named.serverId))
+            val named = asked?.first ?: return@transformLatest
+            emit(tops.forArtist(named.name, named.libraryId, named.serverId))
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    // The chart of the moment, for the search before anything is typed.
+    // The chart of the moment, for the search before anything is typed,
+    // from the server in use: another one asks for its own.
     @OptIn(ExperimentalCoroutinesApi::class)
-    val chart: StateFlow<RankedTracks?> = discovery.available
-        .distinctUntilChanged()
-        .transformLatest { on -> emit(if (on) tops.chart() else null) }
+    val chart: StateFlow<RankedTracks?> = discovery.server
+        .transformLatest { server ->
+            emit(null)
+            if (server != null) emit(tops.chart())
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     // Whether this visit has counted the line saying what the plus does.
