@@ -127,6 +127,9 @@ class SearchTopsTest {
         val model = model(listOf("octoAcquisitions:1"), scope)
 
         model.tops.loadChart()
+        // Waits for the first ask itself, not a set time, so a busy machine
+        // cannot fail it.
+        withTimeout(5_000) { while (asked < 1) delay(20) }
         delay(200)
         assertNull(model.tops.chart)
         assertEquals(1, asked)
