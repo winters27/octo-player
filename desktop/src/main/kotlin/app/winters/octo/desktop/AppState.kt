@@ -637,7 +637,12 @@ class AppState(
     // The window is in front again: playlists may have been deleted or
     // made on another device, and Octo makes its mixes and stations anew
     // now and then, so a list older than a minute is read again.
-    fun windowCameBack(now: Long = System.currentTimeMillis()) {
+    fun windowCameBack(now: Long = System.currentTimeMillis()) = refreshPlaylistsIfOld(now)
+
+    // Home is opened: the lists Octo makes for the listener are made on the
+    // server when playlists are asked for, so a first sign-in can read them
+    // a moment before they exist. A list older than a minute is read again.
+    fun refreshPlaylistsIfOld(now: Long = System.currentTimeMillis()) {
         if (now - playlistsReadAt >= PLAYLISTS_FRESH_MS) refreshPlaylists()
     }
 

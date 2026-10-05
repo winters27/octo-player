@@ -17,6 +17,8 @@ import app.winters.octo.data.runsOcto
 import app.winters.octo.playback.tracksByIds
 import app.winters.octo.server.serverSourceId
 import app.winters.octo.subsonic.Album
+import app.winters.octo.subsonic.OCTO_LIST_KINDS
+import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
@@ -49,7 +51,16 @@ data class OnlineAlbum(
 data class OnlineArtist(val id: String, val name: String, val albumCount: Int, val artwork: String?)
 
 // A station the server runs, played as the list of songs it has lined up.
-data class Station(val id: String, val name: String, val artwork: String?)
+// A Made for you list is shown and played the same way, with its song count.
+data class Station(val id: String, val name: String, val artwork: String?, val songCount: Int? = null)
+
+// The lists Octo made for the listener (New Releases, Rediscover, Deep Cuts),
+// in that order, from the server's playlists. Only an Octo server that makes
+// them marks a playlist so; any other has none.
+internal fun madeForYouLists(playlists: List<Playlist>, sourceId: String): List<Station> =
+    playlists.filter { it.octoList != null }
+        .sortedBy { OCTO_LIST_KINDS.indexOf(it.octoList).takeIf { i -> i >= 0 } ?: OCTO_LIST_KINDS.size }
+        .map { Station(it.id, it.name, ArtworkRef.Server(sourceId, it.coverArt ?: it.id).encode(), it.songCount) }
 
 // What a search found beyond the library. `partAlbums` are albums the
 // library holds some of the songs of, kept apart from those it holds none
@@ -136,7 +147,15 @@ class Discovery @Inject constructor(
         }
     }
 
-    // The songs a station has lined up now.
+    // The lists Octo made for the listener, from its playlists.
+    suspend fun madeForYou(): List<Station> {
+        val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return emptyList()
+        if (!session.runsOcto) return emptyList()
+        val (client, sourceId) = server() ?: return emptyList()
+        return madeForYouLists(client.playlists(), sourceId)
+    }
+
+    // The songs a station, or a Made for you list, has lined up now.
     suspend fun stationSongs(id: String): List<TrackEntity> {
         val (client, sourceId) = server() ?: return emptyList()
         return resolve(client, sourceId, client.playlist(id).entry)

@@ -185,4 +185,21 @@ class PlaylistEditsTest {
         assertEquals("2026-09-27T00:00:00Z", lists[1].validUntil)
         assertEquals("2026-09-20T08:00:00Z", lists[0].changed)
     }
+
+    // A Made for you list names its kind; a playlist without the field, from
+    // any other server, has none.
+    @Test
+    fun aMadeForYouListNamesItsKind() = runTest {
+        ok(
+            ""","playlists":{"playlist":[
+                {"id":"pl1","name":"Mine","owner":"winters","songCount":3},
+                {"id":"og1","name":"New Releases","owner":"winters","songCount":24,"readonly":true,"octoList":"newReleases"}
+            ]}""",
+        )
+        val lists = client().playlists()
+        assertNull(lists[0].octoList)
+        assertEquals("newReleases", lists[1].octoList)
+        ok(""","playlist":{"id":"og1","name":"New Releases","readonly":true,"octoList":"newReleases","entry":[]}""")
+        assertEquals("newReleases", client().playlist("og1").octoList)
+    }
 }

@@ -103,7 +103,11 @@ class HomeViewModel @Inject constructor(
     var stations by mutableStateOf<List<Station>>(emptyList())
         private set
 
-    // The station whose songs are on the way, if any.
+    // The lists Octo made for the listener, kept through a failed load.
+    var madeForYou by mutableStateOf<List<Station>>(emptyList())
+        private set
+
+    // The station, or Made for you list, whose songs are on the way, if any.
     var startingStation by mutableStateOf<String?>(null)
         private set
 
@@ -129,6 +133,7 @@ class HomeViewModel @Inject constructor(
                 stationsLoadedAt = null
                 stationsFailed = false
                 stations = emptyList()
+                madeForYou = emptyList()
                 if (server != null) loadStations()
             }
         }
@@ -159,6 +164,7 @@ class HomeViewModel @Inject constructor(
                 // Made anew on the server since the list was read: off Home,
                 // and the list read again.
                 stations = stations.filterNot { it.id == station.id }
+                madeForYou = madeForYou.filterNot { it.id == station.id }
                 stationsLoadedAt = null
                 loadStations()
                 feedback.show(stationGoneLine(station.name))
@@ -189,20 +195,31 @@ class HomeViewModel @Inject constructor(
         if (offersStations) loadStations()
     }
 
-    // Runs in the background so no other shelf waits on the server.
+    // Runs in the background so no other shelf waits on the server. The
+    // stations and Made for you are read apart, so one failing never hides
+    // the other; either failing asks again when Home comes back.
     private fun loadStations() {
         if (stationsJob?.isActive == true) return
         stationsJob = viewModelScope.launch {
+            var failed = false
             try {
                 stations = withContext(Dispatchers.IO) { discovery.stations() }
-                stationsLoadedAt = SystemClock.elapsedRealtime()
-                stationsFailed = false
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                stationsFailed = true
+                failed = true
                 Log.w("Octo", "stations failed to load: ${e.javaClass.simpleName}")
             }
+            try {
+                madeForYou = withContext(Dispatchers.IO) { discovery.madeForYou() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failed = true
+                Log.w("Octo", "made for you failed to load: ${e.javaClass.simpleName}")
+            }
+            if (!failed) stationsLoadedAt = SystemClock.elapsedRealtime()
+            stationsFailed = failed
         }
     }
 
