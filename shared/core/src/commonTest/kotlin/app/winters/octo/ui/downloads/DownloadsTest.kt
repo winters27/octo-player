@@ -214,17 +214,38 @@ class DownloadsTest {
         assertEquals("A running row is never cleared", listOf("s:b"), watch.rows.value.map { it.key })
     }
 
+    // A Find songs source whose search finishes on the second look, and
+    // which notes each pick it is sent.
+    private class FakeFind : FindSource {
+        var asks = 0
+        var searches = 0
+        val picks = mutableListOf<Pair<String, FoundCandidate>>()
+        var answer: suspend () -> PickResult = { PickResult("queued", "Getting it.", "soulseek:x") }
+
+        override suspend fun start(id: String): FoundSongs {
+            searches++
+            asks = 0
+            return FoundSongs(id = "f$searches", state = "searching", candidate = listOf(copy))
+        }
+
+        override suspend fun get(search: String): FoundSongs {
+            asks++
+            return FoundSongs(id = search, state = if (asks < 2) "searching" else "done", candidate = listOf(copy, FoundCandidate(source = "Lidarr", index = 1, id = "c2")))
+        }
+
+        override suspend fun pick(search: String, copy: FoundCandidate): PickResult {
+            picks += search to copy
+            return answer()
+        }
+
+        companion object {
+            val copy = FoundCandidate(source = "Soulseek", index = 0, id = "c1")
+        }
+    }
+
     @Test
     fun aFindSearchIsFollowedUntilItEnds_ThenPicked() = runTest {
-        var asks = 0
-        val source = object : FindSource {
-            override suspend fun start(id: String) = FoundSongs(id = "f1", state = "searching")
-            override suspend fun get(search: String): FoundSongs {
-                asks++
-                return FoundSongs(id = search, state = if (asks < 2) "searching" else "done", candidate = listOf(FoundCandidate(source = "Soulseek", index = 0)))
-            }
-            override suspend fun pick(search: String, index: Int) = PickResult("queued", "Getting it.", "soulseek:x")
-        }
+        val source = FakeFind()
         val scope = TestScope(StandardTestDispatcher(testScheduler))
         val watch = FindSongsWatch(source, scope)
         watch.search("nd-1")
@@ -232,10 +253,65 @@ class DownloadsTest {
         assertTrue(watch.found.value!!.searching)
         scope.advanceTimeBy(FIND_POLL_MS * 3)
         assertEquals("done", watch.found.value!!.state)
-        assertEquals(2, asks)
+        assertEquals(2, source.asks)
 
-        val picked = watch.pick(0)
+        val picked = watch.pick("f1", FakeFind.copy)
         assertTrue(picked.queued)
         assertEquals("soulseek:x", watch.picked.value!!.key)
+        assertEquals(listOf("f1" to FakeFind.copy), source.picks)
+    }
+
+    @Test
+    fun nothingIsPickedWhileTheSearchRuns() = runTest {
+        val source = FakeFind()
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val watch = FindSongsWatch(source, scope)
+        watch.search("nd-1")
+        scope.runCurrent()
+        assertTrue(watch.found.value!!.searching)
+        assertFalse(canPick(watch.found.value, FakeFind.copy))
+
+        val picked = watch.pick("f1", FakeFind.copy)
+        assertFalse(picked.queued)
+        assertEquals(FIND_PICK_WAIT, picked.detail)
+        assertTrue("The server is not asked", source.picks.isEmpty())
+
+        scope.advanceTimeBy(FIND_POLL_MS * 3)
+        assertTrue(canPick(watch.found.value, FakeFind.copy))
+        assertFalse("A copy the server did not name", canPick(watch.found.value, FoundCandidate(source = "Soulseek")))
+        watch.close()
+    }
+
+    @Test
+    fun aPickFromAReplacedListIsRefused_AndALateAnswerStaysWithItsSearch() = runTest {
+        val source = FakeFind()
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val watch = FindSongsWatch(source, scope)
+        watch.search("nd-1")
+        scope.advanceTimeBy(FIND_POLL_MS * 3)
+        assertEquals("f1", watch.found.value!!.id)
+
+        // Search again: the old list's copies are not picked from the new one.
+        watch.search("nd-1")
+        scope.advanceTimeBy(FIND_POLL_MS * 3)
+        assertEquals("f2", watch.found.value!!.id)
+        assertEquals(FIND_LIST_CHANGED, watch.pick("f1", FakeFind.copy).detail)
+        assertTrue(source.picks.isEmpty())
+
+        // A pick answered after another search began says nothing on the new one.
+        source.answer = {
+            watch.search("nd-1")
+            PickResult("skipped", "That copy is gone.")
+        }
+        watch.pick("f2", FakeFind.copy)
+        assertEquals(listOf("f2" to FakeFind.copy), source.picks)
+        assertNull(watch.picked.value)
+        watch.close()
+    }
+
+    @Test
+    fun aCopysKeyIsItsIdOrItsPlace() {
+        assertEquals("id:c1", copyKey(FoundCandidate(index = 0, id = "c1")))
+        assertEquals("at:0", copyKey(FoundCandidate(index = 0)))
     }
 }

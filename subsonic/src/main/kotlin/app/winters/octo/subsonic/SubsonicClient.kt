@@ -123,9 +123,15 @@ class SubsonicClient(
     suspend fun foundSongs(search: String): FoundSongs =
         get("getFoundSongs", mapOf("search" to search), "foundSongs", FoundSongs.serializer())
 
-    // Fetches exactly the copy at `index` on a Find songs list.
-    suspend fun pickFoundSong(search: String, index: Int): PickResult =
-        get("pickFoundSong", mapOf("search" to search, "candidate" to index.toString()), "pick", PickResult.serializer())
+    // Fetches exactly this copy from a Find songs list: by its id, or on a
+    // server older than copy ids, by its place on the list, which holds
+    // only once the search has finished.
+    suspend fun pickFoundSong(search: String, copy: FoundCandidate): PickResult {
+        val which = copy.id?.let { "copy" to it }
+            ?: copy.index?.let { "candidate" to it.toString() }
+            ?: return PickResult("skipped", "This copy cannot be picked. Search again.")
+        return get("pickFoundSong", mapOf("search" to search, which), "pick", PickResult.serializer())
+    }
 
     // What the signed-in user may do to the library's files. Only for
     // servers that list the octoLibraryActions extension.

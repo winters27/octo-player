@@ -1,6 +1,7 @@
 package app.winters.octo.ui.downloads
 
 import app.winters.octo.subsonic.Acquisition
+import app.winters.octo.subsonic.FoundCandidate
 import app.winters.octo.subsonic.FoundSongs
 import app.winters.octo.subsonic.PickResult
 import app.winters.octo.subsonic.SubsonicException
@@ -205,7 +206,7 @@ interface FindSource {
 
     suspend fun get(search: String): FoundSongs
 
-    suspend fun pick(search: String, index: Int): PickResult
+    suspend fun pick(search: String, copy: FoundCandidate): PickResult
 }
 
 // A Find songs search, followed until every source has answered, and the
@@ -257,16 +258,25 @@ class FindSongsWatch(
         }
     }
 
-    // Fetches the copy at this place on the list, and answers what the
-    // server did.
-    suspend fun pick(index: Int): PickResult {
-        val search = _found.value?.id ?: return PickResult("skipped", "Search first.").also { _picked.value = it }
+    // Fetches one copy from the search `search` (the id the server gave
+    // it), and answers what the server did. Never while the search runs,
+    // nor from a list that another search has replaced: a copy's place
+    // there could name another copy by then. What the server did is shown
+    // only while its search is still the one on screen.
+    suspend fun pick(search: String, copy: FoundCandidate): PickResult {
+        val now = _found.value
+        val refused = when {
+            now == null || now.id != search -> FIND_LIST_CHANGED
+            now.searching -> FIND_PICK_WAIT
+            else -> null
+        }
+        if (refused != null) return PickResult("skipped", refused).also { _picked.value = it }
         val result = try {
-            source.pick(search, index)
+            source.pick(search, copy)
         } catch (e: SubsonicException) {
             PickResult("skipped", e.message ?: "The server could not be asked")
         }
-        _picked.value = result
+        if (_found.value?.id == search) _picked.value = result
         return result
     }
 

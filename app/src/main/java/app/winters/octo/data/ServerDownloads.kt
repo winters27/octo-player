@@ -8,6 +8,7 @@ import app.winters.octo.catalog.FIND_PREFIX
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.isFind
 import app.winters.octo.subsonic.Acquisition
+import app.winters.octo.subsonic.FoundCandidate
 import app.winters.octo.subsonic.FoundSongs
 import app.winters.octo.subsonic.OCTO_ACQUISITIONS
 import app.winters.octo.subsonic.OCTO_DOWNLOAD_LOG_VERSION
@@ -98,8 +99,8 @@ class ServerDownloads @Inject constructor(
 
             override suspend fun get(search: String): FoundSongs = client()?.foundSongs(search) ?: throw SubsonicException.NotFound("Not signed in")
 
-            override suspend fun pick(search: String, index: Int): PickResult =
-                client()?.pickFoundSong(search, index) ?: PickResult("skipped", "Not signed in")
+            override suspend fun pick(search: String, copy: FoundCandidate): PickResult =
+                client()?.pickFoundSong(search, copy) ?: PickResult("skipped", "Not signed in")
         },
         scope,
     )
@@ -201,12 +202,12 @@ class ServerDownloads @Inject constructor(
         (_view.value as? SheetView.Find)?.let { findWatch.search(it.id) }
     }
 
-    // Fetches one copy from the Find songs list. A queued pick opens its
-    // download's log; a replacement waits in the upgrade queue first, so the
-    // list shows it.
-    fun pick(index: Int) {
+    // Fetches one copy from the Find songs search `search`. A queued pick
+    // opens its download's log; a replacement waits in the upgrade queue
+    // first, so the list shows it.
+    fun pick(search: String, copy: FoundCandidate) {
         scope.launch {
-            val result = findWatch.pick(index)
+            val result = findWatch.pick(search, copy)
             if (result.queued) {
                 watch.wake()
                 val key = result.key

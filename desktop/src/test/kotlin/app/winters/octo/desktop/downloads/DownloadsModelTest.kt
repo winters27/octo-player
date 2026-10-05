@@ -91,7 +91,7 @@ class DownloadsModelTest {
         server.answer("findSongs", """"foundSongs":{"id":"f1","state":"searching","song":{"title":"Sexy Boy","artist":"Air"}}""", type = "octo")
         server.answer(
             "getFoundSongs",
-            """"foundSongs":{"id":"f1","state":"done","song":{"title":"Sexy Boy","artist":"Air"},"candidate":[{"source":"Soulseek","peer":"p1","file":"Sexy Boy.flac","format":"flac","rank":1,"index":0}]}""",
+            """"foundSongs":{"id":"f1","state":"done","song":{"title":"Sexy Boy","artist":"Air"},"candidate":[{"source":"Soulseek","peer":"p1","file":"Sexy Boy.flac","format":"flac","rank":1,"index":0,"id":"c-1"}]}""",
             type = "octo",
         )
         model.find("ab", "Sexy Boy", from = "soulseek:ab")
@@ -99,11 +99,11 @@ class DownloadsModelTest {
         assertEquals("ab", server.calls.last { it.url.pathSegments.last() == "findSongs" }.url.queryParameter("id"))
 
         server.answer("pickFoundSong", """"pick":{"state":"queued","detail":"Getting FLAC from p1.","key":"soulseek:ab"}""", type = "octo")
-        model.pick(0)
+        model.pick("f1", model.found.value!!.candidate.single())
         until("the pick opened its log") { model.view == DrawerView.Log("soulseek:ab") }
         val pick = server.calls.last { it.url.pathSegments.last() == "pickFoundSong" }
         assertEquals("f1", pick.url.queryParameter("search"))
-        assertEquals("0", pick.url.queryParameter("candidate"))
+        assertEquals("c-1", pick.url.queryParameter("copy"))
         model.close()
     }
 }

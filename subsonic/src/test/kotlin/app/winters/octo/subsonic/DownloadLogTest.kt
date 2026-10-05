@@ -64,21 +64,41 @@ class DownloadLogTest {
         assertEquals("MP3 220 kbps", found.song.quality)
         assertEquals(listOf(FIND_DONE, FIND_OFF), found.source.map { it.state })
         assertEquals(listOf(0, 1), found.candidate.map { it.index })
+        // A copy's own id, and none from a server older than copy ids.
+        assertEquals(listOf("c-7f3a", null), found.candidate.map { it.id })
         assertNull(found.candidate[1].rank)
         assertEquals("Another version: a remix, an edit or a live take", found.candidate[1].note)
     }
 
     @Test
-    fun pickingSendsTheSearchAndThePlace() = runTest {
+    fun pickingSendsTheSearchAndTheCopysId() = runTest {
         answer("pickFoundSong")
-        val result = client().pickFoundSong("a1b2c3", 3)
+        val result = client().pickFoundSong("a1b2c3", FoundCandidate(source = "Soulseek", index = 3, id = "c-7f3a"))
 
         val request = server.takeRequest()
         assertEquals("/rest/pickFoundSong", request.url.encodedPath)
         assertEquals("a1b2c3", request.url.queryParameter("search"))
-        assertEquals("3", request.url.queryParameter("candidate"))
+        assertEquals("c-7f3a", request.url.queryParameter("copy"))
+        assertNull("The id alone names the copy", request.url.queryParameter("candidate"))
         assertTrue(result.queued)
         assertEquals("soulseek:3kX9Qm", result.key)
+    }
+
+    @Test
+    fun pickingOnAServerWithoutCopyIdsSendsThePlace() = runTest {
+        answer("pickFoundSong")
+        client().pickFoundSong("a1b2c3", FoundCandidate(source = "Soulseek", index = 3))
+
+        val request = server.takeRequest()
+        assertEquals("3", request.url.queryParameter("candidate"))
+        assertNull(request.url.queryParameter("copy"))
+    }
+
+    @Test
+    fun aCopyWithNeitherIdNorPlaceIsNotSent() = runTest {
+        val result = client().pickFoundSong("a1b2c3", FoundCandidate(source = "Soulseek"))
+        assertFalse(result.queued)
+        assertEquals(0, server.requestCount)
     }
 
     @Test

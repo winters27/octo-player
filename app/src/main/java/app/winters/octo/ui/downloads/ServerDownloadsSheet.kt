@@ -275,10 +275,17 @@ private fun ColumnScope.FindSongs(model: ServerDownloads, view: SheetView.Find) 
     val problem by model.findProblem.collectAsStateWithLifecycle()
     val picked by model.picked.collectAsStateWithLifecycle()
     val searching = found?.searching != false && problem == null
-    // A copy waiting for "Replace it", for a song already in the library.
-    var asking by remember(view) { mutableStateOf<FoundCandidate?>(null) }
+    // A copy waiting for "Replace it", for a song already in the library,
+    // with the search it came from. A new search, Search again too, asks
+    // nothing of the old one's copies.
+    var asking by remember(view, found?.id) { mutableStateOf<Pair<String, FoundCandidate>?>(null) }
     Bar(back = if (view.from != null) "Back to the log" else "Back to $SERVER_DOWNLOADS", onBack = { view.from?.let(model::showLog) ?: model.showList() }) {
-        if (!searching) QuietButton("Search again", model::searchAgain)
+        if (!searching) {
+            QuietButton("Search again", {
+                asking = null
+                model.searchAgain()
+            })
+        }
     }
     LazyColumn(Modifier.weight(1f, fill = false), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 16.dp)) {
         item(key = "head") { FindHead(view, found) }
@@ -286,7 +293,7 @@ private fun ColumnScope.FindSongs(model: ServerDownloads, view: SheetView.Find) 
         listOfNotNull(problem, found?.error, picked?.takeIf { !it.queued }?.detail).forEachIndexed { index, words ->
             item(key = "problem$index") { Text(words, style = OctoType.caption, color = OctoColors.SignalOrange, modifier = Modifier.padding(vertical = 6.dp)) }
         }
-        asking?.let { copy ->
+        asking?.takeIf { (search, _) -> search == found?.id }?.let { (search, copy) ->
             item(key = "ask") {
                 Column(
                     Modifier.fillMaxWidth().padding(vertical = 8.dp).clip(RoundedCornerShape(14.dp)).background(Chip).padding(14.dp),
@@ -298,7 +305,7 @@ private fun ColumnScope.FindSongs(model: ServerDownloads, view: SheetView.Find) 
                         GlazeButton("Cancel", { asking = null }, size = ButtonSize.Small)
                         GlazeButton("Replace it", {
                             asking = null
-                            copy.index?.let(model::pick)
+                            model.pick(search, copy)
                         }, size = ButtonSize.Small, icon = painterResource(OctoIcons.Lossless))
                     }
                 }
@@ -307,11 +314,19 @@ private fun ColumnScope.FindSongs(model: ServerDownloads, view: SheetView.Find) 
         item(key = "rule") { Rule() }
         val copies = found?.candidate.orEmpty()
         if (copies.isEmpty() && !searching) item(key = "none") { Text("Nothing found on your sources.", style = OctoType.bodySmall, color = OctoColors.TextMuted) }
-        items(copies, key = { it.index ?: it.hashCode() }) { copy ->
-            CopyLine(copy, found?.song?.coverArt, compact = false, onPick = copy.index?.let { index ->
+        // The list still grows while sources answer, so a copy is picked
+        // only once it is done.
+        if (copies.isNotEmpty() && found?.searching == true) {
+            item(key = "wait") { Text(FIND_PICK_WAIT, style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(bottom = 6.dp)) }
+        }
+        val shown = found
+        items(copies, key = ::copyKey) { copy ->
+            CopyLine(copy, shown?.song?.coverArt, compact = false, onPick = if (shown != null && canPick(shown, copy)) {
                 {
-                    if (found?.song?.libraryId != null) asking = copy else model.pick(index)
+                    if (shown.song.libraryId != null) asking = shown.id to copy else model.pick(shown.id, copy)
                 }
+            } else {
+                null
             })
         }
     }

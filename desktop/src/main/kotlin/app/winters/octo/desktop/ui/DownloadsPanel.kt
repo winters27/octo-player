@@ -76,6 +76,7 @@ import app.winters.octo.subsonic.FoundSongs
 import app.winters.octo.ui.downloads.DOWNLOADS_EMPTY
 import app.winters.octo.ui.downloads.DownloadRow
 import app.winters.octo.ui.downloads.FIND_DOWNLOADS
+import app.winters.octo.ui.downloads.FIND_PICK_WAIT
 import app.winters.octo.ui.downloads.FIND_REPLACES
 import app.winters.octo.ui.downloads.FIND_SONGS
 import app.winters.octo.ui.downloads.LogMark
@@ -83,6 +84,8 @@ import app.winters.octo.ui.downloads.RowPhase
 import app.winters.octo.ui.downloads.candidateFacts
 import app.winters.octo.ui.downloads.candidateTitle
 import app.winters.octo.ui.downloads.candidateVerdict
+import app.winters.octo.ui.downloads.canPick
+import app.winters.octo.ui.downloads.copyKey
 import app.winters.octo.ui.downloads.drawerSummary
 import app.winters.octo.ui.downloads.kindLabel
 import app.winters.octo.ui.downloads.logTime
@@ -345,8 +348,12 @@ private fun FindSongs(app: AppState, model: DownloadsModel, view: DrawerView.Fin
         item(key = "rule") { Separator(Modifier.padding(vertical = Space.M)) }
         val copies = found?.candidate.orEmpty()
         if (copies.isEmpty() && !searching) item(key = "none") { Txt("Nothing found on your sources.", DesktopType.body, OctoColors.TextMuted) }
-        items(copies, key = { it.index ?: it.hashCode() }) { copy ->
-            CopyLine(copy, found?.song?.coverArt, compact = false, onPick = copy.index?.let { index -> { pickCopy(app, model, found!!, copy, index) } })
+        // The list still grows while sources answer, so a copy is picked
+        // only once it is done.
+        if (copies.isNotEmpty() && found?.searching == true) item(key = "wait") { Txt(FIND_PICK_WAIT, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(bottom = Space.S)) }
+        val shown = found
+        items(copies, key = ::copyKey) { copy ->
+            CopyLine(copy, shown?.song?.coverArt, compact = false, onPick = if (shown != null && canPick(shown, copy)) ({ pickCopy(app, model, shown, copy) }) else null)
         }
     }
 }
@@ -422,14 +429,17 @@ private fun CopyLine(copy: FoundCandidate, cover: String?, compact: Boolean, onP
     }
 }
 
-// Picks a copy. Replacing a library song's copy is asked first; a song not
-// in the library is simply fetched.
-private fun pickCopy(app: AppState, model: DownloadsModel, found: FoundSongs, copy: FoundCandidate, index: Int) {
+// Picks a copy from the search `found`. Replacing a library song's copy is
+// asked first; a song not in the library is simply fetched. The question
+// goes away should another search take the list's place meanwhile.
+private fun pickCopy(app: AppState, model: DownloadsModel, found: FoundSongs, copy: FoundCandidate) {
     if (found.song.libraryId == null) {
-        model.pick(index)
+        model.pick(found.id, copy)
         return
     }
     app.popups.showCentred { close ->
+        val now by model.found.collectAsState()
+        LaunchedEffect(now?.id) { if (now?.id != found.id) close() }
         MenuTitle(found.song.title)
         PopupPadding {
             Txt(
@@ -440,7 +450,7 @@ private fun pickCopy(app: AppState, model: DownloadsModel, found: FoundSongs, co
                 GlazeCapsule(null, "Cancel", close)
                 GlazeCapsule(OctoIcons.Lossless, "Replace it", {
                     close()
-                    model.pick(index)
+                    model.pick(found.id, copy)
                 }, lit = true)
             }
         }

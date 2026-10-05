@@ -89,8 +89,13 @@ data class FoundCandidate(
     val speed: Int? = null,
     val rank: Int? = null,
     val note: String? = null,
-    // Its place on a Find songs list, which picking it sends back.
+    // Its place on a Find songs list. A server older than copy ids takes
+    // it back for a pick, once the search has finished.
     val index: Int? = null,
+    // Its own id on a Find songs list, which picking it sends back. It
+    // stays the same copy while the list still grows; older servers send
+    // none.
+    val id: String? = null,
 )
 
 // The song a Find songs search looks for, with the library's copy when

@@ -4,6 +4,7 @@ import app.winters.octo.subsonic.Acquisition
 import app.winters.octo.subsonic.AcquisitionKind
 import app.winters.octo.subsonic.AcquisitionStage
 import app.winters.octo.subsonic.FoundCandidate
+import app.winters.octo.subsonic.FoundSongs
 import app.winters.octo.subsonic.LogKind
 import app.winters.octo.subsonic.Upgrade
 import app.winters.octo.subsonic.UpgradeStage
@@ -223,6 +224,20 @@ const val DOWNLOADS_EMPTY = "Nothing downloading. Songs you add show here, with 
 // that is not.
 const val FIND_REPLACES = "Only a lossless copy can take your copy's place, and yours stays until the new one passes every check."
 const val FIND_DOWNLOADS = "Pick a copy to download that one. It goes through the same checks as any download."
+
+// Why no copy can be picked yet: the list still grows while sources answer.
+const val FIND_PICK_WAIT = "You can pick a copy once the search is done."
+
+// A pick from a list that a new search has since replaced.
+const val FIND_LIST_CHANGED = "The list changed. Pick a copy from it again."
+
+// Whether a copy on the list can be picked: once the search is done, and
+// only a copy the server named.
+fun canPick(found: FoundSongs?, copy: FoundCandidate): Boolean =
+    found != null && !found.searching && (copy.id != null || copy.index != null)
+
+// A copy's key on the list: its id, or its place on a server older than ids.
+fun copyKey(copy: FoundCandidate): String = copy.id?.let { "id:$it" } ?: copy.index?.let { "at:$it" } ?: "copy:${copy.hashCode()}"
 
 // The library's copy of a song, in words: "Your copy: MP3 220 kbps, 7.0 MB".
 fun ownedCopyText(quality: String?, size: Long?, locale: Locale = Locale.getDefault()): String? {

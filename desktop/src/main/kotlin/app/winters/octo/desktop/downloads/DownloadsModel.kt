@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.winters.octo.subsonic.Acquisition
+import app.winters.octo.subsonic.FoundCandidate
 import app.winters.octo.subsonic.FoundSongs
 import app.winters.octo.subsonic.OCTO_ACQUISITIONS
 import app.winters.octo.subsonic.OCTO_DOWNLOAD_LOG_VERSION
@@ -68,7 +69,7 @@ class DownloadsModel(private val client: SubsonicClient, parent: CoroutineScope)
 
             override suspend fun get(search: String): FoundSongs = client.foundSongs(search)
 
-            override suspend fun pick(search: String, index: Int): PickResult = client.pickFoundSong(search, index)
+            override suspend fun pick(search: String, copy: FoundCandidate): PickResult = client.pickFoundSong(search, copy)
         },
         scope,
     )
@@ -149,11 +150,11 @@ class DownloadsModel(private val client: SubsonicClient, parent: CoroutineScope)
         (view as? DrawerView.Find)?.let { findWatch.search(it.id) }
     }
 
-    // Fetches one copy from the Find songs list. A queued pick opens its
-    // download's log, so the person can follow it from the start.
-    fun pick(index: Int) {
+    // Fetches one copy from the Find songs search `search`. A queued pick
+    // opens its download's log, so the person can follow it from the start.
+    fun pick(search: String, copy: FoundCandidate) {
         scope.launch {
-            val result = findWatch.pick(index)
+            val result = findWatch.pick(search, copy)
             if (result.queued) {
                 watch.wake()
                 // A replacement waits in the upgrade queue before it has a log
