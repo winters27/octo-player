@@ -135,8 +135,8 @@ class HealthModel(
     // fixed leave `settle` (and removed songs every check) until the
     // server's list catches up. `done` hears how it went, unless another
     // server has taken its place by then: the run still finishes there, but
-    // its result is not this page's to show. Answers why it did not start,
-    // or null when it did.
+    // its result is not this page's to show. One runs at a time. Answers
+    // why it did not start, or null when it did.
     fun run(
         label: String,
         steps: List<FixStep>,
@@ -147,7 +147,7 @@ class HealthModel(
         val client = on ?: client() ?: return "Not signed in"
         if (!isCurrent(client)) return FIX_OTHER_SERVER
         if (steps.isEmpty()) return null
-        if (running != null) return null
+        running?.let { return it.busy }
         val stopAsked = AtomicBoolean(false)
         stopRun = { stopAsked.set(true) }
         running = FixProgress(label, 0, steps.size)
@@ -234,4 +234,7 @@ class HealthModel(
 // How far a fix has got: `done` of `total` songs.
 data class FixProgress(val label: String, val done: Int, val total: Int) {
     val words: String get() = "$label: $done of $total"
+
+    // Why another fix waits: one runs at a time.
+    val busy: String get() = "$label is still going ($done of $total). Try again once it is done."
 }

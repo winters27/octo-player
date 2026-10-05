@@ -334,4 +334,30 @@ class HealthPageTest {
         assertNull(model.running)
         assertEquals(1, server.endpoints().count { it == "libraryAction" })
     }
+
+    @Test
+    fun aSecondFixWhileOneRunsSaysWhy() = runTest {
+        extensions("octoLibraryActions")
+        server.answer("getLibraryActions", allowed, type = "octo")
+        val answer = CountDownLatch(1)
+        server.answerBy("libraryAction") { request ->
+            answer.await(5, TimeUnit.SECONDS)
+            server.ok(""""libraryAction":{"id":"${request.url.queryParameter("id")}","action":"remove","state":"applied","detail":"Done."}""", type = "octo")
+        }
+        val client = client()
+        val model = HealthModel({ client }, this, Dispatchers.Unconfined)
+        model.check(library)
+        advanceUntilIdle()
+
+        var outcome: FixOutcome? = null
+        assertNull(model.run("Fixing copies", listOf(FixStep.Remove("mp3", "Holocene"))) { outcome = it })
+        assertEquals(
+            "Fixing copies is still going (0 of 1). Try again once it is done.",
+            model.run("Deleting", listOf(FixStep.Remove("towers", "Towers"))),
+        )
+        answer.countDown()
+        advanceUntilIdle()
+        awaitRun(model) { outcome }
+        assertEquals(listOf("mp3"), server.calls.filter { it.url.encodedPath.endsWith("libraryAction") }.map { it.url.queryParameter("id") })
+    }
 }
