@@ -29,7 +29,8 @@ class RadioMixTest {
         seed: Int = 1,
         suggested: List<RadioSong> = emptyList(),
         before: List<RadioSong> = emptyList(),
-    ) = radioMix(RadioInput(seeds, library, suggested, before, now = now), count, Random(seed)).map { it.id }
+        tuning: RadioTuning = RadioTuning(),
+    ) = radioMix(RadioInput(seeds, library, suggested, before, now = now, tuning = tuning), count, Random(seed)).map { it.id }
 
     @Test
     fun aSongMustShareAGenreWithTheSeeds() {
@@ -117,29 +118,126 @@ class RadioMixTest {
         assertEquals(setOf("s1", "s2"), mix(listOf(seed), listOf(seed), 5, suggested = suggested).toSet())
     }
 
+    // A library of close matches and as many suggestions the library does
+    // not have, which carry no genre or year, so nothing but the placement
+    // decides which kind plays where. "O" is a song from outside, "L" one
+    // from the library.
+    private val seedSong = song("seed", "A")
+    private val plenty = listOf(seedSong) + (1..60).map { song("lib$it", "L$it") }
+    private val found = (1..60).map { song("new$it", "S$it", genre = "", year = null) }
+
+    private fun kinds(tuning: RadioTuning = RadioTuning(), runs: Int = 200, count: Int = 30): List<String> =
+        (0 until runs).map { run ->
+            mix(listOf(seedSong), plenty, count, seed = run, suggested = found, tuning = tuning)
+                .joinToString("") { if (it.startsWith("new")) "O" else "L" }
+        }
+
     @Test
-    fun songsFromOutsideTheLibraryKeepTheirShare() {
-        // A library of close matches against suggestions the library does
-        // not have, which carry no genre or year: about a third still come
-        // from the suggestions, and none of them first.
-        val seed = song("seed", "A")
-        val library = listOf(seed) + (1..30).map { song("lib$it", "L$it") }
-        val suggested = (1..30).map { song("new$it", "S$it", genre = "", year = null) }
-        repeat(20) { run ->
-            val picks = mix(listOf(seed), library, 30, seed = run, suggested = suggested)
-            assertEquals(30, picks.size)
-            assertTrue(picks.toString(), picks.count { it.startsWith("new") } in 9..11)
-            assertTrue(picks.first().startsWith("lib"))
+    fun outsideSongsLandAtRandomNotEveryThirdSong() {
+        val openings = kinds().map { it.take(9) }
+        assertTrue(openings.toSet().size.toString(), openings.toSet().size >= 20)
+        assertTrue(openings.count { it == "LLOLLOLLO" } < 10)
+    }
+
+    @Test
+    fun theShareHoldsAcrossRadios() {
+        val radios = kinds()
+        radios.forEach { assertEquals(30, it.length) }
+        assertTrue(radios.toString(), radios.all { it.count { kind -> kind == 'O' } in 8..13 })
+        val share = radios.sumOf { it.count { kind -> kind == 'O' } } / (30.0 * radios.size)
+        assertTrue(share.toString(), share in 0.33..0.37)
+    }
+
+    @Test
+    fun neverThreeOutsideSongsInARow() {
+        assertTrue(kinds().none { "OOO" in it })
+    }
+
+    @Test
+    fun mostlyNewNeverPlaysThreeLibrarySongsInARow() {
+        val radios = kinds(RadioTuning(discovery = RadioDiscovery.MostlyNew))
+        assertTrue(radios.none { "LLL" in it })
+        val share = radios.sumOf { it.count { kind -> kind == 'O' } } / (30.0 * radios.size)
+        assertTrue(share.toString(), share in 0.82..0.88)
+    }
+
+    @Test
+    fun eachDiscoveryLevelKeepsItsShare() {
+        listOf(RadioDiscovery.ALittle, RadioDiscovery.Lots).forEach { level ->
+            val radios = kinds(RadioTuning(discovery = level), runs = 100)
+            val share = radios.sumOf { it.count { kind -> kind == 'O' } } / (30.0 * radios.size)
+            assertTrue("$level $share", share in level.share - 0.03..level.share + 0.03)
         }
     }
 
     @Test
-    fun noDiscoveryShareMeansTheLibraryWinsOnMerit() {
-        val seed = song("seed", "A")
-        val library = listOf(seed) + (1..30).map { song("lib$it", "L$it") }
-        val suggested = (1..30).map { song("new$it", "S$it", genre = "", year = null) }
-        val picks = radioMix(RadioInput(listOf(seed), library, suggested, now = now, discoveryShare = 0.0), 10, Random(1))
-        assertTrue(picks.all { it.id.startsWith("lib") })
+    fun onlyMyLibraryNeverPlaysAnOutsideSong() {
+        val library = listOf(seedSong, song("a", "B"), song("b", "C"), song("c", "D"))
+        val picks = mix(listOf(seedSong), library, 10, suggested = found, tuning = RadioTuning(discovery = RadioDiscovery.LibraryOnly))
+        assertEquals(setOf("a", "b", "c"), picks.toSet())
+        assertEquals(3, picks.size)
+    }
+
+    @Test
+    fun outsideDueFollowsItsRules() {
+        val random = Random(1)
+        assertFalse(outsideDue(0.0, 5, 0, 0, random))
+        assertTrue(outsideDue(1.0, 5, 5, 3, random))
+        // Too far behind the share: outside, whatever the draw.
+        assertTrue(outsideDue(0.35, 4, 0, -4, random))
+        // Too far ahead of it: the library.
+        assertFalse(outsideDue(0.35, 2, 2, 2, random))
+        // Two outside in a row is the most under half; two library in a row over half.
+        assertFalse(outsideDue(0.35, 5, 2, 2, random))
+        assertTrue(outsideDue(0.85, 5, 5, -2, random))
+    }
+
+    @Test
+    fun focusedStaysCloserThanWander() {
+        // Forty songs a year apart from the seed's year on: the closer, the
+        // better the match.
+        val seed = song("seed", "A", year = 1995)
+        val library = listOf(seed) + (0 until 40).map { song("y$it", "Y$it", year = 1995 + it) }
+        fun distance(adventure: RadioAdventure): Double = (0 until 200).sumOf { run ->
+            radioMix(RadioInput(listOf(seed), library, now = now, tuning = RadioTuning(adventure = adventure)), 5, Random(run))
+                .sumOf { (it.year!! - 1995).toDouble() }
+        } / 1000.0
+        val focused = distance(RadioAdventure.Focused)
+        val balanced = distance(RadioAdventure.Balanced)
+        val wander = distance(RadioAdventure.Wander)
+        assertTrue("$focused $balanced $wander", focused < balanced && balanced < wander)
+    }
+
+    @Test
+    fun tightVarietyLetsAnArtistBackSooner() {
+        // Six artists with eight songs each. Normal spacing keeps an artist
+        // at least four picks apart; Tight lets one back after two others.
+        val seed = song("seed", "Z")
+        val library = listOf(seed) + (1..6).flatMap { a -> (1..8).map { song("a$a-$it", "Artist $a") } }
+        fun closeRepeats(variety: RadioVariety): Int = (0 until 100).count { run ->
+            val artists = radioMix(RadioInput(listOf(seed), library, now = now, tuning = RadioTuning(variety = variety)), 12, Random(run))
+                .map { it.artists.single() }
+            artists.indices.any { i -> (1..3).any { d -> i + d < artists.size && artists[i] == artists[i + d] } }
+        }
+        assertTrue(closeRepeats(RadioVariety.Tight) > 0)
+        assertEquals(0, closeRepeats(RadioVariety.Normal))
+    }
+
+    @Test
+    fun favoritesMoreOftenPlaysMoreFavorites() {
+        // The favorites are four years off the seed, so on merit they come
+        // just after the rest; asked for, they come first.
+        val seed = song("seed", "A", year = 1995)
+        val rest = (1..15).map { song("r$it", "R$it", year = 1995) }
+        val liked = (1..15).map { song("f$it", "F$it", year = 1999).copy(liked = true) }
+        val library = listOf(seed) + rest + liked
+        fun favorites(on: Boolean): Double = (0 until 200).sumOf { run ->
+            radioMix(RadioInput(listOf(seed), library, now = now, tuning = RadioTuning(favorites = on)), 10, Random(run))
+                .count { it.liked }.toDouble()
+        } / 200.0
+        val off = favorites(false)
+        val on = favorites(true)
+        assertTrue("$off $on", on >= off + 1.0)
     }
 
     @Test
