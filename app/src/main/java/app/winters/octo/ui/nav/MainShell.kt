@@ -253,6 +253,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             entry<ServerFormRoute> { route -> SignInScreen(back, form = route.form, serverId = route.id, note = route.note) }
                             entry<OctoAdminRoute> { OctoAdminScreen(back) }
                             entry<SpotifyImportRoute> { SpotifyImportScreen(back) }
+                            entry<ChartsRoute> { app.winters.octo.ui.charts.ChartsScreen(back) }
                             entry<SoundRoute> { SoundScreen(back) }
                             entry<SharesRoute> { SharesScreen(back) }
                             entry<RadioStationsRoute> { RadioStationsScreen(back) }

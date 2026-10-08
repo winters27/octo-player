@@ -77,4 +77,55 @@ class TopSongsTest {
         answer(ok(""""x":1"""))
         assertTrue(client().topChart().entry.isEmpty())
     }
+
+    @Test
+    fun aChartIsAskedForByItsIdAndSaysWhichItIs() = runTest {
+        answer(ok(""""topSongs":{"artist":null,"source":"apple","chart":"18","name":"Top Hip-Hop/Rap","country":"us","entry":[
+            {"rank":1,"plays":null,"listeners":null,"inLibrary":false,"song":{"id":"Ab1","title":"Janice STFU","artist":"Drake","isExternal":true}}
+        ]}"""))
+
+        val top = client().topChart(count = 50, chart = "18")
+
+        val request = server.takeRequest()
+        assertEquals("/rest/getTopChart", request.url.encodedPath)
+        assertEquals("18", request.url.queryParameter("chart"))
+        assertEquals("50", request.url.queryParameter("count"))
+        assertEquals("18", top.chart)
+        assertEquals("Top Hip-Hop/Rap", top.name)
+        assertEquals("us", top.country)
+        assertEquals(TOP_SONGS_APPLE, top.source)
+        assertEquals("Janice STFU", top.entry.single().song?.title)
+    }
+
+    @Test
+    fun withoutAChartNoneIsSentAndAnOlderAnswerStillReads() = runTest {
+        answer(ok(""""topSongs":{"artist":null,"source":"deezer","entry":[]}"""))
+
+        val top = client().topChart()
+
+        assertNull(server.takeRequest().url.queryParameter("chart"))
+        assertNull(top.chart)
+        assertNull(top.name)
+        assertEquals(TOP_SONGS_DEEZER, top.source)
+    }
+
+    @Test
+    fun readsTheChartsTheCountryHas() = runTest {
+        answer(ok(""""charts":{"country":"us","chart":[
+            {"id":"34","name":"Popular right now","label":"Top songs","kind":"overall","playlist":"og1","on":true},
+            {"id":"new","name":"Best New Songs","label":"Best New Songs","kind":"new","on":false},
+            {"id":"18","name":"Top Hip-Hop/Rap","label":"Hip-Hop/Rap","kind":"genre","on":true,"later":1}
+        ]}"""))
+
+        val charts = client().charts()
+
+        assertEquals("/rest/getCharts", server.takeRequest().url.encodedPath)
+        assertEquals("us", charts.country)
+        assertEquals(listOf("34", "new", "18"), charts.chart.map { it.id })
+        assertEquals("og1", charts.chart[0].playlist)
+        assertTrue(charts.chart[0].on)
+        assertNull(charts.chart[1].playlist)
+        assertEquals("Hip-Hop/Rap", charts.chart[2].label)
+        assertEquals("genre", charts.chart[2].kind)
+    }
 }

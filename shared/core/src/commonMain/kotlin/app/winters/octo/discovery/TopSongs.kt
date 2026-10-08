@@ -1,8 +1,15 @@
 package app.winters.octo.discovery
 
 import app.winters.octo.catalog.SongIdentity
+import app.winters.octo.subsonic.CHART_NEW_SONGS
+import app.winters.octo.subsonic.CHART_TRENDING
+import app.winters.octo.subsonic.Extension
+import app.winters.octo.subsonic.OCTO_TOP_SONGS
+import app.winters.octo.subsonic.OCTO_TOP_SONGS_CHARTS
+import app.winters.octo.subsonic.TOP_SONGS_APPLE
 import app.winters.octo.subsonic.TOP_SONGS_DEEZER
 import app.winters.octo.subsonic.TOP_SONGS_LASTFM
+import app.winters.octo.subsonic.lists
 import kotlin.math.roundToLong
 
 // How many of an artist's top songs a search asks the server for, and how
@@ -44,9 +51,26 @@ fun playsText(plays: Long): String {
 }
 
 // What a ranked list is ranked by, in a person's words, or null when the
-// server did not say.
-fun rankedBy(source: String): String? = when (source) {
+// server did not say. `chart` is the chart's id, which tells Apple Music's
+// picks of the week and its trending songs from its most played.
+fun rankedBy(source: String, chart: String? = null): String? = when (source) {
     TOP_SONGS_LASTFM -> "Most played on Last.fm"
     TOP_SONGS_DEEZER -> "Most popular on Deezer"
+    TOP_SONGS_APPLE -> when (chart) {
+        CHART_NEW_SONGS -> "Picked by Apple Music"
+        CHART_TRENDING -> "Trending on Apple Music"
+        else -> "Most played on Apple Music"
+    }
     else -> null
 }
+
+// How many of the overall chart's songs Home's Charts row shows.
+const val CHARTS_ROW = 10
+
+// How many songs a chart holds at most: Best New Songs and Trending Songs
+// up to 100, every other chart 50.
+fun chartSongs(chart: String): Int = if (chart == CHART_NEW_SONGS || chart == CHART_TRENDING) 100 else 50
+
+// Whether a server's extensions offer the Charts page: octoTopSongs at the
+// version whose getTopChart takes a chart.
+fun chartsOffered(extensions: List<Extension>): Boolean = extensions.lists(OCTO_TOP_SONGS, OCTO_TOP_SONGS_CHARTS)

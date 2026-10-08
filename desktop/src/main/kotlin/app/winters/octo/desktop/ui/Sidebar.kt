@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -120,6 +121,14 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
         val list = rememberLazyListState()
         LazyColumn(Modifier.weight(1f).fillMaxWidth().scrollbar(list), list) {
             item(key = "home") { NavRow("Home", OctoIcons.Home, lit == SidebarItem.Top(Page.Home), rail) { go(Page.Home) } }
+            // The charts, from an Octo server that has them; asked once per server.
+            val charts = app.search?.charts
+            if (charts != null) {
+                item(key = "charts-ask") { LaunchedEffect(charts) { charts.check() } }
+                if (charts.offered == true) {
+                    item(key = "charts") { NavRow("Charts", OctoIcons.Star, lit == SidebarItem.Top(Page.Charts), rail) { go(Page.Charts) } }
+                }
+            }
             group(app, "library", "Library", rail, frame.foldedGroups) {
                 LibraryPlaces.forEach { place ->
                     item(key = "p:${place.label}") { NavRow(place.label, place.icon, lit == SidebarItem.Top(place.page), rail) { go(place.page) } }

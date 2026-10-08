@@ -1,5 +1,8 @@
 package app.winters.octo.ui.home
 
+import app.winters.octo.discovery.CHARTS_ROW
+import app.winters.octo.discovery.ChartLists
+import app.winters.octo.subsonic.CHART_OVERALL
 import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.getValue
@@ -52,6 +55,7 @@ class HomeViewModel @Inject constructor(
     serverSync: ServerSync,
     pins: PinStore,
     favourites: FavouritesDao,
+    private val chartLists: ChartLists,
 ) : ViewModel() {
     // What is pinned to the front of Home, in its order.
     val pinned: StateFlow<List<PinnedItem>> =
@@ -107,6 +111,11 @@ class HomeViewModel @Inject constructor(
     var madeForYou by mutableStateOf<List<Station>>(emptyList())
         private set
 
+    // The first songs of the server's chart of the moment, for Home's Charts
+    // row; empty on a server without charts.
+    var charts by mutableStateOf<List<TrackEntity>>(emptyList())
+        private set
+
     // The station, or Made for you list, whose songs are on the way, if any.
     var startingStation by mutableStateOf<String?>(null)
         private set
@@ -134,7 +143,11 @@ class HomeViewModel @Inject constructor(
                 stationsFailed = false
                 stations = emptyList()
                 madeForYou = emptyList()
-                if (server != null) loadStations()
+                charts = emptyList()
+                if (server != null) {
+                    loadStations()
+                    loadCharts()
+                }
             }
         }
     }
@@ -184,6 +197,12 @@ class HomeViewModel @Inject constructor(
 
     // Plays a shelf of songs as shown, starting at the one tapped.
     fun play(tracks: List<TrackEntity>, index: Int) = playback.playTracks(tracks.map { it.id }, index)
+
+    private fun loadCharts() {
+        viewModelScope.launch {
+            charts = chartLists.chart(CHART_OVERALL)?.songs?.take(CHARTS_ROW)?.map { it.track }.orEmpty()
+        }
+    }
 
     fun refresh() {
         viewModelScope.launch {

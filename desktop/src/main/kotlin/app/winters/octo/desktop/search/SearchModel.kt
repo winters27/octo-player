@@ -165,6 +165,9 @@ class SearchModel(
     // The top songs of an artist searched for, and the chart for an empty search.
     val tops = SearchTops(connection, scope)
 
+    // The Charts page: the charts the server's country has, and their songs.
+    val charts = Charts(connection, scope)
+
     private var job: Job? = null
 
     fun type(value: String) {
