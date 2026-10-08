@@ -26,6 +26,10 @@ import app.winters.octo.player.immersive.targetFps
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
 import org.jetbrains.skia.Image
+import org.jetbrains.skia.Paint
+import org.jetbrains.skia.Rect
+import org.jetbrains.skia.Surface
+import kotlin.math.roundToInt
 
 // How long the wash takes to fade in once its first frame is drawn, and
 // how long it waits for that frame before fading in regardless.
@@ -73,7 +77,7 @@ fun ImmersiveWash(
 
     LaunchedEffect(cover) {
         val next = cover?.square ?: return@LaunchedEffect
-        val (from, to) = covers.arrive(next, clock.fade, System.nanoTime() / 1_000_000)
+        val (from, to) = covers.arrive(next, clock.fade, System.nanoTime() / 1_000_000, ::mixCovers)
         renderer.setCovers(from, to)
         arrivals++
     }
@@ -113,6 +117,16 @@ fun ImmersiveWash(
                 }
             },
     )
+}
+
+// Two covers mixed as the wash mixes them, `mix` of the new over the old,
+// for a fade that starts while another is under way.
+internal fun mixCovers(old: Image, new: Image, mix: Float): Image {
+    val surface = Surface.makeRasterN32Premul(old.width, old.height)
+    val all = Rect.makeWH(old.width.toFloat(), old.height.toFloat())
+    surface.canvas.drawImage(old, 0f, 0f)
+    surface.canvas.drawImageRect(new, all, Paint().apply { alpha = (mix.coerceIn(0f, 1f) * 255).roundToInt() })
+    return surface.makeImageSnapshot()
 }
 
 // Rests this long, closely. Longer waits here wake on the system's coarse
