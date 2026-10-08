@@ -2,7 +2,7 @@ package app.winters.octo.radio
 
 // How a listener tunes Octo's radio: how much of it is music from outside
 // the library, how far it strays from the seeds, how soon an artist or an
-// album comes back, and whether favorites come round more often. Each app
+// album comes back, and whether favorites come around more often. Each app
 // keeps these in its own settings. The defaults play as radio always has,
 // apart from where the outside songs land.
 data class RadioTuning(
@@ -10,7 +10,11 @@ data class RadioTuning(
     val adventure: RadioAdventure = RadioAdventure.Balanced,
     val variety: RadioVariety = RadioVariety.Normal,
     val favorites: Boolean = false,
-)
+) {
+    // How many songs to ask the server for: more when most of the radio is
+    // to come from outside the library, so the share can be reached.
+    val suggestions: Int get() = if (discovery.share > 0.5) 100 else 50
+}
 
 // The share of a radio kept for songs the library does not have, from the
 // server's suggestions. Balanced is the share Octo's Your Mix keeps.
@@ -30,10 +34,11 @@ enum class RadioAdventure(val reach: Double, val keep: Double, val label: String
     Wander(1.0, 2.0, "Wander", "Deep cuts and further afield"),
 }
 
-// How far apart an album, a title and an artist play, against the usual
-// spacing, which grows with the library.
+// How far apart an album and an artist play, against the usual spacing,
+// which grows with the library. Another version of the same song always
+// waits the usual spacing.
 enum class RadioVariety(val scale: Double, val label: String, val detail: String) {
     Tight(0.5, "Tight", "Artists and albums come back sooner"),
-    Normal(1.0, "Normal", "Spaced as the library's size suits"),
+    Normal(1.0, "Normal", "Spaced to suit your library's size"),
     Wide(1.6, "Wide", "Artists and albums come back much later"),
 }

@@ -128,7 +128,7 @@ fun AppState.startRadioFrom(first: Song, seeds: List<Song>, exclude: Set<String>
     val index = library?.index
     scope.launch {
         val similar = try {
-            client.similarSongs(first.id, RADIO_SONGS)
+            client.similarSongs(first.id, settings.current.playback.radioTuning.suggestions)
         } catch (e: SubsonicException) {
             emptyList()
         }
@@ -146,7 +146,7 @@ fun AppState.startArtistRadio(artistId: String, name: String) {
     val index = library?.index
     scope.launch {
         val similar = try {
-            client.similarSongs(artistId, RADIO_SONGS)
+            client.similarSongs(artistId, settings.current.playback.radioTuning.suggestions)
         } catch (e: SubsonicException) {
             emptyList()
         }
@@ -159,7 +159,11 @@ fun AppState.startArtistRadio(artistId: String, name: String) {
                     emptyList()
                 }
             }
-        val first = radioSeed(own) ?: radioPicks(null, similar).firstOrNull()
+        // Only my library: with none of the artist's songs to open with, the
+        // radio opens with a library song, not one found online.
+        val libraryOnly = settings.current.playback.radioTuning.discovery == RadioDiscovery.LibraryOnly
+        val owned = index?.songs?.mapTo(HashSet()) { it.id }.orEmpty()
+        val first = radioSeed(own) ?: radioPicks(null, similar).firstOrNull { !libraryOnly || it.id in owned }
         if (first == null) {
             notice = "Couldn't find songs like $name"
             return@launch

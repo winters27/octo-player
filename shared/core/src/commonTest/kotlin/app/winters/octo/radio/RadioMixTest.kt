@@ -40,17 +40,20 @@ class RadioMixTest {
     }
 
     @Test
-    fun theRightEraBeatsAFavouriteFromAnotherEra() {
-        // Songs from the seed's era that are not favourites, against
-        // favourites from twenty years on: the era wins every time. Ten of
-        // them, so a draw can never walk past the last one into the other
-        // era (half the total weight is always inside the ten).
+    fun theRightEraBeatsAFavoriteFromAnotherEra() {
+        // Songs from the seed's era that are not favorites, against
+        // favorites from twenty years on: the era wins every time, with
+        // favorites asked for more often too. Ten of them, so a draw can
+        // never walk past the last one into the other era (half the total
+        // weight is always inside the ten).
         val seed = song("seed", "A", year = 1995)
         val near = (1..10).map { song("near$it", "N$it", year = 1994 + it % 3) }
         val far = (1..6).map { song("far$it", "F$it", year = 2014 + it).copy(liked = true) }
-        repeat(50) { run ->
-            val picks = mix(listOf(seed), listOf(seed) + near + far, 3, seed = run)
-            assertTrue(picks.toString(), picks.all { it.startsWith("near") })
+        listOf(RadioTuning(), RadioTuning(favorites = true)).forEach { tuning ->
+            repeat(50) { run ->
+                val picks = mix(listOf(seed), listOf(seed) + near + far, 3, seed = run, tuning = tuning)
+                assertTrue("$tuning $picks", picks.all { it.startsWith("near") })
+            }
         }
     }
 
@@ -176,6 +179,94 @@ class RadioMixTest {
         val picks = mix(listOf(seedSong), library, 10, suggested = found, tuning = RadioTuning(discovery = RadioDiscovery.LibraryOnly))
         assertEquals(setOf("a", "b", "c"), picks.toSet())
         assertEquals(3, picks.size)
+    }
+
+    @Test
+    fun aShareTheOutsideSongsCannotReachEndsWithoutABlockOfLibrarySongs() {
+        // Mostly new, with only 35 outside songs for a radio of 50: the share
+        // is paced to what there is, so the library songs are spread through
+        // instead of all coming at the end.
+        val few = found.take(35)
+        val radios = (0 until 200).map { run ->
+            mix(listOf(seedSong), plenty, 50, seed = run, suggested = few, tuning = RadioTuning(discovery = RadioDiscovery.MostlyNew))
+                .joinToString("") { if (it.startsWith("new")) "O" else "L" }
+        }
+        assertTrue(radios.filter { "LLL" in it }.toString(), radios.none { "LLL" in it })
+        assertTrue(radios.all { it.count { kind -> kind == 'O' } >= 33 })
+    }
+
+    @Test
+    fun pacedShareFollowsWhatThereIs() {
+        assertEquals(0.35, pacedShare(0.35, 60, 60, 30), 1e-9)
+        // Too few outside songs: as many as there are.
+        assertEquals(0.7, pacedShare(0.85, 35, 400, 50), 1e-9)
+        // Too few library songs: the outside ones fill the rest.
+        assertEquals(0.8, pacedShare(0.35, 100, 10, 50), 1e-9)
+        // Fewer songs than slots: the mix they make.
+        assertEquals(0.25, pacedShare(0.85, 5, 15, 50), 1e-9)
+        assertEquals(0.35, pacedShare(0.35, 0, 0, 50), 1e-9)
+    }
+
+    @Test
+    fun theRunCapHoldsWhereverADrawLands() {
+        // Wander lets a draw land at the end of a list; when the songs there
+        // are taken it goes on from the top instead of giving the slot away.
+        listOf(RadioAdventure.Focused, RadioAdventure.Balanced, RadioAdventure.Wander).forEach { adventure ->
+            val balanced = kinds(RadioTuning(adventure = adventure), runs = 300)
+            assertTrue("$adventure ${balanced.filter { "OOO" in it }}", balanced.none { "OOO" in it })
+            val lots = kinds(RadioTuning(discovery = RadioDiscovery.Lots, adventure = adventure), runs = 300)
+            assertTrue("$adventure ${lots.filter { "LLL" in it }}", lots.none { "LLL" in it })
+        }
+    }
+
+    @Test
+    fun theRunCarriesOnFromTheSongsBefore() {
+        // Two songs from outside the library just played (the end of the
+        // last Autoplay batch): the next pick is the library's.
+        val before = listOf(song("x1", "X1", genre = "", year = null), song("x2", "X2", genre = "", year = null))
+        repeat(200) { run ->
+            val first = mix(listOf(seedSong), plenty, 1, seed = run, suggested = found, before = before).single()
+            assertTrue(first, first.startsWith("lib"))
+        }
+        // The phone names the kinds itself, since its `before` holds only
+        // library songs.
+        repeat(200) { run ->
+            val first = radioMix(
+                RadioInput(listOf(seedSong), plenty, found, now = now, beforeOutside = listOf(false, true, true)), 1, Random(run),
+            ).single().id
+            assertTrue(first, first.startsWith("lib"))
+        }
+        assertEquals(2, runOf(listOf(false, true, true)))
+        assertEquals(-1, runOf(listOf(true, false)))
+        assertEquals(0, runOf(emptyList()))
+    }
+
+    @Test
+    fun tightVarietyStillSpacesOtherVersionsOfASong() {
+        // Twelve songs in four versions each, every version by its own artist
+        // on its own album: Tight brings artists back sooner, never the same
+        // song in another version.
+        val seed = song("seed", "Z")
+        val library = listOf(seed) + (1..12).flatMap { t -> (1..4).map { v -> song("t$t-$v", "Artist $t-$v", title = "Title $t") } }
+        repeat(100) { run ->
+            val titles = radioMix(
+                RadioInput(listOf(seed), library, now = now, tuning = RadioTuning(variety = RadioVariety.Tight)), 20, Random(run),
+            ).map { it.title }
+            val close = titles.indices.any { i -> (1..8).any { d -> i + d < titles.size && titles[i] == titles[i + d] } }
+            assertFalse(titles.toString(), close)
+        }
+    }
+
+    @Test
+    fun focusedStillDrawsFromMoreThanAHandful() {
+        // Three hundred songs alike: Focused keeps to the best of them, but
+        // from the usual two hundred, not a smaller pool.
+        val seed = song("seed", "Z")
+        val library = listOf(seed) + (1..300).map { song("s$it", "S$it") }
+        val picked = (0 until 100).flatMapTo(HashSet()) { run ->
+            radioMix(RadioInput(listOf(seed), library, now = now, tuning = RadioTuning(adventure = RadioAdventure.Focused)), 10, Random(run)).map { it.id }
+        }
+        assertTrue(picked.size.toString(), picked.size > 30)
     }
 
     @Test

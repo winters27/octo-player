@@ -135,10 +135,10 @@ class Discovery @Inject constructor(
     }
 
     // The song first, then songs like it.
-    suspend fun radio(seed: TrackEntity): List<TrackEntity> {
+    suspend fun radio(seed: TrackEntity, count: Int = RADIO_SONGS): List<TrackEntity> {
         val (client, sourceId) = server() ?: return emptyList()
         val seedId = serverIdOf(client, seed) ?: return emptyList()
-        val similar = resolve(client, sourceId, client.similarSongs(seedId, RADIO_SONGS))
+        val similar = resolve(client, sourceId, client.similarSongs(seedId, count))
         return (listOf(seed) + similar).distinctBy { it.id }
     }
 

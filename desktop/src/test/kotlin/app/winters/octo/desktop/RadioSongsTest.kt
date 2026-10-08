@@ -68,16 +68,17 @@ class RadioSongsTest {
 
     @Test
     fun onlyMyLibraryKeepsFoundSongsOutOfTheFallback() {
-        // A seed with nothing alike in the library: the server's order
-        // stands, less what it found outside the library.
+        // Nothing the radio itself can play (the one library song is an
+        // intro, which it leaves out), so the server's order stands, less
+        // what it found outside the library.
         val first = Song("x", "X", artist = "Z")
         val similar = listOf(
             Song("y1", "Y1", artist = "Y", isExternal = true),
-            library.songs.first { it.id == "s5" },
+            library.songs.first { it.id == "s4" },
             Song("y2", "Y2", artist = "W", isExternal = true),
         )
         val picks = radioSongs(first, listOf(first), similar, library, emptySet(), { 0 }, LibraryOnly, random = Random(1)).map { it.id }
-        assertEquals(listOf("s5"), picks)
+        assertEquals(listOf("s4"), picks)
         // Only songs from outside: nothing at all, rather than the server's order.
         val outside = radioSongs(first, listOf(first), similar.filter { it.isExternal }, library, emptySet(), { 0 }, LibraryOnly, random = Random(1))
         assertTrue(outside.toString(), outside.isEmpty())

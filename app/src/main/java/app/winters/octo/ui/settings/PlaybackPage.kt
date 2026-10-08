@@ -123,7 +123,7 @@ fun PlaybackPage(onBack: () -> Unit, highlight: String?, vm: PlaybackViewModel =
                 SettingsIndex.RadioFavorites,
                 checked = prefs.radioFavorites,
                 onChange = vm::setRadioFavorites,
-                helper = "Songs you hearted or rated 4 or 5 stars come round more often.",
+                helper = "Songs you hearted or rated 4 or 5 stars come around more often.",
             )
         }
         SettingsGroup(

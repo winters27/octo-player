@@ -5,6 +5,7 @@ import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.PlayedTrack
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
+import app.winters.octo.catalog.isFind
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.listening.PlayHistory
 import app.winters.octo.player.PlayerSettings
@@ -43,8 +44,9 @@ class LibraryRadio @Inject constructor(
         before: List<String> = emptyList(),
     ): List<String> {
         val seed = seeds.firstOrNull() ?: return emptyList()
+        val tuning = settings.prefs.first().radioTuning
         val suggested = try {
-            withContext(Dispatchers.IO) { discovery.radio(seed) }.filter { it.id != seed.id }
+            withContext(Dispatchers.IO) { discovery.radio(seed, tuning.suggestions) }.filter { it.id != seed.id }
         } catch (e: SubsonicException) {
             Log.w("Octo", "radio: server suggestions failed: ${e.javaClass.simpleName}")
             emptyList()
@@ -52,7 +54,6 @@ class LibraryRadio @Inject constructor(
         val library = catalog.tracks().first()
         val liked = user.likedIds().first().toHashSet()
         val played = history.tracks.first().associateBy { it.track.id }
-        val tuning = settings.prefs.first().radioTuning
         return withContext(Dispatchers.Default) {
             val byId = library.associateBy { it.id }
             fun TrackEntity.radio() = radioSong(liked, played[id])
@@ -65,6 +66,9 @@ class LibraryRadio @Inject constructor(
                     exclude = exclude,
                     now = System.currentTimeMillis(),
                     tuning = tuning,
+                    // A song found online is not in `before` above, but its
+                    // kind still carries the run on.
+                    beforeOutside = before.map(::isFind),
                 ),
                 count,
             ).map { it.id }

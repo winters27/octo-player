@@ -17,14 +17,14 @@ import kotlin.random.Random
 // two lists, but only when they share a genre: a shared year or artist
 // lifts a song that already fits and never pulls in one that does not. The
 // server's suggestions add a bonus by their rank. Picks are drawn at random
-// with the better matches favoured, then spaced so an album, a title or an
+// with the better matches favored, then spaced so an album, a title or an
 // artist does not come back too soon. Songs from outside the library land
 // at random, at the share the listener chose (see RadioTuning).
 
 // How much each kind of likeness counts. Genre and genre-in-its-era weigh
 // the same, so a song from the right genre but another era scores well
 // under one from both (about 0.4 against 0.85), which a tenth taken off
-// for not being a favourite cannot overturn.
+// for not being a favorite cannot overturn.
 private const val GENRE_WEIGHT = 1.0
 private const val ERA_WEIGHT = 1.0
 private const val YEAR_WEIGHT = 0.5
@@ -40,7 +40,7 @@ private const val RANK_DEPTH = 20.0
 // Songs played this recently wait until nothing else will do.
 internal const val RECENT_DAYS = 8
 
-// Nudges: a song not marked as a favourite, one played a lot, and one
+// Nudges: a song not marked as a favorite, one played a lot, and one
 // played in the last couple of weeks each give up a tenth.
 private const val FRESH_DAYS = 15
 private const val MANY_PLAYS = 4
@@ -62,8 +62,9 @@ private const val SHARE_SLACK = 1.5
 private const val RARER_RUN = 2
 
 // What a favorite (a heart, or four or five stars) counts for when the
-// listener asks for favorites more often.
-private const val FAVORITE_BOOST = 1.3
+// listener asks for favorites more often. A favorite already skips the
+// tenth taken off the rest, so this makes one about 1.3 times as likely.
+private const val FAVORITE_BOOST = 1.15
 
 // A big library is sampled, and only the best matches are drawn from.
 private const val CANDIDATE_CAP = 4000
@@ -89,6 +90,11 @@ class RadioInput(
     val now: Long,
     // How the listener tuned radio (see RadioTuning).
     val tuning: RadioTuning = RadioTuning(),
+    // Which of the songs in `before` came from outside the library, oldest
+    // first, so the run of one kind carries on from the songs already
+    // queued. Null works it out from the library; the phone passes it,
+    // since its `before` holds only library songs.
+    val beforeOutside: List<Boolean>? = null,
 )
 
 private class Scored(val song: RadioSong, val score: Double)
@@ -132,11 +138,44 @@ fun radioMix(input: RadioInput, count: Int, random: Random = Random.Default): Li
     val fromNew = if (input.tuning.discovery == RadioDiscovery.LibraryOnly) emptyList() else found
     val heardAfter = input.now - RECENT_DAYS * DAY_MS
     val heardLately = { s: Scored -> (s.song.lastPlayedAt ?: Long.MIN_VALUE) >= heardAfter }
-    val keep = (max(KEEP_AT_LEAST, count * KEEP_PER_PICK) * input.tuning.adventure.keep).toInt()
-    val (known, spare) = fromOwned.take(keep).partition { !heardLately(it) }
-    val gap = (radioSpacing(input.library.size) * input.tuning.variety.scale).roundToInt().coerceAtLeast(2)
+    // Adventure widens or narrows how many of the best matches stay in,
+    // never below the floor; songs heard lately do not count toward it.
+    val keep = max(KEEP_AT_LEAST, (count * KEEP_PER_PICK * input.tuning.adventure.keep).toInt())
+    val (fresh, lately) = fromOwned.partition { !heardLately(it) }
+    val known = fresh.take(keep)
+    val spare = lately.take(keep)
+    // Variety moves the artist and album spacing; another version of the
+    // same song always waits the usual spacing.
+    val titleGap = radioSpacing(input.library.size)
+    val gap = (titleGap * input.tuning.variety.scale).roundToInt().coerceAtLeast(2)
+    val beforeOutside = input.beforeOutside ?: input.before.map { it.id !in owned }
     return pick(known, fromNew.filterNot(heardLately), spare + fromNew.filter(heardLately), input.before, count,
-        gap, input.tuning.discovery.share, input.tuning.adventure.reach, random)
+        Spacing(gap, titleGap), input.tuning.discovery.share, input.tuning.adventure.reach, runOf(beforeOutside), random)
+}
+
+// How far apart an album and an artist (`gap`) and a title (`title`) play.
+private class Spacing(val gap: Int, val title: Int)
+
+// The run of one kind at the end of `outside` (oldest first): above 0 for
+// songs from outside the library, below 0 for the library's.
+internal fun runOf(outside: List<Boolean>): Int {
+    val last = outside.lastOrNull() ?: return 0
+    val length = outside.takeLastWhile { it == last }.size
+    return if (last) length else -length
+}
+
+// The share of the picks that can go to songs from outside the library:
+// the share asked for, as far as there are songs of each kind to fill it.
+// Without this, a share the outside songs cannot reach takes them all
+// first and leaves a block of library songs at the end, and the same the
+// other way. The server places outside songs the same way
+// (last_fm_radio_placement.rs, paced_share).
+internal fun pacedShare(share: Double, outside: Int, library: Int, slots: Int): Double {
+    if (slots <= 0 || outside + library == 0) return share
+    if (outside + library < slots) return outside.toDouble() / (outside + library)
+    val most = (outside.toDouble() / slots).coerceIn(0.0, 1.0)
+    val least = (1.0 - library.toDouble() / slots).coerceIn(0.0, 1.0)
+    return share.coerceIn(least, most)
 }
 
 // How many picks apart an album or a title must be; an artist must be half
@@ -171,9 +210,10 @@ private fun pick(
     spare: List<Scored>,
     before: List<RadioSong>,
     count: Int,
-    gap: Int,
-    share: Double,
+    spacing: Spacing,
+    asked: Double,
     reach: Double,
+    leadRun: Int,
     random: Random,
 ): List<RadioSong> {
     val all = known + discovered
@@ -186,21 +226,23 @@ private fun pick(
     val knownTotal = known.sumOf { it.score }
     val discoveredTotal = discovered.sumOf { it.score }
     var newPicks = 0
-    var run = 0
+    var run = leadRun
+    val share = if (asked <= 0.0) 0.0 else pacedShare(asked, discovered.size, known.size, count)
 
     // One weighted draw from a list: land on the song whose share of the
     // running total holds a random threshold, then take the first one from
-    // there that is free and that the spacing allows. Null when none is.
+    // there, going on from the top, that is free and that the spacing
+    // allows. Null when none is.
     fun draw(list: List<Scored>, total: Double): Scored? {
         if (list.isEmpty()) return null
         val threshold = random.nextDouble() * total * reach
-        var index = 0
+        var start = 0
         var sum = list[0].score
-        while (index < list.size - 1 && sum < threshold) sum += list[++index].score
-        while (index < list.size) {
-            val candidate = list[index++]
+        while (start < list.size - 1 && sum < threshold) sum += list[++start].score
+        for (step in list.indices) {
+            val candidate = list[(start + step) % list.size]
             if (candidate.song.id in taken) continue
-            if (tooSoon(candidate.song, played, gap, albums, artists, random)) {
+            if (tooSoon(candidate.song, played, spacing, albums, artists, random)) {
                 held.putIfAbsent(candidate.song.id, candidate)
                 continue
             }
@@ -245,11 +287,19 @@ private fun pick(
 // Whether a song would come too soon after the same album, title, artist
 // or composer. The distance is drawn fresh each time so the spacing does
 // not feel mechanical, and never asks for more variety than the pool has.
-private fun tooSoon(song: RadioSong, played: List<RadioSong>, gap: Int, albums: Int, artists: Int, random: Random): Boolean {
+private fun tooSoon(song: RadioSong, played: List<RadioSong>, spacing: Spacing, albums: Int, artists: Int, random: Random): Boolean {
+    val gap = spacing.gap
     val far = minOf(gap + random.nextInt(gap), albums - 1, played.size)
     if (far > 0) {
         val recent = played.subList(played.size - far, played.size)
-        if (recent.any { (song.album != null && it.album == song.album) || (song.titleKey.isNotEmpty() && it.titleKey == song.titleKey) }) return true
+        if (recent.any { song.album != null && it.album == song.album }) return true
+    }
+    // The title waits the usual spacing whatever the variety; at Normal it
+    // is the album's distance, drawn once.
+    val titleFar = if (spacing.title == gap) far else minOf(spacing.title + random.nextInt(spacing.title), albums - 1, played.size)
+    if (titleFar > 0 && song.titleKey.isNotEmpty()) {
+        val recent = played.subList(played.size - titleFar, played.size)
+        if (recent.any { it.titleKey == song.titleKey }) return true
     }
     val half = gap / 2
     val near = minOf(half + random.nextInt(half + 1), artists - 1, played.size)

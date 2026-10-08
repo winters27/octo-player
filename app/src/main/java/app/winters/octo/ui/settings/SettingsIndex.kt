@@ -82,7 +82,7 @@ object SettingsIndex {
         listOf("radio", "repeat", "spacing", "artist", "album"), section = "Radio",
     )
     val RadioFavorites = add(
-        "radio_favorites", SettingsPage.Playback, "Favorites more often", "Hearted and 4 or 5 star songs come round more",
+        "radio_favorites", SettingsPage.Playback, "Favorites more often", "Hearted and 4 or 5 star songs come around more",
         listOf("radio", "favorite", "hearted", "rating", "stars"), section = "Radio",
     )
     val ResumeWired = add(

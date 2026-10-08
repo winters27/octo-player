@@ -138,7 +138,7 @@ suspend fun autoplaySongs(
     val recent = index?.history?.take(RECENT_PLAYS)?.map { it.id }.orEmpty()
     val skip = exclude + recent + seed.id
     val similar = try {
-        client?.similarSongs(seed.id).orEmpty()
+        client?.similarSongs(seed.id, tuning.suggestions).orEmpty()
     } catch (e: SubsonicException) {
         emptyList()
     }

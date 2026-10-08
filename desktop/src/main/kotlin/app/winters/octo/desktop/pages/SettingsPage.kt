@@ -181,7 +181,10 @@ private fun PlaybackRows(app: AppState, settings: AppSettings) {
         SwitchRow("Autoplay", "When the queue ends, similar songs keep playing.", settings.playback.autoplay) { on ->
             app.setAutoplay(on)
         }
-        val playback = settings.playback
+        ActionRow("Equalizer, loudness, crossfade and speed", null, "Open Sound", { app.navigator.go(Page.Sound) })
+    }
+    val playback = settings.playback
+    Group("Radio") {
         ChoiceRow("Discovery", playback.radioDiscovery.detail, RadioDiscovery.entries, playback.radioDiscovery, { it.label }) { d ->
             app.settings.update { it.copy(playback = it.playback.copy(radioDiscovery = d)) }
         }
@@ -191,10 +194,9 @@ private fun PlaybackRows(app: AppState, settings: AppSettings) {
         ChoiceRow("Artist variety", playback.radioVariety.detail, RadioVariety.entries, playback.radioVariety, { it.label }) { v ->
             app.settings.update { it.copy(playback = it.playback.copy(radioVariety = v)) }
         }
-        SwitchRow("Favorites more often", "Songs you hearted or rated 4 or 5 stars come round more often.", playback.radioFavorites) { on ->
+        SwitchRow("Favorites more often", "Songs you hearted or rated 4 or 5 stars come around more often.", playback.radioFavorites) { on ->
             app.settings.update { it.copy(playback = it.playback.copy(radioFavorites = on)) }
         }
-        ActionRow("Equalizer, loudness, crossfade and speed", null, "Open Sound", { app.navigator.go(Page.Sound) })
     }
 }
 

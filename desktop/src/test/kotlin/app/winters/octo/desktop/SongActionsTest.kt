@@ -5,6 +5,7 @@ import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.radio.RadioDiscovery
 import app.winters.octo.lyrics.OnlineLyrics
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.CoroutineScope
@@ -115,6 +116,32 @@ class SongActionsTest {
         assertEquals(listOf("s1", "s7", "s8"), queueIds())
         assertEquals("s1", callsTo("getSimilarSongs2").single().url.queryParameter("id"))
         assertEquals("50", callsTo("getSimilarSongs2").single().url.queryParameter("count"))
+        // Octo answers in its own order of fit, since the app mixes the radio.
+        assertEquals("client", callsTo("getSimilarSongs2").single().url.queryParameter("octoMix"))
+    }
+
+    @Test
+    fun mostlyNewAsksForMoreSongs() {
+        server.answer("getSimilarSongs2", """"similarSongs2":{"song":[${songJson("s7", "Seven")}]}""")
+        val app = app()
+        app.settings.update { it.copy(playback = it.playback.copy(radioDiscovery = RadioDiscovery.MostlyNew)) }
+        app.startRadio(one)
+        waitFor { callsTo("getSimilarSongs2").isNotEmpty() }
+        assertEquals("100", callsTo("getSimilarSongs2").single().url.queryParameter("count"))
+    }
+
+    @Test
+    fun onlyMyLibraryNeverOpensAnArtistRadioWithAFoundSong() {
+        // No library songs by the artist and no top songs: the server's songs
+        // found online don't open the radio.
+        server.answer("getSimilarSongs2", """"similarSongs2":{"song":[${songJson("y1", "Found")}]}""")
+        server.fail("getTopSongs", 70, "Not found")
+        val app = app()
+        app.settings.update { it.copy(playback = it.playback.copy(radioDiscovery = RadioDiscovery.LibraryOnly)) }
+        app.startArtistRadio("ar1", "Radiohead")
+        waitFor { app.notice != null }
+        assertEquals("Couldn't find songs like Radiohead", app.notice)
+        assertTrue(queueIds().isEmpty())
     }
 
     @Test
