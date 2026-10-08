@@ -562,3 +562,44 @@ fn says_what_the_device_runs_at_and_what_the_song_is() {
     assert_eq!((info.sample_rate, info.channels, info.bits_per_sample), (44_100, 2, Some(16)));
     engine.shutdown();
 }
+
+// Brandon: on radio, Next showed the next song, snapped back to the one
+// before, then moved on. A skip to a song still opening (an outside song
+// Octo is fetching) went on reporting the song skipped away from, and the
+// app, after waiting a while for the new one, followed it back. Once the
+// engine has left a song, it no longer says it is playing it.
+#[test]
+fn a_skip_to_a_song_still_opening_stops_reporting_the_one_left() {
+    let dir = temp_dir();
+    let a = dir.join("left.wav");
+    write_wav(&a, RATE, 2, &sine(440.0, RATE, 2, 0, RATE as usize * 20, 0.3));
+    // A server that takes the call and never answers: the song never opens.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/slow.flac", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        let held: Vec<_> = listener.incoming().take(8).collect();
+        std::thread::sleep(Duration::from_secs(30));
+        drop(held);
+    });
+    let slow = QueueItem { source: url, ..item("slow", Path::new("")) };
+
+    let (engine, events, _) = engine(1.0);
+    engine.set_position_interval(50).unwrap();
+    engine.load(vec![item("left", &a), slow], 0, 0, true).unwrap();
+    events.wait_for("left heard", Duration::from_secs(10), |e| {
+        matches!(e, EngineEvent::Position { item_id, .. } if item_id == "left")
+    });
+    engine.skip_to(1).unwrap();
+    // A word already on its way is fine; after that, none for the song left.
+    std::thread::sleep(Duration::from_millis(300));
+    let before = events.all().len();
+    std::thread::sleep(Duration::from_millis(800));
+    let after: Vec<EngineEvent> = events.all().split_off(before);
+    let stale = after
+        .iter()
+        .filter(|e| matches!(e, EngineEvent::Position { item_id, .. } if item_id == "left"))
+        .count();
+    assert_eq!(stale, 0, "still told of the song left: {after:?}");
+    assert!(!events.starts().contains(&"slow".to_string()), "the stalled song never starts");
+    engine.shutdown();
+}
