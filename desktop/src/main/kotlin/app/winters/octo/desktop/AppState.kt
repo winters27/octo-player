@@ -288,7 +288,10 @@ class AppState(
             // The listener's own songs keep Autoplay near their taste.
             val anchors = recent.filter { it.source != QueueSource.Autoplay && it.song.id != seed.id }.map { it.song }.takeLast(10).reversed()
             withContext(Dispatchers.Default) {
-                autoplaySongs(seed, exclude, connection?.client, library?.index, before, anchors, rating = { ratingOf(it) })
+                autoplaySongs(
+                    seed, exclude, connection?.client, library?.index, before, anchors,
+                    rating = { ratingOf(it) }, tuning = settings.current.playback.radioTuning,
+                )
             }
         },
     ).also { it.start() }

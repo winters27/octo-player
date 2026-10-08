@@ -40,6 +40,9 @@ import app.winters.octo.server.serverOffers
 import app.winters.octo.desktop.setAutoplay
 import app.winters.octo.desktop.settings.AmbienceMotion
 import app.winters.octo.covers.PLAYLIST_COVERS_SETTING
+import app.winters.octo.radio.RadioAdventure
+import app.winters.octo.radio.RadioDiscovery
+import app.winters.octo.radio.RadioVariety
 import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.covers.playlistCoverStyleHelp
 import app.winters.octo.covers.playlistCoverStyleName
@@ -177,6 +180,19 @@ private fun PlaybackRows(app: AppState, settings: AppSettings) {
     Rows {
         SwitchRow("Autoplay", "When the queue ends, similar songs keep playing.", settings.playback.autoplay) { on ->
             app.setAutoplay(on)
+        }
+        val playback = settings.playback
+        ChoiceRow("Discovery", playback.radioDiscovery.detail, RadioDiscovery.entries, playback.radioDiscovery, { it.label }) { d ->
+            app.settings.update { it.copy(playback = it.playback.copy(radioDiscovery = d)) }
+        }
+        ChoiceRow("Adventure", playback.radioAdventure.detail, RadioAdventure.entries, playback.radioAdventure, { it.label }) { a ->
+            app.settings.update { it.copy(playback = it.playback.copy(radioAdventure = a)) }
+        }
+        ChoiceRow("Artist variety", playback.radioVariety.detail, RadioVariety.entries, playback.radioVariety, { it.label }) { v ->
+            app.settings.update { it.copy(playback = it.playback.copy(radioVariety = v)) }
+        }
+        SwitchRow("Favorites more often", "Songs you hearted or rated 4 or 5 stars come round more often.", playback.radioFavorites) { on ->
+            app.settings.update { it.copy(playback = it.playback.copy(radioFavorites = on)) }
         }
         ActionRow("Equalizer, loudness, crossfade and speed", null, "Open Sound", { app.navigator.go(Page.Sound) })
     }

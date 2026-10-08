@@ -8,7 +8,9 @@ import app.winters.octo.desktop.system.OPENED_FILE_PREFIX
 import app.winters.octo.playback.AUTOPLAY_BATCH
 import app.winters.octo.playback.QueueSource
 import app.winters.octo.playback.autoplayPicks
+import app.winters.octo.radio.RadioDiscovery
 import app.winters.octo.radio.RadioInput
+import app.winters.octo.radio.RadioTuning
 import app.winters.octo.radio.radioMix
 import app.winters.octo.radio.radioSong
 import app.winters.octo.subsonic.Song
@@ -129,6 +131,7 @@ suspend fun autoplaySongs(
     before: List<Song> = emptyList(),
     anchors: List<Song> = emptyList(),
     rating: (Song) -> Int = { it.userRating ?: 0 },
+    tuning: RadioTuning = RadioTuning(),
     now: Long = System.currentTimeMillis(),
     random: Random = Random.Default,
 ): List<Song> {
@@ -153,12 +156,16 @@ suspend fun autoplaySongs(
             before = (before + seed).map { it.radioSong(rating(it)) },
             exclude = skip,
             now = now,
+            tuning = tuning,
         ),
         AUTOPLAY_BATCH,
         random,
     )
     if (mixed.isNotEmpty()) return mixed.mapNotNull { known[it.id]?.withSource() }
-    val fromServer = autoplayPicks(similar.map { it.id }, emptyList(), emptyList(), skip)
+    // Only my library keeps the server's songs from outside it out here too.
+    val owned = index?.songs?.mapTo(HashSet()) { it.id }.orEmpty()
+    val offered = similar.filter { tuning.discovery != RadioDiscovery.LibraryOnly || it.id in owned }
+    val fromServer = autoplayPicks(offered.map { it.id }, emptyList(), emptyList(), skip)
     if (fromServer.isNotEmpty()) return fromServer.mapNotNull { known[it]?.withSource() }
     if (index == null) return emptyList()
     val artist = index.songs.filter { song ->

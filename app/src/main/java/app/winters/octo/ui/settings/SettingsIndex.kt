@@ -69,6 +69,22 @@ object SettingsIndex {
         "autoplay", SettingsPage.Playback, "Autoplay", "Similar songs keep playing when the queue ends",
         listOf("similar", "continue", "endless", "radio", "queue"),
     )
+    val RadioDiscovery = add(
+        "radio_discovery", SettingsPage.Playback, "Discovery", "How much of a radio comes from outside your library",
+        listOf("radio", "new music", "outside", "library only", "discover"), section = "Radio",
+    )
+    val RadioAdventure = add(
+        "radio_adventure", SettingsPage.Playback, "Adventure", "How far a radio strays from the song it started from",
+        listOf("radio", "focused", "wander", "deep cuts", "similar"), section = "Radio",
+    )
+    val RadioVariety = add(
+        "radio_variety", SettingsPage.Playback, "Artist variety", "How soon an artist or album comes back",
+        listOf("radio", "repeat", "spacing", "artist", "album"), section = "Radio",
+    )
+    val RadioFavorites = add(
+        "radio_favorites", SettingsPage.Playback, "Favorites more often", "Hearted and 4 or 5 star songs come round more",
+        listOf("radio", "favorite", "hearted", "rating", "stars"), section = "Radio",
+    )
     val ResumeWired = add(
         "resume_wired", SettingsPage.Playback, "Resume when headphones connect", "Plays again when a cable goes back in",
         listOf("headphones", "cable", "wired", "usb", "plug"), section = "Headphones",

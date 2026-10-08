@@ -5,7 +5,9 @@ import app.winters.octo.desktop.library.sortAlbums
 import app.winters.octo.desktop.queue.radioName
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.playback.QueueSource
+import app.winters.octo.radio.RadioDiscovery
 import app.winters.octo.radio.RadioInput
+import app.winters.octo.radio.RadioTuning
 import app.winters.octo.radio.radioMix
 import app.winters.octo.radio.radioSong
 import app.winters.octo.sort.SortList
@@ -71,8 +73,9 @@ fun radioSeed(songs: List<Song>): Song? =
     songs.filter { (it.playCount ?: 0) > 0 }.maxByOrNull { it.playCount ?: 0 } ?: songs.firstOrNull()
 
 // Octo's radio for the desktop: songs like `seeds`, after `first`, from the
-// library and the server's `similar` (see radioMix). When the radio finds
-// nothing, the server's songs in its own order.
+// library and the server's `similar` (see radioMix), as the listener tuned
+// it. When the radio finds nothing, the server's songs in its own order,
+// only the library's when the listener asked for only their library.
 fun radioSongs(
     first: Song,
     seeds: List<Song>,
@@ -80,6 +83,7 @@ fun radioSongs(
     index: LibraryIndex?,
     exclude: Set<String>,
     rating: (Song) -> Int,
+    tuning: RadioTuning = RadioTuning(),
     now: Long = System.currentTimeMillis(),
     random: Random = Random.Default,
 ): List<Song> {
@@ -96,12 +100,16 @@ fun radioSongs(
             before = listOf(first.radioSong(rating(first))),
             exclude = exclude + first.id,
             now = now,
+            tuning = tuning,
         ),
         RADIO_SONGS,
         random,
     ).mapNotNull { known[it.id] }
         .map { song -> suggestedBy[song.id]?.let { song.copy(octoSuggestedBy = it) } ?: song }
-    return mixed.ifEmpty { radioPicks(first, similar).filter { it.id !in exclude } }
+    val owned = index?.songs?.mapTo(HashSet()) { it.id }.orEmpty()
+    return mixed.ifEmpty {
+        radioPicks(first, similar).filter { it.id !in exclude && (tuning.discovery != RadioDiscovery.LibraryOnly || it.id in owned) }
+    }
 }
 
 // Plays the song now, then Octo's radio after it.
@@ -124,7 +132,7 @@ fun AppState.startRadioFrom(first: Song, seeds: List<Song>, exclude: Set<String>
         } catch (e: SubsonicException) {
             emptyList()
         }
-        val picks = withContext(Dispatchers.Default) { radioSongs(first, seeds, similar, index, exclude, { ratingOf(it) }) }
+        val picks = withContext(Dispatchers.Default) { radioSongs(first, seeds, similar, index, exclude, { ratingOf(it) }, settings.current.playback.radioTuning) }
         if (player.state.value.queue.none { it.key == key }) return@launch
         if (picks.isEmpty()) notice = "Couldn't find songs like ${first.title}" else player.addToQueue(picks, radio)
     }
@@ -159,7 +167,7 @@ fun AppState.startArtistRadio(artistId: String, name: String) {
         val seeds = (listOf(first) + own.take(200)).distinctBy { it.id }
         // Their own songs ride along as suggestions after the server's, so
         // a radio for an artist outside the library still plays more of them.
-        val picks = withContext(Dispatchers.Default) { radioSongs(first, seeds, similar + own, index, emptySet(), { ratingOf(it) }) }
+        val picks = withContext(Dispatchers.Default) { radioSongs(first, seeds, similar + own, index, emptySet(), { ratingOf(it) }, settings.current.playback.radioTuning) }
         player.play(listOf(first) + picks, source = QueueSource.Played(radioName(name)))
     }
 }

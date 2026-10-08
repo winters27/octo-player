@@ -7,6 +7,7 @@ import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.listening.PlayHistory
+import app.winters.octo.player.PlayerSettings
 import app.winters.octo.radio.RadioInput
 import app.winters.octo.radio.RadioSong
 import app.winters.octo.radio.radioMix
@@ -22,14 +23,15 @@ const val RADIO_LENGTH = 50
 
 // Octo's radio on the phone: songs like the seeds from the library and,
 // when a server is signed in, from its suggestions, songs it found online
-// among them (see radioMix). Works from the library alone. Start radio and
-// Autoplay both use it.
+// among them (see radioMix), tuned by the listener's radio settings. Works
+// from the library alone. Start radio and Autoplay both use it.
 @Singleton
 class LibraryRadio @Inject constructor(
     private val catalog: CatalogDao,
     private val user: UserDao,
     private val history: PlayHistory,
     private val discovery: Discovery,
+    private val settings: PlayerSettings,
 ) {
     // Ids of up to `count` songs like `seeds`, never the first seed or one
     // in `exclude`, spaced on from the songs in `before` (ids, oldest
@@ -50,6 +52,7 @@ class LibraryRadio @Inject constructor(
         val library = catalog.tracks().first()
         val liked = user.likedIds().first().toHashSet()
         val played = history.tracks.first().associateBy { it.track.id }
+        val tuning = settings.prefs.first().radioTuning
         return withContext(Dispatchers.Default) {
             val byId = library.associateBy { it.id }
             fun TrackEntity.radio() = radioSong(liked, played[id])
@@ -61,6 +64,7 @@ class LibraryRadio @Inject constructor(
                     before = before.mapNotNull(byId::get).map { it.radio() },
                     exclude = exclude,
                     now = System.currentTimeMillis(),
+                    tuning = tuning,
                 ),
                 count,
             ).map { it.id }
