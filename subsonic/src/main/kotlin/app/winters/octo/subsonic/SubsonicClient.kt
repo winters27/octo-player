@@ -362,11 +362,13 @@ class SubsonicClient(
         get("getPlaylist", mapOf("id" to id), "playlist", PlaylistPaths.serializer()).entry
 
     // Songs like this one, for a radio that starts from it. On Octo these
-    // mix library songs with songs found online.
+    // mix library songs with songs found online. octoMix=client asks Octo
+    // for its own order of fit, since the app mixes the radio itself;
+    // other servers ignore it.
     suspend fun similarSongs(id: String, count: Int = 50): List<Song> =
         get(
             "getSimilarSongs2",
-            mapOf("id" to id, "count" to "$count"),
+            mapOf("id" to id, "count" to "$count", "octoMix" to "client"),
             "similarSongs2",
             SongList.serializer(),
             SongList(),
