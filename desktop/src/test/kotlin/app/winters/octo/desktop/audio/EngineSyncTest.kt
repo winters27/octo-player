@@ -311,6 +311,17 @@ class EngineSyncTest {
         assertEquals("404 from server", problem.detail)
     }
 
+    // A song found online was never on the server, so its "not found" is a refusal.
+    @Test
+    fun aNotFoundOnAnOutsideSongIsARefusal() {
+        val (p, engine) = setUp()
+        p.play(listOf(songs[0].copy(id = "ext1", isExternal = true)) + songs.drop(1))
+        engine.emit(EngineEvent.Error(ErrorKind.NOT_FOUND, "404 from server", itemId(p.key("ext1"))))
+        assertEquals("The server wouldn't send that song.", p.state.value.problem?.words)
+        engine.emit(EngineEvent.Error(ErrorKind.NOT_FOUND, "404 from server", itemId(p.key("s2"))))
+        assertEquals("That song isn't on the server any more.", p.state.value.problem?.words)
+    }
+
     @Test
     fun repeatOneCountsEachTimeRound() {
         val (p, engine) = setUp()

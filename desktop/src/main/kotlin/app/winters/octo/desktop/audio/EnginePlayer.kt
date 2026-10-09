@@ -550,7 +550,7 @@ class EnginePlayer(
                 }
                 is EngineEvent.Error -> {
                     val failed = keyOfItem(event.itemId)?.let { key -> queue.songs.firstOrNull { it.key == key } }
-                    problem = PlayProblem(plainWords(event.kind), failed?.song, event.message.takeIf(String::isNotBlank))
+                    problem = PlayProblem(plainWords(event.kind, failed?.song?.isExternal == true), failed?.song, event.message.takeIf(String::isNotBlank))
                     if (keyOfItem(event.itemId) == expecting) expecting = null
                 }
                 is EngineEvent.Position -> {
@@ -693,9 +693,11 @@ class EnginePlayer(
 // sounds like the middle rather than nearly full.
 fun loudness(volume: Float): Float = volume.coerceIn(0f, 1f).let { it * it }
 
-// Why a song would not play, in plain words, the same as the phone's.
-fun plainWords(kind: ErrorKind): String = when (kind) {
-    ErrorKind.NOT_FOUND -> PlayFailure.Missing
+// Why a song would not play, in plain words, the same as the phone's. A
+// song found online (`outside`) was never on the server, so a "not found"
+// for it is the server not sending it.
+fun plainWords(kind: ErrorKind, outside: Boolean = false): String = when (kind) {
+    ErrorKind.NOT_FOUND -> if (outside) PlayFailure.Refused else PlayFailure.Missing
     ErrorKind.HTTP -> PlayFailure.Refused
     ErrorKind.NETWORK -> PlayFailure.Unreachable
     ErrorKind.UNSUPPORTED -> PlayFailure.Unsupported

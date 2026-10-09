@@ -447,7 +447,7 @@ class OctoPlaybackService : MediaLibraryService() {
             if (!player.playWhenReady) return
             failedInARow++
             val title = player.currentMediaItem?.mediaMetadata?.title?.toString()?.takeIf(String::isNotBlank) ?: "a song"
-            val why = playFailureOf(error).words
+            val why = playFailureOf(error, isFind(player.currentMediaItem?.mediaId.orEmpty())).words
             if (failedInARow >= player.mediaItemCount || !player.hasNextMediaItem()) {
                 feedback.show(stoppedLine(title, why))
                 return
