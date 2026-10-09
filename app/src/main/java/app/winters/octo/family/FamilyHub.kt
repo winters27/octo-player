@@ -1,8 +1,10 @@
 package app.winters.octo.family
 
+import app.winters.octo.catalog.ArtworkRef
+import app.winters.octo.subsonic.parseFamilyLink
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import app.winters.octo.subsonic.FamilyJoinLink
+import app.winters.octo.subsonic.FamilyLink
 import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,7 +44,7 @@ val Session.family: Boolean get() = "$OCTO_FAMILY:1" in extensions
 // tapped), or joining a family (a pairing link or its QR code).
 sealed interface FamilyOpen {
     data object Family : FamilyOpen
-    data class Join(val link: FamilyJoinLink) : FamilyOpen
+    data class Join(val link: FamilyLink) : FamilyOpen
 }
 
 // A song found online to ask a copy of, for the request sheet.
@@ -81,6 +83,30 @@ class FamilyHub @Inject constructor(
 
     fun opened() {
         _opens.value = null
+    }
+
+    // The clipboard text last offered, so the same link is offered once.
+    private var offered: String? = null
+
+    // A family link on the clipboard when the app comes to the front is
+    // offered once, with a way to use it.
+    fun offerClipboard(text: String?) {
+        val clip = text?.trim()?.takeIf(String::isNotEmpty) ?: return
+        if (clip == offered) return
+        val link = parseFamilyLink(clip) ?: return
+        offered = clip
+        val words = if (link is app.winters.octo.subsonic.FamilyInviteLink) "A family invite is on the clipboard" else "A family join link is on the clipboard"
+        feedback.show(words, "Use it", { open(FamilyOpen.Join(link)) })
+    }
+
+    // The address of the server in use, as people read it.
+    fun serverAddress(): String? = session()?.client?.primaryUrl?.toString()?.removeSuffix("/")
+
+    // A cover by its id on the server in use, for a request's row.
+    fun coverRef(coverId: String?): String? {
+        val id = coverId?.takeIf(String::isNotEmpty) ?: return null
+        val source = session()?.sourceId ?: return null
+        return ArtworkRef.Server(source, id, online = id.startsWith("ext-")).encode()
     }
 
     // The song the request sheet is open for, or null while it is shut.

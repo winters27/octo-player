@@ -1,12 +1,20 @@
 package app.winters.octo.ui.signin
 
-import okhttp3.OkHttpClient
+import app.winters.octo.ui.family.joinWithInvite
+import app.winters.octo.ui.family.inviteProblem
+import app.winters.octo.subsonic.parseFamilyLink
+import app.winters.octo.subsonic.FamilyInviteLink
+import app.winters.octo.subsonic.FamilyLink
+import app.winters.octo.connection.fingerprint
+import app.winters.octo.connection.ConnectionSettings
+import app.winters.octo.data.resolveHeaders
+import app.winters.octo.connection.cleanHeaders
+import app.winters.octo.connection.ServerClients
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import app.winters.octo.ui.family.joinProblem
 import app.winters.octo.ui.family.joinFamily
 import app.winters.octo.ui.family.JoinOutcome
-import app.winters.octo.subsonic.parseFamilyJoinLink
 import app.winters.octo.subsonic.FamilyPlatform
 import app.winters.octo.subsonic.FamilyPair
 import app.winters.octo.subsonic.FamilyJoinLink
@@ -50,7 +58,7 @@ import javax.inject.Inject
 class SignInViewModel @Inject constructor(
     private val sessions: SessionRepository,
     private val switcher: ServerSwitch,
-    private val http: OkHttpClient,
+    private val clients: ServerClients,
     private val devices: DeviceIds,
 ) : ViewModel() {
     // Joining a family with a 6 digit code instead of a password, and the
@@ -61,6 +69,17 @@ class SignInViewModel @Inject constructor(
     // What pairing answered, kept until signed in: a code works once, so a
     // certificate asked about after pairing does not pair again.
     private var paired: FamilyPair? = null
+
+    // An invite opened: the new member's name and the password they choose,
+    // twice. Joining runs the invite's steps, then pairs this phone.
+    var invite by mutableStateOf<FamilyInviteLink?>(null)
+        private set
+    var inviteName by mutableStateOf("")
+    var invitePassword by mutableStateOf("")
+    var inviteAgain by mutableStateOf("")
+
+    // The camera scanner, over the join form.
+    var scanning by mutableStateOf(false)
 
     // The address in two parts, as the desktop keeps it: the scheme, shown
     // as a button at the start of the field, and the rest as typed.
@@ -160,27 +179,35 @@ class SignInViewModel @Inject constructor(
         error = null
     }
 
-    // Takes a pairing link (octo://join?..., from a QR code or pasted):
-    // fills in the address, the username and the code, and switches to
-    // joining. False for any other text.
+    // Takes a family link (the https form a QR code carries, or
+    // octo://join, scanned, opened or pasted): fills in the address and the
+    // code or the invite, and switches to joining. False for any other text.
     fun takeJoinLink(text: String): Boolean {
-        val link = parseFamilyJoinLink(text) ?: return false
+        val link = parseFamilyLink(text) ?: return false
         startJoin(link)
         return true
     }
 
-    fun startJoin(link: FamilyJoinLink? = null) {
+    fun startJoin(link: FamilyLink? = null) {
         joining = true
+        scanning = false
         error = null
         if (link == null) return
         typeAddress(link.server)
-        username = link.username
-        code = link.code
         paired = null
+        when (link) {
+            is FamilyJoinLink -> {
+                invite = null
+                username = link.username
+                code = link.code
+            }
+            is FamilyInviteLink -> invite = link
+        }
     }
 
     fun stopJoin() {
         joining = false
+        invite = null
         error = null
     }
 
@@ -192,7 +219,12 @@ class SignInViewModel @Inject constructor(
     }
 
     // What is missing before joining, or null when it can go.
-    val joinProblem: String? get() = joinProblem(url, username, code)
+    val joinProblem: String?
+        get() = if (invite != null) {
+            if (url == null) "Type the server's address" else inviteProblem(inviteName, invitePassword, inviteAgain)
+        } else {
+            joinProblem(url, username, code)
+        }
 
     // Pairs with the family code, then signs in with the secret it answers,
     // as a password nobody types. The server then is the one in use.
@@ -202,12 +234,21 @@ class SignInViewModel @Inject constructor(
         busy = true
         error = null
         viewModelScope.launch {
+            // Set up as signing in to the server would be: the certificates
+            // trusted for it, its headers and its client certificate.
+            val (http, security) = clients.forJoin(url, ConnectionSettings(headers = cleanHeaders(resolveHeaders(headers.toList(), emptyList())), pins = pins.toMap(), clientCertAlias = clientCert))
+            val invited = invite
             val pair = paired ?: when (val joined = withContext(Dispatchers.IO) {
-                joinFamily(url, username.trim(), code, devices.current().name, FamilyPlatform.Android, http)
+                val name = devices.current().name
+                if (invited != null) joinWithInvite(url, invited.token, inviteName, invitePassword, name, FamilyPlatform.Android, http)
+                else joinFamily(url, username.trim(), code, name, FamilyPlatform.Android, http)
             }) {
                 is JoinOutcome.Paired -> joined.pair.also { paired = it }
+                // A certificate of the server's own is asked about as signing
+                // in asks; trusting it joins again.
                 is JoinOutcome.Untrusted -> {
-                    error = "This server's certificate is not trusted."
+                    val leaf = security.takeRejected(joined.host)
+                    if (leaf != null) question = SignInError.Untrusted(joined.host, leaf.fingerprint()) else error = "This server's certificate is not trusted."
                     busy = false
                     return@launch
                 }
@@ -232,6 +273,9 @@ class SignInViewModel @Inject constructor(
                 null -> {
                     notice = words
                     code = ""
+                    invitePassword = ""
+                    inviteAgain = ""
+                    invite = null
                     paired = null
                     signedIn = true
                 }

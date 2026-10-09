@@ -4,7 +4,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import app.winters.octo.ui.family.FamilyShellViewModel
 import app.winters.octo.ui.family.FamilyRequestSheetHost
 import app.winters.octo.ui.family.FamilyScreen
-import app.winters.octo.subsonic.FamilyJoinLink
+import app.winters.octo.subsonic.familyAppLink
+import app.winters.octo.subsonic.parseFamilyLink
 import app.winters.octo.family.FamilyOpen
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -146,7 +147,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         stacks.last().add(
             when (what) {
                 FamilyOpen.Family -> FamilyRoute
-                is FamilyOpen.Join -> FamilyJoinRoute(what.link.server, what.link.username, what.link.code)
+                is FamilyOpen.Join -> FamilyJoinRoute(familyAppLink(what.link))
             },
         )
     }
@@ -275,7 +276,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             entry<OctoAdminRoute> { OctoAdminScreen(back) }
                             entry<SpotifyImportRoute> { SpotifyImportScreen(back) }
                             entry<FamilyRoute> { FamilyScreen(back) }
-                            entry<FamilyJoinRoute> { route -> SignInScreen(back, join = FamilyJoinLink(route.server, route.username, route.code)) }
+                            entry<FamilyJoinRoute> { route -> SignInScreen(back, join = parseFamilyLink(route.link)) }
                             entry<SoundRoute> { SoundScreen(back) }
                             entry<SharesRoute> { SharesScreen(back) }
                             entry<RadioStationsRoute> { RadioStationsScreen(back) }

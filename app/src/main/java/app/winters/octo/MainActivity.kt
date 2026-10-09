@@ -1,6 +1,6 @@
 package app.winters.octo
 
-import app.winters.octo.subsonic.parseFamilyJoinLink
+import app.winters.octo.subsonic.parseFamilyLink
 import app.winters.octo.family.FamilyOpen
 import app.winters.octo.family.FamilyNotifier
 import app.winters.octo.family.FamilyHub
@@ -69,14 +69,23 @@ class MainActivity : ComponentActivity() {
         systemEntries.handle(this, intent) { openPlayer++ }
     }
 
+    // Coming to the front: a family link on the clipboard is offered once.
+    // Android lets only the app in front read the clipboard.
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) return
+        val clip = runCatching { getSystemService(android.content.ClipboardManager::class.java)?.primaryClip?.getItemAt(0)?.text?.toString() }.getOrNull()
+        family.offerClipboard(clip)
+    }
+
     // A pairing link (octo://join?..., from a QR code the camera read) opens
     // the join form filled in; a family notice opens Family.
     private fun familyIfAsked(intent: Intent) {
         if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
         when {
             intent.action == FamilyNotifier.OPEN_FAMILY -> family.open(FamilyOpen.Family)
-            intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "octo" ->
-                parseFamilyJoinLink(intent.dataString.orEmpty())?.let { family.open(FamilyOpen.Join(it)) }
+            intent.action == Intent.ACTION_VIEW ->
+                parseFamilyLink(intent.dataString.orEmpty())?.let { family.open(FamilyOpen.Join(it)) }
         }
     }
 

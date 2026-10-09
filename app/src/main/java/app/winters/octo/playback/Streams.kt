@@ -1,5 +1,8 @@
 package app.winters.octo.playback
 
+import app.winters.octo.ui.family.appPicksQuality
+import app.winters.octo.family.family
+import app.winters.octo.family.FamilyHub
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -63,6 +66,9 @@ class Streams @Inject constructor(
     private val settings: PlayerSettings,
     private val http: OkHttpClient,
     private val saved: StreamCache,
+    // A family account's device left to its account plays the file as it
+    // is, and the server applies the account's quality.
+    private val family: FamilyHub,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
@@ -97,7 +103,10 @@ class Streams @Inject constructor(
         connectivity.activeNetwork?.let(connectivity::getNetworkCapabilities)
 
     // The stream size for the connection the phone is on.
-    private fun quality(prefs: StreamPrefs): StreamQuality = if (onMobileData()) prefs.mobile else prefs.wifi
+    private fun quality(prefs: StreamPrefs): StreamQuality {
+        val familyOn = (sessions.state.value as? SessionState.SignedIn)?.session?.family == true
+        return streamQualityFor(appPicksQuality(familyOn, family.model.deviceMode), onMobileData(), prefs)
+    }
 
     // Where the queue keeps a server copy.
     fun uriFor(copy: SourceTrackEntity): String = streamUri(refFor(copy))
@@ -278,4 +287,13 @@ private class SplitDataSource(private val pick: (DataSpec) -> DataSource) : Data
             current = null
         }
     }
+}
+
+// The quality a stream asks for: this app's, for the connection the phone
+// is on, when it picks; otherwise the file as it is, and the server applies
+// the account's choice.
+fun streamQualityFor(appPicks: Boolean, onMobile: Boolean, prefs: StreamPrefs): StreamQuality = when {
+    !appPicks -> StreamQuality.Original
+    onMobile -> prefs.mobile
+    else -> prefs.wifi
 }

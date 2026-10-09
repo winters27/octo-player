@@ -187,23 +187,27 @@ class FamilyModelTest {
 
     @Test
     fun theAccountsQualityAndThisDevicesModeAreSetOnTheServer() = runBlocking {
+        var mode = "Account"
         server.answer("getFamilyDevices") {
-            """"familyDevices":{"device":[{"id":"d_1","name":"Pixel 9","kind":"OctoApp","current":true,"quality":"Account"},{"id":"d_2","name":"Other","current":false}]}"""
+            """"familyDevices":{"device":[{"id":"d_1","name":"Pixel 9","kind":"OctoApp","current":true,"quality":"$mode"},{"id":"d_2","name":"Other","current":false}]}"""
         }
         server.answer("setFamilyQuality") { """"quality":{"home":"Original","away":"DataSaver"}""" }
-        server.answer("setFamilyDeviceQuality") { """"device":{"id":"d_1","current":true,"quality":"App"}""" }
+        server.answer("setFamilyDeviceQuality") { call ->
+            mode = call.url.queryParameter("mode")!!
+            """"device":{"id":"d_1","current":true,"quality":"$mode"}"""
+        }
         model.plan()
         assertEquals(app.winters.octo.subsonic.DeviceQualityMode.Account, model.deviceMode)
         model.setQuality(away = app.winters.octo.subsonic.StreamQuality.DataSaver)
         until("quality sent") { server.called("setFamilyQuality").isNotEmpty() }
         assertEquals("DataSaver", server.called("setFamilyQuality").single().url.queryParameter("away"))
+        until("read again") { !model.working }
         model.setDeviceMode(app.winters.octo.subsonic.DeviceQualityMode.App)
-        // Shown at once, before the server answers.
-        assertEquals(app.winters.octo.subsonic.DeviceQualityMode.App, model.deviceMode)
         until("mode sent") { server.called("setFamilyDeviceQuality").isNotEmpty() }
         val sent = server.called("setFamilyDeviceQuality").single().url
         assertEquals("d_1", sent.queryParameter("id"))
         assertEquals("App", sent.queryParameter("mode"))
+        until("mode kept") { model.deviceMode == app.winters.octo.subsonic.DeviceQualityMode.App }
     }
 
     @Test

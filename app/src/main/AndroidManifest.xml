@@ -6,6 +6,10 @@
     <!-- Telling a family member their request was approved, declined or
          added, and a manager that requests wait. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Scanning a family QR code on the join screen. Phones without a
+         camera still install Octo and type the code instead. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- Whether a stream goes over Wi-Fi or mobile data, or cannot go at all. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- The music already on the phone. -->

@@ -1,5 +1,6 @@
 package app.winters.octo.ui.settings
 
+import app.winters.octo.ui.nav.SettingsPageRoute
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -137,12 +138,9 @@ fun StreamingPage(
                     },
                 )
             })
-            ChoiceRow(SettingsIndex.StreamWifi, value = prefs.wifi.label, onClick = {
-                sheet.show(ChoiceRequest(SettingsIndex.StreamWifi.title, qualities.map { it.choice }, qualities.indexOf(prefs.wifi)) { vm.setWifi(qualities[it]) })
-            })
-            ChoiceRow(SettingsIndex.StreamMobile, value = prefs.mobile.label, onClick = {
-                sheet.show(ChoiceRequest(SettingsIndex.StreamMobile.title, qualities.map { it.choice }, qualities.indexOf(prefs.mobile)) { vm.setMobile(qualities[it]) })
-            })
+            // Quality on Wi-Fi and mobile data, and a family account's own
+            // choice, are on Audio quality.
+            ActionRow(null, onClick = { onOpen(SettingsPageRoute(SettingsPage.AudioQuality)) }, title = SettingsPage.AudioQuality.title, helper = "On Wi-Fi ${prefs.wifi.label}, on mobile data ${prefs.mobile.label}")
         }
 
         SettingsGroup(title = "Cache", icon = OctoIcons.Storage) {

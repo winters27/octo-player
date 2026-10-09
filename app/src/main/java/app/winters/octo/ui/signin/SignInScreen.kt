@@ -1,8 +1,10 @@
 package app.winters.octo.ui.signin
 
+import app.winters.octo.ui.family.QrScanner
+import app.winters.octo.ui.family.MIN_PASSWORD
 import app.winters.octo.design.ButtonSize
 import app.winters.octo.ui.family.JOIN_WITH_A_FAMILY_CODE
-import app.winters.octo.subsonic.FamilyJoinLink
+import app.winters.octo.subsonic.FamilyLink
 import android.security.KeyChain
 import androidx.activity.compose.LocalActivity
 import androidx.annotation.DrawableRes
@@ -106,7 +108,7 @@ fun SignInScreen(
     serverId: String? = null,
     note: String? = null,
     // Opened from a pairing link: joining a family, filled in.
-    join: FamilyJoinLink? = null,
+    join: FamilyLink? = null,
     vm: SignInViewModel = hiltViewModel(),
 ) {
     val feedback = LocalFeedback.current
@@ -123,6 +125,8 @@ fun SignInScreen(
     Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
         SignInForm(vm)
         BackButton(onBack)
+        // The camera, over everything, until it reads a family link.
+        if (vm.scanning) QrScanner(onFound = { vm.startJoin(it) }, onClose = { vm.scanning = false })
     }
     TrustSheet(vm.question, onTrust = vm::trust, onCancel = vm::distrust)
 }
@@ -180,7 +184,8 @@ private fun SignInForm(vm: SignInViewModel) {
                     Text("Octo", style = OctoType.display, color = OctoColors.TextPrimary)
                     Text(
                         when {
-                            vm.joining -> "Join your family's server with its 6 digit code"
+                            vm.invite != null -> "Join your family"
+                            vm.joining -> "Join your family's server with its QR code or 6 digit code"
                             vm.editing -> "Change how Octo connects"
                             else -> "Sign in to your music server"
                         },
@@ -301,10 +306,47 @@ private fun SignInForm(vm: SignInViewModel) {
     }
 }
 
-// The rest of the card while joining a family: the username and the code.
-// A pairing link pasted into any field fills in all of them.
+// The rest of the card while joining a family. With a pair code: the
+// username and the code. With an invite: the new member's name and the
+// password they choose. A family link pasted into any field fills them in;
+// the camera reads a family QR code.
 @Composable
 private fun JoinFields(vm: SignInViewModel) {
+    val invite = vm.invite
+    if (invite != null) {
+        Text(
+            "You're invited to ${invite.server.substringAfter("://")}. Choose your name and a password for your account; this phone then joins.",
+            style = OctoType.bodySmall,
+            color = OctoColors.TextSecondary,
+        )
+        GlassInput(
+            value = vm.inviteName,
+            onValueChange = { vm.inviteName = it },
+            placeholder = "Your name",
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
+            leading = { FieldIcon(OctoIcons.Artist) },
+        )
+        GlassInput(
+            value = vm.invitePassword,
+            onValueChange = { vm.invitePassword = it },
+            placeholder = "Password, at least $MIN_PASSWORD characters",
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
+            visualTransformation = PasswordVisualTransformation(),
+            contentType = ContentType.NewPassword,
+            leading = { FieldIcon(OctoIcons.Key) },
+        )
+        GlassInput(
+            value = vm.inviteAgain,
+            onValueChange = { vm.inviteAgain = it },
+            placeholder = "The same password again",
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { vm.join() }),
+            visualTransformation = PasswordVisualTransformation(),
+            contentType = ContentType.NewPassword,
+            leading = { FieldIcon(OctoIcons.Key) },
+        )
+        return
+    }
     GlassInput(
         value = vm.username,
         onValueChange = { if (!vm.takeJoinLink(it)) vm.username = it },
@@ -336,8 +378,15 @@ private fun JoinButtons(vm: SignInViewModel) {
     vm.error?.let {
         Text(it, style = OctoType.bodySmall, color = OctoColors.Error, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
     }
+    GlazeButton(
+        "Scan the QR code",
+        { vm.scanning = true },
+        size = ButtonSize.Small,
+        icon = painterResource(OctoIcons.Camera),
+        modifier = Modifier.padding(top = 12.dp),
+    )
     Text(
-        "The person who runs the server gives you the code, or a QR code your camera opens in Octo.",
+        "The person who runs the server gives you a QR code, a link, or a 6 digit code.",
         style = OctoType.caption,
         color = OctoColors.TextMuted,
         textAlign = TextAlign.Center,

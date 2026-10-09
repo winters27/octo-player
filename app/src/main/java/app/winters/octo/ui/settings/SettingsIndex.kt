@@ -13,6 +13,7 @@ enum class SettingsPage(val title: String) {
     Library("Library"),
     Server("Server and sync"),
     Streaming("Streaming and downloads"),
+    AudioQuality("Audio quality"),
     Lyrics("Lyrics"),
     Scrobbling("Scrobbling"),
     Backup("Backup and restore"),
@@ -307,13 +308,26 @@ object SettingsIndex {
         "copies", SettingsPage.Streaming, "When a song is on the phone and the server", "Which copy plays",
         listOf("phone copy", "best quality", "duplicate", "prefer"), section = "Streaming",
     )
+    // Audio quality
+    val AccountHome = add(
+        "account_home", SettingsPage.AudioQuality, "At home", "Your account's quality on your home network, for every app",
+        listOf("quality", "bitrate", "family", "home", "account"), section = "Your account",
+    )
+    val AccountAway = add(
+        "account_away", SettingsPage.AudioQuality, "Away from home", "Your account's quality anywhere else, for every app",
+        listOf("quality", "bitrate", "family", "away", "data saver", "account"), section = "Your account",
+    )
+    val DeviceQuality = add(
+        "device_quality", SettingsPage.AudioQuality, "This phone follows", "Your account's choice, or this app's",
+        listOf("quality", "device", "family", "app"), section = "Quality on this device",
+    )
     val StreamWifi = add(
-        "stream_wifi", SettingsPage.Streaming, "Streaming on Wi-Fi", "Quality over Wi-Fi",
-        listOf("quality", "bitrate", "kbps"), section = "Streaming",
+        "stream_wifi", SettingsPage.AudioQuality, "Streaming on Wi-Fi", "This app's quality over Wi-Fi",
+        listOf("quality", "bitrate", "kbps", "streaming", "wifi"), section = "This app",
     )
     val StreamMobile = add(
-        "stream_mobile", SettingsPage.Streaming, "Streaming on mobile data", "Quality over mobile data",
-        listOf("quality", "bitrate", "kbps", "cellular", "data saver"), section = "Streaming",
+        "stream_mobile", SettingsPage.AudioQuality, "Streaming on mobile data", "This app's quality over mobile data",
+        listOf("quality", "bitrate", "kbps", "cellular", "data saver", "streaming", "mobile"), section = "This app",
     )
     val CacheSize = add(
         "cache_size", SettingsPage.Streaming, "Cache size", "Room for songs played lately, to play without a connection",

@@ -154,4 +154,5 @@ object OctoIcons {
     val QrCode = R.drawable.sym_qr_code
     val CellSignal = R.drawable.sym_cell_signal
     val Picture = R.drawable.sym_image
+    val AudioQuality = R.drawable.sym_equalizer
 }

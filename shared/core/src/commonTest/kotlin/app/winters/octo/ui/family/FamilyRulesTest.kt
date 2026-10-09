@@ -218,6 +218,10 @@ class FamilyRulesTest {
         assertEquals(link, readQr(inverted, side, side))
         // A picture with no code in it.
         assertNull(readQr(IntArray(100 * 100) { 0xFF808080.toInt() }, 100, 100))
+        // A camera frame's brightness plane, rows padded as Android pads them.
+        val stride = side + 16
+        val luminance = ByteArray(stride * side) { at -> if (at % stride >= side) 0 else (pixels[(at / stride) * side + at % stride] and 0xFF).toByte() }
+        assertEquals(link, readQrFromLuminance(luminance, stride, side, side))
     }
 
     @Test

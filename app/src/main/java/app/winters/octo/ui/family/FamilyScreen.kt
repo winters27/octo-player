@@ -1,5 +1,9 @@
 package app.winters.octo.ui.family
 
+import app.winters.octo.subsonic.FamilyPreset
+import app.winters.octo.ui.common.Artwork
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -70,6 +74,9 @@ import app.winters.octo.ui.common.screenPadding
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 
+// A request's cover id as the picture to draw, on the server in use.
+val LocalFamilyCovers = staticCompositionLocalOf<(String) -> String?> { { null } }
+
 // The one FamilyHub, for screens and the shell.
 @HiltViewModel
 class FamilyShellViewModel @Inject constructor(val hub: FamilyHub) : ViewModel()
@@ -87,25 +94,29 @@ fun FamilyScreen(onBack: () -> Unit, owner: FamilyShellViewModel = hiltViewModel
         onDispose { model.stop() }
     }
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
-            item(key = "title") { ScreenTitle(FAMILY) }
-            val info = model.info
-            if (info == null) {
-                item(key = "waiting") { Line(model.problem ?: "Asking the server about your plan.") }
-            } else {
-                item(key = "notices") { NoticesRow() }
-                model.said?.let { item(key = "said") { Line(it, OctoColors.TextSecondary) } }
-                if (model.approves) inbox(model)
-                info.manager?.let { members(it.members, it.liveStreams) }
-                plan(info.me)
-                requests(model)
-                devices(model)
-                saved(hub, info.me)
+        CompositionLocalProvider(LocalFamilyCovers provides { id: String -> hub.coverRef(id) }) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
+                item(key = "title") { ScreenTitle(FAMILY) }
+                val info = model.info
+                if (info == null) {
+                    item(key = "waiting") { Line(model.problem ?: "Asking the server about your plan.") }
+                } else {
+                    item(key = "notices") { NoticesRow() }
+                    model.said?.let { item(key = "said") { Line(it, OctoColors.TextSecondary) } }
+                    if (model.approves) inbox(model)
+                    info.manager?.let { members(model, it.members, it.liveStreams) }
+                    plan(info.me)
+                    requests(model)
+                    devices(model)
+                    saved(hub, info.me)
+                }
             }
         }
         BackButton(onBack)
     }
     model.added?.let { AddedSheet(it, hub) }
+    model.shown?.let { ShownSheet(it, model) }
+    if (model.askingPassword) PasswordSheet(model)
 }
 
 @Composable
@@ -175,7 +186,7 @@ private fun LazyListScope.requests(model: FamilyModel) {
         return
     }
     items(model.requests, key = { "request:${it.id}" }) { request ->
-        ItemLine(request.title.ifBlank { request.target }, listOf(request.artist, requestKindLine(request)).filter(String::isNotBlank).joinToString(" · "), state = request) {
+        ItemLine(request.title.ifBlank { request.target }, listOf(request.artist, requestKindLine(request)).filter(String::isNotBlank).joinToString(" · "), state = request, cover = request.coverArt ?: request.target) {
             if (request.state == FamilyRequestState.Pending) GlazeButton("Cancel", { model.cancel(request.id) }, size = ButtonSize.ExtraSmall, enabled = !model.working)
         }
     }
@@ -225,27 +236,82 @@ private fun AddDevice(model: FamilyModel) {
     }
 }
 
-// The code or password, shown this once, with a way to copy it.
+// The pair code as a QR code another phone's camera reads (with the code
+// beside it for typing), or an app password, shown this once, each with a
+// way to copy it.
 @Composable
 private fun AddedSheet(added: FamilyDeviceAdded, hub: FamilyHub) {
     val context = LocalContext.current
-    val code = added.pairCode
-    val secret = code ?: added.appPassword.orEmpty()
-    val server = added.server.orEmpty()
+    val server = added.server?.takeIf(String::isNotBlank) ?: hub.serverAddress().orEmpty()
+    val link = addedDeviceLink(added, server)
     GlassSheet(visible = true, onDismiss = hub.model::dismissAdded) {
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(if (link != null) "Add a device" else "App password", style = OctoType.section, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() })
+            if (link != null) {
+                QrImage(link, label = "QR code to add a device")
+                Text(
+                    "Scan this with the new device's camera, or in Octo there choose $JOIN_WITH_A_FAMILY_CODE and type ${added.username} and ${added.pairCode}. It works once.",
+                    style = OctoType.bodySmall,
+                    color = OctoColors.TextSecondary,
+                )
+            } else {
+                Text(added.appPassword.orEmpty(), style = OctoType.title, color = OctoColors.TextPrimary)
+                Text("In the other app, sign in to ${server.ifEmpty { "this server" }} as ${added.username} with this password. It shows only now.", style = OctoType.bodySmall, color = OctoColors.TextSecondary)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (link != null) {
+                    GlazeButton("Copy link", { copy(context, link) }, size = ButtonSize.Small)
+                    GlazeButton("Copy code", { copy(context, added.pairCode.orEmpty()) }, size = ButtonSize.Small)
+                } else {
+                    GlazeButton("Copy address", { copy(context, server) }, size = ButtonSize.Small)
+                    GlazeButton("Copy password", { copy(context, added.appPassword.orEmpty()) }, size = ButtonSize.Small)
+                }
+                AccentButton("Done", onClick = hub.model::dismissAdded, size = ButtonSize.Small)
+            }
+        }
+    }
+}
+
+// A manager's link (an invite, a member's new device) as a QR code, with a
+// way to copy or send it, until closed.
+@Composable
+private fun ShownSheet(shown: ShownLink, model: FamilyModel) {
+    val context = LocalContext.current
+    GlassSheet(visible = true, onDismiss = model::closeShown) {
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(shown.title, style = OctoType.section, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() })
+            QrImage(shown.url, label = shown.title)
+            Text(shown.note, style = OctoType.bodySmall, color = OctoColors.TextSecondary)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                GlazeButton("Copy link", { copy(context, shown.url) }, size = ButtonSize.Small)
+                GlazeButton("Send", {
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, shown.url)
+                    runCatching { context.startActivity(android.content.Intent.createChooser(send, shown.title).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }, size = ButtonSize.Small)
+                AccentButton("Done", onClick = model::closeShown, size = ButtonSize.Small)
+            }
+        }
+    }
+}
+
+// The family page wants the account's password before a manager's change.
+@Composable
+private fun PasswordSheet(model: FamilyModel) {
+    var password by remember { mutableStateOf("") }
+    GlassSheet(visible = true, onDismiss = model::cancelPassword) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(if (code != null) "Pair code" else "App password", style = OctoType.section, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() })
-            Text(secret, style = OctoType.title, color = OctoColors.TextPrimary)
-            Text(
-                if (code != null) "In Octo on the other device, choose $JOIN_WITH_A_FAMILY_CODE and type ${added.username} and this code. It works once."
-                else "In the other app, sign in to ${server.ifEmpty { "this server" }} as ${added.username} with this password. It shows only now.",
-                style = OctoType.bodySmall,
-                color = OctoColors.TextSecondary,
+            Text("Your account password", style = OctoType.section, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() })
+            Text("This phone signs in with a code of its own. Changes to the family need your account password once.", style = OctoType.bodySmall, color = OctoColors.TextSecondary)
+            GlassInput(
+                password,
+                { password = it },
+                placeholder = "Password",
+                keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password, imeAction = ImeAction.Done),
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                GlazeButton("Copy", { copy(context, secret) }, size = ButtonSize.Small)
-                addedDeviceLink(added, server)?.let { link -> GlazeButton("Copy link", { copy(context, link) }, size = ButtonSize.Small) }
-                AccentButton("Done", onClick = hub.model::dismissAdded, size = ButtonSize.Small)
+                AccentButton("Go on", onClick = { model.signInToPage(password) }, size = ButtonSize.Small, enabled = password.isNotEmpty())
+                GlazeButton("Cancel", model::cancelPassword, size = ButtonSize.Small)
             }
         }
     }
@@ -281,13 +347,40 @@ private fun LazyListScope.saved(hub: FamilyHub, me: FamilyMe) {
     }
 }
 
-private fun LazyListScope.members(members: List<FamilyMember>, live: Int) {
+private fun LazyListScope.members(model: FamilyModel, members: List<FamilyMember>, live: Int) {
     title("members", MEMBERS)
     if (live > 0) item(key = "members:live") { Line("$live playing now") }
     items(members, key = { "member:${it.username}" }) { member ->
-        ItemLine(member.displayName.ifBlank { member.username }, memberLine(member)) {
-            Text(storageLine(member.storageUsedBytes, member.storageLimitGb), style = OctoType.caption, color = OctoColors.TextSecondary)
+        ItemLine(member.displayName.ifBlank { member.username }, "${memberLine(member)} · ${storageLine(member.storageUsedBytes, member.storageLimitGb)}") {
+            GlazeButton("Add a device", { model.memberLink(member) }, size = ButtonSize.ExtraSmall, enabled = !model.working)
         }
+    }
+    item(key = "members:add") { AddMember(model) }
+}
+
+// A new member: the name the family sees, their username and what they may
+// do. They get an invite as a QR code or a link.
+@Composable
+private fun AddMember(model: FamilyModel) {
+    var name by rememberSaveable { mutableStateOf("") }
+    var username by rememberSaveable { mutableStateOf("") }
+    var preset by rememberSaveable { mutableStateOf(FamilyPreset.Member) }
+    Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Add a member", style = OctoType.body, color = OctoColors.TextPrimary)
+        GlassInput(name, { name = it }, placeholder = "Their name, like Sam", keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next))
+        GlassInput(username, { username = it.filterNot(Char::isWhitespace).lowercase() }, placeholder = "Username, like sam", keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FamilyPreset.entries.forEach { choice ->
+                if (choice == preset) AccentButton(presetName(choice), onClick = { preset = choice }, size = ButtonSize.ExtraSmall)
+                else GlazeButton(presetName(choice), { preset = choice }, size = ButtonSize.ExtraSmall)
+            }
+        }
+        Text(presetLine(preset), style = OctoType.caption, color = OctoColors.TextMuted)
+        AccentButton("Add and show their invite", onClick = {
+            model.addMember(username, name, preset)
+            username = ""
+            name = ""
+        }, size = ButtonSize.Small, enabled = username.isNotBlank() && !model.working)
     }
 }
 
@@ -305,8 +398,14 @@ private fun LazyListScope.inbox(model: FamilyModel) {
 private fun InboxLine(model: FamilyModel, request: FamilyRequest) {
     var note by rememberSaveable(request.id) { mutableStateOf("") }
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(requestTitle(request), style = OctoType.body, color = OctoColors.TextPrimary, maxLines = 2)
-        Text("${request.displayName.ifBlank { request.username }} · ${requestKindLine(request)}", style = OctoType.caption, color = OctoColors.TextMuted)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val id = request.coverArt ?: request.target
+            LocalFamilyCovers.current(id)?.let { Artwork(it, 44.dp, Modifier.padding(end = 12.dp), shape = RoundedCornerShape(6.dp), outside = id.startsWith("ext-")) }
+            Column(Modifier.weight(1f)) {
+                Text(requestTitle(request), style = OctoType.body, color = OctoColors.TextPrimary, maxLines = 2)
+                Text("${request.displayName.ifBlank { request.username }} · ${requestKindLine(request)}", style = OctoType.caption, color = OctoColors.TextMuted)
+            }
+        }
         GlassInput(note, { note = it }, placeholder = "A note for them (optional)")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AccentButton("Approve", onClick = { model.approve(request.id, note) }, size = ButtonSize.Small, enabled = !model.working)
@@ -318,8 +417,10 @@ private fun InboxLine(model: FamilyModel, request: FamilyRequest) {
 // A row of a list: its title, a line under it, a request's state when it
 // is one, and actions at the end.
 @Composable
-private fun ItemLine(title: String, line: String, state: FamilyRequest? = null, actions: @Composable () -> Unit = {}) {
+private fun ItemLine(title: String, line: String, state: FamilyRequest? = null, cover: String? = null, actions: @Composable () -> Unit = {}) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        val ref = cover?.let(LocalFamilyCovers.current)
+        if (ref != null) Artwork(ref, 44.dp, Modifier.padding(end = 12.dp), shape = RoundedCornerShape(6.dp), outside = cover.startsWith("ext-"))
         Column(Modifier.weight(1f)) {
             Text(title, style = OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1)
             if (line.isNotBlank()) Text(line, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 2)
