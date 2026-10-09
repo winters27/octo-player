@@ -76,7 +76,7 @@ fun AppearancePage(
     val coverStyle by covers.style.collectAsStateWithLifecycle()
     val sheet = LocalChoiceSheet.current
 
-    SettingsPageFrame("Appearance", onBack, highlight, icon = OctoIcons.Appearance) {
+    SettingsPageFrame("Appearance", onBack, highlight) {
         AmbientPreview(prefs.strength, Modifier.padding(horizontal = 16.dp))
         SettingsGroup {
             ChoiceRow(SettingsIndex.Ambient, value = StrengthChoices.getValue(prefs.strength).label, onClick = {

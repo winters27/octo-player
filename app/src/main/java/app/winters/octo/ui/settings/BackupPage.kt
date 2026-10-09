@@ -92,7 +92,7 @@ fun BackupPage(onBack: () -> Unit, highlight: String?, vm: BackupViewModel = hil
     }
     val working = state == BackupState.Working
 
-    SettingsPageFrame("Backup and restore", onBack, highlight, icon = OctoIcons.Backup) {
+    SettingsPageFrame("Backup and restore", onBack, highlight) {
         when (val now = state) {
             is BackupState.Ready -> {
                 SettingsGroup(

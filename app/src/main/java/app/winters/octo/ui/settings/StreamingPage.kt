@@ -127,7 +127,7 @@ fun StreamingPage(
     val qualities = StreamQuality.entries
     val sizes = CacheSize.entries
 
-    SettingsPageFrame("Streaming and downloads", onBack, highlight, icon = OctoIcons.Download) {
+    SettingsPageFrame("Streaming and downloads", onBack, highlight) {
         SettingsGroup(title = "Streaming", icon = OctoIcons.Wifi) {
             ChoiceRow(SettingsIndex.Copies, value = CopyChoices.getValue(prefs.copies).label, onClick = {
                 val options = CopyPreference.entries
