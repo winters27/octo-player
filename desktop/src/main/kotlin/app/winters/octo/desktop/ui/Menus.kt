@@ -1,5 +1,10 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.desktop.removeFromMyLibrary
+import app.winters.octo.design.LocalPopups
+import app.winters.octo.desktop.pages.askForCopy
+import app.winters.octo.ui.family.offersRemoveFromMyLibrary
+import app.winters.octo.ui.family.outsideActions
 import androidx.compose.foundation.layout.size
 import app.winters.octo.design.Corner
 import app.winters.octo.design.FrameSize
@@ -117,6 +122,14 @@ fun ColumnScope.SongMenu(
             val upgrades = app.upgrades
             // The picked songs a FLAC could replace, less any already looked for.
             val upgradable = if (upgrades?.canUpgrade == true && !outside) upgradableOf(songs, upgrades) else emptyList()
+            // In a family, what adding a song found online does follows the
+            // account: it may save rather than add, and ask for a copy.
+            val me = app.family.me
+            val family = outsideActions(me)
+            val popups = LocalPopups.current
+            val index = app.library?.index
+            val outsideSongs = songs.filter { isOutsideSong(it, index, canFetch = true) }
+            val saved = outsideSongs.isNotEmpty() && outsideSongs.all(app::isStarred)
             songMenuActions(
                 songs.size,
                 place,
@@ -128,21 +141,28 @@ fun ColumnScope.SongMenu(
                 canUpgrade = upgradable.isNotEmpty(),
                 canFind = app.downloads?.supported == true,
                 canDelete = canDeleteFromDisk(app, songs),
+                canRequest = family.offersRequest,
+                canRemoveFromMine = offersRemoveFromMyLibrary(me),
             ).forEachIndexed { index, group ->
                 if (index > 0) MenuSeparator()
                 group.forEach { action ->
-                    val label = songActionLabel(action, starred, last?.name)
+                    val label = songActionLabel(action, if (action == SongAction.AddToLibrary) saved else starred, last?.name, family.addLabel)
                     when (action) {
                         SongAction.Play -> MenuRow(label, { app.play(songs); close() }, OctoIcons.Play)
                         SongAction.PlayNext -> MenuRow(label, { app.playNext(songs); close() }, OctoIcons.PlayNext)
                         SongAction.AddToQueue -> MenuRow(label, { app.addToQueue(songs); close() }, OctoIcons.AddToQueue)
                         SongAction.StartRadio -> MenuRow(label, { one?.let(app::startRadio); close() }, OctoIcons.Radio)
-                        // Asks for the picked songs the library does not have.
+                        // Asks for the picked songs the library does not have,
+                        // or for an account that saves, saves them (or takes
+                        // them off Saved once every one is).
                         SongAction.AddToLibrary -> MenuRow(label, {
-                            val index = app.library?.index
-                            songs.filter { isOutsideSong(it, index, canFetch = true) }.forEach { fetches?.request(it.id) }
+                            if (family.addLabel != null) app.setStarred(outsideSongs, !saved) else outsideSongs.forEach { fetches?.request(it.id) }
                             close()
-                        }, OctoIcons.AddToLibrary)
+                        }, if (family.addLabel == null) OctoIcons.AddToLibrary else if (saved) OctoIcons.Liked else OctoIcons.Like)
+                        SongAction.RequestCopy -> MenuRow(label, {
+                            close()
+                            one?.let { askForCopy(popups, app, it.id, it.title) }
+                        }, OctoIcons.Download, more = true)
                         SongAction.AddToLastPlaylist -> MenuRow(label, {
                             start = last
                             page = MenuPage.Playlists
@@ -177,6 +197,10 @@ fun ColumnScope.SongMenu(
                             (place as? SongPlace.Queue)?.let { app.removeFromQueue(it.keys) }
                             close()
                         }, OctoIcons.Close, destructive = true)
+                        SongAction.RemoveFromMyLibrary -> MenuRow(label, {
+                            close()
+                            app.removeFromMyLibrary(songs)
+                        }, OctoIcons.RemoveFromPlaylist, destructive = true, detail = if (songs.size > 1) "${songs.size}" else null)
                         SongAction.DeleteFromDisk -> MenuRow(label, {
                             close()
                             askToDelete(app, songs)

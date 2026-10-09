@@ -24,6 +24,8 @@ sealed interface Page {
     data object LibraryHealth : Page
     // Spotify import, on an Octo server.
     data object Imports : Page
+    // Family: the account's abilities, requests and devices, on an Octo server with it on.
+    data object Family : Page
     data object Settings : Page
     data object Sound : Page
     data class Album(val id: String) : Page
@@ -58,7 +60,7 @@ sealed interface SidebarItem {
 // it was opened from.
 fun sidebarItemOf(page: Page): SidebarItem? = when (page) {
     Page.Home, Page.Search, Page.Songs, Page.Albums, Page.Artists, Page.Genres, Page.Folders,
-    Page.Favourites, Page.History, Page.RecentlyAdded, Page.LibraryHealth, Page.Imports, Page.Settings, Page.Sound,
+    Page.Favourites, Page.History, Page.RecentlyAdded, Page.LibraryHealth, Page.Imports, Page.Family, Page.Settings, Page.Sound,
     -> SidebarItem.Top(page)
     is Page.Playlist -> SidebarItem.PlaylistItem(page.id)
     is Page.Album, is Page.Artist, is Page.Genre, is Page.Folder -> null

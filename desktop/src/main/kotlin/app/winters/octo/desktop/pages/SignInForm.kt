@@ -1,5 +1,8 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.ui.family.joinProblem
+import app.winters.octo.subsonic.parseFamilyJoinLink
+import app.winters.octo.subsonic.FamilyPair
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -58,6 +61,11 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
 
     // A certificate the system does not trust, waiting for an answer.
     var question by mutableStateOf<CertificateQuestion?>(null)
+
+    // Joining a family with a 6 digit code instead of a password, and the
+    // code typed.
+    var joining by mutableStateOf(false)
+    var code by mutableStateOf("")
 
     // The server's extensions from last time, when it is the one typed.
     private val lastServer = last
@@ -148,6 +156,36 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
         val old = headers.getOrNull(index) ?: return
         headers[index] = old.copy(value = value)
     }
+
+    // Takes a pasted pairing link (octo://join?...): fills in the address,
+    // the username and the code, and switches to joining. False for any
+    // other text, which the field takes as typed.
+    fun takeJoinLink(text: String): Boolean {
+        val link = parseFamilyJoinLink(text) ?: return false
+        typeAddress(link.server)
+        username = link.username
+        code = link.code
+        joining = true
+        result = null
+        return true
+    }
+
+    // What is missing before joining, or null when it can go.
+    val joinProblem: String? get() = joinProblem(url, username, code)
+
+    val joinReady: Boolean get() = !busy && joinProblem == null
+
+    // Signing in with the secret pairing answered, as a password the user
+    // never sees. It is always remembered: there is nothing to type again.
+    fun joinRequest(pair: FamilyPair): SignInRequest = SignInRequest(
+        address = url?.toString() ?: (scheme.prefix + address.trim()),
+        username = pair.username.ifBlank { username.trim() },
+        secret = pair.secret,
+        mode = AuthMode.Token,
+        home = home,
+        headers = headers.toList(),
+        rememberPassword = true,
+    )
 
     fun request(): SignInRequest = SignInRequest(
         address = url?.toString() ?: (scheme.prefix + address.trim()),

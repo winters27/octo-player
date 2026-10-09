@@ -1,5 +1,11 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.desktop.server.osName
+import app.winters.octo.desktop.server.familyPlatform
+import app.winters.octo.subsonic.DEVICE_NAME_HEADER
+import app.winters.octo.ui.family.joinFamily
+import app.winters.octo.ui.family.JoinOutcome
+import app.winters.octo.ui.family.JOIN_WITH_A_FAMILY_CODE
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
@@ -126,6 +132,31 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
         }
     }
 
+    // Pairs with the family code, then signs in with the secret it answers.
+    fun join() {
+        val url = form.url
+        if (!form.joinReady || url == null) return
+        again = ::join
+        form.busy = true
+        form.result = null
+        scope.launch {
+            val name = app.accounts.security.deviceHeaders()[DEVICE_NAME_HEADER] ?: "Octo for ${osName(app.os)}"
+            when (val joined = joinFamily(url, form.username.trim(), form.code, name, familyPlatform(app.os), app.http)) {
+                is JoinOutcome.Failed -> form.result = false to joined.message
+                is JoinOutcome.Paired -> when (val done = app.accounts.signIn(form.joinRequest(joined.pair))) {
+                    is SignInOutcome.Done -> {
+                        form.code = ""
+                        app.signedIn(done.connection, done.note)
+                    }
+                    is SignInOutcome.Saved -> Unit
+                    is SignInOutcome.Failed -> form.result = false to done.message
+                    is SignInOutcome.Untrusted -> form.question = done.question
+                }
+            }
+            form.busy = false
+        }
+    }
+
     // Focus starts in the address, or in the password when the server and
     // user are already filled in.
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
@@ -167,21 +198,31 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
         ) {
             SignInCard(backdrop, short) {
                 Txt("Octo", OctoType.display)
-                Txt("Sign in to your music server. Any Subsonic, Navidrome or Octo server works.", OctoType.bodySmall, OctoColors.TextSecondary, maxLines = 3)
+                Txt(
+                    if (form.joining) "Join your family's Octo server with the 6 digit code from the person who runs it. Pasting their join link fills everything in."
+                    else "Sign in to your music server. Any Subsonic, Navidrome or Octo server works.",
+                    OctoType.bodySmall,
+                    OctoColors.TextSecondary,
+                    maxLines = 3,
+                )
 
                 Label("Server address")
                 GlassField(
                     form.address,
-                    form::typeAddress,
+                    { if (!form.takeJoinLink(it)) form.typeAddress(it) },
                     Modifier.fillMaxWidth(),
                     placeholder = "music.example.com or 192.168.1.20:4533",
                     focusRequester = if (form.startsAtPassword) null else first,
-                    onSubmit = ::signIn,
+                    onSubmit = { if (form.joining) join() else signIn() },
                     leading = { SchemeToggle(form.scheme.prefix, form::toggleScheme) },
                 )
                 form.url?.let { Txt("Connects to ${shownAddress(it)}", OctoType.caption, OctoColors.TextMuted) }
                 if (form.insecure) Txt("This address isn't encrypted and isn't on your home network, so others could read what is sent.", OctoType.caption, OctoColors.Error, maxLines = 3)
 
+                if (form.joining) {
+                    JoinFields(form, ::join)
+                    return@SignInCard
+                }
                 Label(if (form.useApiKey) "Username (optional)" else "Username")
                 GlassField(form.username, { form.username = it; form.result = null }, Modifier.fillMaxWidth(), onSubmit = ::signIn)
                 if (!form.useApiKey) {
@@ -204,6 +245,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                     GlazeCapsule(null, "Test connection", ::test, enabled = form.ready)
                     AccentButton("Sign in", ::signIn, Modifier.widthIn(min = 150.dp), enabled = form.ready, loading = form.busy, size = ButtonSize.Medium)
                 }
+                TextAction(JOIN_WITH_A_FAMILY_CODE, { form.joining = true; form.result = null }, Modifier.align(Alignment.CenterHorizontally), icon = OctoIcons.Family)
             }
             OtherServers(app)
         }
@@ -211,6 +253,29 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
 }
 
 private val CardShape = RoundedCornerShape(22.dp)
+
+// The rest of the card while joining with a family code: the username, the
+// code, and Join. A join link pasted into any field fills in all of them.
+@Composable
+private fun JoinFields(form: SignInForm, join: () -> Unit) {
+    Label("Username")
+    GlassField(form.username, { if (!form.takeJoinLink(it)) { form.username = it; form.result = null } }, Modifier.fillMaxWidth(), onSubmit = join)
+    Label("Family code")
+    GlassField(
+        form.code,
+        { if (!form.takeJoinLink(it)) { form.code = it.filter(Char::isDigit).take(6); form.result = null } },
+        Modifier.fillMaxWidth(),
+        placeholder = "6 digits",
+        onSubmit = join,
+    )
+    form.result?.let { (ok, text) ->
+        Txt(text, OctoType.bodySmall, if (ok) OctoColors.TextSecondary else OctoColors.Error, maxLines = 4)
+    }
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+        TextAction("Sign in with a password", { form.joining = false; form.result = null })
+        AccentButton("Join", join, Modifier.widthIn(min = 150.dp), enabled = form.joinReady, loading = form.busy, size = ButtonSize.Medium)
+    }
+}
 
 // The other servers kept here, under the card, to open one of them instead.
 // One whose password is kept opens at once; otherwise the card fills in

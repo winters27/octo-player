@@ -93,6 +93,30 @@ class MenuActionsTest {
     }
 
     @Test
+    fun aFamilyMemberWhoAsksSavesAndRequests() {
+        val outside = songMenuActions(1, SongPlace.Library, outside = true, canAdd = true, canRequest = true)
+        assertEquals(
+            listOf("Save", "Request a copy", "Add to playlist"),
+            outside[1].map { songActionLabel(it, false, addLabel = "Save") },
+        )
+        // Once saved, the same row takes it off Saved.
+        assertEquals("Remove from Saved", songActionLabel(SongAction.AddToLibrary, true, addLabel = "Save"))
+        // A request is for one song at a time, and never for a library song.
+        assertEquals(false, songMenuActions(2, SongPlace.Library, outside = true, canAdd = true, canRequest = true).flatten().contains(SongAction.RequestCopy))
+        assertEquals(false, songMenuActions(1, SongPlace.Library, canRequest = true).flatten().contains(SongAction.RequestCopy))
+        // Without the family word, the add reads as always.
+        assertEquals("Add to your library", songActionLabel(SongAction.AddToLibrary, true))
+    }
+
+    @Test
+    fun aManagedMemberCanTakeSongsOutOfTheirOwnLibrary() {
+        val last = songMenuActions(2, SongPlace.Library, canRemoveFromMine = true, canDelete = true).last()
+        assertEquals(listOf(SongAction.RemoveFromMyLibrary, SongAction.DeleteFromDisk), last)
+        assertEquals("Remove from my library", songActionLabel(SongAction.RemoveFromMyLibrary, false))
+        assertEquals(false, songMenuActions(1, SongPlace.Library, outside = true, canRemoveFromMine = true).flatten().contains(SongAction.RemoveFromMyLibrary))
+    }
+
+    @Test
     fun ratingWordsMatchThePhone() {
         assertNull(starsLabel(0))
         assertEquals("1 star", starsLabel(1))

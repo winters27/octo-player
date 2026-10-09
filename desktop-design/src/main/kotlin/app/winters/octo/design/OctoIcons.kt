@@ -79,6 +79,10 @@ object OctoIcons {
     val Loudness by sym("sym_loudness")
     val Balance by sym("sym_balance")
     val Crossfade by sym("sym_crossfade")
+    // The family: its page, a member's devices, and an app password.
+    val Family by sym("sym_listeners")
+    val Device by sym("sym_smartphone")
+    val Key by sym("sym_key")
 
     // Back and forward through the pages, and opening the full player: the
     // chevron turned.

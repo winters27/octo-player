@@ -72,6 +72,7 @@ import app.winters.octo.subsonic.FORM_POST_EXTENSION
 import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.ui.family.FamilyModel
 import app.winters.octo.ui.imports.ImportModel
 import app.winters.octo.ui.search.withRecent
 import app.winters.octo.desktop.library.PlaylistArtStore
@@ -177,6 +178,10 @@ class AppState(
 
     // The Spotify import page, on an Octo server.
     val imports = ImportModel({ connection?.client }, scope, openUrl = { openInBrowser(it) })
+
+    // Family, on an Octo server with it on: the account's abilities, which song actions and
+    // the Family page follow.
+    val family = FamilyModel({ connection?.client }, { connection?.family == true }, scope)
 
     // How the kept servers answer, and the scan and user of the one in use,
     // for Settings > Servers.
@@ -462,7 +467,11 @@ class AppState(
         home = views.home
         health.forget()
         imports.forget()
+        family.forget()
         serverFacts.forget()
+        // The plan decides what adding an outside song does, so it is read
+        // before the first song menu opens.
+        if (connection.family) scope.launch { family.plan() }
     }
 
     private fun startReading(views: ServerViews) {
@@ -544,6 +553,7 @@ class AppState(
             search = null
             home = null
             health.forget()
+            family.forget()
             serverFacts.forget()
             playlists = emptyList()
             fullPlayer = false

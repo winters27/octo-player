@@ -1,5 +1,8 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.ui.family.REMOVE_FROM_MY_LIBRARY
+import app.winters.octo.ui.family.REQUEST_A_COPY
+import app.winters.octo.ui.family.SAVED
 import app.winters.octo.ui.downloads.FIND_SONGS
 import app.winters.octo.health.DELETE_FROM_DISK
 import app.winters.octo.ui.upgrade.FIND_HIGHER_QUALITY
@@ -25,12 +28,12 @@ sealed interface SongPlace {
 
 enum class SongAction {
     Play, PlayNext, AddToQueue, StartRadio,
-    AddToLibrary, AddToLastPlaylist, AddToPlaylist, Favourite, Rate, FindFlac,
+    AddToLibrary, RequestCopy, AddToLastPlaylist, AddToPlaylist, Favourite, Rate, FindFlac,
     GoToAlbum, GoToArtist, ShowInFolder,
     Details, FindSongs,
     Move,
     RemoveFromPlaylist, RemoveFromQueue,
-    DeleteFromDisk,
+    RemoveFromMyLibrary, DeleteFromDisk,
 }
 
 // The song menu's rows in their groups. A radio and the details are for
@@ -50,7 +53,10 @@ enum class SongAction {
 // search again on the server's download sources to pick the copy, needs an
 // Octo server that keeps a log of its downloads (`canFind`). Delete from
 // disk needs an Octo server that lets this user (an admin) take files off
-// its disk (`canDelete`), and is last of all, asked first.
+// its disk (`canDelete`), and is last of all, asked first. In a family, a
+// member who asks for copies gets Request a copy beside the add, for one
+// song found online (`canRequest`), and a managed member can take library
+// songs out of their own library (`canRemoveFromMine`).
 fun songMenuActions(
     count: Int,
     place: SongPlace,
@@ -62,6 +68,8 @@ fun songMenuActions(
     canUpgrade: Boolean = false,
     canFind: Boolean = false,
     canDelete: Boolean = false,
+    canRequest: Boolean = false,
+    canRemoveFromMine: Boolean = false,
 ): List<List<SongAction>> {
     val one = count == 1
     val editable = place is SongPlace.Playlist && ownsPlaylist && place.positions.isNotEmpty()
@@ -73,6 +81,7 @@ fun songMenuActions(
         },
         listOfNotNull(
             SongAction.AddToLibrary.takeIf { outside && canAdd },
+            SongAction.RequestCopy.takeIf { one && outside && canRequest },
             SongAction.AddToLastPlaylist.takeIf { lastPlaylist },
             SongAction.AddToPlaylist,
             SongAction.Favourite.takeIf { !outside },
@@ -85,6 +94,7 @@ fun songMenuActions(
         listOfNotNull(
             SongAction.RemoveFromPlaylist.takeIf { editable },
             SongAction.RemoveFromQueue.takeIf { place is SongPlace.Queue && place.keys.isNotEmpty() },
+            SongAction.RemoveFromMyLibrary.takeIf { canRemoveFromMine && !outside },
             SongAction.DeleteFromDisk.takeIf { canDelete && !outside },
         ),
     )
@@ -92,13 +102,20 @@ fun songMenuActions(
 }
 
 // A song row's words. `starred` is whether every picked song is a
-// favourite; `last` is the name of the playlist added to last.
-fun songActionLabel(action: SongAction, starred: Boolean, last: String? = null): String = when (action) {
+// favourite; `last` is the name of the playlist added to last. `addLabel`
+// is a family plan's word for adding a song found online ("Save"), which
+// then reads "Remove from Saved" once every picked song is saved.
+fun songActionLabel(action: SongAction, starred: Boolean, last: String? = null, addLabel: String? = null): String = when (action) {
     SongAction.Play -> "Play"
     SongAction.PlayNext -> "Play next"
     SongAction.AddToQueue -> "Add to queue"
     SongAction.StartRadio -> "Start radio"
-    SongAction.AddToLibrary -> "Add to your library"
+    SongAction.AddToLibrary -> when {
+        addLabel == null -> "Add to your library"
+        starred -> "Remove from $SAVED"
+        else -> addLabel
+    }
+    SongAction.RequestCopy -> REQUEST_A_COPY
     SongAction.AddToLastPlaylist -> "Add to last playlist: ${last.orEmpty()}"
     SongAction.AddToPlaylist -> "Add to playlist"
     SongAction.Favourite -> if (starred) "Remove from favorites" else "Add to favorites"
@@ -112,6 +129,7 @@ fun songActionLabel(action: SongAction, starred: Boolean, last: String? = null):
     SongAction.Move -> "Move"
     SongAction.RemoveFromPlaylist -> "Remove from this playlist"
     SongAction.RemoveFromQueue -> "Remove from the queue"
+    SongAction.RemoveFromMyLibrary -> REMOVE_FROM_MY_LIBRARY
     SongAction.DeleteFromDisk -> DELETE_FROM_DISK
 }
 
