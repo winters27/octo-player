@@ -192,10 +192,10 @@ class AutomixVectorsTest {
             }
         }
         putJsonArray("tempoTrust") {
-            for ((confidence, consistency) in TRUST_CASES) addJsonObject {
+            for ((confidence, steady) in TRUST_CASES) addJsonObject {
                 put("confidence", confidence)
-                put("consistency", consistency)
-                put("confident", trusted(confidence, consistency))
+                put("steady", steady)
+                put("confident", trusted(confidence, steady))
             }
         }
         putJsonArray("rates") {
@@ -268,6 +268,7 @@ class AutomixVectorsTest {
             put("bpm", round(tempo.bpm))
             put("confidence", round(tempo.confidence))
             put("consistency", round(tempo.consistency))
+            put("steady", tempo.steady)
             put("confident", tempo.confident)
             put("beatMs", round(tempo.beatMs))
             put("firstBeatMs", round(tempo.firstBeatMs))
@@ -357,6 +358,7 @@ class AutomixVectorsTest {
                     near("$what bpm", e.num("bpm"), a.bpm, t("bpm"))
                     near("$what confidence", e.num("confidence"), a.confidence, e.num("confidence") * t("confidenceShare"))
                     near("$what consistency", e.num("consistency"), a.consistency, 0.02)
+                    if (e.getValue("steady").jsonPrimitive.boolean != a.steady) failures += "$what: steady ${a.steady}"
                     if (e.getValue("confident").jsonPrimitive.boolean != a.confident) failures += "$what: confident ${a.confident}"
                     near("$what beatMs", e.num("beatMs"), a.beatMs, t("ms") / 10)
                     near("$what firstBeatMs", e.num("firstBeatMs"), a.firstBeatMs, t("ms"))
@@ -426,9 +428,9 @@ class AutomixVectorsTest {
             f.getValue("sine").jsonArray.forEachIndexed { i, x -> near("$what sine $i", x.jsonPrimitive.double, sine[i], t("sample")) }
         }
         for (c in vectors.getValue("tempoTrust").jsonArray.map { it.jsonObject }) {
-            val (confidence, consistency) = c.num("confidence") to c.num("consistency")
-            val actual = trusted(confidence, consistency)
-            if (actual != c.bool("confident")) failures += "tempo with peak ratio $confidence and consistency $consistency: confident $actual"
+            val (confidence, steady) = c.num("confidence") to c.bool("steady")
+            val actual = trusted(confidence, steady)
+            if (actual != c.bool("confident")) failures += "tempo scoring $confidence, steady $steady: confident $actual"
         }
         for (r in vectors.getValue("rates").jsonArray.map { it.jsonObject }) {
             val actual = beatMatchRateAt(r.num("rate"), r.num("sinceEntryMs"), r.num("overlapMs"))
@@ -437,10 +439,10 @@ class AutomixVectorsTest {
         return failures
     }
 
-    // Whether a 120 BPM grid with this autocorrelation peak ratio and beat
-    // consistency is trusted for bar lock.
-    private fun trusted(confidence: Double, consistency: Double) =
-        Tempo(120.0, confidence, consistency, 500.0, 0.0, 0.0).confident
+    // Whether a 120 BPM grid with this period score, steady or not, is
+    // trusted for bar lock.
+    private fun trusted(confidence: Double, steady: Boolean) =
+        Tempo(120.0, confidence, 1.0, 500.0, 0.0, 0.0, steady).confident
 
     private fun JsonObject.str(key: String) = getValue(key).jsonPrimitive.content
     private fun JsonObject.num(key: String) = getValue(key).jsonPrimitive.double
@@ -489,17 +491,15 @@ class AutomixVectorsTest {
     private companion object {
         const val FILTER_VECTOR_SAMPLES = 512
 
-        // Peak ratios and beat consistencies on and either side of the
-        // thresholds a tempo must reach to be trusted.
+        // Period scores on and either side of the threshold a tempo must
+        // reach to be trusted, steady or not.
         val TRUST_CASES = listOf(
-            1.5 to 0.55,
-            1.499 to 0.9,
-            1.501 to 0.9,
-            9.0 to 0.549,
-            9.0 to 0.551,
-            1.499 to 0.55,
-            1.5 to 0.549,
-            1.501 to 0.551,
+            0.4 to true,
+            0.399 to true,
+            0.401 to true,
+            9.0 to false,
+            0.4 to false,
+            0.401 to false,
         )
 
         val ABOUT = JsonArray(
@@ -512,7 +512,7 @@ class AutomixVectorsTest {
                 "sections: render samples floor(fromMs*rate/1000) to floor(min(toMs, lengthMs)*rate/1000) exclusive, interleave, feed the envelope builder in blocks of 4093 samples with startMs = floor(fromMs*rate/1000)*1000/rate (integer division), then analyze. probes are envelope values at hop indexes.",
                 "sections are analyzed as a tail (analyzeTail: last 60 s) or a head (analyzeHead: first 30 s); tagBpm, when set, is the song's tag tempo.",
                 "plans: run the planner with the untagged tail section of song a and head section of song b (null when tailMissing / headMissing) and the given context.",
-                "tempoTrust: whether a beat grid with this autocorrelation peak ratio (confidence) and share of beats on an onset peak (consistency) is trusted for bar lock.",
+                "tempoTrust: whether a beat grid whose period scores this (confidence: the onsets' autocorrelation at one, two, four and eight beat periods plus half of it at half a period) and whose two halves agree on the beat (steady) is trusted for bar lock.",
                 "biquads: cookbook second-order low-pass / high-pass at the given rate, cutoff and Q; coefficients are b0, b1, b2, a1, a2 (a0 = 1); impulse is the answer to a 1 at sample 0, sine the answer to 0.5 * sin(2 pi 1000 n / rate), 512 samples each, from a fresh filter.",
                 "Times are ms, levels dBFS, rates as multiples of normal speed. tolerances: db for levels, ms for times, bpm, confidenceShare as a share of the expected confidence, curve for gains, k and rates, hzShare as a share of the expected cutoff, onset for onset values, sample for filter coefficients and samples.",
             ).map(::JsonPrimitive),

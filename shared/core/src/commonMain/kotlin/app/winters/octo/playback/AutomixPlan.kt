@@ -296,7 +296,7 @@ fun planTransition(
     val reason = buildString {
         append(kind.name.lowercase())
         append(" at ").append(seconds(start)).append(" over ").append(seconds(overlap.toLong()))
-        if (bars > 0 && lockA != null) append(" (").append(bars).append(" bars of ").append(decimals(lockA.bpm, 1)).append(" BPM)")
+        if (bars > 0 && lockA != null) append(" (").append(bars).append(" bars of ").append(decimals(lockA.displayBpm, 1)).append(" BPM)")
         append(", next song from ").append(seconds(entryMs))
         append(", outro at ").append(seconds(outroStart.toLong()))
         append(", latest end ").append(seconds(latestEnd.toLong()))

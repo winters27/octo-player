@@ -1,7 +1,7 @@
 //! Finds the tempo of every song in a folder the way the automix analysis
 //! does, and compares it with the tempo in the song's tags.
 //!
-//! cargo run --release --example bpm_check -- <folder> [--limit <n>] [--use-tag]
+//! cargo run --release --example bpm_check -- <folder> [--limit <n>] [--use-tag] [--truth <file>]
 //!
 //! Each song is decoded whole. The tempo is found three ways: over the
 //! whole song (as the live tap hears it), over its first 30 s (the next
@@ -9,7 +9,11 @@
 //! agrees with the tag when it is within 2 % of it after halving or
 //! doubling. The summary gives that share for songs with a tag, over all of
 //! them and over those whose tempo was trusted. --use-tag lets the tag pick
-//! the octave, as the player does when a song has one.
+//! the octave, as the player does when a song has one. --truth reads
+//! published tempos from a tab-separated file with a header holding `file`
+//! (the song's file name) and `bpm` columns; a published tempo stands in
+//! for the tag. The summary also counts the songs whose shown tempo (see
+//! `Tempo::display_bpm`) is the published one, octave and all.
 
 #[path = "common/tags.rs"]
 mod tags;
@@ -81,6 +85,24 @@ fn slice(e: &SectionEnvelope, from: usize, to: usize) -> SectionEnvelope {
     )
 }
 
+// Published tempos by file name.
+fn truth_from(path: &Path) -> std::collections::HashMap<String, f64> {
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("{}: {e}", path.display())));
+    let mut lines = text.lines();
+    let header: Vec<&str> = lines.next().unwrap_or_default().split('\t').collect();
+    let column = |name: &str| {
+        header.iter().position(|h| h.trim() == name).unwrap_or_else(|| fail(&format!("no {name} column")))
+    };
+    let (file, bpm) = (column("file"), column("bpm"));
+    lines
+        .filter_map(|l| {
+            let cells: Vec<&str> = l.split('\t').collect();
+            let value = cells.get(bpm)?.trim().parse::<f64>().ok()?;
+            Some((cells.get(file)?.trim().to_string(), value))
+        })
+        .collect()
+}
+
 fn agrees(tempo: Option<Tempo>, tag: f64) -> bool {
     tempo.is_some_and(|t| (fold_tempo_ratio(t.bpm / tag) - 1.0).abs() <= AGREES_WITHIN)
 }
@@ -89,10 +111,11 @@ fn show(tempo: Option<Tempo>) -> String {
     match tempo {
         None => "      -        ".to_string(),
         Some(t) => format!(
-            "{:6.1}{} {:5.1}/{:3.0}%",
-            t.bpm,
+            "{:6.1}{} {:4.2}{}{:3.0}%",
+            t.display_bpm(),
             if t.confident() { '*' } else { ' ' },
             t.confidence,
+            if t.steady { '/' } else { '~' },
             t.consistency * 100.0
         ),
     }
@@ -104,6 +127,7 @@ struct Tally {
     agree: usize,
     trusted: usize,
     trusted_agree: usize,
+    shown: usize,
 }
 
 impl Tally {
@@ -111,6 +135,7 @@ impl Tally {
         self.tagged += 1;
         let ok = agrees(tempo, tag);
         self.agree += ok as usize;
+        self.shown += tempo.is_some_and(|t| (t.display_bpm() / tag - 1.0).abs() <= AGREES_WITHIN) as usize;
         if tempo.is_some_and(|t| t.confident()) {
             self.trusted += 1;
             self.trusted_agree += ok as usize;
@@ -120,10 +145,11 @@ impl Tally {
     fn line(&self, name: &str) -> String {
         let share = |a: usize, of: usize| if of == 0 { 0.0 } else { a as f64 * 100.0 / of as f64 };
         format!(
-            "{name:<6} {}/{} agree ({:.0} %); trusted {}/{} ({:.0} %), of which {} agree ({:.0} %)",
+            "{name:<6} {}/{} agree ({:.0} %), {} shown in the same octave; trusted {}/{} ({:.0} %), of which {} agree ({:.0} %)",
             self.agree,
             self.tagged,
             share(self.agree, self.tagged),
+            self.shown,
             self.trusted,
             self.tagged,
             share(self.trusted, self.tagged),
@@ -138,6 +164,7 @@ fn main() {
     let mut folder = None;
     let mut limit = usize::MAX;
     let mut use_tag = false;
+    let mut truth = std::collections::HashMap::new();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--limit" => {
@@ -145,11 +172,17 @@ fn main() {
                     args.next().and_then(|v| v.parse().ok()).unwrap_or_else(|| fail("--limit needs a number"))
             }
             "--use-tag" => use_tag = true,
+            "--truth" => {
+                let path = args.next().unwrap_or_else(|| fail("--truth needs a file"));
+                truth = truth_from(Path::new(&path));
+            }
             other if other.starts_with("--") => fail(&format!("unknown option {other}")),
             other => folder = Some(PathBuf::from(other)),
         }
     }
-    let Some(folder) = folder else { fail("usage: bpm_check <folder> [--limit <n>] [--use-tag]") };
+    let Some(folder) = folder else {
+        fail("usage: bpm_check <folder> [--limit <n>] [--use-tag] [--truth <file>]")
+    };
     let mut songs = Vec::new();
     songs_in(&folder, &mut songs);
     songs.truncate(limit);
@@ -158,13 +191,17 @@ fn main() {
     }
 
     println!("{:>6}  {:<15}  {:<15}  {:<15}  song", "tag", "whole", "first 30 s", "last 60 s");
-    println!("{:>6}  (BPM, * trusted, autocorrelation peak / share of beats on an onset)", "");
+    println!(
+        "{:>6}  (BPM as shown, * trusted, period score, / steady or ~ not, share of beats on an onset)",
+        ""
+    );
     let (mut whole_tally, mut head_tally, mut tail_tally) =
         (Tally::default(), Tally::default(), Tally::default());
     let never = AtomicBool::new(false);
     for path in &songs {
         let source = path.to_string_lossy().to_string();
-        let tag = tags::read(&source).bpm;
+        let file_name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let tag = truth.get(&file_name).copied().or(tags::read(&source).bpm);
         let mut whole = Whole::default();
         let part = SectionPart::Head { secs: 24.0 * 3_600.0 };
         if let Err(f) = scout_section(&source, HttpOptions::default(), part, &never, &mut whole) {
@@ -204,7 +241,7 @@ fn main() {
     }
     println!();
     println!(
-        "{} songs, {} with a tag tempo; within 2 % of the tag after halving or doubling:",
+        "{} songs, {} with a tag or published tempo; within 2 % of it after halving or doubling:",
         songs.len(),
         whole_tally.tagged
     );

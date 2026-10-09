@@ -119,6 +119,31 @@ class AutomixTest {
     }
 
     @Test
+    fun aThreeThreeTwoKickPatternKeepsItsBeat() {
+        // A half-time beat at 80 BPM whose kicks fall on the 1st, 4th and 7th
+        // sixteenths of every two beats, with a snare on the third beat of
+        // each bar: the kicks repeat every three sixteenths more often than
+        // every beat.
+        val length = 60_000.0
+        fun hit(hz: Double, db: Double, bpm: Double, firstMs: Double, decayMs: Double) =
+            SongLayer("pulse", 0.0, length, hz = hz, db = db, bpm = bpm, firstMs = firstMs, every = 1, decayMs = decayMs)
+        val song = SyntheticSong(
+            44_100, 1, 60_000,
+            listOf(
+                SongLayer("tone", 0.0, length, hz = 300.0, db = -30.0),
+                hit(60.0, -6.0, 40.0, 0.0, 80.0),
+                hit(60.0, -6.0, 40.0, 562.5, 80.0),
+                hit(60.0, -6.0, 40.0, 1_125.0, 80.0),
+                hit(2_000.0, -12.0, 20.0, 1_500.0, 30.0),
+            ),
+        )
+        val tempo = song.head().features.tempo!!
+        // 80 BPM or its double, never the 107 BPM of the kicks' three sixteenths.
+        assertEquals("$tempo", 1.0, foldTempoRatio(tempo.bpm / 80.0), 0.01)
+        assertTrue("$tempo", tempo.confident)
+    }
+
+    @Test
     fun aClickTrackHasItsTempoBeatAndBar() {
         val tempo = AutomixCases.tail("beat-120").features.tempo
         assertNotNull(tempo)
@@ -422,7 +447,7 @@ class AutomixTest {
     fun theWholeSongsTempoSetsTheOctaveOrDropsTheLock() {
         val half = plan("tempo-prior")
         assertEquals(1_000.0, half.beatMs!!, 1.0)
-        assertTrue(half.reason.contains("of 60.0 BPM"))
+        assertTrue(half.reason, half.reason.contains("of 120.0 BPM"))
         assertTrue("a tempo the whole song does not share is not trusted", !plan("tempo-prior-off").barLocked)
     }
 

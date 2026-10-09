@@ -8,7 +8,7 @@
         "sections: render samples floor(fromMs*rate/1000) to floor(min(toMs, lengthMs)*rate/1000) exclusive, interleave, feed the envelope builder in blocks of 4093 samples with startMs = floor(fromMs*rate/1000)*1000/rate (integer division), then analyze. probes are envelope values at hop indexes.",
         "sections are analyzed as a tail (analyzeTail: last 60 s) or a head (analyzeHead: first 30 s); tagBpm, when set, is the song's tag tempo.",
         "plans: run the planner with the untagged tail section of song a and head section of song b (null when tailMissing / headMissing) and the given context.",
-        "tempoTrust: whether a beat grid with this autocorrelation peak ratio (confidence) and share of beats on an onset peak (consistency) is trusted for bar lock.",
+        "tempoTrust: whether a beat grid whose period scores this (confidence: the onsets' autocorrelation at one, two, four and eight beat periods plus half of it at half a period) and whose two halves agree on the beat (steady) is trusted for bar lock.",
         "biquads: cookbook second-order low-pass / high-pass at the given rate, cutoff and Q; coefficients are b0, b1, b2, a1, a2 (a0 = 1); impulse is the answer to a 1 at sample 0, sine the answer to 0.5 * sin(2 pi 1000 n / rate), 512 samples each, from a fresh filter.",
         "Times are ms, levels dBFS, rates as multiples of normal speed. tolerances: db for levels, ms for times, bpm, confidenceShare as a share of the expected confidence, curve for gains, k and rates, hzShare as a share of the expected cutoff, onset for onset values, sample for filter coefficients and samples."
     ],
@@ -1139,8 +1139,9 @@
                 "boundariesMs": [],
                 "tempo": {
                     "bpm": 120.0,
-                    "confidence": 42.1667,
+                    "confidence": 2.4247,
                     "consistency": 0.9917,
+                    "steady": true,
                     "confident": true,
                     "beatMs": 500.0,
                     "firstBeatMs": 140000.0,
@@ -1246,8 +1247,9 @@
                 ],
                 "tempo": {
                     "bpm": 120.0,
-                    "confidence": 42.094,
+                    "confidence": 2.4222,
                     "consistency": 1.0,
+                    "steady": true,
                     "confident": true,
                     "beatMs": 500.0,
                     "firstBeatMs": 0.0,
@@ -1393,8 +1395,9 @@
                 "boundariesMs": [],
                 "tempo": {
                     "bpm": 120.0003,
-                    "confidence": 23.9135,
+                    "confidence": 2.3348,
                     "consistency": 1.0,
+                    "steady": true,
                     "confident": true,
                     "beatMs": 499.999,
                     "firstBeatMs": 120007.562,
@@ -1500,8 +1503,9 @@
                 ],
                 "tempo": {
                     "bpm": 119.9989,
-                    "confidence": 23.8949,
+                    "confidence": 2.3304,
                     "consistency": 1.0,
+                    "steady": true,
                     "confident": true,
                     "beatMs": 500.0046,
                     "firstBeatMs": 7.2731,
@@ -1647,8 +1651,9 @@
                 "boundariesMs": [],
                 "tempo": {
                     "bpm": 100.0,
-                    "confidence": 46.0661,
+                    "confidence": 2.4566,
                     "consistency": 0.99,
+                    "steady": true,
                     "confident": true,
                     "beatMs": 600.0,
                     "firstBeatMs": 120000.0,
@@ -1754,8 +1759,9 @@
                 ],
                 "tempo": {
                     "bpm": 100.0,
-                    "confidence": 46.0872,
+                    "confidence": 2.4375,
                     "consistency": 1.0,
+                    "steady": true,
                     "confident": true,
                     "beatMs": 600.0,
                     "firstBeatMs": 0.0,
@@ -1901,8 +1907,9 @@
                 "boundariesMs": [],
                 "tempo": {
                     "bpm": 118.0004,
-                    "confidence": 37.099,
+                    "confidence": 2.0484,
                     "consistency": 1.0,
+                    "steady": true,
                     "confident": true,
                     "beatMs": 508.4727,
                     "firstBeatMs": 120400.4501,
@@ -2008,8 +2015,9 @@
                 ],
                 "tempo": {
                     "bpm": 117.9986,
-                    "confidence": 36.8739,
+                    "confidence": 2.061,
                     "consistency": 1.0,
+                    "steady": true,
                     "confident": true,
                     "beatMs": 508.4804,
                     "firstBeatMs": 400.1695,
@@ -2353,8 +2361,9 @@
                 ],
                 "tempo": {
                     "bpm": 60.0,
-                    "confidence": 42.094,
+                    "confidence": 2.4222,
                     "consistency": 1.0,
+                    "steady": true,
                     "confident": true,
                     "beatMs": 1000.0,
                     "firstBeatMs": 500.0,
@@ -2499,13 +2508,14 @@
                 "outroStartMs": 178740,
                 "boundariesMs": [],
                 "tempo": {
-                    "bpm": 200.0016,
-                    "confidence": 46.0661,
-                    "consistency": 0.495,
-                    "confident": false,
-                    "beatMs": 299.9976,
-                    "firstBeatMs": 120000.0,
-                    "downbeatMs": 120599.9952
+                    "bpm": 199.889,
+                    "confidence": 2.4566,
+                    "consistency": 0.4975,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 300.1667,
+                    "firstBeatMs": 120290.0,
+                    "downbeatMs": 120590.1667
                 }
             }
         }
@@ -3929,7 +3939,7 @@
                 "beatAnchorMs": 140000.0,
                 "late": false,
                 "headroomDb": 1.0,
-                "reason": "blend at 188.50 s over 8.00 s (2 bars of 60.0 BPM), next song from 1.00 s, outro at 199.04 s, latest end 199.75 s"
+                "reason": "blend at 188.50 s over 8.00 s (2 bars of 120.0 BPM), next song from 1.00 s, outro at 199.04 s, latest end 199.75 s"
             }
         },
         {
@@ -13041,44 +13051,34 @@
     ],
     "tempoTrust": [
         {
-            "confidence": 1.5,
-            "consistency": 0.55,
+            "confidence": 0.4,
+            "steady": true,
             "confident": true
         },
         {
-            "confidence": 1.499,
-            "consistency": 0.9,
+            "confidence": 0.399,
+            "steady": true,
             "confident": false
         },
         {
-            "confidence": 1.501,
-            "consistency": 0.9,
+            "confidence": 0.401,
+            "steady": true,
             "confident": true
         },
         {
             "confidence": 9.0,
-            "consistency": 0.549,
+            "steady": false,
             "confident": false
         },
         {
-            "confidence": 9.0,
-            "consistency": 0.551,
-            "confident": true
-        },
-        {
-            "confidence": 1.499,
-            "consistency": 0.55,
+            "confidence": 0.4,
+            "steady": false,
             "confident": false
         },
         {
-            "confidence": 1.5,
-            "consistency": 0.549,
+            "confidence": 0.401,
+            "steady": false,
             "confident": false
-        },
-        {
-            "confidence": 1.501,
-            "consistency": 0.551,
-            "confident": true
         }
     ],
     "rates": [

@@ -125,6 +125,42 @@ fn the_section_analyzer_finds_a_click_tracks_tempo() {
     assert!(SectionAnalyzer::new(SectionKind::Tail, None).finish().is_none());
 }
 
+// A half-time beat at 80 BPM whose kicks fall on the 1st, 4th and 7th
+// sixteenths of every two beats, with a snare on the third beat of each
+// bar: the kicks repeat every three sixteenths more often than every beat.
+fn three_three_two(length_ms: f64) -> Vec<SongLayer> {
+    let hit = |hz, db, bpm, first_ms, decay_ms| SongLayer {
+        kind: "pulse".into(),
+        from_ms: 0.0,
+        to_ms: length_ms,
+        hz,
+        db,
+        end_db: db,
+        bpm,
+        first_ms,
+        every: 1,
+        decay_ms,
+    };
+    vec![
+        tone(0.0, length_ms, 300.0, -30.0),
+        hit(60.0, -6.0, 40.0, 0.0, 80.0),
+        hit(60.0, -6.0, 40.0, 562.5, 80.0),
+        hit(60.0, -6.0, 40.0, 1_125.0, 80.0),
+        hit(2_000.0, -12.0, 20.0, 1_500.0, 30.0),
+    ]
+}
+
+#[test]
+fn a_three_three_two_kick_pattern_keeps_its_beat() {
+    let song =
+        SyntheticSong { rate: 44_100, channels: 1, length_ms: 60_000, layers: three_three_two(60_000.0) };
+    let tempo = song.head().features.tempo.expect("a beat");
+    // 80 BPM or its double, never the 107 BPM of the kicks' three sixteenths.
+    let folded = fold_tempo_ratio(tempo.bpm / 80.0);
+    assert!((folded - 1.0).abs() < 0.01, "{tempo:?}");
+    assert!(tempo.confident(), "{tempo:?}");
+}
+
 #[test]
 fn the_live_analyzer_hears_the_level_and_the_tempo() {
     let song = SyntheticSong { rate: 48_000, channels: 1, length_ms: 30_000, layers: click(30_000.0, 100.0) };
@@ -160,18 +196,19 @@ fn genres_that_are_never_mixed() {
 }
 
 #[test]
-fn a_tempo_is_trusted_only_past_both_thresholds() {
-    let tempo = |confidence, consistency| Tempo {
+fn a_tempo_is_trusted_only_when_strong_and_steady() {
+    let tempo = |confidence, steady| Tempo {
         bpm: 120.0,
         confidence,
-        consistency,
+        consistency: 0.5,
+        steady,
         beat_ms: 500.0,
         first_beat_ms: 0.0,
         downbeat_ms: 0.0,
     };
-    assert!(tempo(1.5, 0.55).confident());
-    assert!(!tempo(1.49, 0.9).confident());
-    assert!(!tempo(9.0, 0.54).confident());
+    assert!(tempo(0.4, true).confident());
+    assert!(!tempo(0.39, true).confident());
+    assert!(!tempo(3.0, false).confident());
 }
 
 #[test]

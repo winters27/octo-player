@@ -3,6 +3,7 @@
 //! its level steps, and its beat grid.
 
 use super::envelope::{EnvelopeBuilder, SILENT_DB, SectionEnvelope, db_of};
+use super::planner::fold_tempo_ratio;
 
 /// The quietest a silence gate can be, in dBFS.
 pub const SILENCE_FLOOR_DB: f64 = -60.0;
@@ -28,10 +29,25 @@ pub const TAIL_BODY_PERCENTILE: f64 = 0.9;
 pub const SLOWEST_BPM: f64 = 70.0;
 pub const FASTEST_BPM: f64 = 180.0;
 
-/// A tempo is trusted when its autocorrelation peak stands this far above
-/// the mean of the range and this share of its beats land on an onset peak.
-pub const TEMPO_CONFIDENT: f64 = 1.5;
-pub const BEAT_CONSISTENT: f64 = 0.55;
+/// A tempo is trusted when its period scores at least `TEMPO_CONFIDENT`
+/// (see `pick_period`) and both halves of the section pick the same period
+/// to within `STEADY_WITHIN`, after halving or doubling.
+pub const TEMPO_CONFIDENT: f64 = 0.4;
+pub const STEADY_WITHIN: f64 = 0.02;
+
+/// The onsets are measured against their mean over this long around each hop.
+pub const ONSET_TREND_MS: f64 = 1_000.0;
+
+/// The beat periods tried are this many hops apart.
+pub const PERIOD_STEP: f64 = 0.1;
+
+// The multiples of the beat period whose autocorrelation scores it, and
+// the weight of the half period.
+const HARMONICS: [f64; 4] = [1.0, 2.0, 4.0, 8.0];
+const HALF_BEAT_WEIGHT: f64 = 0.5;
+
+/// Tempos are shown halved or doubled into this up to twice this.
+pub const DISPLAY_SLOWEST_BPM: f64 = 81.0;
 
 /// How near an onset peak a beat has to fall to count as landing on it.
 pub const BEAT_HIT_MS: f64 = 35.0;
@@ -39,8 +55,8 @@ pub const BEAT_HIT_MS: f64 = 35.0;
 /// Beats in a bar.
 pub const BEATS_PER_BAR: i32 = 4;
 
-// Below this autocorrelation peak the onsets are too faint to carry a beat,
-// so no tempo is reported.
+// Below this spread of the onsets about their local mean they are too
+// faint to carry a beat, so no tempo is reported.
 const FAINTEST_BEAT: f64 = 1e-4;
 
 // An onset peak must reach at least this, and one standard deviation above
@@ -61,13 +77,15 @@ pub fn round_half_up(x: f64) -> f64 {
 
 /// A song's beat grid. Beat times are song times in milliseconds: beats fall
 /// on `first_beat_ms + n * beat_ms` and bars start on
-/// `downbeat_ms + n * bar_ms`. `consistency` is the share of the grid's
-/// beats that land on an onset peak.
+/// `downbeat_ms + n * bar_ms`. `confidence` is the beat period's score,
+/// `consistency` the share of the grid's beats that land on an onset peak,
+/// and `steady` whether both halves of the section heard the same beat.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tempo {
     pub bpm: f64,
     pub confidence: f64,
     pub consistency: f64,
+    pub steady: bool,
     pub beat_ms: f64,
     pub first_beat_ms: f64,
     pub downbeat_ms: f64,
@@ -75,7 +93,23 @@ pub struct Tempo {
 
 impl Tempo {
     pub fn confident(&self) -> bool {
-        self.confidence >= TEMPO_CONFIDENT && self.consistency >= BEAT_CONSISTENT
+        self.steady && self.confidence >= TEMPO_CONFIDENT
+    }
+
+    /// The tempo as it is usually written: halved or doubled into
+    /// `DISPLAY_SLOWEST_BPM` up to twice that.
+    pub fn display_bpm(&self) -> f64 {
+        let mut bpm = self.bpm;
+        if bpm <= 0.0 {
+            return bpm;
+        }
+        while bpm >= 2.0 * DISPLAY_SLOWEST_BPM {
+            bpm /= 2.0;
+        }
+        while bpm < DISPLAY_SLOWEST_BPM {
+            bpm *= 2.0;
+        }
+        bpm
     }
 
     pub fn bar_ms(&self) -> f64 {
@@ -390,50 +424,31 @@ fn boundaries(envelope: &SectionEnvelope, body: &[f64]) -> Vec<i64> {
     found.into_iter().map(|i| envelope.time_of(i)).collect()
 }
 
-// The beat grid from the onsets: the strongest autocorrelation lag between
-// FASTEST_BPM and SLOWEST_BPM, refined with a parabola through its
-// neighbors and moved to the tag's octave when there is a tag; the beat
-// phase with the largest onset sum along the grid; and of the four beats in
-// a bar, the one whose beats carry the most bass onset. The consistency is
-// measured over the sounding hops first to last.
+// The beat grid from the onsets: the beat period whose multiples carry the
+// most autocorrelation (`pick_period`) over the sounding hops, moved to the
+// tag's octave when there is a tag; the beat phase with the largest onset
+// sum along the grid, fitted to the onset peaks; and of the four beats in a
+// bar, the one whose beats carry the most bass onset. The confidence is the
+// period's score; the grid is steady when each half of the sounding hops
+// picks the same period to within STEADY_WITHIN, after halving or doubling.
+// The consistency is measured over the sounding hops first to last.
 fn tempo_of(envelope: &SectionEnvelope, first: i64, last: i64, tag_bpm: Option<f64>) -> Option<Tempo> {
     let onset = &envelope.onset;
     let size = onset.len();
     let hop = envelope.hop_ms as f64;
     let per_minute = 60_000.0 / hop;
-    let shortest = (per_minute / FASTEST_BPM).floor() as usize;
-    let longest = (per_minute / SLOWEST_BPM).ceil() as usize;
-    if size < 2 * (longest + 1) {
+    if first < 0 || last <= first {
         return None;
     }
+    let sounding = &onset[first as usize..=last as usize];
+    let (picked, confidence) = pick_period(sounding, hop)?;
+    let middle = sounding.len() / 2;
+    let steady = [&sounding[..middle], &sounding[middle..]].iter().all(|half| {
+        pick_period(half, hop)
+            .is_some_and(|(p, _)| (fold_tempo_ratio(p / picked) - 1.0).abs() <= STEADY_WITHIN)
+    });
 
-    let mut r = vec![0.0f64; longest + 2];
-    for lag in shortest - 1..=longest + 1 {
-        let mut sum = 0.0;
-        for i in 0..size - lag {
-            sum += onset[i] as f64 * onset[i + lag] as f64;
-        }
-        r[lag] = sum / (size - lag) as f64;
-    }
-    let mut peak = shortest;
-    let mut mean = 0.0;
-    for lag in shortest..=longest {
-        mean += r[lag];
-        if r[lag] > r[peak] {
-            peak = lag;
-        }
-    }
-    mean /= (longest - shortest + 1) as f64;
-    if mean <= 0.0 || r[peak] < FAINTEST_BEAT {
-        return None;
-    }
-    let confidence = r[peak] / mean;
-
-    let left = r[peak - 1];
-    let right = r[peak + 1];
-    let curve = left - 2.0 * r[peak] + right;
-    let shift = if curve < 0.0 { (0.5 * (left - right) / curve).clamp(-0.5, 0.5) } else { 0.0 };
-    let mut period = peak as f64 + shift;
+    let mut period = picked;
     if let Some(tag) = tag_bpm.filter(|&t| t > 0.0) {
         while per_minute / period > tag * SQRT_2 {
             period *= 2.0;
@@ -481,10 +496,89 @@ fn tempo_of(envelope: &SectionEnvelope, first: i64, last: i64, tag_bpm: Option<f
         bpm: 60_000.0 / beat_ms,
         confidence,
         consistency: consistency_of(envelope, &peaks, first, last, first_beat, beat_ms),
+        steady,
         beat_ms,
         first_beat_ms: first_beat,
         downbeat_ms: first_beat + bar as f64 * beat_ms,
     })
+}
+
+// The beat period, in hops, that the onsets repeat at most, and its score.
+// The onsets lose their local mean (the mean over ONSET_TREND_MS around
+// each hop), keeping rises only, then their overall mean; their
+// autocorrelation, as a share of its value at lag 0, is read between whole
+// lags on straight lines. Each period from FASTEST_BPM to SLOWEST_BPM, in
+// steps of PERIOD_STEP hops, scores the autocorrelation at one, two, four
+// and eight periods (beat, half bar, bar, two bars) plus HALF_BEAT_WEIGHT
+// of it at half a period. Weighing the multiples keeps a rhythm that
+// repeats every three eighths from passing for the beat. The first best
+// period wins. `None` when there are too few hops, the onsets hardly move,
+// or nothing repeats (no period scores above 0).
+fn pick_period(onset: &[f32], hop_ms: f64) -> Option<(f64, f64)> {
+    let size = onset.len();
+    let per_minute = 60_000.0 / hop_ms;
+    let shortest = per_minute / FASTEST_BPM;
+    let longest = per_minute / SLOWEST_BPM;
+    if size < 2 * (longest.ceil() as usize + 1) {
+        return None;
+    }
+    let reach = round_half_up(ONSET_TREND_MS / hop_ms / 2.0) as usize;
+    let mut prefix = vec![0.0f64; size + 1];
+    for (i, &x) in onset.iter().enumerate() {
+        prefix[i + 1] = prefix[i] + x as f64;
+    }
+    let mut rises: Vec<f64> = (0..size)
+        .map(|i| {
+            let (from, to) = (i.saturating_sub(reach), size.min(i + reach + 1));
+            let trend = (prefix[to] - prefix[from]) / (to - from) as f64;
+            (onset[i] as f64 - trend).max(0.0)
+        })
+        .collect();
+    let mean = rises.iter().sum::<f64>() / size as f64;
+    for x in &mut rises {
+        *x -= mean;
+    }
+    let most = (size - 1).min((HARMONICS[HARMONICS.len() - 1] * longest).ceil() as usize + 1);
+    let mut r = vec![0.0f64; most + 1];
+    for (lag, value) in r.iter_mut().enumerate() {
+        let mut sum = 0.0;
+        for i in 0..size - lag {
+            sum += rises[i] * rises[i + lag];
+        }
+        *value = sum / (size - lag) as f64;
+    }
+    if r[0] < FAINTEST_BEAT {
+        return None;
+    }
+    let zero = r[0];
+    for value in &mut r {
+        *value /= zero;
+    }
+    let at = |lag: f64| -> f64 {
+        let whole = lag.floor() as usize;
+        if whole + 1 > most {
+            return 0.0;
+        }
+        let part = lag - whole as f64;
+        r[whole] * (1.0 - part) + r[whole + 1] * part
+    };
+    let mut best = (shortest, f64::NEG_INFINITY);
+    let mut k = 0;
+    loop {
+        let period = shortest + k as f64 * PERIOD_STEP;
+        if period > longest + 1e-9 {
+            break;
+        }
+        let mut score = HALF_BEAT_WEIGHT * at(period / 2.0);
+        for m in HARMONICS {
+            score += at(m * period);
+        }
+        if score > best.1 {
+            best = (period, score);
+        }
+        k += 1;
+    }
+    (best.1 > 0.0).then_some(best)
 }
 
 // The onset peaks from hop `first` to hop `last`, as hop indexes: a hop

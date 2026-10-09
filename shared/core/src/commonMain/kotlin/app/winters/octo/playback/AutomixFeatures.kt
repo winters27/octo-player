@@ -32,10 +32,25 @@ const val TAIL_BODY_PERCENTILE = 0.9
 const val SLOWEST_BPM = 70.0
 const val FASTEST_BPM = 180.0
 
-// A tempo is trusted when its autocorrelation peak stands this far above
-// the mean of the range and this share of its beats land on an onset peak.
-const val TEMPO_CONFIDENT = 1.5
-const val BEAT_CONSISTENT = 0.55
+// A tempo is trusted when its period scores at least TEMPO_CONFIDENT (see
+// pickPeriod) and both halves of the section pick the same period to
+// within STEADY_WITHIN, after halving or doubling.
+const val TEMPO_CONFIDENT = 0.4
+const val STEADY_WITHIN = 0.02
+
+// The onsets are measured against their mean over this long around each hop.
+const val ONSET_TREND_MS = 1_000.0
+
+// The beat periods tried are this many hops apart.
+const val PERIOD_STEP = 0.1
+
+// The multiples of the beat period whose autocorrelation scores it, and the
+// weight of the half period.
+private val HARMONICS = doubleArrayOf(1.0, 2.0, 4.0, 8.0)
+private const val HALF_BEAT_WEIGHT = 0.5
+
+// Tempos are shown halved or doubled into this up to twice this.
+const val DISPLAY_SLOWEST_BPM = 81.0
 
 // How near an onset peak a beat has to fall to count as landing on it.
 const val BEAT_HIT_MS = 35.0
@@ -43,8 +58,8 @@ const val BEAT_HIT_MS = 35.0
 // Beats in a bar.
 const val BEATS_PER_BAR = 4
 
-// Below this autocorrelation peak the onsets are too faint to carry a beat,
-// so no tempo is reported.
+// Below this spread of the onsets about their local mean they are too faint
+// to carry a beat, so no tempo is reported.
 private const val FAINTEST_BEAT = 1e-4
 
 // An onset peak must reach at least this, and one standard deviation above
@@ -58,7 +73,9 @@ private const val BOUNDARY_SIDE_MS = 2000
 
 // A song's beat grid. Beat times are song times in milliseconds: beats fall
 // on firstBeatMs + n * beatMs and bars start on downbeatMs + n * barMs.
-// `consistency` is the share of the grid's beats that land on an onset peak.
+// `confidence` is the beat period's score, `consistency` the share of the
+// grid's beats that land on an onset peak, and `steady` whether both halves
+// of the section heard the same beat.
 data class Tempo(
     val bpm: Double,
     val confidence: Double,
@@ -66,8 +83,19 @@ data class Tempo(
     val beatMs: Double,
     val firstBeatMs: Double,
     val downbeatMs: Double,
+    val steady: Boolean = true,
 ) {
-    val confident: Boolean get() = confidence >= TEMPO_CONFIDENT && consistency >= BEAT_CONSISTENT
+    val confident: Boolean get() = steady && confidence >= TEMPO_CONFIDENT
+
+    // The tempo as it is usually written: halved or doubled into
+    // DISPLAY_SLOWEST_BPM up to twice that.
+    val displayBpm: Double get() {
+        var shown = bpm
+        if (shown <= 0) return shown
+        while (shown >= 2 * DISPLAY_SLOWEST_BPM) shown /= 2
+        while (shown < DISPLAY_SLOWEST_BPM) shown *= 2
+        return shown
+    }
 
     val barMs: Double get() = beatMs * BEATS_PER_BAR
 
@@ -316,42 +344,29 @@ private fun boundaries(envelope: SectionEnvelope, body: DoubleArray): List<Long>
     return found.map(envelope::timeOf)
 }
 
-// The beat grid from the onsets: the strongest autocorrelation lag between
-// FASTEST_BPM and SLOWEST_BPM, refined with a parabola through its
-// neighbors and moved to the tag's octave when there is a tag; the beat
-// phase with the largest onset sum along the grid; and of the four beats in
-// a bar, the one whose beats carry the most bass onset. The consistency is
-// measured over the sounding hops first to last.
+// The beat grid from the onsets: the beat period whose multiples carry the
+// most autocorrelation (pickPeriod) over the sounding hops, moved to the
+// tag's octave when there is a tag; the beat phase with the largest onset
+// sum along the grid, fitted to the onset peaks; and of the four beats in a
+// bar, the one whose beats carry the most bass onset. The confidence is the
+// period's score; the grid is steady when each half of the sounding hops
+// picks the same period to within STEADY_WITHIN, after halving or doubling.
+// The consistency is measured over the sounding hops first to last.
 private fun tempoOf(envelope: SectionEnvelope, first: Int, last: Int, tagBpm: Double?): Tempo? {
     val onset = envelope.onset
     val size = onset.size
     val hop = envelope.hopMs.toDouble()
     val perMinute = 60_000.0 / hop
-    val shortest = floor(perMinute / FASTEST_BPM).toInt()
-    val longest = ceil(perMinute / SLOWEST_BPM).toInt()
-    if (size < 2 * (longest + 1)) return null
-
-    val r = DoubleArray(longest + 2)
-    for (lag in shortest - 1..longest + 1) {
-        var sum = 0.0
-        for (i in 0 until size - lag) sum += onset[i].toDouble() * onset[i + lag]
-        r[lag] = sum / (size - lag)
+    if (first < 0 || last <= first) return null
+    val sounding = onset.copyOfRange(first, last + 1)
+    val (picked, confidence) = pickPeriod(sounding, hop) ?: return null
+    val middle = sounding.size / 2
+    val steady = listOf(sounding.copyOfRange(0, middle), sounding.copyOfRange(middle, sounding.size)).all { half ->
+        val p = pickPeriod(half, hop)
+        p != null && abs(foldTempoRatio(p.first / picked) - 1) <= STEADY_WITHIN
     }
-    var peak = shortest
-    var mean = 0.0
-    for (lag in shortest..longest) {
-        mean += r[lag]
-        if (r[lag] > r[peak]) peak = lag
-    }
-    mean /= longest - shortest + 1
-    if (mean <= 0 || r[peak] < FAINTEST_BEAT) return null
-    val confidence = r[peak] / mean
 
-    val left = r[peak - 1]
-    val right = r[peak + 1]
-    val curve = left - 2 * r[peak] + right
-    val shift = if (curve < 0) (0.5 * (left - right) / curve).coerceIn(-0.5, 0.5) else 0.0
-    var period = peak + shift
+    var period = picked
     if (tagBpm != null && tagBpm > 0) {
         while (perMinute / period > tagBpm * SQRT_2) period *= 2
         while (perMinute / period < tagBpm / SQRT_2) period /= 2
@@ -398,7 +413,69 @@ private fun tempoOf(envelope: SectionEnvelope, first: Int, last: Int, tagBpm: Do
         beatMs = beatMs,
         firstBeatMs = firstBeat,
         downbeatMs = firstBeat + bar * beatMs,
+        steady = steady,
     )
+}
+
+// The beat period, in hops, that the onsets repeat at most, and its score.
+// The onsets lose their local mean (the mean over ONSET_TREND_MS around each
+// hop), keeping rises only, then their overall mean; their autocorrelation,
+// as a share of its value at lag 0, is read between whole lags on straight
+// lines. Each period from FASTEST_BPM to SLOWEST_BPM, in steps of
+// PERIOD_STEP hops, scores the autocorrelation at one, two, four and eight
+// periods (beat, half bar, bar, two bars) plus HALF_BEAT_WEIGHT of it at
+// half a period. Weighing the multiples keeps a rhythm that repeats every
+// three eighths from passing for the beat. The first best period wins. Null
+// when there are too few hops, the onsets hardly move, or nothing repeats
+// (no period scores above 0).
+private fun pickPeriod(onset: FloatArray, hopMs: Double): Pair<Double, Double>? {
+    val size = onset.size
+    val perMinute = 60_000.0 / hopMs
+    val shortest = perMinute / FASTEST_BPM
+    val longest = perMinute / SLOWEST_BPM
+    if (size < 2 * (ceil(longest).toInt() + 1)) return null
+    val reach = roundHalfUp(ONSET_TREND_MS / hopMs / 2).toInt()
+    val prefix = DoubleArray(size + 1)
+    for (i in 0 until size) prefix[i + 1] = prefix[i] + onset[i]
+    val rises = DoubleArray(size) { i ->
+        val from = max(0, i - reach)
+        val to = min(size, i + reach + 1)
+        val trend = (prefix[to] - prefix[from]) / (to - from)
+        max(0.0, onset[i] - trend)
+    }
+    val mean = rises.sum() / size
+    for (i in 0 until size) rises[i] -= mean
+    val most = min(size - 1, ceil(HARMONICS.last() * longest).toInt() + 1)
+    val r = DoubleArray(most + 1)
+    for (lag in 0..most) {
+        var sum = 0.0
+        for (i in 0 until size - lag) sum += rises[i] * rises[i + lag]
+        r[lag] = sum / (size - lag)
+    }
+    if (r[0] < FAINTEST_BEAT) return null
+    val zero = r[0]
+    for (lag in 0..most) r[lag] /= zero
+    fun at(lag: Double): Double {
+        val whole = floor(lag).toInt()
+        if (whole + 1 > most) return 0.0
+        val part = lag - whole
+        return r[whole] * (1 - part) + r[whole + 1] * part
+    }
+    var bestPeriod = shortest
+    var bestScore = Double.NEGATIVE_INFINITY
+    var k = 0
+    while (true) {
+        val period = shortest + k * PERIOD_STEP
+        if (period > longest + 1e-9) break
+        var score = HALF_BEAT_WEIGHT * at(period / 2)
+        for (m in HARMONICS) score += at(m * period)
+        if (score > bestScore) {
+            bestScore = score
+            bestPeriod = period
+        }
+        k++
+    }
+    return if (bestScore > 0) bestPeriod to bestScore else null
 }
 
 // The onset peaks from hop `first` to hop `last`, as hop indexes: a hop

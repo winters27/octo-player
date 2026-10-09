@@ -188,6 +188,7 @@ impl TransitionPlan {
             bpm: 60_000.0 / beat,
             confidence: TEMPO_CONFIDENT,
             consistency: 1.0,
+            steady: true,
             beat_ms: beat,
             first_beat_ms: anchor,
             downbeat_ms: anchor,
@@ -427,7 +428,7 @@ pub fn plan_transition(
     let entry_ms = (entry + 0.5).floor() as i64;
     let mut reason = format!("{} at {} over {}", kind.name(), seconds(start), seconds(overlap as i64));
     if let (true, Some(a)) = (bars > 0, lock_a) {
-        reason += &format!(" ({bars} bars of {} BPM)", decimals(a.bpm, 1));
+        reason += &format!(" ({bars} bars of {} BPM)", decimals(a.display_bpm(), 1));
     }
     reason += &format!(", next song from {}", seconds(entry_ms));
     reason += &format!(", outro at {}", seconds(outro_start as i64));
