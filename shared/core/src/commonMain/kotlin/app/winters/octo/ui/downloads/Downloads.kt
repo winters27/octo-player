@@ -1,6 +1,7 @@
 package app.winters.octo.ui.downloads
 
 import app.winters.octo.subsonic.Acquisition
+import app.winters.octo.subsonic.AcquisitionEvent
 import app.winters.octo.subsonic.AcquisitionKind
 import app.winters.octo.subsonic.AcquisitionStage
 import app.winters.octo.subsonic.FoundCandidate
@@ -254,6 +255,72 @@ fun overallFraction(rows: List<DownloadRow>): Float? =
     rows.mapNotNull { it.fraction.takeIf { _ -> !it.finished } }.takeIf { it.isNotEmpty() }?.average()?.toFloat()
 
 // ---------------------------------------------------------------------------
+// The pill
+// ---------------------------------------------------------------------------
+
+// The running row the pill speaks for: the one furthest along, and of
+// those the one that started first, so the pill does not hop between two
+// songs at the same step.
+fun pillLead(rows: List<DownloadRow>): DownloadRow? =
+    rows.filter { !it.finished }
+        .sortedWith(compareByDescending<DownloadRow> { it.phase.ordinal }.thenBy { it.startedAt.orEmpty() })
+        .firstOrNull()
+
+// The step a row is on, in a word or two: "Downloading 42%", "Checking".
+fun stepWords(row: DownloadRow): String = when (row.phase) {
+    RowPhase.Waiting -> "Waiting"
+    RowPhase.Searching -> "Searching"
+    RowPhase.Downloading -> row.fraction?.let { "Downloading ${(it.coerceIn(0f, 1f) * 100).toInt()}%" } ?: "Downloading"
+    RowPhase.Checking -> "Checking"
+    RowPhase.Adding -> "Adding"
+    RowPhase.Done -> "Done"
+    RowPhase.Failed -> "Failed"
+}
+
+// What the pill says aloud: "Downloading 42%, Da Funk. 2 more on the way".
+fun pillSpoken(rows: List<DownloadRow>): String {
+    val lead = pillLead(rows) ?: return ""
+    val more = runningCount(rows) - 1
+    return "${stepWords(lead)}, ${lead.title}" + if (more > 0) ". $more more on the way" else ""
+}
+
+// ---------------------------------------------------------------------------
+// The steps
+// ---------------------------------------------------------------------------
+
+// The steps every download walks, as the log's head draws them.
+enum class DownloadStep(val label: String) {
+    Find("Find"),
+    Download("Download"),
+    Check("Check"),
+    Add("Add"),
+}
+
+// Where a row is on those steps: the step it is on, or DownloadStep.entries.size
+// once it is in. A failed row stops on the step its log last reached.
+fun stepOf(row: DownloadRow, events: List<AcquisitionEvent> = emptyList()): Int = when (row.phase) {
+    RowPhase.Waiting, RowPhase.Searching -> DownloadStep.Find.ordinal
+    RowPhase.Downloading -> DownloadStep.Download.ordinal
+    RowPhase.Checking -> DownloadStep.Check.ordinal
+    RowPhase.Adding -> DownloadStep.Add.ordinal
+    RowPhase.Done -> DownloadStep.entries.size
+    RowPhase.Failed -> events.lastOrNull { markOf(it.logKind) !in AFTERWORDS }?.let { stepOfMark(markOf(it.logKind)) } ?: DownloadStep.Find.ordinal
+}
+
+// The step a log line belongs to.
+fun stepOfMark(mark: LogMark): Int = when (mark) {
+    LogMark.Queued, LogMark.Search, LogMark.Found, LogMark.Note -> DownloadStep.Find.ordinal
+    LogMark.Try, LogMark.Transfer -> DownloadStep.Download.ordinal
+    LogMark.Check -> DownloadStep.Check.ordinal
+    LogMark.Tags, LogMark.Cover, LogMark.Lyrics, LogMark.Library -> DownloadStep.Add.ordinal
+    LogMark.Done -> DownloadStep.entries.size
+    LogMark.Failed -> DownloadStep.Find.ordinal
+}
+
+// Lines that say how it ended, not which step it reached.
+private val AFTERWORDS = setOf(LogMark.Failed, LogMark.Note, LogMark.Done)
+
+// ---------------------------------------------------------------------------
 // The log
 // ---------------------------------------------------------------------------
 
@@ -297,6 +364,31 @@ fun candidateFacts(copy: FoundCandidate, locale: Locale = Locale.getDefault()): 
     }
     copy.speed?.takeIf { it > 0 }?.let { add(speedText(it, locale)) }
 }
+
+// A copy's kind in one short word for its badge: "FLAC", "MP3", or null.
+fun copyBadge(copy: FoundCandidate): String? =
+    (copy.format?.trim()?.trimStart('.') ?: copy.quality?.substringBefore(' '))
+        ?.takeIf(String::isNotBlank)?.uppercase(Locale.ROOT)
+
+// A copy's facts beside its badge: the quality's remainder ("16-bit
+// 44.1 kHz") in place of the whole quality, then the rest as candidateFacts.
+fun badgeFacts(copy: FoundCandidate, locale: Locale = Locale.getDefault()): List<String> {
+    val facts = candidateFacts(copy, locale)
+    val badge = copyBadge(copy) ?: return facts
+    val first = facts.firstOrNull() ?: return facts
+    if (!first.uppercase(Locale.ROOT).startsWith(badge)) return facts
+    val rest = first.substring(badge.length).trim()
+    return (if (rest.isEmpty()) emptyList() else listOf(rest)) + facts.drop(1)
+}
+
+// "1st choice" beside the copy Octo would try first, "2nd choice" and on.
+fun rankWords(rank: Int): String {
+    val suffix = if (rank % 100 in 11..13) "th" else when (rank % 10) { 1 -> "st"; 2 -> "nd"; 3 -> "rd"; else -> "th" }
+    return "$rank$suffix choice"
+}
+
+// How many copies a log line shows before "Show all".
+const val LOG_COPIES_SHOWN = 3
 
 // The line a copy is known by: its title, or its file's name.
 fun candidateTitle(copy: FoundCandidate): String =

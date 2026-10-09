@@ -1,6 +1,12 @@
 package app.winters.octo.ui.downloads
 
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,18 +27,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -44,6 +54,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -56,9 +67,12 @@ import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.GlassSheet
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoDuration
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.Spinner
+import app.winters.octo.design.motionScale
+import app.winters.octo.design.octoTween
 import app.winters.octo.subsonic.AcquisitionEvent
 import app.winters.octo.subsonic.FIND_OFF
 import app.winters.octo.subsonic.FIND_SEARCHING
@@ -177,6 +191,23 @@ private fun ColumnScope.DownloadLog(model: ServerDownloads, key: String) {
     val problem by model.logProblem.collectAsStateWithLifecycle()
     val row = rows.firstOrNull { it.logKey == key } ?: log?.let { rowOf(it) }
     val events = log?.event.orEmpty()
+    val running = row?.finished == false
+    val list = rememberLazyListState()
+    // Brandon: "clicking into the download progress, should be followed". A
+    // running download opens on its newest step and keeps it in view; a
+    // finished one opens at its start. Scrolling up lets go; back at the
+    // end, or "Latest step", follows again.
+    var follow by remember(key) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(key, row != null) { if (row != null && follow == null) follow = !row.finished }
+    LaunchedEffect(list) {
+        snapshotFlow { list.isScrollInProgress }.collect { scrolling ->
+            if (!scrolling && follow != null) follow = !list.canScrollForward
+        }
+    }
+    // By the line's own place: the list has not laid the new lines out yet.
+    LaunchedEffect(events.size, follow) {
+        if (follow == true && events.isNotEmpty()) list.animateScrollToItem(events.lastIndex)
+    }
     Bar(back = "Back to $SERVER_DOWNLOADS", onBack = model::showList) {
         row?.findId?.let { id -> QuietButton(FIND_SONGS) { model.find(id, row.title, key) } }
         if (row?.finished == true) QuietButton("Clear") {
@@ -184,54 +215,163 @@ private fun ColumnScope.DownloadLog(model: ServerDownloads, key: String) {
             model.showList()
         }
     }
-    LazyColumn(Modifier.weight(1f, fill = false), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 16.dp)) {
-        if (row != null) item(key = "head") { LogHead(row, model.artwork(row.coverArt)) }
-        problem?.let { item(key = "problem") { Text(it, style = OctoType.caption, color = OctoColors.SignalOrange, modifier = Modifier.padding(vertical = 6.dp)) } }
-        item(key = "rule") { Rule() }
-        if (log == null && problem == null) item(key = "wait") { Ring(null, 22.dp) }
-        itemsIndexed(events, key = { index, _ -> index }) { index, line -> LogLine(line, last = index == events.lastIndex) }
+    // The song and where it is stay put; only the steps scroll.
+    if (row != null) LogHead(row, events, model.artwork(row.coverArt))
+    problem?.let { Text(it, style = OctoType.caption, color = OctoColors.SignalOrange, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) }
+    Rule(Modifier.padding(top = 14.dp))
+    Box(Modifier.weight(1f, fill = false)) {
+        LazyColumn(state = list, contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 16.dp)) {
+            if (log == null && problem == null) item(key = "wait") { Ring(null, 22.dp) }
+            itemsIndexed(events, key = { index, _ -> index }) { index, line ->
+                LogLine(line, last = index == events.lastIndex, live = running && index == events.lastIndex)
+            }
+        }
+        if (follow == false && running && list.canScrollForward) {
+            GlazeButton(
+                "Latest step",
+                { follow = true },
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+                size = ButtonSize.Small,
+                icon = painterResource(OctoIcons.Downloading),
+            )
+        }
     }
 }
 
+// The song, the steps it walks with the one it is on, and the copy being
+// fetched.
 @Composable
-private fun LogHead(row: DownloadRow, art: String?) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-        Artwork(art, 64.dp, shape = RoundedCornerShape(10.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(row.title, style = OctoType.headline, color = OctoColors.TextPrimary, maxLines = 2)
-            if (row.artist.isNotBlank()) Text(row.artist, style = OctoType.bodySmall, color = OctoColors.TextSecondary)
-            row.album?.takeIf(String::isNotBlank)?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
+private fun LogHead(row: DownloadRow, events: List<AcquisitionEvent>, art: String?) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Artwork(art, 56.dp, shape = RoundedCornerShape(10.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(row.title, style = OctoType.headline, color = OctoColors.TextPrimary, maxLines = 2)
+                val by = listOfNotNull(row.artist.takeIf(String::isNotBlank), row.album?.takeIf(String::isNotBlank))
+                if (by.isNotEmpty()) Text(by.joinToString(" · "), style = OctoType.bodySmall, color = OctoColors.TextSecondary, maxLines = 2)
+            }
         }
-    }
-    Column(Modifier.fillMaxWidth().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (!row.finished) Ring(row.fraction, 16.dp)
+        Steps(row, stepOf(row, events))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(row.status, style = OctoType.bodySmall, color = if (row.phase == RowPhase.Failed) OctoColors.SignalOrange else OctoColors.TextPrimary)
+            val facts = listOfNotNull(row.quality, row.source, kindLabel(row.kind))
+            if (facts.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { facts.forEach { Tag(it) } }
         }
-        if (row.phase == RowPhase.Downloading) ProgressLine(row.fraction)
-        val facts = listOfNotNull(row.quality, row.source, kindLabel(row.kind))
-        if (facts.isNotEmpty()) Text(facts.joinToString(" · "), style = OctoType.caption, color = OctoColors.TextMuted)
     }
 }
 
-// One line of the log, on the thread that joins them.
+// The four steps as a strip: done ones filled, the one it is on filling
+// with the file while it downloads (breathing while nobody can tell how
+// far), and the ones still to come faint.
 @Composable
-private fun LogLine(line: AcquisitionEvent, last: Boolean) {
+private fun Steps(row: DownloadRow, at: Int) {
+    val failed = row.phase == RowPhase.Failed
+    val motion = motionScale()
+    val pulse = if (row.finished || row.fraction != null || motion.distance == 0f) 1f else rememberPulse()
+    Row(
+        Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
+            contentDescription = if (at >= DownloadStep.entries.size) "Every step done" else "Step ${at + 1} of ${DownloadStep.entries.size}, ${DownloadStep.entries[at].label}"
+        },
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        DownloadStep.entries.forEach { step ->
+            val index = step.ordinal
+            val target = when {
+                index < at -> 1f
+                index > at -> 0f
+                failed -> 1f
+                row.phase == RowPhase.Downloading -> row.fraction ?: 0.5f
+                else -> 0.5f
+            }
+            val fill = when {
+                failed && index == at -> OctoColors.SignalOrange
+                row.phase == RowPhase.Done -> OctoColors.SignalGreen
+                else -> OctoColors.TextPrimary
+            }
+            val shown by animateFloatAsState(target, octoTween(motion, OctoDuration.Neutral), label = "step")
+            val alpha = if (index == at && !row.finished) pulse else 1f
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Canvas(Modifier.fillMaxWidth().height(4.dp)) {
+                    val round = CornerRadius(size.height / 2)
+                    drawRoundRect(Track, cornerRadius = round)
+                    if (shown > 0f) drawRoundRect(fill.copy(alpha = alpha), size = Size(size.width * shown, size.height), cornerRadius = round)
+                }
+                Text(
+                    step.label,
+                    style = OctoType.caption,
+                    maxLines = 1,
+                    color = when {
+                        failed && index == at -> OctoColors.SignalOrange
+                        index == at && !row.finished -> OctoColors.TextPrimary
+                        index < at || row.phase == RowPhase.Done -> OctoColors.TextSecondary
+                        else -> OctoColors.TextMuted
+                    },
+                )
+            }
+        }
+    }
+}
+
+// A slow breath, for the step whose end nobody can tell yet.
+@Composable
+private fun rememberPulse(): Float {
+    val pulse = rememberInfiniteTransition(label = "pulse")
+    val alpha by pulse.animateFloat(0.45f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "alpha")
+    return alpha
+}
+
+// A small fact in a soft capsule: "FLAC 16-bit 44.1 kHz", "Soulseek".
+@Composable
+private fun Tag(text: String) {
+    Text(text, style = OctoType.caption, color = OctoColors.TextSecondary, maxLines = 1, modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Chip).padding(horizontal = 8.dp, vertical = 2.dp))
+}
+
+// One line of the log, on the thread that joins them. The newest line of a
+// running download turns while it waits.
+@Composable
+private fun LogLine(line: AcquisitionEvent, last: Boolean, live: Boolean) {
     val mark = markOf(line.logKind)
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Column(Modifier.width(26.dp).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(Modifier.size(26.dp).clip(CircleShape).background(markFill(mark)), contentAlignment = Alignment.Center) {
-                Icon(painterResource(markIcon(mark)), contentDescription = null, tint = markTint(mark), modifier = Modifier.size(14.dp))
+        Column(Modifier.width(24.dp).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.size(24.dp).clip(CircleShape).background(if (live) LiveFill else markFill(mark)), contentAlignment = Alignment.Center) {
+                if (live && mark != LogMark.Done && mark != LogMark.Failed) {
+                    Spinner(size = 13.dp, color = OctoColors.TextPrimary)
+                } else {
+                    Icon(painterResource(markIcon(mark)), contentDescription = null, tint = markTint(mark), modifier = Modifier.size(13.dp))
+                }
             }
             if (!last) Box(Modifier.width(1.dp).weight(1f).background(Thread))
         }
         Column(Modifier.weight(1f).padding(bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.Top) {
-                Text(line.text, style = OctoType.bodySmall, color = if (mark == LogMark.Failed) OctoColors.SignalOrange else OctoColors.TextPrimary, modifier = Modifier.weight(1f))
-                Text(logTime(line.at), style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(start = 8.dp))
+                Text(
+                    line.text,
+                    style = OctoType.bodySmall,
+                    fontWeight = if (live) FontWeight.SemiBold else null,
+                    color = if (mark == LogMark.Failed) OctoColors.SignalOrange else OctoColors.TextPrimary,
+                    modifier = Modifier.weight(1f).padding(top = 2.dp),
+                )
+                Text(logTime(line.at), style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(start = 8.dp, top = 3.dp))
             }
             line.detail?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
-            line.candidate.forEach { CopyLine(it, cover = null, compact = true) }
+            if (line.candidate.isNotEmpty()) Copies(line.candidate)
+        }
+    }
+}
+
+// The copies a search offered, on one soft card: the first few, then the
+// rest on asking.
+@Composable
+private fun Copies(copies: List<FoundCandidate>) {
+    var all by remember(copies) { mutableStateOf(false) }
+    val shown = if (all) copies else copies.take(LOG_COPIES_SHOWN)
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(12.dp)).background(Card).padding(vertical = 2.dp)) {
+        shown.forEachIndexed { index, copy ->
+            if (index > 0) Box(Modifier.padding(horizontal = 12.dp).fillMaxWidth().height(1.dp).background(Thread))
+            CopyLine(copy, compact = true)
+        }
+        if (copies.size > LOG_COPIES_SHOWN) {
+            QuietButton(if (all) "Show fewer" else "Show all ${copies.size}") { all = !all }
         }
     }
 }
@@ -321,7 +461,7 @@ private fun ColumnScope.FindSongs(model: ServerDownloads, view: SheetView.Find) 
         }
         val shown = found
         items(copies, key = ::copyKey) { copy ->
-            CopyLine(copy, model.artwork(shown?.song?.coverArt), compact = false, onPick = if (shown != null && canPick(shown, copy)) {
+            CopyLine(copy, compact = false, onPick = if (shown != null && canPick(shown, copy)) {
                 {
                     if (shown.song.libraryId != null) asking = shown.id to copy else model.pick(shown.id, copy)
                 }
@@ -369,22 +509,27 @@ private fun Sources(sources: List<FindSourceState>) {
     }
 }
 
-// One copy: what it is, where it sits, its facts, and whether Octo would
-// take it. On Find songs it can be got.
+// One copy: its kind on a badge, its title, where it sits, its facts, and
+// whether Octo would take it. On Find songs it can be got; the song's
+// cover is drawn once, over the list.
 @Composable
-private fun CopyLine(copy: FoundCandidate, cover: String?, compact: Boolean, onPick: (() -> Unit)? = null) {
+private fun CopyLine(copy: FoundCandidate, compact: Boolean, onPick: (() -> Unit)? = null) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = if (compact) 3.dp else 8.dp),
+        Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = if (compact) 12.dp else 0.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (!compact) Artwork(cover, 44.dp, shape = RoundedCornerShape(6.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            Text(candidateTitle(copy), style = if (compact) OctoType.caption else OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                copyBadge(copy)?.let { Badge(it, lossless = isLosslessCopy(copy)) }
+                Text(candidateTitle(copy), style = OctoType.bodySmall, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            }
             val where = copy.album?.takeIf(String::isNotBlank) ?: copy.folder
             where?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-            Text(candidateFacts(copy).joinToString(" · "), style = OctoType.caption, color = OctoColors.TextSecondary, maxLines = 3)
-            candidateVerdict(copy)?.let { Text(it, style = OctoType.caption, color = if (copy.rank != null) OctoColors.TextSecondary else OctoColors.TextMuted, maxLines = 2) }
+            Text(badgeFacts(copy).joinToString(" · "), style = OctoType.caption, color = OctoColors.TextSecondary, maxLines = 2)
+            // Octo's order for a copy it would try; why not, for one it would pass over.
+            val verdict = copy.rank?.let(::rankWords) ?: candidateVerdict(copy)
+            verdict?.let { Text(it, style = OctoType.caption, color = if (copy.rank == 1) OctoColors.TextPrimary else OctoColors.TextMuted, maxLines = 2) }
         }
         if (onPick != null) {
             Box(
@@ -399,6 +544,19 @@ private fun CopyLine(copy: FoundCandidate, cover: String?, compact: Boolean, onP
             }
         }
     }
+}
+
+// A copy's kind, small and boxed: "FLAC" a little brighter than "MP3".
+@Composable
+private fun Badge(text: String, lossless: Boolean) {
+    Text(
+        text,
+        style = OctoType.caption,
+        fontWeight = FontWeight.SemiBold,
+        color = if (lossless) OctoColors.TextPrimary else OctoColors.TextSecondary,
+        maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(if (lossless) LosslessChip else Chip).padding(horizontal = 6.dp),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -421,8 +579,8 @@ private fun Bar(back: String, onBack: () -> Unit, actions: @Composable () -> Uni
 }
 
 @Composable
-private fun Rule() {
-    Box(Modifier.padding(vertical = 12.dp).fillMaxWidth().height(1.dp).background(Thread))
+private fun Rule(modifier: Modifier = Modifier.padding(vertical = 12.dp)) {
+    Box(modifier.fillMaxWidth().height(1.dp).background(Thread))
 }
 
 @Composable
@@ -457,3 +615,6 @@ private fun ProgressLine(fraction: Float?) {
 private val Chip = Color.White.copy(alpha = 0.08f)
 private val Thread = Color.White.copy(alpha = 0.10f)
 private val Track = Color.White.copy(alpha = 0.14f)
+private val LosslessChip = Color.White.copy(alpha = 0.16f)
+private val Card = Color.White.copy(alpha = 0.05f)
+private val LiveFill = Color.White.copy(alpha = 0.14f)

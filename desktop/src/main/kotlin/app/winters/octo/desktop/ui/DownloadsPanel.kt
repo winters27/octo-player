@@ -1,5 +1,12 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
@@ -30,10 +37,15 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -50,7 +62,9 @@ import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
 import app.winters.octo.design.MenuTitle
-import app.winters.octo.design.MeterLine
+import app.winters.octo.design.OctoDuration
+import app.winters.octo.design.motionScale
+import app.winters.octo.design.octoTween
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.PopupPadding
@@ -74,6 +88,13 @@ import app.winters.octo.subsonic.FindSourceState
 import app.winters.octo.subsonic.FoundCandidate
 import app.winters.octo.subsonic.FoundSongs
 import app.winters.octo.ui.downloads.DOWNLOADS_EMPTY
+import app.winters.octo.ui.downloads.DownloadStep
+import app.winters.octo.ui.downloads.LOG_COPIES_SHOWN
+import app.winters.octo.ui.downloads.badgeFacts
+import app.winters.octo.ui.downloads.copyBadge
+import app.winters.octo.ui.downloads.isLosslessCopy
+import app.winters.octo.ui.downloads.rankWords
+import app.winters.octo.ui.downloads.stepOf
 import app.winters.octo.ui.downloads.DownloadRow
 import app.winters.octo.ui.downloads.FIND_DOWNLOADS
 import app.winters.octo.ui.downloads.FIND_PICK_WAIT
@@ -215,75 +236,182 @@ private fun DownloadLog(app: AppState, model: DownloadsModel, key: String, modif
     // The list's row knows how an upgrade ended; the log's own row is the download.
     val row = rows.firstOrNull { it.logKey == key } ?: log?.let { rowOf(it) }
     val events = log?.event.orEmpty()
+    val running = row?.finished == false
     val list = rememberLazyListState()
-    // The log opens at its start; lines that arrive later, while its end is
-    // in view, keep the end in view.
-    val seen = remember(key) { intArrayOf(-1) }
-    LaunchedEffect(events.size) {
-        val before = seen[0]
-        seen[0] = events.size
-        if (before <= 0 || events.size <= before) return@LaunchedEffect
-        val atEnd = list.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it >= list.layoutInfo.totalItemsCount - 3 } ?: true
-        if (atEnd) list.animateScrollToItem(list.layoutInfo.totalItemsCount.coerceAtLeast(1) - 1)
+    // Brandon: "clicking into the download progress, should be followed". A
+    // running download opens on its newest step and keeps it in view; a
+    // finished one opens at its start. Scrolling up lets go; back at the
+    // end, or "Latest step", follows again.
+    var follow by remember(key) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(key, row != null) { if (row != null && follow == null) follow = !row.finished }
+    LaunchedEffect(list) {
+        snapshotFlow { list.isScrollInProgress }.collect { scrolling ->
+            if (!scrolling && follow != null) follow = !list.canScrollForward
+        }
     }
-    LazyColumn(modifier.scrollbar(list), state = list, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.S, bottom = Space.Xl)) {
-        item(key = "bar") {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconAction(OctoIcons.Back, "Back to downloads", model::showList, size = ControlHeight.M, iconSize = IconSize.Toolbar, tint = OctoColors.TextSecondary)
-                Spacer(Modifier.weight(1f))
-                row?.findId?.let { id -> TextAction(FIND_SONGS, { model.find(id, row.title, key) }, icon = OctoIcons.Search) }
-                if (row?.finished == true) TextAction("Clear", { model.clear(row.key); model.showList() })
+    // By the line's own place: the list has not laid the new lines out yet.
+    LaunchedEffect(events.size, follow) {
+        if (follow == true && events.isNotEmpty()) list.animateScrollToItem(events.lastIndex)
+    }
+    Column(modifier) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = Space.L), verticalAlignment = Alignment.CenterVertically) {
+            IconAction(OctoIcons.Back, "Back to downloads", model::showList, size = ControlHeight.M, iconSize = IconSize.Toolbar, tint = OctoColors.TextSecondary)
+            Spacer(Modifier.weight(1f))
+            row?.findId?.let { id -> TextAction(FIND_SONGS, { model.find(id, row.title, key) }, icon = OctoIcons.Search) }
+            if (row?.finished == true) TextAction("Clear", { model.clear(row.key); model.showList() })
+        }
+        // The song and where it is stay put; only the steps scroll.
+        if (row != null) LogHead(row, events, Modifier.padding(horizontal = Space.L))
+        problem?.let { Txt(it, DesktopType.meta, OctoColors.SignalOrange, Modifier.padding(horizontal = Space.L, vertical = Space.S), maxLines = 2) }
+        Separator(Modifier.padding(top = Space.L))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            LazyColumn(Modifier.fillMaxSize().scrollbar(list), state = list, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.L, bottom = Space.Xl)) {
+                if (log == null && problem == null) item(key = "wait") { ProgressRing(null, size = IconSize.Transport) }
+                itemsIndexed(events, key = { index, _ -> index }) { index, line ->
+                    LogLine(line, last = index == events.lastIndex, live = running && index == events.lastIndex)
+                }
+            }
+            if (follow == false && running && list.canScrollForward) {
+                GlazeCapsule(OctoIcons.Downloading, "Latest step", { follow = true }, Modifier.align(Alignment.BottomCenter).padding(bottom = Space.L))
             }
         }
-        if (row != null) item(key = "head") { LogHead(row) }
-        problem?.let { item(key = "problem") { Txt(it, DesktopType.meta, OctoColors.SignalOrange, Modifier.padding(vertical = Space.S), maxLines = 2) } }
-        item(key = "rule") { Separator(Modifier.padding(vertical = Space.M)) }
-        if (log == null && problem == null) item(key = "wait") { ProgressRing(null, size = IconSize.Transport) }
-        itemsIndexed(events, key = { index, _ -> index }) { index, line ->
-            LogLine(line, last = index == events.lastIndex, cover = row?.coverArt)
-        }
     }
 }
 
-// The song, where it is now, and the copy being fetched.
+// The song, the steps it walks with the one it is on, and the copy being
+// fetched.
 @Composable
-private fun LogHead(row: DownloadRow) {
-    Row(Modifier.fillMaxWidth().padding(top = Space.S), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
-        Cover(row.coverArt, Modifier.size(HeadCover), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
-            Txt(row.title, DesktopType.emphasis, maxLines = 2)
-            if (row.artist.isNotBlank()) Txt(row.artist, DesktopType.meta, OctoColors.TextSecondary)
-            row.album?.takeIf(String::isNotBlank)?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted) }
+private fun LogHead(row: DownloadRow, events: List<AcquisitionEvent>, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth().padding(top = Space.S), verticalArrangement = Arrangement.spacedBy(Space.L)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
+            Cover(row.coverArt, Modifier.size(HeadCover), shape = Corner.ArtMShape, placeholder = OctoIcons.Songs)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
+                Txt(row.title, DesktopType.emphasis, maxLines = 2)
+                val by = listOfNotNull(row.artist.takeIf(String::isNotBlank), row.album?.takeIf(String::isNotBlank))
+                if (by.isNotEmpty()) Txt(by.joinToString(" · "), DesktopType.meta, OctoColors.TextSecondary, maxLines = 2)
+            }
         }
-    }
-    Column(Modifier.fillMaxWidth().padding(top = Space.M), verticalArrangement = Arrangement.spacedBy(Space.Xs)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
-            if (!row.finished) ProgressRing(row.fraction, size = IconSize.Table)
+        Steps(row, stepOf(row, events))
+        Column(verticalArrangement = Arrangement.spacedBy(Space.S)) {
             Txt(row.status, DesktopType.table, if (row.phase == RowPhase.Failed) OctoColors.SignalOrange else OctoColors.TextPrimary, maxLines = 3)
+            val facts = listOfNotNull(row.quality, row.source, kindLabel(row.kind))
+            if (facts.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(Space.Xs)) { facts.forEach { Tag(it) } }
         }
-        if (row.phase == RowPhase.Downloading) MeterLine(row.fraction)
-        val facts = listOfNotNull(row.quality, row.source, kindLabel(row.kind))
-        if (facts.isNotEmpty()) Txt(facts.joinToString(" · "), DesktopType.meta, OctoColors.TextMuted, maxLines = 2)
     }
 }
 
-// One line of the log: its time, its mark on the thread that joins the
-// lines, the words, and the copies a search offered when it is about them.
+// The four steps as a strip: done ones filled, the one it is on filling
+// with the file while it downloads (breathing while nobody can tell how
+// far), and the ones still to come faint.
 @Composable
-private fun LogLine(line: AcquisitionEvent, last: Boolean, cover: String?) {
+private fun Steps(row: DownloadRow, at: Int) {
+    val failed = row.phase == RowPhase.Failed
+    val pulse = if (row.finished || row.fraction != null) 1f else rememberPulse()
+    Row(
+        Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
+            contentDescription = if (at >= DownloadStep.entries.size) "Every step done" else "Step ${at + 1} of ${DownloadStep.entries.size}, ${DownloadStep.entries[at].label}"
+        },
+        horizontalArrangement = Arrangement.spacedBy(Space.Xs),
+    ) {
+        DownloadStep.entries.forEach { step ->
+            val index = step.ordinal
+            val target = when {
+                index < at -> 1f
+                index > at -> 0f
+                failed -> 1f
+                row.phase == RowPhase.Downloading -> row.fraction ?: 0.5f
+                else -> 0.5f
+            }
+            val fill = when {
+                failed && index == at -> OctoColors.SignalOrange
+                row.phase == RowPhase.Done -> OctoColors.SignalGreen
+                else -> OctoColors.TextPrimary
+            }
+            val shown by animateFloatAsState(target, octoTween(motionScale(), OctoDuration.Neutral), label = "step")
+            val alpha = if (index == at && !row.finished) pulse else 1f
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs)) {
+                Canvas(Modifier.fillMaxWidth().height(StepLine)) {
+                    val round = CornerRadius(size.height / 2)
+                    drawRoundRect(Color.White.copy(alpha = 0.14f), cornerRadius = round)
+                    if (shown > 0f) drawRoundRect(fill.copy(alpha = alpha), size = Size(size.width * shown, size.height), cornerRadius = round)
+                }
+                Txt(
+                    step.label,
+                    DesktopType.meta,
+                    when {
+                        failed && index == at -> OctoColors.SignalOrange
+                        index == at && !row.finished -> OctoColors.TextPrimary
+                        index < at || row.phase == RowPhase.Done -> OctoColors.TextSecondary
+                        else -> OctoColors.TextMuted
+                    },
+                )
+            }
+        }
+    }
+}
+
+// A slow breath, for the step whose end nobody can tell yet.
+@Composable
+private fun rememberPulse(): Float {
+    if (motionScale().distance == 0f) return 1f
+    val pulse = rememberInfiniteTransition(label = "pulse")
+    val alpha by pulse.animateFloat(0.45f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "alpha")
+    return alpha
+}
+
+// A small fact in a soft capsule: "FLAC 16-bit 44.1 kHz", "Soulseek".
+@Composable
+private fun Tag(text: String) {
+    Txt(text, DesktopType.meta, OctoColors.TextSecondary, Modifier.clip(RoundedCornerShape(Corner.ArtS)).background(Chip).padding(horizontal = Space.S, vertical = Space.Xxs))
+}
+
+// One line of the log: its mark on the thread that joins the lines, the
+// words with their time, and the copies a search offered when it is about
+// them. The newest line of a running download turns while it waits.
+@Composable
+private fun LogLine(line: AcquisitionEvent, last: Boolean, live: Boolean) {
     val mark = markOf(line.logKind)
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Space.M)) {
-        Txt(logTime(line.at), DesktopType.meta, OctoColors.TextMuted, Modifier.width(TimeWidth).padding(top = Space.Xxs))
         Column(Modifier.width(MarkSize).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(Modifier.size(MarkSize).clip(CircleShape).background(markFill(mark)), contentAlignment = Alignment.Center) {
-                Glyph(markIcon(mark), size = IconSize.Inline - Space.Xxs, tint = markTint(mark))
+            Box(Modifier.size(MarkSize).clip(CircleShape).background(if (live) LiveFill else markFill(mark)), contentAlignment = Alignment.Center) {
+                if (live && mark != LogMark.Done && mark != LogMark.Failed) {
+                    ProgressRing(null, size = IconSize.Inline)
+                } else {
+                    Glyph(markIcon(mark), size = IconSize.Inline - Space.Xxs, tint = markTint(mark))
+                }
             }
             if (!last) Box(Modifier.width(FrameSize.Hairline).weight(1f).background(SeparatorColor))
         }
         Column(Modifier.weight(1f).padding(bottom = Space.L), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
-            Txt(line.text, DesktopType.table, if (mark == LogMark.Failed) OctoColors.SignalOrange else OctoColors.TextPrimary, maxLines = 4)
-            line.detail?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted, maxLines = 5) }
-            line.candidate.forEach { copy -> CopyLine(copy, cover, compact = true) }
+            Row(verticalAlignment = Alignment.Top) {
+                Txt(
+                    line.text,
+                    if (live) DesktopType.tableTitle else DesktopType.table,
+                    if (mark == LogMark.Failed) OctoColors.SignalOrange else OctoColors.TextPrimary,
+                    Modifier.weight(1f).padding(top = Space.Xxs),
+                    maxLines = 3,
+                )
+                Txt(logTime(line.at), DesktopType.meta, OctoColors.TextMuted, Modifier.padding(start = Space.S, top = Space.Xxs))
+            }
+            line.detail?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted, maxLines = 4) }
+            if (line.candidate.isNotEmpty()) Copies(line.candidate)
+        }
+    }
+}
+
+// The copies a search offered, on one soft card: the first few, then the
+// rest on asking.
+@Composable
+private fun Copies(copies: List<FoundCandidate>) {
+    var all by remember(copies) { mutableStateOf(false) }
+    val shown = if (all) copies else copies.take(LOG_COPIES_SHOWN)
+    Column(Modifier.fillMaxWidth().padding(top = Space.S).clip(Corner.ControlShape).background(Card).padding(vertical = Space.Xxs)) {
+        shown.forEachIndexed { index, copy ->
+            if (index > 0) Separator(Modifier.padding(horizontal = Space.M))
+            CopyLine(copy, compact = true)
+        }
+        if (copies.size > LOG_COPIES_SHOWN) {
+            TextAction(if (all) "Show fewer" else "Show all ${copies.size}", { all = !all }, Modifier.padding(start = Space.Xs, bottom = Space.Xxs))
         }
     }
 }
@@ -353,7 +481,7 @@ private fun FindSongs(app: AppState, model: DownloadsModel, view: DrawerView.Fin
         if (copies.isNotEmpty() && found?.searching == true) item(key = "wait") { Txt(FIND_PICK_WAIT, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(bottom = Space.S)) }
         val shown = found
         items(copies, key = ::copyKey) { copy ->
-            CopyLine(copy, shown?.song?.coverArt, compact = false, onPick = if (shown != null && canPick(shown, copy)) ({ pickCopy(app, model, shown, copy) }) else null)
+            CopyLine(copy, compact = false, onPick = if (shown != null && canPick(shown, copy)) ({ pickCopy(app, model, shown, copy) }) else null)
         }
     }
 }
@@ -400,10 +528,11 @@ private fun Sources(sources: List<FindSourceState>) {
     }
 }
 
-// One copy: its cover, title, the folder or album it sits in, its facts, and
-// whether Octo would take it. On Find songs it can be picked.
+// One copy: its kind on a badge, its title, the folder or album it sits
+// in, its facts, and whether Octo would take it. On Find songs it can be
+// picked; the song's cover is drawn once, over the list.
 @Composable
-private fun CopyLine(copy: FoundCandidate, cover: String?, compact: Boolean, onPick: (() -> Unit)? = null) {
+private fun CopyLine(copy: FoundCandidate, compact: Boolean, onPick: (() -> Unit)? = null) {
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
     Row(
@@ -411,22 +540,37 @@ private fun CopyLine(copy: FoundCandidate, cover: String?, compact: Boolean, onP
             .fillMaxWidth()
             .hoverable(hover)
             .then(if (onPick != null) Modifier.hoverLift(Corner.RowShape, clickable = false) else Modifier)
-            .padding(vertical = if (compact) Space.Xxs else Space.S, horizontal = if (compact) Space.None else Space.Xs),
+            .padding(vertical = Space.S, horizontal = if (compact) Space.M else Space.Xs),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.M),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) Space.M else Space.L),
     ) {
-        if (!compact) Cover(cover, Modifier.size(LineCover), shape = Corner.ArtSShape, placeholder = OctoIcons.Songs)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
-            CutTxt(candidateTitle(copy), if (compact) DesktopType.meta else DesktopType.tableTitle, OctoColors.TextPrimary)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
+                copyBadge(copy)?.let { Badge(it, lossless = isLosslessCopy(copy)) }
+                CutTxt(candidateTitle(copy), if (compact) DesktopType.table else DesktopType.tableTitle, OctoColors.TextPrimary, Modifier.weight(1f, fill = false))
+            }
             val where = listOfNotNull(copy.album?.takeIf(String::isNotBlank) ?: copy.folder, copy.file?.takeIf { copy.title != null && !compact })
             if (where.isNotEmpty()) CutTxt(where.joinToString(" · "), DesktopType.meta, OctoColors.TextMuted)
-            Txt(candidateFacts(copy).joinToString(" · "), DesktopType.meta, OctoColors.TextSecondary, maxLines = 3)
-            candidateVerdict(copy)?.let { Txt(it, DesktopType.meta, if (copy.rank != null) OctoColors.TextSecondary else OctoColors.TextMuted, maxLines = 2) }
+            Txt(badgeFacts(copy).joinToString(" · "), DesktopType.meta, OctoColors.TextSecondary, maxLines = 2)
+            // Octo's order for a copy it would try; why not, for one it would pass over.
+            val verdict = copy.rank?.let(::rankWords) ?: copy.note?.let { candidateVerdict(copy) }
+            verdict?.let { Txt(it, DesktopType.meta, if (copy.rank == 1) OctoColors.TextPrimary else OctoColors.TextMuted, maxLines = 2) }
         }
         if (onPick != null) {
             IconAction(OctoIcons.Download, "Get this copy", onPick, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = hovered, tint = if (hovered) OctoColors.TextPrimary else OctoColors.TextSecondary)
         }
     }
+}
+
+// A copy's kind, small and boxed: "FLAC" a little brighter than "MP3".
+@Composable
+private fun Badge(text: String, lossless: Boolean) {
+    Txt(
+        text,
+        DesktopType.label,
+        if (lossless) OctoColors.TextPrimary else OctoColors.TextSecondary,
+        Modifier.clip(RoundedCornerShape(Corner.ArtS)).background(if (lossless) LosslessChip else Chip).padding(horizontal = Space.S, vertical = Space.None),
+    )
 }
 
 // Picks a copy from the search `found`. Replacing a library song's copy is
@@ -459,6 +603,9 @@ private fun pickCopy(app: AppState, model: DownloadsModel, found: FoundSongs, co
 
 private val LineCover = RowHeight.Regular
 private val HeadCover = FrameSize.PlayerCover + Space.Xs
-private val TimeWidth = Space.Wide + Space.Xl
-private val MarkSize = IconSize.Transport + Space.Xs
+private val MarkSize = IconSize.Transport + Space.Xxs
+private val StepLine = Space.Xs
 private val Chip = Color.White.copy(alpha = 0.08f)
+private val LosslessChip = Color.White.copy(alpha = 0.16f)
+private val Card = Color.White.copy(alpha = 0.05f)
+private val LiveFill = Color.White.copy(alpha = 0.14f)
