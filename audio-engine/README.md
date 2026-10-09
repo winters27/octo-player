@@ -26,7 +26,7 @@ same sound shaping as the Android app, and a sample-accurate clock.
 | `src/output/` | Device callback, audio clock, cpal and silent drivers |
 | `src/timeline.rs` | Which song and second each ring frame holds |
 | `bindings/kotlin/` | Generated Kotlin bindings |
-| `examples/` | `play` (manual testing), `bench` (CPU), `render_transition` (a blend to a WAV) |
+| `examples/` | `play` (manual testing), `bench` (CPU), `render_transition` (blends to WAVs, with checks), `bpm_check` (tempo against tags) |
 | `tools/make-fixtures/` | Makes the small mp3 and opus test files |
 
 <!-- markdownlint-enable MD013 -->
@@ -210,7 +210,18 @@ The analysis and planner are the same as the app's Kotlin copy in
 
 ```sh
 cargo run --release --example render_transition -- a.flac b.flac out.wav --filters 0.7
+cargo run --release --example render_transition -- --batch pairs.txt out/
+cargo run --release --example bpm_check -- ~/Music/some-folder --limit 60
 ```
+
+`render_transition` prints each plan and checks the rendered blend: its
+momentary loudness against the two songs' bodies (3 dB under the quieter,
+2 dB over the louder), samples above -0.1 dBFS, and clicks near the blend.
+A pairs file holds one pair a line, split by a tab or ` | `. `bpm_check`
+finds every song's tempo over the whole song, its first 30 s and its last
+60 s, and gives the share within 2 % of the tag tempo after halving or
+doubling. MP3 tags are not read: the engine builds symphonia without its
+ID3 support.
 
 ## Tests
 
