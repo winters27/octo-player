@@ -39,6 +39,8 @@ pub struct DeckRead {
 
 struct State {
     pcm: Fifo,
+    /// How much sound to keep ready once playing, in frames.
+    steady: usize,
     head_secs: f64,
     status: DeckStatus,
     info: Option<TrackInfo>,
@@ -69,7 +71,19 @@ pub struct Deck {
 
 impl Deck {
     /// Starts opening `source` (a path or an address) at `start_secs`.
-    pub fn open(key: u64, source: String, start_secs: f64, mut http: HttpOptions) -> Deck {
+    pub fn open(key: u64, source: String, start_secs: f64, http: HttpOptions) -> Deck {
+        Deck::open_ahead(key, source, start_secs, http, AHEAD_SECS)
+    }
+
+    /// The same, decoding up to `first_secs` ahead before the first read
+    /// (never less than usual), so playback can wait for that much.
+    pub fn open_ahead(
+        key: u64,
+        source: String,
+        start_secs: f64,
+        mut http: HttpOptions,
+        first_secs: f64,
+    ) -> Deck {
         let starved = Arc::new(AtomicBool::new(false));
         let cancel = Arc::new(AtomicBool::new(false));
         http.starved = Some(starved.clone());
@@ -77,6 +91,7 @@ impl Deck {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 pcm: Fifo::default(),
+                steady: 0,
                 head_secs: start_secs,
                 status: DeckStatus::Opening,
                 info: None,
@@ -90,8 +105,9 @@ impl Deck {
             cancel,
         });
         let worker = shared.clone();
+        let first = first_secs.max(AHEAD_SECS);
         let spawned =
-            thread::Builder::new().name("octo-deck".into()).spawn(move || run(worker, source, http));
+            thread::Builder::new().name("octo-deck".into()).spawn(move || run(worker, source, http, first));
         if let Err(e) = spawned {
             let mut state = shared.lock();
             state.status = DeckStatus::Failed(Failure::new(crate::error::ErrorKind::Other, e.to_string()));
@@ -128,6 +144,14 @@ impl Deck {
         self.shared.lock().pcm.len() / 2
     }
 
+    /// Whether as much sound is ready as the deck decodes ahead, or the
+    /// song has been decoded to its end (or failed).
+    pub fn is_filled(&self) -> bool {
+        let state = self.shared.lock();
+        let done = matches!(state.status, DeckStatus::Ended | DeckStatus::Failed(_));
+        done || (state.capacity > 0 && state.pcm.len() / 2 >= state.capacity)
+    }
+
     /// Takes up to `out.len() / 2` stereo frames.
     pub fn read(&self, out: &mut [f32]) -> DeckRead {
         let mut state = self.shared.lock();
@@ -136,6 +160,10 @@ impl Deck {
         let samples = state.pcm.pop_into(out);
         let frames = samples / 2;
         state.head_secs += frames as f64 / rate;
+        // Once playing, only the usual amount is kept ahead.
+        if frames > 0 && state.steady > 0 {
+            state.capacity = state.steady;
+        }
         // Wake the decoder once half the buffer is free, not on every read.
         if frames > 0 && state.pcm.len() / 2 < state.capacity / 2 {
             self.shared.wake.notify_all();
@@ -171,8 +199,19 @@ impl Drop for Deck {
     }
 }
 
-fn run(shared: Arc<Shared>, source: String, http: HttpOptions) {
-    let opened = source::open(&source, http).and_then(Decoder::open);
+fn run(shared: Arc<Shared>, source: String, http: HttpOptions, first_secs: f64) {
+    // A transcode is opened at its start time rather than sought into.
+    let by_time = source::seeks_by_time(&source);
+    let mut offset = 0.0;
+    let opened = if by_time {
+        let start = shared.lock().seek.take();
+        let (address, landed) = source::at_time(&source, start.unwrap_or(0.0));
+        offset = landed;
+        shared.lock().head_secs = landed;
+        source::open(&address, http.clone()).and_then(Decoder::open)
+    } else {
+        source::open(&source, http.clone()).and_then(Decoder::open)
+    };
     let mut decoder = match opened {
         Ok(d) => d,
         Err(failure) => {
@@ -186,7 +225,8 @@ fn run(shared: Arc<Shared>, source: String, http: HttpOptions) {
     {
         let mut state = shared.lock();
         let rate = decoder.sample_rate() as f64;
-        state.capacity = (rate * AHEAD_SECS) as usize;
+        state.steady = (rate * AHEAD_SECS) as usize;
+        state.capacity = (rate * first_secs) as usize;
         state.pcm = Fifo::with_capacity(state.capacity * 2 + 16_384);
         state.info = Some(decoder.info().clone());
         state.status = DeckStatus::Playing;
@@ -204,7 +244,20 @@ fn run(shared: Arc<Shared>, source: String, http: HttpOptions) {
                 if let Some(target) = state.seek.take() {
                     let generation = state.seek_generation;
                     drop(state);
-                    let landed = decoder.seek(target);
+                    let landed = if by_time {
+                        // Opened again at the time, as the server makes it from there.
+                        let (address, at) = source::at_time(&source, target);
+                        match source::open(&address, http.clone()).and_then(Decoder::open) {
+                            Ok(fresh) => {
+                                decoder = fresh;
+                                offset = at;
+                                Ok(at)
+                            }
+                            Err(f) => Err(f),
+                        }
+                    } else {
+                        decoder.seek(target)
+                    };
                     state = shared.lock();
                     if state.seek_generation == generation {
                         match landed {
@@ -242,7 +295,7 @@ fn run(shared: Arc<Shared>, source: String, http: HttpOptions) {
             Ok(true) => {
                 if state.pcm.is_empty() {
                     let rate = decoder.sample_rate() as f64;
-                    state.head_secs = decoder.position_secs() - (block.len() / 2) as f64 / rate;
+                    state.head_secs = offset + decoder.position_secs() - (block.len() / 2) as f64 / rate;
                 }
                 state.pcm.push(&block);
             }
@@ -322,6 +375,92 @@ mod tests {
         let r = deck.read(&mut buf);
         assert!((r.start_secs - 0.5).abs() < 1e-9, "{}", r.start_secs);
         assert_eq!(buf[0], (24_000 % 20_000) as f32 / 32768.0);
+    }
+
+    #[test]
+    fn decodes_further_ahead_before_the_first_read_then_as_usual() {
+        let dir = temp_dir();
+        let path = dir.join("long.wav");
+        write_wav(&path, 48_000, 2, &sine(440.0, 48_000, 2, 0, 48_000 * 4, 0.5));
+        let deck = Deck::open_ahead(1, path.to_string_lossy().into(), 0.0, HttpOptions::default(), 2.0);
+        let until = Instant::now() + Duration::from_secs(5);
+        while !deck.is_filled() {
+            assert!(Instant::now() < until, "never filled");
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(deck.buffered() >= 96_000 - 1, "{}", deck.buffered());
+        // A song shorter than that is ready once decoded to its end.
+        let short = dir.join("short.wav");
+        write_wav(&short, 48_000, 2, &sine(440.0, 48_000, 2, 0, 4_800, 0.5));
+        let tiny = Deck::open_ahead(2, short.to_string_lossy().into(), 0.0, HttpOptions::default(), 2.0);
+        let until = Instant::now() + Duration::from_secs(5);
+        while !tiny.is_filled() {
+            assert!(Instant::now() < until, "a short song never counted as ready");
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(tiny.buffered(), 4_800);
+    }
+
+    // A transcode has no length to jump in by bytes: it is opened again at
+    // the time, and the sound from there counts as that time.
+    #[test]
+    fn a_transcode_seeks_by_opening_at_a_time() {
+        use crate::testing::http_server::{Behaviour, TestServer};
+        let rate = 48_000;
+        let samples: Vec<i16> = (0..rate * 3).flat_map(|n| [(n % 20_000) as i16, 0]).collect();
+        let server = TestServer::start(flac_bytes(rate, 2, &samples, &[]), Behaviour::default());
+        let address = format!("{}?id=1&format=mp3&maxBitRate=192", server.url());
+        let deck = Deck::open(1, address, 0.0, HttpOptions::default());
+        wait_ready(&deck);
+        deck.seek(1.4);
+        let until = Instant::now() + Duration::from_secs(5);
+        let mut buf = vec![0.0; 64];
+        let r = loop {
+            let r = deck.read(&mut buf);
+            if r.frames > 0 {
+                break r;
+            }
+            assert!(Instant::now() < until, "nothing after the seek");
+            thread::sleep(Duration::from_millis(2));
+        };
+        assert!((r.start_secs - 1.0).abs() < 1e-9, "{}", r.start_secs);
+        // The server's answer starts at its own beginning: what it made from 1 s.
+        assert_eq!(buf[0], 0.0);
+        let targets = server.targets_asked();
+        assert_eq!(targets.len(), 2, "{targets:?}");
+        assert!(!targets[0].contains("timeOffset"), "{targets:?}");
+        assert!(targets[1].ends_with("&timeOffset=1"), "{targets:?}");
+        assert!(server.ranges_asked().iter().all(|&start| start == 0), "{:?}", server.ranges_asked());
+
+        // Opened partway in, it asks for that time from the start.
+        let later = Deck::open(2, format!("{}?id=1&format=mp3", server.url()), 2.0, HttpOptions::default());
+        wait_ready(&later);
+        assert!((later.read(&mut buf).start_secs - 2.0).abs() < 1e-9);
+        assert!(server.targets_asked().last().unwrap().ends_with("timeOffset=2"));
+    }
+
+    // The original file still jumps by bytes.
+    #[test]
+    fn the_original_file_seeks_by_bytes() {
+        use crate::testing::http_server::{Behaviour, TestServer};
+        let rate = 48_000;
+        let samples: Vec<i16> = (0..rate * 3).flat_map(|n| [(n % 20_000) as i16, 0]).collect();
+        let server = TestServer::start(flac_bytes(rate, 2, &samples, &[]), Behaviour::default());
+        let deck = Deck::open(1, format!("{}?id=1&format=raw", server.url()), 0.0, HttpOptions::default());
+        wait_ready(&deck);
+        deck.seek(2.0);
+        let until = Instant::now() + Duration::from_secs(5);
+        let mut buf = vec![0.0; 64];
+        let r = loop {
+            let r = deck.read(&mut buf);
+            if r.frames > 0 && (r.start_secs - 2.0).abs() < 1e-9 {
+                break r;
+            }
+            assert!(Instant::now() < until, "nothing after the seek");
+            thread::sleep(Duration::from_millis(2));
+        };
+        assert_eq!(buf[0], (96_000 % 20_000) as f32 / 32768.0, "{r:?}");
+        assert!(server.targets_asked().iter().all(|t| !t.contains("timeOffset")));
     }
 
     #[test]

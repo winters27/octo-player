@@ -46,6 +46,50 @@ pub fn open(source: &str, http: HttpOptions) -> Result<Opened, Failure> {
     Ok(Opened { source: Box::new(file), hint, remote: false, seeks_cheaply: true })
 }
 
+/// Whether a stream is made on the way (a server's transcode, asked for with
+/// a `format` other than `raw`): it has no length and cannot jump by bytes,
+/// so it is opened again at a time instead, with `timeOffset`.
+pub fn seeks_by_time(source: &str) -> bool {
+    if !is_remote(source) {
+        return false;
+    }
+    let Some((_, query)) = source.split_once('?') else { return false };
+    let query = query.split('#').next().unwrap_or(query);
+    query.split('&').any(|pair| {
+        let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+        name.eq_ignore_ascii_case("format") && !value.is_empty() && !value.eq_ignore_ascii_case("raw")
+    })
+}
+
+/// The address of a time-seeking stream starting `secs` in, in whole
+/// seconds as servers take it, and where that lands.
+pub fn at_time(source: &str, secs: f64) -> (String, f64) {
+    let whole = secs.max(0.0).floor();
+    if whole <= 0.0 {
+        return (source.to_string(), 0.0);
+    }
+    let (base, fragment) = match source.split_once('#') {
+        Some((b, f)) => (b, Some(f)),
+        None => (source, None),
+    };
+    let kept: Vec<&str> = match base.split_once('?') {
+        Some((_, q)) => q.split('&').filter(|p| !p.to_ascii_lowercase().starts_with("timeoffset=")).collect(),
+        None => Vec::new(),
+    };
+    let path = base.split('?').next().unwrap_or(base);
+    let mut query = kept.join("&");
+    if !query.is_empty() {
+        query.push('&');
+    }
+    query.push_str(&format!("timeOffset={}", whole as u64));
+    let mut out = format!("{path}?{query}");
+    if let Some(f) = fragment {
+        out.push('#');
+        out.push_str(f);
+    }
+    (out, whole)
+}
+
 // The extension a server's content type stands for.
 fn extension_for_type(content_type: &str) -> Option<String> {
     let bare = content_type.split(';').next()?.trim().to_ascii_lowercase();
@@ -81,6 +125,23 @@ mod tests {
         assert_eq!(extension_for_type("audio/flac; charset=binary").as_deref(), Some("flac"));
         assert_eq!(url_extension("http://h/rest/stream.view?id=1&f=mp3").as_deref(), Some("view"));
         assert_eq!(url_extension("http://h/a/song.opus").as_deref(), Some("opus"));
+    }
+
+    #[test]
+    fn a_transcode_seeks_by_time() {
+        assert!(seeks_by_time("http://h/rest/stream?id=1&format=mp3&maxBitRate=192"));
+        assert!(!seeks_by_time("http://h/rest/stream?id=1&format=raw"));
+        assert!(!seeks_by_time("http://h/rest/stream?id=1"));
+        assert!(!seeks_by_time("C:\\music\\a.flac"));
+        assert_eq!(
+            at_time("http://h/rest/stream?id=1&format=mp3", 61.7),
+            ("http://h/rest/stream?id=1&format=mp3&timeOffset=61".to_string(), 61.0)
+        );
+        assert_eq!(
+            at_time("http://h/rest/stream?id=1&format=mp3&timeOffset=61", 5.0).0,
+            "http://h/rest/stream?id=1&format=mp3&timeOffset=5"
+        );
+        assert_eq!(at_time("http://h/rest/stream?id=1&format=mp3", 0.4).1, 0.0);
     }
 
     #[test]

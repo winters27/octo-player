@@ -753,6 +753,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_set_speed(
     ): Int
+    external fun uniffi_octo_audio_checksum_method_engine_set_start_after(
+    ): Int
     external fun uniffi_octo_audio_checksum_method_engine_set_stop_after_current(
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_set_trusted_certificates(
@@ -861,6 +863,8 @@ internal object UniffiLib {
     external fun uniffi_octo_audio_fn_method_engine_set_song_profile(`ptr`: Long,`itemId`: RustBuffer.ByValue,`profile`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_octo_audio_fn_method_engine_set_speed(`ptr`: Long,`speed`: Float,`pitch`: Float,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_octo_audio_fn_method_engine_set_start_after(`ptr`: Long,`ms`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_octo_audio_fn_method_engine_set_stop_after_current(`ptr`: Long,`on`: Byte,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -1097,6 +1101,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_method_engine_set_speed() and 0xFFFF) != 43041) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_engine_set_start_after() and 0xFFFF) != 23610) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_method_engine_set_stop_after_current() and 0xFFFF) != 64048) {
@@ -1769,6 +1776,13 @@ public interface EngineInterface {
     fun `setSpeed`(`speed`: kotlin.Float, `pitch`: kotlin.Float)
     
     /**
+     * How much of a stream to have ready before a song starts, in
+     * milliseconds (at most a minute); 0 starts as soon as there is sound.
+     * Files start at once. Applies from the next song started.
+     */
+    fun `setStartAfter`(`ms`: kotlin.UInt)
+    
+    /**
      * Pauses when the playing song ends, once.
      */
     fun `setStopAfterCurrent`(`on`: kotlin.Boolean)
@@ -2357,6 +2371,25 @@ open class Engine: Disposable, AutoCloseable, EngineInterface
         
         FfiConverterFloat.lower(`speed`),
         FfiConverterFloat.lower(`pitch`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * How much of a stream to have ready before a song starts, in
+     * milliseconds (at most a minute); 0 starts as soon as there is sound.
+     * Files start at once. Applies from the next song started.
+     */
+    @Throws(EngineException::class)override fun `setStartAfter`(`ms`: kotlin.UInt)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_engine_set_start_after(
+        it,
+        
+        FfiConverterUInt.lower(`ms`),_status)
 }
     }
     

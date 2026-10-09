@@ -93,6 +93,7 @@ pub enum Command {
     SetPace(Pace),
     SetRepeat(RepeatMode),
     SetStopAfterCurrent(bool),
+    SetStartAfter(u32),
     SetOutputDevice(Option<String>),
     Devices(Sender<Vec<OutputDevice>>),
     SetPositionInterval(u32),
@@ -291,6 +292,10 @@ struct Player {
     pace: Pace,
     repeat: RepeatMode,
     stop_after_current: bool,
+    // How much of a stream is decoded before it starts to play, in seconds,
+    // and whether the song starting now still waits for it.
+    start_after: f64,
+    gated: bool,
     volume: f32,
     muted: bool,
     device_choice: Option<String>,
@@ -340,6 +345,8 @@ pub fn run(driven: Driven) {
         pace: Pace::default(),
         repeat: RepeatMode::Off,
         stop_after_current: false,
+        start_after: 0.0,
+        gated: false,
         volume: 1.0,
         muted: false,
         device_choice: None,
@@ -501,6 +508,7 @@ impl Player {
                 self.stop_after_current = on;
                 self.drop_prepared();
             }
+            Command::SetStartAfter(ms) => self.start_after = ms as f64 / 1_000.0,
             Command::SetOutputDevice(id) => {
                 self.device_choice = id;
                 // Also when the device was lost and none opened since, if
@@ -666,7 +674,21 @@ impl Player {
         self.lost_at = None;
         let previous = self.heard.and_then(|k| self.index_of(k));
         let loudness = self.loudness(index, previous);
-        let deck = self.open_deck(index, secs);
+        // A stream waits until `start_after` of it is decoded (or all of it,
+        // when shorter); a file starts at once.
+        let entry = &self.queue[index];
+        self.gated = self.start_after > 0.0 && crate::source::is_remote(&entry.item.source);
+        let deck = if self.gated {
+            Deck::open_ahead(
+                entry.key,
+                entry.item.source.clone(),
+                secs,
+                self.http_for(index),
+                self.start_after,
+            )
+        } else {
+            self.open_deck(index, secs)
+        };
         let key = self.queue[index].key;
         self.drop_prepared();
         self.flush_output(Moment { key, secs });
@@ -1276,6 +1298,13 @@ impl Player {
     // Keeps the device's ring topped up.
     fn produce(&mut self) {
         let (Some(out), Some(mixer)) = (&mut self.out, &mut self.mixer) else { return };
+        if self.gated {
+            if mixer.lane().is_some_and(|lane| !lane.current().is_filled()) {
+                self.mix_state = MixState::Waiting;
+                return;
+            }
+            self.gated = false;
+        }
         let mut buffered = out.written.saturating_sub(out.shared.read_frames());
         while buffered < out.target {
             let room = out.producer.slots() / 2;

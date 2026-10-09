@@ -19,12 +19,21 @@ pub struct Behaviour {
     pub stall_after: Option<usize>,
     /// Answers every request with this status and no body.
     pub status: Option<u16>,
+    /// Sends at most this many bytes a second, on every request.
+    pub per_second: Option<usize>,
     pub content_type: &'static str,
 }
 
 impl Default for Behaviour {
     fn default() -> Self {
-        Self { ranges: true, drop_after: None, stall_after: None, status: None, content_type: "audio/flac" }
+        Self {
+            ranges: true,
+            drop_after: None,
+            stall_after: None,
+            status: None,
+            per_second: None,
+            content_type: "audio/flac",
+        }
     }
 }
 
@@ -59,6 +68,7 @@ pub struct TestServer {
     port: u16,
     ranges: Arc<Mutex<Vec<u64>>>,
     requests: Arc<AtomicUsize>,
+    targets: Arc<Mutex<Vec<String>>>,
 }
 
 impl TestServer {
@@ -84,23 +94,24 @@ impl TestServer {
         let port = listener.local_addr().unwrap().port();
         let ranges = Arc::new(Mutex::new(Vec::new()));
         let requests = Arc::new(AtomicUsize::new(0));
+        let targets = Arc::new(Mutex::new(Vec::new()));
         let body = Arc::new(body);
-        let (log, count) = (ranges.clone(), requests.clone());
+        let (log, count, asked) = (ranges.clone(), requests.clone(), targets.clone());
         let scheme = if tls.is_some() { "https" } else { "http" };
         thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                let (body, behaviour, log, count, tls) =
-                    (body.clone(), behaviour.clone(), log.clone(), count.clone(), tls.clone());
+                let (body, behaviour, log, count, asked, tls) =
+                    (body.clone(), behaviour.clone(), log.clone(), count.clone(), asked.clone(), tls.clone());
                 thread::spawn(move || match tls {
-                    None => serve(stream, &body, &behaviour, &log, &count),
+                    None => serve(stream, &body, &behaviour, &log, &count, &asked),
                     Some(config) => {
                         let Ok(conn) = rustls::ServerConnection::new(config) else { return };
-                        serve(rustls::StreamOwned::new(conn, stream), &body, &behaviour, &log, &count)
+                        serve(rustls::StreamOwned::new(conn, stream), &body, &behaviour, &log, &count, &asked)
                     }
                 });
             }
         });
-        Self { scheme, port, ranges, requests }
+        Self { scheme, port, ranges, requests, targets }
     }
 
     pub fn url(&self) -> String {
@@ -114,6 +125,11 @@ impl TestServer {
 
     pub fn requests(&self) -> usize {
         self.requests.load(Ordering::SeqCst)
+    }
+
+    /// The path and query of each request, in order.
+    pub fn targets_asked(&self) -> Vec<String> {
+        self.targets.lock().unwrap().clone()
     }
 }
 
@@ -136,15 +152,29 @@ impl Conn for rustls::StreamOwned<rustls::ServerConnection, TcpStream> {
     }
 }
 
-fn serve(mut stream: impl Conn, body: &[u8], b: &Behaviour, log: &Mutex<Vec<u64>>, count: &AtomicUsize) {
+fn serve(
+    mut stream: impl Conn,
+    body: &[u8],
+    b: &Behaviour,
+    log: &Mutex<Vec<u64>>,
+    count: &AtomicUsize,
+    targets: &Mutex<Vec<String>>,
+) {
     let mut range = None;
     {
         let mut reader = BufReader::new(&mut stream);
         let mut line = String::new();
+        let mut first = true;
         loop {
             line.clear();
             if reader.read_line(&mut line).unwrap_or(0) == 0 {
                 return;
+            }
+            if first {
+                first = false;
+                if let Some(target) = line.split_whitespace().nth(1) {
+                    targets.lock().unwrap().push(target.to_string());
+                }
             }
             let trimmed = line.trim_end();
             if trimmed.is_empty() {
@@ -197,7 +227,11 @@ fn serve(mut stream: impl Conn, body: &[u8], b: &Behaviour, log: &Mutex<Vec<u64>
     let rest = &body[start as usize..];
     let cut = if nth == 0 { b.drop_after.or(b.stall_after) } else { None };
     let mut sent = 0;
-    for chunk in rest.chunks(16 << 10) {
+    let piece = b.per_second.map_or(16 << 10, |rate| (rate / 20).max(1));
+    for chunk in rest.chunks(piece) {
+        if b.per_second.is_some() {
+            thread::sleep(Duration::from_millis(50));
+        }
         let chunk = match cut {
             Some(limit) if sent + chunk.len() > limit => &chunk[..limit - sent],
             _ => chunk,

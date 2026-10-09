@@ -367,6 +367,13 @@ impl Engine {
         self.send(Command::SetStopAfterCurrent(on))
     }
 
+    /// How much of a stream to have ready before a song starts, in
+    /// milliseconds (at most a minute); 0 starts as soon as there is sound.
+    /// Files start at once. Applies from the next song started.
+    pub fn set_start_after(&self, ms: u32) -> Result<(), EngineError> {
+        self.send(Command::SetStartAfter(ms.min(60_000)))
+    }
+
     /// Plays to device `id` from `devices()`, or follows the system's
     /// default device with `None`.
     pub fn set_output_device(&self, id: Option<String>) -> Result<(), EngineError> {
