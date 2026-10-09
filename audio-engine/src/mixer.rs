@@ -532,9 +532,18 @@ impl Mixer {
         self.planned.take().map(|p| p.deck)
     }
 
-    /// Ends a crossfade at once: the outgoing song stops.
+    /// Ends a crossfade at once: the outgoing song stops, and the incoming
+    /// song's filter hands over to its dry sound as at a blend's end.
     pub fn finish_fade(&mut self) {
-        self.fade = None;
+        self.end_fade();
+    }
+
+    // Drops the blend, keeping its incoming filter for the release.
+    fn end_fade(&mut self) {
+        if let Some(sweeps) = self.fade.take().and_then(|f| f.sweeps) {
+            let len = ((RELEASE_SECS * self.rate as f64) as usize).max(1);
+            self.release = Some(Release { filter: sweeps.incoming, done: 0, len });
+        }
     }
 
     /// Songs that failed while playing, since the last call.
@@ -777,10 +786,7 @@ impl Mixer {
             fade.done += frames as u64;
             if fade.done >= fade.clock.end() || fade.outgoing.is_ended() {
                 self.failures.extend(fade.outgoing.take_failures());
-                if let Some(sweeps) = self.fade.take().and_then(|f| f.sweeps) {
-                    let len = ((RELEASE_SECS * self.rate as f64) as usize).max(1);
-                    self.release = Some(Release { filter: sweeps.incoming, done: 0, len });
-                }
+                self.end_fade();
             }
         }
         (frames, MixState::Playing)

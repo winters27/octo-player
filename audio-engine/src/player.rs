@@ -35,6 +35,10 @@ use crate::source::http::{self, HttpOptions};
 use crate::source::trust::Trust;
 use crate::timeline::{Moment, Timeline};
 
+/// How long a late blend waits for a next song moved to its entry point to
+/// read ahead again, in seconds of real time.
+const LATE_SEEK_SECS: f64 = 0.5;
+
 /// How much sound is kept queued for the device, and the most it holds.
 const RING_TARGET_SECS: f64 = 0.12;
 const RING_SECS: f64 = 0.4;
@@ -1002,7 +1006,11 @@ impl Player {
         // (a seek near the end), can only blend over what is left.
         let lead_ms = if self.automix.smart_transitions { (LEAD_SECS * speed * 1_000.0) as i64 } else { 0 };
         if !plan.late && now_ms + lead_ms > plan.start_ms {
-            match plan.late_from(now_ms) {
+            // A song that comes in part way is moved there first, which
+            // empties what it had read ahead: the blend waits for it to read
+            // again, or the mixer would find it not ready and join gaplessly.
+            let settle_ms = if plan.entry_ms > 0 { (LATE_SEEK_SECS * speed * 1_000.0) as i64 } else { 0 };
+            match plan.late_from(now_ms + settle_ms) {
                 Some(late) if late.overlap_secs() / speed * 1_000.0 >= SHORTEST_FADE_MS as f64 => plan = late,
                 _ => {
                     self.join_gaplessly(current_key, key, deck, loudness, total, "too late to blend");

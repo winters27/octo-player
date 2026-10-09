@@ -768,6 +768,46 @@ fn a_smart_plan_starts_early_enters_late_and_cuts_the_outgoing_song() {
     assert_eq!((next[1] * 32768.0).round() as usize, RATE as usize % 15_000);
 }
 
+fn late_entry_plan(input: &crate::automix::PlanInput) -> crate::automix::TransitionPlan {
+    let len = input.current.duration_ms as i64;
+    let mut plan = crate::automix::TransitionPlan::fixed_crossfade(len, 2_500, "test plan");
+    plan.start_ms = 9_000;
+    plan.entry_ms = 500;
+    plan
+}
+
+#[test]
+fn a_late_plan_into_a_song_entered_part_way_still_blends() {
+    // Started inside a planned blend whose next song comes in 0.5 s into
+    // itself: the next song is moved there, and must still blend in.
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 12, 0.3));
+    write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 4, 0.3));
+    *crate::automix::TEST_PLANNER.lock().unwrap() = Some(late_entry_plan);
+    let (engine, events, _) = engine(1.0);
+    engine.set_crossfade(3_000).unwrap();
+    engine
+        .set_automix(crate::automix::AutomixSettings {
+            smart_transitions: true,
+            filter_sweeps: false,
+            match_tempo: false,
+            max_overlap_ms: 8_000,
+        })
+        .unwrap();
+    engine.load(vec![item("a", &a), item("b", &b)], 0, 9_500, true).unwrap();
+    let planned = events
+        .wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    *crate::automix::TEST_PLANNER.lock().unwrap() = None;
+    let EngineEvent::TransitionPlanned { reason, .. } = planned else { unreachable!() };
+    assert!(reason.contains("late"), "{reason}");
+    let joined = events.wait_for("join", Duration::from_secs(10), |e| {
+        matches!(e, EngineEvent::CrossfadeStarted { .. } | EngineEvent::GaplessTransition { .. })
+    });
+    assert!(matches!(joined, EngineEvent::CrossfadeStarted { .. }), "{joined:?}");
+    engine.shutdown();
+}
+
 #[test]
 fn starting_inside_the_blend_window_blends_over_what_is_left() {
     let dir = temp_dir();

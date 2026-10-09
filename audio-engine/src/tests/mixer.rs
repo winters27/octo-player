@@ -451,3 +451,63 @@ fn the_blend_is_over_on_its_last_frame() {
         assert_eq!(mixer.is_fading(), target < 60_000, "at {made}");
     }
 }
+
+// Like `blend`, but the blend is ended at once (as a change of the
+// crossfade setting does) once `cut_at` frames are out. Returns the sound
+// and the frame count at the cut.
+fn blend_cut_short(shape: FadeShape, frames: u64, cut_at: usize) -> (Vec<f32>, usize) {
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    dc_file(&a, 96_000, 8_192, 0);
+    place_file(&b, 96_000);
+    let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
+    let mut lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    let next = Deck::open(2, b.to_string_lossy().into(), 0.0, HttpOptions::default());
+    wait_ready(&next);
+    mixer.plan_fade(1, 1.0, frames, next, Loudness::default(), shape);
+    let mut out = Vec::new();
+    let mut markers = Vec::new();
+    let mut block = vec![0.0; 256];
+    let mut cut = None;
+    let until = Instant::now() + Duration::from_secs(30);
+    loop {
+        let (n, state) = mixer.render(&mut block, &mut markers);
+        out.extend_from_slice(&block[..n * 2]);
+        if mixer.is_fading()
+            && let Some(lane) = mixer.lane_mut()
+        {
+            lane.last = true;
+        }
+        if cut.is_none() && out.len() / 2 >= cut_at && mixer.is_fading() {
+            mixer.finish_fade();
+            cut = Some(out.len() / 2);
+        }
+        if state == MixState::Ended && n == 0 {
+            return (out, cut.expect("the blend was cut"));
+        }
+        if n == 0 {
+            assert!(Instant::now() < until, "mixer stalled");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+}
+
+#[test]
+fn a_blend_cut_short_still_hands_the_filter_over_gently() {
+    let fade = 24_000u64;
+    let cut_at = 48_000 + LATENCY + 12_000;
+    let plain = FadeShape { k: 0.4, ..Default::default() };
+    let swept = FadeShape { k: 0.4, filter_strength: 0.7, ..Default::default() };
+    let (a, cut) = blend_cut_short(plain, fade, cut_at);
+    let (b, cut_b) = blend_cut_short(swept, fade, cut_at);
+    assert_eq!(cut, cut_b);
+    // Right after the cut B's high-pass is still fading out...
+    let differs = (cut + LATENCY + 8..cut + LATENCY + 200).any(|i| a[i * 2 + 1] != b[i * 2 + 1]);
+    assert!(differs, "the filter came off at once");
+    // ...and some 10 ms on the sound is B's own.
+    let released = cut + LATENCY + RATE as usize / 100 + 256;
+    let first = (released * 2..a.len().min(b.len())).find(|&i| a[i] != b[i]);
+    assert_eq!(first, None, "{:?}", first.map(|i| (i, a[i], b[i])));
+}
