@@ -265,10 +265,17 @@ fn filter_sweeps_touch_only_the_blend() {
     assert_eq!(a.len(), b.len());
     let fade_start = 48_000 + LATENCY;
     let fade_end = fade_start + fade as usize;
-    // Before and after the blend: the very same samples.
+    // Before the blend, and once B's high-pass has handed over to its dry
+    // sound after it: the very same samples.
+    let released = fade_end + RATE as usize / 100;
     assert_eq!(a[..fade_start * 2], b[..fade_start * 2]);
-    let first = (fade_end * 2..a.len()).find(|&i| a[i] != b[i]);
+    let first = (released * 2..a.len()).find(|&i| a[i] != b[i]);
     assert_eq!(first, None, "{:?}", first.map(|i| (i, a[i], b[i])));
+    // The hand-over is smooth: B's ramp, which the high-pass had taken
+    // down to nothing, comes back without a step.
+    let step =
+        (fade_end - 10..released + 10).map(|i| (b[i * 2 + 1] - b[(i - 1) * 2 + 1]).abs()).fold(0.0, f32::max);
+    assert!(step < 0.01, "a step of {step} where the filter came off");
     // Inside it the filters are at work: the steady A loses its level to
     // the high-pass, and B's ramp is changed by its own high-pass.
     let late = fade_start + fade as usize * 3 / 4;

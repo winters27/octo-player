@@ -35,6 +35,11 @@ const SWEEP_STEP: usize = 32;
 const QUIET_SECS: f64 = 0.3;
 const RUSH_SECS: f64 = 0.25;
 
+/// How long the incoming song's high-pass takes to hand over to the dry
+/// sound once a blend ends, in seconds. Taking it off at once would step the
+/// waveform by the filter's phase shift: a click on bass notes.
+const RELEASE_SECS: f64 = 0.01;
+
 /// How far into and out of a blend the headroom takes to come and go, as
 /// a share of the blend.
 const HEADROOM_RAMP: f64 = 0.1;
@@ -335,10 +340,19 @@ impl Rated {
     }
 }
 
+// The incoming song's filter after a swept blend, faded out from wet to dry
+// over `len` frames.
+struct Release {
+    filter: FilterBank,
+    done: usize,
+    len: usize,
+}
+
 pub struct Mixer {
     rate: u32,
     lane: Option<Lane>,
     fade: Option<Fade>,
+    release: Option<Release>,
     planned: Option<PlannedFade>,
     rated: Option<Rated>,
     tap: LiveTap,
@@ -375,6 +389,7 @@ impl Mixer {
             rate,
             lane: None,
             fade: None,
+            release: None,
             planned: None,
             rated: None,
             tap: LiveTap { key: None, analyzer: LiveAnalyzer::new(), mono: Vec::with_capacity(BLOCK) },
@@ -429,6 +444,7 @@ impl Mixer {
     pub fn start(&mut self, lane: Lane, transition: Transition) {
         self.lane = Some(lane);
         self.fade = None;
+        self.release = None;
         self.planned = None;
         self.rated = None;
         self.next_transition = Some(transition);
@@ -439,6 +455,7 @@ impl Mixer {
     pub fn clear(&mut self) {
         self.lane = None;
         self.fade = None;
+        self.release = None;
         self.planned = None;
         self.rated = None;
         self.pace.clear();
@@ -448,6 +465,7 @@ impl Mixer {
     /// Jumps within the current song.
     pub fn seek(&mut self, secs: f64) {
         self.fade = None;
+        self.release = None;
         self.planned = None;
         self.rated = None;
         if let Some(lane) = &mut self.lane {
@@ -726,6 +744,21 @@ impl Mixer {
                 let clock = fade.clock;
                 sweeps.run(&mut self.b, &mut self.a, frames, fade.done, |d| clock.progress(d));
             }
+        } else if let Some(release) = &mut self.release {
+            let wet = &mut self.b[..frames * 2];
+            wet.copy_from_slice(&self.a[..frames * 2]);
+            release.filter.process(wet, frames);
+            for i in 0..frames {
+                let dry = ((release.done + i) as f32 / release.len as f32).min(1.0);
+                for ch in 0..2 {
+                    let at = i * 2 + ch;
+                    self.a[at] = wet[at] * (1.0 - dry) + self.a[at] * dry;
+                }
+            }
+            release.done += frames;
+            if release.done >= release.len {
+                self.release = None;
+            }
         }
         self.block[..frames * 2].copy_from_slice(&self.a[..frames * 2]);
         if let Some(fade) = &mut self.fade {
@@ -744,7 +777,10 @@ impl Mixer {
             fade.done += frames as u64;
             if fade.done >= fade.clock.end() || fade.outgoing.is_ended() {
                 self.failures.extend(fade.outgoing.take_failures());
-                self.fade = None;
+                if let Some(sweeps) = self.fade.take().and_then(|f| f.sweeps) {
+                    let len = ((RELEASE_SECS * self.rate as f64) as usize).max(1);
+                    self.release = Some(Release { filter: sweeps.incoming, done: 0, len });
+                }
             }
         }
         (frames, MixState::Playing)
