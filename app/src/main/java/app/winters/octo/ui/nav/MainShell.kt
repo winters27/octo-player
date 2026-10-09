@@ -24,7 +24,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -109,6 +111,10 @@ import app.winters.octo.ui.sound.SoundScreen
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import androidx.compose.ui.unit.dp
+import androidx.navigation3.runtime.NavBackStack
+import androidx.navigation3.runtime.NavEntry
+import androidx.navigation3.runtime.rememberDecoratedNavEntries
+import app.winters.octo.design.motionScale
 import app.winters.octo.ui.downloads.DownloadsPill
 
 // The whole app: one back stack per tab, the screens, and the floating
@@ -128,6 +134,27 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
     )
     var selected by rememberSaveable { mutableIntStateOf(0) }
     val stack = stacks[selected]
+    // Whether this change of page is a change of tab, which moves
+    // differently from going deeper or back.
+    val tabSeen = remember { intArrayOf(selected) }
+    val changingTab = tabSeen[0] != selected
+    SideEffect { tabSeen[0] = selected }
+    val motion = motionScale()
+    // Every tab's pages, each tab keeping its own pages' state and view
+    // models while another tab is in front, so coming back to a tab finds
+    // it as it was left instead of building it again from empty.
+    val tabPages = stacks.mapIndexed { index, tabStack ->
+        key(index) {
+            rememberDecoratedNavEntries(
+                backStack = tabStack,
+                entryDecorators = listOf(
+                    rememberSaveableStateHolderNavEntryDecorator(),
+                    rememberViewModelStoreNavEntryDecorator(),
+                ),
+                entryProvider = remember(tabStack) { pagesFor(tabStack) },
+            )
+        }
+    }
     val open: (NavKey) -> Unit = { stack.add(it) }
     val back: () -> Unit = { stack.removeLastOrNull() }
     val hasTrack = now.trackId != null
@@ -209,58 +236,14 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                 Box(Modifier.fillMaxSize().hazeSource(haze)) {
                     AmbientBackdrop(stack.lastOrNull(), now, pageArtworks, awake = !playerOpen)
                     NavDisplay(
-                        backStack = stack,
+                        entries = tabPages[selected],
                         onBack = { stack.removeLastOrNull() },
-                        entryDecorators = listOf(
-                            rememberSaveableStateHolderNavEntryDecorator(),
-                            rememberViewModelStoreNavEntryDecorator(),
-                        ),
                         // Turned sideways, pages keep clear of the camera cutout and
                         // a side navigation bar; the glow still fills the screen.
                         modifier = Modifier.fillMaxSize().windowInsetsPadding(SideInsets),
-                        entryProvider = entryProvider {
-                            entry<HomeRoute> { HomeScreen(open) }
-                            entry<SearchRoute> { SearchScreen(open) }
-                            entry<LibraryRoute> { LibraryScreen(open) }
-                            entry<SettingsRoute> { SettingsScreen(open) }
-                            entry<SettingsPageRoute> { SettingsPageScreen(it.page, it.highlight, open, back) }
-                            entry<AlbumRoute> { AlbumScreen(it.id, open, back) }
-                            entry<ArtistRoute> { ArtistScreen(it.id, open, back) }
-                            entry<OnlineAlbumRoute> { OnlineAlbumScreen(it.id, open, back) }
-                            entry<OnlineArtistRoute> { OnlineArtistScreen(it.id, open, back) }
-                            entry<AlbumsRoute> { AlbumsScreen(open, back) }
-                            entry<ArtistsRoute> { ArtistsScreen(open, back) }
-                            entry<SongsRoute> { SongsScreen(back, open) }
-                            entry<GenresRoute> { GenresScreen(open, back) }
-                            entry<GenreRoute> { GenreScreen(it.name, open, back) }
-                            entry<FoldersRoute> { FoldersScreen(back) }
-                            entry<PlaylistsRoute> { PlaylistsScreen(open, back) }
-                            // Liked songs and Favourites are one page; the way in picks the part.
-                            entry<LikedRoute> { FavouritesScreen(open, back, openingSegment(it)) }
-                            entry<FavouritesRoute> { FavouritesScreen(open, back, openingSegment(it)) }
-                            entry<DownloadsRoute> { DownloadsScreen(back) }
-                            entry<PlaylistRoute> { PlaylistScreen(it.id, back) }
-                            entry<LiveListRoute> { LiveListScreen(it.id, back) }
-                            // Once saved, a new live list's screen takes the editor's place.
-                            entry<LiveListEditRoute> { route ->
-                                LiveListEditScreen(route.id, route.start, back, onSaved = { saved ->
-                                    stack.removeLastOrNull()
-                                    if (route.id == null) open(LiveListRoute(saved))
-                                })
-                            }
-                            entry<SignInRoute> { SignInScreen(back) }
-                            entry<EditConnectionRoute> { SignInScreen(back, editing = true) }
-                            entry<ServerFormRoute> { route -> SignInScreen(back, form = route.form, serverId = route.id, note = route.note) }
-                            entry<OctoAdminRoute> { OctoAdminScreen(back) }
-                            entry<SpotifyImportRoute> { SpotifyImportScreen(back) }
-                            entry<SoundRoute> { SoundScreen(back) }
-                            entry<SharesRoute> { SharesScreen(back) }
-                            entry<RadioStationsRoute> { RadioStationsScreen(back) }
-                            entry<HistoryRoute> { HistoryScreen(it.mostPlayed, back) }
-                            entry<LibraryHealthRoute> { LibraryHealthScreen(open, back) }
-                            entry<HealthCheckRoute> { HealthCheckScreen(it.check, back) }
-                            entry<HealthTrashRoute> { RecentlyRemovedScreen(back) }
-                        },
+                        transitionSpec = { if (changingTab) tabMotion(motion) else pushMotion(motion) },
+                        popTransitionSpec = { if (changingTab) tabMotion(motion) else popMotion(motion) },
+                        predictivePopTransitionSpec = { gestureMotion(motion) },
                     )
                 }
                 // Back from the top of another tab goes Home rather than out.
@@ -345,3 +328,53 @@ private val SideInsets: WindowInsets
 // One key for whichever song is on, so a song change mid-flight cannot
 // break the hand-off.
 private const val ArtKey = "now-playing-art"
+
+// The app's pages, each opening further pages in, and going back within,
+// the tab it belongs to.
+private fun pagesFor(stack: NavBackStack<NavKey>): (NavKey) -> NavEntry<NavKey> {
+    val open: (NavKey) -> Unit = { stack.add(it) }
+    val back: () -> Unit = { stack.removeLastOrNull() }
+    return entryProvider {
+        entry<HomeRoute> { HomeScreen(open) }
+        entry<SearchRoute> { SearchScreen(open) }
+        entry<LibraryRoute> { LibraryScreen(open) }
+        entry<SettingsRoute> { SettingsScreen(open) }
+        entry<SettingsPageRoute> { SettingsPageScreen(it.page, it.highlight, open, back) }
+        entry<AlbumRoute> { AlbumScreen(it.id, open, back) }
+        entry<ArtistRoute> { ArtistScreen(it.id, open, back) }
+        entry<OnlineAlbumRoute> { OnlineAlbumScreen(it.id, open, back) }
+        entry<OnlineArtistRoute> { OnlineArtistScreen(it.id, open, back) }
+        entry<AlbumsRoute> { AlbumsScreen(open, back) }
+        entry<ArtistsRoute> { ArtistsScreen(open, back) }
+        entry<SongsRoute> { SongsScreen(back, open) }
+        entry<GenresRoute> { GenresScreen(open, back) }
+        entry<GenreRoute> { GenreScreen(it.name, open, back) }
+        entry<FoldersRoute> { FoldersScreen(back) }
+        entry<PlaylistsRoute> { PlaylistsScreen(open, back) }
+        // Liked songs and Favourites are one page; the way in picks the part.
+        entry<LikedRoute> { FavouritesScreen(open, back, openingSegment(it)) }
+        entry<FavouritesRoute> { FavouritesScreen(open, back, openingSegment(it)) }
+        entry<DownloadsRoute> { DownloadsScreen(back) }
+        entry<PlaylistRoute> { PlaylistScreen(it.id, back) }
+        entry<LiveListRoute> { LiveListScreen(it.id, back) }
+        // Once saved, a new live list's screen takes the editor's place.
+        entry<LiveListEditRoute> { route ->
+            LiveListEditScreen(route.id, route.start, back, onSaved = { saved ->
+                stack.removeLastOrNull()
+                if (route.id == null) open(LiveListRoute(saved))
+            })
+        }
+        entry<SignInRoute> { SignInScreen(back) }
+        entry<EditConnectionRoute> { SignInScreen(back, editing = true) }
+        entry<ServerFormRoute> { route -> SignInScreen(back, form = route.form, serverId = route.id, note = route.note) }
+        entry<OctoAdminRoute> { OctoAdminScreen(back) }
+        entry<SpotifyImportRoute> { SpotifyImportScreen(back) }
+        entry<SoundRoute> { SoundScreen(back) }
+        entry<SharesRoute> { SharesScreen(back) }
+        entry<RadioStationsRoute> { RadioStationsScreen(back) }
+        entry<HistoryRoute> { HistoryScreen(it.mostPlayed, back) }
+        entry<LibraryHealthRoute> { LibraryHealthScreen(open, back) }
+        entry<HealthCheckRoute> { HealthCheckScreen(it.check, back) }
+        entry<HealthTrashRoute> { RecentlyRemovedScreen(back) }
+    }
+}
