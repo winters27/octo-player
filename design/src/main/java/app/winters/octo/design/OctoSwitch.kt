@@ -57,8 +57,9 @@ fun switchThumb(track: Float, thumb: Float, padding: Float, position: Float, str
     return SwitchThumb(x, width)
 }
 
-// The track off: a faint recessed white.
-private val OffTrack = Color.White.copy(alpha = 0.10f)
+// The track off: a recessed white, strong enough to read as a switch on a
+// raised panel and not only as its thumb.
+private val OffTrack = Color.White.copy(alpha = 0.18f)
 
 // The on/off switch for settings rows: the accent, glowing faintly, when on;
 // a faint recessed pill when off. The thumb slides on the default curve and

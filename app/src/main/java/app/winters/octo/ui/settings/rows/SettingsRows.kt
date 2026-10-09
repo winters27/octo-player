@@ -51,7 +51,7 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.SliderLook
-import app.winters.octo.design.glassPanel
+import app.winters.octo.design.raisedPanel
 import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.common.choiceAnchor
 import app.winters.octo.ui.settings.SettingEntry
@@ -69,7 +69,7 @@ val LocalSettingsHighlight = compositionLocalOf { SettingsHighlight(null) {} }
 private const val SETTLE_MS = 350L
 private const val HOLD_MS = 900L
 
-// Rows in one glass panel, a hairline between each. A row that draws
+// Rows in one raised panel, a hairline between each. A row that draws
 // nothing takes no place and gets no line. The lines start under the text,
 // so rows with icons pass a deeper inset. A title sits above the panel as
 // a quiet capitalised label, as the desktop names its groups, led by the
@@ -102,7 +102,7 @@ fun SettingsGroup(
                 )
             }
         }
-        SubcomposeLayout(Modifier.fillMaxWidth().glassPanel(GroupShape)) { constraints ->
+        SubcomposeLayout(Modifier.fillMaxWidth().raisedPanel(GroupShape)) { constraints ->
             val loose = constraints.copy(minHeight = 0)
             val rows = subcompose("rows", content).map { it.measure(loose) }.filter { it.height > 0 }
             val lines = subcompose("lines") {
@@ -136,7 +136,7 @@ private fun Hairline(inset: Dp) {
             .padding(start = inset)
             .fillMaxWidth()
             .height(onePixel)
-            .background(OctoColors.TextPrimary.copy(alpha = 0.08f)),
+            .background(OctoColors.TextPrimary.copy(alpha = 0.10f)),
     )
 }
 
@@ -181,7 +181,7 @@ internal fun RowFrame(
 private fun RowScope.Label(title: String, below: String?, enabled: Boolean = true, belowColor: Color = OctoColors.TextMuted, titleColor: Color = OctoColors.TextPrimary) {
     Column(Modifier.weight(1f)) {
         Text(title, style = OctoType.body, color = if (enabled) titleColor else OctoColors.TextMuted)
-        below?.let { Text(it, style = OctoType.caption, color = belowColor) }
+        below?.let { Text(it, style = OctoType.caption, color = belowColor, modifier = Modifier.padding(top = 2.dp)) }
     }
 }
 
@@ -227,7 +227,9 @@ fun ChoiceRow(
 }
 
 // A row's current value on its right: quieter than the title, kept to the
-// end of the line, and never taking more than its share of the row.
+// end of the line, and never taking more than its share of the row. It
+// fills that share so the words, and the chevron after them, sit at the
+// row's end rather than halfway along it.
 @Composable
 private fun RowScope.Reading(value: String, enabled: Boolean = true) {
     Text(
@@ -237,7 +239,7 @@ private fun RowScope.Reading(value: String, enabled: Boolean = true) {
         textAlign = TextAlign.End,
         maxLines = 2,
         overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.weight(1f, fill = false),
+        modifier = Modifier.weight(0.8f),
     )
 }
 
@@ -330,7 +332,7 @@ fun NoteRow(text: String, entry: SettingEntry? = null, color: Color = OctoColors
 @Composable
 fun CategoryRow(@DrawableRes icon: Int, title: String, summary: String, onClick: () -> Unit) {
     RowFrame(null, Modifier.clickable(role = Role.Button, onClick = onClick)) {
-        Icon(painterResource(icon), contentDescription = null, tint = OctoColors.Accent, modifier = Modifier.size(24.dp))
+        IconTile(icon)
         Column(Modifier.weight(1f).padding(start = 4.dp)) {
             Text(title, style = OctoType.body, color = OctoColors.TextPrimary)
             if (summary.isNotEmpty()) {
@@ -341,5 +343,21 @@ fun CategoryRow(@DrawableRes icon: Int, title: String, summary: String, onClick:
     }
 }
 
+// A row's icon on a small tinted tile, so a list of pages reads at a glance.
+@Composable
+fun IconTile(@DrawableRes icon: Int) {
+    Box(
+        Modifier
+            .size(IconTileSize)
+            .background(OctoColors.Accent.copy(alpha = 0.14f), IconTileShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(painterResource(icon), contentDescription = null, tint = OctoColors.Accent, modifier = Modifier.size(20.dp))
+    }
+}
+
+private val IconTileSize = 34.dp
+private val IconTileShape = RoundedCornerShape(10.dp)
+
 // The inset for a group of rows with icons: the lines start under the titles.
-val IconRowInset = 56.dp
+val IconRowInset = 66.dp

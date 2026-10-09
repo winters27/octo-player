@@ -71,6 +71,7 @@ import app.winters.octo.ui.nav.SoundRoute
 import app.winters.octo.ui.settings.rows.ActionRow
 import app.winters.octo.ui.settings.rows.CategoryRow
 import app.winters.octo.ui.settings.rows.IconRowInset
+import app.winters.octo.ui.settings.rows.IconTile
 import app.winters.octo.ui.settings.rows.NoteRow
 import app.winters.octo.ui.settings.rows.SettingsGroup
 import app.winters.octo.ui.sound.SoundScreen
@@ -230,7 +231,7 @@ private fun AccountRow(@DrawableRes icon: Int, title: String, lines: List<Pair<S
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Icon(painterResource(icon), contentDescription = null, tint = OctoColors.Accent, modifier = Modifier.size(24.dp))
+        IconTile(icon)
         Column(Modifier.weight(1f)) {
             Text(title, style = OctoType.body, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             lines.forEach { (text, color) ->
@@ -301,7 +302,7 @@ private fun Categories(onOpen: (NavKey) -> Unit, vm: SettingsViewModel) {
         is SessionState.SignedIn -> serverStatus(syncing, null, last?.takeIf { it.sourceId == current.session.sourceId }?.at, now)
     }
 
-    SettingsGroup(separatorInset = IconRowInset) {
+    SettingsGroup(title = "Listening", separatorInset = IconRowInset) {
         CategoryRow(OctoIcons.Playback, SettingsPage.Playback.title, playbackSummary(player)) { open(SettingsPage.Playback) }
         CategoryRow(OctoIcons.Sound, SettingsPage.Sound.title, soundSummary(sound)) { open(SettingsPage.Sound) }
         CategoryRow(
@@ -310,16 +311,16 @@ private fun Categories(onOpen: (NavKey) -> Unit, vm: SettingsViewModel) {
             appearanceSummary(player.ambient, player.liveBackground && LiveBackgroundSupported),
         ) { open(SettingsPage.Appearance) }
     }
-    SettingsGroup(separatorInset = IconRowInset) {
+    SettingsGroup(title = "Your music", separatorInset = IconRowInset) {
         CategoryRow(OctoIcons.Library, SettingsPage.Library.title, librarySummary(access, songs, folders)) { open(SettingsPage.Library) }
         CategoryRow(OctoIcons.Cloud, SettingsPage.Server.title, serverLine) { open(SettingsPage.Server) }
         CategoryRow(OctoIcons.Download, SettingsPage.Streaming.title, streamingSummary(stream, offline)) { open(SettingsPage.Streaming) }
     }
-    SettingsGroup(separatorInset = IconRowInset) {
+    SettingsGroup(title = "Lyrics and history", separatorInset = IconRowInset) {
         CategoryRow(OctoIcons.Lyrics, SettingsPage.Lyrics.title, lyricsSummary(player.lyricsOnline, keepScreenOn)) { open(SettingsPage.Lyrics) }
         CategoryRow(OctoIcons.Scrobbling, SettingsPage.Scrobbling.title, scrobblingSummary(listenBrainz)) { open(SettingsPage.Scrobbling) }
     }
-    SettingsGroup(separatorInset = IconRowInset) {
+    SettingsGroup(title = "This app", separatorInset = IconRowInset) {
         CategoryRow(OctoIcons.Backup, SettingsPage.Backup.title, BACKUP_SUMMARY) { open(SettingsPage.Backup) }
         // A ready update shows here, quietly, in place of the version.
         val updates = hiltViewModel<UpdatesViewModel>()
