@@ -250,6 +250,15 @@ struct Scouting {
     b_head: Option<ScoutJob>,
 }
 
+impl Scouting {
+    // The jobs only use up their time limit while the player plays.
+    fn set_running(&mut self, running: bool) {
+        for job in [&mut self.a_tail, &mut self.b_head].into_iter().flatten() {
+            job.set_running(running);
+        }
+    }
+}
+
 struct Out {
     opened: OpenedOutput,
     shared: Arc<OutputShared>,
@@ -671,6 +680,7 @@ impl Player {
             return;
         }
         self.playing = true;
+        self.scouting.set_running(true);
         if self.mixer.is_none() || self.ended {
             if self.current.is_none() {
                 self.current = Some(0);
@@ -693,6 +703,7 @@ impl Player {
 
     fn pause(&mut self) {
         self.playing = false;
+        self.scouting.set_running(false);
         if let Some(out) = &self.out {
             out.shared.set_paused(true);
         }
@@ -929,6 +940,8 @@ impl Player {
                 ScoutJob::start(item.source.clone(), self.http_for(i), part, item.bpm)
             });
         }
+        let playing = self.playing;
+        self.scouting.set_running(playing);
     }
 
     // Whether the scout is done (or given up on) for the songs `a` then `b`.

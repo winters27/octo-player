@@ -82,7 +82,10 @@ pub fn scout_section(
 
 /// A section being scouted on its own thread. Dropping it stops the work.
 pub struct ScoutJob {
-    started: Instant,
+    // Time counted toward the limit before `running_since`, and when the
+    // count last resumed; `None` while it is stopped.
+    waited: Duration,
+    running_since: Option<Instant>,
     cancel: Arc<AtomicBool>,
     result: Arc<Mutex<Option<Result<SectionAnalysis, Failure>>>>,
 }
@@ -115,7 +118,7 @@ impl ScoutJob {
             *result.lock().unwrap_or_else(|e| e.into_inner()) =
                 Some(Err(Failure::new(ErrorKind::Other, e.to_string())));
         }
-        ScoutJob { started: Instant::now(), cancel, result }
+        ScoutJob { waited: Duration::ZERO, running_since: Some(Instant::now()), cancel, result }
     }
 
     /// The analysis, once the section is decoded.
@@ -126,9 +129,27 @@ impl ScoutJob {
         }
     }
 
-    /// Finished, failed, or given up on after `limit`.
+    /// Counts time toward the limit only while `running`, so a job started
+    /// or waiting while playback is paused is not given up on meanwhile.
+    pub fn set_running(&mut self, running: bool) {
+        match (running, self.running_since) {
+            (true, None) => self.running_since = Some(Instant::now()),
+            (false, Some(since)) => {
+                self.waited += since.elapsed();
+                self.running_since = None;
+            }
+            _ => {}
+        }
+    }
+
+    /// How long the job has counted toward its limit.
+    pub fn waited(&self) -> Duration {
+        self.waited + self.running_since.map_or(Duration::ZERO, |since| since.elapsed())
+    }
+
+    /// Finished, failed, or given up on after `limit` of running time.
     pub fn is_settled(&self, limit: Duration) -> bool {
-        self.result.lock().unwrap_or_else(|e| e.into_inner()).is_some() || self.started.elapsed() >= limit
+        self.result.lock().unwrap_or_else(|e| e.into_inner()).is_some() || self.waited() >= limit
     }
 }
 
@@ -261,5 +282,25 @@ mod tests {
         );
         assert!(r.is_err());
         assert!(sink.mono.is_empty());
+    }
+
+    #[test]
+    fn a_paused_job_is_not_given_up_on() {
+        // A server that stops sending part way: the job never finishes.
+        let samples = sine(440.0, 44_100, 2, 0, 44_100 * 4, 0.3);
+        let server = crate::testing::http_server::TestServer::start(
+            flac_bytes(44_100, 2, &samples, &[]),
+            crate::testing::http_server::Behaviour { stall_after: Some(4_096), ..Default::default() },
+        );
+        let limit = Duration::from_millis(100);
+        let mut job =
+            ScoutJob::start(server.url(), HttpOptions::default(), SectionPart::Head { secs: 30.0 }, None);
+        job.set_running(false);
+        thread::sleep(Duration::from_millis(250));
+        assert!(!job.is_settled(limit), "given up on while paused after {:?}", job.waited());
+        job.set_running(true);
+        thread::sleep(Duration::from_millis(150));
+        assert!(job.is_settled(limit), "{:?}", job.waited());
+        assert!(job.analysis().is_none());
     }
 }
