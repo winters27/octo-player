@@ -116,24 +116,29 @@ class Streams @Inject constructor(
     // What a deck loads songs with: phone files as they are, server songs
     // from their saved copy when there is one, otherwise signed as they open
     // and saved as they play. One for each deck.
-    fun mediaSourceFactory(): MediaSource.Factory {
-        val network = networkFactory()
-        val signed = signedFactory(network)
-        val cached = cachedFactory(signed)
-        val split = DataSource.Factory {
-            SplitDataSource { spec ->
-                when {
-                    !isStream(spec.uri) -> network.createDataSource()
-                    saved.enabled.value -> cached.createDataSource()
-                    else -> signed.createDataSource()
-                }
-            }
-        }
-        val sources = ResolvingDataSource.Factory(split) { spec -> if (isStream(spec.uri)) spec.withUri(pin(spec.uri)) else spec }
-        // A made-on-the-way MP3 has no seek table, so seek by its steady bitrate.
-        val extractors = DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true)
-        return DefaultMediaSourceFactory(sources, extractors).setLoadErrorHandlingPolicy(Retries())
-    }
+    fun mediaSourceFactory(): MediaSource.Factory =
+        DefaultMediaSourceFactory(dataSourceFactory(networkFactory()), extractors()).setLoadErrorHandlingPolicy(Retries())
+
+    // What the scout reads songs with: the same chain the decks play from
+    // (the pinned request, the saved copies, signing), so what it reads is
+    // saved for playing too. It never names a signed address to its reader,
+    // so opening the song again at another place goes through the whole
+    // chain, and it reads from the server only when the server answers
+    // requests for parts of the song.
+    fun scoutSourceFactory(): DataSource.Factory =
+        StableUriDataSource.Factory(dataSourceFactory(RangeGuardDataSource.Factory(networkFactory())))
+
+    // A made-on-the-way MP3 has no seek table, so seek by its steady bitrate.
+    fun extractors(): DefaultExtractorsFactory = DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true)
+
+    private fun dataSourceFactory(network: DataSource.Factory): DataSource.Factory = streamSources(
+        network = network,
+        isStream = ::isStream,
+        pin = ::pin,
+        sign = ::sign,
+        cached = ::cachedFactory,
+        keeping = { saved.enabled.value },
+    )
 
     // Fills the saved copy of a song ahead of time, for the next songs in
     // the queue. Null while nothing is kept.
@@ -179,8 +184,7 @@ class Streams @Inject constructor(
 
     private fun networkFactory(): DataSource.Factory = DefaultDataSource.Factory(context, OkHttpDataSource.Factory(http))
 
-    private fun signedFactory(upstream: DataSource.Factory): DataSource.Factory =
-        ResolvingDataSource.Factory(upstream) { spec -> if (isStream(spec.uri)) spec.withUri(sign(spec.uri)) else spec }
+    private fun signedFactory(upstream: DataSource.Factory): DataSource.Factory = signedSources(upstream, ::isStream, ::sign)
 
     private fun cachedFactory(upstream: DataSource.Factory): CacheDataSource.Factory =
         CacheDataSource.Factory()
@@ -237,6 +241,38 @@ class Streams @Inject constructor(
             }
     }
 }
+
+// The chain a song is read through. Server songs get their request pinned
+// in their address, then are read from their saved copy while songs are
+// kept (filling it from the server as they go), or straight from the
+// server, signed as they open. Everything else (phone files) opens from
+// `network` as it is.
+@OptIn(UnstableApi::class)
+internal fun streamSources(
+    network: DataSource.Factory,
+    isStream: (Uri) -> Boolean,
+    pin: (Uri) -> Uri,
+    sign: (Uri) -> Uri,
+    cached: (DataSource.Factory) -> DataSource.Factory,
+    keeping: () -> Boolean,
+): DataSource.Factory {
+    val signed = signedSources(network, isStream, sign)
+    val saved = cached(signed)
+    val split = DataSource.Factory {
+        SplitDataSource { spec ->
+            when {
+                !isStream(spec.uri) -> network.createDataSource()
+                keeping() -> saved.createDataSource()
+                else -> signed.createDataSource()
+            }
+        }
+    }
+    return ResolvingDataSource.Factory(split) { spec -> if (isStream(spec.uri)) spec.withUri(pin(spec.uri)) else spec }
+}
+
+@OptIn(UnstableApi::class)
+private fun signedSources(upstream: DataSource.Factory, isStream: (Uri) -> Boolean, sign: (Uri) -> Uri): DataSource.Factory =
+    ResolvingDataSource.Factory(upstream) { spec -> if (isStream(spec.uri)) spec.withUri(sign(spec.uri)) else spec }
 
 // Opens server songs and everything else from different sources, picked
 // as each one opens.
