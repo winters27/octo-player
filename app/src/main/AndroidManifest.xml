@@ -68,13 +68,16 @@
                 <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
-            <!-- Joining a family: octo://join?server=...&username=...&code=...,
-                 from a QR code the camera reads or a link tapped. -->
+            <!-- Family links, from a QR code the camera reads or a link tapped:
+                 an invite (octo://join?server=...&invite=...), a sign-in to fill
+                 in (octo://signin?server=...&username=...), or one handed over
+                 from another device (octo://signin#t=...&k=...). -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="octo" android:host="join" />
+                <data android:scheme="octo" android:host="signin" />
             </intent-filter>
         </activity>
 

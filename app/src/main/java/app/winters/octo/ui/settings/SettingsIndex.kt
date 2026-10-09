@@ -266,6 +266,10 @@ object SettingsIndex {
         "family", SettingsPage.Server, "Family", "Your plan, requests and devices, and the family's",
         listOf("family", "members", "requests", "devices", "approve", "plan", "storage"), section = "Connection",
     )
+    val SignInElsewhere = add(
+        "sign_in_elsewhere", SettingsPage.Server, "Sign in on another device", "A QR code your phone or computer scans to sign in with your login",
+        listOf("qr", "scan", "another device", "phone", "computer", "sign in", "login"), section = "Connection",
+    )
     val LastSynced = add(
         "last_synced", SettingsPage.Server, "Last synced", "When the server's library was last copied",
         listOf("sync", "updated"), section = "Sync",

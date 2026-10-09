@@ -136,7 +136,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
     var selected by rememberSaveable { mutableIntStateOf(0) }
     val stack = stacks[selected]
     val open: (NavKey) -> Unit = { stack.add(it) }
-    // A notice tapped or a pairing link opened: the Family screen, or the
+    // A notice tapped or a family link opened: the Family screen, or the
     // join form filled in, on the Settings tab.
     val familyHub = hiltViewModel<FamilyShellViewModel>().hub
     val familyOpen by familyHub.opens.collectAsStateWithLifecycle()

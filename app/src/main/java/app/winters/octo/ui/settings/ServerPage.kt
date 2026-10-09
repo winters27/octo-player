@@ -1,5 +1,6 @@
 package app.winters.octo.ui.settings
 
+import app.winters.octo.family.FamilyHub
 import app.winters.octo.ui.nav.FamilyRoute
 import app.winters.octo.family.family
 import androidx.compose.foundation.layout.Arrangement
@@ -90,6 +91,7 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class ServerViewModel @Inject constructor(
     private val sessions: SessionRepository,
+    private val family: FamilyHub,
     private val sync: ServerSync,
     private val playlists: PlaylistSync,
     private val switcher: ServerSwitch,
@@ -144,7 +146,10 @@ class ServerViewModel @Inject constructor(
 
     fun disconnect() = sync.disconnect()
 
-    suspend fun changePassword(current: String, new: String): PasswordChange = sessions.changePassword(current, new)
+    suspend fun changePassword(current: String, new: String): PasswordChange = sessions.changePassword(current, new, family = family.model.me?.managed == true)
+
+    // Opens "Sign in on another device" on the Family screen.
+    fun signInElsewhere() = family.model.handOver.open()
 
     suspend fun look(): ServerLook? = sessions.look()
 }
@@ -226,6 +231,12 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
                     if (current.session.runsOcto) ActionRow(SettingsIndex.SpotifyImport, onClick = { onOpen(SpotifyImportRoute) })
                     // Only while the server has Family on.
                     if (current.session.family) ActionRow(SettingsIndex.Family, onClick = { onOpen(FamilyRoute) })
+                    if (current.session.family) {
+                        ActionRow(SettingsIndex.SignInElsewhere, onClick = {
+                            vm.signInElsewhere()
+                            onOpen(FamilyRoute)
+                        })
+                    }
                 }
 
                 ServerFacts(vm, current.session)

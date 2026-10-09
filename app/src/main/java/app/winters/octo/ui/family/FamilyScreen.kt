@@ -1,5 +1,6 @@
 package app.winters.octo.ui.family
 
+import app.winters.octo.ui.common.LocalFeedback
 import app.winters.octo.design.OctoSwitch
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.foundation.selection.toggleable
@@ -60,7 +61,6 @@ import app.winters.octo.design.OctoType
 import app.winters.octo.family.FamilyHub
 import app.winters.octo.family.FamilyNotifier
 import app.winters.octo.subsonic.FamilyDevice
-import app.winters.octo.subsonic.FamilyDeviceKind
 import app.winters.octo.subsonic.FamilyMe
 import app.winters.octo.subsonic.FamilyMember
 import app.winters.octo.subsonic.FamilyRequest
@@ -88,6 +88,8 @@ class FamilyShellViewModel @Inject constructor(val hub: FamilyHub) : ViewModel()
 fun FamilyScreen(onBack: () -> Unit, owner: FamilyShellViewModel = hiltViewModel()) {
     val hub = owner.hub
     val model = hub.model
+    var changingPassword by remember { mutableStateOf(false) }
+    var resetting by remember { mutableStateOf<FamilyMember?>(null) }
     DisposableEffect(Unit) {
         model.watch()
         onDispose { model.stop() }
@@ -102,19 +104,61 @@ fun FamilyScreen(onBack: () -> Unit, owner: FamilyShellViewModel = hiltViewModel
                 } else {
                     item(key = "notices") { NoticesRow() }
                     model.said?.let { item(key = "said") { Line(it, OctoColors.TextSecondary) } }
+                    model.login?.let { login(model, hub, it, onPassword = { changingPassword = true }) }
                     if (model.approves) inbox(model)
-                    info.manager?.let { members(model, it.members, it.liveStreams) }
+                    info.manager?.let { members(model, it.members, it.liveStreams, onReset = { resetting = it }) }
                     plan(info.me)
                     requests(model)
-                    devices(model)
+                    devices(model, onPassword = { changingPassword = true })
                     saved(hub, info.me)
                 }
             }
         }
         BackButton(onBack)
     }
-    DeviceSheetHost(model, hub.serverAddress().orEmpty(), model.me?.username.orEmpty())
+    HandOverSheetHost(model, hub.serverAddress().orEmpty(), model.me?.username.orEmpty())
     InviteSheetHost(model, hub.serverAddress().orEmpty())
+    val feedback = LocalFeedback.current
+    GlassSheet(visible = changingPassword, onDismiss = { changingPassword = false }, tall = true, scrolls = false) {
+        if (changingPassword) {
+            PasswordSheetContent(hub::changePassword, done = { words ->
+                changingPassword = false
+                feedback.done(words)
+            }, close = { changingPassword = false })
+        }
+    }
+    // Before a manager resets a member's password: it stops working at once.
+    val member = resetting
+    GlassSheet(visible = member != null, onDismiss = { resetting = null }) {
+        if (member != null) {
+            val name = member.displayName.ifBlank { member.username }
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Reset $name's password?", style = OctoType.headline, color = OctoColors.TextPrimary)
+                Text("Their password stops working at once, on every app and device. You get a new sign-in link to give them, to choose another.", style = OctoType.bodySmall, color = OctoColors.TextSecondary)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    GlazeButton("Cancel", { resetting = null }, size = ButtonSize.Medium, modifier = Modifier.weight(1f))
+                    AccentButton(RESET_PASSWORD, onClick = {
+                        resetting = null
+                        model.resetPassword(member)
+                    }, size = ButtonSize.Medium, fill = OctoColors.Accent, modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+private fun LazyListScope.login(model: FamilyModel, hub: FamilyHub, login: app.winters.octo.subsonic.FamilyLogin, onPassword: () -> Unit) {
+    title("login", YOUR_LOGIN)
+    item(key = "login:card") {
+        val context = LocalContext.current
+        LoginCard(
+            login,
+            fallback = hub.serverAddress().orEmpty(),
+            changePassword = onPassword,
+            showQr = model.handOver::open,
+            actions = PhoneSheetActions(open = { openLink(context, it) }, copy = { copyText(context, it) }),
+        )
+    }
 }
 
 @Composable
@@ -190,47 +234,29 @@ private fun LazyListScope.requests(model: FamilyModel) {
     }
 }
 
-private fun LazyListScope.devices(model: FamilyModel) {
+// The devices the account signed in from, noticed by the server. One can
+// come off the list; signing every one out is changing the password.
+private fun LazyListScope.devices(model: FamilyModel, onPassword: () -> Unit) {
     title("devices", DEVICES)
+    if (model.devices.isEmpty()) item(key = "devices:none") { Line("Apps you sign in to with your login show here by themselves.") }
     items(model.devices, key = { "device:${it.id}" }) { device -> DeviceLine(model, device) }
-    item(key = "devices:add") { AddDevice(model) }
-}
-
-@Composable
-private fun DeviceLine(model: FamilyModel, device: FamilyDevice) {
-    var confirming by remember(device.id) { mutableStateOf(false) }
-    ItemLine(device.name.ifBlank { "A device" }, deviceLine(device)) {
-        when {
-            device.current -> Text("This phone", style = OctoType.caption, color = OctoColors.TextMuted)
-            confirming -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                AccentButton("Sign out", onClick = {
-                    confirming = false
-                    model.signOut(device)
-                }, size = ButtonSize.ExtraSmall, enabled = !model.working)
-                GlazeButton("Keep", { confirming = false }, size = ButtonSize.ExtraSmall)
+    item(key = "devices:actions") {
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(SIGN_OUT_EVERYWHERE, style = OctoType.body, color = OctoColors.TextPrimary)
+            Text(SIGN_OUT_EVERYWHERE_LINE, style = OctoType.caption, color = OctoColors.TextMuted)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                GlazeButton(CHANGE_PASSWORD, onPassword, size = ButtonSize.Small)
+                GlazeButton(HANDOVER_TITLE, model.handOver::open, size = ButtonSize.Small, icon = painterResource(OctoIcons.QrCode))
             }
-            else -> GlazeButton("Sign out", { confirming = true }, size = ButtonSize.ExtraSmall, enabled = !model.working)
         }
     }
 }
 
 @Composable
-private fun AddDevice(model: FamilyModel) {
-    var name by rememberSaveable { mutableStateOf("") }
-    Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Add a device", style = OctoType.body, color = OctoColors.TextPrimary)
-        Text("Octo on another phone or computer joins with a 6 digit code. Any other music app signs in with an app password.", style = OctoType.caption, color = OctoColors.TextMuted)
-        GlassInput(name, { name = it }, placeholder = "Its name, like Living room", keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            GlazeButton("Octo app", {
-                model.addDevice(name, FamilyDeviceKind.OctoApp)
-                name = ""
-            }, size = ButtonSize.Small, enabled = !model.working)
-            GlazeButton("Other app", {
-                model.addDevice(name, FamilyDeviceKind.SubsonicApp)
-                name = ""
-            }, size = ButtonSize.Small, enabled = !model.working)
-        }
+private fun DeviceLine(model: FamilyModel, device: FamilyDevice) {
+    ItemLine(device.name.ifBlank { "A device" }, deviceLine(device)) {
+        if (device.current) Text("This phone", style = OctoType.caption, color = OctoColors.TextMuted)
+        else GlazeButton(REMOVE_FROM_LIST, { model.forget(device) }, size = ButtonSize.ExtraSmall, enabled = !model.working)
     }
 }
 
@@ -260,12 +286,12 @@ private fun LazyListScope.saved(hub: FamilyHub, me: FamilyMe) {
     }
 }
 
-private fun LazyListScope.members(model: FamilyModel, members: List<FamilyMember>, live: Int) {
+private fun LazyListScope.members(model: FamilyModel, members: List<FamilyMember>, live: Int, onReset: (FamilyMember) -> Unit) {
     title("members", MEMBERS)
     if (live > 0) item(key = "members:live") { Line("$live playing now") }
     items(members, key = { "member:${it.username}" }) { member ->
         ItemLine(member.displayName.ifBlank { member.username }, "${memberLine(member)} · ${storageLine(member.storageUsedBytes, member.storageLimitGb)}") {
-            GlazeButton("Add a device", { model.addMemberDevice(member) }, size = ButtonSize.ExtraSmall, enabled = !model.working)
+            GlazeButton(RESET_PASSWORD, { onReset(member) }, size = ButtonSize.ExtraSmall, enabled = !model.working)
         }
     }
     item(key = "members:add") { AddMember(model) }

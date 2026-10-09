@@ -40,7 +40,7 @@ class MainActivity : ComponentActivity() {
     // Launcher shortcuts and "Open with Octo".
     @Inject lateinit var systemEntries: SystemEntries
     @Inject lateinit var updates: AppUpdates
-    // Pairing links and family notices.
+    // Family links and family notices.
     @Inject lateinit var family: FamilyHub
 
     // Counts up each time a home screen widget asks for the full player.
@@ -78,8 +78,9 @@ class MainActivity : ComponentActivity() {
         family.offerClipboard(clip)
     }
 
-    // A pairing link (octo://join?..., from a QR code the camera read) opens
-    // the join form filled in; a family notice opens Family.
+    // A family link (an invite, or a sign-in from another device, from a QR
+    // code the camera read or a link tapped) opens the sign-in form filled
+    // in; a family notice opens Family.
     private fun familyIfAsked(intent: Intent) {
         if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
         when {

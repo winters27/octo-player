@@ -1,5 +1,20 @@
 package app.winters.octo.ui.family
 
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import app.winters.octo.design.GlassInput
+import app.winters.octo.server.passwordChangeWords
+import app.winters.octo.server.passwordDraftProblem
+import app.winters.octo.server.PasswordDraft
+import app.winters.octo.server.PasswordChange
+import app.winters.octo.subsonic.familyAppLink
+import app.winters.octo.subsonic.FamilySignInPrefill
+import app.winters.octo.subsonic.FamilySignInPending
+import app.winters.octo.subsonic.FamilyLogin
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.selectable
@@ -91,14 +106,14 @@ import app.winters.octo.design.OctoType
 import app.winters.octo.design.SheetFill
 import app.winters.octo.design.motionScale
 import app.winters.octo.design.octoTween
-import app.winters.octo.subsonic.FamilyDeviceAdded
 import app.winters.octo.subsonic.FamilyRole
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
 
-// The Add a device sheet and the invite sheet: the same parts as the
-// desktop's popups, laid out to fit one phone screen. The sheet opens all
+// The family sheets (an invite, "Sign in on another device" and the device
+// asking, and changing the password): the same parts as the desktop's
+// popups, laid out to fit one phone screen. The sheet opens all
 // the way, its footer (the other-apps link and Done) stays put above the
 // navigation bar, and when the rest still can't fit, a fade and a "More
 // below" button say so.
@@ -113,48 +128,9 @@ private val Mono = OctoType.bodySmall.copy(fontFamily = MonoFontFamily)
 private val BigCode = OctoType.title.copy(fontFamily = MonoFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 30.sp, letterSpacing = 0.5.sp)
 
 // Test tags, for checking what is on screen.
-const val SHEET_CODE_TAG = "family-sheet-code"
+const val SHEET_QR_TAG = "family-sheet-qr"
 const val SHEET_DONE_TAG = "family-sheet-done"
 const val SHEET_MORE_TAG = "family-sheet-more"
-
-@Composable
-fun DeviceSheetHost(model: FamilyModel, server: String, username: String) {
-    val sheet = model.sheet ?: return
-    key(sheet.id) {
-        // Renewing pauses while the app is out of sight.
-        val owner = LocalLifecycleOwner.current
-        DisposableEffect(owner) {
-            val watch = LifecycleEventObserver { _, event ->
-                when (event) {
-                    Lifecycle.Event.ON_START -> model.sheetOnScreen(true)
-                    Lifecycle.Event.ON_STOP -> model.sheetOnScreen(false)
-                    else -> Unit
-                }
-            }
-            owner.lifecycle.addObserver(watch)
-            onDispose { owner.lifecycle.removeObserver(watch) }
-        }
-        val context = LocalContext.current
-        GlassSheet(visible = true, onDismiss = model::dismissAdded, tall = true, scrolls = false) {
-            DeviceSheetContent(
-                sheet,
-                server,
-                username,
-                avatarName = sheet.forName ?: model.me?.displayName?.ifBlank { null } ?: username,
-                owner = model.me?.role == FamilyRole.Owner,
-                actions = PhoneSheetActions(
-                    otherApps = model::showOtherApps,
-                    backToCode = model::backToCode,
-                    newCode = model::newCode,
-                    retry = model::retrySheet,
-                    done = model::dismissAdded,
-                    open = { openLink(context, it) },
-                    copy = { copyText(context, it) },
-                ),
-            )
-        }
-    }
-}
 
 @Composable
 fun InviteSheetHost(model: FamilyModel, server: String) {
@@ -181,9 +157,62 @@ class PhoneSheetActions(
     val copy: (String) -> Unit = {},
 )
 
+// "Sign in on another device": the QR code that hands this phone's sign-in
+// to another device of the same person, renewed while it shows, and the
+// question when a device scans it.
 @Composable
-fun ColumnScope.DeviceSheetContent(sheet: DeviceSheet, server: String, username: String, avatarName: String, owner: Boolean, actions: PhoneSheetActions, now: () -> Instant = Instant::now) {
-    val code = sheet.code
+fun HandOverSheetHost(model: FamilyModel, server: String, username: String) {
+    val source = model.handOver
+    val sheet = source.sheet ?: return
+    key(sheet.id) {
+        // Renewing pauses while the app is out of sight.
+        val owner = LocalLifecycleOwner.current
+        DisposableEffect(owner) {
+            val watch = LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_START -> source.sheetOnScreen(true)
+                    Lifecycle.Event.ON_STOP -> source.sheetOnScreen(false)
+                    else -> Unit
+                }
+            }
+            owner.lifecycle.addObserver(watch)
+            onDispose { owner.lifecycle.removeObserver(watch) }
+        }
+        val context = LocalContext.current
+        GlassSheet(visible = true, onDismiss = source::close, tall = true, scrolls = false) {
+            val asking = sheet.asking
+            if (asking != null) {
+                AskingContent(asking, sending = sheet.sending, allow = source::allow, deny = source::deny)
+            } else {
+                HandOverSheetContent(
+                    sheet,
+                    awayAllowed = model.me?.abilities?.away != false,
+                    server = server,
+                    avatarName = model.me?.displayName?.ifBlank { null } ?: username,
+                    owner = model.me?.role == FamilyRole.Owner,
+                    actions = PhoneSheetActions(
+                        newCode = source::newCode,
+                        retry = source::retry,
+                        done = source::close,
+                        open = { openLink(context, it) },
+                        copy = { copyText(context, it) },
+                    ),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ColumnScope.HandOverSheetContent(
+    sheet: HandOverSheet,
+    awayAllowed: Boolean,
+    server: String,
+    avatarName: String,
+    owner: Boolean,
+    actions: PhoneSheetActions,
+    now: () -> Instant = Instant::now,
+) {
     var clock by remember { mutableStateOf(now()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -191,35 +220,270 @@ fun ColumnScope.DeviceSheetContent(sheet: DeviceSheet, server: String, username:
             clock = now()
         }
     }
-    val seconds = secondsLeft(code?.expires, clock)
+    val start = sheet.start
+    val seconds = secondsLeft(start?.expires, clock)
+    val finished = sheet.done
+    val failed = sheet.failed
+    val error = sheet.error
+    val ended = finished != null || failed != null
     val subtitle = when {
-        sheet.view == DeviceSheetView.OtherApps -> OTHER_APPS_SUBTITLE
+        finished != null -> "Handed over"
         sheet.waiting -> "Making a code"
         sheet.stale -> "This code expired"
         else -> countdownLine(seconds)
     }
-    val warn = sheet.view == DeviceSheetView.Code && code != null && !sheet.stale && countdownWarns(seconds)
-    val options = code?.let { deviceLinkOptions(it, sheet.server(server), sheet.awayAllowed) }
+    val warn = start != null && !sheet.stale && !ended && countdownWarns(seconds)
+    val options = sheet.options(awayAllowed)
     var picked by remember { mutableStateOf<LinkReach?>(null) }
     val reach = picked ?: options?.default ?: LinkReach.Anywhere
-    Header(avatarName, sheet.title, subtitle, if (warn) OctoColors.SignalOrange else OctoColors.TextMuted, clock = sheet.view == DeviceSheetView.Code, close = actions.done)
-    if (sheet.view == DeviceSheetView.Code && code != null && !sheet.stale) Announce(countdownAnnouncement(seconds))
+    Header(avatarName, HANDOVER_TITLE, subtitle, if (warn) OctoColors.SignalOrange else OctoColors.TextMuted, clock = !ended, close = actions.done)
+    if (start != null && !sheet.stale && !ended) Announce(countdownAnnouncement(seconds))
     val target = remember { BringIntoViewRequester() }
     ScrollArea(target) {
-        if (sheet.view == DeviceSheetView.Code && options?.choosable == true) {
-            ReachChooser(reachQuestion(own = sheet.forName == null), reach, options, owner, server, actions) { picked = it }
-        }
-        val shown = sheet.shown
         when {
-            shown == null && sheet.error != null -> Problem(sheet.error!!, actions.retry)
-            shown == null -> Skeleton(sheet.view)
-            sheet.view == DeviceSheetView.Code -> CodeBody(sheet, shown, options!!, reach, sheet.server(server), sheet.username(username), owner, server, actions, target)
-            else -> AppsBody(shown, sheet.server(server), sheet.username(username), actions.copy, target)
+            finished != null -> Finished(finished)
+            failed != null -> Problem(failed, actions.newCode)
+            error != null && start == null -> Problem(error, actions.retry)
+            options == null -> BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                val side = qrSide(maxWidth) + 16.dp
+                SkeletonBlock(side, side, 20.dp, Modifier.semantics { contentDescription = "Making a code" })
+            }
+            else -> {
+                if (options.choosable) ReachChooser(reachQuestion(own = true), reach, options, owner, server, actions) { picked = it }
+                HandOverBody(sheet, options, reach, actions, target)
+            }
         }
     }
-    Footer(actions.done) {
-        if (sheet.view == DeviceSheetView.Code) QuietAction(OTHER_APPS_LINK, OctoIcons.Key, actions.otherApps)
-        else QuietAction(BACK_TO_QR, OctoIcons.QrCode, actions.backToCode)
+    Footer(actions.done) {}
+}
+
+@Composable
+private fun HandOverBody(sheet: HandOverSheet, options: LinkOptions, reach: LinkReach, actions: PhoneSheetActions, target: BringIntoViewRequester) {
+    val link = options.linkFor(reach)
+    var notice by remember { mutableStateOf(false) }
+    LaunchedEffect(sheet.renewed) {
+        if (sheet.renewed > 0) {
+            notice = true
+            delay(NEW_CODE_MS)
+            notice = false
+        }
+    }
+    val motion = motionScale()
+    if (link != null) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val side = qrSide(maxWidth)
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(Modifier.testTag(SHEET_QR_TAG)) {
+                    QrWell(link, "QR code to sign in on another device", side, dim = sheet.stale) {
+                        if (sheet.stale) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text(STILL_THERE, style = OctoType.body, color = OctoColors.TextPrimary)
+                                AccentButton(MAKE_NEW_CODE, onClick = actions.newCode, size = ButtonSize.Small, fill = OctoColors.Accent)
+                            }
+                        }
+                    }
+                }
+                if (notice) Announce(NEW_CODE)
+                Crossfade(notice, Modifier.fillMaxWidth().heightIn(min = 18.dp), animationSpec = octoTween(motion, OctoDuration.Card), label = "notice") { showing ->
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        if (showing) {
+                            Row(Modifier.background(OctoColors.AccentSelected, PillShape).padding(horizontal = 10.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Icon(painterResource(OctoIcons.Check), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(13.dp))
+                                Text(NEW_CODE, style = OctoType.caption.copy(fontWeight = FontWeight.SemiBold), color = OctoColors.TextPrimary)
+                            }
+                        } else {
+                            Caption(HANDOVER_CAPTION, center = true)
+                        }
+                    }
+                }
+            }
+        }
+        Section("Or open this link on it") { LinkRow(link, actions) }
+    }
+    Section("What happens", Modifier.bringIntoViewRequester(target)) {
+        listOf(
+            "The new device scans this code or opens the link.",
+            "This phone asks you to allow it.",
+            "Your sign-in goes over sealed. The server can't read it.",
+        ).forEachIndexed { i, step ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.size(20.dp).background(OctoColors.AccentTonal, CircleShape), contentAlignment = Alignment.Center) {
+                    Text("${i + 1}", style = OctoType.caption.copy(fontWeight = FontWeight.SemiBold), color = OctoColors.TextPrimary)
+                }
+                Text(step, style = OctoType.caption, color = OctoColors.TextPrimary, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+    if (sheet.refreshFailed) Text(RENEW_FAILED, style = OctoType.caption, color = OctoColors.SignalOrange)
+}
+
+// The hand-over went: a check and what happens next.
+@Composable
+private fun Finished(words: String) {
+    Row(
+        Modifier.fillMaxWidth().background(Fill, CardShape).border(1.dp, Edge, CardShape).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(Modifier.size(32.dp).background(OctoColors.SignalGreen.copy(alpha = 0.18f), CircleShape), contentAlignment = Alignment.Center) {
+            Icon(painterResource(OctoIcons.Check), contentDescription = null, tint = OctoColors.SignalGreen, modifier = Modifier.size(18.dp))
+        }
+        Text(words, style = OctoType.bodySmall, color = OctoColors.TextPrimary, modifier = Modifier.weight(1f))
+    }
+}
+
+// A device scanned the code: its name large, its platform, and Allow (the
+// one primary button) or Deny.
+@Composable
+fun ColumnScope.AskingContent(asking: FamilySignInPending, sending: Boolean, allow: () -> Unit, deny: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(Modifier.size(64.dp).background(OctoColors.AccentSelected, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(painterResource(OctoIcons.Phone), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(30.dp))
+        }
+        Text("Sign in on", style = OctoType.caption, color = OctoColors.TextMuted)
+        Text(asking.deviceName.ifBlank { "A new device" }, style = OctoType.title, color = OctoColors.TextPrimary, textAlign = TextAlign.Center, modifier = Modifier.semantics { heading() })
+        if (asking.platform.isNotBlank()) Text(asking.platform, style = OctoType.body, color = OctoColors.TextSecondary)
+        Text("It gets your sign-in for this server. Allow it only if this device is yours.", style = OctoType.caption, color = OctoColors.TextMuted, textAlign = TextAlign.Center)
+        Announce(askingTitle(asking))
+    }
+    Hairline()
+    Row(
+        Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        GlazeButton(DENY, deny, size = ButtonSize.Medium, enabled = !sending, modifier = Modifier.weight(1f))
+        AccentButton(ALLOW, onClick = allow, size = ButtonSize.Medium, fill = OctoColors.Accent, loading = sending, modifier = Modifier.weight(1f))
+    }
+}
+
+// Changing a family member's password: the current one, the new one twice
+// with how strong it looks. It signs every other app and device out.
+@Composable
+fun ColumnScope.PasswordSheetContent(change: suspend (String, String) -> PasswordChange, done: (String) -> Unit, close: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var draft by remember { mutableStateOf(PasswordDraft()) }
+    var busy by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    fun go() {
+        passwordDraftProblem(draft)?.let { problem = it; return }
+        busy = true
+        problem = null
+        scope.launch {
+            val result = change(draft.current, draft.new)
+            busy = false
+            if (result == PasswordChange.Changed) done(passwordChangeWords(result, family = true)) else problem = passwordChangeWords(result, family = true)
+        }
+    }
+    Header("", CHANGE_PASSWORD, SIGN_OUT_EVERYWHERE_LINE, OctoColors.TextMuted, clock = false, close = close, avatar = false)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        PasswordField(draft.current, "Current password") { draft = draft.copy(current = it); problem = null }
+        PasswordField(draft.new, "New password, at least $MIN_PASSWORD characters") { draft = draft.copy(new = it); problem = null }
+        passwordStrength(draft.new)?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
+        PasswordField(draft.confirm, "New password again", last = true, onDone = ::go) { draft = draft.copy(confirm = it); problem = null }
+        problem?.let { Text(it, style = OctoType.caption, color = OctoColors.Error) }
+    }
+    Hairline()
+    Row(
+        Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        GlazeButton("Cancel", close, size = ButtonSize.Medium, enabled = !busy, modifier = Modifier.weight(1f))
+        AccentButton(CHANGE_PASSWORD, onClick = ::go, size = ButtonSize.Medium, fill = OctoColors.Accent, loading = busy, modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun PasswordField(value: String, placeholder: String, last: Boolean = false, onDone: () -> Unit = {}, onChange: (String) -> Unit) {
+    GlassInput(
+        value = value,
+        onValueChange = onChange,
+        placeholder = placeholder,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = if (last) ImeAction.Done else ImeAction.Next),
+        keyboardActions = KeyboardActions(onDone = { onDone() }),
+        visualTransformation = PasswordVisualTransformation(),
+        contentType = ContentType.NewPassword,
+    )
+}
+
+// Your login: the server's addresses (the outside one and, when it differs,
+// the home one), the username, each with a copy button, and the password,
+// which is changed from here. Under it, how to use it in each app, and on
+// this phone "Open in Octo" for another Octo app.
+@Composable
+fun LoginCard(login: FamilyLogin, fallback: String, changePassword: () -> Unit, showQr: () -> Unit, actions: PhoneSheetActions) {
+    val anywhere = login.servers.anywhere?.takeIf { login.anywhereAvailable && login.awayAllowed }
+    val home = login.servers.home
+    val main = anywhere ?: home ?: fallback
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Card {
+            Column(Modifier.fillMaxWidth().padding(start = 14.dp, end = 2.dp, top = 8.dp, bottom = 6.dp)) {
+                Text("Server", style = OctoType.caption, color = OctoColors.TextMuted)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Value(main, Modifier.weight(1f))
+                    CopyButton(main, "Copy server", actions.copy)
+                }
+                if (anywhere != null && home != null && home != anywhere) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("At home: ", style = OctoType.caption, color = OctoColors.TextMuted)
+                        Value(home, Modifier.weight(1f))
+                        CopyButton(home, "Copy home address", actions.copy)
+                    }
+                }
+                if (anywhere == null && home != null) Text(HOME_ONLY_LOGIN, style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(bottom = 4.dp))
+            }
+            CardRow("Username") {
+                Value(login.username, Modifier.weight(1f))
+                CopyButton(login.username, "Copy username", actions.copy)
+            }
+            Hairline()
+            Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 10.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Password", style = OctoType.caption, color = OctoColors.TextMuted)
+                    Text(PASSWORD_LINE, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
+                }
+                GlazeButton(CHANGE_PASSWORD, changePassword, size = ButtonSize.Small)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AccentButton(HANDOVER_TITLE, onClick = showQr, size = ButtonSize.Small, fill = OctoColors.Accent, icon = painterResource(OctoIcons.QrCode))
+            GlazeButton(OPEN_IN_OCTO, { actions.open(familyAppLink(FamilySignInPrefill(main, login.username, home?.takeIf { it != main }))) }, size = ButtonSize.Small)
+        }
+        Label(USE_IN_ANY_APP)
+        var open by remember { mutableStateOf<String?>("Octo") }
+        Card {
+            loginSteps(main, login.username).forEachIndexed { index, app ->
+                val expanded = open == app.app
+                if (index > 0) Hairline()
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable(role = Role.Button, onClickLabel = if (expanded) "Hide steps" else "Show steps") { open = if (expanded) null else app.app }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(app.app, style = OctoType.label, color = OctoColors.TextPrimary, modifier = Modifier.weight(1f))
+                    Icon(painterResource(if (expanded) OctoIcons.Collapse else OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(16.dp))
+                }
+                if (expanded) {
+                    Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        app.steps.forEachIndexed { i, step ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Box(Modifier.size(20.dp).background(OctoColors.AccentTonal, CircleShape), contentAlignment = Alignment.Center) {
+                                    Text("${i + 1}", style = OctoType.caption.copy(fontWeight = FontWeight.SemiBold), color = OctoColors.TextPrimary)
+                                }
+                                Text(step, style = OctoType.caption, color = OctoColors.TextPrimary, modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -304,14 +568,14 @@ private fun MoreBelow(scroll: ScrollState, target: BringIntoViewRequester, modif
 }
 
 @Composable
-private fun Header(name: String, title: String, subtitle: String, subtitleColor: Color, clock: Boolean, close: () -> Unit) {
+private fun Header(name: String, title: String, subtitle: String, subtitleColor: Color, clock: Boolean, close: () -> Unit, avatar: Boolean = true) {
     Row(
         Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         val initial = name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
-        Box(Modifier.size(40.dp).background(OctoColors.AccentSelected, CircleShape).border(1.dp, Color.White.copy(alpha = 0.10f), CircleShape), contentAlignment = Alignment.Center) {
+        if (avatar) Box(Modifier.size(40.dp).background(OctoColors.AccentSelected, CircleShape).border(1.dp, Color.White.copy(alpha = 0.10f), CircleShape), contentAlignment = Alignment.Center) {
             Text(initial, style = OctoType.body.copy(fontWeight = FontWeight.Bold), color = OctoColors.TextPrimary)
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
@@ -446,151 +710,14 @@ private fun Section(label: String, modifier: Modifier = Modifier, content: @Comp
 }
 
 @Composable
-private fun CodeBody(
-    sheet: DeviceSheet,
-    code: FamilyDeviceAdded,
-    options: LinkOptions,
-    reach: LinkReach,
-    server: String,
-    username: String,
-    owner: Boolean,
-    ownServer: String,
-    actions: PhoneSheetActions,
-    target: BringIntoViewRequester,
-) {
-    val link = options.linkFor(reach)
-    val typed = if (reach == LinkReach.Home) options.home?.let(::linkServer) ?: server else server
-    var notice by remember { mutableStateOf(false) }
-    LaunchedEffect(sheet.renewed) {
-        if (sheet.renewed > 0) {
-            notice = true
-            delay(NEW_CODE_MS)
-            notice = false
-        }
-    }
-    val motion = motionScale()
-    val grey = Modifier.alpha(if (sheet.stale) 0.4f else 1f)
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val side = qrSide(maxWidth)
-        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (link != null) {
-                QrWell(link, CODE_QR_LABEL, side, dim = sheet.stale) {
-                    if (sheet.stale) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text(STILL_THERE, style = OctoType.body, color = OctoColors.TextPrimary)
-                            AccentButton(MAKE_NEW_CODE, onClick = actions.newCode, size = ButtonSize.Small, fill = OctoColors.Accent)
-                        }
-                    }
-                }
-            }
-            if (notice) Announce(NEW_CODE)
-            if (link != null) {
-                Crossfade(notice, Modifier.fillMaxWidth().heightIn(min = 18.dp), animationSpec = octoTween(motion, OctoDuration.Card), label = "notice") { showing ->
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        if (showing) {
-                            Row(Modifier.background(OctoColors.AccentSelected, PillShape).padding(horizontal = 10.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                                Icon(painterResource(OctoIcons.Check), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(13.dp))
-                                Text(NEW_CODE, style = OctoType.caption.copy(fontWeight = FontWeight.SemiBold), color = OctoColors.TextPrimary)
-                            }
-                        } else {
-                            Caption(CODE_QR_CAPTION, center = true)
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if (link != null) Section("Open the link", grey) { LinkRow(link, actions) }
-    Section("Or type it in Octo", grey.bringIntoViewRequester(target)) {
-        // One card: the code, and who it is for on which server.
-        Column(
-            Modifier.fillMaxWidth().background(Fill, CardShape).border(1.dp, Edge, CardShape).padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 10.dp).testTag(SHEET_CODE_TAG),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Crossfade(code.pairCode.orEmpty(), Modifier.weight(1f), animationSpec = octoTween(motion, OctoDuration.Neutral), label = "digits") {
-                    Text(groupedCode(it), style = BigCode, color = OctoColors.TextPrimary)
-                }
-                CopyButton(code.pairCode.orEmpty(), "Copy code", actions.copy)
-            }
-            Text(codeForLine(username, typed), style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-    }
-    if (sheet.refreshFailed) Text(RENEW_FAILED, style = OctoType.caption, color = OctoColors.SignalOrange)
-}
+internal fun Label(text: String) = Text(text, style = OctoType.caption.copy(fontWeight = FontWeight.SemiBold), color = OctoColors.TextSecondary)
 
 @Composable
-private fun AppsBody(added: FamilyDeviceAdded, server: String, username: String, copy: (String) -> Unit, target: BringIntoViewRequester) {
-    val password = added.appPassword.orEmpty()
-    Section("Sign in with these") {
-        Card {
-            CardRow("Server", first = true) {
-                Value(server, Modifier.weight(1f))
-                CopyButton(server, "Copy server", copy)
-            }
-            CardRow("Username") {
-                Value(username, Modifier.weight(1f))
-                CopyButton(username, "Copy username", copy)
-            }
-            Hairline()
-            Column(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("App password", style = OctoType.caption, color = OctoColors.TextMuted)
-                    Text(
-                        SHOWN_ONCE,
-                        style = OctoType.caption.copy(fontWeight = FontWeight.SemiBold),
-                        color = OctoColors.SignalOrange,
-                        modifier = Modifier.padding(start = 8.dp).background(OctoColors.SignalOrange.copy(alpha = 0.14f), PillShape).padding(horizontal = 8.dp, vertical = 1.dp),
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(groupedPassword(password), style = BigCode.copy(fontSize = 19.sp), color = OctoColors.TextPrimary, modifier = Modifier.weight(1f))
-                    CopyButton(password, "Copy app password", copy)
-                }
-            }
-        }
-    }
-    Section("Steps for your app") {
-        var openApp by remember { mutableStateOf<String?>("Symfonium") }
-        Card(Modifier.bringIntoViewRequester(target)) {
-            otherAppSteps(server, username).forEachIndexed { index, app ->
-                val expanded = openApp == app.app
-                if (index > 0) Hairline()
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable(role = Role.Button, onClickLabel = if (expanded) "Hide steps" else "Show steps") { openApp = if (expanded) null else app.app }
-                        .padding(horizontal = 14.dp, vertical = 11.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(app.app, style = OctoType.label, color = OctoColors.TextPrimary, modifier = Modifier.weight(1f))
-                    Icon(painterResource(if (expanded) OctoIcons.Collapse else OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(16.dp))
-                }
-                if (expanded) {
-                    Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        app.steps.forEachIndexed { i, step ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Box(Modifier.size(20.dp).background(OctoColors.AccentTonal, CircleShape), contentAlignment = Alignment.Center) {
-                                    Text("${i + 1}", style = OctoType.caption.copy(fontWeight = FontWeight.SemiBold), color = OctoColors.TextPrimary)
-                                }
-                                Text(step, style = OctoType.caption, color = OctoColors.TextPrimary, modifier = Modifier.weight(1f))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun Label(text: String) = Text(text, style = OctoType.caption.copy(fontWeight = FontWeight.SemiBold), color = OctoColors.TextSecondary)
-
-@Composable
-private fun Caption(text: String, center: Boolean = false) =
+internal fun Caption(text: String, center: Boolean = false) =
     Text(text, style = OctoType.caption, color = OctoColors.TextMuted, textAlign = if (center) TextAlign.Center else null, modifier = if (center) Modifier.fillMaxWidth() else Modifier)
 
 @Composable
-private fun Value(text: String, modifier: Modifier = Modifier) = BasicText(
+internal fun Value(text: String, modifier: Modifier = Modifier) = BasicText(
     text,
     style = Mono.copy(color = OctoColors.TextPrimary),
     maxLines = 1,
@@ -599,7 +726,7 @@ private fun Value(text: String, modifier: Modifier = Modifier) = BasicText(
 )
 
 @Composable
-private fun Hairline() = Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
+internal fun Hairline() = Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
 
 // The link in a soft pill: tap it to open it; the copy button copies all of it.
 @Composable
@@ -628,12 +755,12 @@ private fun LinkRow(url: String, actions: PhoneSheetActions) {
 }
 
 @Composable
-private fun Card(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+internal fun Card(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Column(modifier.fillMaxWidth().background(Fill, CardShape).border(1.dp, Edge, CardShape), content = content)
 }
 
 @Composable
-private fun CardRow(label: String, first: Boolean = false, value: @Composable RowScope.() -> Unit) {
+internal fun CardRow(label: String, first: Boolean = false, value: @Composable RowScope.() -> Unit) {
     if (!first) Hairline()
     Row(Modifier.fillMaxWidth().heightIn(min = 46.dp).padding(start = 14.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.width(84.dp))
@@ -643,7 +770,7 @@ private fun CardRow(label: String, first: Boolean = false, value: @Composable Ro
 
 // The icon turns to a check, with "Copied" beside it, for two seconds.
 @Composable
-private fun CopyButton(value: String, name: String, copy: (String) -> Unit) {
+internal fun CopyButton(value: String, name: String, copy: (String) -> Unit) {
     var copied by remember { mutableStateOf(false) }
     LaunchedEffect(copied) {
         if (copied) {
@@ -682,23 +809,6 @@ private fun Problem(error: String, retry: () -> Unit) {
         }
         GlazeButton(TRY_AGAIN, retry, size = ButtonSize.Small)
     }
-}
-
-@Composable
-private fun Skeleton(view: DeviceSheetView) {
-    if (view == DeviceSheetView.OtherApps) {
-        SkeletonBlock(120.dp, 12.dp, 6.dp)
-        SkeletonBlock(Dp.Unspecified, 150.dp, 14.dp, Modifier.semantics { contentDescription = "Making an app password" })
-        SkeletonBlock(Dp.Unspecified, 140.dp, 14.dp)
-        return
-    }
-    BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        val side = qrSide(maxWidth) + 16.dp
-        SkeletonBlock(side, side, 20.dp, Modifier.semantics { contentDescription = "Making a code" })
-    }
-    SkeletonBlock(96.dp, 12.dp, 6.dp)
-    SkeletonBlock(Dp.Unspecified, 44.dp, 22.dp)
-    SkeletonBlock(Dp.Unspecified, 80.dp, 14.dp)
 }
 
 @Composable
@@ -742,10 +852,10 @@ private fun Footer(close: () -> Unit, start: @Composable RowScope.() -> Unit) {
     }
 }
 
-private fun copyText(context: Context, text: String) {
+internal fun copyText(context: Context, text: String) {
     context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Octo", text))
 }
 
-private fun openLink(context: Context, url: String) {
+internal fun openLink(context: Context, url: String) {
     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }

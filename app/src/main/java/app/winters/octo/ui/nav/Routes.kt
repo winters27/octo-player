@@ -80,7 +80,7 @@ enum class ServerForm {
 // manager, the members and the requests waiting.
 @Serializable data object FamilyRoute : NavKey
 
-// Joining a family, filled in from a pairing link.
+// Signing up or signing in, filled in from a family link.
 @Serializable data class FamilyJoinRoute(val link: String) : NavKey
 
 // The server's shared links, and its internet radio stations.
