@@ -1,10 +1,12 @@
 package app.winters.octo.sound
 
 import androidx.media3.common.C
+import androidx.media3.common.Timeline
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.AudioProcessor.AudioFormat
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
+import app.winters.octo.playback.entryId
 import java.nio.ByteBuffer
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -176,17 +178,40 @@ class SoundShaper(val sampleRate: Int, val channels: Int) {
     }
 }
 
+// What the crossfade needs from a deck's audio path: whether its sound
+// runs through Octo's processor (so transitions can be shaped there), a
+// way to arm a transition, and what the deck has heard of its song.
+interface DeckSound {
+    val shapesTransitions: Boolean
+
+    fun arm(transition: DeckTransition?)
+
+    fun reading(entryId: String?): TapReading?
+}
+
 // Octo's own sound shaping, as a step in the player's audio path. It takes
 // 16-bit sound and gives floats, so boosts have room above full scale until
 // the limiter brings them back. Each deck has its own, all following the
 // same settings. A song's ReplayGain is handed over when the song is set up
 // and taken up only once the song before it has played out, so the level
 // changes exactly between the two songs.
+//
+// While `keepActive` says so (crossfade is on) it runs even when the
+// settings shape nothing, so a transition can start at any moment without
+// the output being set up again; the sound then passes through unchanged.
+// It keeps the song time of every frame it hands on (from where the player
+// says each stream starts, and the speed), runs an armed transition on
+// that time, and feeds what the listener hears to a LiveTap.
 @UnstableApi
-class OctoDspProcessor(private val settings: () -> SoundSettings) : BaseAudioProcessor() {
+class OctoDspProcessor(
+    private val keepActive: () -> Boolean = { false },
+    private val tap: LiveTapFeed? = null,
+    private val settings: () -> SoundSettings,
+) : BaseAudioProcessor(), DeckSound {
     private var pendingSong: SongLoudness? = null
     private var song: SongLoudness? = null
     private var shaper: SoundShaper? = null
+    private var transitions: TransitionShaper? = null
 
     // The settings last taken up. The settings flow hands out a new object
     // on each change, so comparing the object is enough to see a change.
@@ -196,6 +221,29 @@ class OctoDspProcessor(private val settings: () -> SoundSettings) : BaseAudioPro
     private var input = FloatArray(0)
     private var output = FloatArray(0)
 
+    @Volatile private var armed: DeckTransition? = null
+
+    // The queue entry the stream belongs to, where in its song the stream
+    // started, and the frames handed on since.
+    private var entryId: String? = null
+    private var streamStartMs = 0.0
+    private var framesOut = 0L
+
+    @Volatile private var speed = 1f
+
+    override val shapesTransitions: Boolean get() = isActive
+
+    override fun arm(transition: DeckTransition?) {
+        armed = transition
+    }
+
+    override fun reading(entryId: String?): TapReading? = tap?.reading(entryId)
+
+    // The playback speed; the stream starts again at it right after.
+    fun setSpeed(value: Float) {
+        speed = value
+    }
+
     // The loudness of the song that plays after the current one.
     fun setNextSong(next: SongLoudness) {
         pendingSong = next
@@ -204,7 +252,7 @@ class OctoDspProcessor(private val settings: () -> SoundSettings) : BaseAudioPro
     override fun onConfigure(inputAudioFormat: AudioFormat): AudioFormat {
         val encoding = inputAudioFormat.encoding
         if (encoding != C.ENCODING_PCM_16BIT && encoding != C.ENCODING_PCM_FLOAT) return AudioFormat.NOT_SET
-        if (!settings().shapesSound()) return AudioFormat.NOT_SET
+        if (!settings().shapesSound() && !keepActive()) return AudioFormat.NOT_SET
         return AudioFormat(inputAudioFormat.sampleRate, inputAudioFormat.channelCount, C.ENCODING_PCM_FLOAT)
     }
 
@@ -223,6 +271,17 @@ class OctoDspProcessor(private val settings: () -> SoundSettings) : BaseAudioPro
         val now = settings()
         seen = now
         current.apply(now, song, instant = kept == null || newSong != null)
+
+        val entry = entryOf(streamMetadata)
+        val sameSong = kept != null && entry == entryId
+        entryId = entry
+        streamStartMs = streamMetadata.positionOffsetUs / 1_000.0
+        framesOut = 0
+        val shaping = transitions
+        if (shaping == null || shaping.sampleRate != format.sampleRate || shaping.channels != format.channelCount) {
+            transitions = TransitionShaper(format.sampleRate, format.channelCount)
+        }
+        if (!sameSong) tap?.begin(entry, format.sampleRate, format.channelCount)
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
@@ -246,20 +305,42 @@ class OctoDspProcessor(private val settings: () -> SoundSettings) : BaseAudioPro
             inputBuffer.asFloatBuffer().get(input, 0, count)
         }
         inputBuffer.position(inputBuffer.position() + frames * format.bytesPerFrame)
-        emit(current.process(input, frames, output) * format.channelCount)
+        tap?.push(input, count)
+        val out = current.process(input, frames, output)
+        shapeTransition(out)
+        emit(out * format.channelCount)
     }
 
     override fun onQueueEndOfStream() {
         val current = shaper ?: return
         val room = current.latency * current.channels
         if (output.size < room) output = FloatArray(room)
-        emit(current.drain(output) * current.channels)
+        val out = current.drain(output)
+        shapeTransition(out)
+        emit(out * current.channels)
     }
 
     override fun onReset() {
         shaper = null
+        transitions = null
         song = null
         seen = null
+        entryId = null
+        tap?.close()
+    }
+
+    // Runs the armed transition, when it is for this song, on the frames
+    // about to be handed on, and moves the song time past them.
+    private fun shapeTransition(frames: Int) {
+        if (frames == 0) return
+        val format = inputAudioFormat
+        val msPerFrame = 1_000.0 * speed / format.sampleRate
+        val songMs = streamStartMs + framesOut * msPerFrame
+        framesOut += frames
+        val shaping = transitions ?: TransitionShaper(format.sampleRate, format.channelCount).also { transitions = it }
+        val transition = armed?.takeIf { it.entryId == null || it.entryId == entryId }
+        shaping.arm(transition, songMs)
+        shaping.process(output, frames, songMs, msPerFrame)
     }
 
     private fun emit(samples: Int) {
@@ -270,4 +351,15 @@ class OctoDspProcessor(private val settings: () -> SoundSettings) : BaseAudioPro
         buffer.position(bytes)
         buffer.flip()
     }
+}
+
+// The queue entry a stream belongs to, from what the player says about it.
+private fun entryOf(metadata: AudioProcessor.StreamMetadata): String? {
+    val uid = metadata.periodUid ?: return null
+    val timeline = metadata.timeline
+    if (timeline.isEmpty) return null
+    val index = timeline.getIndexOfPeriod(uid)
+    if (index < 0) return null
+    val period = timeline.getPeriod(index, Timeline.Period())
+    return timeline.getWindow(period.windowIndex, Timeline.Window()).mediaItem.entryId
 }

@@ -22,6 +22,7 @@ class OctoProcessorChain(val shaping: OctoDspProcessor) : AudioProcessorChain {
     override fun applyPlaybackParameters(playbackParameters: PlaybackParameters): PlaybackParameters {
         sonic.setSpeed(playbackParameters.speed)
         sonic.setPitch(playbackParameters.pitch)
+        shaping.setSpeed(playbackParameters.speed)
         return playbackParameters
     }
 
