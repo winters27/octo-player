@@ -7,6 +7,7 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.text.font.createFontFamilyResolver
 import app.winters.octo.covers.CoverBackground
 import app.winters.octo.covers.CoverBackgrounds
+import app.winters.octo.covers.CoverGlyph
 import app.winters.octo.covers.CoverPalette
 import app.winters.octo.covers.CoverSpec
 import app.winters.octo.covers.Swatch
@@ -42,7 +43,8 @@ import java.io.File
 // What a designed cover is made from: the list's id, name, its light line
 // and foot line, and the covers its colours come from, with `quarters` when
 // the one picture is a server's four-cover square. `stamp` changes when the
-// list does, so its colours are worked out again.
+// list does, so its colours are worked out again. `coverTitle` and `glyph`
+// are as CoverSpec has them.
 data class CoverOrder(
     val id: String,
     val name: String,
@@ -51,6 +53,8 @@ data class CoverOrder(
     val sources: List<String>,
     val quarters: Boolean = false,
     val stamp: String? = null,
+    val coverTitle: String? = null,
+    val glyph: CoverGlyph? = null,
 )
 
 // Designed playlist covers: their colours, from the lists' first covers,

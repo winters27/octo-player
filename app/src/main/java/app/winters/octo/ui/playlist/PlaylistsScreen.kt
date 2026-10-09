@@ -3,6 +3,7 @@ package app.winters.octo.ui.playlist
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.flowOn
 import app.winters.octo.catalog.mosaicCovers
+import app.winters.octo.covers.playlistGlyph
 import app.winters.octo.livelists.LiveListSongs
 import app.winters.octo.ui.common.phonePlaylistFooter
 import app.winters.octo.ui.common.PlaylistArtwork
@@ -160,7 +161,7 @@ fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsV
                     onServer = playlist.onServer,
                     onLongClick = { menus.open(CollectionTarget.Playlist(playlist.id)) },
                 ) {
-                    PlaylistArtwork(playlist.id, playlist.name, playlist.covers, 56.dp, footer = phonePlaylistFooter(playlist.songCount)) {
+                    PlaylistArtwork(playlist.id, playlist.name, playlist.covers, 56.dp, footer = phonePlaylistFooter(playlist.songCount), glyph = playlistGlyph(playlist.octoNotice, null)) {
                         PlaylistCover(playlist.covers, 56.dp)
                     }
                 }

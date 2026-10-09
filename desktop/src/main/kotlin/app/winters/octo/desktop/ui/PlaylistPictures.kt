@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import app.winters.octo.catalog.drawnCoverStamp
+import app.winters.octo.covers.CHART_COVER_LINE
 import app.winters.octo.covers.CoverSpec
 import app.winters.octo.covers.LIVE_LIST_COVER_LINE
 import app.winters.octo.covers.PLAYLIST_COVER_LINE
@@ -33,6 +34,7 @@ import app.winters.octo.covers.coverPaletteKey
 import app.winters.octo.covers.coverSide
 import app.winters.octo.covers.coverSources
 import app.winters.octo.covers.playlistCoverFooter
+import app.winters.octo.covers.playlistGlyph
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.artworkRim
@@ -71,7 +73,7 @@ fun DesignedCover(app: AppState, order: CoverOrder, modifier: Modifier, shape: S
         val palette by produceState(store.knownPalette(paletteKey), paletteKey, client) {
             if (value == null) value = store.palette(client, order, paletteKey)
         }
-        val spec = palette?.let { CoverSpec(order.id, order.name, order.line, order.footer, it) }
+        val spec = palette?.let { CoverSpec(order.id, order.name, order.line, order.footer, it, order.coverTitle, order.glyph) }
         val key = spec?.let { coverArtKey(it, side) }
         // The last picture stays up while a changed one is drawn.
         var shown by remember { mutableStateOf<ImageBitmap?>(null) }
@@ -91,19 +93,22 @@ fun DesignedCover(app: AppState, order: CoverOrder, modifier: Modifier, shape: S
 }
 
 // A playlist's order: its name, "Playlist", and its size or whose it is,
-// its colours from the server's picture of its first albums.
+// its colours from the server's picture of its first albums. A list with
+// cover words from the server is a chart; a marked list carries its glyph.
 fun playlistOrder(playlist: Playlist, you: String?) = CoverOrder(
     playlist.id,
     playlist.name,
-    PLAYLIST_COVER_LINE,
+    if (playlist.octoCoverTitle != null) CHART_COVER_LINE else PLAYLIST_COVER_LINE,
     playlistCoverFooter(playlist.songCount, playlist.owner, you),
     listOfNotNull(playlist.coverArt),
     quarters = true,
     stamp = playlist.changed,
+    coverTitle = playlist.octoCoverTitle,
+    glyph = playlistGlyph(playlist.octoNotice, playlist.octoList),
 )
 
 // A playlist read with its songs, as the list of playlists has it.
-fun PlaylistWithSongs.summary() = Playlist(id, name, comment, owner, public, songCount, duration, coverArt, changed, readonly, created, octoList = octoList)
+fun PlaylistWithSongs.summary() = Playlist(id, name, comment, owner, public, songCount, duration, coverArt, changed, readonly, created, octoList = octoList, octoNotice = octoNotice, octoCoverTitle = octoCoverTitle)
 
 // A playlist's picture, as the listener chose: designed, or the server's mosaic.
 @Composable

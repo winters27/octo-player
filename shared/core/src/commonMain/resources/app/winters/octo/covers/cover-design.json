@@ -71,5 +71,14 @@
     "title": { "pad": 0.04, "falloff": [0.5, 0.45], "aimContrast": 4.5, "minContrast": 3.0, "maxDrop": 0.6 },
     "footer": { "pad": 0.05, "falloff": [0.6, 0.4], "contrast": 4.5 },
     "yellow": { "hues": [55, 72, 128, 150], "split": 112, "towards": [66, 148], "turnPerDrop": 2.0, "chromaFrom": 0.06, "chromaLift": 0.5 }
+  },
+  "glyphs": {
+    "about": "Lists Octo marks for what they are (Liked Songs, Review, Duplicates) get a painted background with one white glyph in the middle and no words. The glyph sits in a square `box` of the cover's side, centred; every point and width below is a share of that box (origin top left, y down). Shapes are filled; a stroke is centred on its outline. The glyph is white at full opacity over a soft shadow: the same shape in black at shadow.alpha, once at each of shadow.offsets (shares of the side, straight down). The veil darkens under the box grown by veilGrow (about its centre) with the title's numbers.",
+    "box": 0.36,
+    "veilGrow": 0.15,
+    "shadow": { "alpha": 0.1, "offsets": [0.004, 0.006, 0.008] },
+    "heart": { "from": [0.5, 0.88], "lobe": [[0.06, 0.55], [0.06, 0.18], [0.5, 0.3]], "rule": "a cubic from `from` through lobe's two control points to its end, then the same mirrored left to right back to `from`" },
+    "magnifier": { "center": [0.42, 0.42], "radius": 0.3, "stroke": 0.09, "handle": [[0.64, 0.64], [0.88, 0.88]], "handleWidth": 0.11, "rule": "a ring of `radius` stroked `stroke` wide, and a line `handleWidth` wide with round ends" },
+    "copies": { "side": 0.56, "radius": 0.08, "back": [0.3, 0.1], "front": [0.12, 0.3], "stroke": 0.09, "gap": 0.06, "rule": "two rounded squares `side` wide with corners of `radius`, placed by their top left corners: the back one stroked `stroke` wide, the front one filled; the back's stroke is cut away within `gap` of the front square" }
   }
 }

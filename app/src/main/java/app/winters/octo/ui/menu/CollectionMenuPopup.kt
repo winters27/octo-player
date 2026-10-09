@@ -1,5 +1,6 @@
 package app.winters.octo.ui.menu
 
+import app.winters.octo.covers.playlistGlyph
 import app.winters.octo.ui.common.PlaylistArtwork
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -148,7 +149,7 @@ private fun PlaylistMenu(target: CollectionTarget.Playlist, state: CollectionMen
         shown.name,
         songs(shown.songCount),
         {
-            PlaylistArtwork(shown.id, shown.name, shown.covers, 40.dp, shape = RoundedCornerShape(6.dp)) {
+            PlaylistArtwork(shown.id, shown.name, shown.covers, 40.dp, shape = RoundedCornerShape(6.dp), glyph = playlistGlyph(shown.octoNotice, null)) {
                 PlaylistCover(shown.covers, 40.dp, shape = RoundedCornerShape(6.dp))
             }
         },

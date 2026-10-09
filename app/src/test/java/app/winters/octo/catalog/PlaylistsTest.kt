@@ -138,4 +138,10 @@ class PlaylistsTest {
             summarize(playlists, entries),
         )
     }
+
+    @Test
+    fun aSummaryCarriesTheServersNoticeMark() {
+        val playlists = listOf(PlaylistEntity("r", "Review", createdAt = 1, updatedAt = 1, serverId = "pl9", sourceId = "s", octoNotice = "review"))
+        assertEquals("review", summarize(playlists, emptyList()).single().octoNotice)
+    }
 }

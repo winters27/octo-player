@@ -25,6 +25,8 @@ fun playlistCoverStyleHelp(style: PlaylistCoverStyle): String = when (style) {
 const val PLAYLIST_COVER_LINE = "Playlist"
 const val LIVE_LIST_COVER_LINE = "Live list"
 const val STATION_COVER_LINE = "Station"
+const val CHART_COVER_LINE = "Chart"
+const val MIX_COVER_LINE = "Mix"
 
 // The small line at a cover's foot: whose it is when it is someone else's,
 // else how many songs it has (nothing while it has none).
@@ -36,7 +38,7 @@ fun playlistCoverFooter(songCount: Int, owner: String?, you: String?): String? =
 }
 
 // Bumped whenever the drawing changes, so covers kept on disk are made again.
-const val COVER_DESIGN_VERSION = 3
+const val COVER_DESIGN_VERSION = 4
 
 // Bumped whenever the colours are picked differently.
 const val COVER_PALETTE_VERSION = 2
@@ -58,7 +60,7 @@ fun coverSide(px: Int): Int {
 // the library's, the background, the playlist, the size, and its words. A
 // change to any of them is a new picture.
 fun coverArtKey(spec: CoverSpec, side: Int, book: CoverBook = CoverBook.Default, library: CoverBackgrounds = CoverBackgrounds.Default): String {
-    val words = coverHash(listOf(spec.name, spec.line.orEmpty(), spec.footer.orEmpty()).joinToString("\n")).toString(36)
+    val words = coverHash(listOf(spec.name, spec.line.orEmpty(), spec.footer.orEmpty(), spec.coverTitle.orEmpty(), spec.glyph?.name.orEmpty()).joinToString("\n")).toString(36)
     val background = chooseBackground(spec.id, spec.palette, library, book.background).file.removeSuffix(".webp")
     val look = "${book.version}.${library.version}.$background.${coverOrientation(spec.id, book.background)}"
     return "playlist-art:v$COVER_DESIGN_VERSION:$look:${spec.id}:$side:$words"

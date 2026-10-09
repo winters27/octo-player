@@ -1,12 +1,18 @@
 package app.winters.octo.design
 
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
@@ -27,10 +33,12 @@ import app.winters.octo.covers.CoverSpec
 import app.winters.octo.covers.CoverType
 import app.winters.octo.covers.CoverTypesetter
 import app.winters.octo.covers.CoverWords
+import app.winters.octo.covers.GlyphDrawing
+import app.winters.octo.covers.GlyphShape
 import app.winters.octo.covers.Measured
 import app.winters.octo.covers.applyVeil
-import app.winters.octo.covers.planCover
 import app.winters.octo.covers.orientBackground
+import app.winters.octo.covers.planCover
 import app.winters.octo.covers.sampleBackground
 import kotlin.math.ceil
 
@@ -96,14 +104,66 @@ fun DrawScope.drawCoverWords(words: List<CoverWords>, measurer: TextMeasurer, fa
     }
 }
 
-// The veiled background with the words over it, as a picture of its own size.
-fun renderCover(background: ImageBitmap, words: List<CoverWords>, measurer: TextMeasurer, family: FontFamily): ImageBitmap {
-    if (words.isEmpty()) return background
+// One shape of a glyph as a path.
+private fun pathOf(shape: GlyphShape): Path = Path().apply {
+    when (shape) {
+        is GlyphShape.Circle -> addOval(Rect(shape.x - shape.radius, shape.y - shape.radius, shape.x + shape.radius, shape.y + shape.radius))
+        is GlyphShape.RoundSquare -> addRoundRect(
+            RoundRect(Rect(shape.left, shape.top, shape.left + shape.side, shape.top + shape.side), CornerRadius(shape.radius)),
+        )
+        is GlyphShape.Capsule -> {
+            val r = shape.width / 2
+            val dx = shape.x1 - shape.x0
+            val dy = shape.y1 - shape.y0
+            val length = kotlin.math.hypot(dx, dy).coerceAtLeast(1e-6f)
+            // Across the line, half its width.
+            val nx = -dy / length * r
+            val ny = dx / length * r
+            moveTo(shape.x0 + nx, shape.y0 + ny)
+            lineTo(shape.x1 + nx, shape.y1 + ny)
+            lineTo(shape.x1 - nx, shape.y1 - ny)
+            lineTo(shape.x0 - nx, shape.y0 - ny)
+            close()
+            addOval(Rect(shape.x0 - r, shape.y0 - r, shape.x0 + r, shape.y0 + r))
+            addOval(Rect(shape.x1 - r, shape.y1 - r, shape.x1 + r, shape.y1 + r))
+        }
+        is GlyphShape.Curves -> {
+            moveTo(shape.x, shape.y)
+            for (c in shape.cubics) cubicTo(c[0], c[1], c[2], c[3], c[4], c[5])
+            close()
+        }
+    }
+}
+
+// A glyph's outline: its shapes joined and cut in order.
+fun glyphPath(drawing: GlyphDrawing): Path {
+    var path = Path()
+    for (step in drawing.steps) {
+        val part = pathOf(step.shape)
+        path = Path().apply { op(path, part, if (step.add) PathOperation.Union else PathOperation.Difference) }
+    }
+    return path
+}
+
+// Paints a glyph into this scope: its soft shadow, then the glyph in white.
+fun DrawScope.drawCoverGlyph(drawing: GlyphDrawing) {
+    val path = glyphPath(drawing)
+    for (offset in drawing.shadowOffsets) {
+        translate(0f, offset) { drawPath(path, Color.Black.copy(alpha = drawing.shadowAlpha)) }
+    }
+    drawPath(path, Color.White)
+}
+
+// The veiled background with the words (or a glyph) over it, as a picture
+// of its own size.
+fun renderCover(background: ImageBitmap, words: List<CoverWords>, measurer: TextMeasurer, family: FontFamily, glyph: GlyphDrawing? = null): ImageBitmap {
+    if (words.isEmpty() && glyph == null) return background
     val image = ImageBitmap(background.width, background.height)
     val side = Size(background.width.toFloat(), background.height.toFloat())
     CanvasDrawScope().draw(OnePixel, LayoutDirection.Ltr, Canvas(image), side) {
         drawImage(background)
         drawCoverWords(words, measurer, family)
+        glyph?.let { drawCoverGlyph(it) }
     }
     return image
 }
@@ -128,5 +188,5 @@ fun designCover(
     // Turned before the veil, so the veil still keeps the words readable.
     val turned = orientBackground(sampleBackground(pixels, size, side), side, plan.orientation)
     val veiled = applyVeil(turned, side, plan.veil)
-    return renderCover(picture(veiled, side), plan.words, measurer, family)
+    return renderCover(picture(veiled, side), plan.words, measurer, family, plan.glyph)
 }

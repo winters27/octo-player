@@ -1,5 +1,6 @@
 package app.winters.octo.ui.playlist
 
+import app.winters.octo.covers.playlistGlyph
 import app.winters.octo.ui.common.phonePlaylistFooter
 import app.winters.octo.ui.common.PlaylistArtwork
 import androidx.compose.foundation.background
@@ -182,7 +183,7 @@ fun PlaylistScreen(
                                 )
                             },
                         ) { modifier, shape ->
-                            PlaylistArtwork(playlist.id, playlist.name, current.covers, 240.dp, modifier, shape, footer = phonePlaylistFooter(tracks.size)) {
+                            PlaylistArtwork(playlist.id, playlist.name, current.covers, 240.dp, modifier, shape, footer = phonePlaylistFooter(tracks.size), glyph = playlistGlyph(playlist.octoNotice, null)) {
                                 PlaylistCover(current.covers, 240.dp, modifier, shape)
                             }
                         }

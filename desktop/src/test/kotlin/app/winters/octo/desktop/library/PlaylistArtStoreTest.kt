@@ -1,6 +1,8 @@
 package app.winters.octo.desktop.library
 
 import androidx.compose.ui.graphics.asSkiaBitmap
+import app.winters.octo.covers.CHART_COVER_LINE
+import app.winters.octo.covers.CoverGlyph
 import app.winters.octo.covers.CoverSpec
 import app.winters.octo.covers.PLAYLIST_COVER_LINE
 import app.winters.octo.covers.coverPaletteKey
@@ -8,7 +10,9 @@ import app.winters.octo.covers.hueDistance
 import app.winters.octo.covers.seededPalette
 import app.winters.octo.covers.toLch
 import app.winters.octo.desktop.FakeServer
+import app.winters.octo.desktop.ui.playlistOrder
 import app.winters.octo.desktop.ui.stationOrder
+import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.RadioStation
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -20,6 +24,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -105,6 +110,36 @@ class PlaylistArtStoreTest {
         fun key(nowMs: Long) = stationOrder(station, nowMs).let { coverPaletteKey("music.test", it.sources + listOfNotNull(it.stamp)) }
         assertEquals(key(20725 * day), key(20726 * day - 1))
         assertNotEquals(key(20725 * day), key(20726 * day))
+    }
+
+    @Test
+    fun aMarkedListsCoverIsItsGlyphInWhite() = runBlocking {
+        val store = PlaylistArtStore(OkHttpClient())
+        for (glyph in CoverGlyph.entries) {
+            val spec = CoverSpec("og-$glyph", "Liked Songs", PLAYLIST_COVER_LINE, "12 songs", seededPalette("og-$glyph"), glyph = glyph)
+            val bitmap = store.art(spec, 160).asSkiaBitmap()
+            // Somewhere on each glyph's outline, and nowhere near the corners.
+            val (x, y) = when (glyph) {
+                CoverGlyph.Heart -> 80 to 83
+                CoverGlyph.Magnifier -> (51.2 + 0.42 * 57.6 - 0.30 * 57.6).toInt() to (51.2 + 0.42 * 57.6).toInt()
+                CoverGlyph.Copies -> (51.2 + 0.40 * 57.6).toInt() to (51.2 + 0.58 * 57.6).toInt()
+            }
+            assertEquals("$glyph at $x, $y", 0xFFFFFFFF.toInt(), bitmap.getColor(x, y))
+            assertNotEquals(0xFFFFFFFF.toInt(), bitmap.getColor(10, 10))
+        }
+    }
+
+    @Test
+    fun playlistsMarkedByTheServerOrderTheirGlyphAndCoverWords() {
+        val review = playlistOrder(Playlist("pl2", "Review", octoNotice = "review"), "winters")
+        assertEquals(CoverGlyph.Magnifier, review.glyph)
+        assertEquals(CoverGlyph.Copies, playlistOrder(Playlist("pl3", "Duplicates", octoNotice = "duplicates"), "winters").glyph)
+        assertEquals(CoverGlyph.Heart, playlistOrder(Playlist("og1", "Liked Songs", octoList = "liked"), "winters").glyph)
+        assertNull(playlistOrder(Playlist("pl1", "Mine"), "winters").glyph)
+        val chart = playlistOrder(Playlist("og2", "Popular right now", octoCoverTitle = "Popular"), "winters")
+        assertEquals("Popular", chart.coverTitle)
+        assertEquals(CHART_COVER_LINE, chart.line)
+        assertEquals("Popular right now", chart.name)
     }
 
     @Test
