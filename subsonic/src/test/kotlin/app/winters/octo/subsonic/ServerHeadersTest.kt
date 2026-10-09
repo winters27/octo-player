@@ -63,6 +63,17 @@ class ServerHeadersTest {
     }
 
     @Test
+    fun aClientMarkedForOfflineMarksEveryRequestItMakes() {
+        val shared = http(HeaderScope(setOf(origin(own.url("/"))), emptyMap(), device))
+        val offline = shared.markedFor(OctoPurpose.Offline)
+        assertEquals("offline", fetch(offline, own).headers[PURPOSE_HEADER])
+        assertEquals("Pixel 9", fetch(offline, own).headers[DEVICE_NAME_HEADER])
+        assertNull(fetch(offline, other).headers[PURPOSE_HEADER])
+        // The shared client itself is left as it was.
+        assertNull(fetch(shared, own).headers[PURPOSE_HEADER])
+    }
+
+    @Test
     fun aRedirectToAnotherHostCarriesNothing() {
         val client = http(HeaderScope(setOf(origin(own.url("/"))), mapOf("X-Proxy-Token" to "abc"), device))
         own.enqueue(MockResponse.Builder().code(302).addHeader("Location", other.url("/file").toString()).build())

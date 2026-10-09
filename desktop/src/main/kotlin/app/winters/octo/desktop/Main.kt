@@ -198,8 +198,9 @@ fun main(args: Array<String>) {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
             var made: AppState? = null
             // Server songs are signed with whoever is signed in when they
-            // queue; a find fetched into the library plays from its file.
-            val player = openPlayer(settings, scope, { made?.connection?.client }, { made?.connection?.headers.orEmpty() }, { id -> made?.fetches?.landedId(id) }, parts.engine)
+            // queue, and name this computer to the server; a find fetched
+            // into the library plays from its file.
+            val player = openPlayer(settings, scope, { made?.connection?.client }, { made?.connection?.headers.orEmpty() + parts.accounts.security.deviceHeaders() }, { id -> made?.fetches?.landedId(id) }, parts.engine)
             val app = AppState(settings, parts.accounts, parts.http, scope, os, player.player, restored = parts.restored, listeningRoot = places.config, updates = parts.updates).also {
                 made = it
                 player.problem?.let { problem -> it.notice = problem }

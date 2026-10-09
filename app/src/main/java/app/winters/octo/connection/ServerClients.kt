@@ -14,9 +14,12 @@ import javax.inject.Singleton
 // answer, without touching the shared client, which stays with the server
 // in use.
 @Singleton
-class ServerClients @Inject constructor(@ApplicationContext private val context: Context) {
+class ServerClients @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val devices: DeviceIds,
+) {
     fun forServer(main: HttpUrl, settings: ConnectionSettings, seconds: Long): OkHttpClient {
-        val security = ConnectionSecurity(context).apply { configure(main, settings) }
+        val security = ConnectionSecurity(context, devices).apply { configure(main, settings) }
         return OkHttpClient.Builder()
             .connectTimeout(seconds, TimeUnit.SECONDS)
             .callTimeout(seconds, TimeUnit.SECONDS)

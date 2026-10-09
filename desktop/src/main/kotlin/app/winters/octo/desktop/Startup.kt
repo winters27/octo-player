@@ -6,6 +6,8 @@ import app.winters.octo.desktop.secrets.SecretStore
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.ServerSecurity
+import app.winters.octo.desktop.server.desktopUserAgent
+import app.winters.octo.desktop.server.userAgentOf
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
@@ -54,10 +56,13 @@ class Startup(
         // One client for everything, set up for the signed-in server's
         // headers and the certificates the listener trusted.
         val security = ServerSecurity(settings)
-        val http = security.install(OkHttpClient.Builder())
+        val userAgent = desktopUserAgent(os = os)
+        val http = security.install(OkHttpClient.Builder().addInterceptor(userAgentOf(userAgent)))
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .build()
+        // The computer's name can take a moment to read; read it here.
+        security.deviceHeaders()
         val accounts = Accounts(settings, SecretStore.forSystem(os), http, security)
         val restored = accounts.restore()
         Rest(http, accounts, restored, DesktopUpdates.forThisApp(settings, places.cache, os), systemReducesMotion(os), systemTextScale(os))

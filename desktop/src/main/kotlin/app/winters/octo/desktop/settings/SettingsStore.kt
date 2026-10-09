@@ -78,6 +78,9 @@ data class AppSettings(
     val trustedCertificates: Map<String, String> = emptyMap(),
     // Looking for new versions of Octo, and how they are put in.
     val updates: UpdatePrefs = UpdatePrefs(),
+    // This install's id, made once, which its own server tells it apart
+    // by. Empty until first needed.
+    val deviceId: String = "",
 )
 
 // A song table as the listener set it up: the columns shown, in order (by

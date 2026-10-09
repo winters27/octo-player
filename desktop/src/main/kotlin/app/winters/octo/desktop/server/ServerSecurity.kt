@@ -7,6 +7,7 @@ import app.winters.octo.connection.normalizeFingerprint
 import app.winters.octo.connection.pinKey
 import app.winters.octo.connection.platformTrustManager
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.subsonic.DeviceIdentity
 import app.winters.octo.subsonic.HeaderScope
 import app.winters.octo.subsonic.ServerHeaders
 import app.winters.octo.subsonic.origin
@@ -24,10 +25,17 @@ data class CertificateQuestion(val host: String, val fingerprint: String)
 
 // What the network needs to know about the signed-in server, as on the
 // phone: its extra headers and the addresses they may go to, and the
-// certificates the listener chose to trust, each for its own host. The one
+// certificates the listener chose to trust, each for its own host, and
+// this computer's id and name for the server's own addresses. The one
 // shared HTTP client (the server's API, covers and lyrics) reads it on
 // every request, so a change applies everywhere at once.
-class ServerSecurity(private val settings: SettingsStore) {
+class ServerSecurity(
+    private val settings: SettingsStore,
+    // This computer's id and name, told to the signed-in server only.
+    device: () -> DeviceIdentity = { desktopDevice(settings) },
+) {
+    private val device by lazy(device)
+
     private class Current(val origins: Set<String>, val headers: Map<String, String>)
 
     @Volatile private var current: Current? = null
@@ -44,6 +52,10 @@ class ServerSecurity(private val settings: SettingsStore) {
     private val remember: (String, X509Certificate) -> Unit = { host, leaf -> rejected[pinKey(host)] = leaf }
 
     private val trustManager by lazy { PinningTrustManager(platformTrustManager(), pins, remember) }
+
+    // This computer's id and name as headers, for the audio engine, which
+    // fetches songs from the server by itself.
+    fun deviceHeaders(): Map<String, String> = device.headers()
 
     // Sends these headers to the server at these addresses from now on.
     fun configure(addresses: List<HttpUrl>, headers: Map<String, String>) {
@@ -69,7 +81,7 @@ class ServerSecurity(private val settings: SettingsStore) {
         val tls = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trustManager), null) }
         return builder
             .addInterceptor(watch)
-            .addNetworkInterceptor(ServerHeaders { current?.let { HeaderScope(it.origins, it.headers) } })
+            .addNetworkInterceptor(ServerHeaders { current?.let { HeaderScope(it.origins, it.headers, device) } })
             .sslSocketFactory(tls.socketFactory, trustManager)
             .hostnameVerifier(PinningHostnameVerifier(pins, remember))
     }

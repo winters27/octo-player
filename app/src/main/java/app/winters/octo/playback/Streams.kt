@@ -38,6 +38,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withTimeoutOrNull
+import app.winters.octo.subsonic.OctoPurpose
+import app.winters.octo.subsonic.markedFor
 import okhttp3.OkHttpClient
 import java.io.IOException
 import javax.inject.Inject
@@ -143,7 +145,7 @@ class Streams @Inject constructor(
     // Reads a server song for downloading: from its saved copy when there is
     // one, otherwise from the server, without filling the saved copies.
     fun downloadSource(): DataSource {
-        val signed = signedFactory(networkFactory())
+        val signed = signedFactory(offlineNetworkFactory())
         if (!saved.enabled.value) return signed.createDataSource()
         return cachedFactory(signed).setCacheWriteDataSinkFactory(null).createDataSource()
     }
@@ -178,6 +180,13 @@ class Streams @Inject constructor(
     }
 
     private fun networkFactory(): DataSource.Factory = DefaultDataSource.Factory(context, OkHttpDataSource.Factory(http))
+
+    // The same, with every request marked as an offline copy. The server's
+    // own addresses are told so (X-Octo-Purpose), and an Octo server does
+    // not count it as playing; no other host hears of it.
+    private fun offlineNetworkFactory(): DataSource.Factory = DefaultDataSource.Factory(context, OkHttpDataSource.Factory(offlineHttp))
+
+    private val offlineHttp: OkHttpClient by lazy { http.markedFor(OctoPurpose.Offline) }
 
     private fun signedFactory(upstream: DataSource.Factory): DataSource.Factory =
         ResolvingDataSource.Factory(upstream) { spec -> if (isStream(spec.uri)) spec.withUri(sign(spec.uri)) else spec }

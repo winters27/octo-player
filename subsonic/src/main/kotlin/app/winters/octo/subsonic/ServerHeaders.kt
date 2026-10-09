@@ -2,6 +2,7 @@ package app.winters.octo.subsonic
 
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.text.Normalizer
@@ -35,6 +36,9 @@ class DeviceIdentity(id: String, name: String) {
     val id: String = headerSafe(id).ifEmpty { "unknown" }
     val name: String = headerSafe(name).take(MAX_DEVICE_NAME).trim().ifEmpty { "Octo device" }
 
+    // As headers, for code that sends its own requests to the server.
+    fun headers(): Map<String, String> = mapOf(DEVICE_ID_HEADER to id, DEVICE_NAME_HEADER to name)
+
     override fun toString() = "DeviceIdentity(id=$id, name=$name)"
 }
 
@@ -48,6 +52,12 @@ enum class OctoPurpose(val wire: String) {
 
 // Marks a request as being for this purpose.
 fun Request.Builder.purpose(purpose: OctoPurpose): Request.Builder = tag(OctoPurpose::class.java, purpose)
+
+// The same client, its connections and the server's headers shared, with
+// every request it makes marked for this purpose, for code that cannot tag
+// its own requests (a player's data source).
+fun OkHttpClient.markedFor(purpose: OctoPurpose): OkHttpClient =
+    newBuilder().addInterceptor { chain -> chain.proceed(chain.request().newBuilder().purpose(purpose).build()) }.build()
 
 private const val MAX_DEVICE_NAME = 64
 
