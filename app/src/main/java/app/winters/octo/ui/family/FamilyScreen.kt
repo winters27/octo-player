@@ -1,13 +1,13 @@
 package app.winters.octo.ui.family
 
+import app.winters.octo.design.OctoSwitch
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.foundation.selection.toggleable
 import app.winters.octo.subsonic.FamilyPreset
 import app.winters.octo.ui.common.Artwork
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.CompositionLocalProvider
 import android.Manifest
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -60,7 +60,6 @@ import app.winters.octo.design.OctoType
 import app.winters.octo.family.FamilyHub
 import app.winters.octo.family.FamilyNotifier
 import app.winters.octo.subsonic.FamilyDevice
-import app.winters.octo.subsonic.FamilyDeviceAdded
 import app.winters.octo.subsonic.FamilyDeviceKind
 import app.winters.octo.subsonic.FamilyMe
 import app.winters.octo.subsonic.FamilyMember
@@ -114,8 +113,8 @@ fun FamilyScreen(onBack: () -> Unit, owner: FamilyShellViewModel = hiltViewModel
         }
         BackButton(onBack)
     }
-    model.added?.let { AddedSheet(it, hub) }
-    model.shown?.let { ShownSheet(it, model) }
+    DeviceSheetHost(model, hub.serverAddress().orEmpty(), model.me?.username.orEmpty())
+    InviteSheetHost(model, hub.serverAddress().orEmpty())
 }
 
 @Composable
@@ -235,81 +234,6 @@ private fun AddDevice(model: FamilyModel) {
     }
 }
 
-// The pair code as a QR code another phone's camera reads (with the code
-// beside it for typing), or an app password, shown this once, each with a
-// way to copy it.
-@Composable
-private fun AddedSheet(added: FamilyDeviceAdded, hub: FamilyHub) {
-    val context = LocalContext.current
-    val server = added.server?.takeIf(String::isNotBlank) ?: hub.serverAddress().orEmpty()
-    val link = addedDeviceLink(added, server)
-    GlassSheet(visible = true, onDismiss = hub.model::dismissAdded) {
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            val forWhom = hub.model.addedFor
-            Text(
-                when {
-                    forWhom != null && link != null -> "Add a device for $forWhom"
-                    link != null -> "Add a device"
-                    forWhom != null -> "App password for $forWhom"
-                    else -> "App password"
-                },
-                style = OctoType.section,
-                color = OctoColors.TextPrimary,
-                modifier = Modifier.semantics { heading() },
-            )
-            if (link != null) {
-                QrImage(link, label = "QR code to add a device")
-                QrLink(link, "Open this link on the other device")
-                Text(
-                    "Scan this with the new device's camera, or in Octo there choose $JOIN_WITH_A_FAMILY_CODE and type ${added.username} and ${added.pairCode}. It works once.",
-                    style = OctoType.bodySmall,
-                    color = OctoColors.TextSecondary,
-                )
-            } else {
-                Text(added.appPassword.orEmpty(), style = OctoType.title, color = OctoColors.TextPrimary)
-                Text("In the other app, sign in to ${server.ifEmpty { "this server" }} as ${added.username} with this password. It shows only now.", style = OctoType.bodySmall, color = OctoColors.TextSecondary)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (link != null) {
-                    GlazeButton("Copy link", { copy(context, link) }, size = ButtonSize.Small)
-                    GlazeButton("Copy code", { copy(context, added.pairCode.orEmpty()) }, size = ButtonSize.Small)
-                } else {
-                    GlazeButton("Copy address", { copy(context, server) }, size = ButtonSize.Small)
-                    GlazeButton("Copy password", { copy(context, added.appPassword.orEmpty()) }, size = ButtonSize.Small)
-                }
-                AccentButton("Done", onClick = hub.model::dismissAdded, size = ButtonSize.Small)
-            }
-        }
-    }
-}
-
-// A new member's invite as a QR code, with a way to copy or send it, until
-// closed.
-@Composable
-private fun ShownSheet(shown: ShownLink, model: FamilyModel) {
-    val context = LocalContext.current
-    GlassSheet(visible = true, onDismiss = model::closeShown) {
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(shown.title, style = OctoType.section, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() })
-            QrImage(shown.url, label = shown.title)
-            QrLink(shown.url, "Open this link on their device")
-            Text(shown.note, style = OctoType.bodySmall, color = OctoColors.TextSecondary)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                GlazeButton("Copy link", { copy(context, shown.url) }, size = ButtonSize.Small)
-                GlazeButton("Send", {
-                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, shown.url)
-                    runCatching { context.startActivity(android.content.Intent.createChooser(send, shown.title).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                }, size = ButtonSize.Small)
-                AccentButton("Done", onClick = model::closeShown, size = ButtonSize.Small)
-            }
-        }
-    }
-}
-
-private fun copy(context: Context, text: String) {
-    context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Octo", text))
-}
-
 private fun LazyListScope.saved(hub: FamilyHub, me: FamilyMe) {
     val saved = hub.model.saved
     title("saved", SAVED)
@@ -354,6 +278,7 @@ private fun AddMember(model: FamilyModel) {
     var name by rememberSaveable { mutableStateOf("") }
     var username by rememberSaveable { mutableStateOf("") }
     var preset by rememberSaveable { mutableStateOf(FamilyPreset.Member) }
+    var away by rememberSaveable { mutableStateOf(true) }
     Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Add a member", style = OctoType.body, color = OctoColors.TextPrimary)
         GlassInput(name, { name = it }, placeholder = "Their name, like Sam", keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next))
@@ -365,8 +290,23 @@ private fun AddMember(model: FamilyModel) {
             }
         }
         Text(presetLine(preset), style = OctoType.caption, color = OctoColors.TextMuted)
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .toggleable(value = away, role = Role.Switch, onValueChange = { away = it })
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(ALLOW_AWAY, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
+                Text(ALLOW_AWAY_LINE, style = OctoType.caption, color = OctoColors.TextMuted)
+            }
+            // The row is the switch a screen reader hears; this only shows it.
+            OctoSwitch(away, { away = it }, Modifier.clearAndSetSemantics {})
+        }
         AccentButton("Add and show their invite", onClick = {
-            model.addMember(username, name, preset)
+            model.addMember(username, name, preset, away)
             username = ""
             name = ""
         }, size = ButtonSize.Small, enabled = username.isNotBlank() && !model.working)

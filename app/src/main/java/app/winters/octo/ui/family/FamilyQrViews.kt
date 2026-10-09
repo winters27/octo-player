@@ -55,50 +55,6 @@ import app.winters.octo.design.OctoType
 import app.winters.octo.subsonic.FamilyLink
 import java.util.concurrent.Executors
 
-// A link drawn as a QR code, dark on white with a quiet border, for
-// another phone's camera to read off this screen. Made on the phone.
-@Composable
-fun QrImage(text: String, modifier: Modifier = Modifier, side: Dp = 220.dp, label: String = "QR code") {
-    val code = remember(text) { qrCode(text) }
-    Box(
-        modifier
-            .size(side)
-            .background(Color.White, RoundedCornerShape(12.dp))
-            .padding(side / 14)
-            .semantics { contentDescription = label },
-    ) {
-        Canvas(Modifier.size(side - side / 7)) {
-            val cell = size.width / code.size
-            for (y in 0 until code.size) for (x in 0 until code.size) {
-                if (code.isDark(x, y)) drawRect(Color.Black, Offset(x * cell, y * cell), Size(cell + 0.5f, cell + 0.5f))
-            }
-        }
-    }
-}
-
-// The link a QR code holds, right under it, to tap: what to do with it in
-// plain words, then the link itself, opened in the browser (an Octo
-// server's join page hands it on to Octo).
-@Composable
-fun QrLink(url: String, label: String, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, style = OctoType.caption, color = OctoColors.TextSecondary)
-        Text(
-            url,
-            style = OctoType.caption.copy(textDecoration = TextDecoration.Underline),
-            color = OctoColors.Accent,
-            textAlign = TextAlign.Center,
-            maxLines = 3,
-            modifier = Modifier
-                .clickable(role = Role.Button, onClickLabel = label) {
-                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                }
-                .semantics { contentDescription = "$label: $url" },
-        )
-    }
-}
-
 // The text of a QR code in a camera frame: its brightness plane, read
 // whatever the frame's rotation.
 internal fun readFrame(image: ImageProxy): String? {

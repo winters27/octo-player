@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: the family sheets with sample data, for looking at
+     them on a phone without a family server. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name="app.winters.octo.ui.family.SheetPreviewActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Octo" />
+    </application>
+</manifest>

@@ -194,6 +194,9 @@ class SignInViewModel @Inject constructor(
         error = null
         if (link == null) return
         typeAddress(link.server)
+        // A link's home address becomes this account's home address, so the
+        // app uses the home network at home and the outside address away.
+        link.home?.let { home = it }
         paired = null
         when (link) {
             is FamilyJoinLink -> {
@@ -236,12 +239,13 @@ class SignInViewModel @Inject constructor(
         viewModelScope.launch {
             // Set up as signing in to the server would be: the certificates
             // trusted for it, its headers and its client certificate.
-            val (http, security) = clients.forJoin(url, ConnectionSettings(headers = cleanHeaders(resolveHeaders(headers.toList(), emptyList())), pins = pins.toMap(), clientCertAlias = clientCert))
+            val homeUrl = home.trim().takeIf(String::isNotEmpty)?.let(::normalizeServerUrl)
+            val (http, security) = clients.forJoin(url, ConnectionSettings(home = homeUrl, headers = cleanHeaders(resolveHeaders(headers.toList(), emptyList())), pins = pins.toMap(), clientCertAlias = clientCert))
             val invited = invite
             val pair = paired ?: when (val joined = withContext(Dispatchers.IO) {
                 val name = devices.current().name
-                if (invited != null) joinWithInvite(url, invited.token, inviteName, invitePassword, name, FamilyPlatform.Android, http)
-                else joinFamily(url, username.trim(), code, name, FamilyPlatform.Android, http)
+                if (invited != null) joinWithInvite(url, invited.token, inviteName, invitePassword, name, FamilyPlatform.Android, http, home = homeUrl)
+                else joinFamily(url, username.trim(), code, name, FamilyPlatform.Android, http, home = homeUrl)
             }) {
                 is JoinOutcome.Paired -> joined.pair.also { paired = it }
                 // A certificate of the server's own is asked about as signing
