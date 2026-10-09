@@ -31,6 +31,8 @@ import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
+import app.winters.octo.discovery.ONLY_MY_SONGS
+import app.winters.octo.player.PlayerSettings
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -98,6 +100,7 @@ class AlbumViewModel @AssistedInject constructor(
     private val downloads: Downloads,
     private val topSongs: TopSongsSource,
     private val serverDownloads: ServerDownloads,
+    player: PlayerSettings,
 ) : ViewModel() {
     val album: StateFlow<AlbumEntity?> =
         dao.album(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -112,8 +115,27 @@ class AlbumViewModel @AssistedInject constructor(
 
     // The album whole: the library's songs, and in their places the songs
     // found online, which play through the server and can be added.
-    val tracks: StateFlow<List<TrackEntity>> = combine(library, server, downloads.adoptions) { library, server, adoptions ->
+    val whole: StateFlow<List<TrackEntity>> = combine(library, server, downloads.adoptions) { library, server, adoptions ->
         wholeAlbum(library, server, adoptions.orEmpty())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // Whether songs found online are left out everywhere, by the setting.
+    val libraryOnly: StateFlow<Boolean> =
+        player.prefs.map { it.libraryOnly }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    // This page's own "Only my songs", for while it is open.
+    private val onlyMine = MutableStateFlow(false)
+    val ownOnly: StateFlow<Boolean> = onlyMine
+
+    fun setOnlyMine(on: Boolean) {
+        onlyMine.value = on
+    }
+
+    // The songs the page lists and plays: the album whole, or only the
+    // library's songs when either switch says so. Play and shuffle count
+    // in this list, so a row plays itself.
+    val tracks: StateFlow<List<TrackEntity>> = combine(whole, libraryOnly, onlyMine) { all, everywhere, here ->
+        albumSongsShown(all, everywhere || here)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     // How each song asked for is getting on.
@@ -150,7 +172,7 @@ class AlbumViewModel @AssistedInject constructor(
 
     // Has the server add every song here it lacks and not yet asked for.
     fun addMissing() {
-        val waiting = tracks.value.filter { isFind(it.id) && downloads.state(it.id) == DownloadState.None }
+        val waiting = whole.value.filter { isFind(it.id) && downloads.state(it.id) == DownloadState.None }
         viewModelScope.launch { waiting.forEach { downloads.request(it) } }
     }
 
@@ -199,11 +221,15 @@ fun AlbumScreen(
 ) {
     val album by vm.album.collectAsStateWithLifecycle()
     val tracks by vm.tracks.collectAsStateWithLifecycle()
+    val whole by vm.whole.collectAsStateWithLifecycle()
+    val libraryOnly by vm.libraryOnly.collectAsStateWithLifecycle()
+    val ownOnly by vm.ownOnly.collectAsStateWithLifecycle()
     val library by vm.library.collectAsStateWithLifecycle()
     val states by vm.downloadStates.collectAsStateWithLifecycle()
-    // Whether the album holds songs found online, so every row says which
-    // songs are in the library.
+    // Whether the album lists songs found online, so every row says which
+    // songs are in the library; `missing` whether it has any, shown or not.
     val mixed = tracks.any { isFind(it.id) }
+    val missing = whole.any { isFind(it.id) }
     val moreByArtist by vm.moreByArtist.collectAsStateWithLifecycle()
     val highlight by vm.highlight.collectAsStateWithLifecycle()
     PageArtwork(AlbumRoute(id), album?.artwork)
@@ -237,7 +263,17 @@ fun AlbumScreen(
                                     AlbumDownloadButton(library)
                                 }
                                 val canFollow by vm.canFollow.collectAsStateWithLifecycle()
-                                if (mixed) MissingSongs(tracks, states, vm::addMissing, if (canFollow) vm::showDownloads else null)
+                                if (missing) {
+                                    MissingSongs(
+                                        whole,
+                                        states,
+                                        vm::addMissing,
+                                        if (canFollow) vm::showDownloads else null,
+                                        // The setting already leaves them out; the toggle is for this album alone.
+                                        onlyMine = if (libraryOnly) null else ownOnly,
+                                        onOnlyMine = { vm.setOnlyMine(!ownOnly) },
+                                    )
+                                }
                             },
                         )
                     }
@@ -289,8 +325,16 @@ fun AlbumScreen(
 // Under an album that has only some of its songs in the library: how many
 // are in, and the plus that adds the rest (each one not asked for yet).
 // Once they are all on their way, it opens the downloads sheet instead.
+// "Only my songs" (`onlyMine`, when offered) hides the rest on this page.
 @Composable
-private fun MissingSongs(tracks: List<TrackEntity>, states: Map<String, DownloadState>, onAdd: () -> Unit, onFollow: (() -> Unit)?) {
+private fun MissingSongs(
+    tracks: List<TrackEntity>,
+    states: Map<String, DownloadState>,
+    onAdd: () -> Unit,
+    onFollow: (() -> Unit)?,
+    onlyMine: Boolean? = null,
+    onOnlyMine: () -> Unit = {},
+) {
     val adopted = LocalAdoptedFinds.current
     val outside = tracks.count { isOutsideLibrary(it.id, adopted) }
     val askable = tracks.count { isFind(it.id) && (states[it.id] ?: DownloadState.None) == DownloadState.None }
@@ -304,6 +348,7 @@ private fun MissingSongs(tracks: List<TrackEntity>, states: Map<String, Download
             onClick = { if (follows) onFollow?.invoke() else onAdd() },
             enabled = askable > 0 || follows,
         )
+        if (onlyMine != null) QuietAction(OctoIcons.Library, ONLY_MY_SONGS, onOnlyMine, checked = onlyMine)
         if (note != null) {
             Text(
                 note,

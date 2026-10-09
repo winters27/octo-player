@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -268,6 +269,7 @@ fun QuietIconAction(
 
 // A lesser action under or beside the Play line, like "Download album": a
 // small icon and a word in the quiet accent, with no border and no fill.
+// With `checked` it is a switch, in white while on.
 @Composable
 fun QuietAction(
     @DrawableRes icon: Int,
@@ -275,18 +277,25 @@ fun QuietAction(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    checked: Boolean? = null,
 ) {
+    val press = if (checked == null) {
+        Modifier.clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+    } else {
+        Modifier.toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = { onClick() })
+    }
+    val tint = if (checked == true) OctoColors.TextPrimary else OctoColors.TextSecondary
     Row(
         modifier
             .clip(CircleShape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .then(press)
             .alpha(if (enabled) 1f else 0.6f)
             .padding(horizontal = 10.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(painterResource(icon), contentDescription = null, tint = OctoColors.TextSecondary, modifier = Modifier.size(18.dp))
-        Text(text, style = OctoType.label, color = OctoColors.TextSecondary, maxLines = 1)
+        Icon(painterResource(icon), contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+        Text(text, style = OctoType.label, color = tint, maxLines = 1)
     }
 }
 

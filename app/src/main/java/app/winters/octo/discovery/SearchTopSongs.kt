@@ -1,6 +1,7 @@
 package app.winters.octo.discovery
 
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.isFind
 import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
@@ -22,6 +23,11 @@ data class RankedTrack(val rank: Int, val track: TrackEntity, val plays: Long?)
 
 // A ranked list: an artist's top songs, or the chart, which names no artist.
 data class RankedTracks(val artist: String?, val source: String, val songs: List<RankedTrack>)
+
+// The list as "Library songs only" shows it: its library songs, each at its
+// own rank; nothing when none is in the library.
+fun RankedTracks.inLibraryOnly(): RankedTracks? =
+    copy(songs = librarySongsOnly(songs, true) { isFind(it.track.id) }).takeIf { it.songs.isNotEmpty() }
 
 // The ranked lists an Octo server keeps for search: an artist's top songs
 // and the chart of the moment. Only a server that lists octoTopSongs has

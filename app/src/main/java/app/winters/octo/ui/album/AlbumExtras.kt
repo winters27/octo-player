@@ -23,13 +23,20 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavKey
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.isFind
 import app.winters.octo.design.OctoColors
+import app.winters.octo.discovery.librarySongsOnly
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.nav.AlbumRoute
 import java.util.Locale
+
+// The songs an album page lists: all of them, or with `libraryOnly` only
+// those in the library, in album order.
+fun albumSongsShown(tracks: List<TrackEntity>, libraryOnly: Boolean): List<TrackEntity> =
+    librarySongsOnly(tracks, libraryOnly) { isFind(it.id) }
 
 // The album's genre: the one most of its songs have, the first to appear
 // when two tie. Nothing when no song has one.

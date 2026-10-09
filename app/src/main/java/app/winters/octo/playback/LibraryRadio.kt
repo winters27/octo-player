@@ -5,8 +5,11 @@ import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.PlayedTrack
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
+import app.winters.octo.catalog.isFind
 import app.winters.octo.discovery.Discovery
+import app.winters.octo.discovery.librarySongsOnly
 import app.winters.octo.listening.PlayHistory
+import app.winters.octo.player.PlayerSettings
 import app.winters.octo.radio.RadioInput
 import app.winters.octo.radio.RadioSong
 import app.winters.octo.radio.radioMix
@@ -23,13 +26,15 @@ const val RADIO_LENGTH = 50
 // Octo's radio on the phone: songs like the seeds from the library and,
 // when a server is signed in, from its suggestions, songs it found online
 // among them (see radioMix). Works from the library alone. Start radio and
-// Autoplay both use it.
+// Autoplay both use it. With "Library songs only" on, the server's songs
+// found online are left out.
 @Singleton
 class LibraryRadio @Inject constructor(
     private val catalog: CatalogDao,
     private val user: UserDao,
     private val history: PlayHistory,
     private val discovery: Discovery,
+    private val player: PlayerSettings,
 ) {
     // Ids of up to `count` songs like `seeds`, never the first seed or one
     // in `exclude`, spaced on from the songs in `before` (ids, oldest
@@ -47,6 +52,7 @@ class LibraryRadio @Inject constructor(
             Log.w("Octo", "radio: server suggestions failed: ${e.javaClass.simpleName}")
             emptyList()
         }
+        val libraryOnly = player.prefs.first().libraryOnly
         val library = catalog.tracks().first()
         val liked = user.likedIds().first().toHashSet()
         val played = history.tracks.first().associateBy { it.track.id }
@@ -57,7 +63,7 @@ class LibraryRadio @Inject constructor(
                 RadioInput(
                     seeds = seeds.map { it.radio() },
                     library = library.map { it.radio() },
-                    suggested = suggested.map { it.radio() },
+                    suggested = librarySongsOnly(suggested, libraryOnly) { isFind(it.id) }.map { it.radio() },
                     before = before.mapNotNull(byId::get).map { it.radio() },
                     exclude = exclude,
                     now = System.currentTimeMillis(),

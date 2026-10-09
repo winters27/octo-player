@@ -5,6 +5,7 @@ import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.isFind
 import app.winters.octo.catalog.matchKey
 import app.winters.octo.catalog.onlineArtwork
 import app.winters.octo.catalog.searchKey
@@ -38,6 +39,11 @@ data class ArtistExtras(
     val about: String? = null,
     val similar: List<SimilarArtist> = emptyList(),
 )
+
+// The extras as "Library songs only" shows them: top songs in the library,
+// and similar artists the library has.
+fun ArtistExtras.inLibraryOnly(): ArtistExtras =
+    copy(topSongs = librarySongsOnly(topSongs, true) { isFind(it.id) }, similar = similar.filter { it.libraryId != null })
 
 // Reads what the server knows about library artists: their top songs, a
 // biography and artists like them. Kept for as long as the app runs, per

@@ -63,6 +63,8 @@ import app.winters.octo.discovery.DownloadState
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.OnlineArtist
 import app.winters.octo.discovery.SimilarArtist
+import app.winters.octo.discovery.inLibraryOnly
+import app.winters.octo.player.PlayerSettings
 import app.winters.octo.listening.FavouriteKind
 import app.winters.octo.listening.PlayHistory
 import app.winters.octo.playback.LibraryRadio
@@ -111,6 +113,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -128,6 +131,7 @@ class ArtistViewModel @AssistedInject constructor(
     private val libraryRadio: LibraryRadio,
     private val feedback: Feedback,
     downloads: Downloads,
+    player: PlayerSettings,
 ) : ViewModel() {
     val artist: StateFlow<ArtistEntity?> =
         dao.artist(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -145,7 +149,8 @@ class ArtistViewModel @AssistedInject constructor(
     private val reload = MutableStateFlow(0)
 
     // What the server adds: top songs, a biography and similar artists.
-    // Nothing until it answers, and nothing at all without a server.
+    // Nothing until it answers, and nothing at all without a server. With
+    // "Library songs only" on, only what is in the library.
     val extras: StateFlow<ArtistExtras?> = dao.artist(id)
         .filterNotNull()
         .distinctUntilChanged { a, b -> a.id == b.id && a.name == b.name }
@@ -159,6 +164,9 @@ class ArtistViewModel @AssistedInject constructor(
                 Log.w("Octo", "artist extras failed: ${e.javaClass.simpleName}")
                 null
             }
+        }
+        .combine(player.prefs.map { it.libraryOnly }.distinctUntilChanged()) { extras, libraryOnly ->
+            if (libraryOnly) extras?.inLibraryOnly() else extras
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
