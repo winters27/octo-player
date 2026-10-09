@@ -214,6 +214,13 @@ pub struct Coefficients {
     pub a2: f64,
 }
 
+impl crate::automix::Biquad {
+    /// The same coefficients for a filter bank.
+    pub fn coefficients(&self) -> Coefficients {
+        Coefficients { b0: self.b0, b1: self.b1, b2: self.b2, a1: self.a1, a2: self.a2 }
+    }
+}
+
 /// The standard formulas for these filters (the Audio EQ Cookbook).
 pub fn coefficients(filter: &EqFilter, sample_rate: u32) -> Coefficients {
     let a = 10f64.powf(filter.gain_db as f64 / 40.0);

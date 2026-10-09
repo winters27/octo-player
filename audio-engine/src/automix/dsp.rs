@@ -2,8 +2,6 @@
 
 use std::f64::consts::PI;
 
-use crate::sound::model::Coefficients;
-
 /// The Q of a Butterworth second-order section: flat, no bump at the cutoff.
 pub const BUTTERWORTH_Q: f64 = std::f64::consts::FRAC_1_SQRT_2;
 
@@ -78,11 +76,6 @@ impl Biquad {
         self.x2 = 0.0;
         self.y1 = 0.0;
         self.y2 = 0.0;
-    }
-
-    /// The same coefficients for a filter bank.
-    pub fn coefficients(&self) -> Coefficients {
-        Coefficients { b0: self.b0, b1: self.b1, b2: self.b2, a1: self.a1, a2: self.a2 }
     }
 }
 

@@ -277,3 +277,87 @@ fn a_quiet_intro_plays_under_the_end_of_a_hot_song() {
     // Never longer than the slider allows.
     assert_eq!(plan_with(4_000).overlap_ms, 4_000);
 }
+
+fn whole_song_profile(song: &SyntheticSong) -> TransitionProfile {
+    let mono = song.render_mono(0.0, song.length_ms as f64);
+    TransitionProfile::analyze(&mono, song.rate, 1)
+}
+
+#[test]
+fn a_profile_plans_the_blend_a_scout_would() {
+    let fade = |from_ms: f64, to_ms: f64, db: f64, end_db: f64| {
+        vec![
+            SongLayer { end_db, ..tone(from_ms, to_ms, 300.0, db) },
+            SongLayer { end_db: end_db - 3.0, ..tone(from_ms, to_ms, 100.0, db - 3.0) },
+        ]
+    };
+    let mut layers = fade(0.0, 180_000.0, -14.0, -14.0);
+    layers.extend(fade(180_000.0, 220_000.0, -14.0, -74.0));
+    let a = SyntheticSong { rate: 22_050, channels: 1, length_ms: 220_000, layers };
+    let mut layers = fade(0.0, 6_000.0, -38.0, -38.0);
+    layers.extend(fade(6_000.0, 180_000.0, -20.0, -20.0));
+    let b = SyntheticSong { rate: 22_050, channels: 1, length_ms: 180_000, layers };
+    let (pa, pb) = (whole_song_profile(&a).rounded(), whole_song_profile(&b).rounded());
+    assert_eq!((pa.duration_ms, pb.duration_ms), (220_000, 180_000));
+    assert_eq!(pa.tail.start_ms, 160_000);
+    assert_eq!((pa.tail.hop_ms, pa.tail.levels.len()), (100, 600));
+    assert_eq!((pb.head.start_ms, pb.head.levels.len()), (0, 300));
+    let body = pa.body_db.unwrap();
+    assert!((body - a.tail().with_body_level(body).features.body_db).abs() < 1e-9);
+
+    let song = |len| FadeSong { album_id: None, album_order: None, duration_ms: len };
+    let plan = |tail: &SectionAnalysis, head: &SectionAnalysis, context: &TransitionContext| {
+        plan_transition(
+            &song(220_000),
+            Some(&song(180_000)),
+            Some(tail),
+            Some(head),
+            &PlanSettings::new(8_000),
+            context,
+        )
+    };
+    let heard = TransitionContext { body_level_db: Some(body), ..Default::default() };
+    let scouted = plan(&a.tail(), &b.head(), &heard);
+    let profiled = plan(&pa.tail_analysis(), &pb.head_analysis(), &TransitionContext::default());
+    assert_eq!(profiled.kind, scouted.kind, "{profiled:?} / {scouted:?}");
+    assert!((profiled.start_ms - scouted.start_ms).abs() <= 300, "{profiled:?} / {scouted:?}");
+    assert!((profiled.overlap_ms - scouted.overlap_ms).abs() <= 300, "{profiled:?} / {scouted:?}");
+    assert!((profiled.entry_ms - scouted.entry_ms).abs() <= 20, "{profiled:?} / {scouted:?}");
+    assert!(!profiled.late);
+}
+
+#[test]
+fn a_profile_carries_the_whole_songs_tempo() {
+    let song = SyntheticSong { rate: 22_050, channels: 1, length_ms: 90_000, layers: click(90_000.0, 120.0) };
+    let profile = whole_song_profile(&song);
+    assert!((profile.tempo_prior().unwrap() - 120.0).abs() < 0.5, "{:?}", profile.tempo);
+    let tail = profile.tail.features.tempo.unwrap();
+    assert!(tail.confident() && (tail.bpm - 120.0).abs() < 0.5, "{tail:?}");
+    assert_eq!(profile.tail.start_ms, 30_000);
+    // A song shorter than the end a profile covers starts its end at 0.
+    let short =
+        SyntheticSong { rate: 22_050, channels: 1, length_ms: 20_000, layers: click(20_000.0, 120.0) };
+    let short = whole_song_profile(&short);
+    assert_eq!((short.head.start_ms, short.tail.start_ms, short.tail.levels.len()), (0, 0, 200));
+}
+
+#[test]
+fn levels_go_out_in_half_decibel_steps() {
+    assert_eq!(level_code(SILENT_DB), 0);
+    assert_eq!(level_code(-120.0), 0);
+    assert_eq!(level_code(-14.26), 171);
+    assert_eq!(level_of_code(171), -14.5);
+    assert_eq!(level_code(40.0), 255);
+    for code in 0..=255u8 {
+        assert_eq!(level_code(level_of_code(code)), code);
+    }
+}
+
+#[test]
+fn a_silent_song_has_a_profile_without_sound() {
+    let profile = TransitionProfile::analyze(&vec![0.0; 22_050 * 40], 22_050, 1);
+    assert_eq!(profile.body_db, None);
+    assert_eq!(profile.tempo, None);
+    assert_eq!(profile.tail.features.sound_start_ms, None);
+    assert!(profile.tail.levels.iter().all(|&l| l == SILENT_DB));
+}

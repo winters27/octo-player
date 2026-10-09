@@ -13,18 +13,20 @@ pub mod dsp;
 pub mod envelope;
 pub mod features;
 pub mod planner;
+pub mod profile;
 
 pub use curves::*;
 pub use dsp::{BUTTERWORTH_Q, Biquad};
 pub use envelope::{ENVELOPE_HOP_MS, EnvelopeBuilder, SILENT_DB, SectionEnvelope, db_of};
 pub use features::{
     LiveTap, SILENCE_BELOW_BODY_DB, SILENCE_FLOOR_DB, SectionAnalysis, SectionFeatures, Tempo, analyze_head,
-    analyze_tail, body_level_of,
+    analyze_tail, body_level_of, fold_tempo_ratio,
 };
 pub use planner::{
-    PRE_ROLL_MS, PlanSettings, TransitionContext, TransitionKind, TransitionPlan, fold_tempo_ratio,
-    is_plain_genre, plan_transition,
+    PRE_ROLL_MS, PlanSettings, TransitionContext, TransitionKind, TransitionPlan, is_plain_genre,
+    plan_transition,
 };
+pub use profile::{PROFILE_VERSION, SectionProfile, TransitionProfile, level_code, level_of_code};
 
 use crate::crossfade::{FadeSong, SHORTEST_FADE_MS};
 use crate::scout::PcmSink;

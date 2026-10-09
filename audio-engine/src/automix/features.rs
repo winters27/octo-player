@@ -3,7 +3,6 @@
 //! its level steps, and its beat grid.
 
 use super::envelope::{EnvelopeBuilder, SILENT_DB, SectionEnvelope, db_of};
-use super::planner::fold_tempo_ratio;
 
 /// The quietest a silence gate can be, in dBFS.
 pub const SILENCE_FLOOR_DB: f64 = -60.0;
@@ -73,6 +72,22 @@ const SQRT_2: f64 = std::f64::consts::SQRT_2;
 /// Rounds halves up, the same in every language.
 pub fn round_half_up(x: f64) -> f64 {
     (x + 0.5).floor()
+}
+
+/// A tempo ratio folded by halving or doubling into 0.707 to 1.414, so a
+/// song at half or double the tempo counts as the same tempo.
+pub fn fold_tempo_ratio(ratio: f64) -> f64 {
+    if ratio <= 0.0 {
+        return ratio;
+    }
+    let mut r = ratio;
+    while r > SQRT_2 {
+        r /= 2.0;
+    }
+    while r < std::f64::consts::FRAC_1_SQRT_2 {
+        r *= 2.0;
+    }
+    r
 }
 
 /// A song's beat grid. Beat times are song times in milliseconds: beats fall
@@ -234,6 +249,18 @@ impl SectionAnalysis {
             boundaries_ms: boundaries(&envelope, &body),
             tempo,
         };
+        SectionAnalysis { envelope, features, prefix, body, sound, outro }
+    }
+
+    /// An envelope with features found elsewhere, such as a server that
+    /// analyzed the whole song: the levels the planner reads come from the
+    /// envelope, the rest from the features as they are.
+    pub fn from_features(envelope: SectionEnvelope, features: SectionFeatures) -> SectionAnalysis {
+        let hop = envelope.hop_ms;
+        let prefix = prefix_of(&power_of(&envelope.db));
+        let body = smoothed(&prefix, frames_of(BODY_WINDOW_MS, hop));
+        let sound = smoothed(&prefix, frames_of(SOUND_WINDOW_MS, hop));
+        let outro = smoothed(&prefix, frames_of(OUTRO_WINDOW_MS, hop));
         SectionAnalysis { envelope, features, prefix, body, sound, outro }
     }
 

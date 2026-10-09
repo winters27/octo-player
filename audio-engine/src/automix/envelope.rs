@@ -75,6 +75,22 @@ impl SectionEnvelope {
     pub fn index_at(&self, ms: f64) -> i64 {
         ((ms - self.start_ms as f64) / self.hop_ms as f64).floor() as i64
     }
+
+    /// The hops from the one holding `from_ms` up to the one holding
+    /// `to_ms`, that one left out, kept to the hops there are.
+    pub fn slice(&self, from_ms: f64, to_ms: f64) -> SectionEnvelope {
+        let size = self.size() as i64;
+        let from = self.index_at(from_ms).clamp(0, size) as usize;
+        let to = (self.index_at(to_ms).clamp(0, size) as usize).max(from);
+        SectionEnvelope::new(
+            self.time_of(from),
+            self.hop_ms,
+            self.db[from..to].to_vec(),
+            self.low_db[from..to].to_vec(),
+            self.onset[from..to].to_vec(),
+            self.low_onset[from..to].to_vec(),
+        )
+    }
 }
 
 /// Builds a [`SectionEnvelope`] from decoded sound fed to it in blocks of

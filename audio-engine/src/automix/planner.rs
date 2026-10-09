@@ -5,7 +5,9 @@ use super::curves::{
     beat_match_rate_at, incoming_high_pass_hz, outgoing_high_pass_hz, outgoing_low_pass_hz,
     stepped_outgoing_low_pass_hz,
 };
-use super::features::{BEATS_PER_BAR, SectionAnalysis, TEMPO_CONFIDENT, Tempo, round_half_up};
+use super::features::{
+    BEATS_PER_BAR, SectionAnalysis, TEMPO_CONFIDENT, Tempo, fold_tempo_ratio, round_half_up,
+};
 use crate::crossfade::{FadeSong, SHORTEST_FADE_MS, crossfade_length};
 
 /// Songs shorter than this get the plain crossfade, never a planned one.
@@ -476,22 +478,6 @@ pub fn plan_transition(
 pub fn is_plain_genre(genre: &str) -> bool {
     let lower = genre.to_ascii_lowercase();
     PLAIN_CROSSFADE_GENRES.iter().any(|g| lower.contains(g))
-}
-
-/// A tempo ratio folded by halving or doubling into 0.707 to 1.414, so a
-/// song at half or double the tempo counts as the same tempo.
-pub fn fold_tempo_ratio(ratio: f64) -> f64 {
-    if ratio <= 0.0 {
-        return ratio;
-    }
-    let mut r = ratio;
-    while r > std::f64::consts::SQRT_2 {
-        r /= 2.0;
-    }
-    while r < std::f64::consts::FRAC_1_SQRT_2 {
-        r *= 2.0;
-    }
-    r
 }
 
 // A cut for a short overlap; a lift when the next song's first 8 s are at
