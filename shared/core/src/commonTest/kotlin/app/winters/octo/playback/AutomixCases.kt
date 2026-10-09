@@ -26,6 +26,7 @@ object AutomixCases {
         "beat-120-b" to SyntheticSong(22_050, 1, 180_000, beat(180_000.0, 120.0, 1_000.0)),
         "beat-100" to SyntheticSong(44_100, 1, 180_000, beat(180_000.0, 100.0, 600.0)),
         "beat-118" to SyntheticSong(44_100, 1, 180_000, beat(180_000.0, 118.0, 400.0)),
+        "beat-128" to SyntheticSong(44_100, 1, 60_000, beat(60_000.0, 128.0, 300.0)),
         // 1.5 s of silence, then full level.
         "plain-b" to SyntheticSong(44_100, 2, 180_000, pad(1_500.0, 180_000.0, -14.0)),
         // 6 s of a quiet pad 24 dB under the body, then full level.

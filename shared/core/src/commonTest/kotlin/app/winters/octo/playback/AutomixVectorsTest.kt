@@ -75,7 +75,13 @@ class AutomixVectorsTest {
             for ((name, song) in AutomixCases.songs) put(name, songJson(song))
         }
         putJsonArray("sections") {
-            val tagged = listOf(Triple("beat-120", "head", 62.0), Triple("beat-100", "tail", 190.0))
+            val tagged = listOf(
+                Triple("beat-120", "head", 61.0),
+                Triple("beat-100", "tail", 198.0),
+                Triple("beat-128", "head", 70.0),
+                Triple("beat-120", "head", 125.0),
+                Triple("beat-120", "head", 0.0),
+            )
             val sections = AutomixCases.songs.keys.flatMap { name -> listOf("tail", "head").map { Triple(name, it, null as Double?) } } + tagged
             for ((name, part, tag) in sections) {
                 run {

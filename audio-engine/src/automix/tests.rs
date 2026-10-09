@@ -125,6 +125,30 @@ fn the_section_analyzer_finds_a_click_tracks_tempo() {
     assert!(SectionAnalyzer::new(SectionKind::Tail, None).finish().is_none());
 }
 
+fn head_tempo(bpm: f64, tag_bpm: Option<f64>) -> Tempo {
+    let song = SyntheticSong { rate: 44_100, channels: 1, length_ms: 30_000, layers: click(30_000.0, bpm) };
+    let mut analyzer = SectionAnalyzer::new(SectionKind::Head, tag_bpm);
+    analyzer.begin(0.0, 44_100);
+    analyzer.pcm(&song.render_mono(0.0, 30_000.0));
+    analyzer.finish().unwrap().features.tempo.unwrap()
+}
+
+#[test]
+fn a_tag_tempo_picks_only_among_the_found_octaves() {
+    let found = head_tempo(120.0, None);
+    assert!((found.bpm - 120.0).abs() < 0.5, "{found:?}");
+    assert!((head_tempo(120.0, Some(61.0)).bpm - 60.0).abs() < 0.5);
+    assert!((head_tempo(120.0, Some(238.0)).bpm - 240.0).abs() < 1.0);
+    assert_eq!(head_tempo(120.0, Some(121.0)), found);
+    // A tag near no octave of the tempo found is ignored.
+    for tag in [125.0, 62.0, 0.0, -120.0, 90.0, f64::NAN] {
+        assert_eq!(head_tempo(120.0, Some(tag)), found, "tag {tag}");
+    }
+    let fast = head_tempo(128.0, None);
+    assert!((fast.bpm - 128.0).abs() < 0.5, "{fast:?}");
+    assert_eq!(head_tempo(128.0, Some(70.0)), fast);
+}
+
 // A half-time beat at 80 BPM whose kicks fall on the 1st, 4th and 7th
 // sixteenths of every two beats, with a snare on the third beat of each
 // bar: the kicks repeat every three sixteenths more often than every beat.

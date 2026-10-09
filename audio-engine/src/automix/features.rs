@@ -34,6 +34,10 @@ pub const FASTEST_BPM: f64 = 180.0;
 pub const TEMPO_CONFIDENT: f64 = 0.4;
 pub const STEADY_WITHIN: f64 = 0.02;
 
+/// A tag tempo picks an octave of the found tempo only when that octave is
+/// within this share of the tag.
+pub const TAG_WITHIN: f64 = 0.02;
+
 /// The onsets are measured against their mean over this long around each hop.
 pub const ONSET_TREND_MS: f64 = 1_000.0;
 
@@ -219,7 +223,8 @@ pub struct SectionAnalysis {
 
 impl SectionAnalysis {
     /// Finds the features of an envelope. `tag_bpm`, when the song's tags
-    /// carry a tempo, picks between double and half time. `body_level_db`,
+    /// carry a tempo within `TAG_WITHIN` of double or half the tempo found,
+    /// picks that octave; any other tag is ignored. `body_level_db`,
     /// when known from elsewhere, replaces the body level measured here at
     /// `body_percentile`.
     pub fn of(
@@ -462,38 +467,55 @@ fn boundaries(envelope: &SectionEnvelope, body: &[f64]) -> Vec<i64> {
 }
 
 // The beat grid from the onsets: the beat period whose multiples carry the
-// most autocorrelation (`pick_period`) over the sounding hops, moved to the
-// tag's octave when there is a tag; the beat phase with the largest onset
-// sum along the grid, fitted to the onset peaks; and of the four beats in a
-// bar, the one whose beats carry the most bass onset. The confidence is the
-// period's score; the grid is steady when each half of the sounding hops
-// picks the same period to within STEADY_WITHIN, after halving or doubling.
-// The consistency is measured over the sounding hops first to last.
+// most autocorrelation (`pick_period`) over the sounding hops; the beat
+// phase with the largest onset sum along the grid, fitted to the onset
+// peaks; and of the four beats in a bar, the one whose beats carry the most
+// bass onset. The confidence is the period's score; the grid is steady when
+// each half of the sounding hops picks the same period to within
+// STEADY_WITHIN, after halving or doubling. The consistency is measured
+// over the sounding hops first to last. A tag tempo only chooses among the
+// grid's own octaves: when half or double the found tempo is within
+// TAG_WITHIN of the tag, the grid is redone at that octave; any other tag
+// is ignored.
 fn tempo_of(envelope: &SectionEnvelope, first: i64, last: i64, tag_bpm: Option<f64>) -> Option<Tempo> {
-    let onset = &envelope.onset;
-    let size = onset.len();
     let hop = envelope.hop_ms as f64;
-    let per_minute = 60_000.0 / hop;
     if first < 0 || last <= first {
         return None;
     }
-    let sounding = &onset[first as usize..=last as usize];
+    let sounding = &envelope.onset[first as usize..=last as usize];
     let (picked, confidence) = pick_period(sounding, hop)?;
     let middle = sounding.len() / 2;
     let steady = [&sounding[..middle], &sounding[middle..]].iter().all(|half| {
         pick_period(half, hop)
             .is_some_and(|(p, _)| (fold_tempo_ratio(p / picked) - 1.0).abs() <= STEADY_WITHIN)
     });
-
-    let mut period = picked;
-    if let Some(tag) = tag_bpm.filter(|&t| t > 0.0) {
-        while per_minute / period > tag * SQRT_2 {
-            period *= 2.0;
-        }
-        while per_minute / period < tag / SQRT_2 {
-            period /= 2.0;
+    let grid = |start: f64| grid_of(envelope, first, last, start, confidence, steady);
+    let found = grid(picked);
+    let Some(tag) = tag_bpm.filter(|&t| t > 0.0) else { return Some(found) };
+    if (found.bpm / tag - 1.0).abs() <= TAG_WITHIN {
+        return Some(found);
+    }
+    for factor in [0.5, 2.0] {
+        if (found.bpm * factor / tag - 1.0).abs() <= TAG_WITHIN {
+            return Some(grid(picked / factor));
         }
     }
+    Some(found)
+}
+
+// The grid at a beat period of `start` hops, fitted to the onset peaks.
+fn grid_of(
+    envelope: &SectionEnvelope,
+    first: i64,
+    last: i64,
+    start: f64,
+    confidence: f64,
+    steady: bool,
+) -> Tempo {
+    let onset = &envelope.onset;
+    let size = onset.len();
+    let hop = envelope.hop_ms as f64;
+    let mut period = start;
 
     let mut best_phase = 0;
     let mut best = -1.0;
@@ -529,7 +551,7 @@ fn tempo_of(envelope: &SectionEnvelope, first: i64, last: i64, tag_bpm: Option<f
 
     let beat_ms = period * hop;
     let first_beat = envelope.start_ms as f64 + phase * hop;
-    Some(Tempo {
+    Tempo {
         bpm: 60_000.0 / beat_ms,
         confidence,
         consistency: consistency_of(envelope, &peaks, first, last, first_beat, beat_ms),
@@ -537,7 +559,7 @@ fn tempo_of(envelope: &SectionEnvelope, first: i64, last: i64, tag_bpm: Option<f
         beat_ms,
         first_beat_ms: first_beat,
         downbeat_ms: first_beat + bar as f64 * beat_ms,
-    })
+    }
 }
 
 // The beat period, in hops, that the onsets repeat at most, and its score.

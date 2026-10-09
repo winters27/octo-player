@@ -215,11 +215,21 @@ class AutomixTest {
     }
 
     @Test
-    fun aTagTempoPicksTheOctave() {
-        val song = AutomixCases.songs.getValue("beat-120")
-        val envelope = song.envelope(0.0, 30_000.0)
-        assertEquals(60.0, analyzeHead(envelope, tagBpm = 62.0).features.tempo!!.bpm, 0.5)
-        assertEquals(120.0, analyzeHead(envelope, tagBpm = 125.0).features.tempo!!.bpm, 0.5)
+    fun aTagTempoPicksOnlyAmongTheFoundOctaves() {
+        val envelope = AutomixCases.songs.getValue("beat-120").envelope(0.0, 30_000.0)
+        val found = analyzeHead(envelope).features.tempo!!
+        assertEquals(120.0, found.bpm, 0.5)
+        assertEquals(60.0, analyzeHead(envelope, tagBpm = 61.0).features.tempo!!.bpm, 0.5)
+        assertEquals(240.0, analyzeHead(envelope, tagBpm = 238.0).features.tempo!!.bpm, 1.0)
+        assertEquals(found, analyzeHead(envelope, tagBpm = 121.0).features.tempo)
+        // A tag near no octave of the tempo found is ignored.
+        for (tag in listOf(125.0, 62.0, 0.0, -120.0, 90.0, Double.NaN)) {
+            assertEquals("tag $tag", found, analyzeHead(envelope, tagBpm = tag).features.tempo)
+        }
+        val fast = AutomixCases.songs.getValue("beat-128").envelope(0.0, 30_000.0)
+        val fastFound = analyzeHead(fast).features.tempo!!
+        assertEquals(128.0, fastFound.bpm, 0.5)
+        assertEquals(fastFound, analyzeHead(fast, tagBpm = 70.0).features.tempo)
     }
 
     @Test

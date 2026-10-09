@@ -38,6 +38,10 @@ const val FASTEST_BPM = 180.0
 const val TEMPO_CONFIDENT = 0.4
 const val STEADY_WITHIN = 0.02
 
+// A tag tempo picks an octave of the found tempo only when that octave is
+// within this share of the tag.
+const val TAG_WITHIN = 0.02
+
 // The onsets are measured against their mean over this long around each hop.
 const val ONSET_TREND_MS = 1_000.0
 
@@ -223,7 +227,8 @@ class SectionAnalysis private constructor(
         }
 
         // Finds the features of an envelope. `tagBpm`, when the song's tags
-        // carry a tempo, picks between double and half time. `bodyLevelDb`,
+        // carry a tempo within TAG_WITHIN of double or half the tempo found,
+        // picks that octave; any other tag is ignored. `bodyLevelDb`,
         // when known from elsewhere, replaces the body level measured here
         // at `bodyPercentile`.
         fun of(
@@ -378,18 +383,18 @@ private fun boundaries(envelope: SectionEnvelope, body: DoubleArray): List<Long>
 }
 
 // The beat grid from the onsets: the beat period whose multiples carry the
-// most autocorrelation (pickPeriod) over the sounding hops, moved to the
-// tag's octave when there is a tag; the beat phase with the largest onset
-// sum along the grid, fitted to the onset peaks; and of the four beats in a
-// bar, the one whose beats carry the most bass onset. The confidence is the
-// period's score; the grid is steady when each half of the sounding hops
-// picks the same period to within STEADY_WITHIN, after halving or doubling.
-// The consistency is measured over the sounding hops first to last.
+// most autocorrelation (pickPeriod) over the sounding hops; the beat phase
+// with the largest onset sum along the grid, fitted to the onset peaks; and
+// of the four beats in a bar, the one whose beats carry the most bass onset.
+// The confidence is the period's score; the grid is steady when each half
+// of the sounding hops picks the same period to within STEADY_WITHIN, after
+// halving or doubling. The consistency is measured over the sounding hops
+// first to last. A tag tempo only chooses among the grid's own octaves:
+// when half or double the found tempo is within TAG_WITHIN of the tag, the
+// grid is redone at that octave; any other tag is ignored.
 private fun tempoOf(envelope: SectionEnvelope, first: Int, last: Int, tagBpm: Double?): Tempo? {
     val onset = envelope.onset
-    val size = onset.size
     val hop = envelope.hopMs.toDouble()
-    val perMinute = 60_000.0 / hop
     if (first < 0 || last <= first) return null
     val sounding = onset.copyOfRange(first, last + 1)
     val (picked, confidence) = pickPeriod(sounding, hop) ?: return null
@@ -398,12 +403,23 @@ private fun tempoOf(envelope: SectionEnvelope, first: Int, last: Int, tagBpm: Do
         val p = pickPeriod(half, hop)
         p != null && abs(foldTempoRatio(p.first / picked) - 1) <= STEADY_WITHIN
     }
-
-    var period = picked
-    if (tagBpm != null && tagBpm > 0) {
-        while (perMinute / period > tagBpm * SQRT_2) period *= 2
-        while (perMinute / period < tagBpm / SQRT_2) period /= 2
+    val found = gridOf(envelope, first, last, picked, confidence, steady)
+    if (tagBpm == null || !(tagBpm > 0)) return found
+    if (abs(found.bpm / tagBpm - 1) <= TAG_WITHIN) return found
+    for (factor in doubleArrayOf(0.5, 2.0)) {
+        if (abs(found.bpm * factor / tagBpm - 1) <= TAG_WITHIN) {
+            return gridOf(envelope, first, last, picked / factor, confidence, steady)
+        }
     }
+    return found
+}
+
+// The grid at a beat period of `start` hops, fitted to the onset peaks.
+private fun gridOf(envelope: SectionEnvelope, first: Int, last: Int, start: Double, confidence: Double, steady: Boolean): Tempo {
+    val onset = envelope.onset
+    val size = onset.size
+    val hop = envelope.hopMs.toDouble()
+    var period = start
 
     var bestPhase = 0
     var best = -1.0
