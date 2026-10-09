@@ -11,12 +11,20 @@
 //! " | "; empty lines and lines starting with # are skipped. Batch mode
 //! writes 01.wav, 02.wav, ... and ends with a summary.
 //!
+//! The mixer runs with the desktop app's default sound settings, so its
+//! limiter is on: it catches what the two songs' sum would push over full
+//! scale while they blend.
+//!
 //! Checks, on the rendered sound:
 //!   loudness  momentary loudness (BS.1770, 400 ms) through the blend against
-//!             the two bodies, A before the blend and B after it: flagged when
-//!             it falls more than 3 dB below the quieter body's median or rises
-//!             more than 2 dB above the louder body's 90th percentile
-//!   peaks     any sample above -0.1 dBFS
+//!             the two bodies, A before the blend and B after it: a dip is how
+//!             far it falls below the quieter body's median, flagged when it is
+//!             more than 3 dB and more than 3 dB deeper than the dip of a
+//!             gapless join at the same exit (A cut where the blend lets it go,
+//!             B straight after from its entry), so quiet music is not blamed
+//!             on the blend; a swell, more than 2 dB above the louder body's
+//!             90th percentile, is always flagged
+//!   peaks     any sample inside the blend above -0.1 dBFS
 //!   clicks    first-difference spikes near the blend, against how often they
 //!             come in the music outside it
 //!
@@ -198,7 +206,21 @@ fn describe_section(name: &str, a: Option<&SectionAnalysis>) -> String {
 // How one pair came out.
 struct Outcome {
     plan: String,
+    kind: String,
+    start_secs: f64,
+    overlap_secs: f64,
+    measures: Measures,
     flags: Vec<String>,
+}
+
+// What the checks measured.
+#[derive(Clone, Copy, Debug, Default)]
+struct Measures {
+    // How far the blend and the gapless join fall below the quieter body, in dB.
+    dip_db: Option<f64>,
+    gapless_dip_db: Option<f64>,
+    clicks: usize,
+    peaks: usize,
 }
 
 fn plan_pair(a: &str, b: &str, a_len: f64, b_len: f64, opts: &Options) -> TransitionPlan {
@@ -279,24 +301,19 @@ fn render_pair(a: &str, b: &str, out: &Path, opts: &Options) -> Result<Outcome, 
     }
     println!("  {}", plan.describe());
     if plan.overlap_ms <= 0 {
-        return Ok(Outcome { plan: plan.reason, flags: vec!["no blend to render".into()] });
+        return Ok(Outcome {
+            plan: plan.reason.clone(),
+            kind: plan.kind.name().into(),
+            start_secs: plan.start_secs(),
+            overlap_secs: 0.0,
+            measures: Measures::default(),
+            flags: vec!["no blend to render".into()],
+        });
     }
 
     let from = (plan.start_secs() - AROUND_SECS).max(0.0);
-    let a_deck = Deck::open(1, a.to_string(), from, HttpOptions::default());
-    let b_deck = Deck::open(2, b.to_string(), plan.entry_secs(), HttpOptions::default());
-    let until = Instant::now() + Duration::from_secs(30);
-    while !(a_deck.is_ready() && b_deck.is_ready()) {
-        if Instant::now() > until {
-            return Err("the songs did not open".into());
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
-    let mut lane = Lane::new(a_deck, Loudness::default(), &ReplayGainSettings::default(), RATE);
-    lane.last = true;
-    mixer.start(lane, Transition::Start);
     let overlap = plan.overlap_secs();
+    let frames = (overlap * RATE as f64) as u64;
     let shape = FadeShape {
         k: plan.k,
         filter_strength: plan.filter_strength,
@@ -305,25 +322,8 @@ fn render_pair(a: &str, b: &str, out: &Path, opts: &Options) -> Result<Outcome, 
         silence_gate_db: (plan.k != 0.0).then_some(automix::SILENCE_FLOOR_DB as f32),
         headroom_db: plan.headroom_db as f32,
     };
-    let frames = (overlap * RATE as f64) as u64;
-    mixer.plan_fade(1, plan.start_secs(), frames, b_deck, Loudness::default(), shape);
-
     let wanted = ((plan.start_secs() - from + overlap + AROUND_SECS) * RATE as f64) as usize;
-    let mut samples = Vec::with_capacity(wanted * 2);
-    let mut block = vec![0.0f32; 2_048];
-    let mut markers = Vec::new();
-    let until = Instant::now() + Duration::from_secs(120);
-    while samples.len() / 2 < wanted {
-        let (made, state) = mixer.render(&mut block, &mut markers);
-        samples.extend_from_slice(&block[..made * 2]);
-        if made == 0 {
-            if state == MixState::Ended || Instant::now() > until {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    }
-    samples.truncate(wanted * 2);
+    let (samples, markers) = render(a, b, from, plan.start_secs(), plan.entry_secs(), frames, shape, wanted)?;
     write_wav(out, &samples).map_err(|e| format!("{}: {e}", out.display()))?;
 
     // Where the blend lies in the file, by the mixer's own markers.
@@ -339,39 +339,116 @@ fn render_pair(a: &str, b: &str, out: &Path, opts: &Options) -> Result<Outcome, 
         blend_from as f64 / RATE as f64,
         blend_to as f64 / RATE as f64
     );
-    let flags = check(&samples, blend_from, blend_to, opts.click_ratio);
-    Ok(Outcome { plan: plan.reason, flags })
+
+    // The same two songs joined gaplessly where the blend lets A go.
+    let exit = plan.start_secs() + overlap;
+    let (gapless, _) =
+        render(a, b, from, exit, plan.entry_secs(), 1, FadeShape::default(), wanted + frames as usize)?;
+    let (measures, flags) = check(&samples, &gapless, blend_from, blend_to, opts.click_ratio);
+    Ok(Outcome {
+        plan: plan.reason.clone(),
+        kind: plan.kind.name().into(),
+        start_secs: plan.start_secs(),
+        overlap_secs: overlap,
+        measures,
+        flags,
+    })
 }
 
-// The loudness, peak and click checks on a rendered blend.
-fn check(samples: &[f32], blend_from: usize, blend_to: usize, click_ratio: f32) -> Vec<String> {
+// Renders A from `from` into B from `entry`, blending over `frames` from
+// `at` in A, `wanted` frames in all.
+#[allow(clippy::too_many_arguments)]
+fn render(
+    a: &str,
+    b: &str,
+    from: f64,
+    at: f64,
+    entry: f64,
+    frames: u64,
+    shape: FadeShape,
+    wanted: usize,
+) -> Result<(Vec<f32>, Vec<octo_audio::mixer::Marker>), String> {
+    let a_deck = Deck::open(1, a.to_string(), from, HttpOptions::default());
+    let b_deck = Deck::open(2, b.to_string(), entry, HttpOptions::default());
+    let until = Instant::now() + Duration::from_secs(30);
+    while !(a_deck.is_ready() && b_deck.is_ready()) {
+        if Instant::now() > until {
+            return Err("the songs did not open".into());
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
+    let mut lane = Lane::new(a_deck, Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    mixer.plan_fade(1, at, frames, b_deck, Loudness::default(), shape);
+    let mut samples = Vec::with_capacity(wanted * 2);
+    let mut block = vec![0.0f32; 2_048];
+    let mut markers = Vec::new();
+    let until = Instant::now() + Duration::from_secs(120);
+    while samples.len() / 2 < wanted {
+        let (made, state) = mixer.render(&mut block, &mut markers);
+        samples.extend_from_slice(&block[..made * 2]);
+        if made == 0 {
+            if state == MixState::Ended || Instant::now() > until {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    samples.truncate(wanted * 2);
+    Ok((samples, markers))
+}
+
+// The loudness, peak and click checks on a rendered blend. `gapless` is
+// the same two songs joined without a blend where the blend lets A go: the
+// same sound up to the blend's start, then the rest of A's part of the
+// blend, then B's.
+fn check(
+    samples: &[f32],
+    gapless: &[f32],
+    blend_from: usize,
+    blend_to: usize,
+    click_ratio: f32,
+) -> (Measures, Vec<String>) {
     let mut flags = Vec::new();
+    let mut measures = Measures::default();
     let frames = samples.len() / 2;
     let secs = |frame: usize| frame as f64 / RATE as f64;
 
     // Loudness: each body's momentary levels, A's before the blend and B's
-    // after it, against the momentary levels through the blend.
+    // after it, against the momentary levels through the blend and through
+    // the same music joined gaplessly.
     let weighted = k_weighted(samples);
     let a_body = momentary(&weighted, 0, blend_from);
     let b_body = momentary(&weighted, blend_to, frames);
     let blend = momentary(&weighted, blend_from, blend_to);
+    let joined = k_weighted(gapless);
+    let span = blend_to - blend_from;
+    let join = momentary(&joined, blend_from, (blend_from + 2 * span).min(gapless.len() / 2));
+    let lowest =
+        |w: &[(usize, f64)]| w.iter().copied().fold((0, f64::INFINITY), |m, w| if w.1 < m.1 { w } else { m });
     match (body_of(&a_body), body_of(&b_body)) {
         (Some((a_typical, a_loud)), Some((b_typical, b_loud))) if !blend.is_empty() => {
-            let floor = a_typical.min(b_typical) - QUIETER_DB;
+            let quieter = a_typical.min(b_typical);
             let ceiling = a_loud.max(b_loud) + LOUDER_DB;
-            let (low_at, low) =
-                blend.iter().copied().fold((0, f64::INFINITY), |m, w| if w.1 < m.1 { w } else { m });
+            let (low_at, low) = lowest(&blend);
             let (high_at, high) =
                 blend.iter().copied().fold((0, f64::NEG_INFINITY), |m, w| if w.1 > m.1 { w } else { m });
+            let dip = quieter - low;
+            measures.dip_db = Some(dip);
+            let gapless_dip = (!join.is_empty()).then(|| quieter - lowest(&join).1);
+            measures.gapless_dip_db = gapless_dip;
             println!(
-                "  loudness: A before {a_typical:.1} LUFS (loud {a_loud:.1}), B after {b_typical:.1} (loud {b_loud:.1}); through the blend {low:.1} (at {:.2} s) to {high:.1} (at {:.2} s), allowed {floor:.1} to {ceiling:.1}",
+                "  loudness: A before {a_typical:.1} LUFS (loud {a_loud:.1}), B after {b_typical:.1} (loud {b_loud:.1}); through the blend {low:.1} (at {:.2} s) to {high:.1} (at {:.2} s); dip {dip:.1} dB, gapless join {}",
                 secs(low_at),
-                secs(high_at)
+                secs(high_at),
+                gapless_dip.map_or("-".to_string(), |d| format!("{d:.1} dB"))
             );
-            if low < floor {
+            let beyond_gapless = dip - gapless_dip.unwrap_or(f64::NEG_INFINITY);
+            if dip > QUIETER_DB && beyond_gapless > QUIETER_DB {
                 flags.push(format!(
-                    "dips {:.1} dB below the quieter body at {:.2} s",
-                    floor + QUIETER_DB - low,
+                    "dips {dip:.1} dB below the quieter body at {:.2} s, {beyond_gapless:.1} dB more than a gapless join",
                     secs(low_at)
                 ));
             }
@@ -386,17 +463,19 @@ fn check(samples: &[f32], blend_from: usize, blend_to: usize, click_ratio: f32) 
         _ => println!("  loudness: too little sound before or after the blend to compare"),
     }
 
-    // Peaks.
+    // Peaks inside the blend.
     let limit = 10f64.powf(PEAK_DBFS / 20.0) as f32;
-    let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
-    let over = samples.iter().filter(|s| s.abs() > limit).count();
+    let inside = &samples[blend_from * 2..blend_to * 2];
+    let peak = inside.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    let over = inside.iter().filter(|s| s.abs() > limit).count();
+    measures.peaks = over;
     println!(
-        "  peak {:.2} dBFS, {over} samples above {PEAK_DBFS} dBFS",
+        "  peak in the blend {:.2} dBFS, {over} samples above {PEAK_DBFS} dBFS",
         20.0 * (peak.max(1e-10) as f64).log10()
     );
     if over > 0 {
         flags.push(format!(
-            "{over} samples above {PEAK_DBFS} dBFS (peak {:.2})",
+            "{over} samples in the blend above {PEAK_DBFS} dBFS (peak {:.2})",
             20.0 * (peak as f64).log10()
         ));
     }
@@ -415,10 +494,12 @@ fn check(samples: &[f32], blend_from: usize, blend_to: usize, click_ratio: f32) 
         near.len(),
         if times.is_empty() { String::new() } else { format!(" at {} s", times.join(", ")) }
     );
-    if !near.is_empty() && near.len() as f64 > (2.0 * expected).ceil() {
+    let excess = near.len().saturating_sub((2.0 * expected).ceil() as usize);
+    measures.clicks = excess;
+    if !near.is_empty() && excess > 0 {
         flags.push(format!("{} clicks near the blend, first at {} s", near.len(), times[0]));
     }
-    flags
+    (measures, flags)
 }
 
 // The two K-weighting stages of BS.1770 at 48 kHz, run over each channel.
@@ -595,6 +676,36 @@ fn main() {
                 Ok(o) if o.flags.is_empty() => println!("  {name}  ok        {}", o.plan),
                 Ok(o) => println!("  {name}  FLAGGED   {} [{}]", o.plan, o.flags.join("; ")),
                 Err(e) => println!("  {name}  FAILED    {e}"),
+            }
+        }
+        println!();
+        println!(
+            "| Pair | Plan | Start | Overlap | Dip | Gapless dip | Dip vs gapless | Clicks | Peaks | Flags |"
+        );
+        println!("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+        let db = |d: Option<f64>| d.map_or("-".to_string(), |d| format!("{d:.1} dB"));
+        for (out, outcome) in &summary {
+            let name = out.file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            match outcome {
+                Ok(o) => {
+                    let m = o.measures;
+                    let beyond = match (m.dip_db, m.gapless_dip_db) {
+                        (Some(d), Some(g)) => format!("{:+.1} dB", d - g),
+                        _ => "-".to_string(),
+                    };
+                    println!(
+                        "| {name} | {} | {:.2} s | {:.2} s | {} | {} | {beyond} | {} | {} | {} |",
+                        o.kind,
+                        o.start_secs,
+                        o.overlap_secs,
+                        db(m.dip_db),
+                        db(m.gapless_dip_db),
+                        m.clicks,
+                        m.peaks,
+                        if o.flags.is_empty() { "none".to_string() } else { o.flags.join("; ") }
+                    );
+                }
+                Err(e) => println!("| {name} | failed: {e} | | | | | | | | |"),
             }
         }
     }
