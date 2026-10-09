@@ -22,7 +22,7 @@ class SettingsSummariesTest {
     @Test
     fun playback() {
         assertEquals("Gapless · Autoplay", playbackSummary(PlayerPrefs()))
-        assertEquals("Crossfade 6 s · Autoplay", playbackSummary(PlayerPrefs(crossfade = true)))
+        assertEquals("Crossfade 8 s · Autoplay", playbackSummary(PlayerPrefs(crossfade = true)))
         assertEquals(
             "Crossfade 4 s · 1.25x · Skip silence",
             playbackSummary(PlayerPrefs(crossfade = true, crossfadeSeconds = 4, speed = 1.25f, autoplay = false, skipSilence = true)),

@@ -109,7 +109,9 @@ class Autoplay @Inject constructor(
     }
 
     private suspend fun watchAndAdd(player: OutputSwitch, key: String, seedId: String) {
-        val lead = maxOf(LEAD_MS, player.crossfadeMs + LOAD_AHEAD_MS)
+        // A planned blend can start up to LONGEST_EARLY_EXIT_MS before the end.
+        val early = if (player.crossfadeMs > 0) LONGEST_EARLY_EXIT_MS else 0
+        val lead = maxOf(LEAD_MS, player.crossfadeMs + early + LOAD_AHEAD_MS)
         while (!autoplayDue(enabled, player.repeatMode, player.hasNextMediaItem(), player.remainingMs(), lead)) {
             delay(WATCH_EVERY_MS)
         }
