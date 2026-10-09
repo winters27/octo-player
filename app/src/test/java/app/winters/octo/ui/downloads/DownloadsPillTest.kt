@@ -7,9 +7,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-// Brandon: "just to be able to open it quickly without having to navigate to
-// the library". The pill shows only while songs are on their way, and says
-// how many.
+// The pill shows only while songs are on their way, says the step the one
+// furthest along is on, and opens the downloads from anywhere.
 class DownloadsPillTest {
     @Test
     fun onlySongsStillOnTheirWayCount() {
@@ -27,7 +26,6 @@ class DownloadsPillTest {
         assertEquals("3 downloading", comingText(3))
     }
 
-    // Brandon: "downloading pill should update dynamically to the steps its on".
     @Test
     fun theRingFollowsTheServersStep() {
         fun row(state: String, progress: Float? = null) =

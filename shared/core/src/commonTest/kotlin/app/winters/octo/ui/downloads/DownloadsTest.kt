@@ -382,7 +382,6 @@ class DownloadsTest {
         assertEquals("at:0", copyKey(FoundCandidate(index = 0)))
     }
 
-    // Brandon: "downloading pill should update dynamically to the steps its on".
     @Test
     fun thePillSpeaksForTheSongFurthestAlong() {
         val rows = listOf(

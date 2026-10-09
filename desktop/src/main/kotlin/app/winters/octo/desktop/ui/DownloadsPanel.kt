@@ -238,8 +238,7 @@ private fun DownloadLog(app: AppState, model: DownloadsModel, key: String, modif
     val events = log?.event.orEmpty()
     val running = row?.finished == false
     val list = rememberLazyListState()
-    // Brandon: "clicking into the download progress, should be followed". A
-    // running download opens on its newest step and keeps it in view; a
+    // A running download opens on its newest step and keeps it in view; a
     // finished one opens at its start. Scrolling up lets go; back at the
     // end, or "Latest step", follows again.
     var follow by remember(key) { mutableStateOf<Boolean?>(null) }
