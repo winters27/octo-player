@@ -77,17 +77,21 @@ class WashClockTest {
     }
 
     @Test
-    fun aCoverArrivingMidFadeStartsFromTheOneShowingMost() {
+    fun aCoverArrivingMidFadeStartsFromWhatShows() {
         val fade = CoverFade()
         val swap = CoverSwap<String>()
-        assertEquals("a" to "a", swap.arrive("a", fade, 0L))
-        assertEquals("a" to "b", swap.arrive("b", fade, 10_000L))
-        // Barely begun: "a" still shows most, so the fade to "c" is from "a".
+        val blend = { old: String, new: String, mix: Float -> "$old+$new@${(mix * 100).toInt()}" }
+        assertEquals("a" to "a", swap.arrive("a", fade, 0L, blend))
+        assertEquals("a" to "b", swap.arrive("b", fade, 10_000L, blend))
+        // Barely begun: the fade to "c" is from "a" with a little of "b",
+        // never "a" alone (Brandon: on radio the cover snapped back, then
+        // moved on, when the real one came in after the stand-in).
         fade.advance(50f)
-        assertEquals("a" to "c", swap.arrive("c", fade, 10_050L))
-        // Mostly through: from "c".
-        fade.advance(250f)
-        assertEquals("c" to "d", swap.arrive("d", fade, 20_000L))
+        val mix = fade.mix
+        assertEquals("a+b@${(mix * 100).toInt()}" to "c", swap.arrive("c", fade, 10_050L, blend))
+        // A finished fade starts from the cover it ended on.
+        fade.advance(1_000f)
+        assertEquals("c" to "d", swap.arrive("d", fade, 20_000L, blend))
         assertSame("d", swap.new)
     }
 

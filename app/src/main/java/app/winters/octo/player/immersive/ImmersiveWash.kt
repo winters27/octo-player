@@ -5,6 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Rect
 import android.os.Build
 import android.os.PowerManager
 import android.os.SystemClock
@@ -81,7 +84,7 @@ private fun WashCanvas(cover: WashCover?, bpm: Float, fpsLimit: Int, speed: Floa
 
     LaunchedEffect(cover) {
         val next = cover?.square ?: return@LaunchedEffect
-        val (from, to) = covers.arrive(next, clock.fade, SystemClock.uptimeMillis())
+        val (from, to) = covers.arrive(next, clock.fade, SystemClock.uptimeMillis(), ::mixCovers)
         renderer.setCovers(from, to)
         arrivals++
     }
@@ -154,4 +157,14 @@ private fun rememberPowerSave(): Boolean {
         onDispose { context.unregisterReceiver(receiver) }
     }
     return on
+}
+
+// Two covers mixed as the wash mixes them, `mix` of the new over the old,
+// for a fade that starts while another is under way.
+private fun mixCovers(old: Bitmap, new: Bitmap, mix: Float): Bitmap {
+    val out = Bitmap.createBitmap(old.width, old.height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(out)
+    canvas.drawBitmap(old, 0f, 0f, null)
+    canvas.drawBitmap(new, null, Rect(0, 0, old.width, old.height), Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = (mix.coerceIn(0f, 1f) * 255).toInt() })
+    return out
 }

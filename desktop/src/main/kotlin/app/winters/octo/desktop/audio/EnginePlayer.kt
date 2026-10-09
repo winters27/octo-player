@@ -156,7 +156,6 @@ class EnginePlayer(
     private fun positionLocked(heard: Heard): Long {
         run {
             val current = queue.currentEntry ?: return 0
-            if (keyOfItem(heard.itemId) == expecting) expecting = null
             val duration = durationMs()
             val at = pending
             if (at != null) {

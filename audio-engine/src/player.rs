@@ -912,14 +912,24 @@ impl Player {
             self.on_end();
         }
 
+        // Not for a song skipped away from while the next one opens: its
+        // sound is gone, and the app took the word as the song going on
+        // and went back to it. Through a join or a crossfade the song
+        // heard is still playing out, and is told of as ever.
+        let left = self.mix_state == MixState::Waiting && self.current_entry().map(|e| e.key) != self.heard;
         if self.playing
+            && !left
             && !self.tick.is_zero()
             && now - self.last_tick >= self.tick
             && let Some(key) = self.heard
         {
             self.last_tick = now;
+            // The place heard can already be the next song's start, held
+            // there before that song is heard: it is not the heard song's.
             let position = self.shared.position();
-            if let Some(i) = self.index_of(key) {
+            if let Some(i) = self.index_of(key)
+                && position.item_id.as_deref() == Some(self.queue[i].item.id.as_str())
+            {
                 let id = self.queue[i].item.id.clone();
                 self.emit(EngineEvent::Position { item_id: id, position_ms: position.position_ms });
             }

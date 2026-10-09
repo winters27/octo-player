@@ -54,6 +54,11 @@ class WashCover(
 // not send, each time; then it keeps the blend.
 val WASH_RETRY_MS = listOf(3_000L, 8_000L, 20_000L, 60_000L, 120_000L)
 
+// How long a cover the server did not send at once is waited for before
+// the blend stands in: an outside song's often comes a moment later, as
+// Octo finds it, and the wash went to the blend and straight on to it.
+const val WASH_HOLD_MS = 1_500L
+
 // The pixels of a 512 square, as ARGB, and back.
 private val SquareInfo = ImageInfo(WashSize, WashSize, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
 
@@ -63,7 +68,11 @@ private val SquareInfo = ImageInfo(WashSize, WashSize, ColorType.BGRA_8888, Colo
 // pixel, with the shared maths. The last few are kept, so going back a
 // song is instant. A cover the server did not send is not kept: the soft
 // blend stands in for it, and it is asked for again (see follow).
-class WashCovers(private val http: OkHttpClient, private val retryMs: List<Long> = WASH_RETRY_MS) {
+class WashCovers(
+    private val http: OkHttpClient,
+    private val retryMs: List<Long> = WASH_RETRY_MS,
+    private val holdMs: Long = WASH_HOLD_MS,
+) {
     private val kept = object : LinkedHashMap<String, WashCover>(8, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, WashCover>?) = size > 4
     }
@@ -80,9 +89,15 @@ class WashCovers(private val http: OkHttpClient, private val retryMs: List<Long>
 
     // The cover made ready, and again once it can be had when the server
     // did not send it: after a while, a few times, and at once when the
-    // same cover comes in anywhere on screen.
+    // same cover comes in anywhere on screen. One that did not come at
+    // once is waited for a moment before the blend is sent, so the cover
+    // before stays meanwhile.
     fun follow(client: SubsonicClient?, coverId: String?, tuning: WashTuning): Flow<WashCover> = flow {
         var made = make(client, coverId, tuning)
+        if (!made.real && holdMs > 0) {
+            withTimeoutOrNull(holdMs) { CoverArrivals.arrived.first { it == coverId } }
+            made = make(client, coverId, tuning)
+        }
         emit(made.cover)
         for (wait in retryMs) {
             if (made.real) return@flow
