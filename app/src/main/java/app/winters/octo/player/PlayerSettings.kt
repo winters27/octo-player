@@ -11,6 +11,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import app.winters.octo.ambient.AmbientArea
 import app.winters.octo.ambient.AmbientPrefs
 import app.winters.octo.ambient.AmbientStrength
+import app.winters.octo.playback.AutomixSettings
 import app.winters.octo.playback.CopyPreference
 import app.winters.octo.playback.PITCH_RANGE_SEMITONES
 import app.winters.octo.playback.Pace
@@ -35,9 +36,15 @@ data class PlayerPrefs(
     val liveBackground: Boolean = true,
     // What the player's background is, and how it is drawn.
     val background: BackgroundPrefs = BackgroundPrefs(),
-    // Songs blending into each other, and over how many seconds.
+    // Songs blending into each other, and over how many seconds at most.
+    // Smart transitions pick where and how each pair of songs meets (off
+    // blends at the end of each song), filter sweeps thin the songs out as
+    // they cross, and matching the tempo nudges the next song's speed.
     val crossfade: Boolean = false,
-    val crossfadeSeconds: Int = 6,
+    val crossfadeSeconds: Int = 8,
+    val smartTransitions: Boolean = true,
+    val filterSweeps: Boolean = true,
+    val matchTempo: Boolean = false,
     // Looking lyrics up online when the server and the song's files have none.
     val lyricsOnline: Boolean = true,
     // How fast music plays, whether the voice keeps its pitch at other
@@ -66,8 +73,12 @@ data class PlayerPrefs(
     val castRenderers: Boolean = true,
     val castKeepPlaying: Boolean = false,
 ) {
-    // What the player uses: the blend length, or 0 for none.
+    // What the player uses: the longest blend, or 0 for none.
     val crossfadeMs: Long get() = if (crossfade) crossfadeSeconds * 1_000L else 0
+
+    // How the player plans the blends.
+    val automix: AutomixSettings
+        get() = AutomixSettings(maxOverlapMs = crossfadeMs, smart = smartTransitions, filterSweeps = filterSweeps, beatMatch = matchTempo)
 
     // The speed and pitch the player is set to.
     val pace: Pace get() = paceOf(speed, keepPitch, pitchSemitones)
@@ -87,13 +98,16 @@ data class StreamPrefs(
     val mobile: StreamQuality = StreamQuality.Kbps192,
 )
 
-// The range the crossfade length can be set to.
-val CrossfadeSecondsRange = 1..12
+// The range the longest blend can be set to.
+val CrossfadeSecondsRange = 2..16
 
 private val Context.playerPrefs by preferencesDataStore("player")
 private val LIVE_BACKGROUND = booleanPreferencesKey("live_background")
 private val CROSSFADE = booleanPreferencesKey("crossfade")
 private val CROSSFADE_SECONDS = intPreferencesKey("crossfade_seconds")
+private val SMART_TRANSITIONS = booleanPreferencesKey("smart_transitions")
+private val FILTER_SWEEPS = booleanPreferencesKey("filter_sweeps")
+private val MATCH_TEMPO = booleanPreferencesKey("match_tempo")
 private val LYRICS_ONLINE = booleanPreferencesKey("lyrics_online")
 private val SPEED = floatPreferencesKey("speed")
 private val KEEP_PITCH = booleanPreferencesKey("keep_pitch")
@@ -145,6 +159,9 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             ).sane(),
             crossfade = stored[CROSSFADE] ?: defaults.crossfade,
             crossfadeSeconds = (stored[CROSSFADE_SECONDS] ?: defaults.crossfadeSeconds).coerceIn(CrossfadeSecondsRange),
+            smartTransitions = stored[SMART_TRANSITIONS] ?: defaults.smartTransitions,
+            filterSweeps = stored[FILTER_SWEEPS] ?: defaults.filterSweeps,
+            matchTempo = stored[MATCH_TEMPO] ?: defaults.matchTempo,
             lyricsOnline = stored[LYRICS_ONLINE] ?: defaults.lyricsOnline,
             speed = snapSpeed(stored[SPEED] ?: defaults.speed),
             keepPitch = stored[KEEP_PITCH] ?: defaults.keepPitch,
@@ -194,6 +211,18 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
 
     suspend fun setCrossfadeSeconds(seconds: Int) {
         context.playerPrefs.edit { it[CROSSFADE_SECONDS] = seconds.coerceIn(CrossfadeSecondsRange) }
+    }
+
+    suspend fun setSmartTransitions(on: Boolean) {
+        context.playerPrefs.edit { it[SMART_TRANSITIONS] = on }
+    }
+
+    suspend fun setFilterSweeps(on: Boolean) {
+        context.playerPrefs.edit { it[FILTER_SWEEPS] = on }
+    }
+
+    suspend fun setMatchTempo(on: Boolean) {
+        context.playerPrefs.edit { it[MATCH_TEMPO] = on }
     }
 
     suspend fun setLyricsOnline(on: Boolean) {
@@ -285,6 +314,9 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             it.putBackground(player.background.sane())
             it[CROSSFADE] = player.crossfade
             it[CROSSFADE_SECONDS] = player.crossfadeSeconds.coerceIn(CrossfadeSecondsRange)
+            it[SMART_TRANSITIONS] = player.smartTransitions
+            it[FILTER_SWEEPS] = player.filterSweeps
+            it[MATCH_TEMPO] = player.matchTempo
             it[LYRICS_ONLINE] = player.lyricsOnline
             it[SPEED] = snapSpeed(player.speed)
             it[KEEP_PITCH] = player.keepPitch

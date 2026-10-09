@@ -37,6 +37,9 @@ class PlaybackViewModel @Inject constructor(private val settings: PlayerSettings
 
     fun setCrossfade(on: Boolean) = change { setCrossfade(on) }
     fun setCrossfadeSeconds(seconds: Int) = change { setCrossfadeSeconds(seconds) }
+    fun setSmartTransitions(on: Boolean) = change { setSmartTransitions(on) }
+    fun setFilterSweeps(on: Boolean) = change { setFilterSweeps(on) }
+    fun setMatchTempo(on: Boolean) = change { setMatchTempo(on) }
     fun setSkipSilence(on: Boolean) = change { setSkipSilence(on) }
     fun setAutoplay(on: Boolean) = change { setAutoplay(on) }
     fun setResumeWired(on: Boolean) = change { setResumeWired(on) }
@@ -68,7 +71,29 @@ fun PlaybackPage(onBack: () -> Unit, highlight: String?, vm: PlaybackViewModel =
                 onChange = vm::setCrossfade,
                 helper = "Albums played in order stay gapless.",
             )
-            if (prefs.crossfade) CrossfadeLength(prefs.crossfadeSeconds, vm::setCrossfadeSeconds)
+            if (prefs.crossfade) {
+                CrossfadeLength(prefs.crossfadeSeconds, vm::setCrossfadeSeconds)
+                SwitchRow(
+                    SettingsIndex.SmartTransitions,
+                    checked = prefs.smartTransitions,
+                    onChange = vm::setSmartTransitions,
+                    helper = "Each blend starts where the two songs meet best, on the beat when it can. Off blends at the end of each song.",
+                )
+                if (prefs.smartTransitions) {
+                    SwitchRow(
+                        SettingsIndex.FilterSweeps,
+                        checked = prefs.filterSweeps,
+                        onChange = vm::setFilterSweeps,
+                        helper = "The song ending loses its highs and bass as the next one comes in.",
+                    )
+                    SwitchRow(
+                        SettingsIndex.MatchTempo,
+                        checked = prefs.matchTempo,
+                        onChange = vm::setMatchTempo,
+                        helper = "Songs with a close tempo blend in step. The next song settles back to its own speed after.",
+                    )
+                }
+            }
             ChoiceRow(SettingsIndex.Speed, value = paceLabel(prefs), onClick = { speedOpen = true })
             SwitchRow(
                 SettingsIndex.SkipSilence,
@@ -131,7 +156,7 @@ fun PlaybackPage(onBack: () -> Unit, highlight: String?, vm: PlaybackViewModel =
     SpeedPopup(visible = speedOpen, onDismiss = { speedOpen = false })
 }
 
-// How long the blend is, from 1 to 12 seconds, saved as it changes.
+// The longest a blend may be, from 2 to 16 seconds, saved as it changes.
 @Composable
 private fun CrossfadeLength(seconds: Int, onChange: (Int) -> Unit) {
     val range = CrossfadeSecondsRange

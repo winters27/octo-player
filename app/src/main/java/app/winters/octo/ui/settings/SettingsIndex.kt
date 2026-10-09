@@ -54,8 +54,20 @@ object SettingsIndex {
         listOf("fade", "blend", "gapless", "transition", "mix"),
     )
     val CrossfadeLength = add(
-        "crossfade_length", SettingsPage.Playback, "Crossfade length", "How many seconds songs blend for",
-        listOf("fade", "seconds", "duration"),
+        "crossfade_length", SettingsPage.Playback, "Longest blend", "The most seconds two songs blend for",
+        listOf("fade", "seconds", "duration", "crossfade length"),
+    )
+    val SmartTransitions = add(
+        "smart_transitions", SettingsPage.Playback, "Smart transitions", "Each blend starts where the songs meet best",
+        listOf("automix", "dj", "mix", "transition", "beat", "outro"),
+    )
+    val FilterSweeps = add(
+        "filter_sweeps", SettingsPage.Playback, "Filter sweeps", "Songs thin out as they cross",
+        listOf("filter", "sweep", "bass", "eq", "dj"),
+    )
+    val MatchTempo = add(
+        "match_tempo", SettingsPage.Playback, "Match tempo", "The next song nudges its speed to the beat",
+        listOf("tempo", "bpm", "beat", "beatmatch", "speed"),
     )
     val Speed = add(
         "speed", SettingsPage.Playback, "Speed", "How fast music plays, and its pitch",

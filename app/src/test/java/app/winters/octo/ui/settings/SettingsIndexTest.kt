@@ -38,14 +38,15 @@ class SettingsIndexTest {
 
     @Test
     fun theTitleComesFirst() {
-        assertEquals(listOf("Crossfade", "Crossfade length"), titles("crossfade").take(2))
+        assertEquals(listOf("Crossfade", "Longest blend"), titles("crossfade").take(2))
         assertEquals("Crossfade", titles("CROSS").first())
     }
 
     @Test
     fun otherWordsFindASetting() {
         assertEquals("Crossfade", titles("gapless").first())
-        assertEquals("Speed", titles("tempo").first())
+        assertEquals("Speed", titles("semitones").first())
+        assertTrue("Speed" in titles("tempo"))
         assertTrue("Loudness" in titles("replaygain"))
     }
 
