@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.audio
 
+import app.winters.octo.audio.AutomixSettings
 import app.winters.octo.audio.DspSettings
 import app.winters.octo.audio.EngineEvent
 import app.winters.octo.audio.EqSettings
@@ -26,6 +27,7 @@ class FakeEngine : AudioEngine {
     var lastReplayGain: ReplayGainSettings? = null
     var lastDsp: DspSettings? = null
     var fadeMs = -1
+    var lastAutomix: AutomixSettings? = null
     var speed = 1f to 1f
     var listed = listOf(EngineDevice("spk", "Speakers", true), EngineDevice("usb", "USB DAC", false))
     var current: EngineDevice? = null
@@ -89,6 +91,10 @@ class FakeEngine : AudioEngine {
 
     override fun setCrossfade(ms: Int) {
         fadeMs = ms
+    }
+
+    override fun setAutomix(settings: AutomixSettings) {
+        lastAutomix = settings
     }
 
     override fun setEq(eq: EqSettings) {

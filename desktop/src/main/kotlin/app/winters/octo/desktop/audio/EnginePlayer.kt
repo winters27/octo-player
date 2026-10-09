@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.audio
 
+import app.winters.octo.audio.AutomixSettings
 import app.winters.octo.audio.DspSettings
 import app.winters.octo.audio.EndReason
 import app.winters.octo.audio.EngineEvent
@@ -40,6 +41,8 @@ interface SoundTarget {
     fun shape(eq: EqSettings, replayGain: ReplayGainSettings, dsp: DspSettings)
 
     fun setCrossfade(ms: Int)
+
+    fun setAutomix(settings: AutomixSettings)
 
     fun setSpeed(speed: Float, pitch: Float)
 }
@@ -416,6 +419,8 @@ class EnginePlayer(
 
     override fun setCrossfade(ms: Int) = engine.setCrossfade(ms)
 
+    override fun setAutomix(settings: AutomixSettings) = engine.setAutomix(settings)
+
     override fun setSpeed(speed: Float, pitch: Float) {
         synchronized(lock) {
             this.speed = speed
@@ -562,6 +567,11 @@ class EnginePlayer(
                         key != queue.currentEntry?.key && !stillExpecting() -> started(key)
                         else -> return
                     }
+                }
+                // How the next song will follow, for checking blends in the field.
+                is EngineEvent.TransitionPlanned -> {
+                    System.err.println(event.reason)
+                    return
                 }
                 is EngineEvent.DeviceChanged -> {
                     playingOn = event.device?.let { OutputDevice(it.id, it.name) }

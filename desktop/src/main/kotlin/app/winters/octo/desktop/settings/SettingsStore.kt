@@ -276,8 +276,15 @@ data class WashPrefs(
 @Serializable
 data class PlaybackPrefs(
     val volume: Float = 0.8f,
-    // 0 to 12 seconds; 0 is off. Albums played in order stay gapless.
+    // The longest blend, 2 to 16 seconds; 0 is off. Albums played in order
+    // stay gapless.
     val crossfadeSeconds: Int = 0,
+    // Each blend starts where the music allows rather than at the very end
+    // of the song; with it, filter sweeps over both songs and, when asked
+    // for, the next song's speed nudged to the beat.
+    val smartTransitions: Boolean = true,
+    val filterSweeps: Boolean = true,
+    val matchTempo: Boolean = false,
     // The device picked in the output menu, or null to follow the system.
     val outputDevice: String? = null,
     // How fast music plays (0.5 to 2), whether the voice keeps its pitch at

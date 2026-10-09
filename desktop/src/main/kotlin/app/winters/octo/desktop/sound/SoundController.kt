@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.sound
 
+import app.winters.octo.audio.AutomixSettings
 import app.winters.octo.audio.DspSettings
 import app.winters.octo.audio.EqSettings
 import app.winters.octo.audio.ReplayGainSettings
@@ -43,8 +44,15 @@ data class EngineSound(
     val replayGain: ReplayGainSettings,
     val dsp: DspSettings,
     val crossfadeMs: Int,
+    val automix: AutomixSettings,
     val pace: Pace,
 )
+
+// The longest blend the crossfade setting allows, and where it starts
+// when crossfade is turned on.
+const val LONGEST_BLEND_SECONDS = 16
+const val SHORTEST_BLEND_SECONDS = 2
+const val DEFAULT_BLEND_SECONDS = 8
 
 fun engineSound(settings: AppSettings, device: String?): EngineSound {
     val sound = soundFor(settings.sound, device)
@@ -53,7 +61,13 @@ fun engineSound(settings: AppSettings, device: String?): EngineSound {
         eq = sound.engineEq(),
         replayGain = sound.engineReplayGain(),
         dsp = sound.engineDsp(),
-        crossfadeMs = playback.crossfadeSeconds.coerceIn(0, 12) * 1_000,
+        crossfadeMs = playback.crossfadeSeconds.coerceIn(0, LONGEST_BLEND_SECONDS) * 1_000,
+        automix = AutomixSettings(
+            smartTransitions = playback.smartTransitions,
+            filterSweeps = playback.filterSweeps,
+            matchTempo = playback.matchTempo,
+            maxOverlapMs = (playback.crossfadeSeconds.coerceIn(0, LONGEST_BLEND_SECONDS) * 1_000).toUInt(),
+        ),
         pace = paceOf(playback.speed, playback.keepPitch, playback.pitchSemitones),
     )
 }
@@ -120,6 +134,7 @@ class SoundController(private val target: SoundTarget, private val settings: Set
             target.shape(sound.eq, sound.replayGain, sound.dsp)
         }
         if (before?.crossfadeMs != sound.crossfadeMs) target.setCrossfade(sound.crossfadeMs)
+        if (before?.automix != sound.automix) target.setAutomix(sound.automix)
         if (before?.pace != sound.pace) target.setSpeed(sound.pace.speed, sound.pace.pitch)
     }
 

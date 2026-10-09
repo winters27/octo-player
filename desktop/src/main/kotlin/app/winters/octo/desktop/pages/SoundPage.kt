@@ -36,7 +36,10 @@ import app.winters.octo.design.Txt
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.settings.PlaybackPrefs
+import app.winters.octo.desktop.sound.DEFAULT_BLEND_SECONDS
 import app.winters.octo.desktop.sound.EqCurve
+import app.winters.octo.desktop.sound.LONGEST_BLEND_SECONDS
+import app.winters.octo.desktop.sound.SHORTEST_BLEND_SECONDS
 import app.winters.octo.desktop.sound.SoundController
 import app.winters.octo.desktop.ui.windowRect
 import app.winters.octo.playback.FASTEST_SPEED
@@ -395,15 +398,35 @@ private fun readBalance(balance: Float): String {
 private fun PlaybackRows(app: AppState, playback: PlaybackPrefs) {
     fun change(edit: (PlaybackPrefs) -> PlaybackPrefs) = app.settings.update { it.copy(playback = edit(it.playback)) }
     Rows {
-        SliderRow(
-            "Crossfade",
-            "Songs fade into the next. An album played in order runs straight on.",
-            if (playback.crossfadeSeconds == 0) "Off" else "${playback.crossfadeSeconds} s",
-            playback.crossfadeSeconds / 12f,
-            { x -> change { it.copy(crossfadeSeconds = (x * 12).roundToInt()) } },
-            live = false,
-            wheelStep = 1f / 12f,
-        )
+        SwitchRow("Crossfade", "Songs blend into the next. An album played in order runs straight on.", playback.crossfadeSeconds > 0) { on ->
+            change { it.copy(crossfadeSeconds = if (on) DEFAULT_BLEND_SECONDS else 0) }
+        }
+        if (playback.crossfadeSeconds > 0) {
+            val seconds = playback.crossfadeSeconds.coerceIn(SHORTEST_BLEND_SECONDS, LONGEST_BLEND_SECONDS)
+            val span = (LONGEST_BLEND_SECONDS - SHORTEST_BLEND_SECONDS).toFloat()
+            SliderRow(
+                "Longest blend",
+                "How long two songs may play over each other.",
+                "$seconds s",
+                (seconds - SHORTEST_BLEND_SECONDS) / span,
+                { x -> change { it.copy(crossfadeSeconds = SHORTEST_BLEND_SECONDS + (x * span).roundToInt()) } },
+                live = false,
+                wheelStep = 1f / span,
+            )
+            SwitchRow(
+                "Smart transitions",
+                "Each blend starts where the music allows, on the beat or as the song winds down. Off, songs fade at the very end.",
+                playback.smartTransitions,
+            ) { on -> change { it.copy(smartTransitions = on) } }
+            if (playback.smartTransitions) {
+                SwitchRow("Filter sweeps", "The song that is ending thins out as the next one comes in.", playback.filterSweeps) { on ->
+                    change { it.copy(filterSweeps = on) }
+                }
+                SwitchRow("Match tempo", "Nudges the next song's speed to the beat of this one while they blend.", playback.matchTempo) { on ->
+                    change { it.copy(matchTempo = on) }
+                }
+            }
+        }
         SliderRow(
             "Speed",
             "How fast music plays.",

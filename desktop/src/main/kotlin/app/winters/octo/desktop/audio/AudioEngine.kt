@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.audio
 
+import app.winters.octo.audio.AutomixSettings
 import app.winters.octo.audio.DspSettings
 import app.winters.octo.audio.Engine
 import app.winters.octo.audio.EngineEvent
@@ -48,6 +49,10 @@ interface AudioEngine : AutoCloseable {
     fun setStopAfterCurrent(on: Boolean)
 
     fun setCrossfade(ms: Int)
+
+    // How blends are chosen and shaped: smart transitions, filter sweeps,
+    // tempo matching and the longest blend.
+    fun setAutomix(settings: AutomixSettings)
 
     fun setEq(eq: EqSettings)
 
@@ -131,6 +136,8 @@ class NativeAudioEngine(private val engine: Engine) : AudioEngine {
     override fun setStopAfterCurrent(on: Boolean) = ifOpen(Unit) { engine.setStopAfterCurrent(on) }
 
     override fun setCrossfade(ms: Int) = ifOpen(Unit) { engine.setCrossfade(ms.coerceAtLeast(0).toUInt()) }
+
+    override fun setAutomix(settings: AutomixSettings) = ifOpen(Unit) { engine.setAutomix(settings) }
 
     override fun setEq(eq: EqSettings) = ifOpen(Unit) { engine.setEq(eq) }
 
