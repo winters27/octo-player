@@ -25,8 +25,9 @@
 //!             on the blend; a swell, more than 2 dB above the louder body's
 //!             90th percentile, is always flagged
 //!   peaks     any sample inside the blend above -0.1 dBFS
-//!   clicks    first-difference spikes near the blend, against how often they
-//!             come in the music outside it
+//!   clicks    first-difference spikes near the blend that the gapless join
+//!             does not have at the same place in either song, against how
+//!             often they come in the music outside it
 //!
 //! Options (each override replaces the planner's choice):
 //!   --crossfade <ms>   the longest blend (8000)
@@ -39,7 +40,7 @@
 //!   --headroom <dB>    both songs lowered this much through the blend
 //!   --plain            the fixed equal-power crossfade, without scouting
 //!   --no-sweeps        smart transitions without the filter sweeps
-//!   --no-match         smart transitions without tempo matching
+//!   --match            smart transitions with tempo matching (off in the app by default)
 //!   --no-live          plan without A's whole-song level and tempo
 //!   --click-ratio <x>  a click is a step this many times the local level (8)
 
@@ -480,17 +481,24 @@ fn check(
         ));
     }
 
-    // Clicks near the blend, against how often the music has them elsewhere.
+    // Clicks near the blend that are not in the music itself: the gapless
+    // join has A's sound at the same frame and B's one blend length later.
+    // What is left is weighed against how often the music has them elsewhere.
     let spikes = clicks(samples, click_ratio);
+    let joined_spikes = clicks(gapless, click_ratio);
+    let close = (RATE / 100) as usize;
+    let in_music =
+        |f: usize| joined_spikes.iter().any(|&g| g.abs_diff(f) <= close || g.abs_diff(f + span) <= close);
     let margin = (CLICK_MARGIN_SECS * RATE as f64) as usize;
     let (near_from, near_to) = (blend_from.saturating_sub(margin), (blend_to + margin).min(frames));
-    let near: Vec<usize> = spikes.iter().copied().filter(|&f| f >= near_from && f < near_to).collect();
-    let outside = spikes.len() - near.len();
+    let near: Vec<usize> =
+        spikes.iter().copied().filter(|&f| f >= near_from && f < near_to && !in_music(f)).collect();
+    let outside = spikes.iter().filter(|&&f| f < near_from || f >= near_to).count();
     let outside_secs = secs(frames - (near_to - near_from)).max(1e-9);
     let expected = outside as f64 / outside_secs * secs(near_to - near_from);
     let times: Vec<String> = near.iter().take(5).map(|&f| format!("{:.3}", secs(f))).collect();
     println!(
-        "  clicks: {} near the blend{}, {outside} elsewhere ({expected:.1} expected near it at that rate)",
+        "  clicks: {} near the blend not in the music{}, {outside} elsewhere ({expected:.1} expected near it at that rate)",
         near.len(),
         if times.is_empty() { String::new() } else { format!(" at {} s", times.join(", ")) }
     );
@@ -608,7 +616,7 @@ fn main() {
         crossfade_ms: 8_000,
         plain: false,
         sweeps: true,
-        match_tempo: true,
+        match_tempo: false,
         live: true,
         click_ratio: 8.0,
         start: None,
@@ -633,7 +641,7 @@ fn main() {
             "--click-ratio" => opts.click_ratio = value(&mut args, &arg),
             "--plain" => opts.plain = true,
             "--no-sweeps" => opts.sweeps = false,
-            "--no-match" => opts.match_tempo = false,
+            "--match" => opts.match_tempo = true,
             "--no-live" => opts.live = false,
             other if other.starts_with("--") => fail(&format!("unknown option {other}")),
             other => files.push(other.to_string()),
