@@ -28,12 +28,13 @@ const val HEAD_SCOUT_MS = 30_000L
 // How long one wait on the decoder may take.
 private const val CODEC_WAIT_US = 10_000L
 
-// Decodes a stretch of a song into its envelope, the way the player would
-// read it, on a thread of its own. One stretch at a time; each can be
-// cancelled, and each gives up after SCOUT_BUDGET_MS.
+// Decodes stretches of songs into their envelopes and analyses them, the
+// way the player would read them, on threads of their own (two at a time,
+// so the next song's start never waits on the playing song's end). Each
+// can be cancelled, and each gives up after SCOUT_BUDGET_MS.
 @OptIn(UnstableApi::class)
 class Scout(private val sources: DataSource.Factory, private val extractors: ExtractorsFactory) {
-    private val worker = Executors.newSingleThreadExecutor { runnable ->
+    private val worker = Executors.newFixedThreadPool(2) { runnable ->
         Thread(runnable, "octo-scout").apply {
             isDaemon = true
             priority = Thread.MIN_PRIORITY
@@ -53,15 +54,14 @@ class Scout(private val sources: DataSource.Factory, private val extractors: Ext
         }
     }
 
-    // Reads `uri` from `fromMs` to `toMs` and hands the envelope (or null,
-    // when it could not) to `done` on the main thread.
-    fun read(uri: Uri, fromMs: Long, toMs: Long, done: (SectionEnvelope?) -> Unit): Job {
-        val job = Job()
-        job.future = worker.submit {
-            if (job.cancelled) return@submit
+    // Reads `uri` from `fromMs` to `toMs`, analyses what it heard there,
+    // and hands the analysis (or null, when it could not) to `done` on the
+    // main thread.
+    fun <T : Any> read(uri: Uri, fromMs: Long, toMs: Long, analyze: (SectionEnvelope) -> T, done: (T?) -> Unit): Job =
+        run({ cancelled ->
             val started = SystemClock.elapsedRealtime()
-            val envelope = try {
-                decodeSection(uri, fromMs, toMs) { job.cancelled || SystemClock.elapsedRealtime() - started > SCOUT_BUDGET_MS }
+            try {
+                decodeSection(uri, fromMs, toMs) { cancelled() || SystemClock.elapsedRealtime() - started > SCOUT_BUDGET_MS }?.let(analyze)
             } catch (e: NotSeekable) {
                 Log.i("Octo", "automix: not scouting ${uri.lastPathSegment}: ${e.message}")
                 null
@@ -69,7 +69,21 @@ class Scout(private val sources: DataSource.Factory, private val extractors: Ext
                 Log.i("Octo", "automix: scouting ${uri.lastPathSegment} failed: $e")
                 null
             }
-            if (!job.cancelled) main.post { if (!job.cancelled) done(envelope) }
+        }, done)
+
+    // Runs `work` on a scout thread and hands its answer to `done` on the
+    // main thread, unless the job was cancelled first.
+    fun <T : Any> run(work: (cancelled: () -> Boolean) -> T?, done: (T?) -> Unit): Job {
+        val job = Job()
+        job.future = worker.submit {
+            if (job.cancelled) return@submit
+            val answer = try {
+                work { job.cancelled }
+            } catch (e: Exception) {
+                Log.i("Octo", "automix: $e")
+                null
+            }
+            if (!job.cancelled) main.post { if (!job.cancelled) done(answer) }
         }
         return job
     }

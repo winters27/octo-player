@@ -74,9 +74,9 @@ class TransitionShaperTest {
 
     // A processor with nothing to shape, kept running for crossfade, its
     // stream starting at `fromMs` in its song.
-    private fun processor(fromMs: Long = 0, speed: Float = 1f): OctoDspProcessor {
+    private fun processor(fromMs: Long = 0, speed: Float = 1f, entry: String? = null): OctoDspProcessor {
         val off = SoundSettings(limiter = false)
-        val processor = OctoDspProcessor(keepActive = { true }) { off }
+        val processor = OctoDspProcessor(keepActive = { true }, entryOf = { entry }) { off }
         assertEquals(C.ENCODING_PCM_FLOAT, processor.configure(AudioProcessor.AudioFormat(rate, 1, C.ENCODING_PCM_16BIT)).encoding)
         processor.setSpeed(speed)
         processor.flush(AudioProcessor.StreamMetadata(fromMs * 1_000))
@@ -249,10 +249,14 @@ class TransitionShaperTest {
 
     @Test
     fun aTransitionForAnotherSongLeavesThisOneAlone() {
-        val processor = processor()
+        val processor = processor(entry = "q:1")
         processor.arm(DeckTransition("q:9", plan(start = 0), incoming = false))
         val out = run(processor, 1_500)
         assertTrue(out.all { it == 0.5f })
+        // Its own song takes it.
+        val own = processor(entry = "q:9")
+        own.arm(DeckTransition("q:9", plan(start = 0), incoming = false))
+        assertTrue(run(own, 1_500).last() == 0f)
     }
 
     @Test

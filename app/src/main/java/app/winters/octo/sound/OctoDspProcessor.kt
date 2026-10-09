@@ -206,6 +206,7 @@ interface DeckSound {
 class OctoDspProcessor(
     private val keepActive: () -> Boolean = { false },
     private val tap: LiveTapFeed? = null,
+    private val entryOf: (AudioProcessor.StreamMetadata) -> String? = ::entryOfStream,
     private val settings: () -> SoundSettings,
 ) : BaseAudioProcessor(), DeckSound {
     private var pendingSong: SongLoudness? = null
@@ -338,7 +339,8 @@ class OctoDspProcessor(
         val songMs = streamStartMs + framesOut * msPerFrame
         framesOut += frames
         val shaping = transitions ?: TransitionShaper(format.sampleRate, format.channelCount).also { transitions = it }
-        val transition = armed?.takeIf { it.entryId == null || it.entryId == entryId }
+        // A stream whose song is not known takes the transition too.
+        val transition = armed?.takeIf { it.entryId == null || entryId == null || it.entryId == entryId }
         shaping.arm(transition, songMs)
         shaping.process(output, frames, songMs, msPerFrame)
     }
@@ -354,7 +356,8 @@ class OctoDspProcessor(
 }
 
 // The queue entry a stream belongs to, from what the player says about it.
-private fun entryOf(metadata: AudioProcessor.StreamMetadata): String? {
+@UnstableApi
+fun entryOfStream(metadata: AudioProcessor.StreamMetadata): String? {
     val uid = metadata.periodUid ?: return null
     val timeline = metadata.timeline
     if (timeline.isEmpty) return null

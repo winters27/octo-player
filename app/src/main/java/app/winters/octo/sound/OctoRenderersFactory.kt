@@ -28,7 +28,7 @@ class OctoRenderersFactory(
         enableFloatOutput: Boolean,
         enableAudioOutputPlaybackParams: Boolean,
     ): AudioSink {
-        val shaping = OctoDspProcessor(keepActive, LiveTapFeed(), settings)
+        val shaping = OctoDspProcessor(keepActive, LiveTapFeed(), settings = settings)
         sound = shaping
         val sink = DefaultAudioSink.Builder(context)
             .setEnableFloatOutput(false)

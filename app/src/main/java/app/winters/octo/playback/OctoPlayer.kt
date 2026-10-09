@@ -16,6 +16,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.RenderersFactory
 import androidx.media3.exoplayer.source.MediaSource
+import app.winters.octo.sound.DeckSound
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 
@@ -71,20 +72,26 @@ private const val DUCKED_VOLUME = 0.2f
 // notification, headphones and the app all talk to this. It forwards to the
 // deck that is playing, and hands over to the other deck for a crossfade
 // without anything outside noticing. It also owns audio focus.
+//
+// `soundOf` gives each deck's sound processor, which runs a transition's
+// volume and filters; `scout` reads ahead in songs to plan transitions.
 @OptIn(UnstableApi::class)
-class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : ForwardingSimpleBasePlayer(initial), SleepTarget, EditableQueue {
+class OctoPlayer(
+    context: Context,
+    initial: ExoPlayer,
+    spare: ExoPlayer,
+    soundOf: (ExoPlayer) -> DeckSound? = { null },
+    scout: Scout? = null,
+) : ForwardingSimpleBasePlayer(initial), SleepTarget, EditableQueue {
     var deck: ExoPlayer = initial
         private set
 
     private var ducked = false
 
-    // During a crossfade: the deck playing out the old song, and how loud
-    // each deck is in the blend.
+    // During a crossfade: the deck playing out the old song.
     private var outgoing: ExoPlayer? = null
-    private var fadeIn = 1f
-    private var fadeOut = 0f
 
-    private val fader = Crossfader(this, spare).also(::addListener)
+    private val fader = Crossfader(this, spare, soundOf, scout).also(::addListener)
 
     // Both decks, whichever is playing, so speed and skipping silence can be
     // set on each and a crossfade hands over at the same pace.
@@ -107,12 +114,16 @@ class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : Forwa
 
     override fun hasEntry(key: String): Boolean = (0 until mediaItemCount).any { getMediaItemAt(it).entryId == key }
 
-    // How long a crossfade is, or 0 for none.
-    var crossfadeMs: Long
-        get() = fader.fadeMs
+    // How transitions between songs are made: the longest blend (0 for
+    // none) and how it is planned.
+    var automix: AutomixSettings
+        get() = fader.settings
         set(value) {
-            fader.fadeMs = value
+            fader.settings = value
         }
+
+    // The longest blend, or 0 for none.
+    val crossfadeMs: Long get() = fader.fadeMs
 
     // Skips quiet stretches inside songs, on both decks.
     var skipSilence: Boolean
@@ -284,28 +295,21 @@ class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : Forwa
         return super.handleRelease()
     }
 
-    // The blend begins: the incoming deck starts silent and becomes the one
-    // everything talks to, while the outgoing one keeps sounding.
+    // The blend begins: the incoming deck (already playing, its processor
+    // holding it silent until its entry) becomes the one everything talks
+    // to, while the outgoing one keeps sounding. Their processors run the
+    // volumes from here; the decks' own volume only carries ducking and the
+    // sleep timer's fade.
     internal fun handOver(into: ExoPlayer, from: ExoPlayer) {
         outgoing = from
-        fadeIn = 0f
-        fadeOut = 1f
         deck = into
         applyVolume()
-        into.play()
+        if (!into.playWhenReady) into.play()
         setPlayer(into)
-    }
-
-    internal fun setFade(inVolume: Float, outVolume: Float) {
-        fadeIn = inVolume
-        fadeOut = outVolume
-        applyVolume()
     }
 
     internal fun endFade() {
         outgoing = null
-        fadeIn = 1f
-        fadeOut = 0f
         applyVolume()
     }
 
@@ -314,12 +318,13 @@ class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : Forwa
         applyVolume()
     }
 
-    // The one place the decks' volume is set, so ducking, the sleep timer's
-    // fade and a crossfade multiply instead of undoing each other.
+    // The one place the playing decks' volume is set, so ducking and the
+    // sleep timer's fade multiply instead of undoing each other. A spare
+    // running up to a blend stays at 0 until it is handed over.
     private fun applyVolume() {
         val level = (if (ducked) DUCKED_VOLUME else 1f) * sleepFade
-        deck.volume = level * fadeIn
-        outgoing?.volume = level * fadeOut
+        deck.volume = level
+        outgoing?.volume = level
     }
 
     private fun releaseFocus(): Unit = focus.abandon()
