@@ -238,8 +238,9 @@ impl TransitionPlan {
 /// `head` of the start of the next one ([`super::analyze_head`]), either
 /// `None` when it is not ready. Every rule of `crossfade_length` still
 /// holds: when it gives no crossfade the songs play gaplessly. With smart
-/// transitions off, for a song under 35 s or in a genre that should not be
-/// mixed, the plan is the fixed crossfade. Without the tail, or when no
+/// transitions off the plan is the equal-power crossfade
+/// ([`TransitionPlan::fixed_crossfade`]); for a song under 35 s or in a genre
+/// that should not be mixed, the fixed crossfade with the plain curve. Without the tail, or when no
 /// start is left at least [`PRE_ROLL_MS`] ahead, the plan is a late one: the
 /// blend at the end, with the curve and the filters but no bar lock.
 pub fn plan_transition(
@@ -264,7 +265,7 @@ pub fn plan_transition(
     };
     let len_b = next.duration_ms as i64;
     if !settings.smart {
-        return crossfade_plan(len_a, plain, "smart transitions off");
+        return TransitionPlan::fixed_crossfade(len_a, plain, "smart transitions off");
     }
     let genres = [context.current_genre.as_deref(), context.next_genre.as_deref()];
     if let Some(genre) = genres.into_iter().flatten().find(|g| is_plain_genre(g)) {

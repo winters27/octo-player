@@ -3186,13 +3186,13 @@
                 "entryMs": 0,
                 "overlapMs": 8000,
                 "kind": "crossfade",
-                "k": 0.4,
+                "k": 0.0,
                 "filterStrength": 0.0,
                 "beatMatchRate": null,
                 "beatMs": null,
                 "beatAnchorMs": null,
                 "late": false,
-                "headroomDb": 1.0,
+                "headroomDb": 0.0,
                 "reason": "crossfade at 192.00 s over 8.00 s: smart transitions off"
             }
         },

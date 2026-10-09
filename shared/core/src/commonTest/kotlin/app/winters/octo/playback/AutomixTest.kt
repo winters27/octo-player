@@ -320,6 +320,16 @@ class AutomixTest {
         assertEquals(192_000L, plan.startMs)
         assertEquals(8_000L, plan.overlapMs)
         assertEquals(0L, plan.entryMs)
+        // Exactly the equal-power crossfade from before planned transitions.
+        assertEquals(0.0, plan.k, 0.0)
+        assertEquals(0.0, plan.filterStrength, 0.0)
+        assertEquals(0.0, plan.headroomDb, 0.0)
+    }
+
+    @Test
+    fun thePlainCrossfadeForAGenreKeepsItsCurve() {
+        val plan = plan("classical")
+        assertEquals(TransitionKind.CROSSFADE, plan.kind)
         assertEquals(CROSSFADE_CURVE, plan.k, 0.0)
         assertEquals(0.0, plan.filterStrength, 0.0)
     }

@@ -157,8 +157,9 @@ data class TransitionPlan(
 // analysis of the end of the playing song (analyzeTail) and `head` of the
 // start of the next one (analyzeHead), either null when it is not ready.
 // Every rule of crossfadeLength still holds: when it gives no crossfade the
-// songs play gaplessly. With smart transitions off, for a song under 35 s
-// or in a genre that should not be mixed, the plan is the fixed crossfade.
+// songs play gaplessly. With smart transitions off the plan is the
+// equal-power crossfade (fixedCrossfadePlan); for a song under 35 s or in a
+// genre that should not be mixed, the fixed crossfade with the plain curve.
 // Without the tail, or when no start is left at least PRE_ROLL_MS ahead,
 // the plan is a late one: the blend at the end, with the curve and the
 // filters but no bar lock.
@@ -176,7 +177,7 @@ fun planTransition(
     }
     val lenA = current.durationMs
     val lenB = next.durationMs
-    if (!settings.smart) return crossfadePlan(lenA, plain, "smart transitions off")
+    if (!settings.smart) return fixedCrossfadePlan(lenA, plain, "smart transitions off")
     listOfNotNull(context.currentGenre, context.nextGenre).firstOrNull { PLAIN_CROSSFADE_GENRES.containsMatchIn(it) }?.let {
         return crossfadePlan(lenA, plain, "genre $it")
     }
@@ -392,6 +393,26 @@ private fun gaplessPlan(current: FadeSong, reason: String) = TransitionPlan(
     headroomDb = 0.0,
     reason = "gapless: $reason",
 )
+
+// The equal-power crossfade at the end of the song, as it was before
+// planned transitions: no curve weight, no filters and no headroom.
+fun fixedCrossfadePlan(lenA: Long, length: Long, why: String): TransitionPlan {
+    val start = max(0L, lenA - length)
+    return TransitionPlan(
+        startMs = start,
+        entryMs = 0,
+        overlapMs = length,
+        kind = TransitionKind.CROSSFADE,
+        k = 0.0,
+        filterStrength = 0.0,
+        beatMatchRate = null,
+        beatMs = null,
+        beatAnchorMs = null,
+        late = false,
+        headroomDb = 0.0,
+        reason = "crossfade at ${seconds(start)} over ${seconds(length)}: $why",
+    )
+}
 
 private fun crossfadePlan(lenA: Long, length: Long, why: String) = TransitionPlan(
     startMs = lenA - length,
