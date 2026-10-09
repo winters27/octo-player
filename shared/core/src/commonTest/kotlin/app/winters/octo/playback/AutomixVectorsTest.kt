@@ -62,6 +62,8 @@ class AutomixVectorsTest {
         put("version", 1)
         putJsonObject("tolerances") {
             put("db", 0.05)
+            put("onset", 0.01)
+            put("sample", 1e-9)
             put("ms", 20.0)
             put("bpm", 0.05)
             put("confidenceShare", 0.02)
@@ -73,13 +75,20 @@ class AutomixVectorsTest {
             for ((name, song) in AutomixCases.songs) put(name, songJson(song))
         }
         putJsonArray("sections") {
-            for (name in AutomixCases.songs.keys) {
-                for (part in listOf("tail", "head")) {
-                    val analysis = if (part == "tail") AutomixCases.tail(name) else AutomixCases.head(name)
+            val tagged = listOf(Triple("beat-120", "head", 62.0), Triple("beat-100", "tail", 190.0))
+            val sections = AutomixCases.songs.keys.flatMap { name -> listOf("tail", "head").map { Triple(name, it, null as Double?) } } + tagged
+            for ((name, part, tag) in sections) {
+                run {
                     val song = AutomixCases.songs.getValue(name)
+                    val analysis = when {
+                        tag != null -> sectionOf(song, part, tag)
+                        part == "tail" -> AutomixCases.tail(name)
+                        else -> AutomixCases.head(name)
+                    }
                     addJsonObject {
                         put("song", name)
                         put("part", part)
+                        put("tagBpm", tag)
                         put("fromMs", if (part == "tail") maxOf(0L, song.lengthMs - 60_000) else 0L)
                         put("toMs", if (part == "tail") song.lengthMs else minOf(30_000L, song.lengthMs))
                         put("hops", analysis.envelope.size)
@@ -90,6 +99,7 @@ class AutomixVectorsTest {
                                 put("db", round(analysis.envelope.db[index].toDouble()))
                                 put("lowDb", round(analysis.envelope.lowDb[index].toDouble()))
                                 put("onset", round(analysis.envelope.onset[index].toDouble()))
+                                put("lowOnset", round(analysis.envelope.lowOnset[index].toDouble()))
                             }
                         }
                         put("features", featuresJson(analysis.features))
@@ -110,8 +120,19 @@ class AutomixVectorsTest {
                     put("filterSweeps", pair.settings.filterSweeps)
                     put("beatMatch", pair.settings.beatMatch)
                 }
-                put("repeatOne", pair.repeatOne)
-                put("stopAtEndOfSong", pair.stopAtEndOfSong)
+                putJsonObject("context") {
+                    val c = pair.context
+                    put("nowMs", c.nowMs)
+                    put("playedMs", c.playedMs)
+                    put("repeatOne", c.repeatOne)
+                    put("stopAtEndOfSong", c.stopAtEndOfSong)
+                    put("pace", c.pace)
+                    put("skipSilence", c.skipSilence)
+                    put("currentGenre", c.currentGenre)
+                    put("nextGenre", c.nextGenre)
+                    put("bodyLevelDb", c.bodyLevelDb)
+                    put("tempoPrior", c.tempoPrior)
+                }
                 put("tailMissing", pair.tailMissing)
                 put("headMissing", pair.headMissing)
                 put("expected", planJson(AutomixCases.plan(pair)))
@@ -148,6 +169,28 @@ class AutomixVectorsTest {
                 put("hz", steppedOutgoingLowPassHz(t, FILTER_STRENGTH, beats.toDoubleArray(), 0.03125))
             }
         }
+        putJsonArray("biquads") {
+            val cases = listOf(
+                Triple("lowPass", 44_100, 450.0),
+                Triple("lowPass", 48_000, outgoingLowPassHz(1.0, FILTER_STRENGTH)),
+                Triple("lowPass", 44_100, 18_000.0),
+                Triple("lowPass", 22_050, 18_000.0),
+                Triple("lowPass", 48_000, BASS_CUTOFF_HZ),
+                Triple("highPass", 48_000, 210.0),
+                Triple("highPass", 44_100, 472.5),
+                Triple("highPass", 22_050, 20.0),
+            )
+            for ((type, rate, hz) in cases) addJsonObject {
+                put("type", type)
+                put("rate", rate)
+                put("hz", hz)
+                put("q", BUTTERWORTH_Q)
+                val filter = biquadOf(type, rate, hz)
+                putJsonArray("coefficients") { listOf(filter.b0, filter.b1, filter.b2, filter.a1, filter.a2).forEach { add(it) } }
+                putJsonArray("impulse") { impulseOf(filter).forEach { add(it) } }
+                putJsonArray("sine") { sineOf(biquadOf(type, rate, hz), rate).forEach { add(it) } }
+            }
+        }
         putJsonArray("rates") {
             for (since in listOf(0.0, 4_000.0, 8_000.0, 9_000.0, 10_500.0, 12_999.0, 13_000.0, 20_000.0)) addJsonObject {
                 put("rate", 1.03)
@@ -157,6 +200,25 @@ class AutomixVectorsTest {
             }
         }
     }
+
+    private fun sectionOf(song: SyntheticSong, part: String, tag: Double?): SectionAnalysis {
+        val envelope = if (part == "tail") {
+            song.envelope(maxOf(0.0, song.lengthMs - 60_000.0), song.lengthMs.toDouble())
+        } else {
+            song.envelope(0.0, minOf(30_000.0, song.lengthMs.toDouble()))
+        }
+        return if (part == "tail") analyzeTail(envelope, tag) else analyzeHead(envelope, tag)
+    }
+
+    private fun biquadOf(type: String, rate: Int, hz: Double) =
+        if (type == "lowPass") Biquad.lowPass(rate, hz) else Biquad.highPass(rate, hz)
+
+    // The filter's answer to a 1 at sample 0, over FILTER_VECTOR_SAMPLES samples.
+    private fun impulseOf(filter: Biquad) = DoubleArray(FILTER_VECTOR_SAMPLES) { filter.process(if (it == 0) 1.0 else 0.0) }
+
+    // The filter's answer to 0.5 * sin(2 pi 1000 n / rate).
+    private fun sineOf(filter: Biquad, rate: Int) =
+        DoubleArray(FILTER_VECTOR_SAMPLES) { filter.process(0.5 * kotlin.math.sin(2 * kotlin.math.PI * 1_000.0 * it / rate)) }
 
     // Every 500th hop, and the five hops from the loudest onset on.
     private fun probes(envelope: SectionEnvelope): List<Int> {
@@ -198,6 +260,7 @@ class AutomixVectorsTest {
         if (tempo == null) put("tempo", JsonNull) else putJsonObject("tempo") {
             put("bpm", round(tempo.bpm))
             put("confidence", round(tempo.confidence))
+            put("consistency", round(tempo.consistency))
             put("confident", tempo.confident)
             put("beatMs", round(tempo.beatMs))
             put("firstBeatMs", round(tempo.firstBeatMs))
@@ -221,6 +284,8 @@ class AutomixVectorsTest {
         put("beatMatchRate", plan.beatMatchRate?.let { round(it, 6) })
         put("beatMs", plan.beatMs?.let { round(it) })
         put("beatAnchorMs", plan.beatAnchorMs?.let { round(it) })
+        put("late", plan.late)
+        put("headroomDb", plan.headroomDb)
         put("reason", plan.reason)
     }
 
@@ -244,10 +309,12 @@ class AutomixVectorsTest {
         for (section in vectors.getValue("sections").jsonArray.map { it.jsonObject }) {
             val name = section.str("song")
             val part = section.str("part")
-            val what = "$name $part"
+            val tag = section.numOrNull("tagBpm")
+            val what = if (tag == null) "$name $part" else "$name $part tagged $tag"
             val song = songs.getValue(name)
-            val analysis = analyzeSection(song.envelope(section.num("fromMs"), section.num("toMs")))
-            analyses["$name/$part"] = analysis
+            val envelopeIn = song.envelope(section.num("fromMs"), section.num("toMs"))
+            val analysis = if (part == "tail") analyzeTail(envelopeIn, tag) else analyzeHead(envelopeIn, tag)
+            if (tag == null) analyses["$name/$part"] = analysis
             val envelope = analysis.envelope
             if (envelope.size != section.getValue("hops").jsonPrimitive.int) failures += "$what: ${envelope.size} hops"
             if (envelope.startMs != section.getValue("startMs").jsonPrimitive.long) failures += "$what: starts at ${envelope.startMs}"
@@ -255,7 +322,8 @@ class AutomixVectorsTest {
                 val i = probe.getValue("index").jsonPrimitive.int
                 near("$what hop $i db", probe.num("db"), envelope.db.getOrNull(i)?.toDouble(), t("db"))
                 near("$what hop $i lowDb", probe.num("lowDb"), envelope.lowDb.getOrNull(i)?.toDouble(), t("db"))
-                near("$what hop $i onset", probe.num("onset"), envelope.onset.getOrNull(i)?.toDouble(), 2 * t("db"))
+                near("$what hop $i onset", probe.num("onset"), envelope.onset.getOrNull(i)?.toDouble(), t("onset"))
+                near("$what hop $i lowOnset", probe.num("lowOnset"), envelope.lowOnset.getOrNull(i)?.toDouble(), t("onset"))
             }
             val expected = section.getValue("features").jsonObject
             val f = analysis.features
@@ -281,6 +349,7 @@ class AutomixVectorsTest {
                 } else {
                     near("$what bpm", e.num("bpm"), a.bpm, t("bpm"))
                     near("$what confidence", e.num("confidence"), a.confidence, e.num("confidence") * t("confidenceShare"))
+                    near("$what consistency", e.num("consistency"), a.consistency, 0.02)
                     if (e.getValue("confident").jsonPrimitive.boolean != a.confident) failures += "$what: confident ${a.confident}"
                     near("$what beatMs", e.num("beatMs"), a.beatMs, t("ms") / 10)
                     near("$what firstBeatMs", e.num("firstBeatMs"), a.firstBeatMs, t("ms"))
@@ -303,8 +372,7 @@ class AutomixVectorsTest {
                     filterSweeps = settings.bool("filterSweeps"),
                     beatMatch = settings.bool("beatMatch"),
                 ),
-                repeatOne = case.bool("repeatOne"),
-                stopAtEndOfSong = case.bool("stopAtEndOfSong"),
+                context = contextOf(case.getValue("context").jsonObject),
             )
             val e = case.getValue("expected").jsonObject
             val what = "plan $name"
@@ -317,6 +385,8 @@ class AutomixVectorsTest {
             near("$what beatMatchRate", e.numOrNull("beatMatchRate"), plan.beatMatchRate, t("rate") * 10)
             near("$what beatMs", e.numOrNull("beatMs"), plan.beatMs, t("ms") / 10)
             near("$what beatAnchorMs", e.numOrNull("beatAnchorMs"), plan.beatAnchorMs, t("ms"))
+            near("$what headroomDb", e.num("headroomDb"), plan.headroomDb, t("curve"))
+            if (e.bool("late") != plan.late) failures += "$what: late ${plan.late}"
         }
 
         for (g in vectors.getValue("gains").jsonArray.map { it.jsonObject }) {
@@ -334,6 +404,19 @@ class AutomixVectorsTest {
             val beats = f.getValue("beats").jsonArray.map { it.jsonPrimitive.double }.toDoubleArray()
             val actual = steppedOutgoingLowPassHz(f.num("t"), f.num("strength"), beats, f.num("glide"))
             near("stepped low-pass at ${f.num("t")}", f.num("hz"), actual, f.num("hz") * t("hzShare"))
+        }
+        for (f in vectors.getValue("biquads").jsonArray.map { it.jsonObject }) {
+            val type = f.str("type")
+            val rate = f.getValue("rate").jsonPrimitive.int
+            val hz = f.num("hz")
+            val what = "$type at $hz Hz, $rate Hz"
+            val filter = biquadOf(type, rate, hz)
+            val expected = f.getValue("coefficients").jsonArray.map { it.jsonPrimitive.double }
+            listOf(filter.b0, filter.b1, filter.b2, filter.a1, filter.a2).forEachIndexed { i, c -> near("$what coefficient $i", expected[i], c, t("sample")) }
+            val impulse = impulseOf(filter)
+            f.getValue("impulse").jsonArray.forEachIndexed { i, x -> near("$what impulse $i", x.jsonPrimitive.double, impulse[i], t("sample")) }
+            val sine = sineOf(biquadOf(type, rate, hz), rate)
+            f.getValue("sine").jsonArray.forEachIndexed { i, x -> near("$what sine $i", x.jsonPrimitive.double, sine[i], t("sample")) }
         }
         for (r in vectors.getValue("rates").jsonArray.map { it.jsonObject }) {
             val actual = beatMatchRateAt(r.num("rate"), r.num("sinceEntryMs"), r.num("overlapMs"))
@@ -367,6 +450,19 @@ class AutomixVectorsTest {
         },
     )
 
+    private fun contextOf(o: JsonObject) = TransitionContext(
+        nowMs = o.getValue("nowMs").jsonPrimitive.long,
+        playedMs = o.getValue("playedMs").jsonPrimitive.long,
+        repeatOne = o.bool("repeatOne"),
+        stopAtEndOfSong = o.bool("stopAtEndOfSong"),
+        pace = o.num("pace"),
+        skipSilence = o.bool("skipSilence"),
+        currentGenre = o["currentGenre"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content,
+        nextGenre = o["nextGenre"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content,
+        bodyLevelDb = o.numOrNull("bodyLevelDb"),
+        tempoPrior = o.numOrNull("tempoPrior"),
+    )
+
     private fun fadeSongOf(o: JsonObject) = FadeSong(
         albumId = o["albumId"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content,
         albumOrder = o["albumOrder"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.int,
@@ -374,6 +470,8 @@ class AutomixVectorsTest {
     )
 
     private companion object {
+        const val FILTER_VECTOR_SAMPLES = 512
+
         val ABOUT = JsonArray(
             listOf(
                 "Shared automix cases: the Kotlin tests (AutomixVectorsTest) and the audio engine's Rust tests both run them.",
@@ -382,8 +480,10 @@ class AutomixVectorsTest {
                 "pulse: hits at firstMs + j * every * 60000 / bpm (whole j, fromMs <= hit < toMs); each adds amplitude(hit) * exp(-d / decayMs) * sin(2 pi hz d / 1000) where d = n*1000/rate - hit, for 0 <= d < 8 * decayMs.",
                 "Layers add up; every channel carries the same signal; samples are rounded to 32-bit floats.",
                 "sections: render samples floor(fromMs*rate/1000) to floor(min(toMs, lengthMs)*rate/1000) exclusive, interleave, feed the envelope builder in blocks of 4093 samples with startMs = floor(fromMs*rate/1000)*1000/rate (integer division), then analyze. probes are envelope values at hop indexes.",
-                "plans: run the planner with the tail section of song a and the head section of song b (null when tailMissing / headMissing).",
-                "Times are ms, levels dBFS, rates as multiples of normal speed. tolerances: db for levels, ms for times, bpm, confidenceShare as a share of the expected confidence, curve for gains, k and rates, hzShare as a share of the expected cutoff.",
+                "sections are analyzed as a tail (analyzeTail: last 60 s) or a head (analyzeHead: first 30 s); tagBpm, when set, is the song's tag tempo.",
+                "plans: run the planner with the untagged tail section of song a and head section of song b (null when tailMissing / headMissing) and the given context.",
+                "biquads: cookbook second-order low-pass / high-pass at the given rate, cutoff and Q; coefficients are b0, b1, b2, a1, a2 (a0 = 1); impulse is the answer to a 1 at sample 0, sine the answer to 0.5 * sin(2 pi 1000 n / rate), 512 samples each, from a fresh filter.",
+                "Times are ms, levels dBFS, rates as multiples of normal speed. tolerances: db for levels, ms for times, bpm, confidenceShare as a share of the expected confidence, curve for gains, k and rates, hzShare as a share of the expected cutoff, onset for onset values, sample for filter coefficients and samples.",
             ).map(::JsonPrimitive),
         )
     }

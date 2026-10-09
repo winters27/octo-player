@@ -97,7 +97,7 @@ data class SyntheticSong(val rate: Int, val channels: Int, val lengthMs: Long, v
     }
 
     // The last 60 s and the first 30 s, as the player scouts them.
-    fun tail(): SectionAnalysis = analyzeSection(envelope(max(0.0, lengthMs - 60_000.0), lengthMs.toDouble()))
+    fun tail(): SectionAnalysis = analyzeTail(envelope(max(0.0, lengthMs - 60_000.0), lengthMs.toDouble()))
 
-    fun head(): SectionAnalysis = analyzeSection(envelope(0.0, min(30_000.0, lengthMs.toDouble())))
+    fun head(): SectionAnalysis = analyzeHead(envelope(0.0, min(30_000.0, lengthMs.toDouble())))
 }

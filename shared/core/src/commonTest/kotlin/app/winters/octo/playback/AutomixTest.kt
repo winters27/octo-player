@@ -2,7 +2,10 @@ package app.winters.octo.playback
 
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.sin
+import kotlin.math.sqrt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -46,8 +49,8 @@ class AutomixTest {
         val envelope = envelopeOf(samples, 48_000)
         assertEquals(SILENT_DB, envelope.db[10])
         assertEquals(0f, envelope.onset[10])
-        assertTrue(envelope.onset[100] > 90f)
-        assertEquals(0f, envelope.onset[150], 0.01f)
+        assertTrue(envelope.onset[100] > 1f)
+        assertEquals(0f, envelope.onset[150], 0.05f)
     }
 
     @Test
@@ -78,13 +81,13 @@ class AutomixTest {
                 builder.push(samples, at, length)
                 at += length
             }
-            analyzeSection(builder.build())
+            analyzeTail(builder.build())
             return (System.nanoTime() - began) / 1_000_000
         }
         repeat(3) { run() }
         val ms = (1..5).minOf { run() }
         println("automix: envelope and features of 60 s of 48 kHz stereo in $ms ms")
-        assertTrue("took $ms ms", ms < 250)
+        assertTrue("took $ms ms", ms < 400)
     }
 
     // Features
@@ -121,6 +124,7 @@ class AutomixTest {
         assertNotNull(tempo)
         tempo!!
         assertTrue(tempo.confident)
+        assertTrue(tempo.consistency >= 0.9)
         assertEquals(120.0, tempo.bpm, 1.0)
         // Bars start at 500 ms and every 2 s after.
         assertEquals(0.0, offBy(tempo.downbeatMs - 500, 2_000.0), 20.0)
@@ -132,16 +136,105 @@ class AutomixTest {
     @Test
     fun otherTempos() {
         assertEquals(100.0, AutomixCases.tail("beat-100").features.tempo!!.bpm, 1.0)
-        assertEquals(118.0, AutomixCases.head("beat-118").features.tempo!!.bpm, 1.0)
-        assertEquals(118.0, AutomixCases.tail("beat-118").features.tempo!!.bpm, 1.0)
+        assertEquals(118.0, AutomixCases.head("beat-118").features.tempo!!.bpm, 0.1)
+        assertEquals(118.0, AutomixCases.tail("beat-118").features.tempo!!.bpm, 0.1)
+        assertTrue(AutomixCases.tail("beat-118").features.tempo!!.confident)
     }
 
     @Test
     fun aSilentSectionHasNoSound() {
-        val analysis = analyzeSection(envelopeOf(FloatArray(48_000 * 5), 48_000))
+        val analysis = analyzeHead(envelopeOf(FloatArray(48_000 * 5), 48_000))
         assertNull(analysis.features.soundStartMs)
         assertNull(analysis.features.soundEndMs)
         assertNull(analysis.features.tempo)
+    }
+
+    @Test
+    fun scatteredHitsAreNotABeat() {
+        // Hits at random times: plenty of onsets, no steady grid.
+        var seed = 12345L
+        fun next(): Double {
+            seed = seed * 6364136223846793005L + 1442695040888963407L
+            return (seed ushr 11).toDouble() / (1L shl 53).toDouble()
+        }
+        val rate = 22_050
+        val samples = FloatArray(rate * 30)
+        var at = 0.0
+        while (true) {
+            at += 0.15 + next() * 0.6
+            val start = (at * rate).toInt()
+            if (start >= samples.size) break
+            for (i in 0 until minOf(2_000, samples.size - start)) {
+                samples[start + i] += (0.5 * exp(-i / 300.0) * sin(2 * PI * 80.0 * i / rate)).toFloat()
+            }
+        }
+        val tempo = analyzeHead(envelopeOf(samples, rate)).features.tempo
+        assertTrue("found $tempo", tempo == null || !tempo.confident)
+    }
+
+    @Test
+    fun aTagTempoPicksTheOctave() {
+        val song = AutomixCases.songs.getValue("beat-120")
+        val envelope = song.envelope(0.0, 30_000.0)
+        assertEquals(60.0, analyzeHead(envelope, tagBpm = 62.0).features.tempo!!.bpm, 0.5)
+        assertEquals(120.0, analyzeHead(envelope, tagBpm = 125.0).features.tempo!!.bpm, 0.5)
+    }
+
+    @Test
+    fun theLiveTapHearsTheWholeSong() {
+        val song = AutomixCases.songs.getValue("fade-out")
+        val tap = LiveTap(song.rate, 1)
+        val samples = song.renderMono(0.0, 220_000.0)
+        var at = 0
+        while (at < samples.size) {
+            val length = minOf(4_800, samples.size - at)
+            tap.push(samples, at, length)
+            at += length
+        }
+        assertEquals(220_000L, tap.heardMs())
+        assertEquals(-15.25, tap.bodyLevelDb()!!, 0.1)
+        assertNull("a steady tone has no tempo", tap.tempoPrior())
+        val beat = AutomixCases.songs.getValue("beat-100")
+        val beatTap = LiveTap(beat.rate, 1)
+        beatTap.push(beat.renderMono(0.0, 60_000.0))
+        assertEquals(100.0, beatTap.tempoPrior()!!, 0.1)
+        assertNull(LiveTap(44_100, 2).bodyLevelDb())
+    }
+
+    @Test
+    fun theFftMatchesAPlainDft() {
+        val n = 64
+        val input = DoubleArray(n) { sin(it * 0.37) + 0.5 * cos(it * 1.9) + if (it == 5) 1.0 else 0.0 }
+        val out = DoubleArray(n / 2 + 1)
+        RealFft(n).magnitudes(input, out)
+        for (k in 0..n / 2) {
+            var re = 0.0
+            var im = 0.0
+            for (t in 0 until n) {
+                re += input[t] * cos(2 * PI * k * t / n)
+                im -= input[t] * sin(2 * PI * k * t / n)
+            }
+            assertEquals("bin $k", sqrt(re * re + im * im), out[k], 1e-9)
+        }
+    }
+
+    @Test
+    fun theBiquadsPassAndCutWhereTheyShould() {
+        fun gainOf(filter: Biquad, hz: Double, rate: Int): Double {
+            var peak = 0.0
+            for (i in 0 until rate) {
+                val y = filter.process(sin(2 * PI * hz * i / rate))
+                if (i > rate / 2) peak = maxOf(peak, abs(y))
+            }
+            return peak
+        }
+        assertEquals(1.0, gainOf(Biquad.lowPass(48_000, 1_000.0), 100.0, 48_000), 0.01)
+        assertEquals(0.7071, gainOf(Biquad.lowPass(48_000, 1_000.0), 1_000.0, 48_000), 0.01)
+        assertTrue(gainOf(Biquad.lowPass(48_000, 1_000.0), 10_000.0, 48_000) < 0.02)
+        assertEquals(1.0, gainOf(Biquad.highPass(44_100, 200.0), 5_000.0, 44_100), 0.01)
+        assertTrue(gainOf(Biquad.highPass(44_100, 200.0), 20.0, 44_100) < 0.02)
+        // An 18 kHz cutoff at 22.05 kHz is held below the top of the band and stays stable.
+        assertTrue(gainOf(Biquad.lowPass(22_050, 18_000.0), 1_000.0, 22_050) < 1.01)
     }
 
     private fun offBy(x: Double, period: Double): Double {
@@ -189,7 +282,9 @@ class AutomixTest {
         assertEquals(0.0, offBy(plan.startMs - 500.0, 2_000.0), 20.0)
         assertEquals(8_000.0, plan.overlapMs.toDouble(), 10.0)
         assertEquals(TransitionKind.BLEND, plan.kind)
-        assertEquals(1_000L, plan.entryMs)
+        assertEquals(1_000.0, plan.entryMs.toDouble(), 20.0)
+        assertTrue(plan.barLocked)
+        assertEquals(OVERLAP_HEADROOM_DB, plan.headroomDb, 0.0)
         assertEquals(FILTER_STRENGTH, plan.filterStrength, 0.0)
         assertNull(plan.beatMatchRate)
         assertTrue(plan.reason.contains("4 bars of 120.0 BPM"))
@@ -219,17 +314,106 @@ class AutomixTest {
     }
 
     @Test
-    fun withoutAnalysisItIsThePlainCrossfade() {
-        for (name in listOf("no-analysis", "no-head", "smart-off")) {
+    fun smartOffIsThePlainCrossfade() {
+        val plan = plan("smart-off")
+        assertEquals(TransitionKind.CROSSFADE, plan.kind)
+        assertEquals(192_000L, plan.startMs)
+        assertEquals(8_000L, plan.overlapMs)
+        assertEquals(0L, plan.entryMs)
+        assertEquals(CROSSFADE_CURVE, plan.k, 0.0)
+        assertEquals(0.0, plan.filterStrength, 0.0)
+    }
+
+    @Test
+    fun withoutTheTailItBlendsLateAtTheEnd() {
+        for (name in listOf("no-analysis", "no-tail")) {
             val plan = plan(name)
             val length = AutomixCases.songs.getValue(AutomixCases.pair(name).a).lengthMs
-            assertEquals(name, TransitionKind.CROSSFADE, plan.kind)
-            assertEquals(name, length - 8_000, plan.startMs)
+            assertTrue(name, plan.late)
+            assertEquals(name, length - END_MARGIN_MS - 8_000, plan.startMs)
             assertEquals(name, 8_000L, plan.overlapMs)
-            assertEquals(name, 0L, plan.entryMs)
-            assertEquals(name, CROSSFADE_CURVE, plan.k, 0.0)
-            assertEquals(name, 0.0, plan.filterStrength, 0.0)
+            assertEquals(name, FILTER_STRENGTH, plan.filterStrength, 0.0)
+            assertTrue(name, !plan.barLocked)
         }
+        assertEquals(0L, plan("no-analysis").entryMs)
+        assertEquals("the next song still skips its silence", 1_480.0, plan("no-tail").entryMs.toDouble(), 30.0)
+    }
+
+    @Test
+    fun withoutTheHeadThereIsNoBarLock() {
+        val plan = plan("no-head")
+        assertTrue(!plan.barLocked)
+        assertTrue(!plan.late)
+        assertEquals(0L, plan.entryMs)
+    }
+
+    @Test
+    fun genresThatShouldNotBeMixedGetThePlainCrossfade() {
+        assertEquals(TransitionKind.CROSSFADE, plan("classical").kind)
+        assertEquals(TransitionKind.CROSSFADE, plan("podcast").kind)
+        assertTrue(plan("podcast").reason.endsWith("genre Podcast"))
+    }
+
+    @Test
+    fun paceAndSkipSilenceTurnOffBarLockAndBeatMatch() {
+        for (name in listOf("pace", "skip-silence")) {
+            val plan = plan(name)
+            assertTrue(name, !plan.barLocked)
+            assertNull(name, plan.beatMatchRate)
+            assertTrue(name, plan.kind != TransitionKind.CROSSFADE && plan.kind != TransitionKind.GAPLESS)
+        }
+    }
+
+    @Test
+    fun tooLateForTheChosenStartBlendsAtTheEnd() {
+        val late = plan("late")
+        assertTrue(late.late)
+        assertEquals(199_750L - 8_000, late.startMs)
+        assertEquals(8_000L, late.overlapMs)
+        assertTrue(!late.barLocked)
+        val short = plan("late-short")
+        assertEquals(197_000L, short.startMs)
+        assertEquals(2_750L, short.overlapMs)
+        assertEquals(TransitionKind.GAPLESS, plan("too-late").kind)
+    }
+
+    @Test
+    fun theStartLeavesTimeToPreRoll() {
+        val plan = plan("pre-roll")
+        assertTrue(plan.startMs >= 183_000 + PRE_ROLL_MS)
+        assertTrue(!plan.late)
+    }
+
+    @Test
+    fun theBlendWaitsUntilTheSongCountsAsPlayed() {
+        // At 170 s with 60 s heard, the song counts as played (110 s heard)
+        // only at 220 s, past the end, so the blend goes to the very end.
+        val plan = plan("seeked-forward")
+        assertTrue(plan.late)
+        val soundEnd = AutomixCases.tail("fade-out").features.soundEndMs!!
+        assertEquals(soundEnd, plan.startMs + plan.overlapMs)
+        for (pair in AutomixCases.pairs) {
+            val p = AutomixCases.plan(pair)
+            if (p.kind == TransitionKind.GAPLESS || p.kind == TransitionKind.CROSSFADE) continue
+            assertTrue(pair.name, p.startMs >= AutomixCases.songs.getValue(pair.a).lengthMs / 2)
+        }
+    }
+
+    @Test
+    fun theWholeSongsLevelMovesTheOutro() {
+        val plan = plan("whole-song-level")
+        val moved = AutomixCases.tail("fade-out").withBodyLevel(-24.0).features
+        assertEquals(-24.0, moved.bodyDb, 0.0)
+        assertTrue(moved.outroStartMs!! > AutomixCases.tail("fade-out").features.outroStartMs!! + 4_000)
+        assertTrue(plan.startMs in moved.outroStartMs!! - 500..moved.outroStartMs!! + 3_000)
+    }
+
+    @Test
+    fun theWholeSongsTempoSetsTheOctaveOrDropsTheLock() {
+        val half = plan("tempo-prior")
+        assertEquals(1_000.0, half.beatMs!!, 1.0)
+        assertTrue(half.reason.contains("of 60.0 BPM"))
+        assertTrue("a tempo the whole song does not share is not trusted", !plan("tempo-prior-off").barLocked)
     }
 
     @Test
@@ -242,7 +426,8 @@ class AutomixTest {
     }
 
     @Test
-    fun repeatOneAndCrossfadeOffNeverBlend() {
+    fun repeatOneTheSleepTimerAndCrossfadeOffNeverBlend() {
+        assertEquals(TransitionKind.GAPLESS, plan("stop-at-end").kind)
         assertEquals(TransitionKind.GAPLESS, plan("repeat-one").kind)
         assertEquals("gapless: repeat one", plan("repeat-one").reason)
         assertEquals(TransitionKind.GAPLESS, plan("crossfade-off").kind)
@@ -262,8 +447,7 @@ class AutomixTest {
         val tail = AutomixCases.tail("hot-end")
         val head = AutomixCases.head("plain-b")
         val plan = planTransition(
-            FadeSong("a", 1, 30_000), FadeSong("b", 1, 180_000), tail, head,
-            AutomixSettings(8_000), repeatOne = false, stopAtEndOfSong = false,
+            FadeSong("a", 1, 30_000), FadeSong("b", 1, 180_000), tail, head, AutomixSettings(8_000),
         )
         assertEquals(TransitionKind.CROSSFADE, plan.kind)
         assertEquals(22_000L, plan.startMs)

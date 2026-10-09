@@ -36,8 +36,7 @@ object AutomixCases {
         val b: String,
         val settings: AutomixSettings,
         val sameAlbumInOrder: Boolean = false,
-        val repeatOne: Boolean = false,
-        val stopAtEndOfSong: Boolean = false,
+        val context: TransitionContext = TransitionContext(),
         val tailMissing: Boolean = false,
         val headMissing: Boolean = false,
     ) {
@@ -58,12 +57,26 @@ object AutomixCases {
         Pair("beat-match", "beat-120", "beat-118", AutomixSettings(maxOverlapMs = 8_000, beatMatch = true)),
         Pair("beat-match-off", "beat-120", "beat-118", eight),
         Pair("no-sweeps", "beat-120", "beat-120-b", AutomixSettings(maxOverlapMs = 8_000, filterSweeps = false)),
-        Pair("no-analysis", "hot-end", "plain-b", eight, tailMissing = true),
+        Pair("no-analysis", "hot-end", "plain-b", eight, tailMissing = true, headMissing = true),
+        Pair("no-tail", "fade-out", "plain-b", eight, tailMissing = true),
         Pair("no-head", "beat-120", "plain-b", eight, headMissing = true),
         Pair("smart-off", "beat-120", "beat-120-b", AutomixSettings(maxOverlapMs = 8_000, smart = false)),
         Pair("album-in-order", "beat-120", "beat-120-b", eight, sameAlbumInOrder = true),
-        Pair("repeat-one", "beat-120", "beat-120-b", eight, repeatOne = true),
+        Pair("repeat-one", "beat-120", "beat-120-b", eight, context = TransitionContext(repeatOne = true)),
+        Pair("stop-at-end", "beat-120", "beat-120-b", eight, context = TransitionContext(stopAtEndOfSong = true)),
         Pair("crossfade-off", "beat-120", "beat-120-b", AutomixSettings(maxOverlapMs = 0)),
+        Pair("classical", "beat-120", "beat-120-b", eight, context = TransitionContext(nextGenre = "Classical; Baroque")),
+        Pair("podcast", "hot-end", "plain-b", eight, context = TransitionContext(currentGenre = "Podcast")),
+        Pair("pace", "beat-120", "beat-120-b", AutomixSettings(maxOverlapMs = 8_000, beatMatch = true), context = TransitionContext(pace = 1.25)),
+        Pair("skip-silence", "beat-120", "beat-118", AutomixSettings(maxOverlapMs = 8_000, beatMatch = true), context = TransitionContext(skipSilence = true)),
+        Pair("late", "beat-120", "beat-120-b", eight, context = TransitionContext(nowMs = 190_000)),
+        Pair("late-short", "beat-120", "beat-120-b", eight, context = TransitionContext(nowMs = 197_000)),
+        Pair("too-late", "beat-120", "beat-120-b", eight, context = TransitionContext(nowMs = 199_500)),
+        Pair("pre-roll", "fade-out", "plain-b", eight, context = TransitionContext(nowMs = 183_000)),
+        Pair("seeked-forward", "fade-out", "plain-b", eight, context = TransitionContext(nowMs = 170_000, playedMs = 60_000)),
+        Pair("whole-song-level", "fade-out", "plain-b", eight, context = TransitionContext(bodyLevelDb = -24.0)),
+        Pair("tempo-prior", "beat-120", "beat-120-b", eight, context = TransitionContext(tempoPrior = 60.0)),
+        Pair("tempo-prior-off", "beat-120", "beat-120-b", eight, context = TransitionContext(tempoPrior = 100.0)),
     )
 
     private val tails = HashMap<String, SectionAnalysis>()
@@ -79,8 +92,7 @@ object AutomixCases {
         tail = if (pair.tailMissing) null else tail(pair.a),
         head = if (pair.headMissing) null else head(pair.b),
         settings = pair.settings,
-        repeatOne = pair.repeatOne,
-        stopAtEndOfSong = pair.stopAtEndOfSong,
+        context = pair.context,
     )
 
     fun pair(name: String): Pair = pairs.first { it.name == name }
