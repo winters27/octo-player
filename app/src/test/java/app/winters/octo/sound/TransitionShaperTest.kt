@@ -320,6 +320,18 @@ class TransitionShaperTest {
     }
 
     @Test
+    fun theOutgoingSongsFiltersComeInWithoutAClick() {
+        // A steady level into a swept blend: the filters start from rest, so
+        // only the dry-to-wet ramp keeps the waveform from stepping.
+        val processor = processor()
+        processor.arm(DeckTransition(null, plan(start = 500, overlap = 1_000, strength = FILTER_STRENGTH), incoming = false))
+        val out = run(processor, 800)
+        val start = msToFrame(500.0)
+        val biggest = (start - 10 until start + msToFrame(40.0)).maxOf { abs(out[it] - out[it - 1]) }
+        assertTrue("a step of $biggest where the filters came in", biggest < 0.002f)
+    }
+
+    @Test
     fun anOutgoingSongArmedPartWayIntoItsBlendGlidesToTheCurve() {
         // A late plan armed after its start: the playing song was at full.
         val processor = processor(fromMs = 600)

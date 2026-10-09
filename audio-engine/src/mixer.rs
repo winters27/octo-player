@@ -40,6 +40,11 @@ const RUSH_SECS: f64 = 0.25;
 /// waveform by the filter's phase shift: a click on bass notes.
 const RELEASE_SECS: f64 = 0.01;
 
+/// How long the sweeps take to come in from the dry sound at a blend's
+/// start, in seconds. The filters start from rest, so switching them in at
+/// once would step the outgoing song's waveform: a click.
+const ENGAGE_SECS: f64 = 0.01;
+
 /// How far into and out of a blend the headroom takes to come and go, as
 /// a share of the blend.
 const HEADROOM_RAMP: f64 = 0.1;
@@ -198,13 +203,18 @@ impl LiveTap {
 
 // Filters swept over both songs through a blend: a low-pass and a
 // high-pass closing in on the outgoing song, and a high-pass opening up on
-// the incoming one. They move every `SWEEP_STEP` frames.
+// the incoming one. They move every `SWEEP_STEP` frames. Over the first
+// `engage` frames each song moves from its dry sound to its filtered one.
 struct Sweeps {
     rate: u32,
     strength: f64,
     steps: Option<LowPassSteps>,
     outgoing: FilterBank,
     incoming: FilterBank,
+    engaged: usize,
+    engage: usize,
+    dry_out: Vec<f32>,
+    dry_in: Vec<f32>,
 }
 
 impl Sweeps {
@@ -215,6 +225,10 @@ impl Sweeps {
             steps,
             outgoing: FilterBank::new(2, vec![Biquad::low_pass(rate, 18_000.0).coefficients(); 2]),
             incoming: FilterBank::new(2, vec![Biquad::high_pass(rate, 20.0).coefficients()]),
+            engaged: 0,
+            engage: ((ENGAGE_SECS * rate as f64) as usize).max(1),
+            dry_out: vec![0.0; SWEEP_STEP * 2],
+            dry_in: vec![0.0; SWEEP_STEP * 2],
         };
         sweeps.tune(0.0);
         sweeps
@@ -245,8 +259,24 @@ impl Sweeps {
         while at < frames {
             let n = SWEEP_STEP.min(frames - at);
             self.tune(progress(done + at as u64));
+            let engaging = self.engaged < self.engage;
+            if engaging {
+                self.dry_out[..n * 2].copy_from_slice(&outgoing[at * 2..(at + n) * 2]);
+                self.dry_in[..n * 2].copy_from_slice(&incoming[at * 2..(at + n) * 2]);
+            }
             self.outgoing.process(&mut outgoing[at * 2..], n);
             self.incoming.process(&mut incoming[at * 2..], n);
+            if engaging {
+                for i in 0..n {
+                    let wet = ((self.engaged + i + 1) as f32 / self.engage as f32).min(1.0);
+                    for ch in 0..2 {
+                        let (j, k) = (i * 2 + ch, (at + i) * 2 + ch);
+                        outgoing[k] = self.dry_out[j] + (outgoing[k] - self.dry_out[j]) * wet;
+                        incoming[k] = self.dry_in[j] + (incoming[k] - self.dry_in[j]) * wet;
+                    }
+                }
+                self.engaged += n;
+            }
             at += n;
         }
     }

@@ -285,6 +285,24 @@ fn filter_sweeps_touch_only_the_blend() {
 }
 
 #[test]
+fn a_swept_blend_starts_without_a_click() {
+    // The outgoing song is a steady level: any step where the filters come
+    // in is the filters' own.
+    let fade = 24_000u64;
+    let swept = FadeShape { k: 0.4, filter_strength: 0.7, ..Default::default() };
+    let (out, _) = blend(swept, fade, 0.0, 96_000);
+    let fade_start = 48_000 + LATENCY;
+    let step = (fade_start - 10..fade_start + 2_000)
+        .map(|i| (out[i * 2] - out[(i - 1) * 2]).abs())
+        .fold(0.0, f32::max);
+    assert!(step < 0.002, "a step of {step} where the filters came in");
+    // A little later the sound is the filtered one.
+    let (plain, _) = blend(FadeShape { k: 0.4, ..Default::default() }, fade, 0.0, 96_000);
+    let later = fade_start + 4_000;
+    assert!((out[later * 2] - plain[later * 2]).abs() > 1e-3);
+}
+
+#[test]
 fn a_song_with_no_blend_plays_exactly_as_before() {
     // A blend later in a song changes nothing before it.
     let dir = temp_dir();
