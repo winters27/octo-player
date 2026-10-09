@@ -733,8 +733,8 @@ fn a_smart_plan_starts_early_enters_late_and_cuts_the_outgoing_song() {
     write_wav(&a, RATE, 2, &a_samples);
     let b_samples: Vec<i16> = (0..RATE as usize * 4).flat_map(|n| [0, (n % 15_000) as i16]).collect();
     write_wav(&b, RATE, 2, &b_samples);
-    *crate::automix::TEST_PLANNER.lock().unwrap() = Some(test_plan);
     let (engine, events, capture) = engine(2.0);
+    engine.set_test_planner(Some(test_plan));
     engine.set_crossfade(1_000).unwrap();
     engine
         .set_automix(crate::automix::AutomixSettings {
@@ -747,7 +747,6 @@ fn a_smart_plan_starts_early_enters_late_and_cuts_the_outgoing_song() {
     engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
     let planned = events
         .wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
-    *crate::automix::TEST_PLANNER.lock().unwrap() = None;
     let EngineEvent::TransitionPlanned { start_ms, entry_ms, overlap_ms, reason, .. } = planned else {
         unreachable!()
     };
@@ -784,8 +783,8 @@ fn a_late_plan_into_a_song_entered_part_way_still_blends() {
     let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 12, 0.3));
     write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 4, 0.3));
-    *crate::automix::TEST_PLANNER.lock().unwrap() = Some(late_entry_plan);
     let (engine, events, _) = engine(1.0);
+    engine.set_test_planner(Some(late_entry_plan));
     engine.set_crossfade(3_000).unwrap();
     engine
         .set_automix(crate::automix::AutomixSettings {
@@ -798,7 +797,6 @@ fn a_late_plan_into_a_song_entered_part_way_still_blends() {
     engine.load(vec![item("a", &a), item("b", &b)], 0, 9_500, true).unwrap();
     let planned = events
         .wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
-    *crate::automix::TEST_PLANNER.lock().unwrap() = None;
     let EngineEvent::TransitionPlanned { reason, .. } = planned else { unreachable!() };
     assert!(reason.contains("late"), "{reason}");
     let joined = events.wait_for("join", Duration::from_secs(10), |e| {
@@ -924,8 +922,8 @@ fn a_song_with_a_profile_is_planned_from_it_without_the_live_level() {
     let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 12, 0.3));
     write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 4, 0.3));
-    *crate::automix::TEST_PLANNER.lock().unwrap() = Some(recording_plan);
     let (engine, events, _) = engine(2.0);
+    engine.set_test_planner(Some(recording_plan));
     engine.set_crossfade(1_000).unwrap();
     engine
         .set_automix(crate::automix::AutomixSettings {
@@ -939,7 +937,6 @@ fn a_song_with_a_profile_is_planned_from_it_without_the_live_level() {
     engine.set_song_profile("b".into(), Some(profile_of(4_000, 0))).unwrap();
     engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
     events.wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
-    *crate::automix::TEST_PLANNER.lock().unwrap() = None;
     let handed = HANDED.lock().unwrap().take();
     // Both sections at the profile's 100 ms, not the scout's 10 ms; no level
     // from the live tap; the profile's whole-song tempo.

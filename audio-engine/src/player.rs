@@ -138,6 +138,9 @@ pub struct Shared {
     pub trust: Arc<Trust>,
     // The client every stream fetches with, knowing those certificates.
     agent: ureq::Agent,
+    /// A planner used in place of `automix::plan` by this engine only.
+    #[cfg(test)]
+    pub planner: Mutex<Option<crate::automix::Planner>>,
 }
 
 impl Shared {
@@ -159,11 +162,22 @@ impl Shared {
             player: OnceLock::new(),
             agent: http::agent(trust.clone()),
             trust,
+            #[cfg(test)]
+            planner: Mutex::new(None),
         }
     }
 
     pub fn set_player_thread(&self, thread: Thread) {
         let _ = self.player.set(thread);
+    }
+
+    /// Plans a transition, with this engine's test planner when it has one.
+    fn plan(&self, input: &PlanInput) -> TransitionPlan {
+        #[cfg(test)]
+        if let Some(planner) = *self.planner.lock().unwrap_or_else(|e| e.into_inner()) {
+            return planner(input);
+        }
+        crate::automix::plan(input)
     }
 
     /// Wakes the player thread to act on a command now.
@@ -1217,7 +1231,7 @@ impl Player {
                 tempo_prior,
             },
         };
-        let plan = crate::automix::plan(&input);
+        let plan = self.shared.plan(&input);
         // A plan that does not fit the songs falls back to the fixed point.
         let b_len_ms = next_song.duration_ms as i64;
         let fits = plan.kind == TransitionKind::Gapless

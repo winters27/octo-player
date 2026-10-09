@@ -489,6 +489,13 @@ impl Engine {
         })
     }
 
+    /// Plans this engine's transitions with `planner` instead of the real
+    /// planner. Other engines are not touched.
+    #[cfg(test)]
+    pub fn set_test_planner(&self, planner: Option<crate::automix::Planner>) {
+        *self.shared.planner.lock().unwrap_or_else(|e| e.into_inner()) = planner;
+    }
+
     fn send(&self, command: Command) -> Result<(), EngineError> {
         self.commands.send(command).map_err(|_| EngineError::Failed {
             kind: ErrorKind::Other,

@@ -268,10 +268,6 @@ pub struct PlanInput<'a> {
 
 /// Plans the transition from the scouted sections.
 pub fn plan(input: &PlanInput) -> TransitionPlan {
-    #[cfg(test)]
-    if let Some(planner) = *TEST_PLANNER.lock().unwrap_or_else(|e| e.into_inner()) {
-        return planner(input);
-    }
     plan_transition(
         &input.current,
         Some(&input.next),
@@ -282,12 +278,9 @@ pub fn plan(input: &PlanInput) -> TransitionPlan {
     )
 }
 
-/// A planner a test puts in place of `plan`.
+/// A planner a test puts in place of `plan` on one engine.
 #[cfg(test)]
 pub type Planner = fn(&PlanInput) -> TransitionPlan;
-
-#[cfg(test)]
-pub static TEST_PLANNER: std::sync::Mutex<Option<Planner>> = std::sync::Mutex::new(None);
 
 #[cfg(test)]
 mod synthetic;
