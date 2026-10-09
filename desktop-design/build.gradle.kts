@@ -71,8 +71,9 @@ val shareIcons by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("generated/sharedDesign/resources"))
 }
 
-// The fonts playlist covers are set in (Inter Display, OFL), from the
-// phone's font resources, packaged under octo-fonts/ with their licence.
+// The fonts playlist covers are set in (Inter Display, OFL) and the one
+// codes are set in (JetBrains Mono, OFL), from the phone's font resources,
+// packaged under octo-fonts/ with their licences.
 val shareFonts by tasks.registering(Sync::class) {
     from(rootProject.file("design/src/main/res/font")) {
         include("*.ttf")

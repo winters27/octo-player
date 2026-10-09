@@ -1,5 +1,6 @@
 package app.winters.octo.design
 
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animate
@@ -49,15 +50,21 @@ import kotlinx.coroutines.launch
 private val SheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
 // Solid enough to read on over any background, with a little accent in it.
-private val SheetFill = mix(OctoColors.Background, OctoColors.Accent, 0.05f).copy(alpha = 0.97f)
+val SheetFill = mix(OctoColors.Background, OctoColors.Accent, 0.05f).copy(alpha = 0.97f)
 
 // A panel that rises from the bottom over a dimmed screen, at most 70% of
 // the screen tall; what does not fit scrolls. Tapping the dim area, pulling the panel down, or back
 // closes it. Place it last inside a full-screen box so it sits on top.
+// `tall` lets it grow as tall as its content, up to the status bar, opened
+// all the way at once. `scrolls` false hands the content the room as it is,
+// for a sheet that scrolls part of itself and keeps the rest in place (a
+// footer that stays put).
 @Composable
 fun GlassSheet(
     visible: Boolean,
     onDismiss: () -> Unit,
+    tall: Boolean = false,
+    scrolls: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val dismiss by rememberUpdatedState(onDismiss)
@@ -77,7 +84,7 @@ fun GlassSheet(
             visible,
             enter = slideInVertically(spring(0.85f, 400f)) { it },
             exit = slideOutVertically(octoTween(motion, OctoDuration.Card, OctoEasing.EaseIn)) { it },
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier.align(Alignment.BottomCenter).then(if (tall) Modifier.statusBarsPadding() else Modifier),
         ) {
             BoxWithConstraints {
                 val scope = rememberCoroutineScope()
@@ -86,7 +93,7 @@ fun GlassSheet(
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .heightIn(max = maxHeight * 0.7f)
+                        .heightIn(max = if (tall) maxHeight else maxHeight * 0.7f)
                         .graphicsLayer { translationY = pull }
                         .dropShadow(SheetShape, Shadow(radius = shadowBlur(32f), color = Color.Black.copy(alpha = 0.4f)))
                         .clip(SheetShape)
@@ -121,7 +128,7 @@ fun GlassSheet(
                     }
                     // The lines scroll under the handle when there are more
                     // than fit.
-                    SheetColumn(content = content)
+                    if (scrolls) SheetColumn(content = content) else content()
                 }
             }
         }

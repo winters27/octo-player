@@ -90,6 +90,10 @@ object OctoIcons {
     val Link by sym("sym_link")
     // How long a code has left.
     val Timer by sym("sym_timer")
+    // Where a join link works: anywhere, or behind a lock until the outside
+    // address is set.
+    val Globe by sym("sym_globe")
+    val Lock by sym("sym_lock")
 
     // Back and forward through the pages, and opening the full player: the
     // chevron turned.

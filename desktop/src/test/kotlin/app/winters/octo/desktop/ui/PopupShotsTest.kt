@@ -99,7 +99,7 @@ class PopupShotsTest {
                     SwingUtilities.invokeAndWait { app.family.backToCode() }
                     rig.shot(scene, null, 800)
                     // The same code at home only.
-                    rig.clickText(scene, "At home only")
+                    rig.clickText(scene, "At home")
                     shot(scene, "2-at-home", 1_200)
                     // Clicked straight from the switch, as a person would.
                     rig.clickText(scene, "Using Symfonium or another app instead?")
@@ -129,7 +129,7 @@ class PopupShotsTest {
                         SwingUtilities.invokeAndWait { showDeviceSheet(app.popups, app, app.family, sheet = { sheet }) }
                         if (name == "8-no-outside-address") {
                             rig.shot(scene, null, 800)
-                            rig.clickText(scene, "Works anywhere")
+                            rig.clickText(scene, "Anywhere")
                         }
                         shot(scene, name, 1_500)
                     }
@@ -155,6 +155,20 @@ class PopupShotsTest {
                         app.navigator.go(Page.Family)
                     }
                     rig.shot(scene, "popup/13-add-member-form", 2_000)
+                }
+                // A small window: the dialog scrolls inside, Done stays in sight,
+                // and the cue says there is more.
+                rig.scene(PolishShotsTest.Size.Min) { scene ->
+                    rig.reset(scene)
+                    SwingUtilities.invokeAndWait {
+                        showSection(FAMILY, "devices")
+                        app.navigator.go(Page.Family)
+                        app.family.addDevice("Laptop", FamilyDeviceKind.OctoApp)
+                    }
+                    rig.shot(scene, "popup/14-small-window", 2_500)
+                    rig.clickText(scene, "More below")
+                    rig.shot(scene, "popup/15-small-window-scrolled", 1_200)
+                    SwingUtilities.invokeAndWait { app.family.dismissAdded() }
                 }
             }
         }

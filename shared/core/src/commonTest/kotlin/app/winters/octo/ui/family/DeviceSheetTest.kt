@@ -118,6 +118,7 @@ class DeviceSheetTest {
     fun renewingPausesWhileHiddenAndCatchesUpOnReturn() {
         openWithCode()
         model.sheetOnScreen(false)
+        settle()
         now.set(expiresAtMs(model.sheet!!.code!!.expires)!! + 60_000)
         settle()
         assertEquals("paused", 1, codeCalls().size)
@@ -305,9 +306,23 @@ class LinkChoiceTest {
 
     @Test
     fun aLinkShowsWhereItGoesAndTheAddressToType() {
-        assertEquals("example.com/octo/family/join", shownLink("https://example.com/octo/family/join#u=alex&c=482913"))
+        assertEquals("example.com/octo/family/join…#u=alex", shownLink("https://example.com/octo/family/join#u=alex&c=482913"))
+        assertEquals("music.example.com/family/join…#invite=tok_sam_7Hq2", shownLink("https://music.example.com/family/join#invite=tok_sam_7Hq2"))
+        assertEquals("music.example.com/family/join", shownLink("https://music.example.com/family/join"))
+        assertEquals("music.example.com…#u=winters", shownLink("https://music.example.com/family/join#u=winters&c=482913", 32))
+        assertEquals("for sam on example.com/octo", codeForLine("sam", "https://example.com/octo/"))
         assertEquals("https://example.com/octo", linkServer("https://example.com/octo/family/join#u=alex&c=482913"))
         assertEquals("http://192.168.1.20:4533", linkServer(home))
+    }
+
+    @Test
+    fun theChoicesSayWhichAddressTheyUse() {
+        val options = LinkOptions("https://example.com/octo/family/join#u=alex&c=1", home)
+        assertEquals("Uses https://example.com", reachLine(LinkReach.Anywhere, options))
+        assertEquals("Uses your home network (192.168.1.20:4533)", reachLine(LinkReach.Home, options))
+        assertNull(reachLine(LinkReach.Anywhere, LinkOptions(null, home, anywhereAvailable = false)))
+        assertEquals("Where will you use it?", reachQuestion(own = true))
+        assertEquals("Where will they use it?", reachQuestion(own = false))
     }
 
     @Test

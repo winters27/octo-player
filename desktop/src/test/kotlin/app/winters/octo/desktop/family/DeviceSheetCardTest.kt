@@ -1,5 +1,12 @@
 package app.winters.octo.desktop.family
 
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -46,24 +53,33 @@ class DeviceSheetCardTest {
     private var owner = false
     private var scene: ImageComposeScene? = null
 
-    private fun draw() {
+    // Draws the card as the dialog holds it: `width` wide and at most
+    // `height` tall, the rest scrolling.
+    private fun draw(width: Int = 640, height: Int = 1000) {
         SwingUtilities.invokeAndWait {
-            scene = ImageComposeScene(900, 1000, Density(1f)) {
+            scene = ImageComposeScene(width, height, Density(1f)) {
                 ProvideWindowLook(reduceMotion = true) {
-                    val shown = invite
-                    val actions = SheetActions(openPage = { opened += it }, open = { opened += it }, owner = owner)
-                    if (shown != null) InviteCard(shown, "https://music.example.com", {}, actions, copied::add)
-                    else DeviceSheetCard(sheet, "https://fallback.example.com", "fallback", "Alex", actions, copied::add, now = { now })
+                    Column(Modifier.width(width.dp).heightIn(max = height.dp)) {
+                        val shown = invite
+                        val actions = SheetActions(openPage = { opened += it }, open = { opened += it }, owner = owner)
+                        if (shown != null) InviteCard(shown, "https://music.example.com", {}, actions, copied::add)
+                        else DeviceSheetCard(sheet, "https://fallback.example.com", "fallback", "Alex", actions, copied::add, now = { now })
+                    }
                 }
             }
         }
         render()
     }
 
-    private fun render() = repeat(4) {
+    private fun tagged(tag: String) = nodes().firstOrNull { it.config.getOrNull(SemanticsProperties.TestTag) == tag }
+
+    private fun render(frames: Int = 4) = repeat(frames) {
         SwingUtilities.invokeAndWait { scene!!.render((System.nanoTime())).close() }
         Thread.sleep(20)
     }
+
+    // Long enough for fades to finish.
+    private fun settle() = render(frames = 25)
 
     @After
     fun close() {
@@ -122,10 +138,11 @@ class DeviceSheetCardTest {
     fun theSwitchSwapsTheQrCodeAndLinkButKeepsTheCode() {
         draw()
         assertNotNull("anywhere first", find(anywhere))
-        click("At home only")
+        click("At home")
         assertNull(find(anywhere))
         assertNotNull(find(home))
-        assertTrue(has("This link only works on your home network"))
+        assertTrue(has("Uses your home network (192.168.1.20:4533)"))
+        assertTrue(has("for alex on 192.168.1.20:4533"))
         assertTrue(has("482 913"))
         click("Copy link")
         assertEquals(listOf(home), copied)
@@ -138,17 +155,18 @@ class DeviceSheetCardTest {
         draw()
         // Home comes first, as anywhere can't be had yet.
         assertNotNull(find(home))
-        click("Works anywhere")
+        click("Anywhere")
         assertTrue(has("Set your outside address first"))
         click("Open the Status page")
-        assertEquals(listOf("https://music.example.com/admin/#status"), opened)
+        // The dashboard of the server this app is signed in to.
+        assertEquals(listOf("https://fallback.example.com/admin/#status"), opened)
     }
 
     @Test
     fun othersAreToldToAskTheOwner() {
         sheet = DeviceSheet(id = 2, code = code.copy(links = FamilyLinkChoices(null, home), anywhereAvailable = false))
         draw()
-        click("Works anywhere")
+        click("Anywhere")
         assertTrue(has("Ask your family owner to set an outside address"))
         assertFalse(has("Open the Status page"))
     }
@@ -184,7 +202,7 @@ class DeviceSheetCardTest {
     @Test
     fun switchingToOtherAppsAndBackRedraws() {
         draw()
-        press("At home only")
+        press("At home")
         assertNotNull(find(home))
         val password = FamilyDeviceAdded(deviceId = "p_1", kind = FamilyDeviceKind.SubsonicApp, appPassword = "ABCDEFGHJKMNPQRS", server = "https://music.example.com", username = "alex")
         sheet = sheet.copy(view = DeviceSheetView.OtherApps, loading = true)
@@ -207,6 +225,51 @@ class DeviceSheetCardTest {
         assertFalse(has("Copy code"))
         click("Copy link")
         assertEquals(listOf("https://music.example.com/family/join#invite=t9"), copied)
+    }
+
+    @Test
+    fun theChoicesAreARadioGroupThatSaysWhichIsChosen() {
+        draw()
+        fun selected(tag: String) = tagged(tag)!!.config.getOrNull(SemanticsProperties.Selected)
+        assertEquals(Role.RadioButton, tagged("reach-Anywhere")!!.config.getOrNull(SemanticsProperties.Role))
+        assertEquals(true, selected("reach-Anywhere"))
+        assertEquals(false, selected("reach-Home"))
+        assertTrue(has("Uses https://music.example.com"))
+        click("At home")
+        assertEquals(false, selected("reach-Anywhere"))
+        assertEquals(true, selected("reach-Home"))
+    }
+
+    @Test
+    fun theChoicesNeverClipAt320dp() {
+        draw(width = 320)
+        for (tag in listOf("reach-Anywhere-label", "reach-Home-label")) {
+            val results = mutableListOf<TextLayoutResult>()
+            tagged(tag)!!.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(results)
+            assertFalse(tag, results.single().hasVisualOverflow)
+            assertEquals(tag, 15f, results.single().layoutInput.style.fontSize.value, 0.01f)
+        }
+    }
+
+    @Test
+    fun inASmallWindowDoneStaysInSightAndTheCueBringsTheCode() {
+        draw(width = 640, height = 420)
+        val done = tagged(CARD_DONE_TAG)!!.boundsInRoot
+        assertTrue("Done in sight: $done", done.bottom <= 420f)
+        assertNotNull("the cue shows", tagged(CARD_MORE_TAG))
+        click("More below")
+        settle()
+        val code = tagged(CARD_CODE_TAG)!!.boundsInRoot
+        assertTrue("the code in sight above the footer: $code, $done", code.bottom <= tagged(CARD_DONE_TAG)!!.boundsInRoot.top)
+        // At the bottom the cue is gone.
+        assertNull(tagged(CARD_MORE_TAG))
+    }
+
+    @Test
+    fun inAFullSizeWindowThereIsNoCue() {
+        draw()
+        settle()
+        assertNull(tagged(CARD_MORE_TAG))
     }
 
     @Test

@@ -136,13 +136,31 @@ fun middleEllipsized(text: String, max: Int = 48): String {
     return text.take(head) + "…" + text.takeLast(tail)
 }
 
-// A link as the popup shows it: where it goes, without the scheme or the
-// part after #, which only carries the code. The whole link is in the
-// tooltip and what is copied.
-fun shownLink(url: String, max: Int = 40): String {
-    val bare = url.substringBefore('#').substringAfter("://").removeSuffix("/")
-    return middleEllipsized(bare, max)
+// A link as the popup shows it: where it goes, without the scheme, then
+// its middle left out and its telling end kept, the first part after #:
+// "music.example.com/family/join…#u=sam". The whole link is in the tooltip
+// and what is copied.
+fun shownLink(url: String, max: Int = 52): String {
+    val bare = url.substringAfter("://")
+    val base = bare.substringBefore('#').removeSuffix("/")
+    val first = bare.substringAfter('#', "").substringBefore('&').take(20)
+    if (first.isEmpty()) return middleEllipsized(base, max)
+    val tail = "…#$first"
+    val room = (max - tail.length).coerceAtLeast(10)
+    if (base.length <= room) return base + tail
+    // Cut at a slash, so the address keeps whole parts: "music.example.com…#u=sam".
+    val cut = base.take(room)
+    val slash = cut.lastIndexOf('/')
+    return (if (slash > 0) cut.take(slash) else cut) + tail
 }
+
+// The server a code is for, as people read it: no scheme, no slash at the end.
+fun shownServer(server: String): String = server.substringAfter("://").removeSuffix("/")
+
+// The line under the code: who it is for, and where.
+fun codeForLine(username: String, server: String): String = "for $username on ${shownServer(server)}"
+
+const val MORE_BELOW = "More below"
 
 // The server address a join link goes to, path and all: what to type in
 // Octo for that link's network.
@@ -177,8 +195,25 @@ const val TRY_AGAIN = "Try again"
 // Which of a link's two forms shows: through the server's outside address,
 // which works anywhere, or through its home address.
 enum class LinkReach(val label: String) {
-    Anywhere("Works anywhere"),
-    Home("At home only"),
+    Anywhere("Anywhere"),
+    Home("At home"),
+}
+
+// The question over the two choices: the new device is one's own, or
+// someone else's.
+fun reachQuestion(own: Boolean): String = if (own) "Where will you use it?" else "Where will they use it?"
+
+// The line under the choices: which address the link goes through.
+fun reachLine(reach: LinkReach, options: LinkOptions): String? {
+    val link = options.linkFor(reach) ?: return null
+    val server = linkServer(link) ?: return null
+    return if (reach == LinkReach.Home && options.home != null) "Uses your home network (${shownServer(server)})" else "Uses ${originOf(server)}"
+}
+
+// An address's scheme and host, without a path: "https://music.example.com".
+private fun originOf(server: String): String {
+    val scheme = server.substringBefore("://", "https")
+    return "$scheme://" + server.substringAfter("://").substringBefore('/')
 }
 
 // A link's two forms, as the server answered them, and whether the person
