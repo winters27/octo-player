@@ -563,11 +563,8 @@ fn says_what_the_device_runs_at_and_what_the_song_is() {
     engine.shutdown();
 }
 
-// Brandon: on radio, Next showed the next song, snapped back to the one
-// before, then moved on. A skip to a song still opening (an outside song
-// Octo is fetching) went on reporting the song skipped away from, and the
-// app, after waiting a while for the new one, followed it back. Once the
-// engine has left a song, it no longer says it is playing it.
+// A skip to a song still opening stops reporting the song skipped away
+// from: once the engine has left a song, it no longer says it is playing it.
 #[test]
 fn a_skip_to_a_song_still_opening_stops_reporting_the_one_left() {
     let dir = temp_dir();
@@ -601,5 +598,61 @@ fn a_skip_to_a_song_still_opening_stops_reporting_the_one_left() {
         .count();
     assert_eq!(stale, 0, "still told of the song left: {after:?}");
     assert!(!events.starts().contains(&"slow".to_string()), "the stalled song never starts");
+    engine.shutdown();
+}
+
+// From a skip until the next song is heard, the place held is that song's
+// start; no Position names the song left with it, even when the new song
+// opens late and starts being heard.
+#[test]
+fn a_skip_to_a_song_that_opens_late_never_reports_the_one_left() {
+    let dir = temp_dir();
+    let a = dir.join("left.wav");
+    write_wav(&a, RATE, 2, &sine(440.0, RATE, 2, 0, RATE as usize * 20, 0.3));
+    let b = dir.join("late.wav");
+    write_wav(&b, RATE, 2, &sine(660.0, RATE, 2, 0, RATE as usize * 5, 0.3));
+    let body = std::fs::read(&b).unwrap();
+    // A server that answers each call a second late.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/late.wav", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming().take(8) {
+            let Ok(mut stream) = stream else { continue };
+            let body = body.clone();
+            std::thread::spawn(move || {
+                use std::io::{BufRead, Write};
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+                    line.clear();
+                }
+                std::thread::sleep(Duration::from_secs(1));
+                let head = format!("HTTP/1.1 200 OK\r\nContent-Type: audio/wav\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&body);
+            });
+        }
+    });
+    let late = QueueItem { source: url, ..item("late", Path::new("")) };
+
+    let (engine, events, _) = engine(1.0);
+    engine.set_position_interval(50).unwrap();
+    engine.load(vec![item("left", &a), late], 0, 0, true).unwrap();
+    events.wait_for("left heard", Duration::from_secs(10), |e| {
+        matches!(e, EngineEvent::Position { item_id, .. } if item_id == "left")
+    });
+    engine.skip_to(1).unwrap();
+    std::thread::sleep(Duration::from_millis(150));
+    let before = events.all().len();
+    events.wait_for("late started", Duration::from_secs(10), |e| {
+        matches!(e, EngineEvent::TrackStarted { item_id, .. } if item_id == "late")
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let after: Vec<EngineEvent> = events.all().split_off(before);
+    let stale: Vec<_> = after
+        .iter()
+        .filter(|e| matches!(e, EngineEvent::Position { item_id, .. } if item_id == "left"))
+        .collect();
+    assert!(stale.is_empty(), "told of the song left after the skip: {after:?}");
     engine.shutdown();
 }
