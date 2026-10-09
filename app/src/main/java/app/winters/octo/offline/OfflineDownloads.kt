@@ -1,5 +1,10 @@
 package app.winters.octo.offline
 
+import app.winters.octo.ui.family.offlineCopiesAllowed
+import app.winters.octo.ui.family.OFFLINE_COPIES_OFF
+import app.winters.octo.ui.common.Feedback
+import app.winters.octo.family.family
+import app.winters.octo.family.FamilyHub
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
@@ -93,6 +98,10 @@ class OfflineDownloads @Inject constructor(
     private val streams: Streams,
     private val settings: OfflineSettings,
     private val saved: StreamCache,
+    // A family member whose account has offline copies off gets none from
+    // that server; files already on the phone stay.
+    private val family: FamilyHub,
+    private val feedback: Feedback,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Mutex()
@@ -347,6 +356,7 @@ class OfflineDownloads @Inject constructor(
         val downloadable = wanted.keys.chunked(900).flatMap { dao.downloadable(it) }.toSet()
         val copies = downloadable.toList().chunked(900).flatMap { dao.serverCopies(it) }.groupBy { it.mergedId }
         val now = System.currentTimeMillis()
+        val refused = refusedSource()
         val rows = wanted.filterKeys { it in downloadable }.mapNotNull { (trackId, reasons) ->
             val copy = copies[trackId]?.reduce { best, next -> if (compareQuality(next, best) > 0) next else best } ?: return@mapNotNull null
             DownloadEntity(
@@ -364,7 +374,17 @@ class OfflineDownloads @Inject constructor(
                 artist = copy.artist,
             )
         }
-        rows.chunked(500).forEach { dao.upsert(it) }
+        val (kept, held) = rows.partition { it.sourceId != refused }
+        if (held.isNotEmpty()) feedback.show(OFFLINE_COPIES_OFF)
+        kept.chunked(500).forEach { dao.upsert(it) }
+    }
+
+    // The server in use, when its family plan has offline copies off for
+    // this account; null when new downloads may go.
+    private suspend fun refusedSource(): String? {
+        val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return null
+        if (!session.family) return null
+        return session.sourceId.takeUnless { offlineCopiesAllowed(family.plan()) }
     }
 
     private suspend fun delete(trackId: String) {

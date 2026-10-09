@@ -3,6 +3,9 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Telling a family member their request was approved, declined or
+         added, and a manager that requests wait. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Whether a stream goes over Wi-Fi or mobile data, or cannot go at all. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- The music already on the phone. -->
@@ -60,6 +63,14 @@
             <intent-filter>
                 <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
                 <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- Joining a family: octo://join?server=...&username=...&code=...,
+                 from a QR code the camera reads or a link tapped. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="octo" android:host="join" />
             </intent-filter>
         </activity>
 

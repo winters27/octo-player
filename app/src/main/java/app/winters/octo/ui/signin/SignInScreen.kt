@@ -1,5 +1,8 @@
 package app.winters.octo.ui.signin
 
+import app.winters.octo.design.ButtonSize
+import app.winters.octo.ui.family.JOIN_WITH_A_FAMILY_CODE
+import app.winters.octo.subsonic.FamilyJoinLink
 import android.security.KeyChain
 import androidx.activity.compose.LocalActivity
 import androidx.annotation.DrawableRes
@@ -102,9 +105,12 @@ fun SignInScreen(
     form: ServerForm? = null,
     serverId: String? = null,
     note: String? = null,
+    // Opened from a pairing link: joining a family, filled in.
+    join: FamilyJoinLink? = null,
     vm: SignInViewModel = hiltViewModel(),
 ) {
     val feedback = LocalFeedback.current
+    LaunchedEffect(join) { if (join != null) vm.startJoin(join) }
     LaunchedEffect(editing) { if (editing) vm.startEditing() }
     LaunchedEffect(form) { if (form != null) vm.start(form, serverId, note) }
     LaunchedEffect(vm.signedIn) {
@@ -173,7 +179,11 @@ private fun SignInForm(vm: SignInViewModel) {
                 if (heading == null) {
                     Text("Octo", style = OctoType.display, color = OctoColors.TextPrimary)
                     Text(
-                        if (vm.editing) "Change how Octo connects" else "Sign in to your music server",
+                        when {
+                            vm.joining -> "Join your family's server with its 6 digit code"
+                            vm.editing -> "Change how Octo connects"
+                            else -> "Sign in to your music server"
+                        },
                         style = OctoType.bodySmall,
                         color = OctoColors.TextSecondary,
                         modifier = Modifier.padding(top = 4.dp),
@@ -203,7 +213,7 @@ private fun SignInForm(vm: SignInViewModel) {
                 ) {
                     GlassInput(
                         value = vm.address,
-                        onValueChange = vm::typeAddress,
+                        onValueChange = { if (!vm.takeJoinLink(it)) vm.typeAddress(it) },
                         placeholder = "music.example.com",
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
                         leading = { SchemeButton(vm.scheme, onClick = vm::toggleScheme) },
@@ -216,6 +226,10 @@ private fun SignInForm(vm: SignInViewModel) {
                             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
                             leading = { FieldIcon(OctoIcons.Rename) },
                         )
+                    }
+                    if (vm.joining) {
+                        JoinFields(vm)
+                        return@Column
                     }
                     GlassInput(
                         value = vm.username,
@@ -242,6 +256,10 @@ private fun SignInForm(vm: SignInViewModel) {
 
                 ConnectionNote(vm)
 
+                if (vm.joining) {
+                    JoinButtons(vm)
+                    return@Column
+                }
                 AccentButton(
                     text = when (vm.form) {
                         ServerForm.Add -> "Add"
@@ -267,11 +285,65 @@ private fun SignInForm(vm: SignInViewModel) {
                     )
                 }
 
+                if (vm.form == null && !vm.editing) {
+                    GlazeButton(
+                        JOIN_WITH_A_FAMILY_CODE,
+                        { vm.startJoin() },
+                        size = ButtonSize.Small,
+                        icon = painterResource(OctoIcons.Listeners),
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                }
                 AdvancedToggle(vm.advancedOpen) { vm.advancedOpen = !vm.advancedOpen }
                 AnimatedVisibility(vm.advancedOpen) { Advanced(vm) }
             }
         }
     }
+}
+
+// The rest of the card while joining a family: the username and the code.
+// A pairing link pasted into any field fills in all of them.
+@Composable
+private fun JoinFields(vm: SignInViewModel) {
+    GlassInput(
+        value = vm.username,
+        onValueChange = { if (!vm.takeJoinLink(it)) vm.username = it },
+        placeholder = "Username",
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+        contentType = ContentType.Username,
+        leading = { FieldIcon(OctoIcons.Artist) },
+    )
+    GlassInput(
+        value = vm.code,
+        onValueChange = vm::typeCode,
+        placeholder = "Family code (6 digits)",
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { vm.join() }),
+        leading = { FieldIcon(OctoIcons.Key) },
+    )
+}
+
+// Join, what went wrong, and the way back to signing in with a password.
+@Composable
+private fun JoinButtons(vm: SignInViewModel) {
+    AccentButton(
+        text = "Join",
+        onClick = vm::join,
+        loading = vm.busy,
+        enabled = vm.joinProblem == null,
+        modifier = Modifier.padding(top = 20.dp).fillMaxWidth(),
+    )
+    vm.error?.let {
+        Text(it, style = OctoType.bodySmall, color = OctoColors.Error, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
+    }
+    Text(
+        "The person who runs the server gives you the code, or a QR code your camera opens in Octo.",
+        style = OctoType.caption,
+        color = OctoColors.TextMuted,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.padding(top = 12.dp),
+    )
+    GlazeButton("Sign in with a password", vm::stopJoin, size = ButtonSize.Small, modifier = Modifier.padding(top = 12.dp))
 }
 
 // How the octopus and the words come in: a soft spring, or with calm

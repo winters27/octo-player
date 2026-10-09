@@ -1,5 +1,11 @@
 package app.winters.octo.ui.nav
 
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import app.winters.octo.ui.family.FamilyShellViewModel
+import app.winters.octo.ui.family.FamilyRequestSheetHost
+import app.winters.octo.ui.family.FamilyScreen
+import app.winters.octo.subsonic.FamilyJoinLink
+import app.winters.octo.family.FamilyOpen
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterExitState
@@ -129,6 +135,21 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
     var selected by rememberSaveable { mutableIntStateOf(0) }
     val stack = stacks[selected]
     val open: (NavKey) -> Unit = { stack.add(it) }
+    // A notice tapped or a pairing link opened: the Family screen, or the
+    // join form filled in, on the Settings tab.
+    val familyHub = hiltViewModel<FamilyShellViewModel>().hub
+    val familyOpen by familyHub.opens.collectAsStateWithLifecycle()
+    LaunchedEffect(familyOpen) {
+        val what = familyOpen ?: return@LaunchedEffect
+        familyHub.opened()
+        selected = stacks.lastIndex
+        stacks.last().add(
+            when (what) {
+                FamilyOpen.Family -> FamilyRoute
+                is FamilyOpen.Join -> FamilyJoinRoute(what.link.server, what.link.username, what.link.code)
+            },
+        )
+    }
     val back: () -> Unit = { stack.removeLastOrNull() }
     val hasTrack = now.trackId != null
     // The bar's small player, and the full one over everything.
@@ -253,6 +274,8 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             entry<ServerFormRoute> { route -> SignInScreen(back, form = route.form, serverId = route.id, note = route.note) }
                             entry<OctoAdminRoute> { OctoAdminScreen(back) }
                             entry<SpotifyImportRoute> { SpotifyImportScreen(back) }
+                            entry<FamilyRoute> { FamilyScreen(back) }
+                            entry<FamilyJoinRoute> { route -> SignInScreen(back, join = FamilyJoinLink(route.server, route.username, route.code)) }
                             entry<SoundRoute> { SoundScreen(back) }
                             entry<SharesRoute> { SharesScreen(back) }
                             entry<RadioStationsRoute> { RadioStationsScreen(back) }
@@ -330,6 +353,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                 DisconnectSheetHost(disconnectPrompt)
                 ChoiceSheetHost(choiceSheet)
                 ShareSheetHost(shareSheet)
+                FamilyRequestSheetHost()
                 app.winters.octo.ui.downloads.ServerDownloadsHost()
                 // Above the sheets, so an undo stays reachable while one is open.
                 FeedbackHost(feedback)

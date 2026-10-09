@@ -1,5 +1,9 @@
 package app.winters.octo
 
+import app.winters.octo.subsonic.parseFamilyJoinLink
+import app.winters.octo.family.FamilyOpen
+import app.winters.octo.family.FamilyNotifier
+import app.winters.octo.family.FamilyHub
 import android.app.SearchManager
 import android.content.Intent
 import android.os.Bundle
@@ -36,6 +40,8 @@ class MainActivity : ComponentActivity() {
     // Launcher shortcuts and "Open with Octo".
     @Inject lateinit var systemEntries: SystemEntries
     @Inject lateinit var updates: AppUpdates
+    // Pairing links and family notices.
+    @Inject lateinit var family: FamilyHub
 
     // Counts up each time a home screen widget asks for the full player.
     private var openPlayer by mutableIntStateOf(0)
@@ -50,6 +56,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) {
             playIfAsked(intent)
             openPlayerIfAsked(intent)
+            familyIfAsked(intent)
             systemEntries.handle(this, intent) { openPlayer++ }
         }
     }
@@ -58,7 +65,19 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         playIfAsked(intent)
         openPlayerIfAsked(intent)
+        familyIfAsked(intent)
         systemEntries.handle(this, intent) { openPlayer++ }
+    }
+
+    // A pairing link (octo://join?..., from a QR code the camera read) opens
+    // the join form filled in; a family notice opens Family.
+    private fun familyIfAsked(intent: Intent) {
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
+        when {
+            intent.action == FamilyNotifier.OPEN_FAMILY -> family.open(FamilyOpen.Family)
+            intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "octo" ->
+                parseFamilyJoinLink(intent.dataString.orEmpty())?.let { family.open(FamilyOpen.Join(it)) }
+        }
     }
 
     // A widget's artwork or title opens the player. Coming back from recents

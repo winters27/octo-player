@@ -8,6 +8,7 @@ import app.winters.octo.data.Upgrades
 import app.winters.octo.device.DeviceArtworkFetcher
 import app.winters.octo.device.DeviceArtworkKeyer
 import app.winters.octo.device.DeviceLibrary
+import app.winters.octo.family.FamilyHub
 import app.winters.octo.listening.ListenBrainzSync
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playback.ServerSwitch
@@ -37,6 +38,7 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var upgrades: Upgrades
     @Inject lateinit var serverDownloads: ServerDownloads
     @Inject lateinit var libraryFiles: LibraryFiles
+    @Inject lateinit var family: FamilyHub
 
     override fun onCreate() {
         super.onCreate()
@@ -58,6 +60,8 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
         serverDownloads.start()
         // What the server lets Library health and Delete from disk do.
         libraryFiles.start()
+        // Family on the server in use, and its requests checked now and then.
+        family.start()
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader =

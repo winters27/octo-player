@@ -92,6 +92,8 @@ dependencies {
     implementation(libs.androidx.navigation3.runtime)
     implementation(libs.androidx.navigation3.ui)
     implementation(libs.androidx.datastore.preferences)
+    // Checking family requests now and then, even while the app is closed.
+    implementation(libs.androidx.work.runtime)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.hilt.android)
     implementation(libs.hilt.lifecycle.viewmodel.compose)

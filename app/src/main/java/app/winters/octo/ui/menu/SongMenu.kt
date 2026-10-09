@@ -1,5 +1,6 @@
 package app.winters.octo.ui.menu
 
+import app.winters.octo.family.FamilyHub
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -112,8 +113,8 @@ val LocalSongMenu = staticCompositionLocalOf<SongMenuState> { error("No song men
 
 // The choices in a song's menu, in the order shown.
 enum class SongAction {
-    PlayNext, AddToQueue, StartRadio, Download, AddToLastPlaylist, AddToPlaylist, RemoveFromPlaylist, Select, KeepOffline, FindFlac, ShareFile, Share, Like,
-    Rate, GoToAlbum, GoToArtist, SetAsSound, DeleteFromPhone, DeleteFromDisk, Info, FindSongs,
+    PlayNext, AddToQueue, StartRadio, Download, RequestCopy, AddToLastPlaylist, AddToPlaylist, RemoveFromPlaylist, Select, KeepOffline, FindFlac, ShareFile, Share, Like,
+    Rate, GoToAlbum, GoToArtist, SetAsSound, DeleteFromPhone, RemoveFromMyLibrary, DeleteFromDisk, Info, FindSongs,
 }
 
 // Where the menu was opened, as the choices care about it.
@@ -148,6 +149,9 @@ fun menuPlace(context: SongMenuContext, albumId: String, artistId: String): Menu
 // `findSongs` is whether the server can run the song's search again so a
 // copy can be picked (Find songs), for a found song or one it has a copy of.
 // `disk` is whether that server lets this user delete its copy from disk.
+// In a family, a member who asks for copies gets Request a copy beside the
+// add for a song found online (`requestCopy`), and a managed member can take
+// a library song out of their own library (`removeFromMine`).
 fun songActions(
     find: Boolean,
     radio: Boolean,
@@ -159,12 +163,15 @@ fun songActions(
     upgrade: Boolean = false,
     findSongs: Boolean = false,
     disk: Boolean = false,
+    requestCopy: Boolean = false,
+    removeFromMine: Boolean = false,
 ): List<SongAction> = buildList {
     add(SongAction.PlayNext)
     add(SongAction.AddToQueue)
     if (radio) add(SongAction.StartRadio)
     if (find) {
         add(SongAction.Download)
+        if (requestCopy) add(SongAction.RequestCopy)
         if (place.inPlaylist) add(SongAction.RemoveFromPlaylist)
         if (place.selectable) add(SongAction.Select)
     } else {
@@ -184,6 +191,7 @@ fun songActions(
             add(SongAction.SetAsSound)
             add(SongAction.DeleteFromPhone)
         }
+        if (removeFromMine) add(SongAction.RemoveFromMyLibrary)
         if (disk) add(SongAction.DeleteFromDisk)
     }
     add(SongAction.Info)
@@ -195,10 +203,10 @@ fun songActions(
 // what takes it away. A hairline parts the groups.
 private val SongMenuOrder = listOf(
     listOf(SongAction.PlayNext, SongAction.AddToQueue, SongAction.StartRadio),
-    listOf(SongAction.AddToLastPlaylist, SongAction.AddToPlaylist, SongAction.Like, SongAction.Rate, SongAction.Download, SongAction.KeepOffline, SongAction.FindFlac),
+    listOf(SongAction.AddToLastPlaylist, SongAction.AddToPlaylist, SongAction.Like, SongAction.Rate, SongAction.Download, SongAction.RequestCopy, SongAction.KeepOffline, SongAction.FindFlac),
     listOf(SongAction.GoToAlbum, SongAction.GoToArtist),
     listOf(SongAction.Share, SongAction.ShareFile, SongAction.SetAsSound, SongAction.Info, SongAction.FindSongs, SongAction.Select),
-    listOf(SongAction.RemoveFromPlaylist, SongAction.DeleteFromPhone, SongAction.DeleteFromDisk),
+    listOf(SongAction.RemoveFromPlaylist, SongAction.DeleteFromPhone, SongAction.RemoveFromMyLibrary, SongAction.DeleteFromDisk),
 )
 
 // The actions offered, in their groups, leaving out empty groups.
@@ -245,6 +253,8 @@ class SongMenuViewModel @Inject constructor(
     private val upgrades: Upgrades,
     private val serverDownloads: app.winters.octo.data.ServerDownloads,
     private val files: LibraryFiles,
+    // What adding a song found online does in a family, and its requests.
+    val family: FamilyHub,
 ) : ViewModel() {
     val liked: StateFlow<Set<String>> = likes.liked
     val downloadStates: StateFlow<Map<String, DownloadState>> = downloads.states
@@ -293,6 +303,15 @@ class SongMenuViewModel @Inject constructor(
     suspend fun deletable(trackId: String): Boolean = !isFind(trackId) && files.deletable(listOf(trackId)).isNotEmpty()
 
     fun deleteFromDisk(track: TrackEntity) = files.deleteFromDisk(listOf(track.id), track.title)
+
+    // Takes a library song out of this family member's own library, by its
+    // copy on the server.
+    fun removeFromMyLibrary(track: TrackEntity) {
+        viewModelScope.launch {
+            val id = controls.serverSongId(track.id)
+            if (id == null) feedback.show("This song has no copy on the server") else family.removeFromMyLibrary(id, track.title)
+        }
+    }
 
     // The server's id for a song, when it has a copy there to share.
     suspend fun shareId(trackId: String): String? = if (isFind(trackId)) null else controls.serverSongId(trackId)

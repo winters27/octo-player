@@ -1,5 +1,7 @@
 package app.winters.octo.ui.settings
 
+import app.winters.octo.ui.nav.FamilyRoute
+import app.winters.octo.family.family
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -222,6 +224,8 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
                     if (client.authMode != AuthMode.ApiKey) ActionRow(SettingsIndex.ChangePassword, onClick = { changing = true })
                     if (current.session.runsOcto) ActionRow(SettingsIndex.OctoAdmin, onClick = { onOpen(OctoAdminRoute) })
                     if (current.session.runsOcto) ActionRow(SettingsIndex.SpotifyImport, onClick = { onOpen(SpotifyImportRoute) })
+                    // Only while the server has Family on.
+                    if (current.session.family) ActionRow(SettingsIndex.Family, onClick = { onOpen(FamilyRoute) })
                 }
 
                 ServerFacts(vm, current.session)

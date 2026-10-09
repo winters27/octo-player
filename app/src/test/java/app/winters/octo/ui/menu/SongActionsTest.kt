@@ -163,4 +163,22 @@ class SongActionsTest {
         assertEquals(false, DeleteFromDisk in songActions(find = true, radio = false, disk = true))
         assertEquals(false, DeleteFromDisk in songActions(find = false, radio = false))
     }
+
+    @Test
+    fun aFamilyMemberWhoAsksGetsRequestACopyBesideTheAdd() {
+        assertEquals(
+            listOf(PlayNext, AddToQueue, SongAction.Download, SongAction.RequestCopy, Info),
+            songActions(find = true, radio = false, requestCopy = true),
+        )
+        assertEquals(listOf(SongAction.Download, SongAction.RequestCopy), songMenuGroups(songActions(find = true, radio = false, requestCopy = true))[1])
+        // Never on a library song.
+        assertEquals(false, SongAction.RequestCopy in songActions(find = false, radio = false, requestCopy = true))
+    }
+
+    @Test
+    fun aManagedMemberCanTakeALibrarySongOutOfTheirOwnLibrary() {
+        val groups = songMenuGroups(songActions(find = false, radio = false, removeFromMine = true, disk = true))
+        assertEquals(listOf(SongAction.RemoveFromMyLibrary, DeleteFromDisk), groups.last())
+        assertEquals(false, SongAction.RemoveFromMyLibrary in songActions(find = true, radio = false, removeFromMine = true))
+    }
 }

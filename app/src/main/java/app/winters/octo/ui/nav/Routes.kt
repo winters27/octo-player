@@ -76,6 +76,13 @@ enum class ServerForm {
 @Serializable data object OctoAdminRoute : NavKey
 @Serializable data object SpotifyImportRoute : NavKey
 
+// Family on the server in use: what the account may do, requests, devices and, for a
+// manager, the members and the requests waiting.
+@Serializable data object FamilyRoute : NavKey
+
+// Joining a family, filled in from a pairing link.
+@Serializable data class FamilyJoinRoute(val server: String, val username: String, val code: String) : NavKey
+
 // The server's shared links, and its internet radio stations.
 @Serializable data object SharesRoute : NavKey
 @Serializable data object RadioStationsRoute : NavKey

@@ -261,6 +261,10 @@ object SettingsIndex {
         "spotify_import", SettingsPage.Server, "Spotify import", "Your Spotify songs and playlists, and fetching what is missing",
         listOf("spotify", "import", "playlists", "liked", "missing", "download"), section = "Connection",
     )
+    val Family = add(
+        "family", SettingsPage.Server, "Family", "Your plan, requests and devices, and the family's",
+        listOf("family", "members", "requests", "devices", "approve", "plan", "storage"), section = "Connection",
+    )
     val LastSynced = add(
         "last_synced", SettingsPage.Server, "Last synced", "When the server's library was last copied",
         listOf("sync", "updated"), section = "Sync",

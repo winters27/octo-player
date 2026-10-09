@@ -1,5 +1,16 @@
 package app.winters.octo.ui.signin
 
+import okhttp3.OkHttpClient
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import app.winters.octo.ui.family.joinProblem
+import app.winters.octo.ui.family.joinFamily
+import app.winters.octo.ui.family.JoinOutcome
+import app.winters.octo.subsonic.parseFamilyJoinLink
+import app.winters.octo.subsonic.FamilyPlatform
+import app.winters.octo.subsonic.FamilyPair
+import app.winters.octo.subsonic.FamilyJoinLink
+import app.winters.octo.connection.DeviceIds
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -39,7 +50,18 @@ import javax.inject.Inject
 class SignInViewModel @Inject constructor(
     private val sessions: SessionRepository,
     private val switcher: ServerSwitch,
+    private val http: OkHttpClient,
+    private val devices: DeviceIds,
 ) : ViewModel() {
+    // Joining a family with a 6 digit code instead of a password, and the
+    // code typed.
+    var joining by mutableStateOf(false)
+    var code by mutableStateOf("")
+
+    // What pairing answered, kept until signed in: a code works once, so a
+    // certificate asked about after pairing does not pair again.
+    private var paired: FamilyPair? = null
+
     // The address in two parts, as the desktop keeps it: the scheme, shown
     // as a button at the start of the field, and the rest as typed.
     var address by mutableStateOf("")
@@ -136,6 +158,83 @@ class SignInViewModel @Inject constructor(
             if (!schemePicked) scheme = automaticScheme(text)
         }
         error = null
+    }
+
+    // Takes a pairing link (octo://join?..., from a QR code or pasted):
+    // fills in the address, the username and the code, and switches to
+    // joining. False for any other text.
+    fun takeJoinLink(text: String): Boolean {
+        val link = parseFamilyJoinLink(text) ?: return false
+        startJoin(link)
+        return true
+    }
+
+    fun startJoin(link: FamilyJoinLink? = null) {
+        joining = true
+        error = null
+        if (link == null) return
+        typeAddress(link.server)
+        username = link.username
+        code = link.code
+        paired = null
+    }
+
+    fun stopJoin() {
+        joining = false
+        error = null
+    }
+
+    fun typeCode(text: String) {
+        if (takeJoinLink(text)) return
+        code = text.filter(Char::isDigit).take(6)
+        paired = null
+        error = null
+    }
+
+    // What is missing before joining, or null when it can go.
+    val joinProblem: String? get() = joinProblem(url, username, code)
+
+    // Pairs with the family code, then signs in with the secret it answers,
+    // as a password nobody types. The server then is the one in use.
+    fun join() {
+        val url = url
+        if (busy || joinProblem != null || url == null) return
+        busy = true
+        error = null
+        viewModelScope.launch {
+            val pair = paired ?: when (val joined = withContext(Dispatchers.IO) {
+                joinFamily(url, username.trim(), code, devices.current().name, FamilyPlatform.Android, http)
+            }) {
+                is JoinOutcome.Paired -> joined.pair.also { paired = it }
+                is JoinOutcome.Failed -> {
+                    error = joined.message
+                    busy = false
+                    return@launch
+                }
+            }
+            val request = SignInRequest(
+                address = url.toString(),
+                username = pair.username.ifBlank { username.trim() },
+                secret = pair.secret,
+                authMode = AuthMode.Token,
+                home = home,
+                headers = headers.toList(),
+                pins = pins.toMap(),
+                clientCertAlias = clientCert,
+            )
+            val (failed, words) = switcher.signIn(request)
+            when (failed) {
+                null -> {
+                    notice = words
+                    code = ""
+                    paired = null
+                    signedIn = true
+                }
+                is SignInError.Untrusted -> question = failed
+                else -> error = failed.userMessage()
+            }
+            busy = false
+        }
     }
 
     // Switches between https and http by hand.
@@ -344,7 +443,7 @@ class SignInViewModel @Inject constructor(
         val asked = question ?: return
         pins[pinKey(asked.host)] = asked.fingerprint
         question = null
-        submit()
+        if (joining) join() else submit()
     }
 
     fun distrust() {
