@@ -32,6 +32,12 @@ impl FilterBank {
         self.coefficients.is_empty()
     }
 
+    /// Replaces filter `index`'s coefficients, keeping its memory, so a
+    /// curve can move a little at a time while sound runs through it.
+    pub fn set(&mut self, index: usize, coefficients: Coefficients) {
+        self.coefficients[index] = coefficients;
+    }
+
     /// Filters `frames` frames of `samples` in place.
     pub fn process(&mut self, samples: &mut [f32], frames: usize) {
         let count = self.coefficients.len();

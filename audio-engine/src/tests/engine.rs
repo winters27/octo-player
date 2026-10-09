@@ -562,3 +562,125 @@ fn says_what_the_device_runs_at_and_what_the_song_is() {
     assert_eq!((info.sample_rate, info.channels, info.bits_per_sample), (44_100, 2, Some(16)));
     engine.shutdown();
 }
+
+#[test]
+fn a_next_song_of_unknown_length_still_crossfades() {
+    // Songs from outside the library come with no length: the blend waits
+    // for the next song's decoder to say how long it is.
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 3, 0.3));
+    write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 3, 0.3));
+    let (engine, events, _) = engine(4.0);
+    engine.set_crossfade(1_000).unwrap();
+    engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
+    let fade = events.wait_for("crossfade", Duration::from_secs(10), |e| {
+        matches!(e, EngineEvent::CrossfadeStarted { .. })
+    });
+    assert_eq!(
+        fade,
+        EngineEvent::CrossfadeStarted { from_id: "a".into(), to_id: "b".into(), duration_ms: 1_000 }
+    );
+    let planned = events
+        .wait_for("plan", Duration::from_secs(1), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    let EngineEvent::TransitionPlanned { start_ms, entry_ms, overlap_ms, reason, .. } = planned else {
+        unreachable!()
+    };
+    assert_eq!((start_ms, entry_ms, overlap_ms), (2_000, 0, 1_000));
+    assert!(reason.starts_with("automix: equal-power at 2.00s"), "{reason}");
+    events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
+    assert!(!events.all().iter().any(|e| matches!(e, EngineEvent::GaplessTransition { .. })));
+    engine.shutdown();
+}
+
+#[test]
+fn a_crossfade_off_still_says_why_the_join_is_gapless() {
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize, 0.3));
+    write_wav(&b, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize, 0.3));
+    let (engine, events, _) = engine(4.0);
+    engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
+    let planned = events
+        .wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    let EngineEvent::TransitionPlanned { overlap_ms, reason, .. } = planned else { unreachable!() };
+    assert_eq!((overlap_ms, reason.as_str()), (0, "automix: gapless, crossfade is off"));
+    events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
+    engine.shutdown();
+}
+
+fn test_plan(input: &crate::automix::PlanInput) -> crate::automix::TransitionPlan {
+    let mut plan = crate::automix::TransitionPlan::fixed(input.a_len_secs, 0.5, 0.4, "test plan");
+    plan.start_secs = 9.0;
+    plan.entry_secs = 0.5;
+    plan
+}
+
+#[test]
+fn a_smart_plan_starts_early_enters_late_and_cuts_the_outgoing_song() {
+    // Song A on the left at a steady level for 12 s; song B on the right as
+    // a ramp that tells each frame's place in the song.
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    let a_samples: Vec<i16> = (0..RATE as usize * 12).flat_map(|_| [8_192, 0]).collect();
+    write_wav(&a, RATE, 2, &a_samples);
+    let b_samples: Vec<i16> = (0..RATE as usize * 4).flat_map(|n| [0, (n % 15_000) as i16]).collect();
+    write_wav(&b, RATE, 2, &b_samples);
+    *crate::automix::TEST_PLANNER.lock().unwrap() = Some(test_plan);
+    let (engine, events, capture) = engine(2.0);
+    engine.set_crossfade(1_000).unwrap();
+    engine
+        .set_automix(crate::automix::AutomixSettings {
+            smart_transitions: true,
+            filter_sweeps: true,
+            match_tempo: false,
+            max_overlap_ms: 8_000,
+        })
+        .unwrap();
+    engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
+    let planned = events
+        .wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    *crate::automix::TEST_PLANNER.lock().unwrap() = None;
+    let EngineEvent::TransitionPlanned { start_ms, entry_ms, overlap_ms, reason, .. } = planned else {
+        unreachable!()
+    };
+    assert_eq!((start_ms, entry_ms, overlap_ms), (9_000, 500, 500), "{reason}");
+    assert!(reason.contains("test plan"), "{reason}");
+    events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
+    engine.shutdown();
+
+    let out = capture.lock().unwrap().clone();
+    // A is heard for its first 9 s and the half second of the blend, then
+    // stops although it had 2.5 s left. (Counted frame by frame: a slow
+    // test machine can leave gaps of silence in the capture.)
+    let heard = out.chunks_exact(2).filter(|f| f[0] != 0.0).count();
+    assert_eq!(heard, RATE as usize * 19 / 2, "A heard for {heard} frames");
+    // From there on B plays alone, from 0.5 s in plus the blend's half second.
+    let last = out.chunks_exact(2).rposition(|f| f[0] != 0.0).unwrap();
+    let next = out.chunks_exact(2).skip(last + 1).find(|f| f[1] != 0.0).unwrap();
+    assert_eq!((next[1] * 32768.0).round() as usize, RATE as usize % 15_000);
+}
+
+#[test]
+fn starting_inside_the_blend_window_blends_over_what_is_left() {
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 3, 0.3));
+    write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 3, 0.3));
+    let (engine, events, _) = engine(1.0);
+    engine.set_crossfade(1_000).unwrap();
+    // 2.2 s into a 3 s song: the blend at 2 s has already passed.
+    engine.load(vec![item("a", &a), item("b", &b)], 0, 2_200, true).unwrap();
+    let planned = events
+        .wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    let EngineEvent::TransitionPlanned { start_ms, overlap_ms, reason, .. } = planned else { unreachable!() };
+    assert!((2_200..2_400).contains(&start_ms), "{start_ms}: {reason}");
+    assert!((start_ms + overlap_ms).abs_diff(3_000) <= 1, "{reason}");
+    assert!(reason.contains("late"), "{reason}");
+    let fade = events.wait_for("crossfade", Duration::from_secs(10), |e| {
+        matches!(e, EngineEvent::CrossfadeStarted { .. })
+    });
+    let EngineEvent::CrossfadeStarted { duration_ms, .. } = fade else { unreachable!() };
+    assert!(duration_ms.abs_diff(overlap_ms) <= 1, "{duration_ms} vs {overlap_ms}");
+    engine.shutdown();
+}

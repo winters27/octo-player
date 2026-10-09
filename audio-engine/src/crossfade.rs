@@ -4,7 +4,7 @@
 use std::f32::consts::FRAC_PI_2;
 
 /// The longest crossfade the settings allow.
-pub const LONGEST_FADE_MS: u32 = 12_000;
+pub const LONGEST_FADE_MS: u32 = 16_000;
 
 /// The shortest blend worth doing; anything shorter just sounds like a cut.
 pub const SHORTEST_FADE_MS: u64 = 500;
@@ -27,12 +27,29 @@ pub fn crossfade_length(
     repeat_one: bool,
     stop_at_end_of_song: bool,
 ) -> u64 {
-    let Some(next) = next else { return 0 };
-    if fade_ms == 0 || repeat_one || stop_at_end_of_song {
-        return 0;
+    blend_decision(current, next, fade_ms, repeat_one, stop_at_end_of_song).unwrap_or(0)
+}
+
+/// The same rules as `crossfade_length`, saying why there is no blend.
+pub fn blend_decision(
+    current: &FadeSong,
+    next: Option<&FadeSong>,
+    fade_ms: u64,
+    repeat_one: bool,
+    stop_at_end_of_song: bool,
+) -> Result<u64, &'static str> {
+    let Some(next) = next else { return Err("nothing follows") };
+    if fade_ms == 0 {
+        return Err("crossfade is off");
+    }
+    if repeat_one {
+        return Err("repeat one");
+    }
+    if stop_at_end_of_song {
+        return Err("stopping after this song");
     }
     if current.duration_ms == 0 || next.duration_ms == 0 {
-        return 0;
+        return Err("a song's length is unknown");
     }
     // An album played in order stays gapless: songs meant to run into each
     // other should not be blended.
@@ -41,10 +58,10 @@ pub fn crossfade_length(
         && a == b
         && next_order == order + 1
     {
-        return 0;
+        return Err("an album in order");
     }
     let length = fade_ms.min(current.duration_ms.min(next.duration_ms) / 2);
-    if length < SHORTEST_FADE_MS { 0 } else { length }
+    if length < SHORTEST_FADE_MS { Err("a song is too short") } else { Ok(length) }
 }
 
 /// Equal-power fade: the two volumes' squares always add up to one, so the

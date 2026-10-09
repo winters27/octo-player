@@ -14,15 +14,20 @@ use crate::api::{
     EndReason, EngineEvent, EngineListener, PlaybackPosition, PlaybackState, QueueItem, QueueSnapshot,
     RepeatMode,
 };
-use crate::crossfade::{FadeSong, SHORTEST_FADE_MS, crossfade_length};
+use crate::automix::{
+    AutomixSettings, HEAD_SECS, LATEST_EXIT_SECS, LEAD_SECS, PLAIN_K, PlanInput, RATE_EASE_SECS, TAIL_SECS,
+    TransitionPlan,
+};
+use crate::crossfade::{FadeSong, SHORTEST_FADE_MS, blend_decision};
 use crate::deck::{Deck, DeckStatus};
 use crate::decode::TrackInfo;
 use crate::lane::Lane;
-use crate::mixer::{Marker, MixState, Mixer, Transition};
+use crate::mixer::{FadeShape, Marker, MixState, Mixer, Transition};
 use crate::output::{
     DeviceEvent, Driver, OpenedOutput, OutputDevice, OutputFormat, OutputShared, Renderer, ring,
 };
 use crate::pace::Pace;
+use crate::scout::{ScoutJob, SectionPart};
 use crate::sound::model::{DspSettings, EqSettings, ReplayGainSettings, SoundSettings};
 use crate::sound::replaygain::{Loudness, stored_replay_gain};
 use crate::source::http::{self, HttpOptions};
@@ -35,6 +40,13 @@ const RING_SECS: f64 = 0.4;
 
 /// How far ahead of a song's end the next one is opened.
 const PREPARE_SECS: f64 = 20.0;
+
+/// How long the scout may take before a blend is planned without it.
+const SCOUT_LIMIT: Duration = Duration::from_secs(20);
+
+/// The latest a waiting blend is decided: this long, in song time, before
+/// the crossfade at the end of the song would have to start.
+const DECIDE_MARGIN_SECS: f64 = 1.0;
 
 /// How long without sound, while playing, before it counts as buffering.
 const STARVED_GRACE: Duration = Duration::from_millis(80);
@@ -60,6 +72,7 @@ pub enum Command {
     SetVolume(f32),
     SetMuted(bool),
     SetCrossfade(u32),
+    SetAutomix(AutomixSettings),
     SetEq(EqSettings),
     SetReplayGain(ReplayGainSettings),
     SetDsp(DspSettings),
@@ -202,6 +215,23 @@ struct Entry {
     failed: bool,
 }
 
+// The next song, opened, while the way into it is still to be decided.
+struct Upcoming {
+    key: u64,
+    deck: Deck,
+    loudness: Loudness,
+}
+
+// Sections of the playing song and the next one being decoded for the
+// planner, by queue key.
+#[derive(Default)]
+struct Scouting {
+    a_key: Option<u64>,
+    a_tail: Option<ScoutJob>,
+    b_key: Option<u64>,
+    b_head: Option<ScoutJob>,
+}
+
 struct Out {
     opened: OpenedOutput,
     shared: Arc<OutputShared>,
@@ -220,6 +250,9 @@ struct Player {
     next_key: u64,
     settings: SoundSettings,
     crossfade_ms: u32,
+    automix: AutomixSettings,
+    upcoming: Option<Upcoming>,
+    scouting: Scouting,
     pace: Pace,
     repeat: RepeatMode,
     stop_after_current: bool,
@@ -264,6 +297,9 @@ pub fn run(driven: Driven) {
         next_key: 1,
         settings: SoundSettings::default(),
         crossfade_ms: 0,
+        automix: AutomixSettings::default(),
+        upcoming: None,
+        scouting: Scouting::default(),
         pace: Pace::default(),
         repeat: RepeatMode::Off,
         stop_after_current: false,
@@ -381,6 +417,13 @@ impl Player {
                     m.finish_fade();
                 }
                 self.drop_prepared();
+            }
+            Command::SetAutomix(settings) => {
+                self.automix = settings;
+                // A blend already under way plays out as it was planned.
+                if !self.mixer.as_ref().is_some_and(|m| m.is_fading()) {
+                    self.drop_prepared();
+                }
             }
             Command::SetEq(eq) => {
                 self.settings.eq = eq;
@@ -530,14 +573,22 @@ impl Player {
         }
     }
 
+    fn http_for(&self, index: usize) -> HttpOptions {
+        HttpOptions {
+            agent: self.shared.agent.clone(),
+            headers: self.queue[index]
+                .item
+                .headers
+                .iter()
+                .map(|h| (h.name.clone(), h.value.clone()))
+                .collect(),
+            ..Default::default()
+        }
+    }
+
     fn open_deck(&self, index: usize, start_secs: f64) -> Deck {
         let entry = &self.queue[index];
-        let http = HttpOptions {
-            agent: self.shared.agent.clone(),
-            headers: entry.item.headers.iter().map(|h| (h.name.clone(), h.value.clone())).collect(),
-            ..Default::default()
-        };
-        Deck::open(entry.key, entry.item.source.clone(), start_secs, http)
+        Deck::open(entry.key, entry.item.source.clone(), start_secs, self.http_for(index))
     }
 
     fn load(&mut self, items: Vec<QueueItem>, start_index: usize, start_ms: u64, play: bool) {
@@ -699,6 +750,7 @@ impl Player {
     // Forgets the song lined up after the current one.
     fn drop_prepared(&mut self) {
         self.prepared = None;
+        self.upcoming = None;
         if let Some(m) = &mut self.mixer {
             drop(m.cancel_planned_fade());
             if let Some(lane) = m.lane_mut() {
@@ -722,6 +774,7 @@ impl Player {
             }
             if self.prepared == Some(key) {
                 self.prepared = None;
+                self.upcoming = None;
                 if let Some(lane) = mixer.lane_mut() {
                     lane.set_next(None, Loudness::default());
                 }
@@ -751,9 +804,61 @@ impl Player {
                 self.prepared = None;
             }
         }
+        self.update_scouts();
         if self.prepared.is_none() {
             self.prepare_next();
+        } else if self.upcoming.is_some() {
+            self.settle_next();
         }
+    }
+
+    // A queued song's length in milliseconds, from its decoder or the queue.
+    fn length_ms(&self, index: usize) -> Option<u64> {
+        let entry = &self.queue[index];
+        self.infos.get(&entry.key).and_then(|i| i.duration_ms).or(entry.item.duration_ms).filter(|&d| d > 0)
+    }
+
+    // With smart transitions on, decodes the end of the playing song once
+    // it has played a second and its length is known, and the start of the
+    // next one as soon as it is known; again whenever either changes.
+    fn update_scouts(&mut self) {
+        if !self.automix.smart_transitions || self.crossfade_ms == 0 {
+            self.scouting = Scouting::default();
+            return;
+        }
+        let Some(lane) = self.mixer.as_ref().and_then(|m| m.lane()) else { return };
+        let a_key = lane.current().key();
+        let position = lane.position().filter(|(k, _)| *k == a_key).map(|(_, s)| s).unwrap_or(0.0);
+        if self.scouting.a_key != Some(a_key) {
+            self.scouting.a_key = Some(a_key);
+            self.scouting.a_tail = None;
+        }
+        if self.scouting.a_tail.is_none()
+            && position >= 1.0
+            && let Some(index) = self.index_of(a_key)
+            && let Some(len) = self.length_ms(index)
+        {
+            let part = SectionPart::Tail { secs: TAIL_SECS, len_secs: Some(len as f64 / 1_000.0) };
+            let source = self.queue[index].item.source.clone();
+            self.scouting.a_tail = Some(ScoutJob::start(source, self.http_for(index), part));
+        }
+        let next = if self.stop_after_current { None } else { self.following(true) };
+        let b_key = next.map(|i| self.queue[i].key).filter(|&k| k != a_key);
+        if self.scouting.b_key != b_key {
+            self.scouting.b_key = b_key;
+            self.scouting.b_head = next.filter(|_| b_key.is_some()).map(|i| {
+                let part = SectionPart::Head { secs: HEAD_SECS };
+                ScoutJob::start(self.queue[i].item.source.clone(), self.http_for(i), part)
+            });
+        }
+    }
+
+    // Whether the scout is done (or given up on) for the songs `a` then `b`.
+    fn scouts_settled(&self, a: u64, b: u64) -> bool {
+        let s = &self.scouting;
+        let tail = s.a_key == Some(a) && s.a_tail.as_ref().is_some_and(|j| j.is_settled(SCOUT_LIMIT));
+        let head = s.b_key == Some(b) && s.b_head.as_ref().is_some_and(|j| j.is_settled(SCOUT_LIMIT));
+        tail && head
     }
 
     // Lines up the next song, for a gapless join or a crossfade.
@@ -771,16 +876,19 @@ impl Player {
             }
             return;
         };
-        let deck_status = lane.current().status();
-        let duration = self
-            .infos
-            .get(&self.queue[current].key)
-            .and_then(|i| i.duration_ms)
-            .or(self.queue[current].item.duration_ms);
+        let failed = matches!(lane.current().status(), DeckStatus::Failed(_));
+        if !failed && lane.current().info().is_none() {
+            // Still opening: its length may be known in a moment.
+            return;
+        }
         let position = lane.position().map(|(_, s)| s).unwrap_or(0.0);
-        let remaining = duration.map(|d| d as f64 / 1_000.0 - position);
-        let failed = matches!(deck_status, DeckStatus::Failed(_));
-        let window = PREPARE_SECS + self.crossfade_ms as f64 / 1_000.0 * self.pace.speed as f64;
+        let remaining = self.length_ms(current).map(|d| d as f64 / 1_000.0 - position);
+        let speed = self.pace.speed as f64;
+        let mut window = PREPARE_SECS + self.crossfade_ms as f64 / 1_000.0 * speed;
+        if self.automix.smart_transitions {
+            // A planned blend may start well before the end.
+            window += LATEST_EXIT_SECS;
+        }
         if !failed && remaining.is_some_and(|r| r > window) {
             return;
         }
@@ -788,42 +896,190 @@ impl Player {
         let loudness = self.loudness(next, Some(current));
         let key = self.queue[next].key;
         self.prepared = Some(key);
+        self.upcoming = Some(Upcoming { key, deck, loudness });
+        self.settle_next();
+    }
 
+    // Decides how the opened next song follows the playing one, once what
+    // the decision needs is known: the next song's real length (from its
+    // decoder when the queue has none) and, with smart transitions, the
+    // scouted sections. Waiting ends in time for the crossfade at the end
+    // of the song; anything still unknown then means a gapless join.
+    fn settle_next(&mut self) {
+        let (Some(current), Some(up)) = (self.current, &self.upcoming) else { return };
+        let up_key = up.key;
+        let Some(next) = self.index_of(up_key) else {
+            self.drop_prepared();
+            return;
+        };
+        let up_failed = matches!(up.deck.status(), DeckStatus::Failed(_));
+        if let Some(info) = up.deck.info()
+            && !self.infos.contains_key(&up_key)
+        {
+            if self.queue[next].item.duration_ms.is_none() {
+                self.queue[next].item.duration_ms = info.duration_ms;
+            }
+            self.infos.insert(up_key, info);
+        }
+        let Some(lane) = self.mixer.as_ref().and_then(|m| m.lane()) else { return };
+        let failed = matches!(lane.current().status(), DeckStatus::Failed(_));
+        let position = lane.position().map(|(_, s)| s).unwrap_or(0.0);
+        let remaining = self.length_ms(current).map(|d| d as f64 / 1_000.0 - position);
+        let speed = self.pace.speed as f64;
+        let mut blend_secs = self.crossfade_ms as f64 / 1_000.0 * speed;
+        if self.automix.smart_transitions {
+            // Room to line the incoming song up from its entry point.
+            blend_secs += LEAD_SECS * speed;
+        }
+        let can_blend = self.crossfade_ms > 0
+            && self.repeat != RepeatMode::One
+            && !self.stop_after_current
+            && !failed
+            && next != current;
+        let next_known = self.length_ms(next).is_some() || self.infos.contains_key(&up_key) || up_failed;
+        let scouted = !self.automix.smart_transitions || self.scouts_settled(self.queue[current].key, up_key);
+        let deadline = remaining.is_none_or(|r| r <= blend_secs + DECIDE_MARGIN_SECS);
+        if can_blend && !deadline && !(next_known && scouted) {
+            return;
+        }
+        self.decide_next(current, next, position, failed);
+    }
+
+    fn decide_next(&mut self, current: usize, next: usize, position: f64, failed: bool) {
+        let Some(Upcoming { key, deck, loudness }) = self.upcoming.take() else { return };
         let song = |e: &Entry, duration: Option<u64>| FadeSong {
             album_id: e.item.album_id.clone(),
             album_order: e.item.album_order,
             duration_ms: duration.unwrap_or(0),
         };
-        let current_song = song(&self.queue[current], duration);
-        let next_song = song(&self.queue[next], self.queue[next].item.duration_ms);
-        let fade_ms = crossfade_length(
-            &current_song,
-            Some(&next_song),
-            self.crossfade_ms as u64,
-            self.repeat == RepeatMode::One,
-            self.stop_after_current,
-        );
-        let speed = self.pace.speed as f64;
-        let rate = mixer.rate() as f64;
-        let mixer = self.mixer.as_mut().expect("mixer");
+        let current_song = song(&self.queue[current], self.length_ms(current));
+        let next_song = song(&self.queue[next], self.length_ms(next));
+        let decision = if failed {
+            Err("this song failed")
+        } else {
+            blend_decision(
+                &current_song,
+                Some(&next_song),
+                self.crossfade_ms as u64,
+                self.repeat == RepeatMode::One,
+                self.stop_after_current,
+            )
+        };
         let current_key = self.queue[current].key;
-        if fade_ms > 0 && !failed {
-            let total = current_song.duration_ms as f64 / 1_000.0;
-            let blend = fade_ms as f64 / 1_000.0 * speed;
-            let at = total - blend;
-            if position <= at {
-                mixer.plan_fade(current_key, at, (blend * rate) as u64, deck, loudness);
+        let speed = self.pace.speed as f64;
+        let total = current_song.duration_ms as f64 / 1_000.0;
+        let fade_ms = match decision {
+            Ok(ms) => ms,
+            Err(why) => {
+                self.join_gaplessly(current_key, key, deck, loudness, total, why);
                 return;
             }
-            // Late, after a seek near the end: blend over what is left.
-            let left = total - position;
-            if left / speed * 1_000.0 >= SHORTEST_FADE_MS as f64 {
-                mixer.plan_fade(current_key, position, (left * rate) as u64, deck, loudness);
+        };
+        let blend = fade_ms as f64 / 1_000.0 * speed;
+        let b_len = next_song.duration_ms as f64 / 1_000.0;
+        let mut plan = self.make_plan(current_key, key, total, b_len, blend);
+        // A smart plan needs time to line the incoming song up; a start
+        // already passed (a seek near the end) can only blend over what is left.
+        let lead = if self.automix.smart_transitions { LEAD_SECS * speed } else { 0.0 };
+        if position + lead > plan.start_secs {
+            plan = plan.late(total, position);
+            if plan.overlap_secs / speed * 1_000.0 < SHORTEST_FADE_MS as f64 {
+                self.join_gaplessly(current_key, key, deck, loudness, total, "too late to blend");
                 return;
             }
         }
-        if let Some(lane) = mixer.lane_mut() {
+        if plan.entry_secs > 0.0 {
+            deck.seek(plan.entry_secs);
+        }
+        let shape = self.shape_of(&plan, b_len);
+        let rate = self.mixer.as_ref().map(|m| m.rate()).unwrap_or(48_000) as f64;
+        let frames = (plan.overlap_secs * rate) as u64;
+        if let Some(mixer) = self.mixer.as_mut() {
+            mixer.plan_fade(current_key, plan.start_secs, frames, deck, loudness, shape);
+        }
+        let reason = plan.describe();
+        self.tell_plan(current_key, key, plan.start_secs, plan.entry_secs, plan.overlap_secs, reason);
+    }
+
+    // The blend from song `a` into song `b`, `blend` seconds long by the
+    // crossfade rules.
+    fn make_plan(&self, a: u64, b: u64, a_len: f64, b_len: f64, blend: f64) -> TransitionPlan {
+        if !self.automix.smart_transitions {
+            return TransitionPlan::fixed(a_len, blend, 0.0, "fixed crossfade");
+        }
+        let s = &self.scouting;
+        let tail = s.a_tail.as_ref().filter(|_| s.a_key == Some(a)).and_then(|j| j.analysis());
+        let head = s.b_head.as_ref().filter(|_| s.b_key == Some(b)).and_then(|j| j.analysis());
+        let (Some(tail), Some(head)) = (tail, head) else {
+            return TransitionPlan::fixed(a_len, blend, PLAIN_K, "plain crossfade, no analysis");
+        };
+        let speed = self.pace.speed as f64;
+        let live = self.mixer.as_ref().and_then(|m| m.live_analysis(a));
+        let max_ms =
+            if self.automix.max_overlap_ms > 0 { self.automix.max_overlap_ms } else { self.crossfade_ms };
+        let input = PlanInput {
+            a_len_secs: a_len,
+            b_len_secs: b_len,
+            a_tail: &tail,
+            b_head: &head,
+            fixed_overlap_secs: blend,
+            max_overlap_secs: max_ms as f64 / 1_000.0 * speed,
+            settings: &self.automix,
+            a_live: live.as_ref(),
+        };
+        let plan = crate::automix::plan(&input);
+        // A plan that does not fit the songs falls back to the fixed point.
+        let fits = plan.overlap_secs > 0.0
+            && plan.start_secs >= 0.0
+            && plan.start_secs + plan.overlap_secs <= a_len + 1e-6
+            && plan.entry_secs >= 0.0
+            && plan.entry_secs + plan.overlap_secs < b_len;
+        if fits {
+            plan
+        } else {
+            TransitionPlan::fixed(a_len, blend, PLAIN_K, "plan did not fit, plain crossfade")
+        }
+    }
+
+    // How the mixer runs `plan`, with the user's choices applied.
+    fn shape_of(&self, plan: &TransitionPlan, b_len: f64) -> FadeShape {
+        let overlap = plan.overlap_secs.max(1e-9);
+        let beats = plan
+            .beats_secs
+            .iter()
+            .map(|b| ((b - plan.start_secs) / overlap) as f32)
+            .filter(|t| (0.0..=1.0).contains(t))
+            .collect();
+        // The incoming song must outlast the rate's ease back to normal.
+        let room = b_len - plan.entry_secs > plan.overlap_secs + RATE_EASE_SECS + 1.0;
+        FadeShape {
+            k: plan.k,
+            filter_strength: if self.automix.filter_sweeps { plan.filter_strength } else { 0.0 },
+            beats,
+            rate: plan.rate.filter(|_| self.automix.match_tempo && room),
+            silence_gate_db: plan.silence_gate_db,
+            headroom_db: plan.headroom_db,
+        }
+    }
+
+    fn join_gaplessly(&mut self, from: u64, to: u64, deck: Deck, loudness: Loudness, a_len: f64, why: &str) {
+        if let Some(lane) = self.mixer.as_mut().and_then(|m| m.lane_mut()) {
             lane.set_next(Some(deck), loudness);
+        }
+        self.tell_plan(from, to, a_len, 0.0, 0.0, format!("automix: gapless, {why}"));
+    }
+
+    fn tell_plan(&self, from: u64, to: u64, start: f64, entry: f64, overlap: f64, reason: String) {
+        log::info!("{reason}");
+        if let (Some(from_id), Some(to_id)) = (self.id_of(from), self.id_of(to)) {
+            self.emit(EngineEvent::TransitionPlanned {
+                from_id,
+                to_id,
+                start_ms: (start.max(0.0) * 1_000.0) as u64,
+                entry_ms: (entry * 1_000.0) as u64,
+                overlap_ms: (overlap * 1_000.0) as u64,
+                reason,
+            });
         }
     }
 

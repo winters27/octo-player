@@ -95,6 +95,16 @@ impl Stretch {
         self.input.len() / self.channels
     }
 
+    /// Changes the rate from the next period on. At 1 the input passes
+    /// straight through, once the period in progress is out.
+    pub fn set_rate(&mut self, rate: f64) {
+        self.rate = rate;
+    }
+
+    pub fn rate(&self) -> f64 {
+        self.rate
+    }
+
     /// Takes interleaved frames and appends what comes out to `out`.
     pub fn process(&mut self, samples: &[f32], out: &mut Fifo) {
         self.input.push(samples);
@@ -111,6 +121,12 @@ impl Stretch {
                 self.input.consume(n * ch);
                 self.copy_left -= n;
                 continue;
+            }
+            if (self.rate - 1.0).abs() < SAME as f64 {
+                // At normal rate everything passes straight through.
+                out.push(&self.input.as_slice()[..held * ch]);
+                self.input.consume(held * ch);
+                break;
             }
             if held < need {
                 break;

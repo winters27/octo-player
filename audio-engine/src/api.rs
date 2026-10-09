@@ -7,6 +7,7 @@ use std::thread;
 
 use crossbeam_channel::{Sender, bounded, unbounded};
 
+use crate::automix::AutomixSettings;
 use crate::decode::TrackInfo;
 use crate::error::{EngineError, ErrorKind};
 use crate::output::cpal_driver::CpalDriver;
@@ -162,6 +163,19 @@ pub enum EngineEvent {
         item_id: String,
         position_ms: f64,
     },
+    /// How the next song will follow the playing one, decided ahead of
+    /// time. `start_ms` is when in `from_id` the blend starts (its length
+    /// for a gapless join), `entry_ms` where `to_id` comes in, and
+    /// `overlap_ms` how long both sound, 0 for a gapless join. `reason` is a
+    /// line for the log, starting `automix:`.
+    TransitionPlanned {
+        from_id: String,
+        to_id: String,
+        start_ms: u64,
+        entry_ms: u64,
+        overlap_ms: u64,
+        reason: String,
+    },
 }
 
 /// Receives the engine's events, on the engine's own event thread.
@@ -293,9 +307,17 @@ impl Engine {
         self.send(Command::SetMuted(muted))
     }
 
-    /// Crossfade length in milliseconds, 0 to 12000; 0 turns it off.
+    /// Crossfade length in milliseconds, 0 to 16000; 0 turns it off.
     pub fn set_crossfade(&self, ms: u32) -> Result<(), EngineError> {
         self.send(Command::SetCrossfade(ms.min(crate::crossfade::LONGEST_FADE_MS)))
+    }
+
+    /// How crossfades are chosen and shaped: smart transitions, filter
+    /// sweeps, tempo matching and the longest blend. Applies from the next
+    /// transition on. Smart transitions are off until this is called.
+    pub fn set_automix(&self, settings: AutomixSettings) -> Result<(), EngineError> {
+        let max_overlap_ms = settings.max_overlap_ms.min(crate::crossfade::LONGEST_FADE_MS);
+        self.send(Command::SetAutomix(AutomixSettings { max_overlap_ms, ..settings }))
     }
 
     pub fn set_eq(&self, eq: EqSettings) -> Result<(), EngineError> {

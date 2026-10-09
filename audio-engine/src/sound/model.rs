@@ -249,6 +249,20 @@ pub fn coefficients(filter: &EqFilter, sample_rate: u32) -> Coefficients {
     }
 }
 
+/// A second-order low-pass or high-pass (Butterworth, Q 0.7071) at
+/// `frequency`, kept below the top of the range.
+pub fn pass_coefficients(high_pass: bool, frequency: f32, sample_rate: u32) -> Coefficients {
+    let frequency = (frequency as f64).clamp(1.0, sample_rate as f64 * 0.45);
+    let w0 = 2.0 * PI * frequency / sample_rate as f64;
+    let c = w0.cos();
+    let alpha = w0.sin() / (2.0 * std::f64::consts::FRAC_1_SQRT_2);
+    if high_pass {
+        normalise((1.0 + c) / 2.0, -(1.0 + c), (1.0 + c) / 2.0, 1.0 + alpha, -2.0 * c, 1.0 - alpha)
+    } else {
+        normalise((1.0 - c) / 2.0, 1.0 - c, (1.0 - c) / 2.0, 1.0 + alpha, -2.0 * c, 1.0 - alpha)
+    }
+}
+
 fn normalise(b0: f64, b1: f64, b2: f64, a0: f64, a1: f64, a2: f64) -> Coefficients {
     Coefficients { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
 }
