@@ -42,6 +42,13 @@ fun tailAnalyzer(tagBpm: Double?): (SectionEnvelope) -> SectionAnalysis = { anal
 
 fun headAnalyzer(tagBpm: Double?): (SectionEnvelope) -> SectionAnalysis = { analyzeHead(it, tagBpm) }
 
+// Whether a spare parked at `positionMs` must move to `targetMs`: not when
+// it is there already, give or take a frame or two.
+fun needsRepark(positionMs: Long, targetMs: Long): Boolean = abs(positionMs - targetMs) > PARK_TOLERANCE_MS
+
+// A spare this close to where it should be parked is left there.
+const val PARK_TOLERANCE_MS = 40L
+
 // Where the incoming song starts its silent run-up.
 fun TransitionPlan.preRollFromMs(): Long =
     if (overlapMs <= 0) 0 else max(0L, entryMs - (PRE_ROLL_LEAD_MS * incomingRate()).toLong())

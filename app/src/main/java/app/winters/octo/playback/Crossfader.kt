@@ -436,15 +436,13 @@ internal class Crossfader(
             return
         }
         plan = made
-        if (made.kind == TransitionKind.GAPLESS) {
-            sound?.arm(null)
-            return
-        }
-        // Armed now, the playing song is untouched until the blend starts.
-        val gate = tailAnalysis?.let { analysis -> level?.let(analysis::withBodyLevel) ?: analysis }?.features?.gateDb
+        sound?.arm(null)
+        if (made.kind == TransitionKind.GAPLESS) return
+        // The playing song is armed once the next one is ready for its
+        // run-up, so a late plan whose start has passed never fades it out
+        // while the next song is still loading.
+        outgoingGate = tailAnalysis?.let { analysis -> level?.let(analysis::withBodyLevel) ?: analysis }?.features?.gateDb
             ?: level?.let { max(SILENCE_FLOOR_DB, it - SILENCE_BELOW_BODY_DB) }
-        outgoingGate = gate
-        sound?.arm(DeckTransition(key.current, made, incoming = false, gateDb = gate))
     }
 
     // The spare gets the same songs in the same shuffle order, parked
@@ -478,7 +476,9 @@ internal class Crossfader(
         val item = spare.currentMediaItem ?: return
         armIncoming(plan, item)
         spare.playbackParameters = pacedFor(plan, player.deck.playbackParameters)
-        spare.seekTo(plan.preRollFromMs())
+        // Parked there already, it is not moved: a move would make it load
+        // again, and a plan made again while it loads would never find it ready.
+        if (needsRepark(spare.currentPosition, plan.preRollFromMs())) spare.seekTo(plan.preRollFromMs())
         loadedPlan = plan
     }
 
@@ -494,6 +494,8 @@ internal class Crossfader(
     // The run-up: the spare plays, still silent, from where the next song
     // should be now.
     private fun startRunUp(plan: TransitionPlan, position: Long) {
+        val entry = player.deck.currentMediaItem?.let { it.entryId ?: it.mediaId }
+        soundOf(player.deck)?.arm(DeckTransition(entry, plan, incoming = false, gateDb = outgoingGate))
         val target = plan.incomingAtMs(position.toDouble()).toLong()
         if (target > spare.currentPosition + NEAR_CHECK_MS) spare.seekTo(target)
         spare.play()

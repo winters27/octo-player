@@ -42,6 +42,9 @@ class Scout(private val sources: DataSource.Factory, private val extractors: Ext
     }
     private val main = Handler(Looper.getMainLooper())
 
+    // Once released, every stretch still being read stops at its next step.
+    @Volatile private var released = false
+
     // A stretch being read; cancel() stops it and keeps its answer from coming.
     class Job internal constructor() {
         @Volatile var cancelled = false
@@ -61,7 +64,7 @@ class Scout(private val sources: DataSource.Factory, private val extractors: Ext
         run({ cancelled ->
             val started = SystemClock.elapsedRealtime()
             try {
-                decodeSection(uri, fromMs, toMs) { cancelled() || SystemClock.elapsedRealtime() - started > SCOUT_BUDGET_MS }?.let(analyze)
+                decodeSection(uri, fromMs, toMs) { cancelled() || released || SystemClock.elapsedRealtime() - started > SCOUT_BUDGET_MS }?.let(analyze)
             } catch (e: NotSeekable) {
                 Log.i("Octo", "automix: not scouting ${uri.lastPathSegment}: ${e.message}")
                 null
@@ -89,6 +92,7 @@ class Scout(private val sources: DataSource.Factory, private val extractors: Ext
     }
 
     fun release() {
+        released = true
         worker.shutdownNow()
     }
 

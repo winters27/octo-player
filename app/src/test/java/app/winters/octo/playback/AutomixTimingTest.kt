@@ -158,4 +158,12 @@ class AutomixTimingTest {
         assertEquals(60.0, tailAnalyzer(61.0)(envelope).features.tempo!!.bpm, 1.0)
         assertEquals(60.0, headAnalyzer(61.0)(envelope).features.tempo!!.bpm, 1.0)
     }
+
+    @Test
+    fun aSpareParkedWhereItShouldBeIsNotMovedAgain() {
+        assertFalse(needsRepark(1_500, 1_500))
+        assertFalse(needsRepark(1_520, 1_500))
+        assertTrue(needsRepark(0, 1_500))
+        assertTrue(needsRepark(1_500, 0))
+    }
 }
