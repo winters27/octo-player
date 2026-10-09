@@ -556,3 +556,63 @@ fn a_blend_cut_short_still_hands_the_filter_over_gently() {
     let first = (released * 2..a.len().min(b.len())).find(|&i| a[i] != b[i]);
     assert_eq!(first, None, "{:?}", first.map(|i| (i, a[i], b[i])));
 }
+
+#[test]
+fn a_song_still_easing_its_rate_blends_on_without_a_jump() {
+    // B comes in at a matched rate, and its own blend into C starts while
+    // its rate is still easing back to normal.
+    let dir = temp_dir();
+    let (a, b, c) = (dir.join("a.wav"), dir.join("b.wav"), dir.join("c.wav"));
+    dc_file(&a, 96_000, 8_192, 8_192);
+    write_wav(&b, RATE, 2, &sine(173.0, RATE, 2, 0, RATE as usize * 6, 0.25));
+    dc_file(&c, 96_000, 0, 0);
+    let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
+    let mut lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    let next = deck(2, &b);
+    wait_ready(&next);
+    let matched = FadeShape { k: 0.4, rate: Some(1.05), ..Default::default() };
+    mixer.plan_fade(1, 1.0, 12_000, next, Loudness::default(), matched);
+    let mut out = Vec::new();
+    let mut markers = Vec::new();
+    let mut block = vec![0.0; 512];
+    let mut planned = false;
+    let until = Instant::now() + Duration::from_secs(30);
+    loop {
+        let (n, state) = mixer.render(&mut block, &mut markers);
+        out.extend_from_slice(&block[..n * 2]);
+        if mixer.is_fading()
+            && let Some(lane) = mixer.lane_mut()
+        {
+            lane.last = true;
+        }
+        // Once A is gone, B's blend into C goes in at 1.5 s of B.
+        if !planned && out.len() / 2 > 48_000 + 12_000 + 1_000 {
+            let next = deck(3, &c);
+            wait_ready(&next);
+            mixer.plan_fade(
+                2,
+                1.5,
+                24_000,
+                next,
+                Loudness::default(),
+                FadeShape { k: 0.4, ..Default::default() },
+            );
+            planned = true;
+        }
+        if state == MixState::Ended && n == 0 {
+            break;
+        }
+        if n == 0 {
+            assert!(Instant::now() < until, "mixer stalled");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    let b_to_c = markers.iter().find(|m| m.key == 3).expect("C came in").frame as usize;
+    // B fades out smoothly: no step bigger than its own sine's.
+    let slope = 0.25 * 2.0 * std::f32::consts::PI * 173.0 / RATE as f32;
+    let step =
+        (b_to_c - 2_000..b_to_c + 4_000).map(|i| (out[i * 2] - out[(i - 1) * 2]).abs()).fold(0.0, f32::max);
+    assert!(step < slope * 2.0, "a step of {step} (the sine moves {slope} a frame)");
+}

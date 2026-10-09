@@ -134,7 +134,7 @@ struct PlannedFade {
 }
 
 struct Fade {
-    outgoing: Lane,
+    outgoing: Outgoing,
     frames: u64,
     done: u64,
     clock: FadeClock,
@@ -144,6 +144,43 @@ struct Fade {
     gate: Option<f32>,
     quiet: u64,
     headroom_db: f32,
+}
+
+// The song fading out: its lane, through the rate stage it still had when
+// its own blend began, so a song whose tempo was matched carries on easing
+// back to normal instead of jumping.
+struct Outgoing {
+    lane: Lane,
+    rated: Option<Rated>,
+}
+
+impl Outgoing {
+    fn fill(&mut self, n: usize) -> LaneState {
+        match &mut self.rated {
+            Some(rated) => rated.fill(&mut self.lane, n),
+            None => self.lane.fill(n),
+        }
+    }
+
+    fn available(&self) -> usize {
+        self.rated.as_ref().map_or_else(|| self.lane.available(), Rated::available)
+    }
+
+    fn pull(&mut self, out: &mut [f32], spans: &mut Vec<Span>) -> usize {
+        let Some(rated) = &mut self.rated else { return self.lane.pull(out, spans) };
+        let n = (out.len() / 2).min(rated.available());
+        let got = rated.out.pop_into(&mut out[..n * 2]) / 2;
+        rated.advance(got);
+        if rated.is_done() {
+            self.rated = None;
+        }
+        got
+    }
+
+    fn is_ended(&self) -> bool {
+        self.lane.is_ended()
+            && self.rated.as_ref().is_none_or(|r| r.available() == 0 && r.stretch.pending() == 0)
+    }
 }
 
 // Where a blend is at, as progress from 0 to 1, by frames done. Finishing
@@ -519,7 +556,7 @@ impl Mixer {
             lane.set_replay_gain(&settings.replay_gain);
         }
         if let Some(fade) = &mut self.fade {
-            fade.outgoing.set_replay_gain(&settings.replay_gain);
+            fade.outgoing.lane.set_replay_gain(&settings.replay_gain);
         }
     }
 
@@ -587,7 +624,7 @@ impl Mixer {
             all.extend(lane.take_failures());
         }
         if let Some(fade) = &mut self.fade {
-            all.extend(fade.outgoing.take_failures());
+            all.extend(fade.outgoing.lane.take_failures());
         }
         all
     }
@@ -821,7 +858,7 @@ impl Mixer {
             }
             fade.done += frames as u64;
             if fade.done >= fade.clock.end() || fade.outgoing.is_ended() {
-                self.failures.extend(fade.outgoing.take_failures());
+                self.failures.extend(fade.outgoing.lane.take_failures());
                 self.end_fade();
             }
         }
@@ -872,11 +909,13 @@ impl Mixer {
         let shape = plan.shape;
         let sweeps =
             (shape.filter_strength > 0.0).then(|| Sweeps::new(self.rate, shape.filter_strength, shape.steps));
+        // A rate stage still easing the outgoing song stays with it.
+        let easing = self.rated.take().filter(|r| r.key == from);
         self.rated =
             shape.rate.filter(|r| (r - 1.0).abs() > 1e-4).map(|r| Rated::new(to, self.rate, r, plan.frames));
         let gate = shape.silence_gate_db.map(|db| 10f32.powf(db / 10.0));
         self.fade = Some(Fade {
-            outgoing: old,
+            outgoing: Outgoing { lane: old, rated: easing },
             frames: plan.frames,
             done: 0,
             clock: FadeClock { frames: plan.frames, rush: None },
