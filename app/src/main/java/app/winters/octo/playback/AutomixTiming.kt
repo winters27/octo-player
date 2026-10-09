@@ -36,6 +36,12 @@ const val REPLAN_JUMP_MS = 2_000L
 // The incoming song's playback rate through the blend.
 fun TransitionPlan.incomingRate(): Double = beatMatchRate ?: 1.0
 
+// What a scouted end of a song and start of the next go through: the
+// shared analysis, with the song's tag tempo picking its tempo's octave.
+fun tailAnalyzer(tagBpm: Double?): (SectionEnvelope) -> SectionAnalysis = { analyzeTail(it, tagBpm) }
+
+fun headAnalyzer(tagBpm: Double?): (SectionEnvelope) -> SectionAnalysis = { analyzeHead(it, tagBpm) }
+
 // Where the incoming song starts its silent run-up.
 fun TransitionPlan.preRollFromMs(): Long =
     if (overlapMs <= 0) 0 else max(0L, entryMs - (PRE_ROLL_LEAD_MS * incomingRate()).toLong())

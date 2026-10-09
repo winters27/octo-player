@@ -137,4 +137,25 @@ class AutomixTimingTest {
         assertFalse(settled.locked)
         assertTrue(outgoing <= p.startMs)
     }
+
+    // 20 s of a kick every half second (120 BPM) with a quiet tone under it.
+    private fun beatEnvelope(): SectionEnvelope {
+        val rate = 44_100
+        val builder = EnvelopeBuilder(rate, 1, 0)
+        val samples = FloatArray(rate * 20) { n ->
+            val sinceKick = (n % (rate / 2)).toDouble() / rate
+            (0.6 * kotlin.math.exp(-sinceKick * 30) * kotlin.math.sin(2 * kotlin.math.PI * 60 * n / rate) +
+                0.05 * kotlin.math.sin(2 * kotlin.math.PI * 880.0 * n / rate)).toFloat()
+        }
+        builder.push(samples)
+        return builder.build()
+    }
+
+    @Test
+    fun theScoutsHandTheSongsTagTempoToTheAnalysis() {
+        val envelope = beatEnvelope()
+        assertEquals(120.0, tailAnalyzer(null)(envelope).features.tempo!!.bpm, 1.0)
+        assertEquals(60.0, tailAnalyzer(61.0)(envelope).features.tempo!!.bpm, 1.0)
+        assertEquals(60.0, headAnalyzer(61.0)(envelope).features.tempo!!.bpm, 1.0)
+    }
 }

@@ -105,12 +105,13 @@ class LiveTapFeed(private val worker: ScheduledExecutorService = sharedWorker) {
     }
 
     // Any thread: what the tap knows about this queue entry, or null when
-    // it is not the song this deck is playing.
-    fun reading(entryId: String?): TapReading? = synchronized(lock) {
+    // it is not the song this deck is playing. `tagBpm`, the song's tag
+    // tempo, picks the octave of the tempo heard.
+    fun reading(entryId: String?, tagBpm: Double? = null): TapReading? = synchronized(lock) {
         drain()
         val current = tap ?: return null
         if (tapEntry != entryId) return null
-        TapReading(current.heardMs(), current.bodyLevelDb(), current.tempoPrior())
+        TapReading(current.heardMs(), current.bodyLevelDb(), current.tempoPrior(tagBpm))
     }
 
     companion object {

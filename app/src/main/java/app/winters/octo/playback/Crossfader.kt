@@ -317,7 +317,7 @@ internal class Crossfader(
                 tail = scouted
             } else {
                 lateinit var job: Scout.Job
-                job = scout.read(uri, max(0L, lengthMs - TAIL_SCOUT_MS), lengthMs, { analyzeTail(it) }) { analysis ->
+                job = scout.read(uri, max(0L, lengthMs - TAIL_SCOUT_MS), lengthMs, tailAnalyzer(current.mediaMetadata.tagBpm())) { analysis ->
                     if (tail?.job === job) {
                         tail?.analysis = analysis
                         tail?.done = true
@@ -335,7 +335,7 @@ internal class Crossfader(
                 head = Scouted(nextEntry, null).also { it.done = true }
             } else {
                 lateinit var job: Scout.Job
-                job = scout.read(uri, 0, HEAD_SCOUT_MS, { analyzeHead(it) }) { analysis ->
+                job = scout.read(uri, 0, HEAD_SCOUT_MS, headAnalyzer(next.mediaMetadata.tagBpm())) { analysis ->
                     if (head?.job === job) {
                         head?.analysis = analysis
                         head?.done = true
@@ -348,9 +348,10 @@ internal class Crossfader(
         // Once both are in, what the deck has heard of this song.
         if (reading?.entryId != currentEntry && tail?.done == true && head?.done == true) {
             val sound = soundOf(deck)
+            val tagBpm = current.mediaMetadata.tagBpm()
             reading?.job?.cancel()
             lateinit var job: Scout.Job
-            job = scout.run({ sound?.reading(currentEntry) }) { value ->
+            job = scout.run({ sound?.reading(currentEntry, tagBpm) }) { value ->
                 if (reading?.job === job) {
                     reading?.value = value
                     reading?.done = true

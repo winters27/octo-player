@@ -180,13 +180,14 @@ class SoundShaper(val sampleRate: Int, val channels: Int) {
 
 // What the crossfade needs from a deck's audio path: whether its sound
 // runs through Octo's processor (so transitions can be shaped there), a
-// way to arm a transition, and what the deck has heard of its song.
+// way to arm a transition, and what the deck has heard of its song, its
+// tempo's octave picked by the song's tag tempo when it has one.
 interface DeckSound {
     val shapesTransitions: Boolean
 
     fun arm(transition: DeckTransition?)
 
-    fun reading(entryId: String?): TapReading?
+    fun reading(entryId: String?, tagBpm: Double? = null): TapReading?
 }
 
 // Octo's own sound shaping, as a step in the player's audio path. It takes
@@ -238,7 +239,7 @@ class OctoDspProcessor(
         armed = transition
     }
 
-    override fun reading(entryId: String?): TapReading? = tap?.reading(entryId)
+    override fun reading(entryId: String?, tagBpm: Double?): TapReading? = tap?.reading(entryId, tagBpm)
 
     // The playback speed; the stream starts again at it right after.
     fun setSpeed(value: Float) {

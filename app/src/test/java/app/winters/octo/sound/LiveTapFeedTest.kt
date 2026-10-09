@@ -87,4 +87,13 @@ class LiveTapFeedTest {
         feed.push(tooMuch, tooMuch.size)
         assertEquals(0L, feed.reading("q:1")!!.heardMs)
     }
+
+    @Test
+    fun theSongsTagTempoPicksTheOctaveHeard() {
+        val feed = LiveTapFeed(worker)
+        feed.begin("q:1", rate, 2)
+        feed.pushAll(beat(20.0))
+        assertEquals(60.0, feed.reading("q:1", tagBpm = 61.0)!!.tempoPrior!!, 1.0)
+        assertEquals(120.0, feed.reading("q:1")!!.tempoPrior!!, 1.0)
+    }
 }
