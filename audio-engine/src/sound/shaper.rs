@@ -69,6 +69,11 @@ pub struct SoundShaper {
     fade_left: usize,
     fade_scratch: Vec<f32>,
     limiter: Limiter,
+    // Whether the settings turn the limiter on, and whether the sound would
+    // pass through untouched without it.
+    limiter_on: bool,
+    untouched: bool,
+    blending: bool,
     started: bool,
     output: Vec<f32>,
 }
@@ -89,6 +94,9 @@ impl SoundShaper {
             fade_left: 0,
             fade_scratch: Vec::new(),
             limiter: Limiter::new(channels, sample_rate),
+            limiter_on: true,
+            untouched: true,
+            blending: false,
             started: false,
             output: Vec::new(),
         }
@@ -132,8 +140,23 @@ impl SoundShaper {
 
         // Sound that is left as it is passes through untouched; the limiter
         // only catches peaks the shaping could push over.
-        let untouched = bands.is_empty() && preamp * song_gain == 1.0 && balance == 0.0 && !to_mono;
-        self.limiter.enabled = settings.dsp.limiter && !untouched;
+        self.untouched = bands.is_empty() && preamp * song_gain == 1.0 && balance == 0.0 && !to_mono;
+        self.limiter_on = settings.dsp.limiter;
+        self.follow_limiter();
+    }
+
+    /// Says whether two songs sound together. Their sum can pass full scale
+    /// even when each passes through untouched, so while they blend the
+    /// limiter runs whenever the settings have it on.
+    pub fn set_blending(&mut self, blending: bool) {
+        if blending != self.blending {
+            self.blending = blending;
+            self.follow_limiter();
+        }
+    }
+
+    fn follow_limiter(&mut self) {
+        self.limiter.enabled = self.limiter_on && (!self.untouched || self.blending);
     }
 
     /// Shapes `frames` frames of `samples` in place. The limiter's delay

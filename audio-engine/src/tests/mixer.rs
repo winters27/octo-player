@@ -303,6 +303,33 @@ fn a_swept_blend_starts_without_a_click() {
 }
 
 #[test]
+fn the_limiter_catches_a_blend_that_would_clip() {
+    // Two loud songs, each passing through untouched on its own: their sum
+    // in the middle of an equal-power blend would pass full scale.
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    dc_file(&a, 96_000, 31_130, 31_130);
+    dc_file(&b, 96_000, 31_130, 31_130);
+    let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
+    let mut lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    let next = deck(2, &b);
+    wait_ready(&next);
+    mixer.plan_fade(1, 1.0, 24_000, next, Loudness::default(), FadeShape::default());
+    let (out, _) = render_all(&mut mixer);
+    let ceiling = 10f32.powf(crate::sound::limiter::LIMITER_CEILING_DB / 20.0);
+    let fade_start = 48_000 + LATENCY;
+    // Before the blend the song is left exactly as it is.
+    assert!((out[(fade_start - 100) * 2] - 0.95).abs() < 1e-4, "{}", out[(fade_start - 100) * 2]);
+    let loudest = out[fade_start * 2..(fade_start + 24_000) * 2].iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    assert!(loudest <= ceiling + 1e-4, "{loudest}");
+    // Equal power would have reached 0.95 * 1.41 at its middle.
+    let middle = out[(fade_start + 12_000) * 2];
+    assert!(middle > 0.8 && middle <= ceiling + 1e-4, "{middle}");
+}
+
+#[test]
 fn a_song_with_no_blend_plays_exactly_as_before() {
     // A blend later in a song changes nothing before it.
     let dir = temp_dir();

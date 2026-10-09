@@ -406,6 +406,9 @@ pub struct Mixer {
     tail_left: usize,
     failures: Vec<(u64, Failure)>,
     last_marker: Option<Marker>,
+    // Whether two songs sounded together in what was mixed since the last
+    // block went to the shaper.
+    blended: bool,
 }
 
 impl Mixer {
@@ -440,6 +443,7 @@ impl Mixer {
             tail_left: 0,
             failures: Vec::new(),
             last_marker: None,
+            blended: false,
         }
     }
 
@@ -618,6 +622,7 @@ impl Mixer {
                 }
                 break;
             }
+            self.shaper.set_blending(std::mem::take(&mut self.blended));
             self.shaper.process(&mut self.block, frames);
             out[made * 2..(made + frames) * 2].copy_from_slice(&self.block[..frames * 2]);
             made += frames;
@@ -711,6 +716,7 @@ impl Mixer {
             self.begin_fade();
             n = wanted;
         }
+        self.blended |= self.fade.is_some();
         // A blend ends on its exact frame, where the filters come off.
         if let Some(fade) = &self.fade {
             n = n.min(fade.clock.end().saturating_sub(fade.done).max(1) as usize);
