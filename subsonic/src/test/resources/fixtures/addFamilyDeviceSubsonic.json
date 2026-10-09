@@ -1,0 +1,17 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "octo",
+    "openSubsonic": true,
+    "familyDeviceAdded": {
+      "deviceId": "d_9",
+      "kind": "SubsonicApp",
+      "appPassword": "ABCD-EFGH-JKMN-PQRS",
+      "pairCode": null,
+      "expires": null,
+      "server": "https://navidrome.winters.app",
+      "username": "alex"
+    }
+  }
+}

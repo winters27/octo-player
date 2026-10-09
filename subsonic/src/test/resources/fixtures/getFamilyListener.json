@@ -1,0 +1,40 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "octo",
+    "openSubsonic": true,
+    "family": {
+      "me": {
+        "username": "alex",
+        "displayName": "Alex",
+        "role": "Listener",
+        "managed": true,
+        "abilities": {
+          "addToLibrary": "Request",
+          "requestQuality": "Best",
+          "autoApprove": false,
+          "weeklyRequestLimit": 10,
+          "streamCap": 192,
+          "awayCap": 128,
+          "away": true,
+          "devicesAtOnce": 2,
+          "downloadFiles": false,
+          "offlineCopies": false,
+          "share": false,
+          "importPlaylists": true,
+          "cleanOnly": false,
+          "familyPlaylistsEdit": true,
+          "manageFamily": false,
+          "approveRequests": false,
+          "storageLimitGb": 10,
+          "instantFromFamily": true
+        },
+        "requestsThisWeek": 3,
+        "storageUsedBytes": 5400000000,
+        "place": "Home",
+        "deviceId": "d_7Qm2abc"
+      }
+    }
+  }
+}

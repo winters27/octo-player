@@ -576,13 +576,13 @@ class SubsonicClient(
         SubsonicClient(primaryUrl, Credentials(username, secret, authMode), plainHttp, clientName, headers, musicFolderId, route)
 
     // A call that only answers ok or an error. The params may repeat a name.
-    private suspend fun send(endpoint: String, params: List<Pair<String, String>>) {
+    internal suspend fun send(endpoint: String, params: List<Pair<String, String>>) {
         val url = url(endpoint).newBuilder().apply { params.forEach { (key, value) -> addQueryParameter(key, value) } }.build()
         val body = fetch(url, endpoint)
         withContext(Dispatchers.Default) { decode(body, null, ServerInfo.serializer(), null) }
     }
 
-    private suspend fun <T> get(
+    internal suspend fun <T> get(
         endpoint: String,
         params: Map<String, String> = emptyMap(),
         key: String?,
@@ -700,7 +700,7 @@ class SubsonicClient(
     suspend fun deleteRadioStation(id: String) = send("deleteInternetRadioStation", listOf("id" to id))
 
     // Like get, for params that may repeat a name.
-    private suspend fun <T> getWith(
+    internal suspend fun <T> getWith(
         endpoint: String,
         params: List<Pair<String, String>>,
         key: String,
@@ -723,7 +723,7 @@ class SubsonicClient(
 
 // Runs the call without blocking a thread, and cancels it if the caller
 // stops waiting.
-private suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
+internal suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
     cont.invokeOnCancellation { cancel() }
     enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) = cont.resumeWithException(e)

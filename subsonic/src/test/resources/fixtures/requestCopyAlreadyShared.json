@@ -1,0 +1,28 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "octo",
+    "openSubsonic": true,
+    "familyRequest": {
+      "id": "r_5",
+      "username": "alex",
+      "displayName": "Alex",
+      "kind": "Song",
+      "target": "ext-deezer-song-12345",
+      "title": "Song",
+      "artist": "Artist",
+      "album": "Album",
+      "coverArt": "ext-deezer-song-12345",
+      "quality": "Best",
+      "state": "Done",
+      "created": "2026-10-20T18:00:00Z",
+      "decided": null,
+      "decidedBy": null,
+      "note": "",
+      "failure": null,
+      "librarySongId": "tr-1",
+      "outcome": "AlreadyShared"
+    }
+  }
+}

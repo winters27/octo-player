@@ -1,0 +1,68 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "octo",
+    "openSubsonic": true,
+    "family": {
+      "me": {
+        "username": "brandon",
+        "displayName": "Brandon",
+        "role": "Owner",
+        "managed": false,
+        "abilities": {
+          "addToLibrary": "Direct",
+          "requestQuality": "Best",
+          "autoApprove": true,
+          "weeklyRequestLimit": 0,
+          "streamCap": 0,
+          "awayCap": 0,
+          "away": true,
+          "devicesAtOnce": 0,
+          "downloadFiles": true,
+          "offlineCopies": true,
+          "share": true,
+          "importPlaylists": true,
+          "cleanOnly": false,
+          "familyPlaylistsEdit": true,
+          "manageFamily": true,
+          "approveRequests": true,
+          "storageLimitGb": 0,
+          "instantFromFamily": true
+        },
+        "requestsThisWeek": 0,
+        "storageUsedBytes": 0,
+        "place": "Away",
+        "deviceId": null
+      },
+      "manager": {
+        "members": [
+          {
+            "username": "alex",
+            "displayName": "Alex",
+            "role": "Listener",
+            "suspended": false,
+            "devices": 2,
+            "playingNow": true,
+            "pendingRequests": 1,
+            "storageUsedBytes": 5400000000,
+            "storageLimitGb": 10
+          },
+          {
+            "username": "sam",
+            "displayName": "Sam",
+            "role": "Kid",
+            "suspended": true,
+            "devices": 0,
+            "playingNow": false,
+            "pendingRequests": 0,
+            "storageUsedBytes": 0,
+            "storageLimitGb": 5
+          }
+        ],
+        "pendingRequests": 1,
+        "liveStreams": 3
+      }
+    }
+  }
+}

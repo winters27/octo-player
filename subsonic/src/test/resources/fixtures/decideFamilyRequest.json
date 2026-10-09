@@ -1,0 +1,28 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "octo",
+    "openSubsonic": true,
+    "familyRequest": {
+      "id": "r_9xK2",
+      "username": "alex",
+      "displayName": "Alex",
+      "kind": "Song",
+      "target": "ext-deezer-song-12345",
+      "title": "Song",
+      "artist": "Artist",
+      "album": "Album",
+      "coverArt": "ext-deezer-song-12345",
+      "quality": "Flac",
+      "state": "Approved",
+      "created": "2026-10-20T18:00:00Z",
+      "decided": "2026-10-20T18:10:00Z",
+      "decidedBy": "brandon",
+      "note": "Enjoy",
+      "failure": null,
+      "librarySongId": null,
+      "outcome": null
+    }
+  }
+}
