@@ -1,5 +1,6 @@
 package app.winters.octo.subsonic
 
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -32,15 +33,45 @@ data class FamilyMemberAdded(
     override fun toString() = "FamilyMemberAdded(member=${member.username})"
 }
 
-// A fresh invite for a member who has not joined yet.
+// A fresh sign-up link: a new invite for a member who has not signed up
+// yet, or, after a manager resets their password, one to choose a new one.
 @Serializable
 data class FamilyNewInvite(
     val inviteLink: String = "",
     val links: FamilyLinkChoices? = null,
     val anywhereAvailable: Boolean = true,
     val homeOnly: Boolean = false,
+    val expires: String? = null,
 ) {
     override fun toString() = "FamilyNewInvite(anywhereAvailable=$anywhereAvailable)"
+}
+
+// A sign-in hand-over just started on this device: its token, when it
+// ends, and the addresses its link can go through.
+@Serializable
+data class FamilySignInStart(
+    val token: String = "",
+    val expires: String? = null,
+    val links: FamilyLinkChoices = FamilyLinkChoices(),
+    val anywhereAvailable: Boolean = true,
+) {
+    override fun toString() = "FamilySignInStart(expires=$expires)"
+}
+
+// A device that redeemed this device's hand-over and waits for an answer.
+@Serializable
+data class FamilySignInPending(val id: String = "", val deviceName: String = "", val platform: String = "")
+
+@Serializable
+internal data class FamilySignInRedeemed(val id: String = "")
+
+// How a redeemed hand-over stands, from the new device's side.
+@Serializable
+enum class FamilySignInState { Waiting, Allowed, Denied, Expired }
+
+@Serializable
+data class FamilySignInStatus(val state: FamilySignInState = FamilySignInState.Waiting, val box: String? = null) {
+    override fun toString() = "FamilySignInStatus(state=$state)"
 }
 
 // The presets a manager picks for a new member.
@@ -77,23 +108,6 @@ class FamilyWeb(
     suspend fun join(token: String, password: String, displayName: String): String =
         call("POST", "join", body("token" to token, "password" to password, "displayName" to displayName.trim()), FamilyWebUser.serializer()).username
 
-    // A new device for the member signed in: a pair code for an Octo app,
-    // or an app password for any other app. `replaces` ends an earlier
-    // unused code first.
-    suspend fun addMyDevice(name: String, kind: FamilyDeviceKind, replaces: String? = null): FamilyDeviceAdded =
-        call("POST", "me/devices", deviceBody(name, kind, replaces), FamilyDeviceAdded.serializer())
-
-    // A manager's new device for a member: that member's pair code or app
-    // password.
-    suspend fun addMemberDevice(username: String, name: String, kind: FamilyDeviceKind, replaces: String? = null): FamilyDeviceAdded =
-        call("POST", "members/${encodeComponent(username)}/devices", deviceBody(name, kind, replaces), FamilyDeviceAdded.serializer())
-
-    private fun deviceBody(name: String, kind: FamilyDeviceKind, replaces: String?) = body(
-        "name" to name.trim(),
-        "kind" to kind.name,
-        *listOfNotNull(replaces?.takeIf(String::isNotBlank)?.let { "replaces" to it }).toTypedArray(),
-    )
-
     private fun body(vararg fields: Pair<String, String>) = JsonObject(fields.associate { (k, v) -> k to kotlinx.serialization.json.JsonPrimitive(v) })
 
     // A manager adds a member, and gets the link that invites them. Then
@@ -120,10 +134,46 @@ class FamilyWeb(
     suspend fun newInvite(username: String): FamilyNewInvite =
         call("POST", "members/${encodeComponent(username)}/invite", null, FamilyNewInvite.serializer())
 
-    private suspend fun <T> call(method: String, path: String, body: JsonObject?, serializer: kotlinx.serialization.KSerializer<T>): T {
+    // A manager resets a member's password: it stops working at once, and
+    // the answer is a new single-use link to choose another.
+    suspend fun resetMember(username: String): FamilyNewInvite =
+        call("POST", "members/${encodeComponent(username)}/reset", null, FamilyNewInvite.serializer())
+
+    // Starts handing this device's sign-in to the same person's other
+    // device: a short-lived token for the QR code.
+    suspend fun startSignIn(): FamilySignInStart = call("POST", "signin/start", null, FamilySignInStart.serializer())
+
+    // The device that redeemed the token, or null while none has.
+    suspend fun signInPending(token: String): FamilySignInPending? =
+        callOrNull("GET", "signin/${encodeComponent(token)}/pending", null, FamilySignInPending.serializer())?.takeIf { it.id.isNotEmpty() }
+
+    // Allows or denies the device that redeemed the token.
+    suspend fun decideSignIn(token: String, allow: Boolean) {
+        callOrNull("POST", "signin/${encodeComponent(token)}/decide", JsonObject(mapOf("allow" to JsonPrimitive(allow))), FamilyWebUser.serializer())
+    }
+
+    // The sealed sign-in for the allowed device; the server cannot open it.
+    suspend fun putSignInBox(token: String, box: String) {
+        callOrNull("POST", "signin/${encodeComponent(token)}/box", body("box" to box), FamilyWebUser.serializer())
+    }
+
+    // On the new device, with no sign-in: redeems the token from the QR code,
+    // naming this device, and answers the id to wait on.
+    suspend fun redeemSignIn(token: String, deviceName: String, platform: FamilyPlatform): String =
+        call("POST", "signin/redeem", body("token" to token, "deviceName" to deviceName.trim(), "platform" to platform.wire), FamilySignInRedeemed.serializer()).id
+
+    // How the redeemed hand-over stands, with the sealed sign-in once allowed.
+    suspend fun signInStatus(id: String): FamilySignInStatus =
+        call("GET", "signin/redeem/${encodeComponent(id)}", null, FamilySignInStatus.serializer())
+
+    private suspend fun <T> call(method: String, path: String, body: JsonObject?, serializer: kotlinx.serialization.KSerializer<T>): T =
+        callOrNull(method, path, body, serializer) ?: json.decodeFromString(serializer, "{}")
+
+    // As `call`, but an empty answer (204) is null.
+    private suspend fun <T> callOrNull(method: String, path: String, body: JsonObject?, serializer: kotlinx.serialization.KSerializer<T>): T? {
         val plain = server.newBuilder().addPathSegment("api").addPathSegment("family").addEncodedPathSegments(path).build()
         val url = sign?.invoke(plain) ?: plain
-        val payload = (body?.let { json.encodeToString(JsonObject.serializer(), it) } ?: "{}").toRequestBody(JSON)
+        val payload = if (method == "GET") null else (body?.let { json.encodeToString(JsonObject.serializer(), it) } ?: "{}").toRequestBody(JSON)
         val request = Request.Builder().url(url).header("X-Octo-Family", "1").header("Accept", "application/json").method(method, payload).build()
         val text = try {
             val response = http.newCall(request).await()
@@ -137,7 +187,8 @@ class FamilyWeb(
         } catch (e: IOException) {
             throw SubsonicException.Unreachable(e)
         }
-        return json.decodeFromString(serializer, text.ifBlank { "{}" })
+        if (text.isBlank()) return null
+        return json.decodeFromString(serializer, text)
     }
 
     // The server's own words when it gives them, else plain ones.

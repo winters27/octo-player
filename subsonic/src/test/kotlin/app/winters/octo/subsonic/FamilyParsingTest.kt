@@ -214,7 +214,7 @@ class FamilyParsingTest {
         assertEquals(2, devices.size)
         val phone = devices[0]
         assertEquals("Pixel 9", phone.name)
-        assertEquals(FamilyDeviceKind.OctoApp, phone.kind)
+        assertEquals("2026-10-19T10:00:00Z", phone.firstSeen)
         assertEquals("Octo 1.6 (Android)", phone.app)
         assertEquals(FamilyPlace.Away, phone.place)
         assertEquals("Song", phone.playing?.title)
@@ -223,7 +223,7 @@ class FamilyParsingTest {
         assertEquals(DeviceQualityMode.App, phone.quality)
         // A device that does not say follows the account.
         assertEquals(DeviceQualityMode.Account, other.quality)
-        assertEquals(FamilyDeviceKind.SubsonicApp, other.kind)
+        assertEquals("Symfonium", other.app)
         assertNull(other.playing)
         assertFalse(other.current)
     }
@@ -260,45 +260,44 @@ class FamilyParsingTest {
     }
 
     @Test
-    fun signingOutADeviceSendsItsId() = runTest {
+    fun removingADeviceFromTheListSendsItsId() = runTest {
         answer("ok")
-        client().signOutFamilyDevice("d_2")
+        client().forgetFamilyDevice("d_2")
         val url = server.takeRequest().url
-        assertEquals("/rest/signOutFamilyDevice", url.encodedPath)
+        assertEquals("/rest/forgetFamilyDevice", url.encodedPath)
         assertEquals("d_2", url.queryParameter("id"))
     }
 
     @Test
-    fun addingADeviceGivesAPasswordOrACode() = runTest {
-        answer("addFamilyDeviceSubsonic")
-        val app = client().addFamilyDevice(" Symfonium ", FamilyDeviceKind.SubsonicApp)
-        val url = server.takeRequest().url
-        assertEquals("Symfonium", url.queryParameter("name"))
-        assertEquals("SubsonicApp", url.queryParameter("kind"))
-        // One's own device names no member.
-        assertNull(url.queryParameter("username"))
-        assertNull(url.queryParameter("replaces"))
-        assertEquals("ABCD-EFGH-JKMN-PQRS", app.appPassword)
-        assertNull(app.pairCode)
-        assertEquals("https://navidrome.winters.app", app.server)
-        // The password never reaches a log.
-        assertFalse(app.toString().contains("ABCD"))
+    fun theLoginIsReadWithBothAddresses() = runTest {
+        answer("getFamilyLogin")
+        val login = client().familyLogin()
+        assertEquals("/rest/getFamilyLogin", server.takeRequest().url.encodedPath)
+        assertEquals("alex", login.username)
+        assertEquals("https://music.example.com", login.servers.anywhere)
+        assertEquals("http://192.168.1.20:4533", login.servers.home)
+        assertTrue(login.anywhereAvailable)
+        assertFalse(login.awayAllowed)
+    }
 
-        answer("addFamilyDeviceOcto")
-        val octo = client().addFamilyDevice("Laptop", FamilyDeviceKind.OctoApp, username = "alex")
-        val forMember = server.takeRequest().url
-        assertEquals("OctoApp", forMember.queryParameter("kind"))
-        // A manager names the member the device is for.
-        assertEquals("alex", forMember.queryParameter("username"))
-        assertEquals("482913", octo.pairCode)
-        assertEquals("2026-10-20T18:15:00Z", octo.expires)
-        assertNull(octo.appPassword)
-        assertFalse(octo.toString().contains("482913"))
-
-        // A fresh code for the same popup ends the one it replaces.
-        answer("addFamilyDeviceOcto")
-        client().addFamilyDevice("Laptop", FamilyDeviceKind.OctoApp, replaces = "d_9")
-        assertEquals("d_9", server.takeRequest().url.queryParameter("replaces"))
+    @Test
+    fun changingTheFamilyPasswordSendsBothInTheBodyAndSwitchesTheClient() = runTest {
+        answer("ok")
+        answer("ok")
+        val client = client()
+        client.changeFamilyPassword("secret", "a new long one")
+        val change = server.takeRequest()
+        assertEquals("POST", change.method)
+        assertEquals("/rest/changeFamilyPassword", change.url.encodedPath)
+        val form = change.body!!.utf8()
+        assertTrue(form.contains("current=secret"))
+        assertTrue(form.contains("next=a+new+long+one"))
+        // Neither password is in the address.
+        assertNull(change.url.queryParameter("next"))
+        // The client signs in with the new one from now on.
+        client.ping()
+        val next = server.takeRequest().url
+        assertEquals(md5Hex("a new long one" + next.queryParameter("s")), next.queryParameter("t"))
     }
 
     @Test
@@ -332,67 +331,33 @@ class FamilyParsingTest {
     }
 
     @Test
-    fun pairingSendsNoSignInAndAnswersTheSecret() = runTest {
-        answer("octoFamilyPair")
-        val pair = pairWithFamilyCode(server.url("/"), OkHttpClient(), " alex ", "482 913", "Pixel 9", FamilyPlatform.Android)
-        val url = server.takeRequest().url
-        assertEquals("/rest/octoFamilyPair", url.encodedPath)
-        assertEquals("alex", url.queryParameter("username"))
-        assertEquals("482913", url.queryParameter("code"))
-        assertEquals("Pixel 9", url.queryParameter("deviceName"))
-        assertEquals("Android", url.queryParameter("platform"))
-        assertEquals("json", url.queryParameter("f"))
-        // Open call: no sign-in of any kind.
-        assertNull(url.queryParameter("u"))
-        assertNull(url.queryParameter("t"))
-        assertNull(url.queryParameter("p"))
-        assertNull(url.queryParameter("apiKey"))
-
-        assertEquals("alex", pair.username)
-        assertEquals("s3cr3tS3cr3tS3cr3tS3cr3tS3cr3t12", pair.secret)
-        assertEquals("d_11", pair.deviceId)
-        assertFalse(pair.toString().contains("s3cr3t"))
-    }
-
-    @Test
-    fun aWrongCodeSaysSoInPlainWords() = runTest {
-        answer("octoFamilyPairWrong")
-        try {
-            pairWithFamilyCode(server.url("/"), OkHttpClient(), "alex", "000000", "Pixel 9", FamilyPlatform.MacOs)
-            fail("A wrong code must not pair")
-        } catch (e: SubsonicException.WrongCredentials) {
-            assertEquals("That code did not work. Ask for a new one.", e.message)
-        }
-        assertEquals("macOS", server.takeRequest().url.queryParameter("platform"))
-    }
-
-    @Test
-    fun aJoinLinkIsReadInBothForms() {
-        val app = parseFamilyJoinLink("  octo://join?server=https%3A%2F%2Fmusic.example.com%2Fnd&username=alex&code=482913 ")
-        assertEquals(FamilyJoinLink("https://music.example.com/nd", "alex", "482913"), app)
-        // The code never reaches a log.
-        assertFalse(app.toString().contains("482913"))
-        // The https form a QR code carries, with the secrets after the #.
-        assertEquals(app, parseFamilyLink("https://music.example.com/nd/family/join#u=alex&c=482913"))
-        assertEquals(
-            FamilyJoinLink("https://music.example.com", "alex smith", "482913"),
-            parseFamilyLink("https://music.example.com/family/join#u=alex%20smith&c=482913"),
-        )
-        // Links made here read back the same.
-        val web = familyJoinUrl("https://music.example.com/nd/", "alex smith", "482913")
-        assertEquals("https://music.example.com/nd/family/join#u=alex%20smith&c=482913", web)
-        assertEquals(FamilyJoinLink("https://music.example.com/nd", "alex smith", "482913"), parseFamilyLink(web))
-        val own = familyAppLink(FamilyJoinLink("https://music.example.com/nd", "alex smith", "482913"))
-        assertEquals("octo://join?server=https%3A%2F%2Fmusic.example.com%2Fnd&username=alex%20smith&code=482913", own)
-        assertEquals(parseFamilyLink(web), parseFamilyLink(own))
-        // Not links.
-        assertNull(parseFamilyLink("https://music.example.com"))
-        assertNull(parseFamilyLink("https://music.example.com/family/join"))
-        assertNull(parseFamilyLink("https://music.example.com/other/join#u=alex&c=482913"))
-        assertNull(parseFamilyLink("octo://join?server=x&username=alex&code=12345"))
-        assertNull(parseFamilyLink("octo://join?server=x&code=123456"))
-        assertNull(parseFamilyLink("octo://join?username=alex&code=123456"))
+    fun aSignInLinkFillsInTheServerAndUsername() {
+        val link = parseFamilyLink(" octo://signin?server=https%3A%2F%2Fmusic.example.com%2Fnd&home=http%3A%2F%2F192.168.1.20%3A4533&username=alex%20smith ")
+        assertEquals(FamilySignInPrefill("https://music.example.com/nd", "alex smith", "http://192.168.1.20:4533"), link)
+        assertEquals(link, parseFamilyLink(familyAppLink(link!!)))
+        // A bare address still names a server; no username is fine.
+        assertEquals(FamilySignInPrefill("https://music.example.com"), parseFamilyLink("octo://signin?server=https%3A%2F%2Fmusic.example.com"))
+        assertNull(parseFamilyLink("octo://signin?username=alex"))
         assertNull(parseFamilyLink("octo://album/al-1"))
+    }
+
+    @Test
+    fun aHandOverLinkIsReadInBothFormsAndKeepsItsKey() {
+        val web = familySignInUrl("https://music.example.com/nd/", "tok_1", "K-ey_0", "https://music.example.com/nd", "http://192.168.1.20:4533")
+        assertEquals("https://music.example.com/nd/family/signin#t=tok_1&k=K-ey_0&s=https%3A%2F%2Fmusic.example.com%2Fnd&h=http%3A%2F%2F192.168.1.20%3A4533", web)
+        val link = FamilyHandOverLink("https://music.example.com/nd", "tok_1", "K-ey_0", "https://music.example.com/nd", "http://192.168.1.20:4533")
+        assertEquals(link, parseFamilyLink(web))
+        // The app's own form passes the part after # along unchanged.
+        val own = familyAppLink(link)
+        assertEquals("octo://signin#" + web.substringAfter('#'), own)
+        assertEquals(link.copy(base = "https://music.example.com/nd"), parseFamilyLink(own))
+        // Neither the token nor the key reaches a log.
+        assertFalse(link.toString().contains("tok_1"))
+        assertFalse(link.toString().contains("K-ey"))
+        // Not hand-overs.
+        assertNull(parseFamilyLink("https://music.example.com/family/signin#t=tok_1"))
+        assertNull(parseFamilyLink("https://music.example.com/family/signin"))
+        assertNull(parseFamilyLink("https://music.example.com/family/other#t=1&k=2"))
     }
 
     @Test
@@ -402,28 +367,20 @@ class FamilyParsingTest {
         assertEquals(invite, parseFamilyLink("octo://join?server=https%3A%2F%2Fmusic.example.com&invite=tok_ABC-123"))
         assertEquals("https://music.example.com/family/join#invite=tok_ABC-123", familyInviteUrl("https://music.example.com", "tok_ABC-123"))
         assertEquals(invite, parseFamilyLink(familyAppLink(invite)))
-        assertNull(parseFamilyJoinLink("https://music.example.com/family/join#invite=tok"))
         assertFalse(invite.toString().contains("tok_"))
     }
 
     @Test
-    fun aLinksHomeAddressIsReadInBothFormsAndThePathIsKept() {
-        val join = FamilyJoinLink("https://example.com/octo", "alex", "482913", home = "http://192.168.1.20:4533")
-        val web = "https://example.com/octo/family/join#u=alex&c=482913&home=http%3A%2F%2F192.168.1.20%3A4533"
-        assertEquals(join, parseFamilyLink(web))
-        assertEquals(join, parseFamilyLink("octo://join?server=https%3A%2F%2Fexample.com%2Focto&username=alex&code=482913&home=http%3A%2F%2F192.168.1.20%3A4533"))
-        assertEquals(web, familyJoinUrl("https://example.com/octo", "alex", "482913", home = "http://192.168.1.20:4533"))
-        assertEquals(join, parseFamilyLink(familyAppLink(join)))
-
+    fun anInvitesHomeAddressIsReadInBothFormsAndThePathIsKept() {
         val invite = FamilyInviteLink("https://example.com/octo", "tok_1", home = "http://music.lan")
         assertEquals(invite, parseFamilyLink("https://example.com/octo/family/join#invite=tok_1&home=http%3A%2F%2Fmusic.lan"))
         assertEquals(invite, parseFamilyLink("octo://join?server=https%3A%2F%2Fexample.com%2Focto&invite=tok_1&home=http%3A%2F%2Fmusic.lan"))
         assertEquals(invite, parseFamilyLink(familyInviteUrl("https://example.com/octo", "tok_1", "http://music.lan")))
 
         // No home address, or one that is not an address, is no home at all.
-        assertNull(parseFamilyLink("https://example.com/family/join#u=alex&c=482913")!!.home)
-        assertNull(parseFamilyLink("https://example.com/family/join#u=alex&c=482913&home=")!!.home)
-        assertNull(parseFamilyLink("https://example.com/family/join#u=alex&c=482913&home=%3A%2F%2F")!!.home)
+        assertNull(parseFamilyLink("https://example.com/family/join#invite=t")!!.home)
+        assertNull(parseFamilyLink("https://example.com/family/join#invite=t&home=")!!.home)
+        assertNull(parseFamilyLink("https://example.com/family/join#invite=t&home=%3A%2F%2F")!!.home)
     }
 
     @Test

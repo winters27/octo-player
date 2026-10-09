@@ -1,6 +1,5 @@
 package app.winters.octo.ui.family
 
-import app.winters.octo.subsonic.FamilyDeviceKind
 import app.winters.octo.subsonic.FamilyRequest
 import app.winters.octo.subsonic.FamilyRequestOutcome
 import app.winters.octo.subsonic.FamilyRequestState
@@ -79,7 +78,7 @@ class FamilyModelTest {
         }
         model.refresh()
         assertTrue(model.manages)
-        assertEquals(FamilySection.entries, model.sections())
+        assertEquals(FamilySection.entries - FamilySection.Login, model.sections())
         assertEquals("Listener · 2 devices · Playing now · 1 request waiting", memberLine(model.info!!.manager!!.members.single()))
         assertEquals(listOf("r9"), model.inbox.map { it.id })
         assertEquals("Pending", server.called("getFamilyRequests").first { it.url.queryParameter("all") == "true" }.url.queryParameter("state"))
@@ -116,24 +115,27 @@ class FamilyModelTest {
     }
 
     @Test
-    fun cancellingSigningOutAndAddingADevice() = runBlocking {
+    fun cancellingAndRemovingADeviceFromTheList() = runBlocking {
         server.answer("cancelFamilyRequest") { """"familyRequest":${request("r1", "Cancelled")}""" }
         model.cancel("r1")
         until("cancelled") { model.said == "Request cancelled" }
 
-        server.answer("addFamilyDevice") {
-            """"familyDeviceAdded":{"deviceId":"d_9","kind":"OctoApp","appPassword":null,"pairCode":"482913","expires":"2026-10-20T18:15:00Z","server":"https://music.example.com","username":"alex"}"""
-        }
-        model.addDevice("Laptop", FamilyDeviceKind.OctoApp)
-        until("code shown") { model.sheet?.code != null }
-        assertEquals("482913", model.sheet?.code?.pairCode)
-        model.dismissAdded()
-        assertNull(model.sheet)
+        server.answer("forgetFamilyDevice") { "" }
+        model.forget(app.winters.octo.subsonic.FamilyDevice(id = "d_2", name = "Symfonium"))
+        until("removed") { model.said == "Symfonium is off the list" }
+        assertEquals("d_2", server.called("forgetFamilyDevice").single().url.queryParameter("id"))
+    }
 
-        server.answer("signOutFamilyDevice") { "" }
-        model.signOut(app.winters.octo.subsonic.FamilyDevice(id = "d_2", name = "Symfonium"))
-        until("signed out") { model.said == "Symfonium is signed out" }
-        assertEquals("d_2", server.called("signOutFamilyDevice").single().url.queryParameter("id"))
+    @Test
+    fun theLoginIsReadForTheYourLoginCard() = runBlocking {
+        server.answer("getFamilyLogin") {
+            """"familyLogin":{"username":"alex","servers":{"anywhere":"https://music.example.com","home":"http://192.168.1.20:4533"},"anywhereAvailable":true,"awayAllowed":true}"""
+        }
+        model.refresh()
+        assertEquals("alex", model.login!!.username)
+        assertEquals(FamilySection.Login, model.sections().first())
+        model.forget()
+        assertNull(model.login)
     }
 
     @Test
@@ -163,28 +165,17 @@ class FamilyModelTest {
     }
 
     @Test
-    fun aManagerAddsADeviceForAMemberWithNoPassword() = runBlocking {
-        server.answer("addFamilyDevice") { call ->
-            """"familyDeviceAdded":{"deviceId":"d_5","kind":"OctoApp","pairCode":"104729","username":"${call.url.queryParameter("username")}"}"""
-        }
-        model.addMemberDevice(app.winters.octo.subsonic.FamilyMember(username = "sam", displayName = "Sam"))
-        until("code shown") { model.sheet?.code != null }
-        assertEquals("104729", model.sheet!!.code!!.pairCode)
-        assertEquals("sam", model.sheet!!.code!!.username)
-        assertEquals("Add a device for Sam", model.sheet!!.title)
-        assertEquals("sam", server.called("addFamilyDevice").single().url.queryParameter("username"))
-        model.dismissAdded()
-        assertNull(model.sheet)
-        // Nothing asked the family page for a password.
-        assertTrue(server.called("auth").isEmpty())
-    }
-
-    @Test
-    fun aDeviceAddedWithACodeHasAnHttpsLink() {
-        val added = app.winters.octo.subsonic.FamilyDeviceAdded(kind = app.winters.octo.subsonic.FamilyDeviceKind.OctoApp, pairCode = "482913", username = "alex")
-        assertEquals("https://music.example.com/family/join#u=alex&c=482913", addedDeviceLink(added, "https://music.example.com"))
-        assertEquals("https://other.example.com/family/join#u=alex&c=482913", addedDeviceLink(added.copy(server = "https://other.example.com"), "https://music.example.com"))
-        assertNull(addedDeviceLink(added.copy(pairCode = null, appPassword = "ABCD"), "https://music.example.com"))
+    fun aManagerResetsAPasswordAndGetsANewSignInLink() = runBlocking {
+        server.raw("reset") { """{"inviteLink":"https://music.example.com/family/join#invite=r1","expires":"2026-10-27T18:00:00Z"}""" }
+        model.resetPassword(app.winters.octo.subsonic.FamilyMember(username = "sam", displayName = "Sam"))
+        until("link shown") { model.invite != null }
+        assertEquals("New sign-in link for Sam", model.invite!!.title)
+        assertEquals("https://music.example.com/family/join#invite=r1", model.invite!!.url)
+        until("said") { model.said == "Sam's password no longer works" }
+        // Send a new link asks for another reset link, not an invite.
+        model.sendNewLink()
+        until("second link") { server.called("reset").size == 2 }
+        assertTrue(server.called("invite").isEmpty())
     }
 
     @Test

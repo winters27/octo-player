@@ -564,6 +564,19 @@ class SubsonicClient(
     // for an admin. The password goes in a form body, never in the
     // address, which proxies and servers write to their logs. When it is
     // the signed-in user's own, this client signs in with it from then on.
+    // A family member's own password, which the server checks against the
+    // current one. Every app then needs the new one; this client switches
+    // to it at once.
+    suspend fun changeFamilyPassword(current: String, next: String) {
+        postForm("changeFamilyPassword", listOf("current" to current, "next" to next))
+        val now = credentials
+        if (now.mode != AuthMode.ApiKey) credentials = Credentials(now.username, next, now.mode)
+    }
+
+    // What this client signs in with, for sealing into a hand-over to the
+    // same person's other device. Never logged or sent anywhere else.
+    fun handOverSecret(): String = credentials.handOverSecret()
+
     suspend fun changePassword(username: String, newPassword: String) {
         postForm("changePassword", listOf("username" to username, "password" to newPassword))
         val now = credentials

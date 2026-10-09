@@ -3,7 +3,6 @@ package app.winters.octo.ui.family
 import app.winters.octo.subsonic.AddToLibrary
 import app.winters.octo.subsonic.FamilyAbilities
 import app.winters.octo.subsonic.FamilyDevice
-import app.winters.octo.subsonic.FamilyDeviceKind
 import app.winters.octo.subsonic.FamilyMe
 import app.winters.octo.subsonic.FamilyMember
 import app.winters.octo.subsonic.FamilyPreset
@@ -20,6 +19,16 @@ import java.util.Locale
 // The family's words, the same on the phone and the desktop.
 const val FAMILY = "Family"
 const val MY_PLAN = "My plan"
+const val YOUR_LOGIN = "Your login"
+const val USE_IN_ANY_APP = "Use this in any app"
+const val CHANGE_PASSWORD = "Change password"
+const val SIGN_OUT_EVERYWHERE = "Sign out everywhere"
+const val SIGN_OUT_EVERYWHERE_LINE = "Changing your password signs out every app and device. Each one then needs the new password."
+const val REMOVE_FROM_LIST = "Remove from list"
+const val RESET_PASSWORD = "Reset password"
+const val PASSWORD_LINE = "The one you chose"
+const val OPEN_IN_OCTO = "Open in Octo"
+const val HOME_ONLY_LOGIN = "You can listen only on your home network, so only the home address works."
 const val SAVED = "Saved"
 const val REQUESTS = "Requests"
 const val DEVICES = "Devices"
@@ -28,7 +37,6 @@ const val REQUESTS_WAITING = "Requests waiting"
 const val REQUEST_A_COPY = "Request a copy"
 const val SAVE = "Save"
 const val REMOVE_FROM_MY_LIBRARY = "Remove from my library"
-const val JOIN_WITH_A_FAMILY_CODE = "Join with a family code"
 const val OFFLINE_COPIES_OFF = "Offline copies are off for this account"
 
 fun roleLabel(role: FamilyRole): String = when (role) {
@@ -179,16 +187,10 @@ fun requestKindLine(request: FamilyRequest): String {
 fun requestTitle(request: FamilyRequest): String =
     listOf(request.title, request.artist).filter(String::isNotBlank).joinToString(" · ").ifEmpty { request.target }
 
-fun deviceKindLabel(kind: FamilyDeviceKind): String = when (kind) {
-    FamilyDeviceKind.OctoApp -> "Octo app"
-    FamilyDeviceKind.SubsonicApp -> "Other music app"
-    FamilyDeviceKind.NavidromeWeb -> "Web player"
-    FamilyDeviceKind.Detected -> "Seen by the server"
-}
 
 // A device's second line: the app, home or away, and what it plays.
 fun deviceLine(device: FamilyDevice): String = buildList {
-    add(device.app.ifBlank { deviceKindLabel(device.kind) })
+    add(device.app.ifBlank { "A music app" })
     add(if (device.place == FamilyPlace.Away) "Away" else "Home")
     device.playing?.let { playing -> add("Playing ${listOf(playing.title, playing.artist).filter(String::isNotBlank).joinToString(" by ")}") }
 }.joinToString(" · ")

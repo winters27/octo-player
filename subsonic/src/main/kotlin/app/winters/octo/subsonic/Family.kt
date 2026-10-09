@@ -4,10 +4,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import okhttp3.HttpUrl
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.io.IOException
 
 // The OpenSubsonic extension an Octo server lists while Family is on: one
 // owner, members with their own libraries and devices, and the abilities
@@ -54,10 +50,7 @@ enum class FamilyRequestState { Pending, Approved, Declined, Cancelled, Done, Fa
 @Serializable
 enum class FamilyRequestOutcome { Downloaded, AlreadyShared, AddedFromFamily }
 
-@Serializable
-enum class FamilyDeviceKind { OctoApp, SubsonicApp, NavidromeWeb, Detected }
-
-// The platform a paired Octo app runs on, as the pairing call names it.
+// The platform an Octo app runs on, as a sign-in hand-over names it.
 enum class FamilyPlatform(val wire: String) {
     Android("Android"),
     Windows("Windows"),
@@ -215,16 +208,15 @@ data class FamilyDevicePlaying(
     val artist: String = "",
 )
 
-// One signed-in device: an Octo app, another Subsonic app, the web player,
-// or one the server noticed by itself.
+// One device the account signed in from, noticed by the server: an Octo
+// app, another Subsonic app, or the web player.
 @Serializable
 data class FamilyDevice(
     val id: String = "",
     val username: String = "",
     val name: String = "",
-    val kind: FamilyDeviceKind = FamilyDeviceKind.Detected,
     val app: String = "",
-    val created: String = "",
+    val firstSeen: String = "",
     val lastSeen: String = "",
     val place: FamilyPlace = FamilyPlace.Home,
     // Null while idle.
@@ -238,44 +230,17 @@ data class FamilyDevice(
 @Serializable
 internal data class FamilyDevices(val device: List<FamilyDevice> = emptyList())
 
-// A device added by hand. An Octo app gets a 6 digit pair code that
-// expires; any other Subsonic app gets an app password, shown only once.
+// A member's one login: the username, and the server's addresses (the
+// outside one, which works anywhere, and the home one). It works in any
+// Subsonic app as well as Octo.
 @Serializable
-data class FamilyDeviceAdded(
-    val deviceId: String = "",
-    val kind: FamilyDeviceKind = FamilyDeviceKind.SubsonicApp,
-    val appPassword: String? = null,
-    val pairCode: String? = null,
-    val expires: String? = null,
-    val server: String? = null,
+data class FamilyLogin(
     val username: String = "",
-    // The server's home network address, carried in the join link so a
-    // device at home can pair when the public one does not loop back.
-    val home: String? = null,
-    // The join link as the server made it, when it gives one: the default.
-    val link: String? = null,
-    // The same code's link two ways: through the outside address, which
-    // works anywhere (null until the server has one), and the home one.
-    val links: FamilyLinkChoices? = null,
+    val servers: FamilyLinkChoices = FamilyLinkChoices(),
     val anywhereAvailable: Boolean = true,
-    // The server has no public address yet: the link works only at home.
-    val homeOnly: Boolean = false,
-) {
-    // Never print the password or the code, even by accident in a log.
-    override fun toString() = "FamilyDeviceAdded(deviceId=$deviceId, kind=$kind, username=$username)"
-}
-
-// What pairing with a family code answers: the account and the secret
-// this device signs in with from now on, as a password.
-@Serializable
-data class FamilyPair(
-    val username: String = "",
-    val secret: String = "",
-    val deviceId: String = "",
-    val server: String? = null,
-) {
-    override fun toString() = "FamilyPair(username=$username, deviceId=$deviceId, server=$server)"
-}
+    // Whether this member may listen away from home at all.
+    val awayAllowed: Boolean = true,
+)
 
 // The signed-in account's place in the family, with the whole family for
 // a manager.
@@ -343,26 +308,12 @@ suspend fun SubsonicClient.familyDevices(all: Boolean = false): List<FamilyDevic
         FamilyDevices(),
     ).device
 
-suspend fun SubsonicClient.signOutFamilyDevice(id: String) = send("signOutFamilyDevice", listOf("id" to id))
+// Takes a device off the account's list. It comes back if it signs in again;
+// signing a device out is done by changing the password.
+suspend fun SubsonicClient.forgetFamilyDevice(id: String) = send("forgetFamilyDevice", listOf("id" to id))
 
-// Adds a device by hand: an Octo app (a pair code) or another Subsonic app
-// (an app password). A manager may name a member (`username`) and gets
-// that member's code or password.
-// `replaces` names a pair code made earlier for the same popup: the server
-// ends it, if it is still unused, before making the new one, so only one
-// code is live at a time.
-suspend fun SubsonicClient.addFamilyDevice(name: String, kind: FamilyDeviceKind, username: String? = null, replaces: String? = null): FamilyDeviceAdded =
-    get(
-        "addFamilyDevice",
-        buildMap {
-            put("name", name.trim())
-            put("kind", kind.name)
-            username?.trim()?.takeIf(String::isNotEmpty)?.let { put("username", it) }
-            replaces?.takeIf(String::isNotBlank)?.let { put("replaces", it) }
-        },
-        "familyDeviceAdded",
-        FamilyDeviceAdded.serializer(),
-    )
+// The signed-in member's login, for the Your login card.
+suspend fun SubsonicClient.familyLogin(): FamilyLogin = get("getFamilyLogin", key = "familyLogin", serializer = FamilyLogin.serializer())
 
 // Sets the account's own audio quality at home, away, or both; left out
 // keeps what it is. Answers the quality as the server now has it.
@@ -398,39 +349,6 @@ suspend fun SubsonicClient.createFamilyPlaylist(name: String, approveAdditions: 
         "playlist",
         PlaylistWithSongs.serializer(),
     )
-
-// Pairs this device with a family code. The call is open: no sign-in goes
-// with it, since the device has none yet. The answer's secret is the
-// password this device signs in with from now on.
-suspend fun pairWithFamilyCode(
-    server: HttpUrl,
-    http: OkHttpClient,
-    username: String,
-    code: String,
-    deviceName: String,
-    platform: FamilyPlatform,
-    clientName: String = "Octo",
-): FamilyPair {
-    val url = server.newBuilder()
-        .addPathSegment("rest")
-        .addPathSegment("octoFamilyPair")
-        .addQueryParameter("v", API_VERSION)
-        .addQueryParameter("c", clientName)
-        .addQueryParameter("f", "json")
-        .addQueryParameter("username", username.trim())
-        .addQueryParameter("code", code.filter(Char::isDigit))
-        .addQueryParameter("deviceName", deviceName.trim())
-        .addQueryParameter("platform", platform.wire)
-        .build()
-    val body = try {
-        http.newCall(Request.Builder().url(url).build()).awaitBody("octoFamilyPair")
-    } catch (e: IOException) {
-        throw SubsonicException.Unreachable(e)
-    }
-    // A client only for reading the answer: it never makes a call.
-    val reader = SubsonicClient(server, Credentials(username, ""), http)
-    return withContext(Dispatchers.Default) { reader.decode(body, "familyPair", FamilyPair.serializer(), null) }
-}
 
 internal suspend fun okhttp3.Call.awaitBody(endpoint: String): String {
     val response = await()

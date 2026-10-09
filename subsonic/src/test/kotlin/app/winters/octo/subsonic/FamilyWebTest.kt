@@ -1,5 +1,6 @@
 package app.winters.octo.subsonic
 
+import org.junit.Assert.assertNull
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -30,12 +31,10 @@ class FamilyWebTest {
     )
 
     @Test
-    fun anInviteIsAcceptedAndTheDeviceGetsACode() = runTest {
+    fun anInviteIsAcceptedWithTheChosenPassword() = runTest {
         answer("""{"username":"alex"}""", cookie = "octo_family=s1; Path=/; HttpOnly")
-        answer("""{"deviceId":"d_1","kind":"OctoApp","pairCode":"482913","expires":"2026-10-20T18:15:00Z","username":"alex"}""")
         val web = web()
         assertEquals("alex", web.join("tok_1", "a long password", " Alex "))
-        assertEquals("482913", web.addMyDevice("Pixel 9", FamilyDeviceKind.OctoApp).pairCode)
 
         val joined = server.takeRequest()
         assertEquals("POST", joined.method)
@@ -43,12 +42,8 @@ class FamilyWebTest {
         assertEquals("1", joined.headers["X-Octo-Family"])
         val body = joined.body!!.utf8()
         assertTrue(body.contains("\"token\":\"tok_1\""))
+        assertTrue(body.contains("\"password\":\"a long password\""))
         assertTrue(body.contains("\"displayName\":\"Alex\""))
-        val device = server.takeRequest()
-        assertEquals("/api/family/me/devices", device.url.encodedPath)
-        // Signed in by the cookie the invite set.
-        assertEquals("octo_family=s1", device.headers["Cookie"])
-        assertTrue(device.body!!.utf8().contains("\"kind\":\"OctoApp\""))
     }
 
     @Test
@@ -69,15 +64,13 @@ class FamilyWebTest {
         assertEquals("/api/family/members/sam", edit.url.encodedPath)
         assertEquals("""{"edits":{"away":false}}""", edit.body!!.utf8())
 
-        answer("""{"deviceId":"d_5","kind":"OctoApp","pairCode":"104729","username":"sam smith"}""")
-        assertEquals("104729", web().addMemberDevice("sam smith", "Tablet", FamilyDeviceKind.OctoApp).pairCode)
-        val device = server.takeRequest()
-        assertEquals("/api/family/members/sam%20smith/devices", device.url.encodedPath)
-        assertTrue(device.body!!.utf8().contains("\"name\":\"Tablet\""))
-
-        answer("""{"deviceId":"d_6","kind":"OctoApp","pairCode":"220431","username":"sam smith"}""")
-        web().addMemberDevice("sam smith", "Tablet", FamilyDeviceKind.OctoApp, replaces = "d_5")
-        assertTrue(server.takeRequest().body!!.utf8().contains("\"replaces\":\"d_5\""))
+        answer("""{"inviteLink":"https://music.example.com/family/join#invite=r1","links":{"anywhere":"https://music.example.com/family/join#invite=r1","home":null},"expires":"2026-10-27T18:00:00Z"}""")
+        val reset = web().resetMember("sam smith")
+        assertEquals("https://music.example.com/family/join#invite=r1", reset.inviteLink)
+        assertEquals("2026-10-27T18:00:00Z", reset.expires)
+        val resetCall = server.takeRequest()
+        assertEquals("POST", resetCall.method)
+        assertEquals("/api/family/members/sam%20smith/reset", resetCall.url.encodedPath)
 
         answer("""{"inviteLink":"https://music.example.com/family/join#invite=t10","homeOnly":true}""")
         val fresh = web().newInvite("sam smith")
@@ -99,7 +92,7 @@ class FamilyWebTest {
         }
         answer("", code = 401)
         try {
-            web().addMyDevice("Phone", FamilyDeviceKind.OctoApp)
+            web().resetMember("sam")
             fail("A call the server refuses must not pass")
         } catch (e: SubsonicException.WrongCredentials) {
             assertEquals("The server did not take this sign-in for that.", e.message)
@@ -126,12 +119,66 @@ class FamilyWebTest {
 
     @Test
     fun aServerBehindAPathKeepsItInEveryCall() = runTest {
-        answer("""{"deviceId":"d_1","kind":"OctoApp","pairCode":"482913","username":"alex"}""")
-        FamilyWeb(server.url("/octo"), OkHttpClient()).addMyDevice("Phone", FamilyDeviceKind.OctoApp)
-        assertEquals("/octo/api/family/me/devices", server.takeRequest().url.encodedPath)
+        answer("""{"id":"r_1"}""")
+        FamilyWeb(server.url("/octo"), OkHttpClient()).redeemSignIn("tok", "Phone", FamilyPlatform.Android)
+        assertEquals("/octo/api/family/signin/redeem", server.takeRequest().url.encodedPath)
+        answer("""{"inviteLink":"x"}""")
+        FamilyWeb(server.url("/octo/"), OkHttpClient()).resetMember("sam")
+        assertEquals("/octo/api/family/members/sam/reset", server.takeRequest().url.encodedPath)
+    }
 
-        answer("""{"subsonic-response":{"status":"ok","version":"1.16.1","familyPair":{"username":"alex","secret":"s3cret-s3cret-s3cret","deviceId":"d_1"}}}""")
-        pairWithFamilyCode(server.url("/octo/"), OkHttpClient(), "alex", "482913", "Phone", FamilyPlatform.Android)
-        assertEquals("/octo/rest/octoFamilyPair", server.takeRequest().url.encodedPath)
+    @Test
+    fun aHandOverIsStartedDecidedAndSealedBySignedCalls() = runTest {
+        val client = SubsonicClient(server.url("/"), Credentials("alex", "pw"), OkHttpClient())
+        val web = client.familyWeb()
+        answer("""{"token":"tok_9","expires":"2026-10-20T18:02:00Z","links":{"anywhere":"https://music.example.com","home":"http://192.168.1.20:4533"},"anywhereAvailable":true}""")
+        val start = web.startSignIn()
+        assertEquals("tok_9", start.token)
+        assertEquals("http://192.168.1.20:4533", start.links.home)
+        assertFalse(start.toString().contains("tok_9"))
+        assertEquals("/api/family/signin/start", server.takeRequest().url.encodedPath)
+
+        // Nobody yet: the server answers 204.
+        server.enqueue(MockResponse.Builder().code(204).build())
+        assertNull(web.signInPending("tok_9"))
+        val waiting = server.takeRequest()
+        assertEquals("GET", waiting.method)
+        assertEquals("/api/family/signin/tok_9/pending", waiting.url.encodedPath)
+        assertEquals("alex", waiting.url.queryParameter("u"))
+
+        answer("""{"id":"r_1","deviceName":"Pixel 9","platform":"Android"}""")
+        assertEquals(FamilySignInPending("r_1", "Pixel 9", "Android"), web.signInPending("tok_9"))
+        server.takeRequest()
+
+        server.enqueue(MockResponse.Builder().code(204).build())
+        web.decideSignIn("tok_9", allow = true)
+        val decide = server.takeRequest()
+        assertEquals("/api/family/signin/tok_9/decide", decide.url.encodedPath)
+        assertEquals("""{"allow":true}""", decide.body!!.utf8())
+
+        server.enqueue(MockResponse.Builder().code(204).build())
+        web.putSignInBox("tok_9", "c2VhbGVk")
+        val box = server.takeRequest()
+        assertEquals("/api/family/signin/tok_9/box", box.url.encodedPath)
+        assertEquals("""{"box":"c2VhbGVk"}""", box.body!!.utf8())
+    }
+
+    @Test
+    fun theNewDeviceRedeemsAndWaitsWithNoSignIn() = runTest {
+        answer("""{"id":"r_1"}""")
+        answer("""{"state":"Waiting"}""")
+        answer("""{"state":"Allowed","box":"c2VhbGVk"}""")
+        val web = web()
+        assertEquals("r_1", web.redeemSignIn("tok_9", " Pixel 9 ", FamilyPlatform.Android))
+        val redeem = server.takeRequest()
+        assertEquals("POST", redeem.method)
+        assertEquals("""{"token":"tok_9","deviceName":"Pixel 9","platform":"Android"}""", redeem.body!!.utf8())
+        assertNull(redeem.url.queryParameter("u"))
+        assertEquals(FamilySignInState.Waiting, web.signInStatus("r_1").state)
+        val allowed = web.signInStatus("r_1")
+        assertEquals(FamilySignInState.Allowed, allowed.state)
+        assertEquals("c2VhbGVk", allowed.box)
+        assertFalse(allowed.toString().contains("c2VhbGVk"))
+        assertEquals("/api/family/signin/redeem/r_1", server.takeRequest().url.encodedPath)
     }
 }

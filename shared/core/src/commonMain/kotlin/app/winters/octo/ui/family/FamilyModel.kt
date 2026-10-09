@@ -10,29 +10,27 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.FamilyDevice
-import app.winters.octo.subsonic.FamilyDeviceAdded
-import app.winters.octo.subsonic.FamilyDeviceKind
 import app.winters.octo.subsonic.FamilyInfo
 import app.winters.octo.subsonic.FamilyMe
 import app.winters.octo.subsonic.FamilyMember
 import app.winters.octo.subsonic.FamilyPreset
 import app.winters.octo.subsonic.FamilyWeb
-import app.winters.octo.subsonic.familyJoinUrl
 import app.winters.octo.subsonic.FamilyRequest
 import app.winters.octo.subsonic.FamilyRequestState
 import app.winters.octo.subsonic.RequestQuality
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
-import app.winters.octo.subsonic.addFamilyDevice
 import app.winters.octo.subsonic.cancelFamilyRequest
 import app.winters.octo.subsonic.decideFamilyRequest
 import app.winters.octo.subsonic.family
+import app.winters.octo.subsonic.FamilyLogin
+import app.winters.octo.subsonic.familyLogin
+import app.winters.octo.subsonic.forgetFamilyDevice
 import app.winters.octo.subsonic.familyDevices
 import app.winters.octo.subsonic.familyRequests
 import app.winters.octo.subsonic.removeFromMyLibrary
 import app.winters.octo.subsonic.requestCopy
-import app.winters.octo.subsonic.signOutFamilyDevice
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -49,6 +47,7 @@ data class SavedOutside(val songs: List<Song> = emptyList(), val albums: List<Al
 
 // The parts of the Family view, in the order they show.
 enum class FamilySection(val title: String, val managersOnly: Boolean = false) {
+    Login(YOUR_LOGIN),
     Plan(MY_PLAN),
     Saved(SAVED),
     Requests(REQUESTS),
@@ -69,11 +68,19 @@ class FamilyModel(
     // notices do not tell it again.
     private val answered: (FamilyRequest) -> Unit = {},
     private val pollMs: Long = FAMILY_POLL_MS,
-    // The time now in milliseconds, and how often an open Add a device
-    // popup looks at its code's expiry.
+    // The time now in milliseconds, and how often the sign-in QR code looks
+    // at its token's expiry.
     private val clock: () -> Long = System::currentTimeMillis,
     private val tickMs: Long = 250,
 ) {
+    // "Sign in on another device": the QR code and the device asking.
+    val handOver = HandOverSource(client, scope, { info?.me?.displayName.orEmpty() }, clock, tickMs)
+
+    // The member's one login, for the Your login card; null until read, and
+    // for accounts the family does not manage.
+    var login by mutableStateOf<FamilyLogin?>(null)
+        private set
+
     var info by mutableStateOf<FamilyInfo?>(null)
         private set
 
@@ -93,19 +100,6 @@ class FamilyModel(
         private set
 
     var saved by mutableStateOf(SavedOutside())
-        private set
-
-    // The Add a device popup while it is open: the pair code or app
-    // password, shown once, and the member it is for when a manager adds
-    // one for someone else.
-    var sheet by mutableStateOf<DeviceSheet?>(null)
-        private set
-    private var sheets = 0
-    private var renewing: Job? = null
-
-    // Whether the window or app is on screen; a code is only renewed while
-    // someone could be looking at it.
-    var onScreen by mutableStateOf(true)
         private set
 
     // What the server said about the last thing asked, in its own words.
@@ -139,6 +133,7 @@ class FamilyModel(
     // The sections this account sees.
     fun sections(): List<FamilySection> = FamilySection.entries.filter { section ->
         when (section) {
+            FamilySection.Login -> login != null
             FamilySection.Members -> manages
             FamilySection.Inbox -> approves
             else -> true
@@ -170,7 +165,8 @@ class FamilyModel(
         inbox = emptyList()
         devices = emptyList()
         saved = SavedOutside()
-        dismissAdded()
+        login = null
+        handOver.close()
         said = null
         invite = null
     }
@@ -221,10 +217,12 @@ class FamilyModel(
                 val mineDevices = async { client.familyDevices() }
                 val waiting = async { if (read.me.abilities.approveRequests) client.familyRequests(all = true, state = FamilyRequestState.Pending) else emptyList() }
                 val starred = async { runCatching { client.starred() }.getOrNull() }
+                val own = async { runCatching { client.familyLogin() }.getOrNull() }
                 requests = mine.await()
                 devices = mineDevices.await()
                 inbox = waiting.await()
                 starred.await()?.let { found -> saved = SavedOutside(found.song.filter { it.isExternal }, found.album.filter { it.isExternal }) }
+                login = own.await()
             }
         } catch (e: SubsonicException.Unreachable) {
             problem = "Octo can't reach the server right now."
@@ -263,140 +261,12 @@ class FamilyModel(
 
     fun decline(id: String, note: String? = null) = act { decideFamilyRequest(id, approve = false, note = note).let { "Declined ${requestTitle(it)}" } }
 
-    fun signOut(device: FamilyDevice) = act {
-        signOutFamilyDevice(device.id)
-        "${device.name.ifBlank { "The device" }} is signed out"
+    // Takes a device off the list. It comes back if it signs in again; to
+    // sign every device out, the member changes their password.
+    fun forget(device: FamilyDevice) = act {
+        forgetFamilyDevice(device.id)
+        "${device.name.ifBlank { "The device" }} is off the list"
     }
-
-    // A new device: an Octo app gets a pair code, any other app a password.
-    // The popup opens at once and fills in when the server answers.
-    fun addDevice(name: String, kind: FamilyDeviceKind) =
-        openSheet(DeviceSheet(deviceName = name.trim(), view = viewFor(kind), awayAllowed = me?.abilities?.away != false))
-
-    // A manager's new device for a member: that member's pair code or app
-    // password, shown as for one's own.
-    fun addMemberDevice(member: FamilyMember, kind: FamilyDeviceKind = FamilyDeviceKind.OctoApp, name: String = "") = openSheet(
-        DeviceSheet(
-            forName = member.displayName.ifBlank { member.username },
-            forUsername = member.username,
-            deviceName = name.trim(),
-            view = viewFor(kind),
-            awayAllowed = member.username !in keptHome,
-        ),
-    )
-
-    // After an hour open the popup stops renewing its code and asks;
-    // this starts it again with a fresh code.
-    fun newCode() {
-        val open = sheet ?: return
-        sheet = open.copy(openedAt = clock(), stale = false, refreshFailed = false)
-        fetch(DeviceSheetView.Code)
-        renew(open.id)
-    }
-
-    // The window or app shown or hidden: renewing pauses while hidden, and
-    // a code that expired meanwhile is replaced on return.
-    fun sheetOnScreen(visible: Boolean) {
-        onScreen = visible
-    }
-
-    // The app password view, for Symfonium or another app. Its password is
-    // made the first time it is asked for.
-    fun showOtherApps() = switchTo(DeviceSheetView.OtherApps)
-
-    fun backToCode() = switchTo(DeviceSheetView.Code)
-
-    // Asks again for what failed.
-    fun retrySheet() {
-        val open = sheet ?: return
-        fetch(open.view)
-    }
-
-    // The code or password has been seen; it is never shown again.
-    fun dismissAdded() {
-        renewing?.cancel()
-        renewing = null
-        sheet = null
-    }
-
-    private fun viewFor(kind: FamilyDeviceKind) = if (kind == FamilyDeviceKind.OctoApp) DeviceSheetView.Code else DeviceSheetView.OtherApps
-
-    private fun openSheet(open: DeviceSheet) {
-        sheets += 1
-        sheet = open.copy(id = sheets, openedAt = clock())
-        fetch(open.view)
-        renew(sheets)
-    }
-
-    // While the popup is open and on screen, a pair code is replaced a few
-    // seconds before it expires, ending the old one, so the QR code on
-    // screen always works. A failed try is made again every 10 seconds.
-    // After an hour open it stops and asks instead, so codes never pile up.
-    private fun renew(id: Int) {
-        renewing?.cancel()
-        renewing = scope.launch {
-            while (isActive) {
-                val open = sheet?.takeIf { it.id == id } ?: return@launch
-                val code = open.code
-                val due = when {
-                    !onScreen || open.loading || open.stale || code == null -> null
-                    open.refreshFailed -> open.retryAt
-                    else -> expiresAtMs(code.expires)?.minus(RENEW_LEAD_MS)
-                }
-                if (due != null && clock() >= due) {
-                    if (clock() - open.openedAt >= RENEW_FOR_MS) {
-                        sheet = open.copy(stale = true, refreshFailed = false)
-                        return@launch
-                    }
-                    replaceCode(open, code!!)
-                }
-                delay(tickMs)
-            }
-        }
-    }
-
-    private suspend fun replaceCode(open: DeviceSheet, old: FamilyDeviceAdded) {
-        val client = client() ?: return
-        sheet = open.copy(loading = true)
-        val got = runCatching {
-            client.addFamilyDevice(deviceNameOr(open.deviceName, FamilyDeviceKind.OctoApp), FamilyDeviceKind.OctoApp, username = open.forUsername, replaces = old.deviceId)
-        }
-        val now = sheet?.takeIf { it.id == open.id } ?: return
-        sheet = got.fold(
-            { now.copy(code = it, loading = false, refreshFailed = false, renewed = now.renewed + 1) },
-            { now.copy(loading = false, refreshFailed = true, retryAt = clock() + RENEW_RETRY_MS) },
-        )
-    }
-
-    private fun switchTo(view: DeviceSheetView) {
-        val open = sheet ?: return
-        sheet = open.copy(view = view, error = null)
-        if (open.loading) return
-        if ((view == DeviceSheetView.Code && open.code == null) || (view == DeviceSheetView.OtherApps && open.password == null)) fetch(view)
-    }
-
-    // Asks the server for a pair code or an app password for the popup
-    // that is open, and fills it in; an answer for a popup since closed is
-    // dropped.
-    private fun fetch(view: DeviceSheetView) {
-        val client = client() ?: return
-        val asked = sheet ?: return
-        val kind = if (view == DeviceSheetView.Code) FamilyDeviceKind.OctoApp else FamilyDeviceKind.SubsonicApp
-        // A code asked for again ends the one it replaces.
-        val replaces = if (view == DeviceSheetView.Code) asked.code?.deviceId else null
-        sheet = asked.copy(loading = true, error = null)
-        scope.launch {
-            val got = runCatching { client.addFamilyDevice(deviceNameOr(asked.deviceName, kind), kind, username = asked.forUsername, replaces = replaces) }
-            val now = sheet?.takeIf { it.id == asked.id } ?: return@launch
-            sheet = got.fold(
-                { if (view == DeviceSheetView.Code) now.copy(code = it, loading = false) else now.copy(password = it, loading = false) },
-                { now.copy(loading = false, error = if (now.view != view) null else if (view == DeviceSheetView.Code) CODE_FAILED else PASSWORD_FAILED) },
-            )
-            if (got.isSuccess) refresh()
-        }
-    }
-
-    private fun deviceNameOr(name: String, kind: FamilyDeviceKind) = name.ifBlank { if (kind == FamilyDeviceKind.OctoApp) "Octo app" else "Music app" }
 
     // Takes a song out of this member's own library.
     fun removeFromMyLibrary(id: String, title: String) = act {
@@ -433,13 +303,31 @@ class FamilyModel(
     // offer only the home link.
     private var keptHome = emptySet<String>()
 
+    // A manager resets a member's password: it stops working at once, and
+    // a new sign-up link shows in the invite popup for them to choose another.
+    fun resetPassword(member: FamilyMember) = manage { web ->
+        val fresh = web.resetMember(member.username)
+        val name = member.displayName.ifBlank { member.username }
+        invite = InviteSheet(
+            name,
+            member.username,
+            fresh.inviteLink,
+            links = fresh.links,
+            anywhereAvailable = fresh.anywhereAvailable,
+            homeOnly = fresh.homeOnly,
+            awayAllowed = member.username !in keptHome,
+            reset = true,
+        )
+        "$name's password no longer works"
+    }
+
     // A new link for the invite that is open, in place of the last one.
     fun sendNewLink() {
         val client = client() ?: return
         val asked = invite ?: return
         invite = asked.copy(loading = true, error = null)
         scope.launch {
-            val got = runCatching { client.familyWeb().newInvite(asked.username) }
+            val got = runCatching { if (asked.reset) client.familyWeb().resetMember(asked.username) else client.familyWeb().newInvite(asked.username) }
             val now = invite?.takeIf { it.username == asked.username } ?: return@launch
             invite = got.fold(
                 { now.copy(url = it.inviteLink, links = it.links, anywhereAvailable = it.anywhereAvailable, homeOnly = it.homeOnly, loading = false) },
@@ -490,15 +378,6 @@ class FamilyModel(
             refresh()
         }
     }
-}
-
-// The https link for a device just added with a pair code, which any
-// camera opens, with the home address when the server names one; null for
-// an app password, which has no link. The server's own link wins.
-fun addedDeviceLink(added: FamilyDeviceAdded, server: String): String? {
-    val code = added.pairCode ?: return null
-    added.link?.takeIf(String::isNotBlank)?.let { return it }
-    return familyJoinUrl(added.server?.takeIf(String::isNotBlank) ?: server, added.username, code, added.home)
 }
 
 // How often the open view reads the server again.

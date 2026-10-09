@@ -7,7 +7,6 @@ import app.winters.octo.subsonic.AddToLibrary
 import app.winters.octo.subsonic.FamilyAbilities
 import app.winters.octo.subsonic.FamilyDevice
 import app.winters.octo.subsonic.FamilyDevicePlaying
-import app.winters.octo.subsonic.FamilyDeviceKind
 import app.winters.octo.subsonic.FamilyMe
 import app.winters.octo.subsonic.FamilyPlace
 import app.winters.octo.subsonic.FamilyPlatform
@@ -202,7 +201,7 @@ class FamilyRulesTest {
 
     @Test
     fun aLinkMakesAQrCodeThatReadsBack() {
-        val link = app.winters.octo.subsonic.familyJoinUrl("https://music.example.com", "alex", "482913")
+        val link = app.winters.octo.subsonic.familySignInUrl("https://music.example.com", "tok_1", "a-key_of-43-characters-made-for-this-test-0", "https://music.example.com")
         val code = qrCode(link)
         // Drawn four squares to a module with a light border, as the apps draw it.
         val scale = 4
@@ -212,7 +211,7 @@ class FamilyRulesTest {
             for (dy in 0 until scale) for (dx in 0 until scale) pixels[((y + 4) * scale + dy) * side + (x + 4) * scale + dx] = 0xFF000000.toInt()
         }
         assertEquals(link, readQr(pixels, side, side))
-        assertEquals(app.winters.octo.subsonic.FamilyJoinLink("https://music.example.com", "alex", "482913"), familyLinkInQr(readQr(pixels, side, side)))
+        assertEquals(app.winters.octo.subsonic.FamilyHandOverLink("https://music.example.com", "tok_1", "a-key_of-43-characters-made-for-this-test-0", "https://music.example.com"), familyLinkInQr(readQr(pixels, side, side)))
         // Light on dark reads too.
         val inverted = IntArray(pixels.size) { pixels[it] xor 0x00FFFFFF }
         assertEquals(link, readQr(inverted, side, side))
@@ -225,20 +224,43 @@ class FamilyRulesTest {
     }
 
     @Test
-    fun anInviteJoinsThenPairsThisDevice() = runBlocking {
+    fun anInviteSignsUpWithTheChosenPassword() = runBlocking {
         FamilyFakeServer().use { server ->
             server.raw("join") { """{"username":"alex"}""" }
-            server.raw("devices") { """{"deviceId":"d_1","kind":"OctoApp","pairCode":"482913","username":"alex"}""" }
-            server.answer("octoFamilyPair") { """"familyPair":{"username":"alex","secret":"abcdefghijklmnopqrstuvwxyz012345","deviceId":"d_1"}""" }
             assertEquals("Choose a password of at least 8 characters", inviteProblem("Alex", "short", "short"))
             assertEquals("The two passwords are not the same", inviteProblem("Alex", "long enough", "long enougH"))
             assertEquals("Type your name", inviteProblem(" ", "long enough", "long enough"))
+            assertEquals("That password is too long", inviteProblem("Alex", "x".repeat(1025), "x".repeat(1025)))
             assertNull(inviteProblem("Alex", "long enough", "long enough"))
-            val joined = joinWithInvite(server.url, "tok_1", "Alex", "long enough", "Pixel 9", FamilyPlatform.Android, OkHttpClient())
-            assertEquals("abcdefghijklmnopqrstuvwxyz012345", (joined as JoinOutcome.Paired).pair.secret)
-            assertEquals("482913", server.called("octoFamilyPair").single().url.queryParameter("code"))
-            assertEquals("Pixel 9", server.called("octoFamilyPair").single().url.queryParameter("deviceName"))
+            val joined = joinWithInvite(server.url, "tok_1", "Alex", "long enough", OkHttpClient()) as JoinOutcome.SignedUp
+            // The username and the password chosen, to sign in with like any typed one.
+            assertEquals("alex", joined.username)
+            assertEquals("long enough", joined.password)
+            assertFalse(joined.toString().contains("long enough"))
+            val body = server.called("join").single().body!!.utf8()
+            assertTrue(body.contains("\"token\":\"tok_1\""))
+            assertTrue(body.contains("\"password\":\"long enough\""))
+            // Nothing else is asked: no pairing, no device to add.
+            assertEquals(1, server.calls.size)
         }
+    }
+
+    @Test
+    fun aUsedInviteSaysSo() = runBlocking {
+        FamilyFakeServer().use { server ->
+            server.raw("join") { throw IllegalStateException() }
+            val refused = joinWithInvite(server.url, "tok_1", "Alex", "long enough", OkHttpClient())
+            assertTrue(refused is JoinOutcome.Failed)
+        }
+    }
+
+    @Test
+    fun passwordStrengthReadsPlainly() {
+        assertNull(passwordStrength(""))
+        assertEquals("Too short: at least 8 characters", passwordStrength("abc"))
+        assertEquals("Weak: make it longer, or mix in numbers and symbols", passwordStrength("abcdefgh"))
+        assertEquals("Good. Longer is stronger.", passwordStrength("abcdefgh12!"))
+        assertEquals("Strong", passwordStrength("correct horse battery"))
     }
 
     @Test
@@ -250,9 +272,9 @@ class FamilyRulesTest {
         assertEquals("Failed: No real FLAC copy found", requestStateLine(done.copy(state = FamilyRequestState.Failed, failure = "No real FLAC copy found")))
         assertEquals("Song · FLAC", requestKindLine(done))
         assertEquals("Song · Artist", requestTitle(done))
-        val phone = FamilyDevice(name = "Pixel 9", kind = FamilyDeviceKind.OctoApp, app = "Octo 1.6 (Android)", place = FamilyPlace.Away, playing = FamilyDevicePlaying("tr-1", "Song", "Artist"))
+        val phone = FamilyDevice(name = "Pixel 9", app = "Octo 1.6 (Android)", place = FamilyPlace.Away, playing = FamilyDevicePlaying("tr-1", "Song", "Artist"))
         assertEquals("Octo 1.6 (Android) · Away · Playing Song by Artist", deviceLine(phone))
-        assertEquals("Other music app · Home", deviceLine(FamilyDevice(kind = FamilyDeviceKind.SubsonicApp)))
+        assertEquals("A music app · Home", deviceLine(FamilyDevice()))
     }
 
     @Test
@@ -293,53 +315,19 @@ class FamilyRulesTest {
         assertEquals("1 request waiting", familyNotices(NoticeMemory(), emptyList(), waiting = 1).first.single().title)
     }
 
-    // Pairing, against a pretend server.
     @Test
-    fun joiningWithACodeAnswersTheSecret() = runBlocking {
-        FamilyFakeServer().use { server ->
-            server.answer("octoFamilyPair") { """"familyPair":{"username":"alex","secret":"abcdefghijklmnopqrstuvwxyz012345","deviceId":"d_11","server":"https://music.example.com"}""" }
-            val joined = joinFamily(server.url, "alex", "482 913", "Pixel 9", FamilyPlatform.Android, OkHttpClient())
-            assertEquals("abcdefghijklmnopqrstuvwxyz012345", (joined as JoinOutcome.Paired).pair.secret)
-            val call = server.called("octoFamilyPair").single().url
-            assertEquals("482913", call.queryParameter("code"))
-            assertNull(call.queryParameter("u"))
-
-            server.failWith("octoFamilyPair", 40, "That code did not work. Ask for a new one.")
-            val wrong = joinFamily(server.url, "alex", "000000", "Pixel 9", FamilyPlatform.Android, OkHttpClient())
-            assertEquals("That code did not work. Ask for a new one.", (wrong as JoinOutcome.Failed).message)
-        }
-    }
-
-    @Test
-    fun pairingFallsBackToTheHomeAddressWhenTheOutsideOneCantBeReached() = runBlocking {
+    fun signingUpFallsBackToTheHomeAddressWhenTheOutsideOneCantBeReached() = runBlocking {
         FamilyFakeServer().use { home ->
-            home.answer("octoFamilyPair") { """"familyPair":{"username":"alex","secret":"abcdefghijklmnopqrstuvwxyz012345","deviceId":"d_11"}""" }
+            home.raw("join") { """{"username":"alex"}""" }
             // Nothing listens on port 1: the outside address can't be reached.
             val outside = "http://127.0.0.1:1/octo".toHttpUrl()
-            val joined = joinFamily(outside, "alex", "482913", "Pixel 9", FamilyPlatform.Android, OkHttpClient(), home = home.url)
-            assertEquals(home.url, (joined as JoinOutcome.Paired).at)
-            assertEquals(1, home.called("octoFamilyPair").size)
+            val joined = joinWithInvite(outside, "tok_1", "Alex", "long enough", OkHttpClient(), home = home.url)
+            assertEquals(home.url, (joined as JoinOutcome.SignedUp).at)
+            assertEquals(1, home.called("join").size)
 
             // Without a home address it fails as before.
-            val alone = joinFamily(outside, "alex", "482913", "Pixel 9", FamilyPlatform.Android, OkHttpClient())
+            val alone = joinWithInvite(outside, "tok_1", "Alex", "long enough", OkHttpClient())
             assertTrue((alone as JoinOutcome.Failed).unreachable)
-
-            // A code the server turned down is never tried at home.
-            FamilyFakeServer().use { reached ->
-                reached.failWith("octoFamilyPair", 40, "That code did not work. Ask for a new one.")
-                val refused = joinFamily(reached.url, "alex", "000000", "Pixel 9", FamilyPlatform.Android, OkHttpClient(), home = home.url)
-                assertEquals("That code did not work. Ask for a new one.", (refused as JoinOutcome.Failed).message)
-                assertEquals(1, home.called("octoFamilyPair").size)
-            }
         }
-    }
-
-    @Test
-    fun aJoinSaysWhatIsMissing() {
-        val url = "https://music.example.com/".toHttpUrl()
-        assertEquals("Type the server's address", joinProblem(null, "alex", "123456"))
-        assertEquals("Type your username", joinProblem(url, " ", "123456"))
-        assertEquals("The family code is 6 digits", joinProblem(url, "alex", "12345"))
-        assertNull(joinProblem(url, "alex", "123 456"))
     }
 }
