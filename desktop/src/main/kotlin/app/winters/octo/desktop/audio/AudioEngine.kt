@@ -4,11 +4,13 @@ import app.winters.octo.audio.AutomixSettings
 import app.winters.octo.audio.DspSettings
 import app.winters.octo.audio.Engine
 import app.winters.octo.audio.EngineEvent
+import app.winters.octo.audio.EngineException
 import app.winters.octo.audio.EngineListener
 import app.winters.octo.audio.EqSettings
 import app.winters.octo.audio.PlaybackState
 import app.winters.octo.audio.QueueItem
 import app.winters.octo.audio.ReplayGainSettings
+import app.winters.octo.audio.SongProfile
 import app.winters.octo.audio.TrustedCertificate
 import app.winters.octo.audio.OutputDevice as EngineDevice
 import app.winters.octo.audio.OutputFormat as EngineFormat
@@ -53,6 +55,10 @@ interface AudioEngine : AutoCloseable {
     // How blends are chosen and shaped: smart transitions, filter sweeps,
     // tempo matching and the longest blend.
     fun setAutomix(settings: AutomixSettings)
+
+    // The server's transition profile of the song queued as `itemId`, which
+    // the engine then plans that song's blends from; null forgets it.
+    fun setSongProfile(itemId: String, profile: SongProfile?)
 
     fun setEq(eq: EqSettings)
 
@@ -138,6 +144,16 @@ class NativeAudioEngine(private val engine: Engine) : AudioEngine {
     override fun setCrossfade(ms: Int) = ifOpen(Unit) { engine.setCrossfade(ms.coerceAtLeast(0).toUInt()) }
 
     override fun setAutomix(settings: AutomixSettings) = ifOpen(Unit) { engine.setAutomix(settings) }
+
+    // A profile the engine finds not whole is left out: the song is read
+    // from its stream as before.
+    override fun setSongProfile(itemId: String, profile: SongProfile?) = ifOpen(Unit) {
+        try {
+            engine.setSongProfile(itemId, profile)
+        } catch (e: EngineException) {
+            System.err.println("automix: the profile for $itemId was not taken: ${e.message}")
+        }
+    }
 
     override fun setEq(eq: EqSettings) = ifOpen(Unit) { engine.setEq(eq) }
 

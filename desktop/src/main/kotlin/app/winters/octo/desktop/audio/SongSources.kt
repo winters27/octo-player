@@ -38,6 +38,14 @@ class ServerSongs(
     }
 }
 
+// A song's id on the server, for asking the server about it: the library
+// copy of a song found online once it has one, and nothing for a file on
+// this computer.
+fun serverSongId(song: Song, landed: (String) -> String?): String? = when {
+    song.id.startsWith(LOCAL_PREFIX) || isOpenedFile(song.id) -> null
+    else -> landed(song.id) ?: song.id
+}
+
 // Songs whose id starts with this are files on this computer, the rest of
 // the id being the path.
 const val LOCAL_PREFIX = "local:"

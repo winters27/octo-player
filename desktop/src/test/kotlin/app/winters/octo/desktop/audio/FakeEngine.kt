@@ -7,6 +7,7 @@ import app.winters.octo.audio.EqSettings
 import app.winters.octo.audio.PlaybackState
 import app.winters.octo.audio.QueueItem
 import app.winters.octo.audio.ReplayGainSettings
+import app.winters.octo.audio.SongProfile
 import app.winters.octo.audio.OutputDevice as EngineDevice
 import app.winters.octo.audio.OutputFormat as EngineFormat
 import app.winters.octo.audio.RepeatMode as EngineRepeat
@@ -34,9 +35,16 @@ class FakeEngine : AudioEngine {
     var format: EngineFormat? = null
     var pins: Map<String, String>? = null
 
+    // The profiles handed over, by queue item id.
+    val profiles = java.util.concurrent.ConcurrentHashMap<String, SongProfile>()
+
     val ids: List<String> get() = queue.map { it.id }
 
     fun emit(event: EngineEvent) = listener(event)
+
+    override fun setSongProfile(itemId: String, profile: SongProfile?) {
+        if (profile == null) profiles.remove(itemId) else profiles[itemId] = profile
+    }
 
     override fun setListener(listener: (EngineEvent) -> Unit) {
         this.listener = listener

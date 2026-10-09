@@ -75,6 +75,7 @@ import app.winters.octo.desktop.window.placeWindow
 import app.winters.octo.desktop.window.roundWindowsCorners
 import app.winters.octo.desktop.window.screenAreas
 import app.winters.octo.desktop.window.seeThroughMacTitleBar
+import app.winters.octo.subsonic.OCTO_TRANSITIONS
 import coil3.compose.setSingletonImageLoaderFactory
 import java.awt.Dimension
 import java.awt.event.WindowAdapter
@@ -199,7 +200,15 @@ fun main(args: Array<String>) {
             var made: AppState? = null
             // Server songs are signed with whoever is signed in when they
             // queue; a find fetched into the library plays from its file.
-            val player = openPlayer(settings, scope, { made?.connection?.client }, { made?.connection?.headers.orEmpty() }, { id -> made?.fetches?.landedId(id) }, parts.engine)
+            val player = openPlayer(
+                settings,
+                scope,
+                { made?.connection?.client },
+                { made?.connection?.headers.orEmpty() },
+                { id -> made?.fetches?.landedId(id) },
+                { made?.connection?.supports(OCTO_TRANSITIONS) == true },
+                parts.engine,
+            )
             val app = AppState(settings, parts.accounts, parts.http, scope, os, player.player, restored = parts.restored, listeningRoot = places.config, updates = parts.updates).also {
                 made = it
                 player.problem?.let { problem -> it.notice = problem }

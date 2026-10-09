@@ -4,6 +4,7 @@ import app.winters.octo.desktop.player.DEFAULT_OUTPUT
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.playback.TransitionProfiles
 import app.winters.octo.subsonic.SubsonicClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -27,6 +28,8 @@ fun openPlayer(
     headers: () -> Map<String, String> = { emptyMap() },
     // The library id of a song found online once fetched into the library.
     landed: (String) -> String? = { null },
+    // Whether the server signed in now hands out transition profiles.
+    transitions: () -> Boolean = { false },
     // The engine, opened beforehand off the window's thread (Startup), or
     // why it would not open.
     opened: Result<AudioEngine> = runCatching { NativeAudioEngine.open() },
@@ -36,13 +39,31 @@ fun openPlayer(
         val engine = opened.getOrThrow()
         keepTrust(engine, settings, scope)
         val device = playback.outputDevice?.takeUnless { it == DEFAULT_OUTPUT }
-        OpenedPlayer(EnginePlayer(engine, LocalOrServer(ServerSongs(headers, landed, client)), volume = playback.volume, device = device), null)
+        val profiles = EngineProfiles(scope, ServerTransitions(client, transitions)::current, { serverSongId(it, landed) }, engine::setSongProfile)
+        val player = EnginePlayer(engine, LocalOrServer(ServerSongs(headers, landed, client)), volume = playback.volume, device = device, profiles = profiles)
+        OpenedPlayer(player, null)
     } catch (e: Throwable) {
         if (e is VirtualMachineError) throw e
         OpenedPlayer(
             SilentPlayer(scope = scope, volume = playback.volume),
             "Octo couldn't start its sound engine (${e.message ?: e.javaClass.simpleName}), so songs play silently.",
         )
+    }
+}
+
+// The kept transition profiles of the server signed in now, while it hands
+// them out; kept anew when the server changes.
+class ServerTransitions(private val client: () -> SubsonicClient?, private val offers: () -> Boolean) {
+    private var forClient: SubsonicClient? = null
+    private var kept: TransitionProfiles? = null
+
+    fun current(): TransitionProfiles? = synchronized(this) {
+        val server = client()?.takeIf { offers() } ?: return null
+        if (server !== forClient) {
+            forClient = server
+            kept = TransitionProfiles(fetch = { id -> server.transitionProfile(id) })
+        }
+        kept
     }
 }
 
