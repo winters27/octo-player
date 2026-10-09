@@ -299,4 +299,34 @@ class TransitionShaperTest {
         assertTrue("$biggestStep", biggestStep <= 0.5f / (rate * TRANSITION_SLEW_MS / 1_000).toFloat() * 1.01f)
         assertEquals(0.5f, out.last())
     }
+
+    @Test
+    fun theIncomingSongsFilterHandsOverToItsDrySoundOverTenMs() {
+        // A bass note through the end of a swept blend: the high-pass's phase
+        // shift fades out instead of stepping the waveform.
+        val into = DeckTransition(null, plan(entry = 0, overlap = 1_000, strength = FILTER_STRENGTH), incoming = true)
+        val processor = processor()
+        processor.arm(into)
+        val out = run(processor, 1_200) { n, from -> tone(n, 45.0, from) }
+        val dry = tone(msToFrame(1_200.0), 45.0).let { b -> FloatArray(msToFrame(1_200.0)) { b.short / 32_768f } }
+        val end = msToFrame(1_000.0)
+        val lastWet = (end until out.size).last { out[it] != dry[it] }
+        val releaseMs = (lastWet - end) * 1_000.0 / rate
+        assertTrue("released over $releaseMs ms", releaseMs >= FILTER_ENGAGE_MS * 0.9 && releaseMs <= FILTER_ENGAGE_MS + 2)
+        // No sample-to-sample step bigger than the note's own slope allows.
+        val slope = 16_000 / 32_768.0 * 2 * PI * 45.0 / rate
+        val biggest = (end - msToFrame(20.0) until lastWet + 10).maxOf { abs(out[it] - out[it - 1]).toDouble() }
+        assertTrue("$biggest vs $slope", biggest <= slope * 1.6)
+    }
+
+    @Test
+    fun anOutgoingSongArmedPartWayIntoItsBlendGlidesToTheCurve() {
+        // A late plan armed after its start: the playing song was at full.
+        val processor = processor(fromMs = 600)
+        processor.arm(DeckTransition(null, plan(start = 0, overlap = 1_000, k = 0.75), incoming = false))
+        val out = run(processor, 200)
+        assertEquals(0.5f, out.first(), 0.5f * 0.02f)
+        val biggestStep = (1 until out.size).maxOf { abs(out[it] - out[it - 1]) }
+        assertTrue("$biggestStep", biggestStep <= 0.5f / (rate * TRANSITION_SLEW_MS / 1_000).toFloat() * 1.01f)
+    }
 }

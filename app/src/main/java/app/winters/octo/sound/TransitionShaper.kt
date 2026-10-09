@@ -17,9 +17,10 @@ import kotlin.math.sin
 // an armed or dropped transition never clicks.
 const val TRANSITION_SLEW_MS = 30.0
 
-// Filters come in and go out over this many frames, mixed with the sound
-// as it was.
-const val FILTER_ENGAGE_FRAMES = 256
+// Filters come in and go out over this long, mixed with the sound as it
+// was. Switching them off at once would step the waveform by the filter's
+// phase shift: a click on bass notes.
+const val FILTER_ENGAGE_MS = 10.0
 
 // The volume and filter cutoffs are worked out again every this many frames.
 const val AUTOMATION_BLOCK_FRAMES = 32
@@ -168,7 +169,7 @@ class TransitionShaper(val sampleRate: Int, val channels: Int) {
     private val lowPass = SweptFilter(FilterKind.LowPass, sampleRate, channels)
     private val highPass = SweptFilter(FilterKind.HighPass, sampleRate, channels)
     private val slew = 1.0 / (sampleRate * TRANSITION_SLEW_MS / 1000)
-    private val engageStep = 1.0 / FILTER_ENGAGE_FRAMES
+    private val engageStep = 1.0 / max(1.0, sampleRate * FILTER_ENGAGE_MS / 1000)
 
     private var current: DeckTransition? = null
     private var gain = 1.0
@@ -183,9 +184,10 @@ class TransitionShaper(val sampleRate: Int, val channels: Int) {
     private var quietMs = 0.0
     private var faded = false
 
-    // Takes up a transition, or drops it with null. A transition starting
-    // at its beginning takes its first volume at once, so an incoming song
-    // armed before it plays starts silent instead of fading down.
+    // Takes up a transition, or drops it with null. An incoming song armed
+    // fresh takes its first volume at once, so it starts silent instead of
+    // fading down. An outgoing song is audible already, so a transition
+    // armed after its start glides to the curve instead of jumping.
     fun arm(transition: DeckTransition?, songMs: Double) {
         if (transition === current) return
         val fresh = current == null && gain == 1.0
@@ -194,7 +196,7 @@ class TransitionShaper(val sampleRate: Int, val channels: Int) {
         quietMs = 0.0
         levelSquares = 0.0
         levelCount = 0
-        if (transition != null && fresh) gain = transition.gainAt(transition.progressAt(songMs))
+        if (transition != null && fresh && transition.incoming) gain = transition.gainAt(transition.progressAt(songMs))
     }
 
     // Changes `frames` frames of `samples` in place. The first frame is at
