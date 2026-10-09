@@ -9,7 +9,7 @@ import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.familyJoinUrl
 import app.winters.octo.ui.family.FamilyNotice
 import app.winters.octo.ui.family.qrCode
-import kotlinx.coroutines.cancel
+import androidx.compose.ui.semantics.getOrNull
 import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
@@ -19,10 +19,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.awt.datatransfer.Clipboard
-import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
-import java.awt.datatransfer.Transferable
-import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
 
@@ -34,90 +31,13 @@ class DesktopFamilyTest {
 
     private val link = familyJoinUrl("https://music.example.com", "alex", "482913")
 
-    // The link's QR code as a picture, four pixels a square, with a border.
-    private fun qrPicture(text: String = link): BufferedImage {
-        val code = qrCode(text)
-        val scale = 4
-        val side = (code.size + 8) * scale
-        val image = BufferedImage(side, side, BufferedImage.TYPE_INT_RGB)
-        for (y in 0 until side) for (x in 0 until side) image.setRGB(x, y, 0xFFFFFF)
-        for (y in 0 until code.size) for (x in 0 until code.size) if (code.isDark(x, y)) {
-            for (dy in 0 until scale) for (dx in 0 until scale) image.setRGB((x + 4) * scale + dx, (y + 4) * scale + dy, 0)
-        }
-        return image
-    }
-
-    private class Picture(val image: java.awt.Image) : Transferable {
-        override fun getTransferDataFlavors() = arrayOf(DataFlavor.imageFlavor)
-        override fun isDataFlavorSupported(flavor: DataFlavor) = flavor == DataFlavor.imageFlavor
-        override fun getTransferData(flavor: DataFlavor): Any = image
-    }
-
     @Test
-    fun aQrCodeIsReadFromAPictureAFileAndTheClipboard() {
-        assertEquals(link, readQrImage(qrPicture()))
-        val file = File(folder.root, "code.png").also { ImageIO.write(qrPicture(), "png", it) }
-        assertEquals(link, readQrFile(file))
+    fun theClipboardOffersOnlyText() {
         val clipboard = Clipboard("test")
-        clipboard.setContents(Picture(qrPicture()), null)
-        assertEquals(link, readClipboardForLink(clipboard))
         clipboard.setContents(StringSelection("  $link "), null)
-        assertEquals(link, readClipboardForLink(clipboard))
-        // The quiet check on opening reads text only.
-        clipboard.setContents(Picture(qrPicture()), null)
+        assertEquals(link, clipboardText(clipboard))
+        clipboard.setContents(StringSelection("   "), null)
         assertNull(clipboardText(clipboard))
-        assertNull(readQrImage(BufferedImage(50, 50, BufferedImage.TYPE_INT_RGB)))
-    }
-
-    // A camera that shows one picture, again and again.
-    class StillCamera(private val image: BufferedImage) : CameraSource {
-        private var serial = 0L
-        override fun names() = listOf("Test camera")
-        override fun open(index: Int) = 1L
-        override fun close(handle: Long) = Unit
-        override fun picture(handle: Long, seen: Long, buffer: ByteArray, size: IntArray): Long {
-            size[0] = image.width
-            size[1] = image.height
-            if (buffer.size < image.width * image.height * 3) return 0
-            var at = 0
-            for (y in 0 until image.height) for (x in 0 until image.width) {
-                val p = image.getRGB(x, y)
-                buffer[at++] = (p shr 16).toByte()
-                buffer[at++] = (p shr 8).toByte()
-                buffer[at++] = p.toByte()
-            }
-            Thread.sleep(20)
-            return ++serial
-        }
-    }
-
-    @Test
-    fun theCameraScannerFindsTheFamilyLink() {
-        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
-        try {
-            val scanner = CameraScanner({ StillCamera(qrPicture()) }, scope)
-            scanner.start()
-            val end = System.currentTimeMillis() + 10_000
-            while (scanner.found == null && System.currentTimeMillis() < end) Thread.sleep(20)
-            assertEquals(FamilyJoinLink("https://music.example.com", "alex", "482913"), scanner.found)
-            assertEquals(listOf("Test camera"), scanner.cameras)
-            // A QR code that is not a family link is said so, and scanning goes on.
-            val other = CameraScanner({ StillCamera(qrPicture("https://example.com/menu")) }, scope)
-            other.start()
-            val end2 = System.currentTimeMillis() + 10_000
-            while (!other.notALink && System.currentTimeMillis() < end2) Thread.sleep(20)
-            assertTrue(other.notALink)
-            assertTrue(other.scanning)
-            other.stop()
-            // No camera: plain words.
-            val none = CameraScanner({ null }, scope)
-            none.start()
-            val end3 = System.currentTimeMillis() + 5_000
-            while (none.problem == null && System.currentTimeMillis() < end3) Thread.sleep(20)
-            assertTrue(none.problem!!.contains("picture"))
-        } finally {
-            scope.cancel()
-        }
     }
 
     @Test
@@ -129,15 +49,28 @@ class DesktopFamilyTest {
         val bytes = image.encodeToData(org.jetbrains.skia.EncodedImageFormat.PNG)!!.bytes
         image.close()
         scene.close()
-        assertEquals(link, readQrImage(ImageIO.read(java.io.ByteArrayInputStream(bytes))))
+        val picture = ImageIO.read(java.io.ByteArrayInputStream(bytes))
+        val pixels = picture.getRGB(0, 0, picture.width, picture.height, null, 0, picture.width)
+        assertEquals(link, app.winters.octo.ui.family.readQr(pixels, picture.width, picture.height))
     }
 
     @Test
-    fun cameraPicturesTurnIntoPixels() {
-        val rgb = byteArrayOf(10, 20, 30, -1, 0, 0)
-        val argb = toArgb(rgb, 2, 1)
-        assertEquals(0xFF0A141E.toInt(), argb[0])
-        assertEquals(0xFFFF0000.toInt(), argb[1])
+    fun theLinkUnderAQrCodeOpensWhenClicked() {
+        val opened = mutableListOf<String>()
+        val scene = androidx.compose.ui.ImageComposeScene(400, 200, androidx.compose.ui.unit.Density(1f)) {
+            QrLink(link, "Open this link on the other device", { opened += it })
+        }
+        scene.render().close()
+        val all = mutableListOf<androidx.compose.ui.semantics.SemanticsNode>()
+        fun walk(node: androidx.compose.ui.semantics.SemanticsNode) {
+            all += node
+            node.children.forEach(::walk)
+        }
+        scene.semanticsOwners.forEach { walk(it.rootSemanticsNode) }
+        val node = all.first { it.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription)?.firstOrNull()?.contains(link) == true }
+        node.config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action!!.invoke()
+        scene.close()
+        assertEquals(listOf(link), opened)
     }
 
     @Test

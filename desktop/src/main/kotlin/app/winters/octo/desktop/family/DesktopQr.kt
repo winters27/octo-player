@@ -1,5 +1,17 @@
 package app.winters.octo.desktop.family
 
+import app.winters.octo.design.Txt
+import app.winters.octo.design.OctoColors
+import app.winters.octo.design.DesktopType
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -17,14 +29,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.winters.octo.ui.family.qrCode
-import app.winters.octo.ui.family.readQr
-import java.awt.Image
 import java.awt.Toolkit
 import java.awt.datatransfer.Clipboard
 import java.awt.datatransfer.DataFlavor
-import java.awt.image.BufferedImage
-import java.io.File
-import javax.imageio.ImageIO
 
 // A link drawn as a QR code, dark on white with a quiet border, for a
 // phone's camera to read off the screen. Made on this computer.
@@ -47,52 +54,29 @@ fun QrImage(text: String, modifier: Modifier = Modifier, side: Dp = 220.dp, labe
     }
 }
 
-// The text of a QR code in a picture, or null when there is none.
-fun readQrImage(image: BufferedImage): String? {
-    val width = image.width
-    val height = image.height
-    if (width <= 0 || height <= 0) return null
-    val pixels = image.getRGB(0, 0, width, height, null, 0, width)
-    return readQr(pixels, width, height)
+// The link a QR code holds, right under it, to click: what to do with it in
+// plain words, then the link itself. `open` decides where it opens.
+@Composable
+fun QrLink(url: String, label: String, open: (String) -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Txt(label, DesktopType.meta, OctoColors.TextSecondary)
+        Txt(
+            url,
+            DesktopType.meta.copy(textDecoration = TextDecoration.Underline),
+            OctoColors.Accent,
+            Modifier
+                .pointerHoverIcon(PointerIcon.Hand)
+                .clickable(role = Role.Button, onClickLabel = label) { open(url) }
+                .semantics { contentDescription = "$label: $url" },
+            maxLines = 3,
+            align = TextAlign.Center,
+        )
+    }
 }
 
-// The same from a picture file (PNG, JPEG, GIF or BMP).
-fun readQrFile(file: File): String? = runCatching { ImageIO.read(file) }.getOrNull()?.let(::readQrImage)
-
-// What the clipboard holds that could be a family link: its text, or the
-// text of a QR code in a picture copied there (a screenshot, an image
-// copied from a chat), or of the first picture file copied.
-fun readClipboardForLink(clipboard: Clipboard = Toolkit.getDefaultToolkit().systemClipboard): String? {
-    val contents = runCatching { clipboard.getContents(null) }.getOrNull() ?: return null
-    if (contents.isDataFlavorSupported(DataFlavor.stringFlavor)) {
-        runCatching { contents.getTransferData(DataFlavor.stringFlavor) as? String }.getOrNull()?.takeIf(String::isNotBlank)?.let { return it.trim() }
-    }
-    if (contents.isDataFlavorSupported(DataFlavor.imageFlavor)) {
-        val image = runCatching { contents.getTransferData(DataFlavor.imageFlavor) as? Image }.getOrNull()
-        image?.let(::toBuffered)?.let(::readQrImage)?.let { return it }
-    }
-    if (contents.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
-        val files = runCatching { contents.getTransferData(DataFlavor.javaFileListFlavor) as? List<*> }.getOrNull()
-        files?.filterIsInstance<File>()?.firstNotNullOfOrNull(::readQrFile)?.let { return it }
-    }
-    return null
-}
-
-// Just the clipboard's text, for the quiet check when the app opens: it
-// never reads pictures without being asked.
+// The clipboard's text, for a family link pasted or offered when the app
+// opens.
 fun clipboardText(clipboard: Clipboard = Toolkit.getDefaultToolkit().systemClipboard): String? = runCatching {
     val contents = clipboard.getContents(null)
     if (contents?.isDataFlavorSupported(DataFlavor.stringFlavor) == true) contents.getTransferData(DataFlavor.stringFlavor) as? String else null
 }.getOrNull()?.trim()?.takeIf(String::isNotEmpty)
-
-private fun toBuffered(image: Image): BufferedImage? {
-    if (image is BufferedImage) return image
-    val width = image.getWidth(null)
-    val height = image.getHeight(null)
-    if (width <= 0 || height <= 0) return null
-    return BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB).also { buffered ->
-        val graphics = buffered.createGraphics()
-        graphics.drawImage(image, 0, 0, null)
-        graphics.dispose()
-    }
-}

@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.desktop.family.clipboardText
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -7,8 +8,6 @@ import androidx.compose.foundation.Image
 import app.winters.octo.design.ProgressRing
 import app.winters.octo.design.PopupHost
 import app.winters.octo.design.LocalPopups
-import app.winters.octo.desktop.family.readClipboardForLink
-import app.winters.octo.desktop.family.readQrFile
 import app.winters.octo.ui.family.MIN_PASSWORD
 import app.winters.octo.connection.fingerprint
 import app.winters.octo.ui.family.joinWithInvite
@@ -198,7 +197,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
             SignInCard(backdrop, short) {
                 Txt("Octo", OctoType.display)
                 Txt(
-                    if (form.joining) "Join your family's Octo server with the 6 digit code or the QR code from the person who runs it. A join link pasted anywhere fills everything in."
+                    if (form.joining) "Join your family's Octo server with the link or the 6 digit code from the person who runs it. Opening the link fills everything in."
                     else "Sign in to your music server. Any Subsonic, Navidrome or Octo server works.",
                     OctoType.bodySmall,
                     OctoColors.TextSecondary,
@@ -280,7 +279,7 @@ internal fun JoinCard(app: AppState, form: SignInForm, join: () -> Unit, onPassw
             onSubmit = join,
         )
     }
-    ScanRow(app, form)
+    PasteRow(form)
     form.result?.let { (ok, text) ->
         Txt(text, OctoType.bodySmall, if (ok) OctoColors.TextSecondary else OctoColors.Error, maxLines = 4)
     }
@@ -290,69 +289,15 @@ internal fun JoinCard(app: AppState, form: SignInForm, join: () -> Unit, onPassw
     }
 }
 
-// The ways to read a QR code instead of typing: the camera, a picture
-// file, or the clipboard (a link, a screenshot or a copied picture).
+// A family link copied anywhere fills the form in, without pasting it
+// into one field.
 @Composable
-private fun ScanRow(app: AppState, form: SignInForm) {
-    val popups = LocalPopups.current
+private fun PasteRow(form: SignInForm) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        GlazeCapsule(OctoIcons.Camera, "Scan with camera", { showScanner(popups, app, form) }, height = 36.dp)
-        GlazeCapsule(OctoIcons.Folder, "QR picture", {
-            val file = chooseImage() ?: return@GlazeCapsule
-            val text = readQrFile(file)
-            if (text == null || !form.takeJoinLink(text)) form.result = false to (if (text == null) "No QR code found in that picture." else "That QR code is not a family link.")
+        GlazeCapsule(null, "Paste the join link", {
+            val text = clipboardText()
+            if (text == null || !form.takeJoinLink(text)) form.result = false to "The clipboard holds no family link. Copy the link from the other device first."
         }, height = 36.dp)
-        GlazeCapsule(null, "Paste", {
-            val text = readClipboardForLink()
-            if (text == null || !form.takeJoinLink(text)) form.result = false to "The clipboard holds no family link or QR code."
-        }, height = 36.dp)
-    }
-}
-
-private fun chooseImage(): java.io.File? {
-    val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Choose a picture of the QR code", java.awt.FileDialog.LOAD)
-    dialog.setFilenameFilter { _, name -> name.lowercase().substringAfterLast('.') in setOf("png", "jpg", "jpeg", "gif", "bmp") }
-    dialog.isVisible = true
-    val name = dialog.file ?: return null
-    return java.io.File(dialog.directory, name)
-}
-
-// The camera's picture, live, until a family link's QR code is in it.
-private fun showScanner(popups: PopupHost, app: AppState, form: SignInForm) {
-    val scanner = app.cameraScanner
-    scanner.start()
-    popups.showCentred(width = 520.dp) { close ->
-        DisposableEffect(Unit) { onDispose { scanner.stop() } }
-        LaunchedEffect(scanner.found) {
-            val link = scanner.found ?: return@LaunchedEffect
-            form.take(link)
-            scanner.forget()
-            close()
-        }
-        MenuTitle("Scan a family QR code")
-        PopupPadding {
-            Box(Modifier.fillMaxWidth().height(280.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black), contentAlignment = Alignment.Center) {
-                val picture = scanner.picture
-                if (picture != null) {
-                    Image(picture, contentDescription = "What the camera sees", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                } else if (scanner.problem == null) {
-                    ProgressRing(null)
-                }
-                scanner.problem?.let { Txt(it, OctoType.bodySmall, OctoColors.TextSecondary, Modifier.padding(16.dp), maxLines = 4) }
-            }
-            Txt(
-                if (scanner.notALink) "That QR code is not a family link. Show the one from Devices or an invite." else "Hold the QR code up to the camera.",
-                OctoType.caption,
-                OctoColors.TextMuted,
-                maxLines = 2,
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                if (scanner.cameras.size > 1) {
-                    TextAction("Next camera", { scanner.start((scanner.chosen + 1) % scanner.cameras.size) })
-                }
-                GlazeCapsule(null, "Cancel", close)
-            }
-        }
     }
 }
 

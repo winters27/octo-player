@@ -77,9 +77,6 @@ import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.family.FamilyModel
-import app.winters.octo.desktop.family.CameraScanner
-import app.winters.octo.desktop.family.CameraSource
-import app.winters.octo.desktop.family.Webcam
 import app.winters.octo.ui.imports.ImportModel
 import app.winters.octo.ui.search.withRecent
 import app.winters.octo.desktop.library.PlaylistArtStore
@@ -210,12 +207,6 @@ class AppState(
         return streamParamsFor(appPicksQuality(connection?.family == true, family.deviceMode), quality)
     }
 
-    // The webcam, read for QR codes on the join screen; loaded when first asked.
-    private val webcam by lazy { Webcam.load() }
-
-    // Where the scanner's pictures come from; tests give a pretend camera.
-    var cameraSource: () -> CameraSource? = { webcam }
-    val cameraScanner = CameraScanner({ cameraSource() }, scope)
 
     // How the kept servers answer, and the scan and user of the one in use,
     // for Settings > Servers.

@@ -46,24 +46,19 @@ val shareIcon by tasks.registering(Sync::class) {
 }
 
 // The system library in system-shim/ (media controls and sleep on Windows
-// and macOS, and a webcam for reading QR codes everywhere), built with cargo
-// for this machine and put where JNA looks for it on the class path. On
-// Linux it only has the webcam: the rest talks D-Bus from the JVM.
+// and macOS), built with cargo for this machine and put where JNA looks for
+// it on the class path. Linux needs none: it talks D-Bus from the JVM.
 // Building without Rust installed: -Pocto.noSystemShim=true leaves it out,
-// and the app then runs without media controls or a camera.
+// and the app then runs without media controls.
 val hostName: String = System.getProperty("os.name").lowercase()
 val hostArch: String = System.getProperty("os.arch").lowercase().let { if (it == "amd64" || it == "x86_64") "x86-64" else if (it == "arm64") "aarch64" else it }
 val shimFolder = when {
     hostName.startsWith("windows") -> "win32-$hostArch"
     hostName.startsWith("mac") -> "darwin-$hostArch"
-    else -> "linux-$hostArch"
+    else -> null
 }
-val shimFile = when {
-    hostName.startsWith("windows") -> "octo_system.dll"
-    hostName.startsWith("mac") -> "libocto_system.dylib"
-    else -> "libocto_system.so"
-}
-val buildsShim = providers.gradleProperty("octo.noSystemShim").orNull != "true"
+val shimFile = if (hostName.startsWith("windows")) "octo_system.dll" else "libocto_system.dylib"
+val buildsShim = shimFolder != null && providers.gradleProperty("octo.noSystemShim").orNull != "true"
 val shimTarget = layout.buildDirectory.dir("system-shim")
 
 val buildSystemShim by tasks.registering(Exec::class) {
@@ -79,7 +74,7 @@ val buildSystemShim by tasks.registering(Exec::class) {
 val shareSystemShim by tasks.registering(Sync::class) {
     if (buildsShim) {
         dependsOn(buildSystemShim)
-        from(shimTarget.map { it.file("release/$shimFile") }) { into(shimFolder) }
+        from(shimTarget.map { it.file("release/$shimFile") }) { into(shimFolder!!) }
     }
     into(layout.buildDirectory.dir("generated/systemShim"))
 }
@@ -344,12 +339,9 @@ compose.desktop {
                 iconFile = file("icons/octo.icns")
                 bundleID = "app.winters.octo"
                 appCategory = "public.app-category.music"
-                // octo:// links open the app, and the camera reads family QR
-                // codes on the join screen.
+                // octo:// links open the app.
                 infoPlist {
                     extraKeysRawXml = """
-                        <key>NSCameraUsageDescription</key>
-                        <string>Octo reads the QR code that adds this Mac to your family.</string>
                         <key>CFBundleURLTypes</key>
                         <array>
                           <dict>

@@ -149,10 +149,8 @@ object OctoIcons {
 
     // Services' own marks, drawn in their colours (not tinted).
     val ListenBrainz = R.drawable.brand_listenbrainz
-    // Reading and showing QR codes, quality on mobile data, and a picture.
+    // Scanning and showing QR codes.
     val Camera = R.drawable.sym_camera
     val QrCode = R.drawable.sym_qr_code
-    val CellSignal = R.drawable.sym_cell_signal
-    val Picture = R.drawable.sym_image
     val AudioQuality = R.drawable.sym_equalizer
 }

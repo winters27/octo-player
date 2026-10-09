@@ -259,6 +259,7 @@ private fun AddedSheet(added: FamilyDeviceAdded, hub: FamilyHub) {
             )
             if (link != null) {
                 QrImage(link, label = "QR code to add a device")
+                QrLink(link, "Open this link on the other device")
                 Text(
                     "Scan this with the new device's camera, or in Octo there choose $JOIN_WITH_A_FAMILY_CODE and type ${added.username} and ${added.pairCode}. It works once.",
                     style = OctoType.bodySmall,
@@ -291,6 +292,7 @@ private fun ShownSheet(shown: ShownLink, model: FamilyModel) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(shown.title, style = OctoType.section, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() })
             QrImage(shown.url, label = shown.title)
+            QrLink(shown.url, "Open this link on their device")
             Text(shown.note, style = OctoType.bodySmall, color = OctoColors.TextSecondary)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 GlazeButton("Copy link", { copy(context, shown.url) }, size = ButtonSize.Small)

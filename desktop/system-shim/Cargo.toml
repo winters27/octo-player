@@ -3,18 +3,13 @@ name = "octo-system"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
-description = "The Octo desktop app's hooks into the system: the media controls, sleep, the taskbar and jump list on Windows, and a webcam everywhere."
+description = "The Octo desktop app's hooks into Windows and macOS: the system media controls, sleep, and on Windows the taskbar and jump list."
 license = "GPL-3.0-or-later"
 publish = false
 
 [lib]
 name = "octo_system"
 crate-type = ["cdylib", "rlib"]
-
-[dependencies]
-# Webcams on every system: Media Foundation on Windows, AVFoundation on
-# macOS, Video4Linux on Linux; MJPEG pictures are turned into RGB here.
-nokhwa = { version = "0.10.11", features = ["input-native"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [

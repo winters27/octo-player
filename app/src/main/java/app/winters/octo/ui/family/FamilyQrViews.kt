@@ -1,5 +1,10 @@
 package app.winters.octo.ui.family
 
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.clickable
+import androidx.core.net.toUri
+import android.content.Intent
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -68,6 +73,29 @@ fun QrImage(text: String, modifier: Modifier = Modifier, side: Dp = 220.dp, labe
                 if (code.isDark(x, y)) drawRect(Color.Black, Offset(x * cell, y * cell), Size(cell + 0.5f, cell + 0.5f))
             }
         }
+    }
+}
+
+// The link a QR code holds, right under it, to tap: what to do with it in
+// plain words, then the link itself, opened in the browser (an Octo
+// server's join page hands it on to Octo).
+@Composable
+fun QrLink(url: String, label: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, style = OctoType.caption, color = OctoColors.TextSecondary)
+        Text(
+            url,
+            style = OctoType.caption.copy(textDecoration = TextDecoration.Underline),
+            color = OctoColors.Accent,
+            textAlign = TextAlign.Center,
+            maxLines = 3,
+            modifier = Modifier
+                .clickable(role = Role.Button, onClickLabel = label) {
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }
+                .semantics { contentDescription = "$label: $url" },
+        )
     }
 }
 

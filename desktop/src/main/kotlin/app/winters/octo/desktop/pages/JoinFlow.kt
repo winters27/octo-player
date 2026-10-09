@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.desktop.system.openInBrowser
+import app.winters.octo.subsonic.parseFamilyLink
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -56,6 +58,14 @@ suspend fun joinFromForm(app: AppState, form: SignInForm): SignInOutcome.Done? {
         }
     }
     return null
+}
+
+// Opens a join link clicked under a QR code: an octo:// link in Octo
+// itself, any other in the browser (an Octo server's join page, which hands
+// it on to Octo).
+fun AppState.openJoinLink(url: String) {
+    val link = if (url.startsWith("octo:", ignoreCase = true)) parseFamilyLink(url) else null
+    if (link != null) openFamilyLink(link) else openInBrowser(url, os)
 }
 
 // Opens a family link, from a launch, the clipboard or a pasted link:

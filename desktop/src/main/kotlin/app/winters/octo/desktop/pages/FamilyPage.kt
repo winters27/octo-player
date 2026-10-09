@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.desktop.family.QrLink
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.size
 import app.winters.octo.subsonic.FamilyPreset
@@ -114,7 +115,7 @@ fun FamilyPage(app: AppState, visit: Visit) {
     // A manager's link and the family page's password ask float over the page.
     val popups = LocalPopups.current
     val shown = model.shown
-    LaunchedEffect(shown) { if (shown != null) showLink(popups, model, shown) }
+    LaunchedEffect(shown) { if (shown != null) showLink(popups, app, model, shown) }
     val sections = model.sections().map { section ->
         when (section) {
             FamilySection.Plan -> PageSection("plan", MY_PLAN, OctoIcons.Family, detail = planTitle(me)) { PlanSection(model, me) }
@@ -310,7 +311,8 @@ private fun showAdded(popups: PopupHost, app: AppState, model: FamilyModel, adde
         PopupPadding {
             if (link != null) {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { QrImage(link, label = "QR code to add a device") }
-                Txt("Scan this with the new device's camera, or in Octo there choose Join with a family code and type ${added.username} and ${added.pairCode}. It works once.", DesktopType.body, OctoColors.TextSecondary, maxLines = 4)
+                QrLink(link, "Open this link on the other device", app::openJoinLink, Modifier.fillMaxWidth())
+                Txt("Scan this with the new device's camera, open the link on it, or in Octo there choose Join with a family code and type ${added.username} and ${added.pairCode}. It works once.", DesktopType.body, OctoColors.TextSecondary, maxLines = 4)
             } else {
                 Txt(password.orEmpty(), DesktopType.pageTitle, OctoColors.TextPrimary)
                 Txt("In the other app, sign in to $server as ${added.username} with this password. It shows only now.", DesktopType.body, OctoColors.TextSecondary, maxLines = 4)
@@ -330,12 +332,13 @@ private fun showAdded(popups: PopupHost, app: AppState, model: FamilyModel, adde
 }
 
 // A new member's invite as a QR code, with a way to copy it, until closed.
-private fun showLink(popups: PopupHost, model: FamilyModel, shown: ShownLink) {
+private fun showLink(popups: PopupHost, app: AppState, model: FamilyModel, shown: ShownLink) {
     popups.showCentred(width = 440.dp) { close ->
         DisposableEffect(Unit) { onDispose { model.closeShown() } }
         MenuTitle(shown.title)
         PopupPadding {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { QrImage(shown.url, label = shown.title) }
+            QrLink(shown.url, "Open this link on their device", app::openJoinLink, Modifier.fillMaxWidth())
             Txt(shown.note, DesktopType.body, OctoColors.TextSecondary, maxLines = 4)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
                 GlazeCapsule(null, "Copy link", { copy(shown.url) })

@@ -1,7 +1,6 @@
 package app.winters.octo.desktop.ui
 
 import app.winters.octo.desktop.FakeServer
-import app.winters.octo.desktop.family.DesktopFamilyTest
 import app.winters.octo.subsonic.FamilyDeviceKind
 import app.winters.octo.subsonic.FamilyPreset
 import app.winters.octo.desktop.nav.Page
@@ -48,17 +47,6 @@ class FamilyShotsTest {
         "artist":"$artist","album":"","coverArt":null,"quality":"$quality","state":"$state","created":"2026-10-20T18:00:00Z",
         "decided":null,"decidedBy":null,"note":"$note","failure":${if (state == "Failed") "\"No real FLAC copy found\"" else "null"},
         "librarySongId":null,"outcome":${outcome?.let { "\"$it\"" } ?: "null"}}"""
-
-    // A picture of a room, with no code in it, for the scanner's shot.
-    private fun roomPicture(): java.awt.image.BufferedImage {
-        val image = java.awt.image.BufferedImage(640, 360, java.awt.image.BufferedImage.TYPE_INT_RGB)
-        for (y in 0 until 360) for (x in 0 until 640) {
-            val r = 40 + x * 60 / 640
-            val g = 50 + y * 40 / 360
-            image.setRGB(x, y, (r shl 16) or (g shl 8) or 70)
-        }
-        return image
-    }
 
     @Test
     fun drawFamily() {
@@ -118,14 +106,6 @@ class FamilyShotsTest {
                         app.signInForm.takeJoinLink("https://music.example.com/family/join#u=alex&c=482913")
                     }
                     rig.shot(scene, "family/join", 1_500)
-                    // The camera scanner, over the join screen, with a camera
-                    // that sees no code yet.
-                    SwingUtilities.invokeAndWait {
-                        app.cameraSource = { DesktopFamilyTest.StillCamera(roomPicture()) }
-                        app.popups.close()
-                    }
-                    rig.clickText(scene, "Scan with camera")
-                    rig.shot(scene, "family/scanner", 2_000)
                     SwingUtilities.invokeAndWait {
                         app.popups.close()
                         app.signInForm.takeJoinLink("https://music.example.com/family/join#invite=tok_9")
