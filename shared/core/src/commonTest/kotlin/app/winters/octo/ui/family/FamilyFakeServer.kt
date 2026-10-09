@@ -10,8 +10,8 @@ import okhttp3.OkHttpClient
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
-// A pretend Octo server with Family on, answering the contract's shapes
-// (FAMILY-API.md section 1) by endpoint. Every call is recorded.
+// A pretend Octo server with Family on, answering the octoFamily calls
+// by endpoint. Every call is recorded.
 class FamilyFakeServer : AutoCloseable {
     private val server = MockWebServer()
     private val answers = ConcurrentHashMap<String, (RecordedRequest) -> String>()

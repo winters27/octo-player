@@ -55,7 +55,7 @@ fun qualityDetail(quality: RequestQuality): String = when (quality) {
 // what is held back, so a screen can draw it quieter.
 data class AbilityLine(val text: String, val on: Boolean = true)
 
-// Everything the plan lets this account do, in the order a person cares
+// Everything this account may do, in the order a person cares
 // about: adding music, listening, devices, then the rest.
 fun abilityLines(can: FamilyAbilities): List<AbilityLine> = buildList {
     add(

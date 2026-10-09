@@ -23,7 +23,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 // Outside song actions, offline copies, the request sheet, notices, the
-// plan's plain words and joining with a code.
+// abilities in plain words and joining with a code.
 class FamilyRulesTest {
     private fun member(
         add: AddToLibrary = AddToLibrary.Request,
@@ -45,7 +45,6 @@ class FamilyRulesTest {
         storageUsedBytes = storageUsed,
     )
 
-    // OutsideActionsTest in the plan.
     @Test
     fun outsideSongActionsFollowThePlan() {
         assertEquals(OutsideActions(SAVE, offersRequest = true), outsideActions(member(add = AddToLibrary.Request)))
@@ -64,7 +63,6 @@ class FamilyRulesTest {
         assertFalse(offersRemoveFromMyLibrary(null))
     }
 
-    // OfflineRulesTest in the plan.
     @Test
     fun offlineCopiesFollowThePlan() {
         assertFalse(offlineCopiesAllowed(member(offline = false)))
@@ -155,7 +153,6 @@ class FamilyRulesTest {
         assertEquals("Other music app · Home", deviceLine(FamilyDevice(kind = FamilyDeviceKind.SubsonicApp)))
     }
 
-    // FamilyNoticesTest in the plan.
     @Test
     fun eachDecisionIsToldOnce() {
         val pending = FamilyRequest(id = "r1", title = "Song", artist = "Artist", state = FamilyRequestState.Pending)
@@ -194,7 +191,7 @@ class FamilyRulesTest {
         assertEquals("1 request waiting", familyNotices(NoticeMemory(), emptyList(), waiting = 1).first.single().title)
     }
 
-    // PairingTest in the plan, with a pretend server.
+    // Pairing, against a pretend server.
     @Test
     fun joiningWithACodeAnswersTheSecret() = runBlocking {
         FamilyFakeServer().use { server ->

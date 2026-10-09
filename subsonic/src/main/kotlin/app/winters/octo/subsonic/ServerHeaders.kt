@@ -63,7 +63,7 @@ private const val MAX_DEVICE_NAME = 64
 
 // A header value is plain printable ASCII, or every request fails. Accents
 // are taken off, curly quotes made straight, and anything else left out:
-// "Brandon’s Café phone" goes as "Brandon's Cafe phone".
+// "Sam’s Café phone" goes as "Sam's Cafe phone".
 internal fun headerSafe(text: String): String {
     val straight = text.replace('‘', '\'').replace('’', '\'').replace('“', '"').replace('”', '"')
     val plain = Normalizer.normalize(straight, Normalizer.Form.NFKD)

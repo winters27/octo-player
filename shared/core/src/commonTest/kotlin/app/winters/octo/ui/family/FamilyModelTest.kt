@@ -22,7 +22,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-// The Family view's state, against a pretend server answering the contract.
+// The Family view's state, against a pretend server with Family on.
 class FamilyModelTest {
     private val server = FamilyFakeServer()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)

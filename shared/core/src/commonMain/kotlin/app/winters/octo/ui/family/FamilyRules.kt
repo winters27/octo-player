@@ -34,16 +34,16 @@ fun offersRemoveFromMyLibrary(me: FamilyMe?): Boolean =
 // Whether this account may keep offline copies. Without a family, always.
 fun offlineCopiesAllowed(me: FamilyMe?): Boolean = me?.abilities?.offlineCopies ?: true
 
-// One quality in the request sheet, held back when it is above the plan's.
+// One quality in the request sheet, held back when it is above the account's limit.
 data class QualityChoice(val quality: RequestQuality, val enabled: Boolean) {
     val label: String get() = qualityLabel(quality)
     val detail: String get() = if (enabled) qualityDetail(quality) else "Not on your plan"
 }
 
-// Everything the request sheet shows, from the plan.
+// Everything the request sheet shows, from the account's abilities.
 data class RequestSheet(
     val choices: List<QualityChoice>,
-    // The quality picked when the sheet opens: the best the plan allows.
+    // The quality picked when the sheet opens: the best the account may ask for.
     val initial: RequestQuality,
     // "7 of 10 requests left this week", or null with no limit.
     val quotaLine: String?,

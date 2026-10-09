@@ -100,10 +100,10 @@ class ServerHeadersTest {
 
     @Test
     fun aNameWithAccentsOrCurlyQuotesStillGoes() {
-        val named = DeviceIdentity("id", "Brandon’s Café phone 📱")
-        assertEquals("Brandon's Cafe phone", named.name)
+        val named = DeviceIdentity("id", "Sam’s Café phone 📱")
+        assertEquals("Sam's Cafe phone", named.name)
         val client = http(HeaderScope(setOf(origin(own.url("/"))), emptyMap(), named))
-        assertEquals("Brandon's Cafe phone", fetch(client, own).headers[DEVICE_NAME_HEADER])
+        assertEquals("Sam's Cafe phone", fetch(client, own).headers[DEVICE_NAME_HEADER])
         // Nothing usable falls back to a plain name.
         assertEquals("Octo device", DeviceIdentity("id", "📱").name)
         assertEquals(64, DeviceIdentity("id", "x".repeat(200)).name.length)

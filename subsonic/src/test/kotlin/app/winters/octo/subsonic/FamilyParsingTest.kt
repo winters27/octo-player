@@ -13,8 +13,8 @@ import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 
-// The octoFamily extension's calls and answers, read from fixtures written
-// from the contract (FAMILY-API.md section 1).
+// The octoFamily extension's calls and answers, read from fixtures shaped
+// like an Octo server's.
 class FamilyParsingTest {
     private val server = MockWebServer()
 
@@ -141,7 +141,7 @@ class FamilyParsingTest {
         assertEquals(FamilyRequestState.Done, done.state)
         assertEquals(FamilyRequestOutcome.AddedFromFamily, done.outcome)
         assertEquals("tr-77", done.librarySongId)
-        assertEquals("brandon", done.decidedBy)
+        assertEquals("jordan", done.decidedBy)
         assertNull(done.coverArt)
         assertEquals(FamilyRequestState.Declined, requests[2].state)
         assertEquals("We have the live one", requests[2].note)

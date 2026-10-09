@@ -142,7 +142,7 @@ class FamilyModel(
         said = null
     }
 
-    // Reads the plan only, for the parts of the app that follow it (song
+    // Reads the account's abilities only, for the parts of the app that follow it (song
     // actions, offline copies). Null without a family.
     suspend fun plan(): FamilyMe? {
         if (!supported()) return null
