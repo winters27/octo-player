@@ -373,6 +373,12 @@ fun parseFamilyJoinLink(text: String): FamilyJoinLink? {
     return FamilyJoinLink(server, username, code)
 }
 
+// The pairing link for a code, to show or copy: what a QR code carries.
+fun familyJoinLink(server: String, username: String, code: String): String =
+    "octo://join?server=${encodeQueryValue(server)}&username=${encodeQueryValue(username)}&code=${encodeQueryValue(code)}"
+
+private fun encodeQueryValue(value: String): String = java.net.URLEncoder.encode(value, Charsets.UTF_8).replace("+", "%20")
+
 private fun decodeQueryValue(value: String): String =
     runCatching { java.net.URLDecoder.decode(value, Charsets.UTF_8) }.getOrDefault(value)
 

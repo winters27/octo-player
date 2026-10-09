@@ -323,6 +323,10 @@ class FamilyParsingTest {
         assertEquals(FamilyJoinLink("https://music.example.com/nd", "alex", "482913"), link)
         // The code never reaches a log.
         assertFalse(link.toString().contains("482913"))
+        // A link made here reads back the same.
+        val made = familyJoinLink("https://music.example.com/nd", "alex smith", "482913")
+        assertEquals("octo://join?server=https%3A%2F%2Fmusic.example.com%2Fnd&username=alex%20smith&code=482913", made)
+        assertEquals(FamilyJoinLink("https://music.example.com/nd", "alex smith", "482913"), parseFamilyJoinLink(made))
         assertNull(parseFamilyJoinLink("https://music.example.com"))
         assertNull(parseFamilyJoinLink("octo://join?server=x&username=alex&code=12345"))
         assertNull(parseFamilyJoinLink("octo://join?server=x&code=123456"))
