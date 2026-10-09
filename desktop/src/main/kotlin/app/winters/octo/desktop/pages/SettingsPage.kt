@@ -31,6 +31,9 @@ import app.winters.octo.design.RowHeight
 import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.setLibraryOnly
+import app.winters.octo.discovery.LIBRARY_ONLY_HELP
+import app.winters.octo.discovery.LIBRARY_ONLY_SETTING
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.nav.shortcutList
@@ -178,6 +181,7 @@ private fun PlaybackRows(app: AppState, settings: AppSettings) {
         SwitchRow("Autoplay", "When the queue ends, similar songs keep playing.", settings.playback.autoplay) { on ->
             app.setAutoplay(on)
         }
+        SwitchRow(LIBRARY_ONLY_SETTING, LIBRARY_ONLY_HELP, settings.libraryOnly) { on -> app.setLibraryOnly(on) }
         ActionRow("Equalizer, loudness, crossfade and speed", null, "Open Sound", { app.navigator.go(Page.Sound) })
     }
 }

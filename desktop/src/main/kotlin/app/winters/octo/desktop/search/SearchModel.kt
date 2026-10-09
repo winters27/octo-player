@@ -8,6 +8,7 @@ import app.winters.octo.catalog.searchKey
 import app.winters.octo.discovery.AlbumShare
 import app.winters.octo.discovery.albumShare
 import app.winters.octo.desktop.library.LibraryIndex
+import app.winters.octo.desktop.library.isOutsideSong
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.subsonic.Album
@@ -88,8 +89,11 @@ sealed interface SearchState {
 // Splits what the server sent into the library's and the rest. Only a
 // server that can fetch songs into the library (`outsideOn`) mixes in songs
 // found online, and only once the library has been read can they be told
-// apart; otherwise everything counts as the library's. One more of each
-// kind than shown is asked for, to know whether there are more.
+// apart; otherwise everything counts as the library's. With "Library songs
+// only" (`hideOutside`) what was found online is left out instead: songs,
+// albums and artists the server marks as outside, or the library, once
+// read, does not hold. One more of each kind than shown is asked for, to
+// know whether there are more.
 fun splitResults(
     sent: SearchResult,
     query: String,
@@ -97,7 +101,19 @@ fun splitResults(
     playlists: List<Playlist>,
     index: LibraryIndex?,
     outsideOn: Boolean,
+    hideOutside: Boolean = false,
 ): SearchFound {
+    if (hideOutside) {
+        // Songs are told apart even where they would otherwise count as the
+        // library's; albums by the server's mark when the library cannot
+        // say. What is left over as outside is dropped, not listed.
+        val telling = outsideOn && index != null
+        val kept = sent.copy(
+            album = if (telling) sent.album else sent.album.filterNot { it.isExternal },
+            song = sent.song.filterNot { isOutsideSong(it, index, canFetch = true) },
+        )
+        return splitResults(kept, query, filter, playlists, index, outsideOn).copy(outside = OutsideResults())
+    }
     val caps = searchCaps(filter)
     val telling = outsideOn && index != null
     val (held, outsideSongs) = if (telling) sent.song.partition { index.holds(it) } else sent.song to emptyList()
@@ -154,6 +170,8 @@ class SearchModel(
     private val index: () -> LibraryIndex?,
     private val playlists: () -> List<Playlist>,
     private val scope: CoroutineScope,
+    // Whether "Library songs only" is on.
+    private val libraryOnly: () -> Boolean = { false },
 ) {
     var text by mutableStateOf("")
         private set
@@ -212,6 +230,6 @@ class SearchModel(
                 songs = if (caps.songs > 0) maxOf(caps.songs + 1, MIN_SONGS) else 0,
             )
         }
-        return splitResults(sent, query, filter, playlists(), index(), connection.acquires)
+        return splitResults(sent, query, filter, playlists(), index(), connection.acquires, hideOutside = libraryOnly())
     }
 }

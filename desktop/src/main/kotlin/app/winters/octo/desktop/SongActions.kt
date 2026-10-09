@@ -1,6 +1,7 @@
 package app.winters.octo.desktop
 
 import app.winters.octo.desktop.library.LibraryIndex
+import app.winters.octo.desktop.library.libraryOnlySongs
 import app.winters.octo.desktop.library.sortAlbums
 import app.winters.octo.desktop.queue.radioName
 import app.winters.octo.desktop.server.userMessage
@@ -120,7 +121,7 @@ fun AppState.startRadioFrom(first: Song, seeds: List<Song>, exclude: Set<String>
     val index = library?.index
     scope.launch {
         val similar = try {
-            client.similarSongs(first.id, RADIO_SONGS)
+            libraryOnlySongs(client.similarSongs(first.id, RADIO_SONGS), index, settings.state.value.libraryOnly)
         } catch (e: SubsonicException) {
             emptyList()
         }
@@ -137,8 +138,9 @@ fun AppState.startArtistRadio(artistId: String, name: String) {
     val client = connection.client
     val index = library?.index
     scope.launch {
+        val libraryOnly = settings.state.value.libraryOnly
         val similar = try {
-            client.similarSongs(artistId, RADIO_SONGS)
+            libraryOnlySongs(client.similarSongs(artistId, RADIO_SONGS), index, libraryOnly)
         } catch (e: SubsonicException) {
             emptyList()
         }
@@ -146,7 +148,7 @@ fun AppState.startArtistRadio(artistId: String, name: String) {
             .ifEmpty {
                 try {
                     val byId = connection.supports("topSongsByArtistId")
-                    client.topSongs(name, RADIO_SONGS, if (byId) artistId else null)
+                    libraryOnlySongs(client.topSongs(name, RADIO_SONGS, if (byId) artistId else null), index, libraryOnly)
                 } catch (e: SubsonicException) {
                     emptyList()
                 }

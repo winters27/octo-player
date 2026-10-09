@@ -25,6 +25,16 @@ class OwnershipTest {
         assertTrue(isOutsideSong(marked, null, canFetch = false))
     }
 
+    // "Library songs only" leaves the library's songs, in their order.
+    @Test
+    fun libraryOnlyKeepsTheLibrarysSongs() {
+        val songs = listOf(marked, mine)
+        assertEquals(listOf(mine), librarySongs(songs, setOf(marked.id), hide = true))
+        assertEquals(songs, librarySongs(songs, setOf(marked.id), hide = false))
+        assertEquals(listOf(mine), libraryOnlySongs(songs, index, hide = true))
+        assertEquals(songs, libraryOnlySongs(songs, index, hide = false))
+    }
+
     @Test
     fun aLibrarySongIsNot() {
         assertFalse(isOutsideSong(mine, index, canFetch = true))

@@ -288,7 +288,7 @@ class AppState(
             // The listener's own songs keep Autoplay near their taste.
             val anchors = recent.filter { it.source != QueueSource.Autoplay && it.song.id != seed.id }.map { it.song }.takeLast(10).reversed()
             withContext(Dispatchers.Default) {
-                autoplaySongs(seed, exclude, connection?.client, library?.index, before, anchors, rating = { ratingOf(it) })
+                autoplaySongs(seed, exclude, connection?.client, library?.index, before, anchors, rating = { ratingOf(it) }, libraryOnly = settings.current.libraryOnly)
             }
         },
     ).also { it.start() }
@@ -388,7 +388,7 @@ class AppState(
         return ServerViews(
             store,
             if (connection.acquires) Fetches(connection.client, scope, onArrived = { store.load() }, onAsked = { downloads?.wake() }) else null,
-            SearchModel(connection, { store.index }, { playlists }, scope),
+            SearchModel(connection, { store.index }, { playlists }, scope, { settings.current.libraryOnly }),
             HomeStore(connection, scope),
             // Any Octo server: whether it can look for FLACs is asked live,
             // since the extensions saved at sign-in may be older than it.

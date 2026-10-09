@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import app.winters.octo.design.Corner
@@ -24,6 +26,7 @@ import app.winters.octo.desktop.library.askableSongs
 import app.winters.octo.desktop.library.discHeadings
 import app.winters.octo.desktop.library.formatSummary
 import app.winters.octo.desktop.library.libraryShareOf
+import app.winters.octo.desktop.library.librarySongs
 import app.winters.octo.desktop.library.sortAlbums
 import app.winters.octo.desktop.search.FetchPhase
 import app.winters.octo.desktop.nav.Page
@@ -36,6 +39,7 @@ import app.winters.octo.desktop.ui.rememberOutside
 import app.winters.octo.desktop.ui.rememberListState
 import app.winters.octo.desktop.ui.rememberLoad
 import app.winters.octo.desktop.ui.show
+import app.winters.octo.discovery.ONLY_MY_SONGS
 import app.winters.octo.sort.SortList
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.AlbumWithSongs
@@ -72,14 +76,19 @@ fun AlbumPage(app: AppState, visit: Visit, id: String) {
     val list = rememberListState(app.navigator, visit)
     loaded.show(Modifier.padding(horizontal = PageSide)) { view ->
         val album = view.album
-        val songs = album.song
-        val headings = remember(album) { discHeadings(songs, album.discTitles) }
+        val whole = album.song
         // Octo lists every song of an album, those the library lacks too:
         // they play through Octo like the rest, and the table marks them.
-        val outside = rememberOutside(app, songs)
+        // "Library songs only", or this page's "Only my songs", leaves them
+        // out before the table and Play count them.
+        val outside = rememberOutside(app, whole)
+        val settings by app.settings.state.collectAsState()
+        var onlyMine by remember(album.id) { mutableStateOf(false) }
+        val songs = remember(whole, outside, settings.libraryOnly, onlyMine) { librarySongs(whole, outside, settings.libraryOnly || onlyMine) }
+        val headings = remember(album, songs) { discHeadings(songs, album.discTitles) }
         val fetches = app.fetches
         val phases by remember(fetches) { fetches?.phases ?: MutableStateFlow(emptyMap()) }.collectAsState()
-        val share = remember(songs, outside, phases, fetches) { libraryShareOf(songs, outside, phases, canFetch = fetches != null) }
+        val share = remember(whole, outside, phases, fetches) { libraryShareOf(whole, outside, phases, canFetch = fetches != null) }
         // The format of the files in the library, not of the streams.
         val format = remember(album, outside) { formatSummary(songs.filterNot { it.id in outside }) }
         // An album found online is not in the library: no heart, since on
@@ -126,8 +135,14 @@ fun AlbumPage(app: AppState, visit: Visit, id: String) {
                         facts = albumFacts(app, album, songs.size, songs.sumOf { it.duration }, format),
                         note = share?.let {
                             {
-                                LibraryNote(it, follow = if (app.downloads?.supported == true && onTheWay(songs, outside, phases)) ({ app.downloads?.showList(); app.showSidePanel(SidePanel.Downloads) }) else null) {
-                                    askableSongs(songs, outside, phases).forEach { song -> fetches?.request(song.id) }
+                                LibraryNote(
+                                    it,
+                                    follow = if (app.downloads?.supported == true && onTheWay(whole, outside, phases)) ({ app.downloads?.showList(); app.showSidePanel(SidePanel.Downloads) }) else null,
+                                    // The setting already leaves them out; the toggle is for this album alone.
+                                    onlyMine = if (settings.libraryOnly || outside.isEmpty()) null else onlyMine,
+                                    onOnlyMine = { onlyMine = !onlyMine },
+                                ) {
+                                    askableSongs(whole, outside, phases).forEach { song -> fetches?.request(song.id) }
                                 }
                             }
                         },
@@ -148,13 +163,21 @@ fun AlbumPage(app: AppState, visit: Visit, id: String) {
 
 // How much of an album is in the library, under its facts, with a way to
 // add the rest and, while songs are on their way, to follow them in the
-// downloads drawer.
+// downloads drawer. "Only my songs" (`onlyMine`, when offered) hides the
+// rest on this page.
 @Composable
-private fun LibraryNote(share: LibraryShare, follow: (() -> Unit)? = null, addRest: () -> Unit) {
+private fun LibraryNote(
+    share: LibraryShare,
+    follow: (() -> Unit)? = null,
+    onlyMine: Boolean? = null,
+    onOnlyMine: () -> Unit = {},
+    addRest: () -> Unit,
+) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Txt(share.line, DesktopType.meta, OctoColors.TextSecondary)
         share.action?.let { TextAction(it, addRest, icon = OctoIcons.AddToLibrary) }
         follow?.let { TextAction("Show downloads", it, icon = OctoIcons.Downloading) }
+        onlyMine?.let { on -> TextAction(ONLY_MY_SONGS, onOnlyMine, icon = OctoIcons.Library, checked = on) }
     }
 }
 
