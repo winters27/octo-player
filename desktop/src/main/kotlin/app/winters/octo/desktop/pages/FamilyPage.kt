@@ -1,5 +1,17 @@
 package app.winters.octo.desktop.pages
 
+import androidx.compose.foundation.clickable
+import app.winters.octo.ui.family.loginSteps
+import app.winters.octo.ui.family.HANDOVER_TITLE
+import app.winters.octo.ui.family.HOME_ONLY_LOGIN
+import app.winters.octo.ui.family.USE_IN_ANY_APP
+import app.winters.octo.ui.family.PASSWORD_LINE
+import app.winters.octo.ui.family.RESET_PASSWORD
+import app.winters.octo.ui.family.CHANGE_PASSWORD
+import app.winters.octo.ui.family.SIGN_OUT_EVERYWHERE_LINE
+import app.winters.octo.ui.family.SIGN_OUT_EVERYWHERE
+import app.winters.octo.ui.family.REMOVE_FROM_LIST
+import app.winters.octo.ui.family.YOUR_LOGIN
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.focus.focusProperties
@@ -14,7 +26,10 @@ import androidx.compose.foundation.layout.size
 import app.winters.octo.subsonic.FamilyPreset
 import app.winters.octo.ui.family.presetLine
 import app.winters.octo.ui.family.presetName
-import app.winters.octo.desktop.family.showDeviceSheet
+import app.winters.octo.desktop.family.showHandOver
+import app.winters.octo.desktop.family.CopyButton
+import app.winters.octo.desktop.family.Value
+import app.winters.octo.desktop.family.copyText
 import app.winters.octo.desktop.family.showInvite
 import app.winters.octo.desktop.library.Cover
 import androidx.compose.foundation.layout.Arrangement
@@ -60,7 +75,6 @@ import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.subsonic.FamilyDevice
-import app.winters.octo.subsonic.FamilyDeviceKind
 import app.winters.octo.subsonic.FamilyMe
 import app.winters.octo.subsonic.FamilyMember
 import app.winters.octo.subsonic.FamilyRequest
@@ -118,12 +132,11 @@ fun FamilyPage(app: AppState, visit: Visit) {
     val me = info.me
     // Adding a device and a new member's invite float over the page.
     val popups = LocalPopups.current
-    val sheetId = model.sheet?.id
-    LaunchedEffect(sheetId) { if (sheetId != null) showDeviceSheet(popups, app, model) }
     val inviting = model.invite?.username
     LaunchedEffect(inviting) { if (inviting != null) showInvite(popups, app, model) }
     val sections = model.sections().map { section ->
         when (section) {
+            FamilySection.Login -> PageSection("login", YOUR_LOGIN, OctoIcons.Key, detail = model.login?.username) { LoginSection(app, model) }
             FamilySection.Plan -> PageSection("plan", MY_PLAN, OctoIcons.Family, detail = planTitle(me)) { PlanSection(model, me) }
             FamilySection.Saved -> PageSection("saved", SAVED, OctoIcons.Like, detail = savedDetail(model)) { SavedSection(app, model, me) }
             FamilySection.Requests -> PageSection("requests", REQUESTS, OctoIcons.Downloading, detail = requestsDetail(model.requests)) { RequestsSection(model) }
@@ -255,52 +268,99 @@ private fun DevicesSection(app: AppState, model: FamilyModel) {
     Said(model)
     val popups = LocalPopups.current
     Rows {
-        if (model.devices.isEmpty()) SettingRow("No devices yet", "Devices you sign in on show here.")
+        if (model.devices.isEmpty()) SettingRow("No devices yet", "Apps you sign in to with your login show here by themselves.")
         model.devices.forEach { device ->
             ItemRow(device.name.ifBlank { "A device" }, deviceLine(device)) {
-                if (device.current) Txt("This device", DesktopType.meta, OctoColors.TextMuted) else RowAction("Sign out", { askToSignOut(popups, model, device) }, enabled = !model.working)
+                if (device.current) Txt("This device", DesktopType.meta, OctoColors.TextMuted) else RowAction(REMOVE_FROM_LIST, { model.forget(device) }, enabled = !model.working)
             }
         }
     }
-    AddDevice(app, model)
+    Group {
+        Rows {
+            SettingRow(HANDOVER_TITLE, "Show a QR code to sign in on your phone or another computer, without typing your password.") {
+                RowAction("Show QR code", { showHandOver(popups, app, model) }, icon = OctoIcons.QrCode)
+            }
+            SettingRow(SIGN_OUT_EVERYWHERE, SIGN_OUT_EVERYWHERE_LINE) {
+                RowAction(CHANGE_PASSWORD, { changePassword(app) })
+            }
+        }
+    }
 }
 
+// Your login: the one sign-in a member takes to any app. The server's
+// addresses (the outside one and, when it differs, the home one), the
+// username, each with a copy button, and the password, which they change
+// here. Under it, how to use it in each app.
 @Composable
-private fun AddDevice(app: AppState, model: FamilyModel) {
-    var name by remember { mutableStateOf("") }
-    var kind by remember { mutableStateOf(FamilyDeviceKind.OctoApp) }
-    Group("Add a device") {
-        Card {
-            Column(Modifier.fillMaxWidth().padding(horizontal = RowInset, vertical = Space.L), verticalArrangement = Arrangement.spacedBy(Space.M)) {
-                Txt(
-                    if (kind == FamilyDeviceKind.OctoApp) "Octo on another phone or computer joins with a 6 digit code." else "Any other music app signs in with your username and an app password.",
-                    DesktopType.meta,
-                    OctoColors.TextMuted,
-                    maxLines = 2,
-                )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
-                    GlazeSegments(listOf(FamilyDeviceKind.OctoApp, FamilyDeviceKind.SubsonicApp), kind, { if (it == FamilyDeviceKind.OctoApp) "Octo app" else "Other app" }, { kind = it })
-                    GlassField(name, { name = it }, Modifier.weight(1f), placeholder = if (kind == FamilyDeviceKind.OctoApp) "Its name, like Living room" else "Its name, like Symfonium")
-                    GlazeCapsule(OctoIcons.Add, "Add", {
-                        model.addDevice(name, kind)
-                        name = ""
-                    }, enabled = !model.working)
+private fun LoginSection(app: AppState, model: FamilyModel) {
+    val login = model.login ?: return
+    val popups = LocalPopups.current
+    val anywhere = login.servers.anywhere?.takeIf { login.anywhereAvailable && login.awayAllowed }
+    val home = login.servers.home
+    val main = anywhere ?: home ?: app.connection?.client?.primaryUrl?.toString()?.removeSuffix("/").orEmpty()
+    Rows {
+        SettingRow("Server", if (anywhere == null && home != null) HOME_ONLY_LOGIN else null) {
+            Column(horizontalAlignment = Alignment.End) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Value(main)
+                    CopyButton(main, "Copy server", ::copyText)
+                }
+                if (anywhere != null && home != null && home != anywhere) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Txt("At home: ", DesktopType.meta, OctoColors.TextMuted)
+                        Value(home)
+                        CopyButton(home, "Copy home address", ::copyText)
+                    }
+                }
+            }
+        }
+        SettingRow("Username", null) {
+            Value(login.username)
+            CopyButton(login.username, "Copy username", ::copyText)
+        }
+        SettingRow("Password", PASSWORD_LINE) {
+            RowAction(CHANGE_PASSWORD, { changePassword(app) })
+        }
+        SettingRow(HANDOVER_TITLE, "A QR code your phone or another computer scans to sign in with this login.") {
+            RowAction("Show QR code", { showHandOver(popups, app, model) }, icon = OctoIcons.QrCode)
+        }
+    }
+    Group(USE_IN_ANY_APP) {
+        var open by remember { mutableStateOf<String?>("Octo") }
+        Rows {
+            loginSteps(main, login.username).forEach { app ->
+                val expanded = open == app.app
+                SettingRow(app.app, if (expanded) null else app.steps.first(), Modifier.clickable { open = if (expanded) null else app.app }) {
+                    Glyph(if (expanded) OctoIcons.Expand else OctoIcons.Collapse, size = 16.dp, tint = OctoColors.TextMuted)
+                }
+                if (expanded) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = RowInset, vertical = Space.M), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        app.steps.forEachIndexed { i, step ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Txt("${i + 1}.", DesktopType.meta, OctoColors.TextMuted, Modifier.width(18.dp))
+                                Txt(step, DesktopType.meta, OctoColors.TextPrimary, Modifier.weight(1f), maxLines = 3)
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-private fun askToSignOut(popups: PopupHost, model: FamilyModel, device: FamilyDevice) {
+// A manager resets a member's password: it stops working at once, on every
+// app, and a new sign-in link shows for them to choose another.
+private fun askToReset(popups: PopupHost, model: FamilyModel, member: FamilyMember) {
+    val name = member.displayName.ifBlank { member.username }
     popups.showCentred { close ->
-        MenuTitle("Sign out ${device.name.ifBlank { "this device" }}")
+        MenuTitle("Reset $name's password?")
         PopupPadding {
-            Txt("It stops working at once. Signing in again needs a new code or password.", DesktopType.body, OctoColors.TextPrimary, maxLines = 4)
+            Txt("Their password stops working at once, on every app and device. You get a new sign-in link to give them, to choose another.", DesktopType.body, OctoColors.TextPrimary, maxLines = 4)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
                 GlazeCapsule(null, "Cancel", close)
-                GlazeCapsule(null, "Sign out", {
+                GlazeCapsule(null, RESET_PASSWORD, {
                     close()
-                    model.signOut(device)
+                    model.resetPassword(member)
                 }, lit = true)
             }
         }
@@ -310,11 +370,12 @@ private fun askToSignOut(popups: PopupHost, model: FamilyModel, device: FamilyDe
 @Composable
 private fun MembersSection(model: FamilyModel, members: List<FamilyMember>) {
     Said(model)
+    val popups = LocalPopups.current
     Rows {
-        if (members.isEmpty()) SettingRow("No members yet", "Add someone below. They get a QR code or a link to join.")
+        if (members.isEmpty()) SettingRow("No members yet", "Add someone below. They get a QR code or a link to sign up.")
         members.forEach { member ->
             ItemRow(member.displayName.ifBlank { member.username }, "${memberLine(member)} · ${storageLine(member.storageUsedBytes, member.storageLimitGb)}") {
-                RowAction("Add a device", { model.addMemberDevice(member) }, enabled = !model.working, icon = OctoIcons.QrCode)
+                RowAction(RESET_PASSWORD, { askToReset(popups, model, member) }, enabled = !model.working)
             }
         }
     }

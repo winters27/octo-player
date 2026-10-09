@@ -425,8 +425,8 @@ class Accounts(
 
     // Changes the signed-in user's password on the server in use, then keeps
     // the new one where the old one was kept.
-    suspend fun changePassword(connection: Connection, current: String, new: String): PasswordOutcome {
-        val result = changeOwnPassword(connection.client, current, new)
+    suspend fun changePassword(connection: Connection, current: String, new: String, family: Boolean = false): PasswordOutcome {
+        val result = changeOwnPassword(connection.client, current, new, family)
         if (result != PasswordChange.Changed) return PasswordOutcome(result)
         val server = find(connection.server.id) ?: connection.server
         memory[server.id] = new

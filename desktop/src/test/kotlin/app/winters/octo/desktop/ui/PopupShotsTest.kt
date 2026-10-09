@@ -1,18 +1,24 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.runtime.key
+import androidx.compose.ui.unit.dp
 import app.winters.octo.desktop.FakeServer
-import app.winters.octo.desktop.family.showDeviceSheet
-import app.winters.octo.desktop.family.showInvite
+import app.winters.octo.desktop.family.AskingCard
+import app.winters.octo.desktop.family.HandOverCard
+import app.winters.octo.desktop.family.SheetActions
+import app.winters.octo.desktop.family.showHandOver
+import app.winters.octo.desktop.family.showFamilyDialog
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.pages.changePassword
 import app.winters.octo.desktop.pages.showSection
-import app.winters.octo.subsonic.FamilyDeviceAdded
-import app.winters.octo.subsonic.FamilyDeviceKind
 import app.winters.octo.subsonic.FamilyLinkChoices
+import app.winters.octo.subsonic.FamilyMember
 import app.winters.octo.subsonic.FamilyPreset
-import app.winters.octo.ui.family.CODE_FAILED
-import app.winters.octo.ui.family.DeviceSheet
+import app.winters.octo.subsonic.FamilySignInPending
+import app.winters.octo.subsonic.FamilySignInStart
 import app.winters.octo.ui.family.FAMILY
-import app.winters.octo.ui.family.InviteSheet
+import app.winters.octo.ui.family.HandOverBox
+import app.winters.octo.ui.family.HandOverSheet
 import kotlinx.coroutines.runBlocking
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
@@ -23,12 +29,22 @@ import java.time.Instant
 import javax.imageio.ImageIO
 import javax.swing.SwingUtilities
 
-// The Add a device and invite popups in each of their states, over the
-// Family page, against a pretend Octo server.
+// One login per person, as it looks on the desktop: signing up from an
+// invite, a sign-in arriving from another device, Your login, the devices
+// list, "Sign in on another device" in each of its states, a manager's
+// invite and reset link, and changing the password.
 // Only when asked: OCTO_SHOTS=1 ./gradlew :desktop:test --tests '*PopupShotsTest*'.
-// Saved under build/shots/polish/popup/, each with a close crop beside it.
+// Saved under build/shots/polish/one-login/, each with a close crop beside it.
 class PopupShotsTest {
     @get:Rule val folder = TemporaryFolder()
+
+    private val abilities = """"abilities":{"addToLibrary":"Request","requestQuality":"Flac","autoApprove":false,"weeklyRequestLimit":10,
+        "streamCap":0,"awayCap":160,"away":true,"devicesAtOnce":2,"downloadFiles":false,"offlineCopies":false,"share":false,
+        "importPlaylists":true,"cleanOnly":false,"familyPlaylistsEdit":true,"manageFamily":false,"approveRequests":false,
+        "storageLimitGb":10,"instantFromFamily":true}"""
+
+    private val member = """"family":{"me":{"username":"alex","displayName":"Alex","role":"Member","managed":true,$abilities,
+        "requestsThisWeek":3,"storageUsedBytes":5400000000,"place":"Home","deviceId":"d_1"}}"""
 
     private val owner = """"family":{"me":{"username":"winters","displayName":"Jordan","role":"Owner","managed":false,
         "abilities":{"addToLibrary":"Direct","requestQuality":"Best","autoApprove":true,"weeklyRequestLimit":0,"streamCap":0,"awayCap":0,
@@ -36,26 +52,21 @@ class PopupShotsTest {
         "familyPlaylistsEdit":true,"manageFamily":true,"approveRequests":true,"storageLimitGb":0,"instantFromFamily":true},
         "requestsThisWeek":0,"storageUsedBytes":0,"place":"Home","deviceId":null},
         "manager":{"members":[
+          {"username":"alex","displayName":"Alex","role":"Member","suspended":false,"devices":3,"playingNow":true,"pendingRequests":0,"storageUsedBytes":5400000000,"storageLimitGb":10},
           {"username":"sam","displayName":"Sam","role":"Kid","suspended":false,"devices":1,"playingNow":false,"pendingRequests":0,"storageUsedBytes":800000000,"storageLimitGb":5}],
-        "pendingRequests":0,"liveStreams":0}}"""
+        "pendingRequests":0,"liveStreams":1}}"""
 
-    private var made = 0
+    private val devices = """"familyDevices":{"device":[
+        {"id":"d_1","username":"alex","name":"Studio PC","app":"Octo 1.6 (Windows)","firstSeen":"","lastSeen":"","place":"Home","playing":{"songId":"s1","title":"Angel","artist":"Massive Attack"},"current":true},
+        {"id":"d_2","username":"alex","name":"Pixel 9","app":"Octo 1.6 (Android)","firstSeen":"","lastSeen":"","place":"Away","playing":null,"current":false},
+        {"id":"d_3","username":"alex","name":"Symfonium","app":"Symfonium","firstSeen":"","lastSeen":"","place":"Home","playing":null,"current":false},
+        {"id":"d_4","username":"alex","name":"Web player","app":"Navidrome web player","firstSeen":"","lastSeen":"","place":"Home","playing":null,"current":false}]}"""
 
-    private fun device(kind: String): String {
-        made += 1
-        val code = listOf("482913", "730164", "915302")[(made - 1) % 3]
-        return if (kind == "SubsonicApp") {
-            """"familyDeviceAdded":{"deviceId":"p_$made","kind":"SubsonicApp","appPassword":"ABCDEFGHJKMNPQRS","server":"https://music.example.com","username":"winters"}"""
-        } else {
-            val expires = Instant.now().plusSeconds(582)
-            """"familyDeviceAdded":{"deviceId":"d_$made","kind":"OctoApp","pairCode":"$code","expires":"$expires","server":"https://music.example.com","username":"winters",
-            "links":{"anywhere":"https://music.example.com/family/join#u=winters&c=$code&home=http%3A%2F%2F192.168.1.20%3A4533",
-            "home":"http://192.168.1.20:4533/family/join#u=winters&c=$code"},"anywhereAvailable":true}"""
-        }
-    }
+    private val key = HandOverBox.newKey()
+    private val start = FamilySignInStart("tok_7Hq2", null, FamilyLinkChoices("https://music.example.com", "http://192.168.1.20:4533"))
 
     @Test
-    fun drawPopups() {
+    fun drawOneLogin() {
         assumeTrue(System.getenv("OCTO_SHOTS") == "1")
         FakeServer().use { server ->
             PolishShotsTest.Rig(folder, PolishData.library(100), server).use { rig ->
@@ -64,120 +75,151 @@ class PopupShotsTest {
                     """"openSubsonicExtensions":[{"name":"songLyrics","versions":[1]},{"name":"octoFamily","versions":[1]}]""",
                     type = "octo",
                 )
-                server.answer("getFamily", owner, type = "octo")
+                server.answer("getFamily", member, type = "octo")
                 server.answer("getFamilyRequests", """"familyRequests":{"request":[]}""", type = "octo")
-                server.answer("getFamilyDevices", """"familyDevices":{"device":[]}""", type = "octo")
+                server.answer("getFamilyDevices", devices, type = "octo")
                 server.answer("getStarred2", """"starred2":{}""", type = "octo")
-                server.answerBy("addFamilyDevice") { call -> server.ok(device(call.url.queryParameter("kind").orEmpty()), type = "octo") }
+                server.answer(
+                    "getFamilyLogin",
+                    """"familyLogin":{"username":"alex","servers":{"anywhere":"https://music.example.com","home":"http://192.168.1.20:4533"},"anywhereAvailable":true,"awayAllowed":true}""",
+                    type = "octo",
+                )
+                server.answerBy("start") {
+                    """{"token":"tok_7Hq2","expires":"${Instant.now().plusSeconds(102)}","links":{"anywhere":"https://music.example.com","home":"http://192.168.1.20:4533"},"anywhereAvailable":true}"""
+                }
+                server.answerBy("pending") { "" }
                 server.answerBy("members") {
                     """{"member":{"username":"sam","displayName":"Sam","role":"Kid"},"inviteLink":"https://music.example.com/family/join#invite=tok_sam_7Hq2",
                     "links":{"anywhere":"https://music.example.com/family/join#invite=tok_sam_7Hq2","home":"http://192.168.1.20:4533/family/join#invite=tok_sam_7Hq2"},"anywhereAvailable":true}"""
                 }
                 server.answerBy("sam") { """{"username":"sam","displayName":"Sam","role":"Kid"}""" }
+                server.answerBy("reset") {
+                    """{"inviteLink":"https://music.example.com/family/join#invite=tok_alex_R9","links":{"anywhere":"https://music.example.com/family/join#invite=tok_alex_R9","home":"http://192.168.1.20:4533/family/join#invite=tok_alex_R9"},"anywhereAvailable":true}"""
+                }
+                // A new device waiting on its other device.
+                server.answerBy("redeem") { """{"id":"r_1"}""" }
+                server.answerBy("r_1") { """{"state":"Waiting"}""" }
 
                 val app = rig.app
-                rig.signIn()
-                runBlocking { app.family.refresh() }
-                val out = File("build/shots/polish/popup")
+                val out = File("build/shots/polish/one-login")
                 fun shot(scene: androidx.compose.ui.ImageComposeScene, name: String, ms: Long = 2_000) {
-                    rig.shot(scene, "popup/$name", ms)
+                    rig.shot(scene, "one-login/$name", ms)
                     crop(File(out, "$name.png"), File(out, "$name-crop.png"))
                 }
+
+                // Before signing in: signing up, a sign-in arriving, a sign-in link.
                 rig.scene(PolishShotsTest.Size.Hd) { scene ->
-                    fun onFamily() = SwingUtilities.invokeAndWait {
-                        showSection(FAMILY, "devices")
+                    SwingUtilities.invokeAndWait { app.signInForm.takeJoinLink("https://music.example.com/family/join#invite=tok_9") }
+                    shot(scene, "01-sign-up-from-invite", 1_500)
+                    SwingUtilities.invokeAndWait {
+                        app.signInForm.leaveLink()
+                        app.signInForm.takeJoinLink("${server.address.removeSuffix("/")}/family/signin#t=tok_1&k=$key&s=https%3A%2F%2Fmusic.example.com")
+                    }
+                    shot(scene, "02-sign-in-arriving", 2_000)
+                    SwingUtilities.invokeAndWait {
+                        app.signInForm.leaveLink()
+                        app.signInForm.takeJoinLink("octo://signin?server=https%3A%2F%2Fmusic.example.com&home=http%3A%2F%2F192.168.1.20%3A4533&username=alex")
+                    }
+                    shot(scene, "03-sign-in-link-filled-in", 1_500)
+                    SwingUtilities.invokeAndWait { app.signInForm.leaveLink() }
+                }
+
+                rig.signIn()
+                runBlocking { app.family.refresh() }
+                rig.scene(PolishShotsTest.Size.Hd) { scene ->
+                    fun on(section: String) = SwingUtilities.invokeAndWait {
+                        showSection(FAMILY, section)
                         app.navigator.go(Page.Family)
                     }
-                    // A fresh code, works anywhere.
                     rig.reset(scene)
-                    onFamily()
-                    SwingUtilities.invokeAndWait { app.family.addDevice("Living room", FamilyDeviceKind.OctoApp) }
-                    shot(scene, "1-fresh", 2_500)
-                    // Symfonium or another app.
-                    SwingUtilities.invokeAndWait { app.family.showOtherApps() }
-                    shot(scene, "3-other-apps", 2_000)
-                    SwingUtilities.invokeAndWait { app.family.backToCode() }
-                    rig.shot(scene, null, 800)
-                    // The same code at home only.
-                    rig.clickText(scene, "At home")
-                    shot(scene, "2-at-home", 1_200)
-                    // Clicked straight from the switch, as a person would.
-                    rig.clickText(scene, "Using Symfonium or another app instead?")
-                    rig.shot(scene, null, 800)
-                    rig.clickText(scene, "Back to the QR code")
-                    rig.shot(scene, null, 800)
-                    SwingUtilities.invokeAndWait { app.family.dismissAdded() }
+                    on("login")
+                    shot(scene, "04-your-login", 2_000)
+                    rig.reset(scene)
+                    on("devices")
+                    shot(scene, "05-devices", 2_000)
 
-                    // A fixed popup for the states that take time to reach.
-                    val code = FamilyDeviceAdded(
-                        deviceId = "d_9", kind = FamilyDeviceKind.OctoApp, pairCode = "730164",
-                        expires = Instant.now().plusSeconds(41).toString(), server = "https://music.example.com", username = "winters",
-                        links = FamilyLinkChoices("https://music.example.com/family/join#u=winters&c=730164", "http://192.168.1.20:4533/family/join#u=winters&c=730164"),
-                    )
-                    val fixed = mapOf(
-                        "4-new-code" to DeviceSheet(id = 90, code = code, renewed = 1),
-                        "5-under-a-minute" to DeviceSheet(id = 91, code = code),
-                        "6-still-there" to DeviceSheet(id = 92, code = code.copy(expires = Instant.now().minusSeconds(5).toString()), stale = true),
-                        "7-renew-failed" to DeviceSheet(id = 93, code = code, refreshFailed = true),
-                        "8-no-outside-address" to DeviceSheet(id = 94, code = code.copy(links = FamilyLinkChoices(null, code.links!!.home), anywhereAvailable = false)),
-                        "9-loading" to DeviceSheet(id = 95, loading = true),
-                        "10-error" to DeviceSheet(id = 96, error = CODE_FAILED),
+                    // Sign in on another device, as it runs.
+                    rig.reset(scene)
+                    on("devices")
+                    SwingUtilities.invokeAndWait { showHandOver(app.popups, app, app.family) }
+                    shot(scene, "06-sign-in-on-another-device", 2_500)
+                    rig.clickText(scene, "At home")
+                    shot(scene, "07-at-home", 1_200)
+                    SwingUtilities.invokeAndWait { app.popups.close() }
+
+                    // The states that take time to reach, drawn as they show.
+                    val actions = SheetActions(owner = false)
+                    val fixed = linkedMapOf(
+                        "08-device-asking" to null,
+                        "09-handed-over" to HandOverSheet(id = 2, start = start, key = key, done = "Sent to Pixel 9. It's signing in now."),
+                        "10-still-there" to HandOverSheet(id = 3, start = start.copy(expires = Instant.now().minusSeconds(5).toString()), key = key, stale = true),
+                        "11-no-outside-address" to HandOverSheet(id = 4, start = start.copy(expires = Instant.now().plusSeconds(80).toString(), links = FamilyLinkChoices(null, "http://192.168.1.20:4533"), anywhereAvailable = false), key = key),
                     )
                     for ((name, sheet) in fixed) {
                         rig.reset(scene)
-                        onFamily()
-                        SwingUtilities.invokeAndWait { showDeviceSheet(app.popups, app, app.family, sheet = { sheet }) }
-                        if (name == "8-no-outside-address") {
+                        on("devices")
+                        SwingUtilities.invokeAndWait {
+                            app.popups.showFamilyDialog { close ->
+                                key(name) {
+                                    if (sheet == null) AskingCard(FamilySignInPending("r_1", "Pixel 9", "Android"), sending = false, allow = close, deny = close)
+                                    else HandOverCard(sheet, awayAllowed = true, server = "https://music.example.com", avatarName = "Alex", actions = SheetActions(done = close, owner = actions.owner), copy = {})
+                                }
+                            }
+                        }
+                        if (name == "11-no-outside-address") {
                             rig.shot(scene, null, 800)
                             rig.clickText(scene, "Anywhere")
                         }
                         shot(scene, name, 1_500)
                     }
 
-                    // A new member's invite, from the Members section.
+                    // Changing the password, which signs out everywhere.
                     rig.reset(scene)
-                    SwingUtilities.invokeAndWait {
-                        showSection(FAMILY, "members")
-                        app.navigator.go(Page.Family)
-                        app.family.addMember("sam", "Sam", FamilyPreset.Kid)
-                    }
-                    shot(scene, "11-invite", 2_500)
-                    rig.reset(scene)
-                    onFamily()
-                    val kept = InviteSheet("Sam", "sam", "http://192.168.1.20:4533/family/join#invite=tok_sam_7Hq2", awayAllowed = false,
-                        links = FamilyLinkChoices("https://music.example.com/family/join#invite=tok_sam_7Hq2", "http://192.168.1.20:4533/family/join#invite=tok_sam_7Hq2"))
-                    SwingUtilities.invokeAndWait { showInvite(app.popups, app, app.family, invite = { kept }) }
-                    shot(scene, "12-invite-home-only", 1_500)
-                    // The Add member form with its away switch.
-                    rig.reset(scene)
-                    SwingUtilities.invokeAndWait {
-                        showSection(FAMILY, "members")
-                        app.navigator.go(Page.Family)
-                    }
-                    rig.shot(scene, "popup/13-add-member-form", 2_000)
+                    on("devices")
+                    SwingUtilities.invokeAndWait { changePassword(app) }
+                    shot(scene, "12-change-password", 1_500)
                 }
-                // A small window: the dialog scrolls inside, Done stays in sight,
-                // and the cue says there is more.
+
+                // A manager: the members, an invite, a reset link.
+                server.answer("getFamily", owner, type = "octo")
+                runBlocking { app.family.refresh() }
+                rig.scene(PolishShotsTest.Size.Hd) { scene ->
+                    rig.reset(scene)
+                    SwingUtilities.invokeAndWait {
+                        showSection(FAMILY, "members")
+                        app.navigator.go(Page.Family)
+                    }
+                    shot(scene, "13-members", 2_000)
+                    SwingUtilities.invokeAndWait { app.family.addMember("sam", "Sam", FamilyPreset.Kid) }
+                    shot(scene, "14-invite", 2_500)
+                    rig.reset(scene)
+                    SwingUtilities.invokeAndWait {
+                        showSection(FAMILY, "members")
+                        app.navigator.go(Page.Family)
+                        app.family.resetPassword(FamilyMember(username = "alex", displayName = "Alex"))
+                    }
+                    shot(scene, "15-new-sign-in-link", 2_500)
+                }
+                // A small window: the dialog scrolls inside, Done stays in sight.
                 rig.scene(PolishShotsTest.Size.Min) { scene ->
                     rig.reset(scene)
                     SwingUtilities.invokeAndWait {
-                        showSection(FAMILY, "devices")
+                        app.popups.close()
+                        showSection(FAMILY, "members")
                         app.navigator.go(Page.Family)
-                        app.family.addDevice("Laptop", FamilyDeviceKind.OctoApp)
+                        showHandOver(app.popups, app, app.family)
                     }
-                    rig.shot(scene, "popup/14-small-window", 2_500)
-                    rig.clickText(scene, "More below")
-                    rig.shot(scene, "popup/15-small-window-scrolled", 1_200)
-                    SwingUtilities.invokeAndWait { app.family.dismissAdded() }
+                    rig.shot(scene, "one-login/16-small-window", 2_500)
+                    SwingUtilities.invokeAndWait { app.popups.close() }
                 }
             }
         }
     }
 
-    // The popup and a margin around it, out of the middle of the window.
+    // The dialog and a margin around it, out of the middle of the window.
     private fun crop(from: File, to: File) {
         val image = ImageIO.read(from) ?: return
-        val w = minOf(820, image.width)
+        val w = minOf(860, image.width)
         val h = minOf(1000, image.height)
         ImageIO.write(image.getSubimage((image.width - w) / 2, (image.height - h) / 2, w, h), "png", to)
     }

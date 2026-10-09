@@ -4,9 +4,10 @@ import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.audio.ServerSongs
 import app.winters.octo.desktop.system.LaunchRequest
 import app.winters.octo.desktop.system.parseLaunchArgs
-import app.winters.octo.subsonic.FamilyJoinLink
+import app.winters.octo.subsonic.FamilyHandOverLink
+import app.winters.octo.subsonic.FamilySignInPrefill
 import app.winters.octo.subsonic.Song
-import app.winters.octo.subsonic.familyJoinUrl
+import app.winters.octo.subsonic.familySignInUrl
 import app.winters.octo.ui.family.FamilyNotice
 import app.winters.octo.ui.family.qrCode
 import androidx.compose.ui.semantics.getOrNull
@@ -29,7 +30,7 @@ import javax.imageio.ImageIO
 class DesktopFamilyTest {
     @get:Rule val folder = TemporaryFolder()
 
-    private val link = familyJoinUrl("https://music.example.com", "alex", "482913")
+    private val link = familySignInUrl("https://music.example.com", "tok_1", "a-key_of-43-characters-made-for-this-test-0", "https://music.example.com")
 
     @Test
     fun theClipboardOffersOnlyText() {
@@ -56,13 +57,18 @@ class DesktopFamilyTest {
 
     @Test
     fun aFamilyLinkInEitherFormIsHandedOverAtLaunch() {
+        // The page a phone camera opens hands the sign-in on to Octo: the
+        // https form, or octo://signin with the part after # passed along.
         val https = parseLaunchArgs(listOf(link))
         assertEquals(listOf(LaunchRequest.OpenLink(link)), https)
-        val own = "octo://join?server=https%3A%2F%2Fmusic.example.com&username=alex&code=482913"
+        val own = "octo://signin#" + link.substringAfter('#')
         assertEquals(listOf(LaunchRequest.OpenLink(own)), parseLaunchArgs(listOf(own)))
+        val prefill = "octo://signin?server=https%3A%2F%2Fmusic.example.com&username=alex"
+        assertEquals(listOf(LaunchRequest.OpenLink(prefill)), parseLaunchArgs(listOf(prefill)))
         // Any other web address is not a file to play, nor a link.
         assertTrue(parseLaunchArgs(listOf("https://example.com/page"), isFile = { false }).isEmpty())
-        assertEquals(FamilyJoinLink("https://music.example.com", "alex", "482913"), app.winters.octo.subsonic.parseFamilyLink(link))
+        assertEquals(FamilyHandOverLink("https://music.example.com", "tok_1", "a-key_of-43-characters-made-for-this-test-0", "https://music.example.com"), app.winters.octo.subsonic.parseFamilyLink(own))
+        assertEquals(FamilySignInPrefill("https://music.example.com", "alex"), app.winters.octo.subsonic.parseFamilyLink(prefill))
     }
 
     @Test

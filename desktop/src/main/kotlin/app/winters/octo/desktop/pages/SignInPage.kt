@@ -14,9 +14,7 @@ import app.winters.octo.ui.family.joinWithInvite
 import app.winters.octo.desktop.server.osName
 import app.winters.octo.desktop.server.familyPlatform
 import app.winters.octo.subsonic.DEVICE_NAME_HEADER
-import app.winters.octo.ui.family.joinFamily
 import app.winters.octo.ui.family.JoinOutcome
-import app.winters.octo.ui.family.JOIN_WITH_A_FAMILY_CODE
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
@@ -143,17 +141,23 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
         }
     }
 
-    // Pairs with the family code, then signs in with the secret it answers.
-    fun join() {
-        if (!form.joinReady) return
-        again = ::join
+    // Signs up from an invite, or takes a sign-in from another device of
+    // one's own, then signs in.
+    fun go() {
+        if (form.busy) return
+        if (form.invite != null && !form.inviteReady) return
+        again = ::go
         form.busy = true
         form.result = null
         scope.launch {
-            joinFromForm(app, form)?.let { done -> app.signedIn(done.connection, done.note) }
+            val done = if (form.invite != null) signUpFromForm(app, form) else receiveFromForm(app, form)
+            done?.let { app.signedIn(it.connection, it.note) }
             form.busy = false
         }
     }
+
+    // A sign-in from another device starts at once: there is nothing to type.
+    LaunchedEffect(form.handOver) { if (form.handOver != null && form.handOverStep == null && form.result == null) go() }
 
     // Focus starts in the address, or in the password when the server and
     // user are already filled in.
@@ -197,8 +201,11 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
             SignInCard(backdrop, short) {
                 Txt("Octo", OctoType.display)
                 Txt(
-                    if (form.joining) "Join your family's Octo server with the link or the 6 digit code from the person who runs it. Opening the link fills everything in."
-                    else "Sign in to your music server. Any Subsonic, Navidrome or Octo server works.",
+                    when {
+                        form.invite != null -> "Sign up for your family's Octo server. Your login then works in Octo and any other music app."
+                        form.handOver != null -> "Signing in with the login from your other device."
+                        else -> "Sign in to your music server. Any Subsonic, Navidrome or Octo server works."
+                    },
                     OctoType.bodySmall,
                     OctoColors.TextSecondary,
                     maxLines = 3,
@@ -211,14 +218,14 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                     Modifier.fillMaxWidth(),
                     placeholder = "music.example.com or 192.168.1.20:4533",
                     focusRequester = if (form.startsAtPassword) null else first,
-                    onSubmit = { if (form.joining) join() else signIn() },
+                    onSubmit = { if (form.invite != null) go() else signIn() },
                     leading = { SchemeToggle(form.scheme.prefix, form::toggleScheme) },
                 )
                 form.url?.let { Txt("Connects to ${shownAddress(it)}", OctoType.caption, OctoColors.TextMuted) }
                 if (form.insecure) Txt("This address isn't encrypted and isn't on your home network, so others could read what is sent.", OctoType.caption, OctoColors.Error, maxLines = 3)
 
-                if (form.joining) {
-                    JoinCard(app, form, ::join, onPassword = { form.joining = false; form.invite = null; form.result = null })
+                if (form.invite != null || form.handOver != null) {
+                    LinkCard(form, ::go, onLeave = form::leaveLink)
                     return@SignInCard
                 }
                 Label(if (form.useApiKey) "Username (optional)" else "Username")
@@ -243,7 +250,11 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                     GlazeCapsule(null, "Test connection", ::test, enabled = form.ready)
                     AccentButton("Sign in", ::signIn, Modifier.widthIn(min = 150.dp), enabled = form.ready, loading = form.busy, size = ButtonSize.Medium)
                 }
-                TextAction(JOIN_WITH_A_FAMILY_CODE, { form.joining = true; form.result = null }, Modifier.align(Alignment.CenterHorizontally), icon = OctoIcons.Family)
+                // An invite, or a sign-in link from another device, copied anywhere.
+                TextAction("Paste a family link", {
+                    val text = clipboardText()
+                    if (text == null || !form.takeJoinLink(text)) form.result = false to "The clipboard holds no family link. Copy the link from your invite or your other device first."
+                }, Modifier.align(Alignment.CenterHorizontally), icon = OctoIcons.Family)
             }
             OtherServers(app)
         }
@@ -251,55 +262,6 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
 }
 
 private val CardShape = RoundedCornerShape(22.dp)
-
-// The rest of the card while joining a family. With a pair code: the
-// username and the code. With an invite: the new member's name and the
-// password they choose. Either fills in from a link pasted into any field,
-// a QR code read from a picture or the clipboard, or the camera.
-@Composable
-internal fun JoinCard(app: AppState, form: SignInForm, join: () -> Unit, onPassword: () -> Unit) {
-    val invite = form.invite
-    if (invite != null) {
-        Txt("You're invited to ${invite.server.substringAfter("://")}. Choose your name and a password for your account; this computer then joins.", OctoType.bodySmall, OctoColors.TextSecondary, maxLines = 3)
-        Label("Your name")
-        GlassField(form.inviteName, { form.inviteName = it; form.result = null }, Modifier.fillMaxWidth(), placeholder = "As the family sees you", onSubmit = join)
-        Label("Password")
-        SecretField(form.invitePassword, { form.invitePassword = it; form.result = null }, "At least $MIN_PASSWORD characters", join, null)
-        Label("Password again")
-        SecretField(form.inviteAgain, { form.inviteAgain = it; form.result = null }, "The same password", join, null)
-    } else {
-        Label("Username")
-        GlassField(form.username, { if (!form.takeJoinLink(it)) { form.username = it; form.result = null } }, Modifier.fillMaxWidth(), onSubmit = join)
-        Label("Family code")
-        GlassField(
-            form.code,
-            { if (!form.takeJoinLink(it)) { form.code = it.filter(Char::isDigit).take(6); form.result = null } },
-            Modifier.fillMaxWidth(),
-            placeholder = "6 digits",
-            onSubmit = join,
-        )
-    }
-    PasteRow(form)
-    form.result?.let { (ok, text) ->
-        Txt(text, OctoType.bodySmall, if (ok) OctoColors.TextSecondary else OctoColors.Error, maxLines = 4)
-    }
-    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-        TextAction("Sign in with a password", onPassword)
-        AccentButton("Join", join, Modifier.widthIn(min = 150.dp), enabled = form.joinReady, loading = form.busy, size = ButtonSize.Medium)
-    }
-}
-
-// A family link copied anywhere fills the form in, without pasting it
-// into one field.
-@Composable
-private fun PasteRow(form: SignInForm) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        GlazeCapsule(null, "Paste the join link", {
-            val text = clipboardText()
-            if (text == null || !form.takeJoinLink(text)) form.result = false to "The clipboard holds no family link. Copy the link from the other device first."
-        }, height = 36.dp)
-    }
-}
 
 // The other servers kept here, under the card, to open one of them instead.
 // One whose password is kept opens at once; otherwise the card fills in

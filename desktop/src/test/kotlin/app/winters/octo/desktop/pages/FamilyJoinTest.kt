@@ -6,10 +6,9 @@ import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.SignInOutcome
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.subsonic.AuthMode
-import app.winters.octo.subsonic.FamilyPlatform
 import app.winters.octo.subsonic.Scheme
 import app.winters.octo.ui.family.JoinOutcome
-import app.winters.octo.ui.family.joinFamily
+import app.winters.octo.ui.family.joinWithInvite
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
@@ -21,72 +20,76 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-// Joining a family from the sign-in page: a pasted link fills the form, the
-// code pairs, and the secret it answers signs in like a password.
+// Family links on the sign-in page: a sign-in link fills in the server and
+// username for the password; an invite signs up, then signs in with the
+// password chosen, like any typed sign-in.
 class FamilyJoinTest {
     @get:Rule val folder = TemporaryFolder()
 
     @Test
-    fun aPastedLinkFillsEverythingIn() {
+    fun aSignInLinkFillsInTheServerAndUsername() {
         val form = SignInForm()
         assertFalse(form.takeJoinLink("music.example.com"))
-        assertTrue(form.takeJoinLink(" octo://join?server=https%3A%2F%2Fmusic.example.com&username=alex&code=482913 "))
-        assertTrue(form.joining)
+        form.password = "left over"
+        assertTrue(form.takeJoinLink(" octo://signin?server=https%3A%2F%2Fmusic.example.com&home=http%3A%2F%2F192.168.1.20%3A4533&username=alex "))
         assertEquals("music.example.com", form.address)
         assertEquals(Scheme.Https, form.scheme)
         assertEquals("alex", form.username)
-        assertEquals("482913", form.code)
-        assertNull(form.joinProblem)
-        assertTrue(form.joinReady)
-        form.code = "4829"
-        assertEquals("The family code is 6 digits", form.joinProblem)
+        assertEquals("http://192.168.1.20:4533", form.home)
+        // The password is for the person to type.
+        assertEquals("", form.password)
+        assertNull(form.invite)
+        assertNull(form.handOver)
     }
 
     @Test
-    fun theCodePairsAndTheSecretSignsIn() = runTest {
+    fun anInviteSignsUpThenSignsInWithTheChosenPassword() = runTest {
         FakeServer().use { server ->
-            server.answer("octoFamilyPair", """"familyPair":{"username":"alex","secret":"abcdefghijklmnopqrstuvwxyz012345","deviceId":"d_11","server":"https://music.example.com"}""", type = "octo")
+            server.answerBy("join") { """{"username":"alex"}""" }
             server.answer("ping", type = "octo")
             server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[{"name":"octoFamily","versions":[1]}]""", type = "octo")
             val form = SignInForm()
-            form.takeJoinLink("octo://join?server=${java.net.URLEncoder.encode(server.address, Charsets.UTF_8)}&username=alex&code=482913")
-            val http = OkHttpClient()
-            val joined = joinFamily(form.url!!, form.username, form.code, "Studio PC", FamilyPlatform.Windows, http) as JoinOutcome.Paired
-            val pairing = server.calls.single { it.url.pathSegments.last() == "octoFamilyPair" }.url
-            assertEquals("Windows", pairing.queryParameter("platform"))
-            assertEquals("Studio PC", pairing.queryParameter("deviceName"))
+            assertTrue(form.takeJoinLink("octo://join?server=${java.net.URLEncoder.encode(server.address, Charsets.UTF_8)}&invite=tok_1"))
+            assertEquals("tok_1", form.invite!!.token)
+            form.inviteName = "Alex"
+            form.invitePassword = "long enough"
+            assertEquals("The two passwords are not the same", form.inviteProblem)
+            form.inviteAgain = "long enough"
+            assertNull(form.inviteProblem)
+            assertTrue(form.inviteReady)
 
-            val request = form.joinRequest(joined.pair)
+            val http = OkHttpClient()
+            val joined = joinWithInvite(form.url!!, form.invite!!.token, form.inviteName, form.invitePassword, http) as JoinOutcome.SignedUp
+            val request = form.signUpRequest(joined.username, joined.password)
             assertEquals("alex", request.username)
             assertEquals(AuthMode.Token, request.mode)
-            assertTrue(request.rememberPassword)
             val accounts = Accounts(SettingsStore(File(folder.root, "settings.json")), SessionOnlySecrets(), http)
             val done = accounts.signIn(request) as SignInOutcome.Done
             assertTrue(done.connection.family)
-            // Signed with a token made from the secret, never the secret itself.
+            // Signed in with a token made from the chosen password, never the password itself.
             val signed = server.calls.last().url
             assertEquals("alex", signed.queryParameter("u"))
+            assertEquals(md5("long enough" + signed.queryParameter("s")), signed.queryParameter("t"))
             assertNull(signed.queryParameter("p"))
-            assertFalse(signed.toString().contains("abcdefghijklmnopqrstuvwxyz012345"))
         }
     }
 
     @Test
-    fun aLinksHomeAddressPairsAtHomeAndIsSavedAsTheHomeAddress() = runTest {
+    fun anInvitesHomeAddressSignsUpAtHomeAndIsSavedAsTheHomeAddress() = runTest {
         FakeServer().use { home ->
-            home.answer("octoFamilyPair", """"familyPair":{"username":"alex","secret":"abcdefghijklmnopqrstuvwxyz012345","deviceId":"d_11"}""", type = "octo")
+            home.answerBy("join") { """{"username":"alex"}""" }
             home.answer("ping", type = "octo")
             home.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[{"name":"octoFamily","versions":[1]}]""", type = "octo")
             // The outside address, with its path, does not loop back from here.
             val outside = "http://127.0.0.1:1/octo"
             val form = SignInForm()
-            assertTrue(form.takeJoinLink("$outside/family/join#u=alex&c=482913&home=${java.net.URLEncoder.encode(home.address, Charsets.UTF_8)}"))
+            assertTrue(form.takeJoinLink("$outside/family/join#invite=tok_1&home=${java.net.URLEncoder.encode(home.address, Charsets.UTF_8)}"))
             assertEquals(home.address.removeSuffix("/"), form.home)
             val http = OkHttpClient()
-            val joined = joinFamily(form.url!!, form.username, form.code, "Studio PC", FamilyPlatform.Windows, http, home = form.homeUrl) as JoinOutcome.Paired
+            val joined = joinWithInvite(form.url!!, "tok_1", "Alex", "long enough", http, home = form.homeUrl) as JoinOutcome.SignedUp
             assertEquals(form.homeUrl, joined.at)
 
-            val request = form.joinRequest(joined.pair)
+            val request = form.signUpRequest(joined.username, joined.password)
             assertEquals(outside, request.address)
             val accounts = Accounts(SettingsStore(File(folder.root, "settings.json")), SessionOnlySecrets(), http)
             assertTrue(accounts.signIn(request) is SignInOutcome.Done)
@@ -98,10 +101,23 @@ class FamilyJoinTest {
     }
 
     @Test
+    fun aHandOverLinkWaitsToBeReceived() {
+        val form = SignInForm()
+        assertTrue(form.takeJoinLink("https://music.example.com/family/signin#t=tok_1&k=a-key_of-43-characters-made-for-this-test-0&s=https%3A%2F%2Fmusic.example.com"))
+        assertEquals("tok_1", form.handOver!!.token)
+        assertNull(form.invite)
+        form.leaveLink()
+        assertNull(form.handOver)
+    }
+
+    @Test
     fun aLinkWithoutAHomeAddressLeavesItAlone() {
         val form = SignInForm()
         form.home = "http://music.lan"
-        form.takeJoinLink("https://example.com/family/join#u=alex&c=482913")
+        form.takeJoinLink("https://example.com/family/join#invite=tok_1")
         assertEquals("http://music.lan", form.home)
     }
+
+    private fun md5(text: String): String =
+        java.security.MessageDigest.getInstance("MD5").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 }

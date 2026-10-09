@@ -1,7 +1,6 @@
 package app.winters.octo.desktop.ui
 
 import app.winters.octo.desktop.FakeServer
-import app.winters.octo.subsonic.FamilyDeviceKind
 import app.winters.octo.subsonic.FamilyPreset
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.pages.askForCopy
@@ -101,20 +100,13 @@ class FamilyShotsTest {
 
                 val app = rig.app
                 rig.scene(PolishShotsTest.Size.Hd) { scene ->
-                    // Joining, before signing in.
-                    SwingUtilities.invokeAndWait {
-                        app.signInForm.takeJoinLink("https://music.example.com/family/join#u=alex&c=482913")
-                    }
-                    rig.shot(scene, "family/join", 1_500)
+                    // Signing up from an invite, before signing in.
                     SwingUtilities.invokeAndWait {
                         app.popups.close()
                         app.signInForm.takeJoinLink("https://music.example.com/family/join#invite=tok_9")
                     }
                     rig.shot(scene, "family/invite", 1_500)
-                    SwingUtilities.invokeAndWait {
-                        app.signInForm.invite = null
-                        app.signInForm.joining = false
-                    }
+                    SwingUtilities.invokeAndWait { app.signInForm.leaveLink() }
                 }
                 rig.signIn()
                 runBlocking { app.family.plan() }
@@ -130,16 +122,6 @@ class FamilyShotsTest {
                     rig.reset(scene)
                     SwingUtilities.invokeAndWait { askForCopy(app.popups, app, "ext-deezer-song-11", "Pink + White") }
                     rig.shot(scene, "family/request-sheet", 1_500)
-
-                    // Add a device: the code as a QR code any camera reads.
-                    rig.reset(scene)
-                    SwingUtilities.invokeAndWait {
-                        showSection(FAMILY, "devices")
-                        app.navigator.go(Page.Family)
-                        app.family.addDevice("Living room", FamilyDeviceKind.OctoApp)
-                    }
-                    rig.shot(scene, "family/add-device-qr", 2_500)
-                    SwingUtilities.invokeAndWait { app.family.dismissAdded() }
 
                     // Audio quality and offline copies, in Settings.
                     for (section in listOf("quality", "offline")) {
