@@ -878,9 +878,13 @@ impl Mixer {
         self.marks.push_back(MixMark { frame: self.mixed, key, secs, speed, transition });
     }
 
-    // How many frames can be mixed before a planned crossfade begins.
+    // How many frames can be mixed before a planned crossfade begins. A song
+    // whose sound stops short of the blend's start begins it at once.
     fn frames_before_fade(&self, n: usize) -> usize {
         let (Some(plan), Some(lane)) = (&self.planned, &self.lane) else { return n };
+        if lane.current().key() == plan.key && lane.ran_dry() {
+            return 0;
+        }
         let Some((key, secs)) = lane.position() else { return n };
         if key != plan.key {
             return n;

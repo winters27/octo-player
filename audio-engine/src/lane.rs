@@ -169,6 +169,27 @@ impl Lane {
         self.ended && self.out.is_empty()
     }
 
+    /// Whether the playing song has handed over all its sound, with no next
+    /// song lined up behind it: its decoder reached the end of the stream
+    /// and nothing it read is left to take out.
+    pub fn ran_dry(&self) -> bool {
+        self.next.is_none()
+            && self.out.is_empty()
+            && self.current.deck.status() == DeckStatus::Ended
+            && self.current.deck.buffered() == 0
+    }
+
+    /// The sound the lane holds, in seconds, once the playing song's decoder
+    /// has reached the end of the stream; `None` before then.
+    pub fn left_after_end_secs(&self) -> Option<f64> {
+        if self.current.deck.status() != DeckStatus::Ended {
+            return None;
+        }
+        let rate = self.current.deck.info().map_or(self.out_rate, |i| i.sample_rate) as f64;
+        let held = (self.current.deck.buffered() + self.inbuf.len() / 2) as f64 / rate;
+        Some(held + self.available() as f64 / self.out_rate as f64)
+    }
+
     /// Songs that failed while playing, by key, since the last call.
     pub fn take_failures(&mut self) -> Vec<(u64, Failure)> {
         std::mem::take(&mut self.failures)

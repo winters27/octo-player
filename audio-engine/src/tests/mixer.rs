@@ -616,3 +616,45 @@ fn a_song_still_easing_its_rate_blends_on_without_a_jump() {
         (b_to_c - 2_000..b_to_c + 4_000).map(|i| (out[i * 2] - out[(i - 1) * 2]).abs()).fold(0.0, f32::max);
     assert!(step < slope * 2.0, "a step of {step} (the sine moves {slope} a frame)");
 }
+
+#[test]
+fn a_song_that_ends_before_its_blend_still_hands_over() {
+    // The blend was lined up at 5 s of a song whose sound stops at 1 s.
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    dc_file(&a, 48_000, 8_192, 0);
+    dc_file(&b, 48_000, 0, 8_192);
+    let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
+    let lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    mixer.start(lane, Transition::Start);
+    let next = deck(2, &b);
+    wait_ready(&next);
+    mixer.plan_fade(1, 5.0, 12_000, next, Loudness::default(), FadeShape { k: 0.4, ..Default::default() });
+    let mut out = Vec::new();
+    let mut markers = Vec::new();
+    let mut block = vec![0.0; 1024];
+    let until = Instant::now() + Duration::from_secs(30);
+    loop {
+        let (n, state) = mixer.render(&mut block, &mut markers);
+        out.extend_from_slice(&block[..n * 2]);
+        // Nothing follows B.
+        if let Some(lane) = mixer.lane_mut()
+            && lane.current().key() == 2
+        {
+            lane.last = true;
+        }
+        if state == MixState::Ended && n == 0 {
+            break;
+        }
+        if n == 0 {
+            assert!(Instant::now() < until, "mixer stalled");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    let b_from = markers.iter().find(|m| m.key == 2).expect("B came in").frame as usize;
+    // As A runs out of sound (its last few milliseconds were already read).
+    assert!((47_000..=48_000 + LATENCY).contains(&b_from), "{b_from}");
+    // B plays to its end, at its own level once A is gone.
+    assert_eq!(out.len() / 2, b_from + 48_000);
+    assert!((out[(b_from + 1_000) * 2 + 1] - 0.25).abs() < 1e-6);
+}

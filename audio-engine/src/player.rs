@@ -231,6 +231,15 @@ struct Upcoming {
     loudness: Loudness,
 }
 
+// A blend handed to the mixer: from which song into which, starting where
+// in the outgoing song, with the incoming one moved to where.
+struct Lined {
+    from: u64,
+    to: u64,
+    start_secs: f64,
+    entry_secs: f64,
+}
+
 // Sections of the playing song and the next one being decoded for the
 // planner, by queue key.
 #[derive(Default)]
@@ -261,6 +270,7 @@ struct Player {
     crossfade_ms: u32,
     automix: AutomixSettings,
     upcoming: Option<Upcoming>,
+    lined: Option<Lined>,
     scouting: Scouting,
     pace: Pace,
     repeat: RepeatMode,
@@ -308,6 +318,7 @@ pub fn run(driven: Driven) {
         crossfade_ms: 0,
         automix: AutomixSettings::default(),
         upcoming: None,
+        lined: None,
         scouting: Scouting::default(),
         pace: Pace::default(),
         repeat: RepeatMode::Off,
@@ -814,11 +825,67 @@ impl Player {
             }
         }
         self.update_scouts();
+        self.replan_if_cut_short();
         if self.prepared.is_none() {
             self.prepare_next();
         } else if self.upcoming.is_some() {
             self.settle_next();
         }
+    }
+
+    // A blend lined up past where the playing song's sound turns out to end
+    // (its decoder reached the end of the stream early) is taken back, so the
+    // next song is decided again on the sound's real end.
+    fn replan_if_cut_short(&mut self) {
+        let Some(lined) = &self.lined else { return };
+        if self.prepared != Some(lined.to) || self.upcoming.is_some() {
+            return;
+        }
+        let Some(mixer) = &self.mixer else { return };
+        let Some(lane) = mixer.lane() else { return };
+        if lane.current().key() != lined.from || !mixer.has_planned_fade() {
+            return;
+        }
+        let Some(left) = lane.left_after_end_secs() else { return };
+        let end = lane.position().map(|(_, s)| s).unwrap_or(0.0) + left;
+        if end >= lined.start_secs {
+            return;
+        }
+        let (from, to, moved) = (lined.from, lined.to, lined.entry_secs > 0.0);
+        self.lined = None;
+        let Some(deck) = self.mixer.as_mut().and_then(|m| m.cancel_planned_fade()) else { return };
+        let (Some(current), Some(next)) = (self.index_of(from), self.index_of(to)) else { return };
+        if moved {
+            deck.seek(0.0);
+        }
+        let loudness = self.loudness(next, Some(current));
+        self.upcoming = Some(Upcoming { key: to, deck, loudness });
+        log::info!("automix: the sound ends at {end:.2} s, before the blend; deciding again");
+    }
+
+    // What is left of the playing song at `current`, in seconds: by its
+    // length, or, once its decoder has reached the end of the stream, by
+    // what the lane still holds, which is less when the sound stops short of
+    // the stated length.
+    fn remaining_secs(&self, current: usize, lane: &Lane) -> Option<f64> {
+        let position = lane.position().map(|(_, s)| s).unwrap_or(0.0);
+        let stated = self.length_ms(current).map(|d| d as f64 / 1_000.0 - position);
+        match lane.left_after_end_secs() {
+            Some(left) => Some(stated.map_or(left, |s| s.min(left))),
+            None => stated,
+        }
+    }
+
+    // The playing song's length in milliseconds as far as its sound goes:
+    // the stated length, cut to where the sound ends once the decoder has
+    // found that.
+    fn sounding_length_ms(&self, current: usize) -> Option<u64> {
+        let stated = self.length_ms(current);
+        let Some(lane) = self.mixer.as_ref().and_then(|m| m.lane()) else { return stated };
+        let Some(left) = lane.left_after_end_secs() else { return stated };
+        let position = lane.position().map(|(_, s)| s).unwrap_or(0.0);
+        let heard = ((position + left) * 1_000.0).round() as u64;
+        Some(stated.map_or(heard, |s| s.min(heard))).filter(|&d| d > 0)
     }
 
     // A queued song's length in milliseconds, from its decoder or the queue.
@@ -892,8 +959,7 @@ impl Player {
             // Still opening: its length may be known in a moment.
             return;
         }
-        let position = lane.position().map(|(_, s)| s).unwrap_or(0.0);
-        let remaining = self.length_ms(current).map(|d| d as f64 / 1_000.0 - position);
+        let remaining = self.remaining_secs(current, lane);
         let speed = self.pace.speed as f64;
         let mut window = PREPARE_SECS + self.crossfade_ms as f64 / 1_000.0 * speed;
         if self.automix.smart_transitions {
@@ -935,7 +1001,7 @@ impl Player {
         let Some(lane) = self.mixer.as_ref().and_then(|m| m.lane()) else { return };
         let failed = matches!(lane.current().status(), DeckStatus::Failed(_));
         let position = lane.position().map(|(_, s)| s).unwrap_or(0.0);
-        let remaining = self.length_ms(current).map(|d| d as f64 / 1_000.0 - position);
+        let remaining = self.remaining_secs(current, lane);
         let speed = self.pace.speed as f64;
         let mut blend_secs = self.crossfade_ms as f64 / 1_000.0 * speed;
         if self.automix.smart_transitions {
@@ -970,7 +1036,7 @@ impl Player {
             album_order: e.item.album_order,
             duration_ms: duration.unwrap_or(0),
         };
-        let current_song = song(&self.queue[current], self.length_ms(current));
+        let current_song = song(&self.queue[current], self.sounding_length_ms(current));
         let next_song = song(&self.queue[next], self.length_ms(next));
         let decision = if failed {
             Err("this song failed")
@@ -1027,6 +1093,12 @@ impl Player {
         if let Some(mixer) = self.mixer.as_mut() {
             mixer.plan_fade(current_key, plan.start_secs(), frames, deck, loudness, shape);
         }
+        self.lined = Some(Lined {
+            from: current_key,
+            to: key,
+            start_secs: plan.start_secs(),
+            entry_secs: plan.entry_secs(),
+        });
         let reason = plan.describe();
         self.tell_plan(current_key, key, plan.start_secs(), plan.entry_secs(), plan.overlap_secs(), reason);
     }

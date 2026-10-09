@@ -831,3 +831,37 @@ fn starting_inside_the_blend_window_blends_over_what_is_left() {
     assert!(duration_ms.abs_diff(overlap_ms) <= 1, "{duration_ms} vs {overlap_ms}");
     engine.shutdown();
 }
+
+#[test]
+fn a_song_that_stops_short_of_its_length_still_hands_over() {
+    // The file says 40 s, but its sound stops after 3 s: the next song is
+    // decided once the decoder reaches the end, not 40 s in.
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 40, 0.3));
+    let bytes = std::fs::read(&a).unwrap();
+    std::fs::write(&a, &bytes[..44 + RATE as usize * 3 * 4]).unwrap();
+    write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 3, 0.3));
+    let (engine, events, _) = engine(4.0);
+    engine.set_crossfade(1_000).unwrap();
+    engine
+        .set_automix(crate::automix::AutomixSettings { smart_transitions: true, ..Default::default() })
+        .unwrap();
+    engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
+    events.wait_for(
+        "b",
+        Duration::from_secs(10),
+        |e| matches!(e, EngineEvent::TrackStarted { item_id, .. } if item_id == "b"),
+    );
+    events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
+    // The join that counts is decided again on the 3 s of sound: a blend
+    // inside it, or a gapless join at its end when too little was left.
+    let last_plan = events
+        .all()
+        .into_iter()
+        .rfind(|e| matches!(e, EngineEvent::TransitionPlanned { .. }))
+        .expect("a plan");
+    let EngineEvent::TransitionPlanned { start_ms, overlap_ms, .. } = last_plan else { unreachable!() };
+    assert!(start_ms + overlap_ms <= 3_000, "{start_ms} + {overlap_ms}");
+    engine.shutdown();
+}
