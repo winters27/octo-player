@@ -91,6 +91,9 @@ data class AppSettings(
 @Serializable
 data class OfflinePrefs(
     val folder: String = "",
+    // How kept songs are fetched: the file as it is, or Opus at a lower
+    // bitrate (a StreamQuality name), as the phone's download quality.
+    val downloadQuality: String = "Original",
     val servers: Map<String, KeepChoices> = emptyMap(),
 )
 

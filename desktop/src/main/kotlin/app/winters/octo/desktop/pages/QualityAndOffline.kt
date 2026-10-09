@@ -94,7 +94,7 @@ private fun QualityRow(title: String, caption: String?, chosen: StreamQuality, l
 // folder they go in, the Liked songs, chosen playlists, and how many are
 // kept. A family account with offline copies off keeps what it has.
 @Composable
-internal fun OfflineRows(app: AppState) {
+internal fun OfflineRows(app: AppState, settings: AppSettings) {
     val offline = app.offline
     val status = offline.status
     val choices = offline.choices()
@@ -119,6 +119,9 @@ internal fun OfflineRows(app: AppState) {
             })
         }
         SwitchRow("Keep Liked songs", "Every song you like, as you like it.", choices.liked) { on -> offline.keepLiked(on) }
+        SettingRow("Download quality", "For songs fetched from now on. Smaller files fit more songs.") {
+            GlazeSegments(StreamQuality.entries, StreamQuality.entries.firstOrNull { it.name == settings.offline.downloadQuality } ?: StreamQuality.Original, ::qualityName, offline::setDownloadQuality)
+        }
     }
     val playlists = app.playlists
     if (playlists.isNotEmpty()) {

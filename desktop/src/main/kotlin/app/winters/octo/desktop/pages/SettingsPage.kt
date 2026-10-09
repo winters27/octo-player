@@ -76,7 +76,7 @@ fun SettingsPage(app: AppState, visit: Visit) {
             PageSection("look", "Appearance", OctoIcons.Appearance) { AppearanceGroups(app, settings) },
             PageSection("playback", "Playback", OctoIcons.Playback) { PlaybackRows(app, settings) },
             PageSection("quality", AUDIO_QUALITY, OctoIcons.Equalizer, detail = "At home, away, and on this computer.") { AudioQualityRows(app, settings) },
-            PageSection("offline", "Offline", OctoIcons.Download, detail = "Songs kept here to play without a connection.") { OfflineRows(app) },
+            PageSection("offline", "Offline", OctoIcons.Download, detail = "Songs kept here to play without a connection.") { OfflineRows(app, settings) },
             PageSection("listening", "Listening", OctoIcons.Headphones) { ListeningRows(app, settings) },
             PageSection("lyrics", "Lyrics", OctoIcons.Lyrics) { LyricsRows(app, settings) },
             if (discord) PageSection("discord", "Discord", DiscordMark, detail = "Show what you're playing to your friends.", brand = true) { DiscordRows(app) } else null,

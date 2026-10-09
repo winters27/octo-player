@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.offline
 
+import app.winters.octo.ui.family.streamParams
+import app.winters.octo.subsonic.StreamQuality
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -128,6 +130,15 @@ class DesktopOffline(
 
     fun isPlaylistKept(id: String): Boolean = id in choices().playlists
 
+    // The quality kept songs are fetched in from now on. Songs already here
+    // stay as they are.
+    val downloadQuality: StreamQuality
+        get() = StreamQuality.entries.firstOrNull { it.name == settings.current.offline.downloadQuality } ?: StreamQuality.Original
+
+    fun setDownloadQuality(quality: StreamQuality) {
+        settings.update { it.copy(offline = it.offline.copy(downloadQuality = quality.name)) }
+    }
+
     // Moves the folder: kept files move with it.
     fun moveTo(target: File) {
         scope.launch(Dispatchers.IO) {
@@ -222,14 +233,18 @@ class DesktopOffline(
         status = statusOf(files).copy(failed = failed)
     }
 
-    // Downloads one song's file as it is, into the folder.
+    // Downloads one song into the folder, in the download quality: the file
+    // as it is, or Opus at that bitrate, with the same stream parameters
+    // playing uses.
     private suspend fun fetch(server: String, client: app.winters.octo.subsonic.SubsonicClient, song: Song): KeptFile? = withContext(Dispatchers.IO) {
-        val path = "${app.winters.octo.offline.fileSafe(server)}/" + keptPath(song.displayArtist ?: song.artist, song.album, song.track, song.title, song.suffix)
+        val params = streamParams(appPicks = true, quality = downloadQuality)
+        val suffix = if (params["format"] == "opus") "opus" else song.suffix
+        val path = "${app.winters.octo.offline.fileSafe(server)}/" + keptPath(song.displayArtist ?: song.artist, song.album, song.track, song.title, suffix)
         val target = File(folder, path)
         val part = File(target.parentFile, target.name + ".part")
         try {
             target.parentFile?.mkdirs()
-            val request = Request.Builder().url(client.url("stream", mapOf("id" to song.id, "format" to "raw"))).build()
+            val request = Request.Builder().url(client.url("stream", mapOf("id" to song.id) + params)).build()
             http.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withContext null
                 part.outputStream().use { out -> response.body.byteStream().copyTo(out) }

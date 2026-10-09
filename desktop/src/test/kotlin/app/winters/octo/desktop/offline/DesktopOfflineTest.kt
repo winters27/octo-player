@@ -88,6 +88,20 @@ class DesktopOfflineTest {
     }
 
     @Test
+    fun aLowerDownloadQualityFetchesOpusThroughTheStreamParameters() {
+        server.file("stream", ByteArray(100) { 3 })
+        val offline = offline()
+        offline.setDownloadQuality(app.winters.octo.subsonic.StreamQuality.Standard)
+        offline.keep(listOf(song("tr-1", "One")), true)
+        until("kept") { offline.localFile("tr-1") != null }
+        assertEquals("01 One.opus", offline.localFile("tr-1")!!.name)
+        val fetched = server.calls.first { it.url.pathSegments.last() == "stream" }
+        assertEquals("opus", fetched.url.queryParameter("format"))
+        assertEquals("160", fetched.url.queryParameter("maxBitRate"))
+        assertEquals("offline", fetched.headers[PURPOSE_HEADER])
+    }
+
+    @Test
     fun likedSongsAndAPlaylistAreKeptWhileChosen() {
         server.file("stream", ByteArray(10) { 1 })
         liked = listOf(song("tr-1", "Liked").copy(starred = "2026-10-01T00:00:00Z"), song("tr-2", "Not liked"))
