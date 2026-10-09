@@ -343,6 +343,11 @@ class SubsonicClient(
             TopSongs(),
         )
 
+    // A song's transition profile, or `ready = false` while the server has
+    // none. Only for servers that list the octoTransitions extension.
+    suspend fun transitionProfile(id: String): TransitionProfileAnswer =
+        get("getTransitionProfile", mapOf("id" to id), "transitionProfile", TransitionProfileAnswer.serializer(), TransitionProfileAnswer(id))
+
     // The songs played most right now, ranked like an artist's top songs.
     // Only for servers that list the octoTopSongs extension.
     suspend fun topChart(count: Int = 20): TopSongs =

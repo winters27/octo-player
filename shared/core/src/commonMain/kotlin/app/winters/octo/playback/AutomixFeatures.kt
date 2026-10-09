@@ -206,6 +206,22 @@ class SectionAnalysis private constructor(
     }
 
     companion object {
+        // An envelope with features found elsewhere, such as a server that
+        // analyzed the whole song: the levels the planner reads come from the
+        // envelope, the rest from the features as they are.
+        fun fromFeatures(envelope: SectionEnvelope, features: SectionFeatures): SectionAnalysis {
+            val hop = envelope.hopMs
+            val prefix = prefixOf(powerOf(envelope.db))
+            return SectionAnalysis(
+                envelope,
+                features,
+                prefix,
+                smoothed(prefix, framesOf(BODY_WINDOW_MS, hop)),
+                smoothed(prefix, framesOf(SOUND_WINDOW_MS, hop)),
+                smoothed(prefix, framesOf(OUTRO_WINDOW_MS, hop)),
+            )
+        }
+
         // Finds the features of an envelope. `tagBpm`, when the song's tags
         // carry a tempo, picks between double and half time. `bodyLevelDb`,
         // when known from elsewhere, replaces the body level measured here
