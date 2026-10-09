@@ -551,8 +551,9 @@ fn a_blend_cut_short_still_hands_the_filter_over_gently() {
     // Right after the cut B's high-pass is still fading out...
     let differs = (cut + LATENCY + 8..cut + LATENCY + 200).any(|i| a[i * 2 + 1] != b[i * 2 + 1]);
     assert!(differs, "the filter came off at once");
-    // ...and some 10 ms on the sound is B's own.
-    let released = cut + LATENCY + RATE as usize / 100 + 256;
+    // ...and some 20 ms on (the blend's own last 10 ms, then the filter's)
+    // the sound is B's own.
+    let released = cut + LATENCY + RATE as usize / 50 + 256;
     let first = (released * 2..a.len().min(b.len())).find(|&i| a[i] != b[i]);
     assert_eq!(first, None, "{:?}", first.map(|i| (i, a[i], b[i])));
 }
@@ -657,4 +658,27 @@ fn a_song_that_ends_before_its_blend_still_hands_over() {
     // B plays to its end, at its own level once A is gone.
     assert_eq!(out.len() / 2, b_from + 48_000);
     assert!((out[(b_from + 1_000) * 2 + 1] - 0.25).abs() < 1e-6);
+}
+
+#[test]
+fn a_blend_cut_short_glides_both_songs_to_their_ends() {
+    let fade = 24_000u64;
+    let cut_at = 48_000 + LATENCY + 12_000;
+    let (out, cut) = blend_cut_short(FadeShape { k: 0.4, ..Default::default() }, fade, cut_at);
+    // A (left) was at about 0.15 when the blend was cut: it glides out over
+    // 10 ms instead of stepping to nothing.
+    let at_cut = out[(cut + LATENCY) * 2];
+    assert!(at_cut > 0.1, "{at_cut}");
+    let step = (cut + LATENCY - 10..cut + LATENCY + 1_000)
+        .map(|i| (out[i * 2] - out[(i - 1) * 2]).abs())
+        .fold(0.0, f32::max);
+    assert!(step < at_cut / 100.0, "a step of {step}");
+    let gone = cut + LATENCY + RATE as usize / 100 + 256;
+    assert_eq!(out[gone * 2], 0.0);
+    // B (right, a ramp of its place) is at its own level by then.
+    let place = place_of(out[gone * 2 + 1]);
+    assert!(place > 0 && place < 15_000, "{place}");
+    let b_now = out[gone * 2 + 1];
+    let b_next = out[(gone + 1) * 2 + 1];
+    assert!((b_next - b_now - 1.0 / 32_768.0).abs() < 1e-6, "{b_now} {b_next}");
 }

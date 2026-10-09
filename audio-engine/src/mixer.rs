@@ -45,6 +45,9 @@ const RELEASE_SECS: f64 = 0.01;
 /// once would step the outgoing song's waveform: a click.
 const ENGAGE_SECS: f64 = 0.01;
 
+/// How long a blend ended on demand takes to finish, in seconds.
+const FINISH_SECS: f64 = 0.01;
+
 /// How far into and out of a blend the headroom takes to come and go, as
 /// a share of the blend.
 const HEADROOM_RAMP: f64 = 0.1;
@@ -603,10 +606,17 @@ impl Mixer {
         self.planned.take().map(|p| p.deck)
     }
 
-    /// Ends a crossfade at once: the outgoing song stops, and the incoming
-    /// song's filter hands over to its dry sound as at a blend's end.
+    /// Ends a crossfade now: the rest of the blend runs over
+    /// `FINISH_SECS`, so the outgoing song glides out and the incoming one up
+    /// to its own level instead of stepping, and the incoming song's filter
+    /// then hands over to its dry sound as at a blend's end.
     pub fn finish_fade(&mut self) {
-        self.end_fade();
+        let len = ((FINISH_SECS * self.rate as f64) as u64).max(1);
+        if let Some(fade) = &mut self.fade
+            && fade.clock.end().saturating_sub(fade.done) > len
+        {
+            fade.clock.rush = Some((fade.done, fade.clock.progress(fade.done), len));
+        }
     }
 
     // Drops the blend, keeping its incoming filter for the release.
