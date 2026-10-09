@@ -13,6 +13,8 @@ import app.winters.octo.offline.OfflinePrefs
 import app.winters.octo.offline.OfflineSettings
 import app.winters.octo.offline.StreamCache
 import app.winters.octo.playback.CopyPreference
+import app.winters.octo.playback.START_AFTER_HELP
+import app.winters.octo.playback.StartAfter
 import app.winters.octo.playback.StreamQuality
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.player.StreamPrefs
@@ -49,6 +51,10 @@ class StreamingViewModel @Inject constructor(private val settings: PlayerSetting
 
     fun setMobile(quality: StreamQuality) {
         viewModelScope.launch { settings.setStreamMobile(quality) }
+    }
+
+    fun setStartAfter(startAfter: StartAfter) {
+        viewModelScope.launch { settings.setStartAfter(startAfter) }
     }
 }
 
@@ -142,6 +148,10 @@ fun StreamingPage(
             })
             ChoiceRow(SettingsIndex.StreamMobile, value = prefs.mobile.label, onClick = {
                 sheet.show(ChoiceRequest(SettingsIndex.StreamMobile.title, qualities.map { it.choice }, qualities.indexOf(prefs.mobile)) { vm.setMobile(qualities[it]) })
+            })
+            val waits = StartAfter.entries
+            ChoiceRow(SettingsIndex.StartAfter, value = prefs.startAfter.label, helper = START_AFTER_HELP, onClick = {
+                sheet.show(ChoiceRequest(SettingsIndex.StartAfter.title, waits.map { Choice(it.label) }, waits.indexOf(prefs.startAfter)) { vm.setStartAfter(waits[it]) })
             })
         }
 

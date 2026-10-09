@@ -15,6 +15,7 @@ import app.winters.octo.playback.AutomixSettings
 import app.winters.octo.playback.CopyPreference
 import app.winters.octo.playback.PITCH_RANGE_SEMITONES
 import app.winters.octo.playback.Pace
+import app.winters.octo.playback.StartAfter
 import app.winters.octo.playback.StreamQuality
 import app.winters.octo.playback.paceOf
 import app.winters.octo.playback.snapSpeed
@@ -96,6 +97,8 @@ data class StreamPrefs(
     val copies: CopyPreference = CopyPreference.PhoneFirst,
     val wifi: StreamQuality = StreamQuality.Original,
     val mobile: StreamQuality = StreamQuality.Kbps192,
+    // How much of a stream is ready before a song starts.
+    val startAfter: StartAfter = StartAfter.Short,
 )
 
 // The range the longest blend can be set to.
@@ -127,6 +130,7 @@ private val AMBIENT_BAR = booleanPreferencesKey("ambient_bar")
 private val AMBIENT_PAGE_ARTWORK = booleanPreferencesKey("ambient_page_artwork")
 private val STREAM_WIFI = stringPreferencesKey("stream_wifi")
 private val STREAM_MOBILE = stringPreferencesKey("stream_mobile")
+private val START_AFTER = stringPreferencesKey("start_after")
 private val BACKGROUND_MODE = stringPreferencesKey("immersive_background")
 private val BACKGROUND_BRIGHTNESS_CAP = intPreferencesKey("immersive_bg_brightness_cap")
 private val BACKGROUND_SATURATION = intPreferencesKey("immersive_bg_saturation")
@@ -193,6 +197,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             copies = choice(stored[COPIES], defaults.copies),
             wifi = choice(stored[STREAM_WIFI], defaults.wifi),
             mobile = choice(stored[STREAM_MOBILE], defaults.mobile),
+            startAfter = choice(stored[START_AFTER], defaults.startAfter),
         )
     }
 
@@ -339,6 +344,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             it[COPIES] = stream.copies.name
             it[STREAM_WIFI] = stream.wifi.name
             it[STREAM_MOBILE] = stream.mobile.name
+            it[START_AFTER] = stream.startAfter.name
         }
     }
 
@@ -352,6 +358,10 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
 
     suspend fun setStreamMobile(quality: StreamQuality) {
         context.playerPrefs.edit { it[STREAM_MOBILE] = quality.name }
+    }
+
+    suspend fun setStartAfter(startAfter: StartAfter) {
+        context.playerPrefs.edit { it[START_AFTER] = startAfter.name }
     }
 }
 
