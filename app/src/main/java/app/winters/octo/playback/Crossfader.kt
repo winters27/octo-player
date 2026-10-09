@@ -34,9 +34,11 @@ private const val LEVEL_HEARD_MS = 20_000L
 // A tempo-matched song eases back to its own speed in steps this small.
 private const val RATE_STEP = 0.0025
 
-// Runs the transition between two decks. While a song plays it scouts the
+// Runs the transition between two decks. While a song plays it reads the
 // end of it and the start of the next song, and plans where and how they
-// meet (planTransition). Ahead of the blend it loads the spare deck with
+// meet (planTransition). Each comes from the server's transition profile of
+// the song when the server has one (`profiles`), else from scouting it.
+// Ahead of the blend it loads the spare deck with
 // the same queue, the same shuffle order and the next song, parked where
 // the next song's silent run-up starts. A little before the blend the spare
 // plays, silent, and is lined up with the playing song by its position. At
@@ -51,6 +53,7 @@ internal class Crossfader(
     private var spare: ExoPlayer,
     private val soundOf: (ExoPlayer) -> DeckSound?,
     private val scout: Scout?,
+    private val profiles: ProfileSource? = null,
 ) : Player.Listener {
     // How transitions are planned; a longest blend of 0 turns them off.
     var settings = AutomixSettings(maxOverlapMs = 0)
@@ -101,9 +104,12 @@ internal class Crossfader(
     private var lastPosition = -1L
     private var lastCheckAt = 0L
 
-    private class Scouted(val entryId: String, val job: Scout.Job?) {
+    private class Scouted(val entryId: String, var job: Scout.Job?) {
         var done = false
         var analysis: SectionAnalysis? = null
+
+        // The server's profile of the song, when the analysis came from it.
+        var profile: TransitionProfile? = null
     }
 
     private class Reading(val entryId: String, val job: Scout.Job?) {
@@ -309,47 +315,55 @@ internal class Crossfader(
         return moved
     }
 
-    // Starts scouting the end of the playing song once it has played a
-    // second, and the start of the next song, each once per queue entry.
+    // Reads the end of the playing song once it has played a second, and the
+    // start of the next song as soon as it is known, each once per queue
+    // entry: from the server's profile of the song when it has one, else by
+    // scouting it.
     private fun scoutAhead(deck: ExoPlayer, current: MediaItem, next: MediaItem, position: Long, lengthMs: Long) {
         val scout = scout ?: return
         if (!settings.smart) return
         val currentEntry = current.entryId ?: current.mediaId
         if (tail?.entryId != currentEntry && position >= SCOUT_AFTER_MS && lengthMs >= SHORTEST_AUTOMIX_SONG_MS) {
             tail?.job?.cancel()
-            val uri = current.localConfiguration?.uri
             val scouted = Scouted(currentEntry, null)
-            if (uri == null) {
-                scouted.done = true
-                tail = scouted
-            } else {
-                lateinit var job: Scout.Job
-                job = scout.read(uri, max(0L, lengthMs - TAIL_SCOUT_MS), lengthMs, tailAnalyzer(current.mediaMetadata.tagBpm())) { analysis ->
-                    if (tail?.job === job) {
-                        tail?.analysis = analysis
-                        tail?.done = true
-                        schedule(0)
+            tail = scouted
+            withProfile(current, scouted, TransitionProfile::tailAnalysis) {
+                val uri = current.localConfiguration?.uri
+                if (uri == null) {
+                    scouted.done = true
+                } else {
+                    lateinit var job: Scout.Job
+                    job = scout.read(uri, max(0L, lengthMs - TAIL_SCOUT_MS), lengthMs, tailAnalyzer(current.mediaMetadata.tagBpm())) { analysis ->
+                        if (tail === scouted && scouted.job === job) {
+                            scouted.analysis = analysis
+                            scouted.done = true
+                            schedule(0)
+                        }
                     }
+                    scouted.job = job
                 }
-                tail = Scouted(currentEntry, job)
             }
         }
         val nextEntry = next.entryId ?: next.mediaId
         if (head?.entryId != nextEntry) {
             head?.job?.cancel()
-            val uri = next.localConfiguration?.uri
-            if (uri == null) {
-                head = Scouted(nextEntry, null).also { it.done = true }
-            } else {
-                lateinit var job: Scout.Job
-                job = scout.read(uri, 0, HEAD_SCOUT_MS, headAnalyzer(next.mediaMetadata.tagBpm())) { analysis ->
-                    if (head?.job === job) {
-                        head?.analysis = analysis
-                        head?.done = true
-                        schedule(0)
+            val scouted = Scouted(nextEntry, null)
+            head = scouted
+            withProfile(next, scouted, TransitionProfile::headAnalysis) {
+                val uri = next.localConfiguration?.uri
+                if (uri == null) {
+                    scouted.done = true
+                } else {
+                    lateinit var job: Scout.Job
+                    job = scout.read(uri, 0, HEAD_SCOUT_MS, headAnalyzer(next.mediaMetadata.tagBpm())) { analysis ->
+                        if (head === scouted && scouted.job === job) {
+                            scouted.analysis = analysis
+                            scouted.done = true
+                            schedule(0)
+                        }
                     }
+                    scouted.job = job
                 }
-                head = Scouted(nextEntry, job)
             }
         }
         // Once both are in, what the deck has heard of this song.
@@ -366,6 +380,28 @@ internal class Crossfader(
                 }
             }
             reading = Reading(currentEntry, job)
+        }
+    }
+
+    // Fills `scouted` from the server's profile of the song when it has one,
+    // at once when it is already here; otherwise, or once the server says it
+    // has none, runs `scoutIt`.
+    private fun withProfile(item: MediaItem, scouted: Scouted, part: (TransitionProfile) -> SectionAnalysis, scoutIt: () -> Unit) {
+        val source = profiles ?: return scoutIt()
+        val fill = { profile: TransitionProfile ->
+            scouted.profile = profile
+            scouted.analysis = part(profile)
+            scouted.done = true
+        }
+        val uri = item.localConfiguration?.uri?.toString()
+        source.cached(uri)?.let { return fill(it) }
+        if (!source.request(uri) { profile ->
+                if (tail !== scouted && head !== scouted) return@request
+                if (profile != null) fill(profile) else scoutIt()
+                schedule(0)
+            }
+        ) {
+            scoutIt()
         }
     }
 
@@ -417,7 +453,8 @@ internal class Crossfader(
         nextItem: MediaItem,
     ) {
         val heard = reading?.takeIf { it.entryId == key.current }?.value
-        val level = heard?.takeIf { it.heardMs >= LEVEL_HEARD_MS }?.bodyLevelDb
+        val served = tail?.takeIf { it.entryId == key.current }?.profile
+        val (level, tempoPrior) = heardFor(served, heard?.takeIf { it.heardMs >= LEVEL_HEARD_MS }?.bodyLevelDb, heard?.tempoPrior)
         val context = TransitionContext(
             nowMs = position,
             playedMs = heard?.let { (it.heardMs * speed).toLong() } ?: position,
@@ -428,7 +465,7 @@ internal class Crossfader(
             currentGenre = deck.currentMediaItem?.mediaMetadata?.genre?.toString(),
             nextGenre = nextItem.mediaMetadata.genre?.toString(),
             bodyLevelDb = level,
-            tempoPrior = heard?.tempoPrior,
+            tempoPrior = tempoPrior,
         )
         val tailAnalysis = tail?.takeIf { it.entryId == key.current }?.analysis
         val headAnalysis = head?.takeIf { it.entryId == key.next }?.analysis

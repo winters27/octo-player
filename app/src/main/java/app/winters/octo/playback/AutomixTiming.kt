@@ -47,6 +47,13 @@ fun isRebuffering(playWhenReady: Boolean, playbackState: Int, suppressionReason:
 fun AutomixSettings.atSpeed(speed: Float): AutomixSettings =
     if (speed == 1f) this else copy(maxOverlapMs = (maxOverlapMs * speed.toDouble()).roundToLong())
 
+// The playing song's level and tempo as the planner is told them: with the
+// song's end from the server's profile, that end is already measured
+// against the whole song, so no level goes with it, and its tempo is the
+// whole song's from the profile, else what was heard.
+fun heardFor(profile: TransitionProfile?, heardLevelDb: Double?, heardTempo: Double?): Pair<Double?, Double?> =
+    if (profile == null) heardLevelDb to heardTempo else null to (profile.tempoPrior ?: heardTempo)
+
 // The incoming song's playback rate through the blend.
 fun TransitionPlan.incomingRate(): Double = beatMatchRate ?: 1.0
 

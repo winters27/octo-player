@@ -25,6 +25,8 @@ import androidx.media3.session.SessionResult
 import app.winters.octo.MainActivity
 import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.isFind
+import app.winters.octo.data.SessionRepository
+import app.winters.octo.data.SessionState
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.FindLengths
@@ -121,6 +123,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var deviceMedia: DeviceMedia
     @Inject lateinit var feedback: Feedback
     @Inject lateinit var switcher: ServerSwitch
+    @Inject lateinit var sessions: SessionRepository
 
     private val scope = MainScope()
     // While the server in use changes, the emptied player is not saved over
@@ -165,7 +168,8 @@ class OctoPlaybackService : MediaLibraryService() {
                 .also { deck -> renderers.sound?.let { sounds[deck] = it } }
         }
         val scout = Scout(streams.scoutSourceFactory(), streams.extractors())
-        local = OctoPlayer(this, deck(), deck(), sounds::get, scout)
+        val profiles = ServerProfiles(scope) { (sessions.state.value as? SessionState.SignedIn)?.session }
+        local = OctoPlayer(this, deck(), deck(), sounds::get, scout, profiles)
         player = OutputSwitch(local)
         tracker = PlayTracker(plays::started, plays::record, isPlaying = { player.isPlaying })
         player.addListener(tracker)
