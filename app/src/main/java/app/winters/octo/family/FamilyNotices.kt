@@ -24,14 +24,11 @@ import app.winters.octo.MainActivity
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.design.OctoIcons
-import app.winters.octo.subsonic.FamilyRequestState
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
-import app.winters.octo.subsonic.family
-import app.winters.octo.subsonic.familyRequests
 import app.winters.octo.ui.family.FAMILY
 import app.winters.octo.ui.family.FamilyNotice
-import app.winters.octo.ui.family.familyNotices
+import app.winters.octo.ui.family.checkFamilyNotices
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -45,10 +42,7 @@ import java.util.concurrent.TimeUnit
 // requests wait.
 class FamilyCheck(private val store: FamilyNoticeStore) {
     suspend fun run(account: String, client: SubsonicClient): List<FamilyNotice> {
-        val me = client.family().me
-        val mine = client.familyRequests()
-        val waiting = if (me.abilities.approveRequests) client.familyRequests(all = true, state = FamilyRequestState.Pending).size else null
-        val (told, memory) = familyNotices(store.read(account), mine, waiting)
+        val (told, memory) = checkFamilyNotices(client, store.read(account))
         store.write(account, memory)
         return told
     }

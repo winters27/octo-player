@@ -62,7 +62,6 @@ import app.winters.octo.subsonic.FamilyMe
 import app.winters.octo.subsonic.FamilyMember
 import app.winters.octo.subsonic.FamilyRequest
 import app.winters.octo.subsonic.FamilyRequestState
-import app.winters.octo.subsonic.familyJoinLink
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.ScreenTitle
@@ -245,7 +244,7 @@ private fun AddedSheet(added: FamilyDeviceAdded, hub: FamilyHub) {
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 GlazeButton("Copy", { copy(context, secret) }, size = ButtonSize.Small)
-                if (code != null && server.isNotEmpty()) GlazeButton("Copy link", { copy(context, familyJoinLink(server, added.username, code)) }, size = ButtonSize.Small)
+                addedDeviceLink(added, server)?.let { link -> GlazeButton("Copy link", { copy(context, link) }, size = ButtonSize.Small) }
                 AccentButton("Done", onClick = hub.model::dismissAdded, size = ButtonSize.Small)
             }
         }

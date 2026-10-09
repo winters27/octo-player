@@ -78,6 +78,8 @@ class FamilyParsingTest {
         assertEquals(10, can.storageLimitGb)
         assertTrue(can.instantFromFamily)
         assertNull(family.manager)
+        // The account's own audio quality, and the family's limits on it.
+        assertEquals(FamilyQuality(StreamQuality.Original, StreamQuality.Standard, 192, 128), me.quality)
     }
 
     @Test
@@ -109,7 +111,9 @@ class FamilyParsingTest {
         answer("getFamilyFuture")
         val me = client().family().me
         assertEquals("zoe", me.username)
-        assertEquals(FamilyRole.Unmanaged, me.role)
+        // A role this app does not know keeps the server's own name.
+        assertNull(me.role)
+        assertEquals("Guest", me.roleName)
         assertEquals(AddToLibrary.Direct, me.abilities.addToLibrary)
         assertEquals(RequestQuality.Best, me.abilities.requestQuality)
         assertEquals(FamilyPlace.Home, me.place)
@@ -216,9 +220,35 @@ class FamilyParsingTest {
         assertEquals("Song", phone.playing?.title)
         assertTrue(phone.current)
         val other = devices[1]
+        assertEquals(DeviceQualityMode.App, phone.quality)
+        // A device that does not say follows the account.
+        assertEquals(DeviceQualityMode.Account, other.quality)
         assertEquals(FamilyDeviceKind.SubsonicApp, other.kind)
         assertNull(other.playing)
         assertFalse(other.current)
+    }
+
+    @Test
+    fun theAccountsQualityAndADevicesModeAreSet() = runTest {
+        answer("setFamilyQuality")
+        val now = client().setFamilyQuality(home = StreamQuality.High, away = StreamQuality.DataSaver)
+        val url = server.takeRequest().url
+        assertEquals("/rest/setFamilyQuality", url.encodedPath)
+        assertEquals("High", url.queryParameter("home"))
+        assertEquals("DataSaver", url.queryParameter("away"))
+        assertEquals(StreamQuality.DataSaver, now.away)
+        // One left out is not sent.
+        answer("setFamilyQuality")
+        client().setFamilyQuality(away = StreamQuality.Standard)
+        assertNull(server.takeRequest().url.queryParameter("home"))
+
+        answer("setFamilyDeviceQuality")
+        val device = client().setFamilyDeviceQuality("d_7Qm2abc", DeviceQualityMode.App)
+        val call = server.takeRequest().url
+        assertEquals("d_7Qm2abc", call.queryParameter("id"))
+        assertEquals("App", call.queryParameter("mode"))
+        assertEquals(DeviceQualityMode.App, device.quality)
+        assertEquals(listOf(0, 256, 160, 96), StreamQuality.entries.map { it.kbps })
     }
 
     @Test
@@ -318,19 +348,43 @@ class FamilyParsingTest {
     }
 
     @Test
-    fun aJoinLinkIsRead() {
-        val link = parseFamilyJoinLink("  octo://join?server=https%3A%2F%2Fmusic.example.com%2Fnd&username=alex&code=482913 ")
-        assertEquals(FamilyJoinLink("https://music.example.com/nd", "alex", "482913"), link)
+    fun aJoinLinkIsReadInBothForms() {
+        val app = parseFamilyJoinLink("  octo://join?server=https%3A%2F%2Fmusic.example.com%2Fnd&username=alex&code=482913 ")
+        assertEquals(FamilyJoinLink("https://music.example.com/nd", "alex", "482913"), app)
         // The code never reaches a log.
-        assertFalse(link.toString().contains("482913"))
-        // A link made here reads back the same.
-        val made = familyJoinLink("https://music.example.com/nd", "alex smith", "482913")
-        assertEquals("octo://join?server=https%3A%2F%2Fmusic.example.com%2Fnd&username=alex%20smith&code=482913", made)
-        assertEquals(FamilyJoinLink("https://music.example.com/nd", "alex smith", "482913"), parseFamilyJoinLink(made))
-        assertNull(parseFamilyJoinLink("https://music.example.com"))
-        assertNull(parseFamilyJoinLink("octo://join?server=x&username=alex&code=12345"))
-        assertNull(parseFamilyJoinLink("octo://join?server=x&code=123456"))
-        assertNull(parseFamilyJoinLink("octo://join?username=alex&code=123456"))
+        assertFalse(app.toString().contains("482913"))
+        // The https form a QR code carries, with the secrets after the #.
+        assertEquals(app, parseFamilyLink("https://music.example.com/nd/family/join#u=alex&c=482913"))
+        assertEquals(
+            FamilyJoinLink("https://music.example.com", "alex smith", "482913"),
+            parseFamilyLink("https://music.example.com/family/join#u=alex%20smith&c=482913"),
+        )
+        // Links made here read back the same.
+        val web = familyJoinUrl("https://music.example.com/nd/", "alex smith", "482913")
+        assertEquals("https://music.example.com/nd/family/join#u=alex%20smith&c=482913", web)
+        assertEquals(FamilyJoinLink("https://music.example.com/nd", "alex smith", "482913"), parseFamilyLink(web))
+        val own = familyAppLink(FamilyJoinLink("https://music.example.com/nd", "alex smith", "482913"))
+        assertEquals("octo://join?server=https%3A%2F%2Fmusic.example.com%2Fnd&username=alex%20smith&code=482913", own)
+        assertEquals(parseFamilyLink(web), parseFamilyLink(own))
+        // Not links.
+        assertNull(parseFamilyLink("https://music.example.com"))
+        assertNull(parseFamilyLink("https://music.example.com/family/join"))
+        assertNull(parseFamilyLink("https://music.example.com/other/join#u=alex&c=482913"))
+        assertNull(parseFamilyLink("octo://join?server=x&username=alex&code=12345"))
+        assertNull(parseFamilyLink("octo://join?server=x&code=123456"))
+        assertNull(parseFamilyLink("octo://join?username=alex&code=123456"))
+        assertNull(parseFamilyLink("octo://album/al-1"))
+    }
+
+    @Test
+    fun anInviteLinkIsReadInBothForms() {
+        val invite = FamilyInviteLink("https://music.example.com", "tok_ABC-123")
+        assertEquals(invite, parseFamilyLink("https://music.example.com/family/join#invite=tok_ABC-123"))
+        assertEquals(invite, parseFamilyLink("octo://join?server=https%3A%2F%2Fmusic.example.com&invite=tok_ABC-123"))
+        assertEquals("https://music.example.com/family/join#invite=tok_ABC-123", familyInviteUrl("https://music.example.com", "tok_ABC-123"))
+        assertEquals(invite, parseFamilyLink(familyAppLink(invite)))
+        assertNull(parseFamilyJoinLink("https://music.example.com/family/join#invite=tok"))
+        assertFalse(invite.toString().contains("tok_"))
     }
 
     @Test

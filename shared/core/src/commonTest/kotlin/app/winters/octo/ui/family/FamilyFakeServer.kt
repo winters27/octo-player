@@ -22,7 +22,12 @@ class FamilyFakeServer : AutoCloseable {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 calls += request
                 val endpoint = request.url.pathSegments.lastOrNull().orEmpty()
-                val body = answers[endpoint]?.invoke(request) ?: fail(70, "Not found")
+                val body = try {
+                    answers[endpoint]?.invoke(request) ?: fail(70, "Not found")
+                } catch (e: IllegalStateException) {
+                    // A rule that refuses: the family page's "not signed in".
+                    return MockResponse.Builder().code(401).body("").build()
+                }
                 return MockResponse.Builder().body(body).build()
             }
         }
@@ -39,6 +44,11 @@ class FamilyFakeServer : AutoCloseable {
 
     fun answer(endpoint: String, payload: (RecordedRequest) -> String) {
         answers[endpoint] = { request -> ok(payload(request)) }
+    }
+
+    // Answers with this body as it is, as the family page's JSON calls do.
+    fun raw(endpoint: String, body: (RecordedRequest) -> String) {
+        answers[endpoint] = body
     }
 
     fun failWith(endpoint: String, code: Int, message: String) {

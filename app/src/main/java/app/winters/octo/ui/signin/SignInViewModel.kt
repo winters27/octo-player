@@ -206,6 +206,11 @@ class SignInViewModel @Inject constructor(
                 joinFamily(url, username.trim(), code, devices.current().name, FamilyPlatform.Android, http)
             }) {
                 is JoinOutcome.Paired -> joined.pair.also { paired = it }
+                is JoinOutcome.Untrusted -> {
+                    error = "This server's certificate is not trusted."
+                    busy = false
+                    return@launch
+                }
                 is JoinOutcome.Failed -> {
                     error = joined.message
                     busy = false

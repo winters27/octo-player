@@ -2,6 +2,7 @@ package app.winters.octo.subsonic
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
@@ -65,6 +66,30 @@ enum class FamilyPlatform(val wire: String) {
     Ios("iOS"),
 }
 
+// How a stream is sent: the file as it is, or Opus at a lower bitrate.
+@Serializable
+enum class StreamQuality(val kbps: Int) {
+    Original(0),
+    High(256),
+    Standard(160),
+    DataSaver(96),
+}
+
+// The account's own audio quality at home and away, and the family's
+// limits on it (0 for none), as the server keeps them.
+@Serializable
+data class FamilyQuality(
+    val home: StreamQuality = StreamQuality.Original,
+    val away: StreamQuality = StreamQuality.Original,
+    val familyLimitKbps: Int = 0,
+    val familyAwayLimitKbps: Int = 0,
+)
+
+// Who picks a device's audio quality: the account's own setting, or the
+// app on the device (only the family's limit applies then).
+@Serializable
+enum class DeviceQualityMode { Account, App }
+
 // What the owner lets an account do. A limit of 0 means no limit, and a
 // stream cap of 0 means the original file.
 @Serializable
@@ -95,7 +120,8 @@ data class FamilyAbilities(
 data class FamilyMe(
     val username: String = "",
     val displayName: String = "",
-    val role: FamilyRole = FamilyRole.Unmanaged,
+    // The role as the server names it; `role` reads it when this app knows it.
+    @SerialName("role") val roleName: String = FamilyRole.Unmanaged.name,
     val managed: Boolean = false,
     val abilities: FamilyAbilities = FamilyAbilities(),
     val requestsThisWeek: Int = 0,
@@ -103,21 +129,31 @@ data class FamilyMe(
     val place: FamilyPlace = FamilyPlace.Home,
     // Null for the owner and for unmanaged accounts.
     val deviceId: String? = null,
-)
+    val quality: FamilyQuality = FamilyQuality(),
+) {
+    // Null for a role a newer server has and this app does not know yet.
+    val role: FamilyRole? get() = familyRole(roleName)
+}
 
 // One member, as a manager sees them.
 @Serializable
 data class FamilyMember(
     val username: String = "",
     val displayName: String = "",
-    val role: FamilyRole = FamilyRole.Member,
+    @SerialName("role") val roleName: String = FamilyRole.Member.name,
     val suspended: Boolean = false,
     val devices: Int = 0,
     val playingNow: Boolean = false,
     val pendingRequests: Int = 0,
     val storageUsedBytes: Long = 0,
     val storageLimitGb: Int = 0,
-)
+) {
+    val role: FamilyRole? get() = familyRole(roleName)
+}
+
+// A role by the name the server gives it, or null for one this app does
+// not know.
+fun familyRole(name: String): FamilyRole? = FamilyRole.entries.firstOrNull { it.name == name }
 
 // What a manager sees of the whole family.
 @Serializable
@@ -187,6 +223,8 @@ data class FamilyDevice(
     val playing: FamilyDevicePlaying? = null,
     // The device asking.
     val current: Boolean = false,
+    // Who picks its audio quality.
+    val quality: DeviceQualityMode = DeviceQualityMode.Account,
 )
 
 @Serializable
@@ -298,6 +336,24 @@ suspend fun SubsonicClient.addFamilyDevice(name: String, kind: FamilyDeviceKind)
         FamilyDeviceAdded.serializer(),
     )
 
+// Sets the account's own audio quality at home, away, or both; left out
+// keeps what it is. Answers the quality as the server now has it.
+suspend fun SubsonicClient.setFamilyQuality(home: StreamQuality? = null, away: StreamQuality? = null): FamilyQuality =
+    get(
+        "setFamilyQuality",
+        buildMap {
+            home?.let { put("home", it.name) }
+            away?.let { put("away", it.name) }
+        },
+        "quality",
+        FamilyQuality.serializer(),
+        FamilyQuality(home ?: StreamQuality.Original, away ?: StreamQuality.Original),
+    )
+
+// Sets who picks one of the account's devices' audio quality.
+suspend fun SubsonicClient.setFamilyDeviceQuality(id: String, mode: DeviceQualityMode): FamilyDevice =
+    get("setFamilyDeviceQuality", mapOf("id" to id, "mode" to mode.name), "device", FamilyDevice.serializer(), FamilyDevice(id = id, quality = mode))
+
 // Takes a song out of the signed-in member's own library. The server
 // refuses songs of the shared library.
 suspend fun SubsonicClient.removeFromMyLibrary(id: String) = send("removeFromMyLibrary", listOf("id" to id))
@@ -348,41 +404,7 @@ suspend fun pairWithFamilyCode(
     return withContext(Dispatchers.Default) { reader.decode(body, "familyPair", FamilyPair.serializer(), null) }
 }
 
-// A pair code is six digits; anything else is not one.
-fun isFamilyCode(code: String): Boolean = code.length == 6 && code.all(Char::isDigit)
-
-// What a pairing link (a QR code, or one pasted) carries:
-// octo://join?server=<address>&username=<name>&code=<6 digits>.
-data class FamilyJoinLink(val server: String, val username: String, val code: String) {
-    override fun toString() = "FamilyJoinLink(server=$server, username=$username)"
-}
-
-// Reads a pairing link, or null when the text is not one. Spaces around it
-// are ignored, so a pasted link works.
-fun parseFamilyJoinLink(text: String): FamilyJoinLink? {
-    val trimmed = text.trim()
-    val prefix = "octo://join?"
-    if (!trimmed.startsWith(prefix, ignoreCase = true)) return null
-    val params = trimmed.substring(prefix.length).split('&').mapNotNull { part ->
-        val at = part.indexOf('=')
-        if (at <= 0) null else part.substring(0, at) to decodeQueryValue(part.substring(at + 1))
-    }.toMap()
-    val server = params["server"]?.trim()?.takeIf(String::isNotEmpty) ?: return null
-    val username = params["username"]?.trim()?.takeIf(String::isNotEmpty) ?: return null
-    val code = params["code"]?.trim()?.takeIf(::isFamilyCode) ?: return null
-    return FamilyJoinLink(server, username, code)
-}
-
-// The pairing link for a code, to show or copy: what a QR code carries.
-fun familyJoinLink(server: String, username: String, code: String): String =
-    "octo://join?server=${encodeQueryValue(server)}&username=${encodeQueryValue(username)}&code=${encodeQueryValue(code)}"
-
-private fun encodeQueryValue(value: String): String = java.net.URLEncoder.encode(value, Charsets.UTF_8).replace("+", "%20")
-
-private fun decodeQueryValue(value: String): String =
-    runCatching { java.net.URLDecoder.decode(value, Charsets.UTF_8) }.getOrDefault(value)
-
-private suspend fun okhttp3.Call.awaitBody(endpoint: String): String {
+internal suspend fun okhttp3.Call.awaitBody(endpoint: String): String {
     val response = await()
     return withContext(Dispatchers.IO) {
         response.use {

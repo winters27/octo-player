@@ -41,6 +41,9 @@ kotlin {
             // Ed25519 arrives only in newer versions than the app supports,
             // so both apps use this one.
             implementation(libs.bouncycastle.prov)
+            // Drawing and reading QR codes for family links, on the device,
+            // with no web service and nothing from Google Play.
+            api(libs.zxing.core)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

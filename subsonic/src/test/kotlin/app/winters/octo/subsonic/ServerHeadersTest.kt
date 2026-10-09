@@ -46,7 +46,7 @@ class ServerHeadersTest {
 
         val mine = fetch(client, own)
         assertEquals("6f1c2a9e-1111-4222-8333-944455556666", mine.headers[DEVICE_ID_HEADER])
-        assertEquals("Pixel 9", mine.headers[DEVICE_NAME_HEADER])
+        assertEquals("Pixel%209", mine.headers[DEVICE_NAME_HEADER])
         // Playing is never marked offline.
         assertNull(mine.headers[PURPOSE_HEADER])
 
@@ -67,7 +67,7 @@ class ServerHeadersTest {
         val shared = http(HeaderScope(setOf(origin(own.url("/"))), emptyMap(), device))
         val offline = shared.markedFor(OctoPurpose.Offline)
         assertEquals("offline", fetch(offline, own).headers[PURPOSE_HEADER])
-        assertEquals("Pixel 9", fetch(offline, own).headers[DEVICE_NAME_HEADER])
+        assertEquals("Pixel%209", fetch(offline, own).headers[DEVICE_NAME_HEADER])
         assertNull(fetch(offline, other).headers[PURPOSE_HEADER])
         // The shared client itself is left as it was.
         assertNull(fetch(shared, own).headers[PURPOSE_HEADER])
@@ -83,7 +83,7 @@ class ServerHeadersTest {
 
         val first = own.takeRequest()
         assertEquals("offline", first.headers[PURPOSE_HEADER])
-        assertEquals("Pixel 9", first.headers[DEVICE_NAME_HEADER])
+        assertEquals("Pixel%209", first.headers[DEVICE_NAME_HEADER])
         val second = other.takeRequest()
         assertNull(second.headers[PURPOSE_HEADER])
         assertNull(second.headers[DEVICE_ID_HEADER])
@@ -99,14 +99,21 @@ class ServerHeadersTest {
     }
 
     @Test
-    fun aNameWithAccentsOrCurlyQuotesStillGoes() {
-        val named = DeviceIdentity("id", "Sam’s Café phone 📱")
-        assertEquals("Sam's Cafe phone", named.name)
+    fun anyNameGoesPercentEncodedAsUtf8() {
+        val typed = "Sam\u2019s Caf\u00e9 phone \uD83D\uDCF1"
+        val named = DeviceIdentity("id", typed)
+        // Kept as typed.
+        assertEquals(typed, named.name)
         val client = http(HeaderScope(setOf(origin(own.url("/"))), emptyMap(), named))
-        assertEquals("Sam's Cafe phone", fetch(client, own).headers[DEVICE_NAME_HEADER])
-        // Nothing usable falls back to a plain name.
-        assertEquals("Octo device", DeviceIdentity("id", "📱").name)
+        val sent = fetch(client, own).headers[DEVICE_NAME_HEADER]!!
+        assertEquals("Sam%E2%80%99s%20Caf%C3%A9%20phone%20%F0%9F%93%B1", sent)
+        assertEquals(typed, java.net.URLDecoder.decode(sent, Charsets.UTF_8))
+        // At most 64 characters, never cutting one in two.
         assertEquals(64, DeviceIdentity("id", "x".repeat(200)).name.length)
+        val emoji = DeviceIdentity("id", "\uD83D\uDCF1".repeat(70)).name
+        assertEquals(64, emoji.codePointCount(0, emoji.length))
+        // Nothing usable falls back to a plain name.
+        assertEquals("Octo device", DeviceIdentity("id", "  ").name)
     }
 
     @Test

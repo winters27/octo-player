@@ -1,5 +1,8 @@
 package app.winters.octo.ui.family
 
+import app.winters.octo.subsonic.DeviceQualityMode
+import app.winters.octo.subsonic.StreamQuality
+import app.winters.octo.subsonic.FamilyQuality
 import app.winters.octo.subsonic.AddToLibrary
 import app.winters.octo.subsonic.FamilyAbilities
 import app.winters.octo.subsonic.FamilyDevice
@@ -38,7 +41,7 @@ class FamilyRulesTest {
     ) = FamilyMe(
         username = "alex",
         displayName = "Alex",
-        role = role,
+        roleName = role.name,
         managed = managed,
         abilities = FamilyAbilities(addToLibrary = add, requestQuality = max, weeklyRequestLimit = limit, storageLimitGb = storageLimit, offlineCopies = offline),
         requestsThisWeek = used,
@@ -132,20 +135,106 @@ class FamilyRulesTest {
         assertTrue("Your requests wait for approval" in lines)
         assertTrue("10 requests a week" in lines)
         assertTrue("Room for 10 GB in your library" in lines)
-        assertTrue("Plays at up to 192 kbps" in lines)
-        assertTrue("Away from home, plays at up to 128 kbps" in lines)
+        assertTrue("Your family plan limits listening to 192 kbps" in lines)
+        assertTrue("Your family plan limits away listening to 128 kbps" in lines)
         assertTrue("Plays on 2 devices at once" in lines)
         assertTrue("Offline copies are off" in lines)
         // Nothing in the family's words uses a dash for a pause.
-        for (line in lines) assertFalse(line, line.contains('—') || line.contains('–'))
+        for (line in lines) assertFalse(line, line.contains('\u2014') || line.contains('\u2013'))
 
         val owner = abilityLines(FamilyAbilities(addToLibrary = AddToLibrary.Direct, manageFamily = true, approveRequests = true)).map { it.text }
         assertEquals("Songs you add go straight into your library", owner[0])
-        assertTrue("Plays in the original quality" in owner)
+        // No limit set: quality is not a line at all.
+        assertFalse(owner.any { it.contains("kbps") || it.contains("quality") })
         assertTrue("Manages the family" in owner)
         assertFalse(owner.any { it.contains("requests a week") })
+        // An away cap of 0 is the same as at home: no away line of its own.
+        val sameAway = abilityLines(FamilyAbilities(streamCap = 192, awayCap = 0)).map { it.text }
+        assertTrue("Listens away from home too" in sameAway)
+        assertFalse(sameAway.any { it.contains("away listening") })
+        // Nor one no lower.
+        assertFalse(abilityLines(FamilyAbilities(streamCap = 128, awayCap = 192)).any { it.text.contains("away listening") })
+        assertTrue(abilityLines(FamilyAbilities(streamCap = 0, awayCap = 128)).any { it.text == "Your family plan limits away listening to 128 kbps" })
         val homeOnly = abilityLines(FamilyAbilities(away = false))
         assertEquals(AbilityLine("Listening away from home is off", on = false), homeOnly.first { it.text.startsWith("Listening away") })
+    }
+
+    @Test
+    fun audioQualityChoicesShowTheFamilysLimit() {
+        val free = FamilyQuality()
+        assertTrue(familyLimitLines(free).isEmpty())
+        assertTrue(qualityOptions(homeLimit(free)).none { it.limited })
+        val limited = FamilyQuality(home = StreamQuality.Original, away = StreamQuality.Standard, familyLimitKbps = 0, familyAwayLimitKbps = 160)
+        assertEquals(listOf("Your family plan limits away listening to 160 kbps"), familyLimitLines(limited))
+        assertEquals(160, awayLimit(limited))
+        assertEquals(0, homeLimit(limited))
+        // Original and High are held to 160 away; Standard and Data saver are not.
+        assertEquals(listOf(true, true, false, false), qualityOptions(awayLimit(limited)).map { it.limited })
+        assertEquals(listOf("Original", "High", "Standard", "Data saver"), qualityOptions(0).map { it.name })
+        // A home limit is the away limit too, unless away is lower.
+        val both = FamilyQuality(familyLimitKbps = 256, familyAwayLimitKbps = 96)
+        assertEquals(listOf("Your family plan limits listening to 256 kbps", "Your family plan limits away listening to 96 kbps"), familyLimitLines(both))
+        assertEquals(96, awayLimit(both))
+        assertEquals(256, awayLimit(FamilyQuality(familyLimitKbps = 256)))
+    }
+
+    @Test
+    fun theAppPicksQualityOnlyWithoutAFamilyOrWhenLeftToIt() {
+        assertTrue(appPicksQuality(familyOn = false, mode = null))
+        assertTrue(appPicksQuality(familyOn = false, mode = DeviceQualityMode.Account))
+        assertTrue(appPicksQuality(familyOn = true, mode = DeviceQualityMode.App))
+        assertFalse(appPicksQuality(familyOn = true, mode = DeviceQualityMode.Account))
+        assertFalse(appPicksQuality(familyOn = true, mode = null))
+        // In Account mode the app asks for the file as it is.
+        assertEquals(mapOf("format" to "raw"), streamParams(appPicks = false, quality = StreamQuality.DataSaver))
+        assertEquals(mapOf("format" to "raw"), streamParams(appPicks = true, quality = StreamQuality.Original))
+        assertEquals(mapOf("format" to "opus", "maxBitRate" to "160"), streamParams(appPicks = true, quality = StreamQuality.Standard))
+    }
+
+    @Test
+    fun aRoleFromANewerServerShowsItsOwnName() {
+        assertEquals("Listener", roleLabel("Listener"))
+        assertEquals("Co-admin", roleLabel("CoAdmin"))
+        assertEquals("Guest", roleLabel("Guest"))
+        assertEquals("Family Guest", roleLabel("FamilyGuest"))
+        assertEquals("Zoe, Guest", planTitle(FamilyMe(username = "zoe", displayName = "Zoe", roleName = "Guest")))
+    }
+
+    @Test
+    fun aLinkMakesAQrCodeThatReadsBack() {
+        val link = app.winters.octo.subsonic.familyJoinUrl("https://music.example.com", "alex", "482913")
+        val code = qrCode(link)
+        // Drawn four squares to a module with a light border, as the apps draw it.
+        val scale = 4
+        val side = (code.size + 8) * scale
+        val pixels = IntArray(side * side) { 0xFFFFFFFF.toInt() }
+        for (y in 0 until code.size) for (x in 0 until code.size) if (code.isDark(x, y)) {
+            for (dy in 0 until scale) for (dx in 0 until scale) pixels[((y + 4) * scale + dy) * side + (x + 4) * scale + dx] = 0xFF000000.toInt()
+        }
+        assertEquals(link, readQr(pixels, side, side))
+        assertEquals(app.winters.octo.subsonic.FamilyJoinLink("https://music.example.com", "alex", "482913"), familyLinkInQr(readQr(pixels, side, side)))
+        // Light on dark reads too.
+        val inverted = IntArray(pixels.size) { pixels[it] xor 0x00FFFFFF }
+        assertEquals(link, readQr(inverted, side, side))
+        // A picture with no code in it.
+        assertNull(readQr(IntArray(100 * 100) { 0xFF808080.toInt() }, 100, 100))
+    }
+
+    @Test
+    fun anInviteJoinsThenPairsThisDevice() = runBlocking {
+        FamilyFakeServer().use { server ->
+            server.raw("join") { """{"username":"alex"}""" }
+            server.raw("devices") { """{"deviceId":"d_1","kind":"OctoApp","pairCode":"482913","username":"alex"}""" }
+            server.answer("octoFamilyPair") { """"familyPair":{"username":"alex","secret":"abcdefghijklmnopqrstuvwxyz012345","deviceId":"d_1"}""" }
+            assertEquals("Choose a password of at least 8 characters", inviteProblem("Alex", "short", "short"))
+            assertEquals("The two passwords are not the same", inviteProblem("Alex", "long enough", "long enougH"))
+            assertEquals("Type your name", inviteProblem(" ", "long enough", "long enough"))
+            assertNull(inviteProblem("Alex", "long enough", "long enough"))
+            val joined = joinWithInvite(server.url, "tok_1", "Alex", "long enough", "Pixel 9", FamilyPlatform.Android, OkHttpClient())
+            assertEquals("abcdefghijklmnopqrstuvwxyz012345", (joined as JoinOutcome.Paired).pair.secret)
+            assertEquals("482913", server.called("octoFamilyPair").single().url.queryParameter("code"))
+            assertEquals("Pixel 9", server.called("octoFamilyPair").single().url.queryParameter("deviceName"))
+        }
     }
 
     @Test

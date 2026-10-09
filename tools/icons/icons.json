@@ -104,6 +104,10 @@
     "sym_timer": { "icon": "timer", "weight": "regular" },
     "sym_listeners": { "icon": "users-three", "weight": "regular" },
     "sym_layout": { "icon": "layout", "weight": "regular" },
-    "sym_wifi": { "icon": "wifi-high", "weight": "regular" }
+    "sym_wifi": { "icon": "wifi-high", "weight": "regular" },
+    "sym_camera": { "icon": "camera", "weight": "regular" },
+    "sym_qr_code": { "icon": "qr-code", "weight": "regular" },
+    "sym_cell_signal": { "icon": "cell-signal-high", "weight": "regular" },
+    "sym_image": { "icon": "image", "weight": "regular" }
   }
 }

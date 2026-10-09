@@ -147,6 +147,66 @@ class FamilyModelTest {
     }
 
     @Test
+    fun aManagerAddsAMemberAndSeesTheirInviteAsAQrCode() = runBlocking {
+        server.raw("auth") { """{"username":"alex","role":"Owner"}""" }
+        server.raw("members") { """{"member":{"username":"sam","displayName":"Sam","role":"Kid"},"inviteLink":"https://music.example.com/family/join#invite=t9"}""" }
+        model.addMember("sam", "Sam", app.winters.octo.subsonic.FamilyPreset.Kid)
+        until("invite shown") { model.shown != null }
+        assertEquals("Invite Sam", model.shown!!.title)
+        assertEquals("https://music.example.com/family/join#invite=t9", model.shown!!.url)
+        // The page was signed in with this account's own password.
+        assertTrue(server.called("auth").single().body!!.utf8().contains("\"password\":\"secret\""))
+        model.closeShown()
+        assertNull(model.shown)
+    }
+
+    @Test
+    fun theFamilyPageAsksForThePasswordWhenTheDevicesOwnIsRefused() = runBlocking {
+        var tries = 0
+        server.raw("auth") { call ->
+            tries++
+            if (call.body!!.utf8().contains("\"right one\"")) """{"username":"alex"}""" else throw IllegalStateException()
+        }
+        server.raw("invite") { """{"inviteLink":"https://music.example.com/family/join#invite=t10"}""" }
+        model.memberLink(app.winters.octo.subsonic.FamilyMember(username = "sam", displayName = "Sam"))
+        until("password asked") { model.askingPassword }
+        model.signInToPage("right one")
+        until("link shown") { model.shown != null }
+        assertEquals("Add a device for Sam", model.shown!!.title)
+        assertFalse(model.askingPassword)
+        assertEquals(2, tries)
+    }
+
+    @Test
+    fun aDeviceAddedWithACodeHasAnHttpsLink() {
+        val added = app.winters.octo.subsonic.FamilyDeviceAdded(kind = app.winters.octo.subsonic.FamilyDeviceKind.OctoApp, pairCode = "482913", username = "alex")
+        assertEquals("https://music.example.com/family/join#u=alex&c=482913", addedDeviceLink(added, "https://music.example.com"))
+        assertEquals("https://other.example.com/family/join#u=alex&c=482913", addedDeviceLink(added.copy(server = "https://other.example.com"), "https://music.example.com"))
+        assertNull(addedDeviceLink(added.copy(pairCode = null, appPassword = "ABCD"), "https://music.example.com"))
+    }
+
+    @Test
+    fun theAccountsQualityAndThisDevicesModeAreSetOnTheServer() = runBlocking {
+        server.answer("getFamilyDevices") {
+            """"familyDevices":{"device":[{"id":"d_1","name":"Pixel 9","kind":"OctoApp","current":true,"quality":"Account"},{"id":"d_2","name":"Other","current":false}]}"""
+        }
+        server.answer("setFamilyQuality") { """"quality":{"home":"Original","away":"DataSaver"}""" }
+        server.answer("setFamilyDeviceQuality") { """"device":{"id":"d_1","current":true,"quality":"App"}""" }
+        model.plan()
+        assertEquals(app.winters.octo.subsonic.DeviceQualityMode.Account, model.deviceMode)
+        model.setQuality(away = app.winters.octo.subsonic.StreamQuality.DataSaver)
+        until("quality sent") { server.called("setFamilyQuality").isNotEmpty() }
+        assertEquals("DataSaver", server.called("setFamilyQuality").single().url.queryParameter("away"))
+        model.setDeviceMode(app.winters.octo.subsonic.DeviceQualityMode.App)
+        // Shown at once, before the server answers.
+        assertEquals(app.winters.octo.subsonic.DeviceQualityMode.App, model.deviceMode)
+        until("mode sent") { server.called("setFamilyDeviceQuality").isNotEmpty() }
+        val sent = server.called("setFamilyDeviceQuality").single().url
+        assertEquals("d_1", sent.queryParameter("id"))
+        assertEquals("App", sent.queryParameter("mode"))
+    }
+
+    @Test
     fun withoutTheExtensionNothingIsAsked() = runBlocking {
         supported = false
         model.refresh()

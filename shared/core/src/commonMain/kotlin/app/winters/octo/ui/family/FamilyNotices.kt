@@ -2,6 +2,9 @@ package app.winters.octo.ui.family
 
 import app.winters.octo.subsonic.FamilyRequest
 import app.winters.octo.subsonic.FamilyRequestState
+import app.winters.octo.subsonic.SubsonicClient
+import app.winters.octo.subsonic.family
+import app.winters.octo.subsonic.familyRequests
 import kotlinx.serialization.Serializable
 
 // One notice to show: a request of mine was decided or arrived, or (for a
@@ -67,3 +70,16 @@ fun requestNotice(request: FamilyRequest): FamilyNotice {
         else -> FamilyNotice(request.id, "Request", what)
     }
 }
+
+// One look at the server: what to tell this account and what it has been
+// told from then on. A manager who approves also hears how many requests
+// wait.
+suspend fun checkFamilyNotices(client: SubsonicClient, memory: NoticeMemory): Pair<List<FamilyNotice>, NoticeMemory> {
+    val me = client.family().me
+    val mine = client.familyRequests()
+    val waiting = if (me.abilities.approveRequests) client.familyRequests(all = true, state = FamilyRequestState.Pending).size else null
+    return familyNotices(memory, mine, waiting)
+}
+
+// How often requests are checked in the background.
+const val FAMILY_CHECK_MS = 30 * 60 * 1000L

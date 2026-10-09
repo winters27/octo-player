@@ -33,7 +33,13 @@
         "requestsThisWeek": 3,
         "storageUsedBytes": 5400000000,
         "place": "Home",
-        "deviceId": "d_7Qm2abc"
+        "deviceId": "d_7Qm2abc",
+        "quality": {
+          "home": "Original",
+          "away": "Standard",
+          "familyLimitKbps": 192,
+          "familyAwayLimitKbps": 128
+        }
       }
     }
   }

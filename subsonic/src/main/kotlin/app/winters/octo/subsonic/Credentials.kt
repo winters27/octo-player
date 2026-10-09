@@ -23,7 +23,7 @@ enum class AuthMode {
 // for showing, and may be empty until the server names it.
 class Credentials(
     val username: String,
-    private val secret: String,
+    internal val secret: String,
     val mode: AuthMode = AuthMode.Token,
 ) {
     fun sign(salt: String): String = md5Hex(secret + salt)

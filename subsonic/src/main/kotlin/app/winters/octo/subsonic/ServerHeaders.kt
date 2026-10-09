@@ -5,7 +5,6 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
-import java.text.Normalizer
 
 // Extra headers a server needs on every request, such as an access token
 // for a proxy in front of it, and the addresses they may go to. `device`
@@ -30,14 +29,19 @@ const val DEVICE_ID_HEADER = "X-Octo-Device-Id"
 const val DEVICE_NAME_HEADER = "X-Octo-Device-Name"
 const val PURPOSE_HEADER = "X-Octo-Purpose"
 
-// This app install as its own server knows it: a stable id made once, and
-// a name a person reads (the phone's model, the computer's name).
+// This install as its own server knows it: a stable id made once, and
+// a name a person reads (the phone's name, the computer's name), kept as
+// typed, at most 64 characters.
 class DeviceIdentity(id: String, name: String) {
-    val id: String = headerSafe(id).ifEmpty { "unknown" }
-    val name: String = headerSafe(name).take(MAX_DEVICE_NAME).trim().ifEmpty { "Octo device" }
+    val id: String = id.filter { it in '!'..'~' }.ifEmpty { "unknown" }
+    val name: String = clipName(name.trim()).ifEmpty { "Octo device" }
+
+    // The name as it travels in a header: UTF-8, percent-encoded, so any
+    // name goes, "Sam’s Café" too.
+    val headerName: String get() = encodeComponent(name)
 
     // As headers, for code that sends its own requests to the server.
-    fun headers(): Map<String, String> = mapOf(DEVICE_ID_HEADER to id, DEVICE_NAME_HEADER to name)
+    fun headers(): Map<String, String> = mapOf(DEVICE_ID_HEADER to id, DEVICE_NAME_HEADER to headerName)
 
     override fun toString() = "DeviceIdentity(id=$id, name=$name)"
 }
@@ -61,13 +65,12 @@ fun OkHttpClient.markedFor(purpose: OctoPurpose): OkHttpClient =
 
 private const val MAX_DEVICE_NAME = 64
 
-// A header value is plain printable ASCII, or every request fails. Accents
-// are taken off, curly quotes made straight, and anything else left out:
-// "Sam’s Café phone" goes as "Sam's Cafe phone".
-internal fun headerSafe(text: String): String {
-    val straight = text.replace('‘', '\'').replace('’', '\'').replace('“', '"').replace('”', '"')
-    val plain = Normalizer.normalize(straight, Normalizer.Form.NFKD)
-    return plain.filter { it in ' '..'~' }.replace(Regex(" {2,}"), " ").trim()
+// At most 64 characters, never cutting one in two, with no control
+// characters.
+private fun clipName(text: String): String {
+    val clean = text.filterNot { it.isISOControl() }
+    if (clean.codePointCount(0, clean.length) <= MAX_DEVICE_NAME) return clean
+    return clean.substring(0, clean.offsetByCodePoints(0, MAX_DEVICE_NAME)).trim()
 }
 
 // Adds the server's headers to each request for one of its addresses.
@@ -85,7 +88,7 @@ class ServerHeaders(private val scope: () -> HeaderScope?) : Interceptor {
             current.headers.forEach { (name, value) -> header(name, value) }
             if (device != null) {
                 header(DEVICE_ID_HEADER, device.id)
-                header(DEVICE_NAME_HEADER, device.name)
+                header(DEVICE_NAME_HEADER, device.headerName)
             }
             if (purpose != null) header(PURPOSE_HEADER, purpose.wire)
         }.build()

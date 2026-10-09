@@ -20,7 +20,8 @@
             "title": "Song",
             "artist": "Artist"
           },
-          "current": true
+          "current": true,
+          "quality": "App"
         },
         {
           "id": "d_2",

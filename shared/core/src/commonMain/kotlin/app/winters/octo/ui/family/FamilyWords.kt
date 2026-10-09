@@ -6,6 +6,7 @@ import app.winters.octo.subsonic.FamilyDevice
 import app.winters.octo.subsonic.FamilyDeviceKind
 import app.winters.octo.subsonic.FamilyMe
 import app.winters.octo.subsonic.FamilyMember
+import app.winters.octo.subsonic.FamilyPreset
 import app.winters.octo.subsonic.FamilyPlace
 import app.winters.octo.subsonic.FamilyRequest
 import app.winters.octo.subsonic.FamilyRequestKind
@@ -13,6 +14,7 @@ import app.winters.octo.subsonic.FamilyRequestOutcome
 import app.winters.octo.subsonic.FamilyRequestState
 import app.winters.octo.subsonic.FamilyRole
 import app.winters.octo.subsonic.RequestQuality
+import app.winters.octo.subsonic.familyRole
 import java.util.Locale
 
 // The family's words, the same on the phone and the desktop.
@@ -37,6 +39,12 @@ fun roleLabel(role: FamilyRole): String = when (role) {
     FamilyRole.Kid -> "Kid"
     FamilyRole.Unmanaged -> "Not in the family"
 }
+
+// A role by the server's name for it: this app's words for the roles it
+// knows, and the server's own name, spaced out, for one it does not
+// ("FamilyGuest" reads "Family Guest").
+fun roleLabel(name: String): String =
+    familyRole(name)?.let(::roleLabel) ?: name.replace(Regex("(?<=[a-z])(?=[A-Z])"), " ").trim().ifEmpty { "Member" }
 
 fun qualityLabel(quality: RequestQuality): String = when (quality) {
     RequestQuality.Best -> "Best"
@@ -80,10 +88,14 @@ fun abilityLines(can: FamilyAbilities): List<AbilityLine> = buildList {
     }
     if (can.instantFromFamily) add(AbilityLine("Songs the family already has are added right away"))
     add(AbilityLine(if (can.storageLimitGb > 0) "Room for ${can.storageLimitGb} GB in your library" else "No limit on your library's size"))
-    add(AbilityLine(if (can.streamCap > 0) "Plays at up to ${can.streamCap} kbps" else "Plays in the original quality"))
+    // Quality is each person's own choice (Audio quality); only a limit the
+    // family set is a line here. An away limit of 0 is the same as at home,
+    // and so is one no lower.
+    if (can.streamCap > 0) add(AbilityLine("Your family plan limits listening to ${can.streamCap} kbps", on = false))
+    val awayLower = can.awayCap > 0 && (can.streamCap == 0 || can.awayCap < can.streamCap)
     when {
         !can.away -> add(AbilityLine("Listening away from home is off", on = false))
-        can.awayCap > 0 -> add(AbilityLine("Away from home, plays at up to ${can.awayCap} kbps"))
+        awayLower -> add(AbilityLine("Your family plan limits away listening to ${can.awayCap} kbps", on = false))
         else -> add(AbilityLine("Listens away from home too"))
     }
     add(AbilityLine(if (can.devicesAtOnce > 0) "Plays on ${plural(can.devicesAtOnce, "device")} at once" else "Plays on any number of devices at once"))
@@ -183,7 +195,7 @@ fun deviceLine(device: FamilyDevice): String = buildList {
 
 // A member's line for a manager: role, devices, playing, waiting requests.
 fun memberLine(member: FamilyMember): String = buildList {
-    add(roleLabel(member.role))
+    add(roleLabel(member.roleName))
     if (member.suspended) add("Paused")
     add(plural(member.devices, "device"))
     if (member.playingNow) add("Playing now")
@@ -191,6 +203,21 @@ fun memberLine(member: FamilyMember): String = buildList {
 }.joinToString(" · ")
 
 // "Alex, Listener": who this plan is for.
-fun planTitle(me: FamilyMe): String = "${me.displayName.ifBlank { me.username }}, ${roleLabel(me.role)}"
+fun planTitle(me: FamilyMe): String = "${me.displayName.ifBlank { me.username }}, ${roleLabel(me.roleName)}"
 
 fun plural(count: Int, word: String): String = if (count == 1) "1 $word" else "$count ${word}s"
+
+fun presetName(preset: FamilyPreset): String = when (preset) {
+    FamilyPreset.CoAdmin -> "Co-admin"
+    FamilyPreset.Member -> "Member"
+    FamilyPreset.Listener -> "Listener"
+    FamilyPreset.Kid -> "Kid"
+}
+
+// What a new member of each kind may do, in a line, before they are added.
+fun presetLine(preset: FamilyPreset): String = when (preset) {
+    FamilyPreset.CoAdmin -> "Runs the family with you: members, devices and requests."
+    FamilyPreset.Member -> "Adds songs straight into their own library."
+    FamilyPreset.Listener -> "Saves songs and asks for copies, which you approve."
+    FamilyPreset.Kid -> "Clean songs only. Their requests wait for you."
+}

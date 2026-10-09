@@ -1,12 +1,15 @@
 package app.winters.octo.ui.family
 
+import app.winters.octo.subsonic.FamilyDeviceKind
 import app.winters.octo.subsonic.FamilyPair
 import app.winters.octo.subsonic.FamilyPlatform
+import app.winters.octo.subsonic.FamilyWeb
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.isFamilyCode
 import app.winters.octo.subsonic.pairWithFamilyCode
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
+import javax.net.ssl.SSLException
 
 // What is missing from a family code join, in plain words, or null when it
 // can be sent.
@@ -18,14 +21,18 @@ fun joinProblem(address: HttpUrl?, username: String, code: String): String? = wh
 }
 
 // What joining came to: the account and its secret, to sign in with like
-// any password, or why it did not work.
+// any password; a certificate the device does not trust yet, to ask about
+// and try again; or why it did not work.
 sealed interface JoinOutcome {
     class Paired(val pair: FamilyPair) : JoinOutcome
+    class Untrusted(val host: String) : JoinOutcome
     class Failed(val message: String) : JoinOutcome
 }
 
 // Pairs this device with a family code. The secret it answers is this
-// device's password from then on; the caller signs in with it.
+// device's password from then on; the caller signs in with it. `http`
+// is set up to trust what the listener trusted, so a server with a
+// certificate of its own is asked about first, as signing in does.
 suspend fun joinFamily(
     address: HttpUrl,
     username: String,
@@ -33,15 +40,48 @@ suspend fun joinFamily(
     deviceName: String,
     platform: FamilyPlatform,
     http: OkHttpClient,
-): JoinOutcome = try {
-    val pair = pairWithFamilyCode(address, http, username, code.filter { !it.isWhitespace() }, deviceName, platform)
-    if (pair.secret.isBlank()) JoinOutcome.Failed("The server did not answer with a sign-in. Ask for a new code.") else JoinOutcome.Paired(pair)
+): JoinOutcome = joining(address, "That code did not work. Ask for a new one.") {
+    pairWithFamilyCode(address, http, username, code.filter { !it.isWhitespace() }, deviceName, platform)
+}
+
+// What an invite still needs before it is accepted, or null when it can go.
+fun inviteProblem(displayName: String, password: String, again: String): String? = when {
+    displayName.isBlank() -> "Type your name"
+    password.length < MIN_PASSWORD -> "Choose a password of at least $MIN_PASSWORD characters"
+    password != again -> "The two passwords are not the same"
+    else -> null
+}
+
+const val MIN_PASSWORD = 8
+
+// Accepts an invite on this device: the new member's name and password go
+// to the family page, which makes the account; then this device gets its
+// own pair code there and pairs with it, so it signs in like any device.
+suspend fun joinWithInvite(
+    address: HttpUrl,
+    token: String,
+    displayName: String,
+    password: String,
+    deviceName: String,
+    platform: FamilyPlatform,
+    http: OkHttpClient,
+): JoinOutcome = joining(address, "That invite did not work. Ask for a new one.") {
+    val web = FamilyWeb(address, http)
+    val username = web.join(token, password, displayName)
+    val code = web.addMyDevice(deviceName, FamilyDeviceKind.OctoApp).pairCode
+        ?: throw SubsonicException.Server(0, "The server made no pair code for this device.")
+    pairWithFamilyCode(address, http, username, code, deviceName, platform)
+}
+
+private suspend fun joining(address: HttpUrl, refused: String, pair: suspend () -> FamilyPair): JoinOutcome = try {
+    val made = pair()
+    if (made.secret.isBlank()) JoinOutcome.Failed("The server did not answer with a sign-in. Ask for a new code.") else JoinOutcome.Paired(made)
 } catch (e: SubsonicException.WrongCredentials) {
-    JoinOutcome.Failed(e.message ?: "That code did not work. Ask for a new one.")
+    JoinOutcome.Failed(e.message ?: refused)
 } catch (e: SubsonicException.Unreachable) {
-    JoinOutcome.Failed("Octo can't reach that address. Check it and try again.")
+    if (e.cause is SSLException) JoinOutcome.Untrusted(address.host) else JoinOutcome.Failed("Octo can't reach that address. Check it and try again.")
 } catch (e: SubsonicException.NotSubsonic) {
-    JoinOutcome.Failed(if (e.status == 404) "That server has no family codes. Check the address, or update Octo on the server." else "That address did not answer like an Octo server.")
+    JoinOutcome.Failed(if (e.status == 404) "That server has no family codes. Check the address, or update Octo on the server." else e.message?.takeIf { e.status != null } ?: "That address did not answer like an Octo server.")
 } catch (e: SubsonicException) {
-    JoinOutcome.Failed(e.message ?: "That code did not work. Ask for a new one.")
+    JoinOutcome.Failed(e.message ?: refused)
 }
