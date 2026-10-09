@@ -218,6 +218,7 @@ private fun ColumnScope.HandOverPopup(app: AppState, model: FamilyModel, id: Int
         actions = actions,
         copy = ::copyText,
         now = now,
+        username = app.connection?.client?.username,
     )
 }
 
@@ -230,6 +231,8 @@ fun ColumnScope.HandOverCard(
     actions: SheetActions,
     copy: (String) -> Unit,
     now: () -> Instant = Instant::now,
+    // Named in the link, for the family page to show.
+    username: String? = null,
 ) {
     val done = remember { FocusRequester() }
     FocusOnDone(done)
@@ -253,7 +256,7 @@ fun ColumnScope.HandOverCard(
         else -> countdownLine(seconds)
     }
     val warn = start != null && !sheet.stale && !ended && countdownWarns(seconds)
-    val options = sheet.options(awayAllowed)
+    val options = sheet.options(awayAllowed, username)
     var picked by remember(sheet.id) { mutableStateOf<LinkReach?>(null) }
     val reach = picked ?: options?.default ?: LinkReach.Anywhere
     Header(avatarName, HANDOVER_TITLE, subtitle, if (warn) OctoColors.SignalOrange else OctoColors.TextMuted, clock = !ended, close = actions.done)

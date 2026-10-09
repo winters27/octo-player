@@ -49,12 +49,13 @@ class SheetPreviewActivity : ComponentActivity() {
         val start = FamilySignInStart(
             token = "tok_7Hq2",
             expires = Instant.now().plusSeconds(102).toString(),
-            links = FamilyLinkChoices("https://music.example.com", "http://192.168.1.20:4533"),
+            links = FamilyLinkChoices("https://music.example.com/family/signin", "http://192.168.1.20:4533/family/signin"),
+            servers = FamilyLinkChoices("https://music.example.com", "http://192.168.1.20:4533"),
         )
         val sheet = when (state) {
             "sent" -> HandOverSheet(id = 1, start = start, key = key, done = "Sent to Studio PC. It's signing in now.")
             "stale" -> HandOverSheet(id = 1, start = start.copy(expires = Instant.now().minusSeconds(5).toString()), key = key, stale = true)
-            "unavailable" -> HandOverSheet(id = 1, start = start.copy(links = FamilyLinkChoices(null, "http://192.168.1.20:4533"), anywhereAvailable = false), key = key)
+            "unavailable" -> HandOverSheet(id = 1, start = start.copy(links = FamilyLinkChoices(null, "http://192.168.1.20:4533/family/signin"), servers = FamilyLinkChoices(null, "http://192.168.1.20:4533"), anywhereAvailable = false), key = key)
             "loading" -> HandOverSheet(id = 1, key = key, loading = true)
             "error" -> HandOverSheet(id = 1, key = key, error = HANDOVER_FAILED)
             else -> HandOverSheet(id = 1, start = start, key = key)

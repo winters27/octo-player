@@ -3,7 +3,8 @@ package app.winters.octo.ui.family
 import app.winters.octo.subsonic.FamilyHandOverLink
 import app.winters.octo.subsonic.FamilyPlatform
 import app.winters.octo.subsonic.FamilySignInState
-import app.winters.octo.subsonic.FamilyWeb
+import app.winters.octo.subsonic.familySignInRedeem
+import app.winters.octo.subsonic.redeemFamilySignIn
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
@@ -121,10 +122,9 @@ suspend fun receiveHandOver(
     waitMs: Long = 130_000,
 ): HandOverResult {
     val base = link.base.toHttpUrlOrNull() ?: return HandOverResult.Refused("This sign-in link has no server in it. Scan the QR code again.")
-    val web = FamilyWeb(base, http)
     step(HANDOVER_WAITING)
     val id = try {
-        web.redeemSignIn(link.token, deviceName, platform)
+        redeemFamilySignIn(base, http, link.token, deviceName, platform)
     } catch (e: SubsonicException.Unreachable) {
         return HandOverResult.Refused(HANDOVER_UNREACHABLE)
     } catch (e: SubsonicException.NotFound) {
@@ -135,7 +135,7 @@ suspend fun receiveHandOver(
     var waited = 0L
     while (waited < waitMs) {
         val status = try {
-            web.signInStatus(id)
+            familySignInRedeem(base, http, id)
         } catch (e: SubsonicException.Unreachable) {
             null
         } catch (e: SubsonicException) {

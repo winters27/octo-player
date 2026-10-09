@@ -11,8 +11,10 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 // A sign-in to fill in, for a member who has a login:
 //   octo://signin?server=<address>&home=<address>&username=<name>
 // A sign-in handed over from the same person's other device:
-//   <server>/family/signin#t=<token>&k=<key>&s=<address>&h=<address>
-//   octo://signin#t=<token>&k=<key>&s=<address>&h=<address>
+//   <server>/family/signin#t=<token>&k=<key>&s=<address>&h=<address>&u=<name>
+//   octo://handover?t=<token>&k=<key>&s=<address>&h=<address>&u=<name>
+//   intent://handover?t=...#Intent;scheme=octo;package=...;end (as Android
+//   browsers hand it on)
 //
 // Secrets ride in the part after #, which browsers never send to a server.
 // `server` is the address that works from anywhere, which may carry a path
@@ -33,17 +35,19 @@ data class FamilyInviteLink(override val server: String, val token: String, over
 data class FamilySignInPrefill(override val server: String, val username: String = "", override val home: String? = null) : FamilyLink
 
 // A hand-over from another device: the token to redeem, on `base` (the
-// address the link was opened on), and the key that opens what the other
-// device sends. The key never leaves this device.
+// address the link was opened on, or the server for the app's own form),
+// the key that opens what the other device sends, and the username when
+// the link names it. The key never leaves this device.
 data class FamilyHandOverLink(
     val base: String,
     val token: String,
     val key: String,
     override val server: String,
     override val home: String? = null,
+    val username: String? = null,
 ) : FamilyLink {
     // Never print the token or the key, even by accident in a log.
-    override fun toString() = "FamilyHandOverLink(base=$base, server=$server, home=$home)"
+    override fun toString() = "FamilyHandOverLink(base=$base, server=$server, home=$home, username=$username)"
 }
 
 // Reads a family link, or null when the text is not one. Spaces around it
@@ -53,6 +57,9 @@ fun parseFamilyLink(text: String): FamilyLink? {
     return when {
         trimmed.startsWith("octo://join", ignoreCase = true) -> parseAppInvite(trimmed)
         trimmed.startsWith("octo://signin", ignoreCase = true) -> parseAppSignIn(trimmed)
+        trimmed.startsWith("octo://handover", ignoreCase = true) -> handOverIn(readParams(trimmed.substringAfter('?', "").substringBefore('#')), base = null)
+        // An Android browser's form: the same query, then #Intent;...;end.
+        trimmed.startsWith("intent://handover", ignoreCase = true) -> handOverIn(readParams(trimmed.substringAfter('?', "").substringBefore('#')), base = null)
         trimmed.startsWith("https://", ignoreCase = true) || trimmed.startsWith("http://", ignoreCase = true) -> parseWebLink(trimmed)
         else -> null
     }
@@ -66,9 +73,7 @@ private fun parseAppInvite(text: String): FamilyLink? {
 }
 
 private fun parseAppSignIn(text: String): FamilyLink? {
-    val fragment = text.substringAfter('#', "")
-    if (fragment.isNotEmpty()) return handOverIn(readParams(fragment), base = null)
-    val params = readParams(text.substringAfter('?', ""))
+    val params = readParams(text.substringAfter('?', "").substringBefore('#'))
     val server = params["server"]?.trim()?.takeIf(String::isNotEmpty)?.let(::addressIn) ?: return null
     return FamilySignInPrefill(server, params["username"]?.trim().orEmpty(), homeIn(params, "home"))
 }
@@ -94,7 +99,7 @@ private fun handOverIn(params: Map<String, String>, base: String?): FamilyHandOv
     val token = params["t"]?.trim()?.takeIf(String::isNotEmpty) ?: return null
     val key = params["k"]?.trim()?.takeIf(String::isNotEmpty) ?: return null
     val server = params["s"]?.trim()?.takeIf(String::isNotEmpty)?.let(::addressIn) ?: base ?: return null
-    return FamilyHandOverLink(base ?: server, token, key, server, homeIn(params, "h"))
+    return FamilyHandOverLink(base ?: server, token, key, server, homeIn(params, "h"), params["u"]?.trim()?.takeIf(String::isNotEmpty))
 }
 
 // An address a link names, when it is an address at all.
@@ -112,18 +117,22 @@ private fun readParams(text: String): Map<String, String> = text.split('&').mapN
 fun familyInviteUrl(server: String, token: String, home: String? = null): String =
     "${server.trim().removeSuffix("/")}/family/join#invite=${encodeComponent(token)}${homePart(home)}"
 
-// The https link for a hand-over, opened on `base`: the token, the key, and
-// the addresses the new device signs in to.
-fun familySignInUrl(base: String, token: String, key: String, server: String, home: String? = null): String =
-    "${base.trim().removeSuffix("/")}/family/signin#t=${encodeComponent(token)}&k=${encodeComponent(key)}&s=${encodeComponent(server.trim().removeSuffix("/"))}" +
-        (home?.trim()?.takeIf(String::isNotEmpty)?.let { "&h=${encodeComponent(it.removeSuffix("/"))}" }.orEmpty())
+// The https link for a hand-over, opened on `base`: the token, the key, the
+// addresses the new device signs in to, and the username for the page.
+fun familySignInUrl(base: String, token: String, key: String, server: String, home: String? = null, username: String? = null): String =
+    "${base.trim().removeSuffix("/")}/family/signin#" + handOverParams(token, key, server, home, username)
+
+private fun handOverParams(token: String, key: String, server: String, home: String?, username: String?): String =
+    "t=${encodeComponent(token)}&k=${encodeComponent(key)}&s=${encodeComponent(server.trim().removeSuffix("/"))}" +
+        (home?.trim()?.takeIf(String::isNotEmpty)?.let { "&h=${encodeComponent(it.removeSuffix("/"))}" }.orEmpty()) +
+        (username?.trim()?.takeIf(String::isNotEmpty)?.let { "&u=${encodeComponent(it)}" }.orEmpty())
 
 // The app's own form of a link, for opening Octo directly.
 fun familyAppLink(link: FamilyLink): String = when (link) {
     is FamilyInviteLink -> "octo://join?server=${encodeComponent(link.server)}&invite=${encodeComponent(link.token)}${homePart(link.home)}"
     is FamilySignInPrefill -> "octo://signin?server=${encodeComponent(link.server)}${homePart(link.home)}" +
         (link.username.takeIf(String::isNotBlank)?.let { "&username=${encodeComponent(it)}" }.orEmpty())
-    is FamilyHandOverLink -> "octo://signin#" + familySignInUrl(link.base, link.token, link.key, link.server, link.home).substringAfter('#')
+    is FamilyHandOverLink -> "octo://handover?" + handOverParams(link.token, link.key, link.server, link.home, link.username)
 }
 
 private fun homePart(home: String?): String = home?.trim()?.takeIf(String::isNotEmpty)?.let { "&home=${encodeComponent(it)}" }.orEmpty()

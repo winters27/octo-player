@@ -47,10 +47,14 @@ class HandOverTest {
     private fun settle() = runBlocking { delay(200) }
 
     // Each token lasts two minutes from when it was made, by the test's clock.
-    private fun answerStarts() = server.raw("start") {
-        val n = server.called("start").size
-        """{"token":"tok_$n","expires":"${Instant.ofEpochMilli(now.get() + 120_000)}","links":{"anywhere":"https://music.example.com","home":"http://192.168.1.20:4533"},"anywhereAvailable":true}"""
+    private fun answerStarts() = server.answer("startFamilySignIn") {
+        val n = server.called("startFamilySignIn").size
+        """"familySignIn":{"token":"tok_$n","expires":"${Instant.ofEpochMilli(now.get() + 120_000)}",
+        "links":{"anywhere":"https://music.example.com/family/signin","home":"http://192.168.1.20:4533/family/signin"},
+        "servers":{"anywhere":"https://music.example.com","home":"http://192.168.1.20:4533"},"anywhereAvailable":true}"""
     }
+
+    private fun pending(device: String?) = server.answer("getFamilySignInPending") { if (device == null) "" else """"familySignInPending":$device""" }
 
     private fun source() = HandOverSource({ server.client() }, scope, { "Alex" }, now::get, tickMs = 10, askEveryMs = 20)
 
@@ -98,35 +102,40 @@ class HandOverTest {
     @Test
     fun theSignedInDeviceSendsNothingBeforeAllow() {
         answerStarts()
-        server.raw("pending") { "" }
-        server.raw("decide") { "" }
-        server.raw("box") { "" }
+        pending(null)
+        server.answer("decideFamilySignIn") { """"familySignInDecided":{"state":"Allowed"}""" }
+        server.answer("putFamilySignInBox") { "" }
         val source = source()
         source.open()
         until("code") { source.sheet?.start != null }
         val sheet = source.sheet!!
         assertEquals("tok_1", sheet.start!!.token)
-        val link = sheet.options(awayAllowed = true)!!.linkFor(LinkReach.Anywhere)!!
+        val link = sheet.options(awayAllowed = true, username = "alex")!!.linkFor(LinkReach.Anywhere)!!
         assertTrue(link.startsWith("https://music.example.com/family/signin#t=tok_1&k="))
+        assertTrue(link.endsWith("&s=https%3A%2F%2Fmusic.example.com&h=http%3A%2F%2F192.168.1.20%3A4533&u=alex"))
+        // At home, the page and the server are the home ones.
+        val atHome = sheet.options(awayAllowed = true)!!.linkFor(LinkReach.Home)!!
+        assertTrue(atHome.startsWith("http://192.168.1.20:4533/family/signin#t=tok_1&k="))
+        assertTrue(atHome.contains("&s=http%3A%2F%2F192.168.1.20%3A4533"))
         assertEquals(sheet.key, (parseFamilyLink(link) as FamilyHandOverLink).key)
 
         // A device redeems the token; the sheet asks.
-        server.raw("pending") { """{"id":"r_1","deviceName":"Pixel 9","platform":"Android"}""" }
+        pending("""{"id":"r_1","deviceName":"Pixel 9","platform":"Android"}""")
         until("asking") { source.sheet?.asking != null }
         assertEquals("Sign in on Pixel 9?", askingTitle(source.sheet!!.asking!!))
         settle()
-        assertTrue("nothing decided yet", server.called("decide").isEmpty())
-        assertTrue("nothing sent yet", server.called("box").isEmpty())
+        assertTrue("nothing decided yet", server.called("decideFamilySignIn").isEmpty())
+        assertTrue("nothing sent yet", server.called("putFamilySignInBox").isEmpty())
 
         source.allow()
         until("sent") { source.sheet?.done != null }
         assertEquals("Sent to Pixel 9. It's signing in now.", source.sheet!!.done)
-        val decide = server.called("decide").single()
-        assertEquals("""{"allow":true}""", decide.body!!.utf8())
-        val boxCall = server.called("box").single()
+        val decide = server.called("decideFamilySignIn").single()
+        assertEquals("true", decide.url.queryParameter("allow"))
+        val boxCall = server.called("putFamilySignInBox").single()
         assertTrue("decided before sending", server.calls.indexOf(decide) < server.calls.indexOf(boxCall))
         // The box opens with the key from the QR code, and holds this app's sign-in.
-        val box = boxCall.body!!.utf8().substringAfter("\"box\":\"").substringBefore('"')
+        val box = java.net.URLDecoder.decode(boxCall.body!!.utf8().substringAfter("box=").substringBefore('&'), Charsets.UTF_8)
         val opened = HandOverBox.open(box, sheet.key)
         assertEquals(HandOverSignIn("alex", "secret", "Token", "https://music.example.com", "http://192.168.1.20:4533", "Alex"), opened)
         // The key never went to the server, nor the password in the clear.
@@ -140,17 +149,17 @@ class HandOverTest {
     @Test
     fun denyingTellsTheServerAndShowsAFreshCode() {
         answerStarts()
-        server.raw("pending") { """{"id":"r_1","deviceName":"Someone's laptop","platform":"Windows"}""" }
-        server.raw("decide") { "" }
+        pending("""{"id":"r_1","deviceName":"Someone's laptop","platform":"Windows"}""")
+        server.answer("decideFamilySignIn") { """"familySignInDecided":{"state":"Allowed"}""" }
         val source = source()
         source.open()
         until("asking") { source.sheet?.asking != null }
         val first = source.sheet!!.key
-        server.raw("pending") { "" }
+        pending(null)
         source.deny()
         until("fresh code") { source.sheet?.start?.token == "tok_2" && source.sheet?.loading == false }
-        assertEquals("""{"allow":false}""", server.called("decide").single().body!!.utf8())
-        assertTrue(server.called("box").isEmpty())
+        assertEquals("false", server.called("decideFamilySignIn").single().url.queryParameter("allow"))
+        assertTrue(server.called("putFamilySignInBox").isEmpty())
         assertNotEquals("a new key with the new code", first, source.sheet!!.key)
         assertNull(source.sheet!!.asking)
     }
@@ -158,7 +167,7 @@ class HandOverTest {
     @Test
     fun theCodeRenewsBeforeItExpiresPausesWhenHiddenAndStopsAfterTenMinutes() {
         answerStarts()
-        server.raw("pending") { "" }
+        pending(null)
         val source = source()
         source.open()
         until("code") { source.sheet?.start != null }
@@ -169,7 +178,7 @@ class HandOverTest {
         settle()
         now.set(expires + 10_000)
         settle()
-        assertEquals("paused while hidden", 1, server.called("start").size)
+        assertEquals("paused while hidden", 1, server.called("startFamilySignIn").size)
         source.sheetOnScreen(true)
         until("renewed on return") { source.sheet?.renewed == 1 }
         assertNotEquals(firstKey, source.sheet!!.key)
@@ -183,26 +192,28 @@ class HandOverTest {
         }
         now.set(expiresAtMs(source.sheet!!.start!!.expires)!! - 1_000)
         until("asks instead") { source.sheet?.stale == true }
-        val made = server.called("start").size
+        val made = server.called("startFamilySignIn").size
         settle()
-        assertEquals("no code past ten minutes", made, server.called("start").size)
+        assertEquals("no code past ten minutes", made, server.called("startFamilySignIn").size)
         source.newCode()
-        until("new code") { source.sheet?.stale == false && server.called("start").size == made + 1 }
+        until("new code") { source.sheet?.stale == false && server.called("startFamilySignIn").size == made + 1 }
     }
 
     @Test
     fun theNewDeviceNeverSendsTheKey() = runBlocking {
         val link = FamilyHandOverLink(server.url.toString().removeSuffix("/"), "tok_9", HandOverBox.newKey(), "https://music.example.com", "http://192.168.1.20:4533")
         val box = HandOverBox.seal(signIn, link.key)
-        server.raw("redeem") { """{"id":"r_1"}""" }
+        server.answer("redeemFamilySignIn") { """"familySignInRedeemed":{"id":"r_1"}""" }
         val polls = AtomicInteger(0)
-        server.raw("r_1") { if (polls.incrementAndGet() < 2) """{"state":"Waiting"}""" else """{"state":"Allowed","box":"$box"}""" }
+        server.answer("getFamilySignInRedeem") { if (polls.incrementAndGet() < 2) """"familySignInRedeem":{"state":"Waiting"}""" else """"familySignInRedeem":{"state":"Allowed","box":"$box"}""" }
         val steps = mutableListOf<String>()
         val result = receiveHandOver(link, OkHttpClient(), "Pixel 9", FamilyPlatform.Android, { steps += it }, pollMs = 10)
         assertEquals(signIn, (result as HandOverResult.Received).signIn)
         assertEquals(listOf(HANDOVER_WAITING, HANDOVER_ALLOWED), steps)
-        val redeem = server.called("redeem").single()
-        assertEquals("""{"token":"tok_9","deviceName":"Pixel 9","platform":"Android"}""", redeem.body!!.utf8())
+        val redeem = server.called("redeemFamilySignIn").single().url
+        assertEquals("tok_9", redeem.queryParameter("token"))
+        assertEquals("Pixel 9", redeem.queryParameter("deviceName"))
+        assertEquals("Android", redeem.queryParameter("platform"))
         // The part after # never reaches the server: not the key, not the link.
         server.calls.forEach { call ->
             assertFalse(call.url.toString().contains(link.key))
@@ -214,16 +225,16 @@ class HandOverTest {
     @Test
     fun aDeniedOrExpiredHandOverSaysSo() = runBlocking {
         val link = FamilyHandOverLink(server.url.toString().removeSuffix("/"), "tok_9", HandOverBox.newKey(), "https://music.example.com")
-        server.raw("redeem") { """{"id":"r_1"}""" }
-        server.raw("r_1") { """{"state":"Denied"}""" }
+        server.answer("redeemFamilySignIn") { """"familySignInRedeemed":{"id":"r_1"}""" }
+        server.answer("getFamilySignInRedeem") { """"familySignInRedeem":{"state":"Denied"}""" }
         assertEquals(HANDOVER_DENIED, (receiveHandOver(link, OkHttpClient(), "Pixel 9", FamilyPlatform.Android, pollMs = 10) as HandOverResult.Refused).message)
-        server.raw("r_1") { """{"state":"Expired"}""" }
+        server.answer("getFamilySignInRedeem") { """"familySignInRedeem":{"state":"Expired"}""" }
         assertEquals(HANDOVER_EXPIRED, (receiveHandOver(link, OkHttpClient(), "Pixel 9", FamilyPlatform.Android, pollMs = 10) as HandOverResult.Refused).message)
         // Nobody answers in time.
-        server.raw("r_1") { """{"state":"Waiting"}""" }
+        server.answer("getFamilySignInRedeem") { """"familySignInRedeem":{"state":"Waiting"}""" }
         assertEquals(HANDOVER_EXPIRED, (receiveHandOver(link, OkHttpClient(), "Pixel 9", FamilyPlatform.Android, pollMs = 10, waitMs = 50) as HandOverResult.Refused).message)
         // A token already used or out of date.
-        server.raw("redeem") { throw IllegalStateException() }
+        server.failWith("redeemFamilySignIn", 40, "That sign-in code has been used or has expired.")
         assertEquals(HANDOVER_EXPIRED, (receiveHandOver(link, OkHttpClient(), "Pixel 9", FamilyPlatform.Android, pollMs = 10) as HandOverResult.Refused).message)
     }
 
@@ -231,8 +242,8 @@ class HandOverTest {
     fun aBoxSealedWithAnotherKeyIsRefused() = runBlocking {
         val link = FamilyHandOverLink(server.url.toString().removeSuffix("/"), "tok_9", HandOverBox.newKey(), "https://music.example.com")
         val other = HandOverBox.seal(signIn, HandOverBox.newKey())
-        server.raw("redeem") { """{"id":"r_1"}""" }
-        server.raw("r_1") { """{"state":"Allowed","box":"$other"}""" }
+        server.answer("redeemFamilySignIn") { """"familySignInRedeemed":{"id":"r_1"}""" }
+        server.answer("getFamilySignInRedeem") { """"familySignInRedeem":{"state":"Allowed","box":"$other"}""" }
         val result = receiveHandOver(link, OkHttpClient(), "Pixel 9", FamilyPlatform.Android, pollMs = 10)
         assertEquals("This sign-in could not be opened here. Make a new QR code on your other device.", (result as HandOverResult.Refused).message)
     }

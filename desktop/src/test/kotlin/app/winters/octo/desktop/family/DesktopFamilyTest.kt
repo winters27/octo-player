@@ -61,7 +61,7 @@ class DesktopFamilyTest {
         // https form, or octo://signin with the part after # passed along.
         val https = parseLaunchArgs(listOf(link))
         assertEquals(listOf(LaunchRequest.OpenLink(link)), https)
-        val own = "octo://signin#" + link.substringAfter('#')
+        val own = "octo://handover?" + link.substringAfter('#')
         assertEquals(listOf(LaunchRequest.OpenLink(own)), parseLaunchArgs(listOf(own)))
         val prefill = "octo://signin?server=https%3A%2F%2Fmusic.example.com&username=alex"
         assertEquals(listOf(LaunchRequest.OpenLink(prefill)), parseLaunchArgs(listOf(prefill)))

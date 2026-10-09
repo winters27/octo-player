@@ -294,7 +294,7 @@ class FamilyModel(
             links = added.links,
             anywhereAvailable = added.anywhereAvailable,
             homeOnly = added.homeOnly,
-            awayAllowed = away,
+            awayAllowed = away && added.awayAllowed,
         )
         "Added $name"
     }
@@ -315,7 +315,7 @@ class FamilyModel(
             links = fresh.links,
             anywhereAvailable = fresh.anywhereAvailable,
             homeOnly = fresh.homeOnly,
-            awayAllowed = member.username !in keptHome,
+            awayAllowed = fresh.awayAllowed && member.username !in keptHome,
             reset = true,
         )
         "$name's password no longer works"
@@ -330,7 +330,7 @@ class FamilyModel(
             val got = runCatching { if (asked.reset) client.familyWeb().resetMember(asked.username) else client.familyWeb().newInvite(asked.username) }
             val now = invite?.takeIf { it.username == asked.username } ?: return@launch
             invite = got.fold(
-                { now.copy(url = it.inviteLink, links = it.links, anywhereAvailable = it.anywhereAvailable, homeOnly = it.homeOnly, loading = false) },
+                { now.copy(url = it.inviteLink, links = it.links, anywhereAvailable = it.anywhereAvailable, homeOnly = it.homeOnly, awayAllowed = now.awayAllowed && it.awayAllowed, loading = false) },
                 { now.copy(loading = false, error = LINK_FAILED) },
             )
         }

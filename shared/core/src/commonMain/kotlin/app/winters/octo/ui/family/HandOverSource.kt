@@ -1,5 +1,9 @@
 package app.winters.octo.ui.family
 
+import app.winters.octo.subsonic.putFamilySignInBox
+import app.winters.octo.subsonic.decideFamilySignIn
+import app.winters.octo.subsonic.familySignInPending
+import app.winters.octo.subsonic.startFamilySignIn
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,23 +46,27 @@ data class HandOverSheet(
 ) {
     val waiting: Boolean get() = start == null && error == null
 
-    // The QR code's link both ways: through the outside address and the
-    // home one. The choice picks where it is redeemed and which address the
-    // new device signs in to; the home address always goes along.
-    fun options(awayAllowed: Boolean): LinkOptions? {
+    // The QR code's link both ways: the family page through the outside
+    // address or the home one (`links`), then the token, the key, the server
+    // the new device signs in to that way (`servers`), the home address, and
+    // the username for the page to show.
+    fun options(awayAllowed: Boolean, username: String? = null): LinkOptions? {
         val begun = start ?: return null
-        val anywhere = begun.links.anywhere?.let(::baseOf)
-        val home = begun.links.home?.let(::baseOf)
-        fun link(base: String) = familySignInUrl(base, begun.token, key, base, home)
-        return LinkOptions(anywhere?.let(::link), home?.let(::link), begun.anywhereAvailable && anywhere != null, awayAllowed)
+        val home = begun.servers.home?.let(::baseOf)
+        fun link(page: String?, server: String?): String? {
+            val base = page?.let(::baseOf) ?: return null
+            return familySignInUrl(base, begun.token, key, server?.let(::baseOf) ?: base, home, username)
+        }
+        val anywhere = link(begun.links.anywhere, begun.servers.anywhere)
+        return LinkOptions(anywhere, link(begun.links.home, begun.servers.home), begun.anywhereAvailable && anywhere != null, awayAllowed)
     }
 
     // Never print the token or the key.
     override fun toString() = "HandOverSheet(id=$id, loading=$loading, asking=${asking != null}, done=${done != null})"
 }
 
-// A server's address from what the server answered, a bare address or a
-// link on it.
+// A server's address from what the server answered: a bare address, or a
+// family page on it (<base>/family/signin).
 private fun baseOf(text: String): String = (linkServer(text) ?: text).removeSuffix("/")
 
 // The name and platform of the device asking, as the prompt shows them.
@@ -143,9 +151,8 @@ class HandOverSource(
         sheet = open.copy(sending = true)
         scope.launch {
             val sent = runCatching {
-                val web = client.familyWeb()
-                web.decideSignIn(start.token, allow = true)
-                web.putSignInBox(start.token, HandOverBox.seal(signInOf(client, open), open.key))
+                client.decideFamilySignIn(start.token, allow = true)
+                client.putFamilySignInBox(start.token, HandOverBox.seal(signInOf(client, open), open.key))
             }
             val now = sheet?.takeIf { it.id == open.id } ?: return@launch
             sheet = if (sent.isSuccess) {
@@ -164,16 +171,16 @@ class HandOverSource(
         val client = client() ?: return
         sheet = open.copy(asking = null, loading = true)
         scope.launch {
-            runCatching { client.familyWeb().decideSignIn(start.token, allow = false) }
+            runCatching { client.decideFamilySignIn(start.token, allow = false) }
             renew(open.id)
         }
     }
 
     // What travels in the box: this app's own sign-in for the server.
     private fun signInOf(client: SubsonicClient, open: HandOverSheet): HandOverSignIn {
-        val links = open.start?.links
-        val anywhere = links?.anywhere?.let(::baseOf)
-        val home = links?.home?.let(::baseOf)
+        val servers = open.start?.servers
+        val anywhere = servers?.anywhere?.let(::baseOf)
+        val home = servers?.home?.let(::baseOf)
         return HandOverSignIn(
             username = client.username,
             secret = client.handOverSecret(),
@@ -202,7 +209,7 @@ class HandOverSource(
     private suspend fun startCode(): Pair<FamilySignInStart, String>? {
         val client = client() ?: return null
         return try {
-            client.familyWeb().startSignIn() to newKey()
+            client.startFamilySignIn() to newKey()
         } catch (e: SubsonicException) {
             null
         }
@@ -238,7 +245,7 @@ class HandOverSource(
                     renew(id)
                 } else if (!open.refreshFailed && sinceAsk >= askEveryMs) {
                     sinceAsk = 0
-                    val asking = runCatching { client()?.familyWeb()?.signInPending(start.token) }.getOrNull()
+                    val asking = runCatching { client()?.familySignInPending(start.token) }.getOrNull()
                     if (asking != null) sheet = sheet?.takeIf { it.id == id && it.start?.token == start.token }?.copy(asking = asking)
                 }
             }

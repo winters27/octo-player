@@ -1,5 +1,9 @@
 package app.winters.octo.subsonic
 
+import java.io.IOException
+import okhttp3.Request
+import okhttp3.OkHttpClient
+import okhttp3.HttpUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -349,6 +353,94 @@ suspend fun SubsonicClient.createFamilyPlaylist(name: String, approveAdditions: 
         "playlist",
         PlaylistWithSongs.serializer(),
     )
+
+// A sign-in hand-over just started on this device: its token, when it
+// ends, the family page's address each way (`links`, each
+// <base>/family/signin) and the server's address each way (`servers`).
+@Serializable
+data class FamilySignInStart(
+    val token: String = "",
+    val expires: String? = null,
+    val links: FamilyLinkChoices = FamilyLinkChoices(),
+    val servers: FamilyLinkChoices = FamilyLinkChoices(),
+    val anywhereAvailable: Boolean = true,
+) {
+    override fun toString() = "FamilySignInStart(expires=$expires)"
+}
+
+// A device that redeemed this device's hand-over and waits for an answer.
+@Serializable
+data class FamilySignInPending(val id: String = "", val deviceName: String = "", val platform: String = "")
+
+@Serializable
+internal data class FamilySignInRedeemed(val id: String = "")
+
+@Serializable
+internal data class FamilySignInDecided(val state: String = "")
+
+// How a redeemed hand-over stands, from the new device's side.
+@Serializable
+enum class FamilySignInState { Waiting, Allowed, Denied, Expired }
+
+@Serializable
+data class FamilySignInStatus(val state: FamilySignInState = FamilySignInState.Waiting, val box: String? = null) {
+    override fun toString() = "FamilySignInStatus(state=$state)"
+}
+
+// Starts handing this device's sign-in to the same person's other device:
+// a short-lived token for the QR code.
+suspend fun SubsonicClient.startFamilySignIn(): FamilySignInStart =
+    get("startFamilySignIn", key = "familySignIn", serializer = FamilySignInStart.serializer())
+
+// The device that redeemed the token, or null while none has.
+suspend fun SubsonicClient.familySignInPending(token: String): FamilySignInPending? =
+    getOptional("getFamilySignInPending", mapOf("token" to token), "familySignInPending", FamilySignInPending.serializer())?.takeIf { it.id.isNotEmpty() }
+
+// Allows or denies the device that redeemed the token.
+suspend fun SubsonicClient.decideFamilySignIn(token: String, allow: Boolean) {
+    getOptional("decideFamilySignIn", mapOf("token" to token, "allow" to allow.toString()), "familySignInDecided", FamilySignInDecided.serializer())
+}
+
+// The sealed sign-in for the allowed device, in a form body; the server
+// cannot open it.
+suspend fun SubsonicClient.putFamilySignInBox(token: String, box: String) = sendForm("putFamilySignInBox", listOf("token" to token, "box" to box))
+
+// On the new device, with no sign-in: redeems the token from the QR code,
+// naming this device, and answers the id to wait on. Open calls: no
+// sign-in goes with them.
+suspend fun redeemFamilySignIn(server: HttpUrl, http: OkHttpClient, token: String, deviceName: String, platform: FamilyPlatform): String =
+    openCall(server, http, "redeemFamilySignIn", listOf("token" to token, "deviceName" to deviceName.trim(), "platform" to platform.wire), "familySignInRedeemed", FamilySignInRedeemed.serializer()).id
+
+// How the redeemed hand-over stands, with the sealed sign-in once allowed.
+suspend fun familySignInRedeem(server: HttpUrl, http: OkHttpClient, id: String): FamilySignInStatus =
+    openCall(server, http, "getFamilySignInRedeem", listOf("id" to id), "familySignInRedeem", FamilySignInStatus.serializer())
+
+private suspend fun <T> openCall(
+    server: HttpUrl,
+    http: OkHttpClient,
+    endpoint: String,
+    params: List<Pair<String, String>>,
+    key: String,
+    serializer: kotlinx.serialization.KSerializer<T>,
+    clientName: String = "Octo",
+): T {
+    val url = server.newBuilder()
+        .addPathSegment("rest")
+        .addPathSegment(endpoint)
+        .addQueryParameter("v", API_VERSION)
+        .addQueryParameter("c", clientName)
+        .addQueryParameter("f", "json")
+        .apply { params.forEach { (name, value) -> addQueryParameter(name, value) } }
+        .build()
+    val body = try {
+        http.newCall(Request.Builder().url(url).build()).awaitBody(endpoint)
+    } catch (e: IOException) {
+        throw SubsonicException.Unreachable(e)
+    }
+    // A client only for reading the answer: it never makes a call.
+    val reader = SubsonicClient(server, Credentials("", ""), http)
+    return withContext(Dispatchers.Default) { reader.decode(body, key, serializer, null) }
+}
 
 internal suspend fun okhttp3.Call.awaitBody(endpoint: String): String {
     val response = await()

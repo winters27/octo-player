@@ -343,21 +343,112 @@ class FamilyParsingTest {
 
     @Test
     fun aHandOverLinkIsReadInBothFormsAndKeepsItsKey() {
-        val web = familySignInUrl("https://music.example.com/nd/", "tok_1", "K-ey_0", "https://music.example.com/nd", "http://192.168.1.20:4533")
-        assertEquals("https://music.example.com/nd/family/signin#t=tok_1&k=K-ey_0&s=https%3A%2F%2Fmusic.example.com%2Fnd&h=http%3A%2F%2F192.168.1.20%3A4533", web)
-        val link = FamilyHandOverLink("https://music.example.com/nd", "tok_1", "K-ey_0", "https://music.example.com/nd", "http://192.168.1.20:4533")
+        val web = familySignInUrl("https://music.example.com/nd/", "tok_1", "K-ey_0", "https://music.example.com/nd", "http://192.168.1.20:4533", "alex")
+        assertEquals("https://music.example.com/nd/family/signin#t=tok_1&k=K-ey_0&s=https%3A%2F%2Fmusic.example.com%2Fnd&h=http%3A%2F%2F192.168.1.20%3A4533&u=alex", web)
+        val link = FamilyHandOverLink("https://music.example.com/nd", "tok_1", "K-ey_0", "https://music.example.com/nd", "http://192.168.1.20:4533", "alex")
         assertEquals(link, parseFamilyLink(web))
-        // The app's own form passes the part after # along unchanged.
+        // The app's own form carries the same values in its query.
         val own = familyAppLink(link)
-        assertEquals("octo://signin#" + web.substringAfter('#'), own)
-        assertEquals(link.copy(base = "https://music.example.com/nd"), parseFamilyLink(own))
+        assertEquals("octo://handover?" + web.substringAfter('#'), own)
+        assertEquals(link, parseFamilyLink(own))
         // Neither the token nor the key reaches a log.
         assertFalse(link.toString().contains("tok_1"))
         assertFalse(link.toString().contains("K-ey"))
+        // The fragment's values, as the family page hands them on.
+        assertEquals(
+            FamilyHandOverLink("https://music.example.com", "tok_9", "a_b-c", "https://music.example.com", "http://192.168.1.20:4533"),
+            parseFamilyLink("octo://handover?t=tok_9&k=a_b-c&s=https%3A%2F%2Fmusic.example.com&h=http%3A%2F%2F192.168.1.20%3A4533"),
+        )
+        // An Android browser's intent form reads the same.
+        assertEquals(
+            FamilyHandOverLink("https://music.example.com", "tok_9", "a_b-c", "https://music.example.com", null, "alex"),
+            parseFamilyLink("intent://handover?t=tok_9&k=a_b-c&s=https%3A%2F%2Fmusic.example.com&u=alex#Intent;scheme=octo;package=app.winters.octo;S.browser_fallback_url=https%3A%2F%2Fmusic.example.com%2Ffamily%2Fsignin%26back%3D1;end"),
+        )
+        // Without a token, a key or a server it is no hand-over.
+        assertNull(parseFamilyLink("octo://handover?t=tok_9&s=https%3A%2F%2Fmusic.example.com"))
+        assertNull(parseFamilyLink("octo://handover?k=a&s=https%3A%2F%2Fmusic.example.com"))
+        assertNull(parseFamilyLink("octo://handover?t=tok_9&k=a"))
         // Not hand-overs.
         assertNull(parseFamilyLink("https://music.example.com/family/signin#t=tok_1"))
         assertNull(parseFamilyLink("https://music.example.com/family/signin"))
         assertNull(parseFamilyLink("https://music.example.com/family/other#t=1&k=2"))
+    }
+
+    @Test
+    fun aHandOverIsStartedAndDecidedByOctoFamilyCalls() = runTest {
+        server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"ok","version":"1.16.1","familySignIn":{"token":"tok_9","expires":"2026-10-20T18:02:00Z",
+            "links":{"anywhere":"https://music.example.com/family/signin","home":"http://192.168.1.20:4533/family/signin"},
+            "servers":{"anywhere":"https://music.example.com","home":"http://192.168.1.20:4533"},"anywhereAvailable":true}}}""").build())
+        val client = client()
+        val start = client.startFamilySignIn()
+        assertEquals("tok_9", start.token)
+        assertEquals("https://music.example.com/family/signin", start.links.anywhere)
+        assertEquals("http://192.168.1.20:4533", start.servers.home)
+        assertFalse(start.toString().contains("tok_9"))
+        val started = server.takeRequest().url
+        assertEquals("/rest/startFamilySignIn", started.encodedPath)
+        assertEquals("alex", started.queryParameter("u"))
+
+        // Nobody yet: the key is null or missing.
+        server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"ok","version":"1.16.1","familySignInPending":null}}""").build())
+        assertNull(client.familySignInPending("tok_9"))
+        assertEquals("tok_9", server.takeRequest().url.queryParameter("token"))
+        answer("ok")
+        assertNull(client.familySignInPending("tok_9"))
+        server.takeRequest()
+        server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"ok","version":"1.16.1","familySignInPending":{"id":"r_1","deviceName":"Pixel 9","platform":"Android"}}}""").build())
+        assertEquals(FamilySignInPending("r_1", "Pixel 9", "Android"), client.familySignInPending("tok_9"))
+        assertEquals("/rest/getFamilySignInPending", server.takeRequest().url.encodedPath)
+
+        server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"ok","version":"1.16.1","familySignInDecided":{"state":"Allowed"}}}""").build())
+        client.decideFamilySignIn("tok_9", allow = true)
+        val decide = server.takeRequest().url
+        assertEquals("/rest/decideFamilySignIn", decide.encodedPath)
+        assertEquals("true", decide.queryParameter("allow"))
+
+        answer("ok")
+        client.putFamilySignInBox("tok_9", "c2VhbGVk")
+        val box = server.takeRequest()
+        assertEquals("POST", box.method)
+        assertEquals("/rest/putFamilySignInBox", box.url.encodedPath)
+        // The box goes in the body, never in the address.
+        assertNull(box.url.queryParameter("box"))
+        assertTrue(box.body!!.utf8().contains("box=c2VhbGVk"))
+    }
+
+    @Test
+    fun theNewDeviceRedeemsAndWaitsWithNoSignIn() = runTest {
+        server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"ok","version":"1.16.1","familySignInRedeemed":{"id":"r_1"}}}""").build())
+        server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"ok","version":"1.16.1","familySignInRedeem":{"state":"Waiting"}}}""").build())
+        server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"ok","version":"1.16.1","familySignInRedeem":{"state":"Allowed","box":"c2VhbGVk"}}}""").build())
+        assertEquals("r_1", redeemFamilySignIn(server.url("/"), OkHttpClient(), "tok_9", " Pixel 9 ", FamilyPlatform.Android))
+        val redeem = server.takeRequest().url
+        assertEquals("/rest/redeemFamilySignIn", redeem.encodedPath)
+        assertEquals("tok_9", redeem.queryParameter("token"))
+        assertEquals("Pixel 9", redeem.queryParameter("deviceName"))
+        assertEquals("Android", redeem.queryParameter("platform"))
+        // Open: no sign-in of any kind.
+        assertNull(redeem.queryParameter("u"))
+        assertNull(redeem.queryParameter("t"))
+        assertNull(redeem.queryParameter("p"))
+        assertEquals(FamilySignInState.Waiting, familySignInRedeem(server.url("/"), OkHttpClient(), "r_1").state)
+        val allowed = familySignInRedeem(server.url("/"), OkHttpClient(), "r_1")
+        assertEquals(FamilySignInState.Allowed, allowed.state)
+        assertEquals("c2VhbGVk", allowed.box)
+        assertFalse(allowed.toString().contains("c2VhbGVk"))
+        server.takeRequest()
+        assertEquals("/rest/getFamilySignInRedeem", server.takeRequest().url.encodedPath)
+    }
+
+    @Test
+    fun aWrongTokenIsRefusedInPlainWords() = runTest {
+        server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":40,"message":"That sign-in code has been used or has expired."}}}""").build())
+        try {
+            redeemFamilySignIn(server.url("/"), OkHttpClient(), "old", "Pixel 9", FamilyPlatform.Android)
+            fail("A used token must not redeem")
+        } catch (e: SubsonicException.WrongCredentials) {
+            assertEquals("That sign-in code has been used or has expired.", e.message)
+        }
     }
 
     @Test

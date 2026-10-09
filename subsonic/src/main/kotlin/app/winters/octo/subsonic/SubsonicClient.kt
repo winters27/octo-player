@@ -599,6 +599,21 @@ class SubsonicClient(
         withContext(Dispatchers.Default) { decode(body, null, ServerInfo.serializer(), null) }
     }
 
+    // A call whose answer may leave its key out, or null: null then.
+    internal suspend fun <T> getOptional(endpoint: String, params: Map<String, String>, key: String, serializer: KSerializer<T>): T? {
+        val body = fetch(url(endpoint, params), endpoint)
+        return withContext(Dispatchers.Default) {
+            val root = decode(body, null, kotlinx.serialization.json.JsonObject.serializer(), null)
+            val payload = root[key]
+            if (payload == null || payload is kotlinx.serialization.json.JsonNull) null else json.decodeFromJsonElement(serializer, payload)
+        }
+    }
+
+    // Params in a form body rather than the address; only ok or an error.
+    internal suspend fun sendForm(endpoint: String, params: List<Pair<String, String>>) {
+        postForm(endpoint, params)
+    }
+
     internal suspend fun <T> get(
         endpoint: String,
         params: Map<String, String> = emptyMap(),

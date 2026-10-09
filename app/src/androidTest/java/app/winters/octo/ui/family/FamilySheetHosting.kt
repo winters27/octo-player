@@ -26,8 +26,8 @@ import okhttp3.OkHttpClient
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
-// A pretend Octo server with Family on, on the phone itself, answering the
-// family page's calls by the last part of their path.
+// A pretend Octo server with Family on, on the phone itself, answering
+// calls by the last part of their path.
 class FamilyPhoneServer : AutoCloseable {
     private val server = MockWebServer()
     private val answers = ConcurrentHashMap<String, () -> String>()
@@ -40,7 +40,7 @@ class FamilyPhoneServer : AutoCloseable {
             }
         }
         server.start()
-        answer("pending") { "" }
+        answer("getFamilySignInPending") { ok("") }
     }
 
     val address: String get() = server.url("/").toString().removeSuffix("/")
@@ -49,10 +49,17 @@ class FamilyPhoneServer : AutoCloseable {
         answers[endpoint] = body
     }
 
+    // A Subsonic answer, ok, with this payload.
+    fun ok(payload: String) = """{"subsonic-response":{"status":"ok","version":"1.16.1","type":"octo","openSubsonic":true${if (payload.isEmpty()) "" else ",$payload"}}}"""
+
     // A sign-in code that lasts a minute and forty seconds, with both addresses or only the home one.
-    fun answerStart(anywhere: Boolean = true) = answer("start") {
+    fun answerStart(anywhere: Boolean = true) = answer("startFamilySignIn") {
+        val page = if (anywhere) "\"https://music.example.com/family/signin\"" else "null"
         val outside = if (anywhere) "\"https://music.example.com\"" else "null"
-        """{"token":"tok_1","expires":"${Instant.now().plusSeconds(100)}","links":{"anywhere":$outside,"home":"http://192.168.1.20:4533"},"anywhereAvailable":$anywhere}"""
+        ok(
+            """"familySignIn":{"token":"tok_1","expires":"${Instant.now().plusSeconds(100)}","links":{"anywhere":$page,"home":"http://192.168.1.20:4533/family/signin"},""" +
+                """"servers":{"anywhere":$outside,"home":"http://192.168.1.20:4533"},"anywhereAvailable":$anywhere}""",
+        )
     }
 
     fun model(): FamilyModel = FamilyModel(

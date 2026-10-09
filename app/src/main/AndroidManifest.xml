@@ -71,13 +71,15 @@
             <!-- Family links, from a QR code the camera reads or a link tapped:
                  an invite (octo://join?server=...&invite=...), a sign-in to fill
                  in (octo://signin?server=...&username=...), or one handed over
-                 from another device (octo://signin#t=...&k=...). -->
+                 from another device (octo://handover?t=...&k=...&s=...&h=...,
+                 which the family page also sends as an intent:// link). -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="octo" android:host="join" />
                 <data android:scheme="octo" android:host="signin" />
+                <data android:scheme="octo" android:host="handover" />
             </intent-filter>
         </activity>
 

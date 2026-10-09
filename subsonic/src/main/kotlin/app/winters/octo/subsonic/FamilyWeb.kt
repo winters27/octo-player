@@ -27,51 +27,30 @@ data class FamilyMemberAdded(
     val member: FamilyMember = FamilyMember(),
     val inviteLink: String = "",
     val links: FamilyLinkChoices? = null,
+    val inviteDays: Int = 7,
     val anywhereAvailable: Boolean = true,
+    val awayAllowed: Boolean = true,
     val homeOnly: Boolean = false,
+    val publicUrl: String? = null,
 ) {
     override fun toString() = "FamilyMemberAdded(member=${member.username})"
 }
 
 // A fresh sign-up link: a new invite for a member who has not signed up
 // yet, or, after a manager resets their password, one to choose a new one.
+// The same shape answers both.
 @Serializable
 data class FamilyNewInvite(
     val inviteLink: String = "",
     val links: FamilyLinkChoices? = null,
-    val anywhereAvailable: Boolean = true,
-    val homeOnly: Boolean = false,
+    val inviteDays: Int = 7,
     val expires: String? = null,
+    val anywhereAvailable: Boolean = true,
+    val awayAllowed: Boolean = true,
+    val homeOnly: Boolean = false,
+    val publicUrl: String? = null,
 ) {
     override fun toString() = "FamilyNewInvite(anywhereAvailable=$anywhereAvailable)"
-}
-
-// A sign-in hand-over just started on this device: its token, when it
-// ends, and the addresses its link can go through.
-@Serializable
-data class FamilySignInStart(
-    val token: String = "",
-    val expires: String? = null,
-    val links: FamilyLinkChoices = FamilyLinkChoices(),
-    val anywhereAvailable: Boolean = true,
-) {
-    override fun toString() = "FamilySignInStart(expires=$expires)"
-}
-
-// A device that redeemed this device's hand-over and waits for an answer.
-@Serializable
-data class FamilySignInPending(val id: String = "", val deviceName: String = "", val platform: String = "")
-
-@Serializable
-internal data class FamilySignInRedeemed(val id: String = "")
-
-// How a redeemed hand-over stands, from the new device's side.
-@Serializable
-enum class FamilySignInState { Waiting, Allowed, Denied, Expired }
-
-@Serializable
-data class FamilySignInStatus(val state: FamilySignInState = FamilySignInState.Waiting, val box: String? = null) {
-    override fun toString() = "FamilySignInStatus(state=$state)"
 }
 
 // The presets a manager picks for a new member.
@@ -138,33 +117,6 @@ class FamilyWeb(
     // the answer is a new single-use link to choose another.
     suspend fun resetMember(username: String): FamilyNewInvite =
         call("POST", "members/${encodeComponent(username)}/reset", null, FamilyNewInvite.serializer())
-
-    // Starts handing this device's sign-in to the same person's other
-    // device: a short-lived token for the QR code.
-    suspend fun startSignIn(): FamilySignInStart = call("POST", "signin/start", null, FamilySignInStart.serializer())
-
-    // The device that redeemed the token, or null while none has.
-    suspend fun signInPending(token: String): FamilySignInPending? =
-        callOrNull("GET", "signin/${encodeComponent(token)}/pending", null, FamilySignInPending.serializer())?.takeIf { it.id.isNotEmpty() }
-
-    // Allows or denies the device that redeemed the token.
-    suspend fun decideSignIn(token: String, allow: Boolean) {
-        callOrNull("POST", "signin/${encodeComponent(token)}/decide", JsonObject(mapOf("allow" to JsonPrimitive(allow))), FamilyWebUser.serializer())
-    }
-
-    // The sealed sign-in for the allowed device; the server cannot open it.
-    suspend fun putSignInBox(token: String, box: String) {
-        callOrNull("POST", "signin/${encodeComponent(token)}/box", body("box" to box), FamilyWebUser.serializer())
-    }
-
-    // On the new device, with no sign-in: redeems the token from the QR code,
-    // naming this device, and answers the id to wait on.
-    suspend fun redeemSignIn(token: String, deviceName: String, platform: FamilyPlatform): String =
-        call("POST", "signin/redeem", body("token" to token, "deviceName" to deviceName.trim(), "platform" to platform.wire), FamilySignInRedeemed.serializer()).id
-
-    // How the redeemed hand-over stands, with the sealed sign-in once allowed.
-    suspend fun signInStatus(id: String): FamilySignInStatus =
-        call("GET", "signin/redeem/${encodeComponent(id)}", null, FamilySignInStatus.serializer())
 
     private suspend fun <T> call(method: String, path: String, body: JsonObject?, serializer: kotlinx.serialization.KSerializer<T>): T =
         callOrNull(method, path, body, serializer) ?: json.decodeFromString(serializer, "{}")

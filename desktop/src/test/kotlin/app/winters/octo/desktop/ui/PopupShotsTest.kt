@@ -63,7 +63,12 @@ class PopupShotsTest {
         {"id":"d_4","username":"alex","name":"Web player","app":"Navidrome web player","firstSeen":"","lastSeen":"","place":"Home","playing":null,"current":false}]}"""
 
     private val key = HandOverBox.newKey()
-    private val start = FamilySignInStart("tok_7Hq2", null, FamilyLinkChoices("https://music.example.com", "http://192.168.1.20:4533"))
+    private val start = FamilySignInStart(
+        "tok_7Hq2",
+        null,
+        FamilyLinkChoices("https://music.example.com/family/signin", "http://192.168.1.20:4533/family/signin"),
+        FamilyLinkChoices("https://music.example.com", "http://192.168.1.20:4533"),
+    )
 
     @Test
     fun drawOneLogin() {
@@ -84,21 +89,27 @@ class PopupShotsTest {
                     """"familyLogin":{"username":"alex","servers":{"anywhere":"https://music.example.com","home":"http://192.168.1.20:4533"},"anywhereAvailable":true,"awayAllowed":true}""",
                     type = "octo",
                 )
-                server.answerBy("start") {
-                    """{"token":"tok_7Hq2","expires":"${Instant.now().plusSeconds(102)}","links":{"anywhere":"https://music.example.com","home":"http://192.168.1.20:4533"},"anywhereAvailable":true}"""
+                server.answerBy("startFamilySignIn") {
+                    server.ok(
+                        """"familySignIn":{"token":"tok_7Hq2","expires":"${Instant.now().plusSeconds(102)}","links":{"anywhere":"https://music.example.com/family/signin","home":"http://192.168.1.20:4533/family/signin"},
+                        "servers":{"anywhere":"https://music.example.com","home":"http://192.168.1.20:4533"},"anywhereAvailable":true}""",
+                        type = "octo",
+                    )
                 }
-                server.answerBy("pending") { "" }
+                server.answerBy("getFamilySignInPending") { server.ok(type = "octo") }
                 server.answerBy("members") {
                     """{"member":{"username":"sam","displayName":"Sam","role":"Kid"},"inviteLink":"https://music.example.com/family/join#invite=tok_sam_7Hq2",
-                    "links":{"anywhere":"https://music.example.com/family/join#invite=tok_sam_7Hq2","home":"http://192.168.1.20:4533/family/join#invite=tok_sam_7Hq2"},"anywhereAvailable":true}"""
+                    "links":{"anywhere":"https://music.example.com/family/join#invite=tok_sam_7Hq2","home":"http://192.168.1.20:4533/family/join#invite=tok_sam_7Hq2"},
+                    "inviteDays":7,"anywhereAvailable":true,"awayAllowed":true,"homeOnly":false,"publicUrl":"https://music.example.com"}"""
                 }
                 server.answerBy("sam") { """{"username":"sam","displayName":"Sam","role":"Kid"}""" }
                 server.answerBy("reset") {
-                    """{"inviteLink":"https://music.example.com/family/join#invite=tok_alex_R9","links":{"anywhere":"https://music.example.com/family/join#invite=tok_alex_R9","home":"http://192.168.1.20:4533/family/join#invite=tok_alex_R9"},"anywhereAvailable":true}"""
+                    """{"inviteLink":"https://music.example.com/family/join#invite=tok_alex_R9","links":{"anywhere":"https://music.example.com/family/join#invite=tok_alex_R9","home":"http://192.168.1.20:4533/family/join#invite=tok_alex_R9"},
+                    "inviteDays":7,"expires":"${Instant.now().plusSeconds(7 * 86_400)}","anywhereAvailable":true,"awayAllowed":true,"homeOnly":false,"publicUrl":"https://music.example.com"}"""
                 }
                 // A new device waiting on its other device.
-                server.answerBy("redeem") { """{"id":"r_1"}""" }
-                server.answerBy("r_1") { """{"state":"Waiting"}""" }
+                server.answerBy("redeemFamilySignIn") { server.ok(""""familySignInRedeemed":{"id":"r_1"}""", type = "octo") }
+                server.answerBy("getFamilySignInRedeem") { server.ok(""""familySignInRedeem":{"state":"Waiting"}""", type = "octo") }
 
                 val app = rig.app
                 val out = File("build/shots/polish/one-login")
@@ -153,7 +164,7 @@ class PopupShotsTest {
                         "08-device-asking" to null,
                         "09-handed-over" to HandOverSheet(id = 2, start = start, key = key, done = "Sent to Pixel 9. It's signing in now."),
                         "10-still-there" to HandOverSheet(id = 3, start = start.copy(expires = Instant.now().minusSeconds(5).toString()), key = key, stale = true),
-                        "11-no-outside-address" to HandOverSheet(id = 4, start = start.copy(expires = Instant.now().plusSeconds(80).toString(), links = FamilyLinkChoices(null, "http://192.168.1.20:4533"), anywhereAvailable = false), key = key),
+                        "11-no-outside-address" to HandOverSheet(id = 4, start = start.copy(expires = Instant.now().plusSeconds(80).toString(), links = FamilyLinkChoices(null, "http://192.168.1.20:4533/family/signin"), servers = FamilyLinkChoices(null, "http://192.168.1.20:4533"), anywhereAvailable = false), key = key),
                     )
                     for ((name, sheet) in fixed) {
                         rig.reset(scene)

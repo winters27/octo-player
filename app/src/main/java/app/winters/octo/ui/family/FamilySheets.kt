@@ -190,6 +190,7 @@ fun HandOverSheetHost(model: FamilyModel, server: String, username: String) {
                     server = server,
                     avatarName = model.me?.displayName?.ifBlank { null } ?: username,
                     owner = model.me?.role == FamilyRole.Owner,
+                    username = username.ifBlank { null },
                     actions = PhoneSheetActions(
                         newCode = source::newCode,
                         retry = source::retry,
@@ -212,6 +213,8 @@ fun ColumnScope.HandOverSheetContent(
     owner: Boolean,
     actions: PhoneSheetActions,
     now: () -> Instant = Instant::now,
+    // Named in the link, for the family page to show.
+    username: String? = null,
 ) {
     var clock by remember { mutableStateOf(now()) }
     LaunchedEffect(Unit) {
@@ -233,7 +236,7 @@ fun ColumnScope.HandOverSheetContent(
         else -> countdownLine(seconds)
     }
     val warn = start != null && !sheet.stale && !ended && countdownWarns(seconds)
-    val options = sheet.options(awayAllowed)
+    val options = sheet.options(awayAllowed, username)
     var picked by remember { mutableStateOf<LinkReach?>(null) }
     val reach = picked ?: options?.default ?: LinkReach.Anywhere
     Header(avatarName, HANDOVER_TITLE, subtitle, if (warn) OctoColors.SignalOrange else OctoColors.TextMuted, clock = !ended, close = actions.done)
@@ -856,6 +859,10 @@ internal fun copyText(context: Context, text: String) {
     context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Octo", text))
 }
 
+// An octo:// link goes to this app itself (the debug build's own package
+// when it is the debug build), never to another Octo installed beside it.
 internal fun openLink(context: Context, url: String) {
-    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    val intent = Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    if (url.startsWith("octo:", ignoreCase = true)) intent.setPackage(context.packageName)
+    runCatching { context.startActivity(intent) }
 }

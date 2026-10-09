@@ -50,7 +50,8 @@ class FamilyDialogsTest {
     private val start = FamilySignInStart(
         token = "tok_1",
         expires = "2026-10-20T18:01:42Z",
-        links = FamilyLinkChoices("https://music.example.com", "http://192.168.1.20:4533"),
+        links = FamilyLinkChoices("https://music.example.com/family/signin", "http://192.168.1.20:4533/family/signin"),
+        servers = FamilyLinkChoices("https://music.example.com", "http://192.168.1.20:4533"),
     )
     private val copied = mutableListOf<String>()
     private val opened = mutableListOf<String>()
@@ -187,7 +188,7 @@ class FamilyDialogsTest {
 
     @Test
     fun withoutAnOutsideAddressAnywhereSaysWhatToDo() {
-        handOver = handOver.copy(start = start.copy(links = FamilyLinkChoices(null, "http://192.168.1.20:4533"), anywhereAvailable = false))
+        handOver = handOver.copy(start = start.copy(links = FamilyLinkChoices(null, "http://192.168.1.20:4533/family/signin"), servers = FamilyLinkChoices(null, "http://192.168.1.20:4533"), anywhereAvailable = false))
         owner = true
         draw()
         assertNotNull("home first", linkTo("http://192.168.1.20:4533/family/signin"))
