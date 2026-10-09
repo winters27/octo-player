@@ -729,6 +729,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_seek(
     ): Int
+    external fun uniffi_octo_audio_checksum_method_engine_set_automix(
+    ): Int
     external fun uniffi_octo_audio_checksum_method_engine_set_crossfade(
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_set_dsp(
@@ -833,6 +835,8 @@ internal object UniffiLib {
     external fun uniffi_octo_audio_fn_method_engine_replace_upcoming(`ptr`: Long,`items`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_octo_audio_fn_method_engine_seek(`ptr`: Long,`positionMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_octo_audio_fn_method_engine_set_automix(`ptr`: Long,`settings`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_octo_audio_fn_method_engine_set_crossfade(`ptr`: Long,`ms`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -1055,7 +1059,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_octo_audio_checksum_method_engine_seek() and 0xFFFF) != 46784) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_octo_audio_checksum_method_engine_set_crossfade() and 0xFFFF) != 16248) {
+    if ((lib.uniffi_octo_audio_checksum_method_engine_set_automix() and 0xFFFF) != 25418) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_engine_set_crossfade() and 0xFFFF) != 65324) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_method_engine_set_dsp() and 0xFFFF) != 56598) {
@@ -1681,7 +1688,14 @@ public interface EngineInterface {
     fun `seek`(`positionMs`: kotlin.ULong)
     
     /**
-     * Crossfade length in milliseconds, 0 to 12000; 0 turns it off.
+     * How crossfades are chosen and shaped: smart transitions, filter
+     * sweeps, tempo matching and the longest blend. Applies from the next
+     * transition on. Smart transitions are off until this is called.
+     */
+    fun `setAutomix`(`settings`: AutomixSettings)
+    
+    /**
+     * Crossfade length in milliseconds, 0 to 16000; 0 turns it off.
      */
     fun `setCrossfade`(`ms`: kotlin.UInt)
     
@@ -2117,7 +2131,26 @@ open class Engine: Disposable, AutoCloseable, EngineInterface
 
     
     /**
-     * Crossfade length in milliseconds, 0 to 12000; 0 turns it off.
+     * How crossfades are chosen and shaped: smart transitions, filter
+     * sweeps, tempo matching and the longest blend. Applies from the next
+     * transition on. Smart transitions are off until this is called.
+     */
+    @Throws(EngineException::class)override fun `setAutomix`(`settings`: AutomixSettings)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_engine_set_automix(
+        it,
+        
+        FfiConverterTypeAutomixSettings.lower(`settings`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Crossfade length in milliseconds, 0 to 16000; 0 turns it off.
      */
     @Throws(EngineException::class)override fun `setCrossfade`(`ms`: kotlin.UInt)
         = 
@@ -2807,6 +2840,71 @@ public object FfiConverterTypeEngineListener: FfiConverter<EngineListener, Long>
 
     override fun write(value: EngineListener, buf: ByteBuffer) {
         buf.putLong(lower(value))
+    }
+}
+
+
+
+/**
+ * The user's choices for transitions.
+ */
+data class AutomixSettings (
+    /**
+     * Choose where each blend starts from the music; off is the fixed
+     * crossfade at the end of the song.
+     */
+    val `smartTransitions`: kotlin.Boolean
+    , 
+    /**
+     * Sweep filters over both songs during a smart blend.
+     */
+    val `filterSweeps`: kotlin.Boolean
+    , 
+    /**
+     * Nudge the incoming song's tempo to the outgoing one's.
+     */
+    val `matchTempo`: kotlin.Boolean
+    , 
+    /**
+     * The longest a smart blend may last, in milliseconds; 0 uses the
+     * crossfade length.
+     */
+    val `maxOverlapMs`: kotlin.UInt
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAutomixSettings: FfiConverterRustBuffer<AutomixSettings> {
+    override fun read(buf: ByteBuffer): AutomixSettings {
+        return AutomixSettings(
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: AutomixSettings) = (
+            FfiConverterBoolean.allocationSize(value.`smartTransitions`) +
+            FfiConverterBoolean.allocationSize(value.`filterSweeps`) +
+            FfiConverterBoolean.allocationSize(value.`matchTempo`) +
+            FfiConverterUInt.allocationSize(value.`maxOverlapMs`)
+    )
+
+    override fun write(value: AutomixSettings, buf: ByteBuffer) {
+            FfiConverterBoolean.write(value.`smartTransitions`, buf)
+            FfiConverterBoolean.write(value.`filterSweeps`, buf)
+            FfiConverterBoolean.write(value.`matchTempo`, buf)
+            FfiConverterUInt.write(value.`maxOverlapMs`, buf)
     }
 }
 
@@ -3896,6 +3994,27 @@ sealed class EngineEvent {
         companion object
     }
     
+    /**
+     * How the next song will follow the playing one, decided ahead of
+     * time. `start_ms` is when in `from_id` the blend starts (its length
+     * for a gapless join), `entry_ms` where `to_id` comes in, and
+     * `overlap_ms` how long both sound, 0 for a gapless join. `reason` is a
+     * line for the log, starting `automix:`.
+     */
+    data class TransitionPlanned(
+        val `fromId`: kotlin.String, 
+        val `toId`: kotlin.String, 
+        val `startMs`: kotlin.ULong, 
+        val `entryMs`: kotlin.ULong, 
+        val `overlapMs`: kotlin.ULong, 
+        val `reason`: kotlin.String) : EngineEvent()
+        
+    {
+        
+
+        companion object
+    }
+    
 
     
 
@@ -3952,6 +4071,14 @@ public object FfiConverterTypeEngineEvent : FfiConverterRustBuffer<EngineEvent>{
             11 -> EngineEvent.Position(
                 FfiConverterString.read(buf),
                 FfiConverterDouble.read(buf),
+                )
+            12 -> EngineEvent.TransitionPlanned(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterULong.read(buf),
+                FfiConverterULong.read(buf),
+                FfiConverterULong.read(buf),
+                FfiConverterString.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
         }
@@ -4044,6 +4171,18 @@ public object FfiConverterTypeEngineEvent : FfiConverterRustBuffer<EngineEvent>{
                 + FfiConverterDouble.allocationSize(value.`positionMs`)
             )
         }
+        is EngineEvent.TransitionPlanned -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`fromId`)
+                + FfiConverterString.allocationSize(value.`toId`)
+                + FfiConverterULong.allocationSize(value.`startMs`)
+                + FfiConverterULong.allocationSize(value.`entryMs`)
+                + FfiConverterULong.allocationSize(value.`overlapMs`)
+                + FfiConverterString.allocationSize(value.`reason`)
+            )
+        }
     }
 
     override fun write(value: EngineEvent, buf: ByteBuffer) {
@@ -4110,6 +4249,16 @@ public object FfiConverterTypeEngineEvent : FfiConverterRustBuffer<EngineEvent>{
                 buf.putInt(11)
                 FfiConverterString.write(value.`itemId`, buf)
                 FfiConverterDouble.write(value.`positionMs`, buf)
+                Unit
+            }
+            is EngineEvent.TransitionPlanned -> {
+                buf.putInt(12)
+                FfiConverterString.write(value.`fromId`, buf)
+                FfiConverterString.write(value.`toId`, buf)
+                FfiConverterULong.write(value.`startMs`, buf)
+                FfiConverterULong.write(value.`entryMs`, buf)
+                FfiConverterULong.write(value.`overlapMs`, buf)
+                FfiConverterString.write(value.`reason`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }

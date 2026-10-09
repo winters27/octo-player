@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use crate::crossfade::{fade_in_volume, fade_out_volume};
 use crate::deck::Deck;
 use crate::lane::Lane;
-use crate::mixer::{Marker, MixState, Mixer, Transition};
+use crate::mixer::{FadeShape, Marker, MixState, Mixer, Transition};
 use crate::pace::Pace;
 use crate::sound::model::ReplayGainSettings;
 use crate::sound::model::SoundSettings;
@@ -73,7 +73,7 @@ fn crossfade_is_equal_power_and_on_time() {
     let next = deck(2, &b);
     wait_ready(&next);
     let fade_frames = 24_000u64; // 0.5 s
-    mixer.plan_fade(1, 1.5, fade_frames, next, Loudness::default());
+    mixer.plan_fade(1, 1.5, fade_frames, next, Loudness::default(), FadeShape::default());
     let (out, markers) = render_all(&mut mixer);
 
     let latency = 72; // the limiter's delay at 48 kHz
@@ -177,4 +177,266 @@ fn seeking_marks_the_new_place() {
     }
     let seek = markers.iter().find(|m| m.transition == Some(Transition::Seek)).expect("seek marker");
     assert!((seek.secs - 1.25).abs() < 1e-9);
+}
+
+// Song A on the left at a steady level; song B on the right as a ramp that
+// tells each frame's place in the song (frame n holds n % 15_000).
+fn place_file(path: &Path, frames: usize) {
+    let samples: Vec<i16> = (0..frames).flat_map(|n| [0, (n % 15_000) as i16]).collect();
+    write_wav(path, RATE, 2, &samples);
+}
+
+fn place_of(sample: f32) -> usize {
+    (sample * 32768.0).round() as usize
+}
+
+// Renders A (2 s, left) into B (right) with a blend at 1 s lasting
+// `frames`, shaped by `shape`, with B starting at `entry` seconds.
+fn blend(shape: FadeShape, frames: u64, entry: f64, b_frames: usize) -> (Vec<f32>, Vec<Marker>) {
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    dc_file(&a, 96_000, 8_192, 0);
+    place_file(&b, b_frames);
+    let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
+    let mut lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    let next = Deck::open(2, b.to_string_lossy().into(), entry, HttpOptions::default());
+    wait_ready(&next);
+    mixer.plan_fade(1, 1.0, frames, next, Loudness::default(), shape);
+    render_all(&mut mixer)
+}
+
+const LATENCY: usize = 72;
+
+#[test]
+fn the_incoming_song_starts_from_its_entry_point() {
+    let fade = 12_000u64;
+    let (out, markers) = blend(FadeShape::default(), fade, 0.5, 96_000);
+    let fade_start = 48_000 + LATENCY;
+    // Past the blend B plays alone, from 0.5 s plus the time since the blend began.
+    let after = fade_start + fade as usize + 100;
+    let expected = (24_000 + fade as usize + 100) % 15_000;
+    assert_eq!(place_of(out[after * 2 + 1]), expected);
+    let b = markers.iter().find(|m| m.key == 2).expect("marker for B");
+    assert_eq!(b.frame, fade_start as u64);
+    assert!((b.secs - 0.5).abs() < 1e-9, "{}", b.secs);
+    // B plays from 0.5 s to its end after A's first second.
+    assert_eq!(out.len() / 2, 48_000 + 96_000 - 24_000 + LATENCY);
+}
+
+#[test]
+fn the_outgoing_song_stops_when_the_blend_ends() {
+    let fade = 12_000u64;
+    let (out, _) = blend(FadeShape { k: 0.4, ..Default::default() }, fade, 0.0, 96_000);
+    let fade_start = 48_000 + LATENCY;
+    let end = fade_start + fade as usize;
+    // A still had 0.75 s to go, but nothing of it is left after the blend.
+    assert!(out[(end - 200) * 2] > 0.0);
+    for i in end..end + 48_000 {
+        assert_eq!(out[i * 2], 0.0, "A still heard at {i}");
+    }
+    assert_eq!(out.len() / 2, 48_000 + 96_000 + LATENCY);
+}
+
+#[test]
+fn the_curve_follows_k() {
+    let fade = 24_000u64;
+    let k = 0.55;
+    let (out, _) = blend(FadeShape { k, ..Default::default() }, fade, 0.0, 96_000);
+    let fade_start = 48_000 + LATENCY;
+    for i in (0..fade as usize).step_by(1_999) {
+        let (gout, _) = crate::automix::gains(i as f32 / fade as f32, k);
+        assert!((out[(fade_start + i) * 2] - 0.25 * gout).abs() < 1e-6, "at {i}");
+    }
+    // Halfway the outgoing song is at cos(pi/4) * (1 - k) + k / 2.
+    let half = out[(fade_start + fade as usize / 2) * 2] / 0.25;
+    assert!((half - (std::f32::consts::FRAC_1_SQRT_2 * (1.0 - k) + k / 2.0)).abs() < 1e-4, "{half}");
+}
+
+#[test]
+fn filter_sweeps_touch_only_the_blend() {
+    let fade = 24_000u64;
+    let plain = FadeShape { k: 0.4, ..Default::default() };
+    let swept =
+        FadeShape { k: 0.4, filter_strength: 0.7, beats: vec![0.0, 0.25, 0.5, 0.75], ..Default::default() };
+    let (a, _) = blend(plain, fade, 0.0, 96_000);
+    let (b, _) = blend(swept, fade, 0.0, 96_000);
+    assert_eq!(a.len(), b.len());
+    let fade_start = 48_000 + LATENCY;
+    let fade_end = fade_start + fade as usize;
+    // Before and after the blend: the very same samples.
+    assert_eq!(a[..fade_start * 2], b[..fade_start * 2]);
+    let first = (fade_end * 2..a.len()).find(|&i| a[i] != b[i]);
+    assert_eq!(first, None, "{:?}", first.map(|i| (i, a[i], b[i])));
+    // Inside it the filters are at work: the steady A loses its level to
+    // the high-pass, and B's ramp is changed by its own high-pass.
+    let late = fade_start + fade as usize * 3 / 4;
+    assert!(b[late * 2].abs() < a[late * 2].abs() * 0.5, "{} vs {}", b[late * 2], a[late * 2]);
+    let early = fade_start + 2_000;
+    assert!((a[early * 2 + 1] - b[early * 2 + 1]).abs() > 1e-3);
+}
+
+#[test]
+fn a_song_with_no_blend_plays_exactly_as_before() {
+    // A blend later in a song changes nothing before it.
+    let dir = temp_dir();
+    let a = dir.join("a.wav");
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, 96_000, 0.4));
+    let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
+    let mut lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    let (alone, _) = render_all(&mut mixer);
+    let b = dir.join("b.wav");
+    dc_file(&b, 48_000, 0, 1_000);
+    let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
+    let mut lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    let next = deck(2, &b);
+    wait_ready(&next);
+    let shape = FadeShape { k: 0.75, filter_strength: 0.7, ..Default::default() };
+    mixer.plan_fade(1, 1.5, 12_000, next, Loudness::default(), shape);
+    let (blended, _) = render_all(&mut mixer);
+    let start = 72_000 + LATENCY;
+    assert_eq!(alone[..start * 2], blended[..start * 2]);
+}
+
+#[test]
+fn a_matched_tempo_eases_back_to_normal() {
+    let fade = 48_000u64;
+    let b_frames = RATE as usize * 9;
+    let shape = FadeShape { k: 0.4, rate: Some(1.05), ..Default::default() };
+    let (out, markers) = blend(shape, fade, 0.0, b_frames);
+    let fade_start = 48_000 + LATENCY;
+    // Through the blend B moves at 1.05, then eases back over 5 s
+    // (1.025 on average), then plays on at its own rate.
+    let b_out = 1.0 + 5.0 + (9.0 - 1.05 - 5.125);
+    let expected = fade_start as f64 + b_out * RATE as f64;
+    assert!((out.len() as f64 / 2.0 - expected).abs() < 1_500.0, "{} vs {expected}", out.len() / 2);
+    // The clock follows B's own time throughout.
+    let mut seen_eased = false;
+    for m in markers.iter().filter(|m| m.key == 2) {
+        let t = (m.frame as f64 - fade_start as f64) / RATE as f64;
+        let song = if t <= 1.0 {
+            t * 1.05
+        } else if t <= 6.0 {
+            let e = t - 1.0;
+            1.05 + e + 0.05 * (e - e * e / 10.0)
+        } else {
+            seen_eased = true;
+            6.175 + (t - 6.0)
+        };
+        assert!((m.secs - song).abs() < 0.05, "{m:?}: want {song}");
+    }
+    assert!(seen_eased, "no marker after the ease: {markers:?}");
+    let last = markers.iter().rfind(|m| m.key == 2).unwrap();
+    assert!((last.secs_per_frame - 1.0 / RATE as f64).abs() < 1e-12, "{last:?}");
+}
+
+// A with sound for its first `sound` frames and silence after, into B as
+// a steady level on the right, blending from 1 s for 1 s.
+fn blend_into_silence(shape: FadeShape, sound: usize) -> Vec<f32> {
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    let samples: Vec<i16> = (0..96_000).flat_map(|n| [if n < sound { 8_192 } else { 0 }, 0]).collect();
+    write_wav(&a, RATE, 2, &samples);
+    dc_file(&b, 96_000, 0, 8_192);
+    let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
+    let mut lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    let next = deck(2, &b);
+    wait_ready(&next);
+    mixer.plan_fade(1, 1.0, 48_000, next, Loudness::default(), shape);
+    render_all(&mut mixer).0
+}
+
+#[test]
+fn a_blend_finishes_early_once_the_outgoing_song_falls_silent() {
+    let k = 0.4;
+    let gated = FadeShape { k, silence_gate_db: Some(-60.0), ..Default::default() };
+    let plain = FadeShape { k, ..Default::default() };
+    // A falls silent 0.2 s into the blend.
+    let early = blend_into_silence(gated.clone(), 57_600);
+    let late = blend_into_silence(plain, 57_600);
+    // 0.3 s of quiet (to within a block), then 0.25 s to finish: by 0.8 s
+    // into the blend B is at full level, where it would still be rising.
+    let at = 48_000 + LATENCY + 38_400;
+    assert!((early[at * 2 + 1] - 0.25).abs() < 1e-6, "{}", early[at * 2 + 1]);
+    let (_, gin) = crate::automix::gains(0.8, k);
+    assert!((late[at * 2 + 1] - 0.25 * gin).abs() < 1e-6);
+    assert!(late[at * 2 + 1] < 0.249);
+    // Before the quiet has lasted 0.3 s, both are the same.
+    let before = 48_000 + LATENCY + 9_600 + 12_000;
+    assert_eq!(early[before * 2 + 1], late[before * 2 + 1]);
+    // A song that keeps sounding is blended all the way.
+    let full = blend_into_silence(gated, 96_000);
+    assert!((full[at * 2 + 1] - 0.25 * gin).abs() < 1e-6);
+}
+
+#[test]
+fn headroom_lowers_the_middle_of_a_blend() {
+    let fade = 24_000u64;
+    let k = 0.4;
+    let (out, _) = blend(FadeShape { k, headroom_db: 1.0, ..Default::default() }, fade, 0.0, 96_000);
+    let fade_start = 48_000 + LATENCY;
+    let mid = fade_start + fade as usize / 2;
+    let (gout, _) = crate::automix::gains(0.5, k);
+    let down = 10f32.powf(-1.0 / 20.0);
+    assert!((out[mid * 2] - 0.25 * gout * down).abs() < 1e-6, "{}", out[mid * 2]);
+    // Coming in gradually: barely lowered at the very start.
+    let (g0, _) = crate::automix::gains(0.01, k);
+    let start = fade_start + fade as usize / 100;
+    assert!(out[start * 2] > 0.25 * g0 * down);
+    // Gone once the blend is over: B at its own level.
+    let after = fade_start + fade as usize + 10;
+    assert_eq!(place_of(out[after * 2 + 1]), (fade as usize + 10) % 15_000);
+}
+
+#[test]
+fn the_live_tap_hears_the_playing_song_before_shaping() {
+    let dir = temp_dir();
+    let a = dir.join("a.wav");
+    dc_file(&a, 48_000, 8_192, 0);
+    let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
+    let mut lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    render_all(&mut mixer);
+    let live = mixer.live_analysis(1).expect("tapped");
+    assert!((live.secs - 1.0).abs() < 1e-9, "{}", live.secs);
+    // Mono of 0.25 on one side is 0.125.
+    assert!((live.mean_db - 20.0 * 0.125f32.log10()).abs() < 1e-3, "{}", live.mean_db);
+    assert!(mixer.live_analysis(2).is_none());
+}
+
+#[test]
+fn the_blend_is_over_on_its_last_frame() {
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    dc_file(&a, 96_000, 8_192, 0);
+    dc_file(&b, 96_000, 0, 8_192);
+    let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
+    let mut lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    let next = deck(2, &b);
+    wait_ready(&next);
+    mixer.plan_fade(1, 1.0, 12_000, next, Loudness::default(), FadeShape { k: 0.4, ..Default::default() });
+    // Up to the blend's last frame, then one more.
+    let mut markers = Vec::new();
+    let mut made = 0;
+    let until = Instant::now() + Duration::from_secs(5);
+    for target in [48_000 + 12_000 - 1, 48_000 + 12_000] {
+        while made < target {
+            let mut block = vec![0.0; (target - made).min(512) * 2];
+            let (n, _) = mixer.render(&mut block, &mut markers);
+            made += n;
+            assert!(Instant::now() < until);
+        }
+        // A is let go at the end of the blend although it had 0.75 s left.
+        assert_eq!(mixer.is_fading(), target < 60_000, "at {made}");
+    }
 }

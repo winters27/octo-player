@@ -99,6 +99,8 @@ struct Shared {
     opts: HttpOptions,
     len: Option<u64>,
     content_type: Option<String>,
+    // The first answer was a range (206 with Content-Range).
+    partial: bool,
     state: Mutex<State>,
     wake: Condvar,
 }
@@ -153,6 +155,7 @@ impl HttpSource {
             opts,
             len,
             content_type,
+            partial: status == 206,
             state: Mutex::new(State {
                 buf: VecDeque::new(),
                 buf_start: 0,
@@ -180,6 +183,12 @@ impl HttpSource {
     /// Whether the server answers range requests.
     pub fn supports_ranges(&self) -> bool {
         self.shared.lock().ranges
+    }
+
+    /// Whether the server answered the first request with a range, so a
+    /// jump far ahead costs one request rather than reading up to it.
+    pub fn answered_with_range(&self) -> bool {
+        self.shared.partial
     }
 }
 
