@@ -1,6 +1,9 @@
 package app.winters.octo.desktop.ui
 
 import app.winters.octo.desktop.FakeServer
+import app.winters.octo.desktop.family.DesktopFamilyTest
+import app.winters.octo.subsonic.FamilyDeviceKind
+import app.winters.octo.subsonic.FamilyPreset
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.pages.askForCopy
 import app.winters.octo.desktop.pages.showSection
@@ -21,12 +24,13 @@ class FamilyShotsTest {
     @get:Rule val folder = TemporaryFolder()
 
     private val abilities = """"abilities":{"addToLibrary":"Request","requestQuality":"Flac","autoApprove":false,"weeklyRequestLimit":10,
-        "streamCap":192,"awayCap":128,"away":true,"devicesAtOnce":2,"downloadFiles":false,"offlineCopies":false,"share":false,
+        "streamCap":0,"awayCap":160,"away":true,"devicesAtOnce":2,"downloadFiles":false,"offlineCopies":false,"share":false,
         "importPlaylists":true,"cleanOnly":false,"familyPlaylistsEdit":true,"manageFamily":false,"approveRequests":false,
         "storageLimitGb":10,"instantFromFamily":true}"""
 
     private val listener = """"family":{"me":{"username":"winters","displayName":"Alex","role":"Listener","managed":true,$abilities,
-        "requestsThisWeek":3,"storageUsedBytes":5400000000,"place":"Home","deviceId":"d_7Qm2abc"}}"""
+        "requestsThisWeek":3,"storageUsedBytes":5400000000,"place":"Home","deviceId":"d_7Qm2abc",
+        "quality":{"home":"Original","away":"Standard","familyLimitKbps":0,"familyAwayLimitKbps":160}}}"""
 
     private val owner = """"family":{"me":{"username":"winters","displayName":"Jordan","role":"Owner","managed":false,
         "abilities":{"addToLibrary":"Direct","requestQuality":"Best","autoApprove":true,"weeklyRequestLimit":0,"streamCap":0,"awayCap":0,
@@ -44,6 +48,17 @@ class FamilyShotsTest {
         "artist":"$artist","album":"","coverArt":null,"quality":"$quality","state":"$state","created":"2026-10-20T18:00:00Z",
         "decided":null,"decidedBy":null,"note":"$note","failure":${if (state == "Failed") "\"No real FLAC copy found\"" else "null"},
         "librarySongId":null,"outcome":${outcome?.let { "\"$it\"" } ?: "null"}}"""
+
+    // A picture of a room, with no code in it, for the scanner's shot.
+    private fun roomPicture(): java.awt.image.BufferedImage {
+        val image = java.awt.image.BufferedImage(640, 360, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        for (y in 0 until 360) for (x in 0 until 640) {
+            val r = 40 + x * 60 / 640
+            val g = 50 + y * 40 / 360
+            image.setRGB(x, y, (r shl 16) or (g shl 8) or 70)
+        }
+        return image
+    }
 
     @Test
     fun drawFamily() {
@@ -75,11 +90,18 @@ class FamilyShotsTest {
                 server.answer(
                     "getFamilyDevices",
                     """"familyDevices":{"device":[
-                      {"id":"d_1","username":"winters","name":"Studio PC","kind":"OctoApp","app":"Octo 1.6 (Windows)","created":"","lastSeen":"","place":"Home","playing":{"songId":"s1","title":"Angel","artist":"Massive Attack"},"current":true},
+                      {"id":"d_1","username":"winters","name":"Studio PC","kind":"OctoApp","app":"Octo 1.6 (Windows)","created":"","lastSeen":"","place":"Home","playing":{"songId":"s1","title":"Angel","artist":"Massive Attack"},"current":true,"quality":"Account"},
                       {"id":"d_2","username":"winters","name":"Pixel 9","kind":"OctoApp","app":"Octo 1.6 (Android)","created":"","lastSeen":"","place":"Away","playing":null,"current":false},
                       {"id":"d_3","username":"winters","name":"Symfonium","kind":"SubsonicApp","app":"Symfonium","created":"","lastSeen":"","place":"Home","playing":null,"current":false}]}""",
                     type = "octo",
                 )
+                server.answer(
+                    "addFamilyDevice",
+                    """"familyDeviceAdded":{"deviceId":"d_9","kind":"OctoApp","pairCode":"482913","expires":"2026-10-20T18:15:00Z","server":"https://music.example.com","username":"winters"}""",
+                    type = "octo",
+                )
+                server.answerBy("auth") { """{"username":"winters","role":"Owner"}""" }
+                server.answerBy("members") { """{"member":{"username":"sam","displayName":"Sam","role":"Kid"},"inviteLink":"https://music.example.com/family/join#invite=tok_sam_7Hq2"}""" }
                 server.answer(
                     "getStarred2",
                     """"starred2":{"song":[
@@ -93,9 +115,26 @@ class FamilyShotsTest {
                 rig.scene(PolishShotsTest.Size.Hd) { scene ->
                     // Joining, before signing in.
                     SwingUtilities.invokeAndWait {
-                        app.signInForm.takeJoinLink("octo://join?server=https%3A%2F%2Fmusic.example.com&username=alex&code=482913")
+                        app.signInForm.takeJoinLink("https://music.example.com/family/join#u=alex&c=482913")
                     }
                     rig.shot(scene, "family/join", 1_500)
+                    // The camera scanner, over the join screen, with a camera
+                    // that sees no code yet.
+                    SwingUtilities.invokeAndWait {
+                        app.cameraSource = { DesktopFamilyTest.StillCamera(roomPicture()) }
+                        app.popups.close()
+                    }
+                    rig.clickText(scene, "Scan with camera")
+                    rig.shot(scene, "family/scanner", 2_000)
+                    SwingUtilities.invokeAndWait {
+                        app.popups.close()
+                        app.signInForm.takeJoinLink("https://music.example.com/family/join#invite=tok_9")
+                    }
+                    rig.shot(scene, "family/invite", 1_500)
+                    SwingUtilities.invokeAndWait {
+                        app.signInForm.invite = null
+                        app.signInForm.joining = false
+                    }
                 }
                 rig.signIn()
                 runBlocking { app.family.plan() }
@@ -112,6 +151,26 @@ class FamilyShotsTest {
                     SwingUtilities.invokeAndWait { askForCopy(app.popups, app, "ext-deezer-song-11", "Pink + White") }
                     rig.shot(scene, "family/request-sheet", 1_500)
 
+                    // Add a device: the code as a QR code any camera reads.
+                    rig.reset(scene)
+                    SwingUtilities.invokeAndWait {
+                        showSection(FAMILY, "devices")
+                        app.navigator.go(Page.Family)
+                        app.family.addDevice("Living room", FamilyDeviceKind.OctoApp)
+                    }
+                    rig.shot(scene, "family/add-device-qr", 2_500)
+                    SwingUtilities.invokeAndWait { app.family.dismissAdded() }
+
+                    // Audio quality and offline copies, in Settings.
+                    for (section in listOf("quality", "offline")) {
+                        rig.reset(scene)
+                        SwingUtilities.invokeAndWait {
+                            showSection("Settings", section)
+                            app.navigator.go(Page.Settings)
+                        }
+                        rig.shot(scene, "family/settings-$section", 2_000)
+                    }
+
                     server.answer("getFamily", owner, type = "octo")
                     runBlocking { app.family.refresh() }
                     for (section in listOf("plan", "members", "inbox")) {
@@ -122,6 +181,14 @@ class FamilyShotsTest {
                         }
                         rig.shot(scene, "family/owner-$section", 2_000)
                     }
+                    // A new member's invite, as a QR code.
+                    rig.reset(scene)
+                    SwingUtilities.invokeAndWait {
+                        showSection(FAMILY, "members")
+                        app.navigator.go(Page.Family)
+                        app.family.addMember("sam", "Sam", FamilyPreset.Kid)
+                    }
+                    rig.shot(scene, "family/owner-invite-qr", 2_500)
                 }
             }
         }

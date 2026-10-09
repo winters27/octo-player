@@ -2,6 +2,7 @@ package app.winters.octo.desktop.system
 
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.subsonic.Song
+import app.winters.octo.subsonic.parseFamilyLink
 import java.io.File
 import java.net.URI
 import java.net.URLDecoder
@@ -78,6 +79,8 @@ fun parseLaunchArgs(args: List<String>, isFile: (File) -> Boolean = File::isFile
         if (arg.isEmpty() || arg.startsWith("-")) continue
         when {
             arg.startsWith("octo:", ignoreCase = true) -> links += LaunchRequest.OpenLink(arg)
+            // A family link in its https form, handed over like an octo:// one.
+            parseFamilyLink(arg) != null -> links += LaunchRequest.OpenLink(arg)
             arg.startsWith("file:", ignoreCase = true) -> runCatching { Paths.get(URI(arg)).toFile() }.getOrNull()?.let { files += it }
             else -> files += File(arg).absoluteFile
         }

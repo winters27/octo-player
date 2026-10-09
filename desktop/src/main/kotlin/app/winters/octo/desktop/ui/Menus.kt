@@ -143,12 +143,14 @@ fun ColumnScope.SongMenu(
                 canFind = app.downloads?.supported == true,
                 canDelete = canDeleteFromDisk(app, songs),
                 canRequest = family.offersRequest,
+                canKeep = true,
                 canRemoveFromMine = offersRemoveFromMyLibrary(me) &&
                     songs.all { offersRemoveOn(it.octoPersonal, index?.marksPersonal == true) },
             ).forEachIndexed { index, group ->
                 if (index > 0) MenuSeparator()
                 group.forEach { action ->
-                    val label = songActionLabel(action, if (action == SongAction.AddToLibrary) saved else starred, last?.name, family.addLabel)
+                    val kept = songs.all { app.offline.isKeptByHand(it.id) }
+                    val label = songActionLabel(action, if (action == SongAction.AddToLibrary) saved else starred, last?.name, family.addLabel, kept)
                     when (action) {
                         SongAction.Play -> MenuRow(label, { app.play(songs); close() }, OctoIcons.Play)
                         SongAction.PlayNext -> MenuRow(label, { app.playNext(songs); close() }, OctoIcons.PlayNext)
@@ -161,6 +163,11 @@ fun ColumnScope.SongMenu(
                             if (family.addLabel != null) app.setStarred(outsideSongs, !saved) else outsideSongs.forEach { fetches?.request(it.id) }
                             close()
                         }, if (family.addLabel == null) OctoIcons.AddToLibrary else if (saved) OctoIcons.Liked else OctoIcons.Like)
+                        // Keeps the songs on this computer, or lets them go.
+                        SongAction.KeepOffline -> MenuRow(label, {
+                            app.offline.keep(songs, !kept)
+                            close()
+                        }, if (kept) OctoIcons.Downloaded else OctoIcons.Download)
                         SongAction.RequestCopy -> MenuRow(label, {
                             close()
                             one?.let { askForCopy(popups, app, it.id, it.title) }

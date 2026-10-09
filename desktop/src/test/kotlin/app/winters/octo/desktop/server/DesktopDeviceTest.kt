@@ -68,7 +68,8 @@ class DesktopDeviceTest {
 
                 val mine = own.calls.last()
                 assertEquals(settings.current.deviceId, mine.headers[DEVICE_ID_HEADER])
-                assertEquals("Studio PC", mine.headers[DEVICE_NAME_HEADER])
+                // The name goes percent-encoded, as any name may.
+                assertEquals("Studio%20PC", mine.headers[DEVICE_NAME_HEADER])
                 assertEquals("Octo/1.6.0 (Windows)", mine.headers["User-Agent"])
 
                 http.newCall(Request.Builder().url(other.address.toHttpUrl().resolve("rest/ping")!!).build()).execute().close()
@@ -78,7 +79,8 @@ class DesktopDeviceTest {
                 // The app's own name goes everywhere, as on the phone.
                 assertEquals("Octo/1.6.0 (Windows)", elsewhere.headers["User-Agent"])
                 // And the engine is given them for its own requests.
-                assertEquals("Studio PC", security.deviceHeaders()[DEVICE_NAME_HEADER])
+                assertEquals("Studio%20PC", security.deviceHeaders()[DEVICE_NAME_HEADER])
+                assertEquals("Studio PC", security.deviceName())
             }
         }
     }

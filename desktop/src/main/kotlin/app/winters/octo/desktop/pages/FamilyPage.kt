@@ -1,5 +1,14 @@
 package app.winters.octo.desktop.pages
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
+import app.winters.octo.subsonic.FamilyPreset
+import app.winters.octo.ui.family.presetLine
+import app.winters.octo.ui.family.presetName
+import app.winters.octo.ui.family.addedDeviceLink
+import app.winters.octo.ui.family.ShownLink
+import app.winters.octo.desktop.library.Cover
+import app.winters.octo.desktop.family.QrImage
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,7 +59,6 @@ import app.winters.octo.subsonic.FamilyMember
 import app.winters.octo.subsonic.FamilyRequest
 import app.winters.octo.subsonic.FamilyRequestState
 import app.winters.octo.subsonic.RequestQuality
-import app.winters.octo.subsonic.familyJoinLink
 import app.winters.octo.ui.family.DEVICES
 import app.winters.octo.ui.family.FAMILY
 import app.winters.octo.ui.family.FamilyModel
@@ -103,6 +111,11 @@ fun FamilyPage(app: AppState, visit: Visit) {
         return
     }
     val me = info.me
+    // A manager's link and the family page's password ask float over the page.
+    val popups = LocalPopups.current
+    val shown = model.shown
+    LaunchedEffect(shown) { if (shown != null) showLink(popups, model, shown) }
+    LaunchedEffect(model.askingPassword) { if (model.askingPassword) askPassword(popups, model) }
     val sections = model.sections().map { section ->
         when (section) {
             FamilySection.Plan -> PageSection("plan", MY_PLAN, OctoIcons.Family, detail = planTitle(me)) { PlanSection(model, me) }
@@ -110,7 +123,7 @@ fun FamilyPage(app: AppState, visit: Visit) {
             FamilySection.Requests -> PageSection("requests", REQUESTS, OctoIcons.Downloading, detail = requestsDetail(model.requests)) { RequestsSection(model) }
             FamilySection.Devices -> PageSection("devices", DEVICES, OctoIcons.Device, detail = plural(model.devices.size, "device")) { DevicesSection(app, model) }
             FamilySection.Members -> PageSection("members", MEMBERS, OctoIcons.Family, detail = membersDetail(info.manager?.members.orEmpty(), info.manager?.liveStreams ?: 0)) {
-                MembersSection(info.manager?.members.orEmpty())
+                MembersSection(model, info.manager?.members.orEmpty())
             }
             FamilySection.Inbox -> PageSection("inbox", REQUESTS_WAITING, OctoIcons.Check, detail = if (model.inbox.isEmpty()) "None waiting" else "${model.inbox.size} waiting") {
                 InboxSection(model)
@@ -224,7 +237,7 @@ private fun RequestsSection(model: FamilyModel) {
     }
     Rows {
         model.requests.forEach { request ->
-            ItemRow(request.title.ifBlank { request.target }, listOf(request.artist, requestKindLine(request)).filter(String::isNotBlank).joinToString(" · "), state = request) {
+            ItemRow(request.title.ifBlank { request.target }, listOf(request.artist, requestKindLine(request)).filter(String::isNotBlank).joinToString(" · "), state = request, cover = request.coverArt ?: request.target) {
                 if (request.state == FamilyRequestState.Pending) RowAction("Cancel", { model.cancel(request.id) }, enabled = !model.working)
             }
         }
@@ -275,32 +288,73 @@ private fun AddDevice(app: AppState, model: FamilyModel) {
     }
 }
 
-// The code or password, shown once, with a way to copy it.
+// The pair code as a QR code any camera reads (with the code beside it
+// for typing), or an app password, shown once, each with a way to copy it.
 private fun showAdded(popups: PopupHost, app: AppState, model: FamilyModel, added: FamilyDeviceAdded) {
-    popups.showCentred(width = 420.dp) { close ->
+    val server = added.server ?: app.connection?.client?.primaryUrl?.toString()?.removeSuffix("/").orEmpty()
+    popups.showCentred(width = 440.dp) { close ->
         val done = {
             model.dismissAdded()
             close()
         }
-        val code = added.pairCode
+        val link = addedDeviceLink(added, server)
         val password = added.appPassword
-        MenuTitle(if (code != null) "Pair code" else "App password")
+        MenuTitle(if (link != null) "Add a device" else "App password")
         PopupPadding {
-            val secret = code ?: password.orEmpty()
-            Txt(secret, DesktopType.pageTitle, OctoColors.TextPrimary)
-            if (code != null) {
-                Txt("In Octo on the other device, choose Join with a family code and type your username and this code. It works once${added.expires?.let { ", until it expires" } ?: ""}.", DesktopType.body, OctoColors.TextSecondary, maxLines = 4)
+            if (link != null) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { QrImage(link, label = "QR code to add a device") }
+                Txt("Scan this with the new device's camera, or in Octo there choose Join with a family code and type ${added.username} and ${added.pairCode}. It works once.", DesktopType.body, OctoColors.TextSecondary, maxLines = 4)
             } else {
-                val server = added.server ?: app.connection?.client?.primaryUrl?.toString()?.removeSuffix("/")
-                Txt("In the other app, sign in to ${server ?: "this server"} as ${added.username} with this password. It shows only now.", DesktopType.body, OctoColors.TextSecondary, maxLines = 4)
+                Txt(password.orEmpty(), DesktopType.pageTitle, OctoColors.TextPrimary)
+                Txt("In the other app, sign in to $server as ${added.username} with this password. It shows only now.", DesktopType.body, OctoColors.TextSecondary, maxLines = 4)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
-                if (code != null) {
-                    val server = added.server ?: app.connection?.client?.primaryUrl?.toString()?.removeSuffix("/").orEmpty()
-                    GlazeCapsule(null, "Copy link", { copy(familyJoinLink(server, added.username, code)) })
+                if (link != null) {
+                    GlazeCapsule(null, "Copy link", { copy(link) })
+                    GlazeCapsule(null, "Copy code", { copy(added.pairCode.orEmpty()) })
+                } else {
+                    GlazeCapsule(null, "Copy address", { copy(server) })
+                    GlazeCapsule(null, "Copy password", { copy(password.orEmpty()) })
                 }
-                GlazeCapsule(null, "Copy", { copy(secret) })
                 GlazeCapsule(OctoIcons.Check, "Done", done, lit = true)
+            }
+        }
+    }
+}
+
+// A manager's link (an invite, a member's new device) as a QR code, with
+// a way to copy it, until closed.
+private fun showLink(popups: PopupHost, model: FamilyModel, shown: ShownLink) {
+    popups.showCentred(width = 440.dp) { close ->
+        DisposableEffect(Unit) { onDispose { model.closeShown() } }
+        MenuTitle(shown.title)
+        PopupPadding {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { QrImage(shown.url, label = shown.title) }
+            Txt(shown.note, DesktopType.body, OctoColors.TextSecondary, maxLines = 4)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
+                GlazeCapsule(null, "Copy link", { copy(shown.url) })
+                GlazeCapsule(OctoIcons.Check, "Done", close, lit = true)
+            }
+        }
+    }
+}
+
+// The family page wants the account's password before a manager's change.
+private fun askPassword(popups: PopupHost, model: FamilyModel) {
+    popups.showCentred(width = 400.dp) { close ->
+        var password by remember { mutableStateOf("") }
+        DisposableEffect(Unit) { onDispose { if (model.askingPassword) model.cancelPassword() } }
+        val go = {
+            model.signInToPage(password)
+            close()
+        }
+        MenuTitle("Your account password")
+        PopupPadding {
+            Txt("This computer signs in with a code of its own. Changes to the family need your account password once.", DesktopType.body, OctoColors.TextSecondary, maxLines = 4)
+            GlassField(password, { password = it }, Modifier.fillMaxWidth(), placeholder = "Password", password = true, onSubmit = go)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
+                GlazeCapsule(null, "Cancel", close)
+                GlazeCapsule(null, "Go on", go, lit = true, enabled = password.isNotEmpty())
             }
         }
     }
@@ -327,12 +381,40 @@ private fun askToSignOut(popups: PopupHost, model: FamilyModel, device: FamilyDe
 }
 
 @Composable
-private fun MembersSection(members: List<FamilyMember>) {
+private fun MembersSection(model: FamilyModel, members: List<FamilyMember>) {
+    Said(model)
     Rows {
-        if (members.isEmpty()) SettingRow("No members yet", "Add members on the Octo dashboard's Family page.")
+        if (members.isEmpty()) SettingRow("No members yet", "Add someone below. They get a QR code or a link to join.")
         members.forEach { member ->
-            ItemRow(member.displayName.ifBlank { member.username }, memberLine(member)) {
-                Txt(storageLine(member.storageUsedBytes, member.storageLimitGb), DesktopType.meta, OctoColors.TextSecondary)
+            ItemRow(member.displayName.ifBlank { member.username }, "${memberLine(member)} · ${storageLine(member.storageUsedBytes, member.storageLimitGb)}") {
+                RowAction("Add a device", { model.memberLink(member) }, enabled = !model.working, icon = OctoIcons.QrCode)
+            }
+        }
+    }
+    AddMember(model)
+}
+
+// A new member: their username, the name the family sees, and what they
+// may do. They get an invite to scan or open.
+@Composable
+private fun AddMember(model: FamilyModel) {
+    var username by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf("") }
+    var preset by remember { mutableStateOf(FamilyPreset.Member) }
+    Group("Add a member") {
+        Card {
+            Column(Modifier.fillMaxWidth().padding(horizontal = RowInset, vertical = Space.L), verticalArrangement = Arrangement.spacedBy(Space.M)) {
+                Txt(presetLine(preset), DesktopType.meta, OctoColors.TextMuted, maxLines = 2)
+                GlazeSegments(FamilyPreset.entries, preset, ::presetName, { preset = it })
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
+                    GlassField(name, { name = it }, Modifier.weight(1f), placeholder = "Their name, like Sam")
+                    GlassField(username, { username = it.filterNot(Char::isWhitespace).lowercase() }, Modifier.weight(1f), placeholder = "Username, like sam")
+                    GlazeCapsule(OctoIcons.Add, "Add", {
+                        model.addMember(username, name, preset)
+                        username = ""
+                        name = ""
+                    }, enabled = username.isNotBlank() && !model.working)
+                }
             }
         }
     }
@@ -356,6 +438,7 @@ private fun InboxRow(model: FamilyModel, request: FamilyRequest) {
     var note by remember(request.id) { mutableStateOf("") }
     Column(Modifier.fillMaxWidth().padding(horizontal = RowInset, vertical = Space.L), verticalArrangement = Arrangement.spacedBy(Space.S)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
+            Cover(request.coverArt ?: request.target, Modifier.size(40.dp), shape = RoundedCornerShape(6.dp), online = (request.coverArt ?: request.target).startsWith("ext-"))
             Column(Modifier.weight(1f)) {
                 CutTxt(requestTitle(request), DesktopType.tableTitle)
                 Txt("${request.displayName.ifBlank { request.username }} · ${requestKindLine(request)}", DesktopType.meta, OctoColors.TextMuted)
@@ -372,12 +455,13 @@ private fun InboxRow(model: FamilyModel, request: FamilyRequest) {
 // A row of a list: its title, a line under it, the request's state when
 // it is one, and actions at the end.
 @Composable
-private fun ItemRow(title: String, line: String, state: FamilyRequest? = null, actions: @Composable () -> Unit = {}) {
+private fun ItemRow(title: String, line: String, state: FamilyRequest? = null, cover: String? = null, actions: @Composable () -> Unit = {}) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = RowHeight.Regular).hoverLift(Corner.RowShape).padding(horizontal = RowInset, vertical = Space.M),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.L),
     ) {
+        if (cover != null) Cover(cover, Modifier.size(40.dp), shape = RoundedCornerShape(6.dp), online = cover.startsWith("ext-"))
         Column(Modifier.weight(1f)) {
             CutTxt(title, DesktopType.tableTitle)
             if (line.isNotBlank()) Txt(line, DesktopType.meta, OctoColors.TextMuted, maxLines = 2)

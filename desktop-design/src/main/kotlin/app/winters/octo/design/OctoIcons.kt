@@ -83,6 +83,11 @@ object OctoIcons {
     val Family by sym("sym_listeners")
     val Device by sym("sym_smartphone")
     val Key by sym("sym_key")
+    // Reading and showing QR codes, quality on mobile data, and a picture.
+    val Camera by sym("sym_camera")
+    val QrCode by sym("sym_qr_code")
+    val CellSignal by sym("sym_cell_signal")
+    val Picture by sym("sym_image")
 
     // Back and forward through the pages, and opening the full player: the
     // chevron turned.

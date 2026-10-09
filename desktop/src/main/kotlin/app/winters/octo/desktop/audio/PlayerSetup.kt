@@ -27,6 +27,9 @@ fun openPlayer(
     headers: () -> Map<String, String> = { emptyMap() },
     // The library id of a song found online once fetched into the library.
     landed: (String) -> String? = { null },
+    // What streams ask for, and a copy kept on this computer for a song.
+    params: () -> Map<String, String> = { mapOf("format" to "raw") },
+    kept: (String) -> java.io.File? = { null },
     // The engine, opened beforehand off the window's thread (Startup), or
     // why it would not open.
     opened: Result<AudioEngine> = runCatching { NativeAudioEngine.open() },
@@ -36,7 +39,7 @@ fun openPlayer(
         val engine = opened.getOrThrow()
         keepTrust(engine, settings, scope)
         val device = playback.outputDevice?.takeUnless { it == DEFAULT_OUTPUT }
-        OpenedPlayer(EnginePlayer(engine, LocalOrServer(ServerSongs(headers, landed, client)), volume = playback.volume, device = device), null)
+        OpenedPlayer(EnginePlayer(engine, LocalOrServer(ServerSongs(headers, landed, params, client), kept), volume = playback.volume, device = device), null)
     } catch (e: Throwable) {
         if (e is VirtualMachineError) throw e
         OpenedPlayer(

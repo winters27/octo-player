@@ -56,6 +56,7 @@ import app.winters.octo.desktop.discord.DiscordMark
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.desktop.hotkeys.GlobalShortcutGroup
 import app.winters.octo.desktop.ui.LocalSoftwareDrawing
+import app.winters.octo.ui.family.AUDIO_QUALITY
 import kotlin.math.roundToInt
 
 // Settings: the servers, how Octo looks, playback, listening, lyrics,
@@ -74,6 +75,8 @@ fun SettingsPage(app: AppState, visit: Visit) {
             PageSection("servers", "Servers", OctoIcons.Servers) { ServerRows(app) },
             PageSection("look", "Appearance", OctoIcons.Appearance) { AppearanceGroups(app, settings) },
             PageSection("playback", "Playback", OctoIcons.Playback) { PlaybackRows(app, settings) },
+            PageSection("quality", AUDIO_QUALITY, OctoIcons.Equalizer, detail = "At home, away, and on this computer.") { AudioQualityRows(app, settings) },
+            PageSection("offline", "Offline", OctoIcons.Download, detail = "Songs kept here to play without a connection.") { OfflineRows(app) },
             PageSection("listening", "Listening", OctoIcons.Headphones) { ListeningRows(app, settings) },
             PageSection("lyrics", "Lyrics", OctoIcons.Lyrics) { LyricsRows(app, settings) },
             if (discord) PageSection("discord", "Discord", DiscordMark, detail = "Show what you're playing to your friends.", brand = true) { DiscordRows(app) } else null,

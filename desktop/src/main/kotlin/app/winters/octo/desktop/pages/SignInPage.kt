@@ -1,5 +1,17 @@
 package app.winters.octo.desktop.pages
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.Image
+import app.winters.octo.design.ProgressRing
+import app.winters.octo.design.PopupHost
+import app.winters.octo.design.LocalPopups
+import app.winters.octo.desktop.family.readClipboardForLink
+import app.winters.octo.desktop.family.readQrFile
+import app.winters.octo.ui.family.MIN_PASSWORD
+import app.winters.octo.connection.fingerprint
+import app.winters.octo.ui.family.joinWithInvite
 import app.winters.octo.desktop.server.osName
 import app.winters.octo.desktop.server.familyPlatform
 import app.winters.octo.subsonic.DEVICE_NAME_HEADER
@@ -134,25 +146,12 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
 
     // Pairs with the family code, then signs in with the secret it answers.
     fun join() {
-        val url = form.url
-        if (!form.joinReady || url == null) return
+        if (!form.joinReady) return
         again = ::join
         form.busy = true
         form.result = null
         scope.launch {
-            val name = app.accounts.security.deviceHeaders()[DEVICE_NAME_HEADER] ?: "Octo for ${osName(app.os)}"
-            when (val joined = joinFamily(url, form.username.trim(), form.code, name, familyPlatform(app.os), app.http)) {
-                is JoinOutcome.Failed -> form.result = false to joined.message
-                is JoinOutcome.Paired -> when (val done = app.accounts.signIn(form.joinRequest(joined.pair))) {
-                    is SignInOutcome.Done -> {
-                        form.code = ""
-                        app.signedIn(done.connection, done.note)
-                    }
-                    is SignInOutcome.Saved -> Unit
-                    is SignInOutcome.Failed -> form.result = false to done.message
-                    is SignInOutcome.Untrusted -> form.question = done.question
-                }
-            }
+            joinFromForm(app, form)?.let { done -> app.signedIn(done.connection, done.note) }
             form.busy = false
         }
     }
@@ -199,7 +198,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
             SignInCard(backdrop, short) {
                 Txt("Octo", OctoType.display)
                 Txt(
-                    if (form.joining) "Join your family's Octo server with the 6 digit code from the person who runs it. Pasting their join link fills everything in."
+                    if (form.joining) "Join your family's Octo server with the 6 digit code or the QR code from the person who runs it. A join link pasted anywhere fills everything in."
                     else "Sign in to your music server. Any Subsonic, Navidrome or Octo server works.",
                     OctoType.bodySmall,
                     OctoColors.TextSecondary,
@@ -220,7 +219,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                 if (form.insecure) Txt("This address isn't encrypted and isn't on your home network, so others could read what is sent.", OctoType.caption, OctoColors.Error, maxLines = 3)
 
                 if (form.joining) {
-                    JoinFields(form, ::join)
+                    JoinCard(app, form, ::join, onPassword = { form.joining = false; form.invite = null; form.result = null })
                     return@SignInCard
                 }
                 Label(if (form.useApiKey) "Username (optional)" else "Username")
@@ -254,26 +253,106 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
 
 private val CardShape = RoundedCornerShape(22.dp)
 
-// The rest of the card while joining with a family code: the username, the
-// code, and Join. A join link pasted into any field fills in all of them.
+// The rest of the card while joining a family. With a pair code: the
+// username and the code. With an invite: the new member's name and the
+// password they choose. Either fills in from a link pasted into any field,
+// a QR code read from a picture or the clipboard, or the camera.
 @Composable
-private fun JoinFields(form: SignInForm, join: () -> Unit) {
-    Label("Username")
-    GlassField(form.username, { if (!form.takeJoinLink(it)) { form.username = it; form.result = null } }, Modifier.fillMaxWidth(), onSubmit = join)
-    Label("Family code")
-    GlassField(
-        form.code,
-        { if (!form.takeJoinLink(it)) { form.code = it.filter(Char::isDigit).take(6); form.result = null } },
-        Modifier.fillMaxWidth(),
-        placeholder = "6 digits",
-        onSubmit = join,
-    )
+internal fun JoinCard(app: AppState, form: SignInForm, join: () -> Unit, onPassword: () -> Unit) {
+    val invite = form.invite
+    if (invite != null) {
+        Txt("You're invited to ${invite.server.substringAfter("://")}. Choose your name and a password for your account; this computer then joins.", OctoType.bodySmall, OctoColors.TextSecondary, maxLines = 3)
+        Label("Your name")
+        GlassField(form.inviteName, { form.inviteName = it; form.result = null }, Modifier.fillMaxWidth(), placeholder = "As the family sees you", onSubmit = join)
+        Label("Password")
+        SecretField(form.invitePassword, { form.invitePassword = it; form.result = null }, "At least $MIN_PASSWORD characters", join, null)
+        Label("Password again")
+        SecretField(form.inviteAgain, { form.inviteAgain = it; form.result = null }, "The same password", join, null)
+    } else {
+        Label("Username")
+        GlassField(form.username, { if (!form.takeJoinLink(it)) { form.username = it; form.result = null } }, Modifier.fillMaxWidth(), onSubmit = join)
+        Label("Family code")
+        GlassField(
+            form.code,
+            { if (!form.takeJoinLink(it)) { form.code = it.filter(Char::isDigit).take(6); form.result = null } },
+            Modifier.fillMaxWidth(),
+            placeholder = "6 digits",
+            onSubmit = join,
+        )
+    }
+    ScanRow(app, form)
     form.result?.let { (ok, text) ->
         Txt(text, OctoType.bodySmall, if (ok) OctoColors.TextSecondary else OctoColors.Error, maxLines = 4)
     }
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-        TextAction("Sign in with a password", { form.joining = false; form.result = null })
+        TextAction("Sign in with a password", onPassword)
         AccentButton("Join", join, Modifier.widthIn(min = 150.dp), enabled = form.joinReady, loading = form.busy, size = ButtonSize.Medium)
+    }
+}
+
+// The ways to read a QR code instead of typing: the camera, a picture
+// file, or the clipboard (a link, a screenshot or a copied picture).
+@Composable
+private fun ScanRow(app: AppState, form: SignInForm) {
+    val popups = LocalPopups.current
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        GlazeCapsule(OctoIcons.Camera, "Scan with camera", { showScanner(popups, app, form) }, height = 36.dp)
+        GlazeCapsule(OctoIcons.Folder, "QR picture", {
+            val file = chooseImage() ?: return@GlazeCapsule
+            val text = readQrFile(file)
+            if (text == null || !form.takeJoinLink(text)) form.result = false to (if (text == null) "No QR code found in that picture." else "That QR code is not a family link.")
+        }, height = 36.dp)
+        GlazeCapsule(null, "Paste", {
+            val text = readClipboardForLink()
+            if (text == null || !form.takeJoinLink(text)) form.result = false to "The clipboard holds no family link or QR code."
+        }, height = 36.dp)
+    }
+}
+
+private fun chooseImage(): java.io.File? {
+    val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Choose a picture of the QR code", java.awt.FileDialog.LOAD)
+    dialog.setFilenameFilter { _, name -> name.lowercase().substringAfterLast('.') in setOf("png", "jpg", "jpeg", "gif", "bmp") }
+    dialog.isVisible = true
+    val name = dialog.file ?: return null
+    return java.io.File(dialog.directory, name)
+}
+
+// The camera's picture, live, until a family link's QR code is in it.
+private fun showScanner(popups: PopupHost, app: AppState, form: SignInForm) {
+    val scanner = app.cameraScanner
+    scanner.start()
+    popups.showCentred(width = 520.dp) { close ->
+        DisposableEffect(Unit) { onDispose { scanner.stop() } }
+        LaunchedEffect(scanner.found) {
+            val link = scanner.found ?: return@LaunchedEffect
+            form.take(link)
+            scanner.forget()
+            close()
+        }
+        MenuTitle("Scan a family QR code")
+        PopupPadding {
+            Box(Modifier.fillMaxWidth().height(280.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black), contentAlignment = Alignment.Center) {
+                val picture = scanner.picture
+                if (picture != null) {
+                    Image(picture, contentDescription = "What the camera sees", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                } else if (scanner.problem == null) {
+                    ProgressRing(null)
+                }
+                scanner.problem?.let { Txt(it, OctoType.bodySmall, OctoColors.TextSecondary, Modifier.padding(16.dp), maxLines = 4) }
+            }
+            Txt(
+                if (scanner.notALink) "That QR code is not a family link. Show the one from Devices or an invite." else "Hold the QR code up to the camera.",
+                OctoType.caption,
+                OctoColors.TextMuted,
+                maxLines = 2,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                if (scanner.cameras.size > 1) {
+                    TextAction("Next camera", { scanner.start((scanner.chosen + 1) % scanner.cameras.size) })
+                }
+                GlazeCapsule(null, "Cancel", close)
+            }
+        }
     }
 }
 
@@ -500,6 +579,6 @@ internal fun TrustQuestion(question: CertificateQuestion, onTrust: () -> Unit, o
 }
 
 @Composable
-private fun Label(text: String) {
+internal fun Label(text: String) {
     Txt(text, OctoType.caption, OctoColors.TextMuted, Modifier.padding(top = 4.dp))
 }

@@ -1,5 +1,9 @@
 package app.winters.octo.desktop
 
+import app.winters.octo.ui.family.streamParams as streamParamsFor
+import app.winters.octo.ui.family.appPicksQuality
+import app.winters.octo.subsonic.StreamQuality
+import app.winters.octo.desktop.offline.DesktopOffline
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -73,6 +77,9 @@ import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.family.FamilyModel
+import app.winters.octo.desktop.family.CameraScanner
+import app.winters.octo.desktop.family.CameraSource
+import app.winters.octo.desktop.family.Webcam
 import app.winters.octo.ui.imports.ImportModel
 import app.winters.octo.ui.search.withRecent
 import app.winters.octo.desktop.library.PlaylistArtStore
@@ -182,6 +189,33 @@ class AppState(
     // Family, on an Octo server with it on: the account's abilities, which song actions and
     // the Family page follow.
     val family = FamilyModel({ connection?.client }, { connection?.family == true }, scope)
+
+    // Songs kept on this computer to play without a connection.
+    val offline = DesktopOffline(
+        settings,
+        http,
+        scope,
+        File(System.getProperty("user.home"), "Music${File.separator}Octo offline"),
+        { connection },
+        { library?.index?.songs },
+        family,
+        { words -> notice = words },
+    )
+
+    // What a stream asks the server for: this app's own quality without a
+    // family, or when this device is left to the app; otherwise the file as
+    // it is, and the server applies the account's choice.
+    fun streamParams(): Map<String, String> {
+        val quality = StreamQuality.entries.firstOrNull { it.name == settings.current.playback.streamQuality } ?: StreamQuality.Original
+        return streamParamsFor(appPicksQuality(connection?.family == true, family.deviceMode), quality)
+    }
+
+    // The webcam, read for QR codes on the join screen; loaded when first asked.
+    private val webcam by lazy { Webcam.load() }
+
+    // Where the scanner's pictures come from; tests give a pretend camera.
+    var cameraSource: () -> CameraSource? = { webcam }
+    val cameraScanner = CameraScanner({ cameraSource() }, scope)
 
     // How the kept servers answer, and the scan and user of the one in use,
     // for Settings > Servers.
@@ -469,9 +503,10 @@ class AppState(
         imports.forget()
         family.forget()
         serverFacts.forget()
-        // The plan decides what adding an outside song does, so it is read
-        // before the first song menu opens.
+        // The family decides what adding an outside song does and who picks
+        // the stream quality, so it is read before the first song plays.
         if (connection.family) scope.launch { family.plan() }
+        offline.poke()
     }
 
     private fun startReading(views: ServerViews) {
@@ -731,6 +766,8 @@ class AppState(
         scope.launch {
             try {
                 if (starred) client.star(ids) else client.unstar(ids)
+                // Kept Liked songs follow.
+                offline.poke()
             } catch (e: SubsonicException) {
                 ids.forEach { starOverrides.remove(it) }
                 notice = "Couldn't change favorites: ${e.userMessage()}"

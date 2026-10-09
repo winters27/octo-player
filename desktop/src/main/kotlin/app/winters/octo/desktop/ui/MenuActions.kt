@@ -28,7 +28,7 @@ sealed interface SongPlace {
 
 enum class SongAction {
     Play, PlayNext, AddToQueue, StartRadio,
-    AddToLibrary, RequestCopy, AddToLastPlaylist, AddToPlaylist, Favourite, Rate, FindFlac,
+    AddToLibrary, RequestCopy, AddToLastPlaylist, AddToPlaylist, Favourite, Rate, KeepOffline, FindFlac,
     GoToAlbum, GoToArtist, ShowInFolder,
     Details, FindSongs,
     Move,
@@ -70,6 +70,8 @@ fun songMenuActions(
     canDelete: Boolean = false,
     canRequest: Boolean = false,
     canRemoveFromMine: Boolean = false,
+    // Library songs can be kept on this computer to play offline.
+    canKeep: Boolean = false,
 ): List<List<SongAction>> {
     val one = count == 1
     val editable = place is SongPlace.Playlist && ownsPlaylist && place.positions.isNotEmpty()
@@ -86,6 +88,7 @@ fun songMenuActions(
             SongAction.AddToPlaylist,
             SongAction.Favourite.takeIf { !outside },
             SongAction.Rate.takeIf { !outside },
+            SongAction.KeepOffline.takeIf { canKeep && !outside },
             SongAction.FindFlac.takeIf { canUpgrade && !outside },
         ),
         if (one && !outside) listOfNotNull(SongAction.GoToAlbum, SongAction.GoToArtist, SongAction.ShowInFolder.takeIf { inFolder }) else emptyList(),
@@ -105,7 +108,7 @@ fun songMenuActions(
 // favourite; `last` is the name of the playlist added to last. `addLabel`
 // is a family plan's word for adding a song found online ("Save"), which
 // then reads "Remove from Saved" once every picked song is saved.
-fun songActionLabel(action: SongAction, starred: Boolean, last: String? = null, addLabel: String? = null): String = when (action) {
+fun songActionLabel(action: SongAction, starred: Boolean, last: String? = null, addLabel: String? = null, kept: Boolean = false): String = when (action) {
     SongAction.Play -> "Play"
     SongAction.PlayNext -> "Play next"
     SongAction.AddToQueue -> "Add to queue"
@@ -120,6 +123,7 @@ fun songActionLabel(action: SongAction, starred: Boolean, last: String? = null, 
     SongAction.AddToPlaylist -> "Add to playlist"
     SongAction.Favourite -> if (starred) "Remove from favorites" else "Add to favorites"
     SongAction.Rate -> "Rate"
+    SongAction.KeepOffline -> if (kept) "Remove download" else "Download"
     SongAction.FindFlac -> FIND_HIGHER_QUALITY
     SongAction.GoToAlbum -> "Go to album"
     SongAction.GoToArtist -> "Go to artist"

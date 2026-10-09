@@ -1,7 +1,11 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.ui.family.inviteProblem
+import app.winters.octo.subsonic.parseFamilyLink
+import app.winters.octo.subsonic.FamilyInviteLink
+import app.winters.octo.subsonic.FamilyJoinLink
+import app.winters.octo.subsonic.FamilyLink
 import app.winters.octo.ui.family.joinProblem
-import app.winters.octo.subsonic.parseFamilyJoinLink
 import app.winters.octo.subsonic.FamilyPair
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -66,6 +70,13 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
     // code typed.
     var joining by mutableStateOf(false)
     var code by mutableStateOf("")
+
+    // An invite opened (a link or its QR code): the new member's name and
+    // the password they choose, twice.
+    var invite by mutableStateOf<FamilyInviteLink?>(null)
+    var inviteName by mutableStateOf("")
+    var invitePassword by mutableStateOf("")
+    var inviteAgain by mutableStateOf("")
 
     // The server's extensions from last time, when it is the one typed.
     private val lastServer = last
@@ -157,21 +168,37 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
         headers[index] = old.copy(value = value)
     }
 
-    // Takes a pasted pairing link (octo://join?...): fills in the address,
-    // the username and the code, and switches to joining. False for any
-    // other text, which the field takes as typed.
+    // Takes a family link, pasted, scanned or opened (the https form or
+    // octo://join): fills in the address and the code or the invite, and
+    // switches to joining. False for any other text, which a field takes as
+    // typed.
     fun takeJoinLink(text: String): Boolean {
-        val link = parseFamilyJoinLink(text) ?: return false
-        typeAddress(link.server)
-        username = link.username
-        code = link.code
-        joining = true
-        result = null
+        val link = parseFamilyLink(text) ?: return false
+        take(link)
         return true
     }
 
+    fun take(link: FamilyLink) {
+        typeAddress(link.server)
+        when (link) {
+            is FamilyJoinLink -> {
+                invite = null
+                username = link.username
+                code = link.code
+            }
+            is FamilyInviteLink -> invite = link
+        }
+        joining = true
+        result = null
+    }
+
     // What is missing before joining, or null when it can go.
-    val joinProblem: String? get() = joinProblem(url, username, code)
+    val joinProblem: String?
+        get() = if (invite != null) {
+            if (url == null) "Type the server's address" else inviteProblem(inviteName, invitePassword, inviteAgain)
+        } else {
+            joinProblem(url, username, code)
+        }
 
     val joinReady: Boolean get() = !busy && joinProblem == null
 

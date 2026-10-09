@@ -57,6 +57,9 @@ class ServerSecurity(
     // fetches songs from the server by itself.
     fun deviceHeaders(): Map<String, String> = device.headers()
 
+    // This computer's name, as the family sees it.
+    fun deviceName(): String = device.name
+
     // Sends these headers to the server at these addresses from now on.
     fun configure(addresses: List<HttpUrl>, headers: Map<String, String>) {
         current = Current(addresses.mapTo(HashSet(), ::origin), headers)

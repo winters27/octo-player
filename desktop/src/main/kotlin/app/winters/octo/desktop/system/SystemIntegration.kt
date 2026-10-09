@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.system
 
+import app.winters.octo.desktop.pages.openFamilyLink
+import app.winters.octo.subsonic.parseFamilyLink
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
@@ -44,6 +46,8 @@ import java.awt.EventQueue
 import java.awt.desktop.AppReopenedListener
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
+import app.winters.octo.desktop.family.FamilyWatch
+import app.winters.octo.desktop.family.NoticeFile
 import java.io.File
 
 // The system integration, for the settings page and the now-playing bar.
@@ -128,9 +132,14 @@ class SystemIntegration(
     // The Windows taskbar button, jump list and starting at sign-in.
     val shell = ShellIntegration(app, os, places.config)
 
+    // Family requests told as notifications, and a family link offered from
+    // the clipboard.
+    val family = FamilyWatch(app, NoticeFile(File(places.config, "family-notices.json")), show = { notice -> notifier?.show(notice.title, notice.text) })
+
     fun start(launchArgs: List<String>) {
         session.start { works -> mediaKeysWork = works }
         shell.start()
+        family.start()
         startDiscord()
         shortcuts.start()
         // The system bus can be slow to answer, so it is reached off the window's thread.
@@ -192,6 +201,11 @@ class SystemIntegration(
             when (request) {
                 is LaunchRequest.OpenFiles -> app.play(request.files.map(::openedFileSong))
                 is LaunchRequest.OpenLink -> {
+                    // A family link joins this computer to the family.
+                    parseFamilyLink(request.link)?.let { link ->
+                        app.openFamilyLink(link)
+                        continue
+                    }
                     val page = pageForLink(request.link)
                     val play = playLinkOf(request.link)
                     when {
@@ -356,6 +370,7 @@ class SystemIntegration(
             override fun windowGainedFocus(e: WindowEvent?) {
                 windowInFront = true
                 app.windowCameBack()
+                family.offerClipboard()
             }
 
             override fun windowLostFocus(e: WindowEvent?) {

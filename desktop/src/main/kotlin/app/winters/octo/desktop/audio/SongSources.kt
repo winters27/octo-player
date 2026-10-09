@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.audio
 
+import java.io.File
 import app.winters.octo.audio.HttpHeader
 import app.winters.octo.audio.QueueItem
 import app.winters.octo.audio.ReplayGainInfo
@@ -29,12 +30,15 @@ fun interface SongSources {
 class ServerSongs(
     private val headers: () -> Map<String, String> = { emptyMap() },
     private val landed: (String) -> String? = { null },
+    // What the stream asks for: the file as it is unless this app picks a
+    // lower quality (see streamParams).
+    private val params: () -> Map<String, String> = { mapOf("format" to "raw") },
     private val client: () -> SubsonicClient?,
 ) : SongSources {
     override fun addressOf(song: Song): SongAddress? {
         val server = client() ?: return null
         val id = landed(song.id) ?: song.id
-        return SongAddress(server.url("stream", mapOf("id" to id, "format" to "raw")).toString(), headers())
+        return SongAddress(server.url("stream", mapOf("id" to id) + params()).toString(), headers())
     }
 }
 
@@ -43,9 +47,14 @@ class ServerSongs(
 const val LOCAL_PREFIX = "local:"
 
 // Files on this computer by path, and everything else from the server.
-class LocalOrServer(private val server: SongSources) : SongSources {
+class LocalOrServer(
+    private val server: SongSources,
+    // A copy kept on this computer, played in place of the server's.
+    private val kept: (String) -> File? = { null },
+) : SongSources {
     override fun addressOf(song: Song): SongAddress? =
         when {
+            kept(song.id) != null -> SongAddress(kept(song.id)!!.absolutePath)
             song.id.startsWith(LOCAL_PREFIX) -> SongAddress(song.id.removePrefix(LOCAL_PREFIX))
             // A file opened from the system (a double click, a drop): the
             // file itself, or the address it was opened from.
