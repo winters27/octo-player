@@ -617,6 +617,16 @@ mod tests {
     }
 
     #[test]
+    fn the_camera_refuses_what_it_cannot_use() {
+        let mut size = [0u32; 2];
+        let mut buffer = [0u8; 12];
+        assert_eq!(unsafe { octo_camera_picture(1, 0, std::ptr::null_mut(), 0, size.as_mut_ptr()) }, BAD_ARGUMENT as i64);
+        // A camera never opened.
+        assert_eq!(unsafe { octo_camera_picture(999, 0, buffer.as_mut_ptr(), buffer.len(), size.as_mut_ptr()) }, BAD_ARGUMENT as i64);
+        octo_camera_close(999);
+    }
+
+    #[test]
     fn positions_stay_inside_the_song() {
         assert_eq!(clamp_position(250_000, 200_000), 200_000);
         assert_eq!(clamp_position(-1, 200_000), 0);
