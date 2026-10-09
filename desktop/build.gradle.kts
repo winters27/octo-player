@@ -46,19 +46,24 @@ val shareIcon by tasks.registering(Sync::class) {
 }
 
 // The system library in system-shim/ (media controls and sleep on Windows
-// and macOS), built with cargo for this machine and put where JNA looks for
-// it on the class path. Linux needs none: it talks D-Bus from the JVM.
+// and macOS, and a webcam for reading QR codes everywhere), built with cargo
+// for this machine and put where JNA looks for it on the class path. On
+// Linux it only has the webcam: the rest talks D-Bus from the JVM.
 // Building without Rust installed: -Pocto.noSystemShim=true leaves it out,
-// and the app then runs without media controls.
+// and the app then runs without media controls or a camera.
 val hostName: String = System.getProperty("os.name").lowercase()
 val hostArch: String = System.getProperty("os.arch").lowercase().let { if (it == "amd64" || it == "x86_64") "x86-64" else if (it == "arm64") "aarch64" else it }
 val shimFolder = when {
     hostName.startsWith("windows") -> "win32-$hostArch"
     hostName.startsWith("mac") -> "darwin-$hostArch"
-    else -> null
+    else -> "linux-$hostArch"
 }
-val shimFile = if (hostName.startsWith("windows")) "octo_system.dll" else "libocto_system.dylib"
-val buildsShim = shimFolder != null && providers.gradleProperty("octo.noSystemShim").orNull != "true"
+val shimFile = when {
+    hostName.startsWith("windows") -> "octo_system.dll"
+    hostName.startsWith("mac") -> "libocto_system.dylib"
+    else -> "libocto_system.so"
+}
+val buildsShim = providers.gradleProperty("octo.noSystemShim").orNull != "true"
 val shimTarget = layout.buildDirectory.dir("system-shim")
 
 val buildSystemShim by tasks.registering(Exec::class) {
@@ -74,7 +79,7 @@ val buildSystemShim by tasks.registering(Exec::class) {
 val shareSystemShim by tasks.registering(Sync::class) {
     if (buildsShim) {
         dependsOn(buildSystemShim)
-        from(shimTarget.map { it.file("release/$shimFile") }) { into(shimFolder!!) }
+        from(shimTarget.map { it.file("release/$shimFile") }) { into(shimFolder) }
     }
     into(layout.buildDirectory.dir("generated/systemShim"))
 }
@@ -339,9 +344,12 @@ compose.desktop {
                 iconFile = file("icons/octo.icns")
                 bundleID = "app.winters.octo"
                 appCategory = "public.app-category.music"
-                // octo:// links open the app.
+                // octo:// links open the app, and the camera reads family QR
+                // codes on the join screen.
                 infoPlist {
                     extraKeysRawXml = """
+                        <key>NSCameraUsageDescription</key>
+                        <string>Octo reads the QR code that adds this Mac to your family.</string>
                         <key>CFBundleURLTypes</key>
                         <array>
                           <dict>
@@ -370,6 +378,30 @@ compose.desktop {
         }
     }
 }
+
+// The octo:// URL scheme in the Windows installer: once the MSI is made,
+// packaging/windows/add-url-scheme.vbs adds the scheme's registry keys to
+// it (HKCU, as it installs per user), so a family link's "Open in Octo"
+// works from the first moment and the keys go when Octo is removed. The
+// plugin clears jpackage's resources folder before it runs, so its WiX
+// template cannot carry them. macOS has the scheme in its Info.plist
+// above. On Linux the installed app writes its own menu entry with
+// x-scheme-handler/octo at its first start (system/LinkRegistration.kt),
+// as it does on Windows for a moved install.
+tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask>()
+    .matching { it.name == "packageMsi" || it.name == "packageReleaseMsi" }
+    .configureEach {
+        val script = file("packaging/windows/add-url-scheme.vbs")
+        inputs.file(script)
+        doLast {
+            destinationDir.get().asFile.listFiles { f -> f.extension == "msi" }?.forEach { msi ->
+                val process = ProcessBuilder("cscript", "//nologo", script.absolutePath, msi.absolutePath).redirectErrorStream(true).start()
+                val output = process.inputStream.bufferedReader().readText()
+                if (process.waitFor() != 0) throw GradleException("Adding the octo:// scheme to ${msi.name} failed: " + output)
+                logger.lifecycle(output.trim())
+            }
+        }
+    }
 
 // The JDK's security providers and the modules they live in; any other
 // name listed (the JDK's own, in java.base) always stays.
