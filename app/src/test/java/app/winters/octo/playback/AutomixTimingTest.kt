@@ -181,4 +181,18 @@ class AutomixTimingTest {
         // Played out.
         assertFalse(isRebuffering(true, Player.STATE_ENDED, none))
     }
+
+    @Test
+    fun theFixedCrossfadeLastsAsLongAtAnySpeed() {
+        val settings = AutomixSettings(maxOverlapMs = 8_000, smart = false)
+        val a = FadeSong("a", 1, 200_000)
+        val b = FadeSong("b", 1, 200_000)
+        val context = TransitionContext(nowMs = 100_000, pace = 1.5)
+        val plan = planTransition(a, b, null, null, settings.atSpeed(1.5f), context)
+        // 12 s of the song pass in 8 s at 1.5x.
+        assertEquals(12_000L, plan.overlapMs)
+        assertEquals(188_000L, plan.startMs)
+        assertEquals(settings, settings.atSpeed(1f))
+        assertEquals(4_000L, settings.atSpeed(0.5f).maxOverlapMs)
+    }
 }

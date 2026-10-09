@@ -3,6 +3,7 @@ package app.winters.octo.playback
 import androidx.media3.common.Player
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.roundToLong
 
 // The next song starts playing silently this long (in the playing song's
 // time) before it comes in, so the two can be lined up while nobody hears it.
@@ -39,6 +40,12 @@ const val REPLAN_JUMP_MS = 2_000L
 // listener or held back by a call.
 fun isRebuffering(playWhenReady: Boolean, playbackState: Int, suppressionReason: Int): Boolean =
     playWhenReady && playbackState == Player.STATE_BUFFERING && suppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE
+
+// The settings the planner gets at a playback speed: the longest blend is
+// in song time, so at 1.5x speed an 8 s blend covers 12 s of the songs and
+// still lasts 8 s, as on the desktop.
+fun AutomixSettings.atSpeed(speed: Float): AutomixSettings =
+    if (speed == 1f) this else copy(maxOverlapMs = (maxOverlapMs * speed.toDouble()).roundToLong())
 
 // The incoming song's playback rate through the blend.
 fun TransitionPlan.incomingRate(): Double = beatMatchRate ?: 1.0

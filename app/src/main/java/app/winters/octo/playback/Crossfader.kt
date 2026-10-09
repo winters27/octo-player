@@ -432,7 +432,7 @@ internal class Crossfader(
         )
         val tailAnalysis = tail?.takeIf { it.entryId == key.current }?.analysis
         val headAnalysis = head?.takeIf { it.entryId == key.next }?.analysis
-        val made = planTransition(currentSong, nextSong, tailAnalysis, headAnalysis, settings, context)
+        val made = planTransition(currentSong, nextSong, tailAnalysis, headAnalysis, settings.atSpeed(speed), context)
         planKey = key
         val sound = soundOf(deck)
         if (made.kind != TransitionKind.GAPLESS && sound?.shapesTransitions != true) {
