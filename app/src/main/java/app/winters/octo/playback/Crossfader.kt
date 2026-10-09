@@ -133,6 +133,13 @@ internal class Crossfader(
         if (isPlaying) {
             schedule(0)
         } else {
+            val deck = player.deck
+            if (outgoing != null && isRebuffering(deck.playWhenReady, deck.playbackState, deck.playbackSuppressionReason)) {
+                // The incoming song is waiting for its sound: the blend goes
+                // on once it has it, each deck on its own song time.
+                schedule(NEAR_CHECK_MS)
+                return
+            }
             // A pause, a call or unplugged headphones: no half-finished blend.
             finishFade()
             dropRunUp()

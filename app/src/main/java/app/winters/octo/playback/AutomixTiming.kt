@@ -1,5 +1,6 @@
 package app.winters.octo.playback
 
+import androidx.media3.common.Player
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -32,6 +33,12 @@ const val ALIGN_LAST_CHANCE_MS = 400L
 // A position that moves this far from where it should be means the plan
 // no longer fits.
 const val REPLAN_JUMP_MS = 2_000L
+
+// Whether a deck that stopped playing is only waiting for its sound to
+// arrive (a rebuffer), which a blend rides out, rather than paused by the
+// listener or held back by a call.
+fun isRebuffering(playWhenReady: Boolean, playbackState: Int, suppressionReason: Int): Boolean =
+    playWhenReady && playbackState == Player.STATE_BUFFERING && suppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE
 
 // The incoming song's playback rate through the blend.
 fun TransitionPlan.incomingRate(): Double = beatMatchRate ?: 1.0

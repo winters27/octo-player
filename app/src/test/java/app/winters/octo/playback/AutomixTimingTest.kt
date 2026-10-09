@@ -1,5 +1,6 @@
 package app.winters.octo.playback
 
+import androidx.media3.common.Player
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -165,5 +166,19 @@ class AutomixTimingTest {
         assertFalse(needsRepark(1_520, 1_500))
         assertTrue(needsRepark(0, 1_500))
         assertTrue(needsRepark(1_500, 0))
+    }
+
+    @Test
+    fun aRebufferIsNotAPause() {
+        val none = Player.PLAYBACK_SUPPRESSION_REASON_NONE
+        assertTrue(isRebuffering(true, Player.STATE_BUFFERING, none))
+        // Paused by the listener, or by unplugged headphones.
+        assertFalse(isRebuffering(false, Player.STATE_BUFFERING, none))
+        assertFalse(isRebuffering(false, Player.STATE_READY, none))
+        // Held back by a call.
+        assertFalse(isRebuffering(true, Player.STATE_READY, Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS))
+        assertFalse(isRebuffering(true, Player.STATE_BUFFERING, Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS))
+        // Played out.
+        assertFalse(isRebuffering(true, Player.STATE_ENDED, none))
     }
 }
