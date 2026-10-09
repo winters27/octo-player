@@ -91,8 +91,11 @@ class FamilyModel(
     var saved by mutableStateOf(SavedOutside())
         private set
 
-    // A device just added: its pair code or app password, shown once.
+    // A device just added: its pair code or app password, shown once, and
+    // the member it is for when a manager added it for someone else.
     var added by mutableStateOf<FamilyDeviceAdded?>(null)
+        private set
+    var addedFor by mutableStateOf<String?>(null)
         private set
 
     // What the server said about the last thing asked, in its own words.
@@ -102,23 +105,12 @@ class FamilyModel(
     var working by mutableStateOf(false)
         private set
 
-    // A link a manager made (an invite, a member's sign-in link), shown as a
-    // QR code with a way to copy it, until closed.
+    // A new member's invite, shown as a QR code with a way to copy it,
+    // until closed.
     var shown by mutableStateOf<ShownLink?>(null)
         private set
 
-    // Whether the family page wants the account's password before a
-    // manager's change: this device signs in with a secret of its own, or
-    // with an API key.
-    var askingPassword by mutableStateOf(false)
-        private set
-
     private var watching: Job? = null
-
-    // The family page signed in, for a manager's changes, kept while the
-    // view is.
-    private var page: FamilyWeb? = null
-    private var waitingForPassword: (suspend (FamilyWeb) -> Unit)? = null
 
     val available: Boolean get() = supported()
 
@@ -171,9 +163,7 @@ class FamilyModel(
         added = null
         said = null
         shown = null
-        askingPassword = false
-        page = null
-        waitingForPassword = null
+        addedFor = null
     }
 
     // Reads the account's abilities only, for the parts of the app that follow it (song
@@ -271,13 +261,25 @@ class FamilyModel(
 
     // A new device: an Octo app gets a pair code, any other app a password.
     fun addDevice(name: String, kind: FamilyDeviceKind) = act {
-        added = addFamilyDevice(name.ifBlank { if (kind == FamilyDeviceKind.OctoApp) "Octo app" else "Music app" }, kind)
+        added = addFamilyDevice(deviceNameOr(name, kind), kind)
+        addedFor = null
         null
     }
+
+    // A manager's new device for a member: that member's pair code or app
+    // password, shown as for one's own.
+    fun addMemberDevice(member: FamilyMember, kind: FamilyDeviceKind = FamilyDeviceKind.OctoApp, name: String = "") = act {
+        added = addFamilyDevice(deviceNameOr(name, kind), kind, username = member.username)
+        addedFor = member.displayName.ifBlank { member.username }
+        null
+    }
+
+    private fun deviceNameOr(name: String, kind: FamilyDeviceKind) = name.ifBlank { if (kind == FamilyDeviceKind.OctoApp) "Octo app" else "Music app" }
 
     // The code or password has been seen; it is never shown again.
     fun dismissAdded() {
         added = null
+        addedFor = null
     }
 
     // Takes a song out of this member's own library.
@@ -301,62 +303,17 @@ class FamilyModel(
         "Added $name"
     }
 
-    // A manager's link that sets up a new device for a member: they open
-    // it on that device, choose a password, and it joins.
-    fun memberLink(member: FamilyMember) = manage { web ->
-        val name = member.displayName.ifBlank { member.username }
-        shown = ShownLink(
-            "Add a device for $name",
-            web.memberLink(member.username),
-            "Scan this on $name's new device, or send them the link. It asks them for a new password, then the device joins.",
-        )
-        null
-    }
-
     fun closeShown() {
         shown = null
     }
 
-    // The account password the family page asked for; the change waiting
-    // on it goes ahead once it signs in.
-    fun signInToPage(password: String) {
-        val client = client() ?: return
-        val waiting = waitingForPassword ?: return
-        scope.launch {
-            working = true
-            try {
-                val web = client.familyWeb()
-                web.signIn(client.username, password)
-                page = web
-                askingPassword = false
-                waitingForPassword = null
-                waiting(web)
-            } catch (e: SubsonicException) {
-                said = e.message ?: "That password did not work."
-            } finally {
-                working = false
-            }
-            refresh()
-        }
-    }
-
-    fun cancelPassword() {
-        askingPassword = false
-        waitingForPassword = null
-    }
-
+    // A change on the family page, signed as every call this app makes.
     private fun manage(change: suspend (FamilyWeb) -> String?) {
         val client = client() ?: return
         scope.launch {
             working = true
             try {
-                val web = page ?: client.familyWeb().takeIf { it.signInAs(client) }?.also { page = it }
-                if (web == null) {
-                    waitingForPassword = { signedIn -> change(signedIn)?.let { said = it } }
-                    askingPassword = true
-                } else {
-                    change(web)?.let { said = it }
-                }
+                change(client.familyWeb())?.let { said = it }
             } catch (e: SubsonicException.Unreachable) {
                 said = "Octo can't reach the server right now."
             } catch (e: SubsonicException) {

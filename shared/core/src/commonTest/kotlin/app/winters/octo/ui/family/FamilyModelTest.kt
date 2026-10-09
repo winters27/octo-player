@@ -148,33 +148,35 @@ class FamilyModelTest {
 
     @Test
     fun aManagerAddsAMemberAndSeesTheirInviteAsAQrCode() = runBlocking {
-        server.raw("auth") { """{"username":"alex","role":"Owner"}""" }
         server.raw("members") { """{"member":{"username":"sam","displayName":"Sam","role":"Kid"},"inviteLink":"https://music.example.com/family/join#invite=t9"}""" }
         model.addMember("sam", "Sam", app.winters.octo.subsonic.FamilyPreset.Kid)
         until("invite shown") { model.shown != null }
         assertEquals("Invite Sam", model.shown!!.title)
         assertEquals("https://music.example.com/family/join#invite=t9", model.shown!!.url)
-        // The page was signed in with this account's own password.
-        assertTrue(server.called("auth").single().body!!.utf8().contains("\"password\":\"secret\""))
+        // Signed as every call is, never with a password.
+        val call = server.called("members").single().url
+        assertEquals("alex", call.queryParameter("u"))
+        assertNull(call.queryParameter("p"))
+        assertTrue(server.called("auth").isEmpty())
         model.closeShown()
         assertNull(model.shown)
     }
 
     @Test
-    fun theFamilyPageAsksForThePasswordWhenTheDevicesOwnIsRefused() = runBlocking {
-        var tries = 0
-        server.raw("auth") { call ->
-            tries++
-            if (call.body!!.utf8().contains("\"right one\"")) """{"username":"alex"}""" else throw IllegalStateException()
+    fun aManagerAddsADeviceForAMemberWithNoPassword() = runBlocking {
+        server.answer("addFamilyDevice") { call ->
+            """"familyDeviceAdded":{"deviceId":"d_5","kind":"OctoApp","pairCode":"104729","username":"${call.url.queryParameter("username")}"}"""
         }
-        server.raw("invite") { """{"inviteLink":"https://music.example.com/family/join#invite=t10"}""" }
-        model.memberLink(app.winters.octo.subsonic.FamilyMember(username = "sam", displayName = "Sam"))
-        until("password asked") { model.askingPassword }
-        model.signInToPage("right one")
-        until("link shown") { model.shown != null }
-        assertEquals("Add a device for Sam", model.shown!!.title)
-        assertFalse(model.askingPassword)
-        assertEquals(2, tries)
+        model.addMemberDevice(app.winters.octo.subsonic.FamilyMember(username = "sam", displayName = "Sam"))
+        until("code shown") { model.added != null }
+        assertEquals("104729", model.added!!.pairCode)
+        assertEquals("sam", model.added!!.username)
+        assertEquals("Sam", model.addedFor)
+        assertEquals("sam", server.called("addFamilyDevice").single().url.queryParameter("username"))
+        model.dismissAdded()
+        assertNull(model.addedFor)
+        // Nothing asked the family page for a password.
+        assertTrue(server.called("auth").isEmpty())
     }
 
     @Test

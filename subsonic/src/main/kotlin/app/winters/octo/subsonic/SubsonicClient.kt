@@ -570,13 +570,9 @@ class SubsonicClient(
         if (username == now.username && now.mode != AuthMode.ApiKey) credentials = Credentials(username, newPassword, now.mode)
     }
 
-    // The password this client signs in with, for the family page, which
-    // takes a password; null when it signs in with an API key.
-    internal fun passwordSecret(): String? = credentials.takeIf { it.mode != AuthMode.ApiKey }?.secret
-
     // The family page's calls on this server, through this client's
-    // connections and headers.
-    fun familyWeb(): FamilyWeb = FamilyWeb(baseUrl, http)
+    // connections and headers, each signed as every Subsonic call is.
+    fun familyWeb(): FamilyWeb = FamilyWeb(baseUrl, http, ::signed)
 
     // The same server, headers and route signed in with another secret, for
     // checking a password without touching this client.

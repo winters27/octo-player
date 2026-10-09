@@ -24,17 +24,20 @@ data class FamilyWebUser(val username: String = "", val role: String = "")
 @Serializable
 data class FamilyMemberAdded(val member: FamilyMember = FamilyMember(), val inviteLink: String = "")
 
-@Serializable
-private data class InviteAnswer(val inviteLink: String = "")
-
 // The presets a manager picks for a new member.
 enum class FamilyPreset { CoAdmin, Member, Listener, Kid }
 
-// The family page's own calls (/api/family), as Octo's family web page
-// makes them: JSON both ways, and a sign-in kept in a cookie that lives
-// only as long as this object. Used to join with an invite, and for what
-// a manager does that the Subsonic calls do not cover.
-class FamilyWeb(private val server: HttpUrl, http: OkHttpClient) {
+// The family page's own calls (/api/family): JSON both ways. From an app
+// signed in to the server, each call carries the same sign-in as every
+// Subsonic call (`sign` adds it to the address), so no password is ever
+// asked for. Without one (joining with an invite, before this device has a
+// sign-in) the page's cookie, kept only as long as this object, signs in
+// the new member after the invite is accepted.
+class FamilyWeb(
+    private val server: HttpUrl,
+    http: OkHttpClient,
+    private val sign: ((HttpUrl) -> HttpUrl)? = null,
+) {
     private val cookies = object : CookieJar {
         private val kept = mutableListOf<Cookie>()
 
@@ -50,24 +53,6 @@ class FamilyWeb(private val server: HttpUrl, http: OkHttpClient) {
 
     private val http = http.newBuilder().cookieJar(cookies).build()
 
-    // Signs in as the account `client` signs in with, when its secret is a
-    // password the family page takes. False when it is not (an API key, or
-    // a device's own secret the page refuses), so the caller asks for the
-    // account password.
-    suspend fun signInAs(client: SubsonicClient): Boolean {
-        val secret = client.passwordSecret() ?: return false
-        return try {
-            signIn(client.username, secret)
-            true
-        } catch (e: SubsonicException.WrongCredentials) {
-            false
-        }
-    }
-
-    // Signs in to the family page with an account password.
-    suspend fun signIn(username: String, password: String): FamilyWebUser =
-        call("POST", "auth", mapOf("username" to username.trim(), "password" to password), FamilyWebUser.serializer())
-
     // Accepts an invite: the new member's name and the password they chose.
     // Signs this page in as them, and answers their username.
     suspend fun join(token: String, password: String, displayName: String): String =
@@ -78,6 +63,11 @@ class FamilyWeb(private val server: HttpUrl, http: OkHttpClient) {
     suspend fun addMyDevice(name: String, kind: FamilyDeviceKind): FamilyDeviceAdded =
         call("POST", "me/devices", mapOf("name" to name.trim(), "kind" to kind.name), FamilyDeviceAdded.serializer())
 
+    // A manager's new device for a member: that member's pair code or app
+    // password.
+    suspend fun addMemberDevice(username: String, name: String, kind: FamilyDeviceKind): FamilyDeviceAdded =
+        call("POST", "members/${encodeComponent(username)}/devices", mapOf("name" to name.trim(), "kind" to kind.name), FamilyDeviceAdded.serializer())
+
     // A manager adds a member, and gets the link that invites them.
     suspend fun addMember(username: String, displayName: String, preset: FamilyPreset): FamilyMemberAdded =
         call(
@@ -87,13 +77,9 @@ class FamilyWeb(private val server: HttpUrl, http: OkHttpClient) {
             FamilyMemberAdded.serializer(),
         )
 
-    // A manager's fresh sign-in link for a member: it sets up a device of
-    // theirs, as an invite does.
-    suspend fun memberLink(username: String): String =
-        call("POST", "members/${encodeComponent(username)}/invite", null, InviteAnswer.serializer()).inviteLink
-
     private suspend fun <T> call(method: String, path: String, body: Map<String, String>?, serializer: kotlinx.serialization.KSerializer<T>): T {
-        val url = server.newBuilder().addPathSegment("api").addPathSegment("family").addEncodedPathSegments(path).build()
+        val plain = server.newBuilder().addPathSegment("api").addPathSegment("family").addEncodedPathSegments(path).build()
+        val url = sign?.invoke(plain) ?: plain
         val payload = (body?.let { json.encodeToString(JsonObject.serializer(), JsonObject(it.mapValues { (_, v) -> kotlinx.serialization.json.JsonPrimitive(v) })) } ?: "{}")
             .toRequestBody(JSON)
         val request = Request.Builder().url(url).header("X-Octo-Family", "1").header("Accept", "application/json").method(method, payload).build()
@@ -117,7 +103,7 @@ class FamilyWeb(private val server: HttpUrl, http: OkHttpClient) {
         val said = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
             ?.let { it["message"] ?: it["error"] }?.jsonPrimitive?.contentOrNull?.takeIf(String::isNotBlank)
         return when (status) {
-            401, 403 -> SubsonicException.WrongCredentials(said ?: "That username or password did not work.")
+            401, 403 -> SubsonicException.WrongCredentials(said ?: "The server did not take this sign-in for that.")
             404 -> SubsonicException.NotSubsonic(said ?: "This server has no family page. Update Octo on the server.", status)
             410 -> SubsonicException.NotFound(said ?: "That invite has been used or has expired. Ask for a new one.")
             else -> SubsonicException.Server(status, said ?: "The server said no (HTTP $status).")

@@ -115,7 +115,6 @@ fun FamilyPage(app: AppState, visit: Visit) {
     val popups = LocalPopups.current
     val shown = model.shown
     LaunchedEffect(shown) { if (shown != null) showLink(popups, model, shown) }
-    LaunchedEffect(model.askingPassword) { if (model.askingPassword) askPassword(popups, model) }
     val sections = model.sections().map { section ->
         when (section) {
             FamilySection.Plan -> PageSection("plan", MY_PLAN, OctoIcons.Family, detail = planTitle(me)) { PlanSection(model, me) }
@@ -299,7 +298,15 @@ private fun showAdded(popups: PopupHost, app: AppState, model: FamilyModel, adde
         }
         val link = addedDeviceLink(added, server)
         val password = added.appPassword
-        MenuTitle(if (link != null) "Add a device" else "App password")
+        val forWhom = model.addedFor
+        MenuTitle(
+            when {
+                forWhom != null && link != null -> "Add a device for $forWhom"
+                link != null -> "Add a device"
+                forWhom != null -> "App password for $forWhom"
+                else -> "App password"
+            },
+        )
         PopupPadding {
             if (link != null) {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { QrImage(link, label = "QR code to add a device") }
@@ -322,8 +329,7 @@ private fun showAdded(popups: PopupHost, app: AppState, model: FamilyModel, adde
     }
 }
 
-// A manager's link (an invite, a member's new device) as a QR code, with
-// a way to copy it, until closed.
+// A new member's invite as a QR code, with a way to copy it, until closed.
 private fun showLink(popups: PopupHost, model: FamilyModel, shown: ShownLink) {
     popups.showCentred(width = 440.dp) { close ->
         DisposableEffect(Unit) { onDispose { model.closeShown() } }
@@ -334,27 +340,6 @@ private fun showLink(popups: PopupHost, model: FamilyModel, shown: ShownLink) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
                 GlazeCapsule(null, "Copy link", { copy(shown.url) })
                 GlazeCapsule(OctoIcons.Check, "Done", close, lit = true)
-            }
-        }
-    }
-}
-
-// The family page wants the account's password before a manager's change.
-private fun askPassword(popups: PopupHost, model: FamilyModel) {
-    popups.showCentred(width = 400.dp) { close ->
-        var password by remember { mutableStateOf("") }
-        DisposableEffect(Unit) { onDispose { if (model.askingPassword) model.cancelPassword() } }
-        val go = {
-            model.signInToPage(password)
-            close()
-        }
-        MenuTitle("Your account password")
-        PopupPadding {
-            Txt("This computer signs in with a code of its own. Changes to the family need your account password once.", DesktopType.body, OctoColors.TextSecondary, maxLines = 4)
-            GlassField(password, { password = it }, Modifier.fillMaxWidth(), placeholder = "Password", password = true, onSubmit = go)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
-                GlazeCapsule(null, "Cancel", close)
-                GlazeCapsule(null, "Go on", go, lit = true, enabled = password.isNotEmpty())
             }
         }
     }
@@ -387,7 +372,7 @@ private fun MembersSection(model: FamilyModel, members: List<FamilyMember>) {
         if (members.isEmpty()) SettingRow("No members yet", "Add someone below. They get a QR code or a link to join.")
         members.forEach { member ->
             ItemRow(member.displayName.ifBlank { member.username }, "${memberLine(member)} · ${storageLine(member.storageUsedBytes, member.storageLimitGb)}") {
-                RowAction("Add a device", { model.memberLink(member) }, enabled = !model.working, icon = OctoIcons.QrCode)
+                RowAction("Add a device", { model.addMemberDevice(member) }, enabled = !model.working, icon = OctoIcons.QrCode)
             }
         }
     }

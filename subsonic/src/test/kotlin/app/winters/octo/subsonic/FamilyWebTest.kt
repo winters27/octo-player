@@ -59,9 +59,11 @@ class FamilyWebTest {
         assertEquals("https://music.example.com/family/join#invite=t9", added.inviteLink)
         assertTrue(server.takeRequest().body!!.utf8().contains("\"preset\":\"Kid\""))
 
-        answer("""{"inviteLink":"https://music.example.com/family/join#invite=t10"}""")
-        assertEquals("https://music.example.com/family/join#invite=t10", web().memberLink("sam smith"))
-        assertEquals("/api/family/members/sam%20smith/invite", server.takeRequest().url.encodedPath)
+        answer("""{"deviceId":"d_5","kind":"OctoApp","pairCode":"104729","username":"sam smith"}""")
+        assertEquals("104729", web().addMemberDevice("sam smith", "Tablet", FamilyDeviceKind.OctoApp).pairCode)
+        val device = server.takeRequest()
+        assertEquals("/api/family/members/sam%20smith/devices", device.url.encodedPath)
+        assertTrue(device.body!!.utf8().contains("\"name\":\"Tablet\""))
     }
 
     @Test
@@ -75,25 +77,27 @@ class FamilyWebTest {
         }
         answer("", code = 401)
         try {
-            web().signIn("alex", "wrong")
-            fail("A wrong password must not sign in")
+            web().addMyDevice("Phone", FamilyDeviceKind.OctoApp)
+            fail("A call the server refuses must not pass")
         } catch (e: SubsonicException.WrongCredentials) {
-            assertEquals("That username or password did not work.", e.message)
+            assertEquals("The server did not take this sign-in for that.", e.message)
         }
     }
 
     @Test
-    fun aClientSignsInWithItsOwnPasswordWhenThePageTakesIt() = runTest {
-        answer("""{"username":"winters","role":"Owner"}""")
+    fun anAppsCallsCarryItsSubsonicSignInAndNoPassword() = runTest {
+        answer("""{"member":{"username":"sam"},"inviteLink":"https://music.example.com/family/join#invite=t9"}""")
         val client = SubsonicClient(server.url("/"), Credentials("winters", "pw"), OkHttpClient())
-        assertTrue(client.familyWeb().signInAs(client))
-        assertTrue(server.takeRequest().body!!.utf8().contains("\"password\":\"pw\""))
-        // A device's own secret the page refuses: the caller asks instead.
-        answer("", code = 401)
-        assertFalse(client.familyWeb().signInAs(client))
-        // An API key is no password at all: nothing is sent.
-        val keyed = SubsonicClient(server.url("/"), Credentials("", "key", AuthMode.ApiKey), OkHttpClient())
-        assertFalse(keyed.familyWeb().signInAs(keyed))
-        assertEquals(2, server.requestCount)
+        client.familyWeb().addMember("sam", "Sam", FamilyPreset.Kid)
+        val url = server.takeRequest().url
+        assertEquals("/api/family/members", url.encodedPath)
+        assertEquals("winters", url.queryParameter("u"))
+        assertTrue(url.queryParameter("t")!!.isNotEmpty())
+        assertTrue(url.queryParameter("s")!!.isNotEmpty())
+        assertEquals(API_VERSION, url.queryParameter("v"))
+        assertEquals("Octo", url.queryParameter("c"))
+        // The password itself never travels.
+        assertEquals(null, url.queryParameter("p"))
+        assertFalse(url.toString().contains("pw"))
     }
 }

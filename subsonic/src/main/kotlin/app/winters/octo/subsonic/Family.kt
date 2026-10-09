@@ -327,11 +327,16 @@ suspend fun SubsonicClient.familyDevices(all: Boolean = false): List<FamilyDevic
 suspend fun SubsonicClient.signOutFamilyDevice(id: String) = send("signOutFamilyDevice", listOf("id" to id))
 
 // Adds a device by hand: an Octo app (a pair code) or another Subsonic app
-// (an app password).
-suspend fun SubsonicClient.addFamilyDevice(name: String, kind: FamilyDeviceKind): FamilyDeviceAdded =
+// (an app password). A manager may name a member (`username`) and gets
+// that member's code or password.
+suspend fun SubsonicClient.addFamilyDevice(name: String, kind: FamilyDeviceKind, username: String? = null): FamilyDeviceAdded =
     get(
         "addFamilyDevice",
-        mapOf("name" to name.trim(), "kind" to kind.name),
+        buildMap {
+            put("name", name.trim())
+            put("kind", kind.name)
+            username?.trim()?.takeIf(String::isNotEmpty)?.let { put("username", it) }
+        },
         "familyDeviceAdded",
         FamilyDeviceAdded.serializer(),
     )

@@ -252,6 +252,14 @@ class FamilyParsingTest {
     }
 
     @Test
+    fun aQualityAnswerWithoutItsKeyStillReads() = runTest {
+        answer("ok")
+        assertEquals(StreamQuality.Standard, client().setFamilyQuality(away = StreamQuality.Standard).away)
+        answer("ok")
+        assertEquals(DeviceQualityMode.App, client().setFamilyDeviceQuality("d_1", DeviceQualityMode.App).quality)
+    }
+
+    @Test
     fun signingOutADeviceSendsItsId() = runTest {
         answer("ok")
         client().signOutFamilyDevice("d_2")
@@ -267,6 +275,8 @@ class FamilyParsingTest {
         val url = server.takeRequest().url
         assertEquals("Symfonium", url.queryParameter("name"))
         assertEquals("SubsonicApp", url.queryParameter("kind"))
+        // One's own device names no member.
+        assertNull(url.queryParameter("username"))
         assertEquals("ABCD-EFGH-JKMN-PQRS", app.appPassword)
         assertNull(app.pairCode)
         assertEquals("https://navidrome.winters.app", app.server)
@@ -274,8 +284,11 @@ class FamilyParsingTest {
         assertFalse(app.toString().contains("ABCD"))
 
         answer("addFamilyDeviceOcto")
-        val octo = client().addFamilyDevice("Laptop", FamilyDeviceKind.OctoApp)
-        assertEquals("OctoApp", server.takeRequest().url.queryParameter("kind"))
+        val octo = client().addFamilyDevice("Laptop", FamilyDeviceKind.OctoApp, username = "alex")
+        val forMember = server.takeRequest().url
+        assertEquals("OctoApp", forMember.queryParameter("kind"))
+        // A manager names the member the device is for.
+        assertEquals("alex", forMember.queryParameter("username"))
         assertEquals("482913", octo.pairCode)
         assertEquals("2026-10-20T18:15:00Z", octo.expires)
         assertNull(octo.appPassword)

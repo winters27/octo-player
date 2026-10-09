@@ -116,7 +116,6 @@ fun FamilyScreen(onBack: () -> Unit, owner: FamilyShellViewModel = hiltViewModel
     }
     model.added?.let { AddedSheet(it, hub) }
     model.shown?.let { ShownSheet(it, model) }
-    if (model.askingPassword) PasswordSheet(model)
 }
 
 @Composable
@@ -246,7 +245,18 @@ private fun AddedSheet(added: FamilyDeviceAdded, hub: FamilyHub) {
     val link = addedDeviceLink(added, server)
     GlassSheet(visible = true, onDismiss = hub.model::dismissAdded) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(if (link != null) "Add a device" else "App password", style = OctoType.section, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() })
+            val forWhom = hub.model.addedFor
+            Text(
+                when {
+                    forWhom != null && link != null -> "Add a device for $forWhom"
+                    link != null -> "Add a device"
+                    forWhom != null -> "App password for $forWhom"
+                    else -> "App password"
+                },
+                style = OctoType.section,
+                color = OctoColors.TextPrimary,
+                modifier = Modifier.semantics { heading() },
+            )
             if (link != null) {
                 QrImage(link, label = "QR code to add a device")
                 Text(
@@ -272,8 +282,8 @@ private fun AddedSheet(added: FamilyDeviceAdded, hub: FamilyHub) {
     }
 }
 
-// A manager's link (an invite, a member's new device) as a QR code, with a
-// way to copy or send it, until closed.
+// A new member's invite as a QR code, with a way to copy or send it, until
+// closed.
 @Composable
 private fun ShownSheet(shown: ShownLink, model: FamilyModel) {
     val context = LocalContext.current
@@ -289,29 +299,6 @@ private fun ShownSheet(shown: ShownLink, model: FamilyModel) {
                     runCatching { context.startActivity(android.content.Intent.createChooser(send, shown.title).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 }, size = ButtonSize.Small)
                 AccentButton("Done", onClick = model::closeShown, size = ButtonSize.Small)
-            }
-        }
-    }
-}
-
-// The family page wants the account's password before a manager's change.
-@Composable
-private fun PasswordSheet(model: FamilyModel) {
-    var password by remember { mutableStateOf("") }
-    GlassSheet(visible = true, onDismiss = model::cancelPassword) {
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Your account password", style = OctoType.section, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() })
-            Text("This phone signs in with a code of its own. Changes to the family need your account password once.", style = OctoType.bodySmall, color = OctoColors.TextSecondary)
-            GlassInput(
-                password,
-                { password = it },
-                placeholder = "Password",
-                keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password, imeAction = ImeAction.Done),
-                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AccentButton("Go on", onClick = { model.signInToPage(password) }, size = ButtonSize.Small, enabled = password.isNotEmpty())
-                GlazeButton("Cancel", model::cancelPassword, size = ButtonSize.Small)
             }
         }
     }
@@ -352,7 +339,7 @@ private fun LazyListScope.members(model: FamilyModel, members: List<FamilyMember
     if (live > 0) item(key = "members:live") { Line("$live playing now") }
     items(members, key = { "member:${it.username}" }) { member ->
         ItemLine(member.displayName.ifBlank { member.username }, "${memberLine(member)} · ${storageLine(member.storageUsedBytes, member.storageLimitGb)}") {
-            GlazeButton("Add a device", { model.memberLink(member) }, size = ButtonSize.ExtraSmall, enabled = !model.working)
+            GlazeButton("Add a device", { model.addMemberDevice(member) }, size = ButtonSize.ExtraSmall, enabled = !model.working)
         }
     }
     item(key = "members:add") { AddMember(model) }
