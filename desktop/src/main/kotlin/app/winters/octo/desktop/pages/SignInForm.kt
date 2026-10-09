@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.subsonic.normalizeServerUrl
 import app.winters.octo.ui.family.inviteProblem
 import app.winters.octo.subsonic.parseFamilyLink
 import app.winters.octo.subsonic.FamilyInviteLink
@@ -178,8 +179,11 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
         return true
     }
 
+    // A link's home address becomes this account's home address, so the
+    // app uses the home network at home and the outside address away.
     fun take(link: FamilyLink) {
         typeAddress(link.server)
+        link.home?.let { home = it }
         when (link) {
             is FamilyJoinLink -> {
                 invite = null
@@ -201,6 +205,9 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
         }
 
     val joinReady: Boolean get() = !busy && joinProblem == null
+
+    // The home address typed or from a link, when it is one.
+    val homeUrl: HttpUrl? get() = home.trim().takeIf(String::isNotEmpty)?.let(::normalizeServerUrl)
 
     // Signing in with the secret pairing answered, as a password the user
     // never sees. It is always remembered: there is nothing to type again.

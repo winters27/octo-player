@@ -1,15 +1,22 @@
 package app.winters.octo.desktop.pages
 
-import app.winters.octo.desktop.family.QrLink
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.hideFromAccessibility
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.toggleable
+import app.winters.octo.design.FocusRing
+import app.winters.octo.design.OctoSwitch
+import app.winters.octo.ui.family.ALLOW_AWAY_LINE
+import app.winters.octo.ui.family.ALLOW_AWAY
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.size
 import app.winters.octo.subsonic.FamilyPreset
 import app.winters.octo.ui.family.presetLine
 import app.winters.octo.ui.family.presetName
-import app.winters.octo.ui.family.addedDeviceLink
-import app.winters.octo.ui.family.ShownLink
+import app.winters.octo.desktop.family.showDeviceSheet
+import app.winters.octo.desktop.family.showInvite
 import app.winters.octo.desktop.library.Cover
-import app.winters.octo.desktop.family.QrImage
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,7 +60,6 @@ import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.subsonic.FamilyDevice
-import app.winters.octo.subsonic.FamilyDeviceAdded
 import app.winters.octo.subsonic.FamilyDeviceKind
 import app.winters.octo.subsonic.FamilyMe
 import app.winters.octo.subsonic.FamilyMember
@@ -84,8 +90,6 @@ import app.winters.octo.ui.family.storageLine
 import app.winters.octo.ui.family.storageShare
 import app.winters.octo.ui.family.weeklyLine
 import kotlinx.coroutines.launch
-import java.awt.Toolkit
-import java.awt.datatransfer.StringSelection
 
 // Family on an Octo server with it on: this account's plan in plain words,
 // its saved songs, requests and devices, and for a manager the members and
@@ -112,10 +116,12 @@ fun FamilyPage(app: AppState, visit: Visit) {
         return
     }
     val me = info.me
-    // A manager's link and the family page's password ask float over the page.
+    // Adding a device and a new member's invite float over the page.
     val popups = LocalPopups.current
-    val shown = model.shown
-    LaunchedEffect(shown) { if (shown != null) showLink(popups, app, model, shown) }
+    val sheetId = model.sheet?.id
+    LaunchedEffect(sheetId) { if (sheetId != null) showDeviceSheet(popups, app, model) }
+    val inviting = model.invite?.username
+    LaunchedEffect(inviting) { if (inviting != null) showInvite(popups, app, model) }
     val sections = model.sections().map { section ->
         when (section) {
             FamilySection.Plan -> PageSection("plan", MY_PLAN, OctoIcons.Family, detail = planTitle(me)) { PlanSection(model, me) }
@@ -263,9 +269,6 @@ private fun DevicesSection(app: AppState, model: FamilyModel) {
 private fun AddDevice(app: AppState, model: FamilyModel) {
     var name by remember { mutableStateOf("") }
     var kind by remember { mutableStateOf(FamilyDeviceKind.OctoApp) }
-    val popups = LocalPopups.current
-    val added = model.added
-    LaunchedEffect(added) { if (added != null) showAdded(popups, app, model, added) }
     Group("Add a device") {
         Card {
             Column(Modifier.fillMaxWidth().padding(horizontal = RowInset, vertical = Space.L), verticalArrangement = Arrangement.spacedBy(Space.M)) {
@@ -286,70 +289,6 @@ private fun AddDevice(app: AppState, model: FamilyModel) {
             }
         }
     }
-}
-
-// The pair code as a QR code any camera reads (with the code beside it
-// for typing), or an app password, shown once, each with a way to copy it.
-private fun showAdded(popups: PopupHost, app: AppState, model: FamilyModel, added: FamilyDeviceAdded) {
-    val server = added.server ?: app.connection?.client?.primaryUrl?.toString()?.removeSuffix("/").orEmpty()
-    popups.showCentred(width = 440.dp) { close ->
-        val done = {
-            model.dismissAdded()
-            close()
-        }
-        val link = addedDeviceLink(added, server)
-        val password = added.appPassword
-        val forWhom = model.addedFor
-        MenuTitle(
-            when {
-                forWhom != null && link != null -> "Add a device for $forWhom"
-                link != null -> "Add a device"
-                forWhom != null -> "App password for $forWhom"
-                else -> "App password"
-            },
-        )
-        PopupPadding {
-            if (link != null) {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { QrImage(link, label = "QR code to add a device") }
-                QrLink(link, "Open this link on the other device", app::openJoinLink, Modifier.fillMaxWidth())
-                Txt("Scan this with the new device's camera, open the link on it, or in Octo there choose Join with a family code and type ${added.username} and ${added.pairCode}. It works once.", DesktopType.body, OctoColors.TextSecondary, maxLines = 4)
-            } else {
-                Txt(password.orEmpty(), DesktopType.pageTitle, OctoColors.TextPrimary)
-                Txt("In the other app, sign in to $server as ${added.username} with this password. It shows only now.", DesktopType.body, OctoColors.TextSecondary, maxLines = 4)
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
-                if (link != null) {
-                    GlazeCapsule(null, "Copy link", { copy(link) })
-                    GlazeCapsule(null, "Copy code", { copy(added.pairCode.orEmpty()) })
-                } else {
-                    GlazeCapsule(null, "Copy address", { copy(server) })
-                    GlazeCapsule(null, "Copy password", { copy(password.orEmpty()) })
-                }
-                GlazeCapsule(OctoIcons.Check, "Done", done, lit = true)
-            }
-        }
-    }
-}
-
-// A new member's invite as a QR code, with a way to copy it, until closed.
-private fun showLink(popups: PopupHost, app: AppState, model: FamilyModel, shown: ShownLink) {
-    popups.showCentred(width = 440.dp) { close ->
-        DisposableEffect(Unit) { onDispose { model.closeShown() } }
-        MenuTitle(shown.title)
-        PopupPadding {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { QrImage(shown.url, label = shown.title) }
-            QrLink(shown.url, "Open this link on their device", app::openJoinLink, Modifier.fillMaxWidth())
-            Txt(shown.note, DesktopType.body, OctoColors.TextSecondary, maxLines = 4)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
-                GlazeCapsule(null, "Copy link", { copy(shown.url) })
-                GlazeCapsule(OctoIcons.Check, "Done", close, lit = true)
-            }
-        }
-    }
-}
-
-private fun copy(text: String) {
-    runCatching { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null) }
 }
 
 private fun askToSignOut(popups: PopupHost, model: FamilyModel, device: FamilyDevice) {
@@ -389,16 +328,31 @@ private fun AddMember(model: FamilyModel) {
     var username by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var preset by remember { mutableStateOf(FamilyPreset.Member) }
+    var away by remember { mutableStateOf(true) }
     Group("Add a member") {
         Card {
             Column(Modifier.fillMaxWidth().padding(horizontal = RowInset, vertical = Space.L), verticalArrangement = Arrangement.spacedBy(Space.M)) {
                 Txt(presetLine(preset), DesktopType.meta, OctoColors.TextMuted, maxLines = 2)
                 GlazeSegments(FamilyPreset.entries, preset, ::presetName, { preset = it })
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .toggleable(value = away, interactionSource = null, indication = FocusRing(Corner.RowShape), role = Role.Switch, onValueChange = { away = it }),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.M),
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Txt(ALLOW_AWAY, DesktopType.body, OctoColors.TextPrimary)
+                        Txt(ALLOW_AWAY_LINE, DesktopType.meta, OctoColors.TextMuted, maxLines = 2)
+                    }
+                    // The row is the switch a screen reader hears; this only shows it.
+                    OctoSwitch(away, { away = it }, Modifier.focusProperties { canFocus = false }.semantics { hideFromAccessibility() })
+                }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
                     GlassField(name, { name = it }, Modifier.weight(1f), placeholder = "Their name, like Sam")
                     GlassField(username, { username = it.filterNot(Char::isWhitespace).lowercase() }, Modifier.weight(1f), placeholder = "Username, like sam")
                     GlazeCapsule(OctoIcons.Add, "Add", {
-                        model.addMember(username, name, preset)
+                        model.addMember(username, name, preset, away)
                         username = ""
                         name = ""
                     }, enabled = username.isNotBlank() && !model.working)

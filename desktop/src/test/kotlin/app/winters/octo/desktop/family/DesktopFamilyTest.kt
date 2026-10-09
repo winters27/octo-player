@@ -55,25 +55,6 @@ class DesktopFamilyTest {
     }
 
     @Test
-    fun theLinkUnderAQrCodeOpensWhenClicked() {
-        val opened = mutableListOf<String>()
-        val scene = androidx.compose.ui.ImageComposeScene(400, 200, androidx.compose.ui.unit.Density(1f)) {
-            QrLink(link, "Open this link on the other device", { opened += it })
-        }
-        scene.render().close()
-        val all = mutableListOf<androidx.compose.ui.semantics.SemanticsNode>()
-        fun walk(node: androidx.compose.ui.semantics.SemanticsNode) {
-            all += node
-            node.children.forEach(::walk)
-        }
-        scene.semanticsOwners.forEach { walk(it.rootSemanticsNode) }
-        val node = all.first { it.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription)?.firstOrNull()?.contains(link) == true }
-        node.config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action!!.invoke()
-        scene.close()
-        assertEquals(listOf(link), opened)
-    }
-
-    @Test
     fun aFamilyLinkInEitherFormIsHandedOverAtLaunch() {
         val https = parseLaunchArgs(listOf(link))
         assertEquals(listOf(LaunchRequest.OpenLink(link)), https)

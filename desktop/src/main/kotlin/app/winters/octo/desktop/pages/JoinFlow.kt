@@ -34,9 +34,9 @@ suspend fun joinFromForm(app: AppState, form: SignInForm): SignInOutcome.Done? {
     val name = app.accounts.security.deviceName()
     val invite = form.invite
     val joined = if (invite != null) {
-        joinWithInvite(url, invite.token, form.inviteName, form.invitePassword, name, familyPlatform(app.os), app.http)
+        joinWithInvite(url, invite.token, form.inviteName, form.invitePassword, name, familyPlatform(app.os), app.http, home = form.homeUrl)
     } else {
-        joinFamily(url, form.username.trim(), form.code, name, familyPlatform(app.os), app.http)
+        joinFamily(url, form.username.trim(), form.code, name, familyPlatform(app.os), app.http, home = form.homeUrl)
     }
     when (joined) {
         is JoinOutcome.Failed -> form.result = false to joined.message

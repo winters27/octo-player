@@ -70,4 +70,38 @@ class FamilyJoinTest {
             assertFalse(signed.toString().contains("abcdefghijklmnopqrstuvwxyz012345"))
         }
     }
+
+    @Test
+    fun aLinksHomeAddressPairsAtHomeAndIsSavedAsTheHomeAddress() = runTest {
+        FakeServer().use { home ->
+            home.answer("octoFamilyPair", """"familyPair":{"username":"alex","secret":"abcdefghijklmnopqrstuvwxyz012345","deviceId":"d_11"}""", type = "octo")
+            home.answer("ping", type = "octo")
+            home.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[{"name":"octoFamily","versions":[1]}]""", type = "octo")
+            // The outside address, with its path, does not loop back from here.
+            val outside = "http://127.0.0.1:1/octo"
+            val form = SignInForm()
+            assertTrue(form.takeJoinLink("$outside/family/join#u=alex&c=482913&home=${java.net.URLEncoder.encode(home.address, Charsets.UTF_8)}"))
+            assertEquals(home.address.removeSuffix("/"), form.home)
+            val http = OkHttpClient()
+            val joined = joinFamily(form.url!!, form.username, form.code, "Studio PC", FamilyPlatform.Windows, http, home = form.homeUrl) as JoinOutcome.Paired
+            assertEquals(form.homeUrl, joined.at)
+
+            val request = form.joinRequest(joined.pair)
+            assertEquals(outside, request.address)
+            val accounts = Accounts(SettingsStore(File(folder.root, "settings.json")), SessionOnlySecrets(), http)
+            assertTrue(accounts.signIn(request) is SignInOutcome.Done)
+            val saved = accounts.servers.single()
+            // The outside address is the main one, path and all; home is used at home.
+            assertEquals(outside, saved.address.removeSuffix("/"))
+            assertEquals(home.address.removeSuffix("/"), saved.home?.removeSuffix("/"))
+        }
+    }
+
+    @Test
+    fun aLinkWithoutAHomeAddressLeavesItAlone() {
+        val form = SignInForm()
+        form.home = "http://music.lan"
+        form.takeJoinLink("https://example.com/family/join#u=alex&c=482913")
+        assertEquals("http://music.lan", form.home)
+    }
 }
