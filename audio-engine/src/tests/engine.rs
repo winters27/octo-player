@@ -865,3 +865,99 @@ fn a_song_that_stops_short_of_its_length_still_hands_over() {
     assert!(start_ms + overlap_ms <= 3_000, "{start_ms} + {overlap_ms}");
     engine.shutdown();
 }
+
+// What the planner was handed when it planned from the songs' profiles:
+// the hop of each section, and the level and tempo of the playing song.
+type Handed = (Option<i32>, Option<i32>, Option<f64>, Option<f64>);
+
+static HANDED: Mutex<Option<Handed>> = Mutex::new(None);
+
+fn recording_plan(input: &crate::automix::PlanInput) -> crate::automix::TransitionPlan {
+    if input.current.duration_ms == 12_000 {
+        *HANDED.lock().unwrap() = Some((
+            input.tail.map(|t| t.envelope.hop_ms),
+            input.head.map(|h| h.envelope.hop_ms),
+            input.context.body_level_db,
+            input.context.tempo_prior,
+        ));
+    }
+    test_plan(input)
+}
+
+fn profile_of(duration_ms: i64, tail_from_ms: i64) -> crate::automix::SongProfile {
+    let tempo = crate::automix::SongProfileTempo {
+        bpm: 120.0,
+        beat_ms: 500.0,
+        first_beat_ms: 0.0,
+        downbeat_ms: 0.0,
+        confidence: 2.0,
+        consistency: 0.9,
+        steady: true,
+    };
+    let section = |start_ms: i64, hops: usize| crate::automix::SongProfileSection {
+        start_ms,
+        hop_ms: 100,
+        levels: vec![-20.0; hops],
+        body_db: -20.0,
+        gate_db: -65.0,
+        sound_start_ms: Some(start_ms),
+        sound_end_ms: Some(start_ms + hops as i64 * 100),
+        outro_start_ms: Some(start_ms + hops as i64 * 100),
+        intro_end_ms: Some(start_ms),
+        boundaries_ms: Vec::new(),
+        tempo: None,
+    };
+    let head_hops = (duration_ms.min(30_000) / 100) as usize;
+    let tail_hops = ((duration_ms - tail_from_ms) / 100) as usize;
+    crate::automix::SongProfile {
+        duration_ms,
+        body_db: Some(-20.0),
+        tempo: Some(tempo),
+        head: section(0, head_hops),
+        tail: section(tail_from_ms, tail_hops),
+    }
+}
+
+#[test]
+fn a_song_with_a_profile_is_planned_from_it_without_the_live_level() {
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 12, 0.3));
+    write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 4, 0.3));
+    *crate::automix::TEST_PLANNER.lock().unwrap() = Some(recording_plan);
+    let (engine, events, _) = engine(2.0);
+    engine.set_crossfade(1_000).unwrap();
+    engine
+        .set_automix(crate::automix::AutomixSettings {
+            smart_transitions: true,
+            filter_sweeps: true,
+            match_tempo: false,
+            max_overlap_ms: 8_000,
+        })
+        .unwrap();
+    engine.set_song_profile("a".into(), Some(profile_of(12_000, 0))).unwrap();
+    engine.set_song_profile("b".into(), Some(profile_of(4_000, 0))).unwrap();
+    engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
+    events.wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    *crate::automix::TEST_PLANNER.lock().unwrap() = None;
+    let handed = HANDED.lock().unwrap().take();
+    // Both sections at the profile's 100 ms, not the scout's 10 ms; no level
+    // from the live tap; the profile's whole-song tempo.
+    assert_eq!(handed, Some((Some(100), Some(100), None, Some(120.0))));
+    engine.shutdown();
+}
+
+#[test]
+fn a_profile_that_is_not_whole_is_refused_and_one_can_be_forgotten() {
+    let (engine, _, _) = engine(1.0);
+    let mut empty = profile_of(12_000, 0);
+    empty.tail.levels.clear();
+    let refused = engine.set_song_profile("a".into(), Some(empty)).unwrap_err();
+    assert!(matches!(&refused, crate::error::EngineError::Failed { kind: ErrorKind::InvalidArgument, .. }));
+    let mut timeless = profile_of(12_000, 0);
+    timeless.duration_ms = 0;
+    assert!(engine.set_song_profile("a".into(), Some(timeless)).is_err());
+    engine.set_song_profile("a".into(), Some(profile_of(12_000, 0))).unwrap();
+    engine.set_song_profile("a".into(), None).unwrap();
+    engine.shutdown();
+}

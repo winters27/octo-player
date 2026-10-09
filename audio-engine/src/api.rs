@@ -7,7 +7,7 @@ use std::thread;
 
 use crossbeam_channel::{Sender, bounded, unbounded};
 
-use crate::automix::AutomixSettings;
+use crate::automix::{AutomixSettings, SongProfile};
 use crate::decode::TrackInfo;
 use crate::error::{EngineError, ErrorKind};
 use crate::output::cpal_driver::CpalDriver;
@@ -325,6 +325,19 @@ impl Engine {
     pub fn set_automix(&self, settings: AutomixSettings) -> Result<(), EngineError> {
         let max_overlap_ms = settings.max_overlap_ms.min(crate::crossfade::LONGEST_FADE_MS);
         self.send(Command::SetAutomix(AutomixSettings { max_overlap_ms, ..settings }))
+    }
+
+    /// The transition profile of the song queued as `item_id`, from its
+    /// server, or `None` to forget it. With one, that song's start and end
+    /// are planned from it instead of being read from the stream.
+    pub fn set_song_profile(&self, item_id: String, profile: Option<SongProfile>) -> Result<(), EngineError> {
+        let profile = match profile {
+            None => None,
+            Some(p) => Some(Arc::new(
+                p.to_profile().ok_or_else(|| invalid("a profile without its levels or length"))?,
+            )),
+        };
+        self.send(Command::SetProfile { item_id, profile })
     }
 
     pub fn set_eq(&self, eq: EqSettings) -> Result<(), EngineError> {

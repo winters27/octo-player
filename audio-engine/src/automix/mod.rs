@@ -4,8 +4,9 @@
 //! optional rate for the incoming song so the two tempos line up.
 //!
 //! The scout decodes the end of the playing song and the start of the next
-//! one into envelopes ([`SectionAnalyzer`]); a live tap follows the playing
-//! song as it is heard ([`LiveAnalyzer`]); [`plan`] turns them into a
+//! one into envelopes ([`SectionAnalyzer`]), unless the app handed over the
+//! song's [`TransitionProfile`] from its server; a live tap follows the
+//! playing song as it is heard ([`LiveAnalyzer`]); [`plan`] turns them into a
 //! [`TransitionPlan`] that the mixer runs.
 
 pub mod curves;
@@ -14,6 +15,7 @@ pub mod envelope;
 pub mod features;
 pub mod planner;
 pub mod profile;
+pub mod song_profile;
 
 pub use curves::*;
 pub use dsp::{BUTTERWORTH_Q, Biquad};
@@ -27,6 +29,7 @@ pub use planner::{
     plan_transition,
 };
 pub use profile::{PROFILE_VERSION, SectionProfile, TransitionProfile, level_code, level_of_code};
+pub use song_profile::{SongProfile, SongProfileSection, SongProfileTempo};
 
 use crate::crossfade::{FadeSong, SHORTEST_FADE_MS};
 use crate::scout::PcmSink;

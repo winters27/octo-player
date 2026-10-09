@@ -17,7 +17,7 @@ use crate::api::{
 use crate::automix::{
     AutomixSettings, HEAD_SECS, LATEST_EXIT_SECS, LEAD_SECS, LiveAnalysis, PlanInput, PlanSettings,
     RATE_EASE_SECS, SILENCE_BELOW_BODY_DB, SILENCE_FLOOR_DB, TAIL_SECS, TransitionContext, TransitionKind,
-    TransitionPlan,
+    TransitionPlan, TransitionProfile,
 };
 use crate::crossfade::{FadeSong, SHORTEST_FADE_MS, blend_decision};
 use crate::deck::{Deck, DeckStatus};
@@ -48,6 +48,10 @@ const PREPARE_SECS: f64 = 20.0;
 
 /// How long the scout may take before a blend is planned without it.
 const SCOUT_LIMIT: Duration = Duration::from_secs(20);
+
+// How many songs' transition profiles are kept before those no longer
+// queued are let go.
+const PROFILES_KEPT: usize = 64;
 
 /// The latest a waiting blend is decided: this long, in song time, before
 /// the crossfade at the end of the song would have to start.
@@ -82,6 +86,7 @@ pub enum Command {
     SetMuted(bool),
     SetCrossfade(u32),
     SetAutomix(AutomixSettings),
+    SetProfile { item_id: String, profile: Option<Arc<TransitionProfile>> },
     SetEq(EqSettings),
     SetReplayGain(ReplayGainSettings),
     SetDsp(DspSettings),
@@ -278,6 +283,8 @@ struct Player {
     settings: SoundSettings,
     crossfade_ms: u32,
     automix: AutomixSettings,
+    // Transition profiles from the app, by queue item id.
+    profiles: HashMap<String, Arc<TransitionProfile>>,
     upcoming: Option<Upcoming>,
     lined: Option<Lined>,
     scouting: Scouting,
@@ -326,6 +333,7 @@ pub fn run(driven: Driven) {
         settings: SoundSettings::default(),
         crossfade_ms: 0,
         automix: AutomixSettings::default(),
+        profiles: HashMap::new(),
         upcoming: None,
         lined: None,
         scouting: Scouting::default(),
@@ -447,6 +455,18 @@ impl Player {
                 }
                 self.drop_prepared();
             }
+            Command::SetProfile { item_id, profile } => match profile {
+                Some(profile) => {
+                    self.profiles.insert(item_id, profile);
+                    if self.profiles.len() > PROFILES_KEPT {
+                        let queued: Vec<&str> = self.queue.iter().map(|e| e.item.id.as_str()).collect();
+                        self.profiles.retain(|id, _| queued.contains(&id.as_str()));
+                    }
+                }
+                None => {
+                    self.profiles.remove(&item_id);
+                }
+            },
             Command::SetAutomix(settings) => {
                 self.automix = settings;
                 // A blend already under way plays out as it was planned.
@@ -907,7 +927,8 @@ impl Player {
 
     // With smart transitions on, decodes the end of the playing song once
     // it has played a second and its length is known, and the start of the
-    // next one as soon as it is known; again whenever either changes.
+    // next one as soon as it is known; again whenever either changes. A song
+    // with a transition profile from the app is not decoded.
     fn update_scouts(&mut self) {
         if !self.automix.smart_transitions || self.crossfade_ms == 0 {
             self.scouting = Scouting::default();
@@ -924,6 +945,7 @@ impl Player {
             && position >= 1.0
             && let Some(index) = self.index_of(a_key)
             && let Some(len) = self.length_ms(index)
+            && self.profile_at(index).is_none()
         {
             let part = SectionPart::Tail { secs: TAIL_SECS, len_secs: Some(len as f64 / 1_000.0) };
             let item = &self.queue[index].item;
@@ -934,22 +956,32 @@ impl Player {
         let b_key = next.map(|i| self.queue[i].key).filter(|&k| k != a_key);
         if self.scouting.b_key != b_key {
             self.scouting.b_key = b_key;
-            self.scouting.b_head = next.filter(|_| b_key.is_some()).map(|i| {
-                let part = SectionPart::Head { secs: HEAD_SECS };
-                let item = &self.queue[i].item;
-                ScoutJob::start(item.source.clone(), self.http_for(i), part, item.bpm)
-            });
+            self.scouting.b_head =
+                next.filter(|&i| b_key.is_some() && self.profile_at(i).is_none()).map(|i| {
+                    let part = SectionPart::Head { secs: HEAD_SECS };
+                    let item = &self.queue[i].item;
+                    ScoutJob::start(item.source.clone(), self.http_for(i), part, item.bpm)
+                });
         }
         let playing = self.playing;
         self.scouting.set_running(playing);
     }
 
-    // Whether the scout is done (or given up on) for the songs `a` then `b`.
+    // Whether the scout is done (or given up on) for the songs `a` then `b`;
+    // a song with a profile needs none.
     fn scouts_settled(&self, a: u64, b: u64) -> bool {
         let s = &self.scouting;
-        let tail = s.a_key == Some(a) && s.a_tail.as_ref().is_some_and(|j| j.is_settled(SCOUT_LIMIT));
-        let head = s.b_key == Some(b) && s.b_head.as_ref().is_some_and(|j| j.is_settled(SCOUT_LIMIT));
+        let profiled = |key: u64| self.index_of(key).and_then(|i| self.profile_at(i)).is_some();
+        let tail = profiled(a)
+            || (s.a_key == Some(a) && s.a_tail.as_ref().is_some_and(|j| j.is_settled(SCOUT_LIMIT)));
+        let head = profiled(b)
+            || (s.b_key == Some(b) && s.b_head.as_ref().is_some_and(|j| j.is_settled(SCOUT_LIMIT)));
         tail && head
+    }
+
+    // The transition profile the app handed over for the queued song at `index`.
+    fn profile_at(&self, index: usize) -> Option<&Arc<TransitionProfile>> {
+        self.profiles.get(&self.queue.get(index)?.item.id)
     }
 
     // Lines up the next song, for a gapless join or a crossfade.
@@ -1100,7 +1132,11 @@ impl Player {
         if plan.entry_ms > 0 {
             deck.seek(plan.entry_secs());
         }
-        let shape = self.shape_of(&plan, b_len, live.as_ref());
+        let body_db = live
+            .as_ref()
+            .and_then(|l| l.body_level_db)
+            .or_else(|| self.profile_at(current).and_then(|p| p.body_db));
+        let shape = self.shape_of(&plan, b_len, body_db);
         let rate = self.mixer.as_ref().map(|m| m.rate()).unwrap_or(48_000) as f64;
         let frames = (plan.overlap_secs() * rate) as u64;
         if let Some(mixer) = self.mixer.as_mut() {
@@ -1135,10 +1171,26 @@ impl Player {
         let (a, b) = (self.queue[current].key, self.queue[next].key);
         let (a_item, b_item) = (&self.queue[current].item, &self.queue[next].item);
         let s = &self.scouting;
-        let tail = s.a_tail.as_ref().filter(|_| s.a_key == Some(a)).and_then(|j| j.analysis());
-        let head = s.b_head.as_ref().filter(|_| s.b_key == Some(b)).and_then(|j| j.analysis());
+        // A profile's end is measured against the whole song already, so the
+        // live tap's level does not go with it, and its tempo is the whole
+        // song's.
+        let (a_profile, b_profile) = (self.profile_at(current), self.profile_at(next));
+        let tail = match a_profile {
+            Some(p) => Some(p.tail_analysis()),
+            None => s.a_tail.as_ref().filter(|_| s.a_key == Some(a)).and_then(|j| j.analysis()),
+        };
+        let head = match b_profile {
+            Some(p) => Some(p.head_analysis()),
+            None => s.b_head.as_ref().filter(|_| s.b_key == Some(b)).and_then(|j| j.analysis()),
+        };
         let speed = self.pace.speed as f64;
         let live = self.mixer.as_ref().and_then(|m| m.live_analysis(a, a_item.bpm));
+        let body_level_db = match a_profile {
+            Some(_) => None,
+            None => live.as_ref().and_then(|l| l.body_level_db),
+        };
+        let tempo_prior =
+            a_profile.and_then(|p| p.tempo_prior()).or_else(|| live.as_ref().and_then(|l| l.tempo_prior));
         let max_ms =
             if self.automix.max_overlap_ms > 0 { self.automix.max_overlap_ms } else { self.crossfade_ms };
         let input = PlanInput {
@@ -1161,8 +1213,8 @@ impl Player {
                 skip_silence: false,
                 current_genre: a_item.genre.clone(),
                 next_genre: b_item.genre.clone(),
-                body_level_db: live.as_ref().and_then(|l| l.body_level_db),
-                tempo_prior: live.as_ref().and_then(|l| l.tempo_prior),
+                body_level_db,
+                tempo_prior,
             },
         };
         let plan = crate::automix::plan(&input);
@@ -1183,13 +1235,12 @@ impl Player {
     }
 
     // How the mixer runs `plan`. The outgoing song's silence gate comes from
-    // its level as heard so far.
-    fn shape_of(&self, plan: &TransitionPlan, b_len: f64, live: Option<&LiveAnalysis>) -> FadeShape {
+    // its level, as heard so far or else from its profile.
+    fn shape_of(&self, plan: &TransitionPlan, b_len: f64, body_db: Option<f64>) -> FadeShape {
         // The incoming song must outlast the rate's ease back to normal.
         let room = b_len - plan.entry_secs() > plan.overlap_secs() + RATE_EASE_SECS + 1.0;
-        let gate = live
-            .and_then(|l| l.body_level_db)
-            .map_or(SILENCE_FLOOR_DB, |body| SILENCE_FLOOR_DB.max(body - SILENCE_BELOW_BODY_DB));
+        let gate =
+            body_db.map_or(SILENCE_FLOOR_DB, |body| SILENCE_FLOOR_DB.max(body - SILENCE_BELOW_BODY_DB));
         let equal_power = plan.k == 0.0;
         FadeShape {
             k: plan.k,

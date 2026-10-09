@@ -749,6 +749,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_set_replaygain(
     ): Int
+    external fun uniffi_octo_audio_checksum_method_engine_set_song_profile(
+    ): Int
     external fun uniffi_octo_audio_checksum_method_engine_set_speed(
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_set_stop_after_current(
@@ -855,6 +857,8 @@ internal object UniffiLib {
     external fun uniffi_octo_audio_fn_method_engine_set_repeat(`ptr`: Long,`mode`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_octo_audio_fn_method_engine_set_replaygain(`ptr`: Long,`settings`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_octo_audio_fn_method_engine_set_song_profile(`ptr`: Long,`itemId`: RustBuffer.ByValue,`profile`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_octo_audio_fn_method_engine_set_speed(`ptr`: Long,`speed`: Float,`pitch`: Float,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -1087,6 +1091,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_method_engine_set_replaygain() and 0xFFFF) != 38530) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_engine_set_song_profile() and 0xFFFF) != 37095) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_method_engine_set_speed() and 0xFFFF) != 43041) {
@@ -1388,6 +1395,29 @@ public object FfiConverterULong: FfiConverter<ULong, Long> {
 
     override fun write(value: ULong, buf: ByteBuffer) {
         buf.putLong(value.toLong())
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterLong: FfiConverter<Long, Long> {
+    override fun lift(value: Long): Long {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Long {
+        return buf.getLong()
+    }
+
+    override fun lower(value: Long): Long {
+        return value
+    }
+
+    override fun allocationSize(value: Long) = 8UL
+
+    override fun write(value: Long, buf: ByteBuffer) {
+        buf.putLong(value)
     }
 }
 
@@ -1724,6 +1754,13 @@ public interface EngineInterface {
     fun `setRepeat`(`mode`: RepeatMode)
     
     fun `setReplaygain`(`settings`: ReplayGainSettings)
+    
+    /**
+     * The transition profile of the song queued as `item_id`, from its
+     * server, or `None` to forget it. With one, that song's start and end
+     * are planned from it instead of being read from the stream.
+     */
+    fun `setSongProfile`(`itemId`: kotlin.String, `profile`: SongProfile?)
     
     /**
      * Speed from 0.5 to 2, keeping the pitch. `pitch` moves the pitch on
@@ -2281,6 +2318,26 @@ open class Engine: Disposable, AutoCloseable, EngineInterface
         it,
         
         FfiConverterTypeReplayGainSettings.lower(`settings`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * The transition profile of the song queued as `item_id`, from its
+     * server, or `None` to forget it. With one, that song's start and end
+     * are planned from it instead of being read from the stream.
+     */
+    @Throws(EngineException::class)override fun `setSongProfile`(`itemId`: kotlin.String, `profile`: SongProfile?)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_engine_set_song_profile(
+        it,
+        
+        FfiConverterString.lower(`itemId`),
+        FfiConverterOptionalTypeSongProfile.lower(`profile`),_status)
 }
     }
     
@@ -3641,6 +3698,217 @@ public object FfiConverterTypeReplayGainSettings: FfiConverterRustBuffer<ReplayG
 
 
 /**
+ * What the planner needs about one song: its first 30 s and last 60 s, and
+ * the whole song's level and tempo.
+ */
+data class SongProfile (
+    val `durationMs`: kotlin.Long
+    , 
+    val `bodyDb`: kotlin.Double? = null 
+    , 
+    val `tempo`: SongProfileTempo? = null 
+    , 
+    val `head`: SongProfileSection
+    , 
+    val `tail`: SongProfileSection
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSongProfile: FfiConverterRustBuffer<SongProfile> {
+    override fun read(buf: ByteBuffer): SongProfile {
+        return SongProfile(
+            FfiConverterLong.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterOptionalTypeSongProfileTempo.read(buf),
+            FfiConverterTypeSongProfileSection.read(buf),
+            FfiConverterTypeSongProfileSection.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SongProfile) = (
+            FfiConverterLong.allocationSize(value.`durationMs`) +
+            FfiConverterOptionalDouble.allocationSize(value.`bodyDb`) +
+            FfiConverterOptionalTypeSongProfileTempo.allocationSize(value.`tempo`) +
+            FfiConverterTypeSongProfileSection.allocationSize(value.`head`) +
+            FfiConverterTypeSongProfileSection.allocationSize(value.`tail`)
+    )
+
+    override fun write(value: SongProfile, buf: ByteBuffer) {
+            FfiConverterLong.write(value.`durationMs`, buf)
+            FfiConverterOptionalDouble.write(value.`bodyDb`, buf)
+            FfiConverterOptionalTypeSongProfileTempo.write(value.`tempo`, buf)
+            FfiConverterTypeSongProfileSection.write(value.`head`, buf)
+            FfiConverterTypeSongProfileSection.write(value.`tail`, buf)
+    }
+}
+
+
+
+/**
+ * One end of a song: its level in dBFS every `hop_ms` from `start_ms`, and
+ * its features.
+ */
+data class SongProfileSection (
+    val `startMs`: kotlin.Long
+    , 
+    val `hopMs`: kotlin.UInt
+    , 
+    val `levels`: List<kotlin.Float>
+    , 
+    val `bodyDb`: kotlin.Double
+    , 
+    val `gateDb`: kotlin.Double
+    , 
+    val `soundStartMs`: kotlin.Long? = null 
+    , 
+    val `soundEndMs`: kotlin.Long? = null 
+    , 
+    val `outroStartMs`: kotlin.Long? = null 
+    , 
+    val `introEndMs`: kotlin.Long? = null 
+    , 
+    val `boundariesMs`: List<kotlin.Long> = listOf() 
+    , 
+    val `tempo`: SongProfileTempo? = null 
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSongProfileSection: FfiConverterRustBuffer<SongProfileSection> {
+    override fun read(buf: ByteBuffer): SongProfileSection {
+        return SongProfileSection(
+            FfiConverterLong.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterSequenceFloat.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterOptionalLong.read(buf),
+            FfiConverterOptionalLong.read(buf),
+            FfiConverterOptionalLong.read(buf),
+            FfiConverterOptionalLong.read(buf),
+            FfiConverterSequenceLong.read(buf),
+            FfiConverterOptionalTypeSongProfileTempo.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SongProfileSection) = (
+            FfiConverterLong.allocationSize(value.`startMs`) +
+            FfiConverterUInt.allocationSize(value.`hopMs`) +
+            FfiConverterSequenceFloat.allocationSize(value.`levels`) +
+            FfiConverterDouble.allocationSize(value.`bodyDb`) +
+            FfiConverterDouble.allocationSize(value.`gateDb`) +
+            FfiConverterOptionalLong.allocationSize(value.`soundStartMs`) +
+            FfiConverterOptionalLong.allocationSize(value.`soundEndMs`) +
+            FfiConverterOptionalLong.allocationSize(value.`outroStartMs`) +
+            FfiConverterOptionalLong.allocationSize(value.`introEndMs`) +
+            FfiConverterSequenceLong.allocationSize(value.`boundariesMs`) +
+            FfiConverterOptionalTypeSongProfileTempo.allocationSize(value.`tempo`)
+    )
+
+    override fun write(value: SongProfileSection, buf: ByteBuffer) {
+            FfiConverterLong.write(value.`startMs`, buf)
+            FfiConverterUInt.write(value.`hopMs`, buf)
+            FfiConverterSequenceFloat.write(value.`levels`, buf)
+            FfiConverterDouble.write(value.`bodyDb`, buf)
+            FfiConverterDouble.write(value.`gateDb`, buf)
+            FfiConverterOptionalLong.write(value.`soundStartMs`, buf)
+            FfiConverterOptionalLong.write(value.`soundEndMs`, buf)
+            FfiConverterOptionalLong.write(value.`outroStartMs`, buf)
+            FfiConverterOptionalLong.write(value.`introEndMs`, buf)
+            FfiConverterSequenceLong.write(value.`boundariesMs`, buf)
+            FfiConverterOptionalTypeSongProfileTempo.write(value.`tempo`, buf)
+    }
+}
+
+
+
+/**
+ * A beat grid: beats on `first_beat_ms + n * beat_ms`, bars on
+ * `downbeat_ms + n * 4 * beat_ms`, in song time.
+ */
+data class SongProfileTempo (
+    val `bpm`: kotlin.Double
+    , 
+    val `beatMs`: kotlin.Double
+    , 
+    val `firstBeatMs`: kotlin.Double
+    , 
+    val `downbeatMs`: kotlin.Double
+    , 
+    val `confidence`: kotlin.Double
+    , 
+    val `consistency`: kotlin.Double
+    , 
+    val `steady`: kotlin.Boolean
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSongProfileTempo: FfiConverterRustBuffer<SongProfileTempo> {
+    override fun read(buf: ByteBuffer): SongProfileTempo {
+        return SongProfileTempo(
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SongProfileTempo) = (
+            FfiConverterDouble.allocationSize(value.`bpm`) +
+            FfiConverterDouble.allocationSize(value.`beatMs`) +
+            FfiConverterDouble.allocationSize(value.`firstBeatMs`) +
+            FfiConverterDouble.allocationSize(value.`downbeatMs`) +
+            FfiConverterDouble.allocationSize(value.`confidence`) +
+            FfiConverterDouble.allocationSize(value.`consistency`) +
+            FfiConverterBoolean.allocationSize(value.`steady`)
+    )
+
+    override fun write(value: SongProfileTempo, buf: ByteBuffer) {
+            FfiConverterDouble.write(value.`bpm`, buf)
+            FfiConverterDouble.write(value.`beatMs`, buf)
+            FfiConverterDouble.write(value.`firstBeatMs`, buf)
+            FfiConverterDouble.write(value.`downbeatMs`, buf)
+            FfiConverterDouble.write(value.`confidence`, buf)
+            FfiConverterDouble.write(value.`consistency`, buf)
+            FfiConverterBoolean.write(value.`steady`, buf)
+    }
+}
+
+
+
+/**
  * What the decoder found out about a song.
  */
 data class TrackInfo (
@@ -4656,6 +4924,38 @@ public object FfiConverterOptionalULong: FfiConverterRustBuffer<kotlin.ULong?> {
 /**
  * @suppress
  */
+public object FfiConverterOptionalLong: FfiConverterRustBuffer<kotlin.Long?> {
+    override fun read(buf: ByteBuffer): kotlin.Long? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterLong.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Long?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterLong.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Long?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterLong.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalFloat: FfiConverterRustBuffer<kotlin.Float?> {
     override fun read(buf: ByteBuffer): kotlin.Float? {
         if (buf.get().toInt() == 0) {
@@ -4880,6 +5180,70 @@ public object FfiConverterOptionalTypeReplayGainInfo: FfiConverterRustBuffer<Rep
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeSongProfile: FfiConverterRustBuffer<SongProfile?> {
+    override fun read(buf: ByteBuffer): SongProfile? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeSongProfile.read(buf)
+    }
+
+    override fun allocationSize(value: SongProfile?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeSongProfile.allocationSize(value)
+        }
+    }
+
+    override fun write(value: SongProfile?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeSongProfile.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeSongProfileTempo: FfiConverterRustBuffer<SongProfileTempo?> {
+    override fun read(buf: ByteBuffer): SongProfileTempo? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeSongProfileTempo.read(buf)
+    }
+
+    override fun allocationSize(value: SongProfileTempo?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeSongProfileTempo.allocationSize(value)
+        }
+    }
+
+    override fun write(value: SongProfileTempo?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeSongProfileTempo.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeTrackInfo: FfiConverterRustBuffer<TrackInfo?> {
     override fun read(buf: ByteBuffer): TrackInfo? {
         if (buf.get().toInt() == 0) {
@@ -4902,6 +5266,34 @@ public object FfiConverterOptionalTypeTrackInfo: FfiConverterRustBuffer<TrackInf
         } else {
             buf.put(1)
             FfiConverterTypeTrackInfo.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceLong: FfiConverterRustBuffer<List<kotlin.Long>> {
+    override fun read(buf: ByteBuffer): List<kotlin.Long> {
+        val len = buf.getInt()
+        return List<kotlin.Long>(len) {
+            FfiConverterLong.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.Long>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterLong.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.Long>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterLong.write(it, buf)
         }
     }
 }
