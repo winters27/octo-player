@@ -330,6 +330,20 @@ pub fn plan_transition(
         }
         _ => latest_end - outro_start,
     };
+    // The next song's quiet start plays under the end of this one, so the
+    // blend lasts at least until the next song is near its full level.
+    let quiet_start =
+        head_features.and_then(|f| f.intro_end_ms).map_or(0.0, |end| (end as f64 - entry).max(0.0));
+    let lengthened = quiet_start > overlap;
+    if lengthened {
+        match lock_a.filter(|_| bars > 0) {
+            Some(a) => {
+                bars = (quiet_start / a.bar_ms() - 1e-9).ceil() as i32;
+                overlap = bars as f64 * a.bar_ms();
+            }
+            None => overlap = quiet_start,
+        }
+    }
     overlap = overlap.max(SHORTEST_BLEND_MS as f64).min(limit);
     if let Some(a) = lock_a
         && bars > 0
@@ -431,6 +445,9 @@ pub fn plan_transition(
         reason += &format!(" ({bars} bars of {} BPM)", decimals(a.display_bpm(), 1));
     }
     reason += &format!(", next song from {}", seconds(entry_ms));
+    if lengthened {
+        reason += &format!(" (full from {})", seconds((entry + quiet_start) as i64));
+    }
     reason += &format!(", outro at {}", seconds(outro_start as i64));
     reason += &format!(", latest end {}", seconds(latest_end as i64));
     if head.is_none() {

@@ -243,3 +243,37 @@ fn a_long_fade_out_hands_over_where_the_outro_starts() {
     assert_eq!((plan.overlap_ms, plan.late), (8_000, false), "{plan:?}");
     assert!(plan.start_ms < 200_000);
 }
+
+#[test]
+fn a_quiet_intro_plays_under_the_end_of_a_hot_song() {
+    let pad = |from_ms: f64, to_ms: f64, db: f64| {
+        vec![tone(from_ms, to_ms, 300.0, db), tone(from_ms, to_ms, 100.0, db - 3.0)]
+    };
+    let a =
+        SyntheticSong { rate: 22_050, channels: 1, length_ms: 200_000, layers: pad(0.0, 200_000.0, -14.0) };
+    let mut layers = pad(0.0, 6_000.0, -38.0);
+    layers.extend(pad(6_000.0, 180_000.0, -14.0));
+    let b = SyntheticSong { rate: 22_050, channels: 1, length_ms: 180_000, layers };
+    let head = b.head();
+    let intro = head.features.intro_end_ms.unwrap();
+    assert!((intro - 5_750).abs() <= 20, "{intro}");
+    let song = |len| FadeSong { album_id: None, album_order: None, duration_ms: len };
+    let plan_with = |max_overlap_ms| {
+        plan_transition(
+            &song(200_000),
+            Some(&song(180_000)),
+            Some(&a.tail()),
+            Some(&head),
+            &PlanSettings::new(max_overlap_ms),
+            &TransitionContext::default(),
+        )
+    };
+    let plan = plan_with(8_000);
+    // The blend lasts until the next song is near its full level, ending
+    // where the hot song does.
+    assert!(plan.overlap_ms >= intro - plan.entry_ms, "{plan:?}");
+    assert_eq!(plan.start_ms + plan.overlap_ms, 199_750, "{plan:?}");
+    assert!(plan.reason.contains("(full from 5."), "{}", plan.reason);
+    // Never longer than the slider allows.
+    assert_eq!(plan_with(4_000).overlap_ms, 4_000);
+}

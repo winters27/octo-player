@@ -152,6 +152,9 @@ data class SectionFeatures(
     // Where the level steps up or down by 4 dB or more, two seconds either side.
     val boundariesMs: List<Long>,
     val tempo: Tempo?,
+    // Where the song first comes within 6 dB of its body level: the end of a
+    // quiet intro, or the sound start when it starts at full level.
+    val introEndMs: Long? = null,
 )
 
 // An envelope with the features found in it.
@@ -184,8 +187,8 @@ class SectionAnalysis private constructor(
     }
 
     // The same section measured against a body level known from elsewhere,
-    // such as the whole song heard as it played: the gate, sound times and
-    // outro move with it; the boundaries and tempo stay.
+    // such as the whole song heard as it played: the gate, sound times,
+    // outro and intro move with it; the boundaries and tempo stay.
     fun withBodyLevel(bodyDb: Double): SectionAnalysis {
         val levels = levelsFor(envelope, bodyDb, sound, outro)
         return SectionAnalysis(
@@ -196,6 +199,7 @@ class SectionAnalysis private constructor(
                 soundStartMs = levels.soundStart,
                 soundEndMs = levels.soundEnd,
                 outroStartMs = levels.outroStart,
+                introEndMs = levels.introEnd,
             ),
             prefix, body, sound, outro,
         )
@@ -227,6 +231,7 @@ class SectionAnalysis private constructor(
                 outroStartMs = levels.outroStart,
                 boundariesMs = boundaries(envelope, body),
                 tempo = if (levels.soundStart == null) null else tempoOf(envelope, levels.first, levels.last, tagBpm),
+                introEndMs = levels.introEnd,
             )
             return SectionAnalysis(envelope, features, prefix, body, sound, outro)
         }
@@ -262,7 +267,15 @@ private fun bodyLevelOf(body: DoubleArray, percentile: Double): Double {
     return bodyDb
 }
 
-private class Levels(val gate: Double, val first: Int, val last: Int, val soundStart: Long?, val soundEnd: Long?, val outroStart: Long?)
+private class Levels(
+    val gate: Double,
+    val first: Int,
+    val last: Int,
+    val soundStart: Long?,
+    val soundEnd: Long?,
+    val outroStart: Long?,
+    val introEnd: Long?,
+)
 
 private fun levelsFor(envelope: SectionEnvelope, bodyDb: Double, sound: DoubleArray, outro: DoubleArray): Levels {
     val gate = max(SILENCE_FLOOR_DB, bodyDb - SILENCE_BELOW_BODY_DB)
@@ -281,7 +294,11 @@ private fun levelsFor(envelope: SectionEnvelope, bodyDb: Double, sound: DoubleAr
         for (i in outro.indices) if (outro[i] >= bodyDb - OUTRO_BELOW_BODY_DB) lastLoud = i
         min(envelope.timeOf(lastLoud + 1), end)
     }
-    return Levels(gate, first, last, soundStart, soundEnd, outroStart)
+    val introEnd = soundStart?.let {
+        val loud = outro.indexOfFirst { it >= bodyDb - OUTRO_BELOW_BODY_DB }
+        if (loud < 0) null else envelope.timeOf(loud)
+    }
+    return Levels(gate, first, last, soundStart, soundEnd, outroStart, introEnd)
 }
 
 private fun framesOf(ms: Int, hopMs: Int): Int = max(1, ms / hopMs)

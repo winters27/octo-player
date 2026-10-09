@@ -28,6 +28,8 @@ object AutomixCases {
         "beat-118" to SyntheticSong(44_100, 1, 180_000, beat(180_000.0, 118.0, 400.0)),
         // 1.5 s of silence, then full level.
         "plain-b" to SyntheticSong(44_100, 2, 180_000, pad(1_500.0, 180_000.0, -14.0)),
+        // 6 s of a quiet pad 24 dB under the body, then full level.
+        "quiet-intro" to SyntheticSong(44_100, 2, 180_000, pad(0.0, 6_000.0, -38.0) + pad(6_000.0, 180_000.0, -14.0)),
     )
 
     data class Pair(
@@ -50,6 +52,8 @@ object AutomixCases {
         Pair("trailing-silence", "silence-tail", "plain-b", eight),
         Pair("fade-out", "fade-out", "plain-b", eight),
         Pair("hot-end", "hot-end", "plain-b", eight),
+        Pair("quiet-intro", "hot-end", "quiet-intro", eight),
+        Pair("quiet-intro-capped", "hot-end", "quiet-intro", AutomixSettings(maxOverlapMs = 4_000)),
         Pair("same-tempo", "beat-120", "beat-120-b", eight),
         Pair("same-tempo-long", "beat-120", "beat-120-b", AutomixSettings(maxOverlapMs = 16_000)),
         Pair("same-tempo-short", "beat-120", "beat-120-b", AutomixSettings(maxOverlapMs = 5_000)),

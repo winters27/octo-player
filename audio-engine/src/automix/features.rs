@@ -183,6 +183,9 @@ pub struct SectionFeatures {
     pub sound_end_ms: Option<i64>,
     /// From here on the song never again comes within 6 dB of its body level.
     pub outro_start_ms: Option<i64>,
+    /// Where the song first comes within 6 dB of its body level: the end of
+    /// a quiet intro, or the sound start when it starts at full level.
+    pub intro_end_ms: Option<i64>,
     /// Where the level steps up or down by 4 dB or more, two seconds either side.
     pub boundaries_ms: Vec<i64>,
     pub tempo: Option<Tempo>,
@@ -227,6 +230,7 @@ impl SectionAnalysis {
             sound_start_ms: levels.sound_start,
             sound_end_ms: levels.sound_end,
             outro_start_ms: levels.outro_start,
+            intro_end_ms: levels.intro_end,
             boundaries_ms: boundaries(&envelope, &body),
             tempo,
         };
@@ -260,8 +264,8 @@ impl SectionAnalysis {
     }
 
     /// The same section measured against a body level known from elsewhere,
-    /// such as the whole song heard as it played: the gate, sound times and
-    /// outro move with it; the boundaries and tempo stay.
+    /// such as the whole song heard as it played: the gate, sound times,
+    /// outro and intro move with it; the boundaries and tempo stay.
     pub fn with_body_level(&self, body_db: f64) -> SectionAnalysis {
         let levels = levels_for(&self.envelope, body_db, &self.sound, &self.outro);
         let mut copy = self.clone();
@@ -270,6 +274,7 @@ impl SectionAnalysis {
         copy.features.sound_start_ms = levels.sound_start;
         copy.features.sound_end_ms = levels.sound_end;
         copy.features.outro_start_ms = levels.outro_start;
+        copy.features.intro_end_ms = levels.intro_end;
         copy
     }
 }
@@ -316,6 +321,7 @@ struct Levels {
     sound_start: Option<i64>,
     sound_end: Option<i64>,
     outro_start: Option<i64>,
+    intro_end: Option<i64>,
 }
 
 fn levels_for(envelope: &SectionEnvelope, body_db: f64, sound: &[f64], outro: &[f64]) -> Levels {
@@ -341,7 +347,11 @@ fn levels_for(envelope: &SectionEnvelope, body_db: f64, sound: &[f64], outro: &[
         }
         envelope.time_of((last_loud + 1) as usize).min(end)
     });
-    Levels { gate, first, last, sound_start, sound_end, outro_start }
+    let intro_end = sound_start.and_then(|_| {
+        let loud = outro.iter().position(|&o| o >= body_db - OUTRO_BELOW_BODY_DB)?;
+        Some(envelope.time_of(loud))
+    });
+    Levels { gate, first, last, sound_start, sound_end, outro_start, intro_end }
 }
 
 fn frames_of(ms: i32, hop_ms: i32) -> usize {

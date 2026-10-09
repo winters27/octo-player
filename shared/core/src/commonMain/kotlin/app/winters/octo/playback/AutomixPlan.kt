@@ -1,6 +1,7 @@
 package app.winters.octo.playback
 
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -231,6 +232,18 @@ fun planTransition(
     } else {
         latestEnd - outroStart
     }
+    // The next song's quiet start plays under the end of this one, so the
+    // blend lasts at least until the next song is near its full level.
+    val quietStart = headFeatures?.introEndMs?.let { max(0.0, it - entry) } ?: 0.0
+    val lengthened = quietStart > overlap
+    if (lengthened) {
+        if (lockA != null && bars > 0) {
+            bars = ceil(quietStart / lockA.barMs - 1e-9).toInt()
+            overlap = bars * lockA.barMs
+        } else {
+            overlap = quietStart
+        }
+    }
     overlap = min(max(overlap, SHORTEST_BLEND_MS.toDouble()), limit)
     if (lockA != null && bars > 0 && overlap < bars * lockA.barMs) {
         // Cut back to whole bars that fit, when that is still long enough.
@@ -298,6 +311,7 @@ fun planTransition(
         append(" at ").append(seconds(start)).append(" over ").append(seconds(overlap.toLong()))
         if (bars > 0 && lockA != null) append(" (").append(bars).append(" bars of ").append(decimals(lockA.displayBpm, 1)).append(" BPM)")
         append(", next song from ").append(seconds(entryMs))
+        if (lengthened) append(" (full from ").append(seconds((entry + quietStart).toLong())).append(")")
         append(", outro at ").append(seconds(outroStart.toLong()))
         append(", latest end ").append(seconds(latestEnd.toLong()))
         if (head == null) append(", no analysis of the next song's start")

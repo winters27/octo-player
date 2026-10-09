@@ -240,6 +240,12 @@ fn check(vectors: &Value) -> Vec<String> {
             ms(f.outro_start_ms),
             t("ms"),
         );
+        c.near(
+            &format!("{what} introEndMs"),
+            num_or_none(expected, "introEndMs"),
+            ms(f.intro_end_ms),
+            t("ms"),
+        );
         let boundaries: Vec<f64> = list(expected, "boundariesMs").iter().filter_map(Value::as_f64).collect();
         if boundaries.len() != f.boundaries_ms.len() {
             c.fail(format!("{what} boundaries: expected {boundaries:?}, got {:?}", f.boundaries_ms));

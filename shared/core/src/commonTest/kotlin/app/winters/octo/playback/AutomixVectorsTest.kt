@@ -262,6 +262,7 @@ class AutomixVectorsTest {
         put("soundStartMs", f.soundStartMs)
         put("soundEndMs", f.soundEndMs)
         put("outroStartMs", f.outroStartMs)
+        put("introEndMs", f.introEndMs)
         putJsonArray("boundariesMs") { f.boundariesMs.forEach { add(it) } }
         val tempo = f.tempo
         if (tempo == null) put("tempo", JsonNull) else putJsonObject("tempo") {
@@ -340,6 +341,7 @@ class AutomixVectorsTest {
             near("$what soundStartMs", expected.numOrNull("soundStartMs"), f.soundStartMs?.toDouble(), t("ms"))
             near("$what soundEndMs", expected.numOrNull("soundEndMs"), f.soundEndMs?.toDouble(), t("ms"))
             near("$what outroStartMs", expected.numOrNull("outroStartMs"), f.outroStartMs?.toDouble(), t("ms"))
+            near("$what introEndMs", expected.numOrNull("introEndMs"), f.introEndMs?.toDouble(), t("ms"))
             val boundaries = expected.getValue("boundariesMs").jsonArray.map { it.jsonPrimitive.double }
             if (boundaries.size != f.boundariesMs.size) {
                 failures += "$what boundaries: expected $boundaries, got ${f.boundariesMs}"

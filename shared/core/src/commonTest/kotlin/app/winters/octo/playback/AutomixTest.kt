@@ -111,6 +111,23 @@ class AutomixTest {
     }
 
     @Test
+    fun aQuietIntroPlaysUnderTheEndOfAHotSong() {
+        val head = AutomixCases.head("quiet-intro").features
+        // The 1 s level, power averaged, reaches the body less 6 dB once a
+        // quarter of its window holds the full-level part.
+        assertEquals(5_750.0, head.introEndMs!!.toDouble(), 20.0)
+        assertEquals(0L, AutomixCases.head("hot-end").features.introEndMs)
+        val plan = plan("quiet-intro")
+        // Without the intro a hot ending gets the shortest blend.
+        assertEquals(SHORTEST_BLEND_MS, plan("hot-end").overlapMs)
+        assertTrue("${plan.overlapMs}", plan.overlapMs >= head.introEndMs!! - plan.entryMs)
+        assertEquals(199_750L, plan.startMs + plan.overlapMs)
+        assertTrue(plan.reason, plan.reason.contains("(full from 5."))
+        // Never longer than the slider allows.
+        assertEquals(4_000L, plan("quiet-intro-capped").overlapMs)
+    }
+
+    @Test
     fun aHotEndingHasNoOutro() {
         val features = AutomixCases.tail("hot-end").features
         assertEquals(200_000L, features.soundEndMs)
