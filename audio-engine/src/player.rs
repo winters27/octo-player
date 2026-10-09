@@ -15,14 +15,15 @@ use crate::api::{
     RepeatMode,
 };
 use crate::automix::{
-    AutomixSettings, HEAD_SECS, LATEST_EXIT_SECS, LEAD_SECS, PLAIN_K, PlanInput, RATE_EASE_SECS, TAIL_SECS,
+    AutomixSettings, HEAD_SECS, LATEST_EXIT_SECS, LEAD_SECS, LiveAnalysis, PlanInput, PlanSettings,
+    RATE_EASE_SECS, SILENCE_BELOW_BODY_DB, SILENCE_FLOOR_DB, TAIL_SECS, TransitionContext, TransitionKind,
     TransitionPlan,
 };
 use crate::crossfade::{FadeSong, SHORTEST_FADE_MS, blend_decision};
 use crate::deck::{Deck, DeckStatus};
 use crate::decode::TrackInfo;
 use crate::lane::Lane;
-use crate::mixer::{FadeShape, Marker, MixState, Mixer, Transition};
+use crate::mixer::{FadeShape, LowPassSteps, Marker, MixState, Mixer, Transition};
 use crate::output::{
     DeviceEvent, Driver, OpenedOutput, OutputDevice, OutputFormat, OutputShared, Renderer, ring,
 };
@@ -47,6 +48,10 @@ const SCOUT_LIMIT: Duration = Duration::from_secs(20);
 /// The latest a waiting blend is decided: this long, in song time, before
 /// the crossfade at the end of the song would have to start.
 const DECIDE_MARGIN_SECS: f64 = 1.0;
+
+/// Past the deadline, a next song whose length is not known yet is waited
+/// for until only the shortest blend and this much are left of the playing one.
+const LAST_CALL_SECS: f64 = 0.1;
 
 /// How long without sound, while playing, before it counts as buffering.
 const STARVED_GRACE: Duration = Duration::from_millis(80);
@@ -839,8 +844,9 @@ impl Player {
             && let Some(len) = self.length_ms(index)
         {
             let part = SectionPart::Tail { secs: TAIL_SECS, len_secs: Some(len as f64 / 1_000.0) };
-            let source = self.queue[index].item.source.clone();
-            self.scouting.a_tail = Some(ScoutJob::start(source, self.http_for(index), part));
+            let item = &self.queue[index].item;
+            let (source, bpm) = (item.source.clone(), item.bpm);
+            self.scouting.a_tail = Some(ScoutJob::start(source, self.http_for(index), part, bpm));
         }
         let next = if self.stop_after_current { None } else { self.following(true) };
         let b_key = next.map(|i| self.queue[i].key).filter(|&k| k != a_key);
@@ -848,7 +854,8 @@ impl Player {
             self.scouting.b_key = b_key;
             self.scouting.b_head = next.filter(|_| b_key.is_some()).map(|i| {
                 let part = SectionPart::Head { secs: HEAD_SECS };
-                ScoutJob::start(self.queue[i].item.source.clone(), self.http_for(i), part)
+                let item = &self.queue[i].item;
+                ScoutJob::start(item.source.clone(), self.http_for(i), part, item.bpm)
             });
         }
     }
@@ -942,6 +949,13 @@ impl Player {
         if can_blend && !deadline && !(next_known && scouted) {
             return;
         }
+        // Past the deadline the next song's length is still worth waiting
+        // for while a short blend over what is left still fits.
+        let last_call =
+            remaining.is_none_or(|r| r <= SHORTEST_FADE_MS as f64 / 1_000.0 * speed + LAST_CALL_SECS);
+        if can_blend && !next_known && !last_call {
+            return;
+        }
         self.decide_next(current, next, position, failed);
     }
 
@@ -975,90 +989,122 @@ impl Player {
                 return;
             }
         };
-        let blend = fade_ms as f64 / 1_000.0 * speed;
+        let blend_ms = (fade_ms as f64 * speed).round() as i64;
         let b_len = next_song.duration_ms as f64 / 1_000.0;
-        let mut plan = self.make_plan(current_key, key, total, b_len, blend);
-        // A smart plan needs time to line the incoming song up; a start
-        // already passed (a seek near the end) can only blend over what is left.
-        let lead = if self.automix.smart_transitions { LEAD_SECS * speed } else { 0.0 };
-        if position + lead > plan.start_secs {
-            plan = plan.late(total, position);
-            if plan.overlap_secs / speed * 1_000.0 < SHORTEST_FADE_MS as f64 {
-                self.join_gaplessly(current_key, key, deck, loudness, total, "too late to blend");
-                return;
+        let now_ms = (position * 1_000.0) as i64;
+        let (mut plan, live) = self.make_plan(current, next, &current_song, &next_song, blend_ms, now_ms);
+        if plan.kind == TransitionKind::Gapless {
+            let why = plan.reason.strip_prefix("gapless: ").unwrap_or(&plan.reason).to_string();
+            self.join_gaplessly(current_key, key, deck, loudness, total, &why);
+            return;
+        }
+        // A start already passed, or too soon to line the incoming song up
+        // (a seek near the end), can only blend over what is left.
+        let lead_ms = if self.automix.smart_transitions { (LEAD_SECS * speed * 1_000.0) as i64 } else { 0 };
+        if !plan.late && now_ms + lead_ms > plan.start_ms {
+            match plan.late_from(now_ms) {
+                Some(late) if late.overlap_secs() / speed * 1_000.0 >= SHORTEST_FADE_MS as f64 => plan = late,
+                _ => {
+                    self.join_gaplessly(current_key, key, deck, loudness, total, "too late to blend");
+                    return;
+                }
             }
         }
-        if plan.entry_secs > 0.0 {
-            deck.seek(plan.entry_secs);
+        if plan.entry_ms > 0 {
+            deck.seek(plan.entry_secs());
         }
-        let shape = self.shape_of(&plan, b_len);
+        let shape = self.shape_of(&plan, b_len, live.as_ref());
         let rate = self.mixer.as_ref().map(|m| m.rate()).unwrap_or(48_000) as f64;
-        let frames = (plan.overlap_secs * rate) as u64;
+        let frames = (plan.overlap_secs() * rate) as u64;
         if let Some(mixer) = self.mixer.as_mut() {
-            mixer.plan_fade(current_key, plan.start_secs, frames, deck, loudness, shape);
+            mixer.plan_fade(current_key, plan.start_secs(), frames, deck, loudness, shape);
         }
         let reason = plan.describe();
-        self.tell_plan(current_key, key, plan.start_secs, plan.entry_secs, plan.overlap_secs, reason);
+        self.tell_plan(current_key, key, plan.start_secs(), plan.entry_secs(), plan.overlap_secs(), reason);
     }
 
-    // The blend from song `a` into song `b`, `blend` seconds long by the
-    // crossfade rules.
-    fn make_plan(&self, a: u64, b: u64, a_len: f64, b_len: f64, blend: f64) -> TransitionPlan {
+    // The blend from the song at `current` into the one at `next`,
+    // `blend_ms` of song time long by the crossfade rules, decided `now_ms`
+    // into the playing song. Also hands back what the live tap heard of it.
+    fn make_plan(
+        &self,
+        current: usize,
+        next: usize,
+        current_song: &FadeSong,
+        next_song: &FadeSong,
+        blend_ms: i64,
+        now_ms: i64,
+    ) -> (TransitionPlan, Option<LiveAnalysis>) {
+        let a_len_ms = current_song.duration_ms as i64;
         if !self.automix.smart_transitions {
-            return TransitionPlan::fixed(a_len, blend, 0.0, "fixed crossfade");
+            return (TransitionPlan::fixed_crossfade(a_len_ms, blend_ms, "smart transitions off"), None);
         }
+        let (a, b) = (self.queue[current].key, self.queue[next].key);
+        let (a_item, b_item) = (&self.queue[current].item, &self.queue[next].item);
         let s = &self.scouting;
         let tail = s.a_tail.as_ref().filter(|_| s.a_key == Some(a)).and_then(|j| j.analysis());
         let head = s.b_head.as_ref().filter(|_| s.b_key == Some(b)).and_then(|j| j.analysis());
-        let (Some(tail), Some(head)) = (tail, head) else {
-            return TransitionPlan::fixed(a_len, blend, PLAIN_K, "plain crossfade, no analysis");
-        };
         let speed = self.pace.speed as f64;
-        let live = self.mixer.as_ref().and_then(|m| m.live_analysis(a));
+        let live = self.mixer.as_ref().and_then(|m| m.live_analysis(a, a_item.bpm));
         let max_ms =
             if self.automix.max_overlap_ms > 0 { self.automix.max_overlap_ms } else { self.crossfade_ms };
         let input = PlanInput {
-            a_len_secs: a_len,
-            b_len_secs: b_len,
-            a_tail: &tail,
-            b_head: &head,
-            fixed_overlap_secs: blend,
-            max_overlap_secs: max_ms as f64 / 1_000.0 * speed,
-            settings: &self.automix,
-            a_live: live.as_ref(),
+            current: current_song.clone(),
+            next: next_song.clone(),
+            tail: tail.as_ref(),
+            head: head.as_ref(),
+            settings: PlanSettings {
+                max_overlap_ms: (max_ms as f64 * speed).round() as i64,
+                smart: true,
+                filter_sweeps: self.automix.filter_sweeps,
+                beat_match: self.automix.match_tempo,
+            },
+            context: TransitionContext {
+                now_ms,
+                played_ms: live.as_ref().map_or(now_ms, |l| l.heard_ms),
+                repeat_one: self.repeat == RepeatMode::One,
+                stop_at_end_of_song: self.stop_after_current,
+                pace: speed,
+                skip_silence: false,
+                current_genre: a_item.genre.clone(),
+                next_genre: b_item.genre.clone(),
+                body_level_db: live.as_ref().and_then(|l| l.body_level_db),
+                tempo_prior: live.as_ref().and_then(|l| l.tempo_prior),
+            },
         };
         let plan = crate::automix::plan(&input);
         // A plan that does not fit the songs falls back to the fixed point.
-        let fits = plan.overlap_secs > 0.0
-            && plan.start_secs >= 0.0
-            && plan.start_secs + plan.overlap_secs <= a_len + 1e-6
-            && plan.entry_secs >= 0.0
-            && plan.entry_secs + plan.overlap_secs < b_len;
+        let b_len_ms = next_song.duration_ms as i64;
+        let fits = plan.kind == TransitionKind::Gapless
+            || (plan.overlap_ms > 0
+                && plan.start_ms >= 0
+                && plan.start_ms + plan.overlap_ms <= a_len_ms
+                && plan.entry_ms >= 0
+                && plan.entry_ms + plan.overlap_ms < b_len_ms);
         if fits {
-            plan
+            (plan, live)
         } else {
-            TransitionPlan::fixed(a_len, blend, PLAIN_K, "plan did not fit, plain crossfade")
+            let why = format!("the plan did not fit ({})", plan.reason);
+            (TransitionPlan::fixed_crossfade(a_len_ms, blend_ms, &why), live)
         }
     }
 
-    // How the mixer runs `plan`, with the user's choices applied.
-    fn shape_of(&self, plan: &TransitionPlan, b_len: f64) -> FadeShape {
-        let overlap = plan.overlap_secs.max(1e-9);
-        let beats = plan
-            .beats_secs
-            .iter()
-            .map(|b| ((b - plan.start_secs) / overlap) as f32)
-            .filter(|t| (0.0..=1.0).contains(t))
-            .collect();
+    // How the mixer runs `plan`. The outgoing song's silence gate comes from
+    // its level as heard so far.
+    fn shape_of(&self, plan: &TransitionPlan, b_len: f64, live: Option<&LiveAnalysis>) -> FadeShape {
         // The incoming song must outlast the rate's ease back to normal.
-        let room = b_len - plan.entry_secs > plan.overlap_secs + RATE_EASE_SECS + 1.0;
+        let room = b_len - plan.entry_secs() > plan.overlap_secs() + RATE_EASE_SECS + 1.0;
+        let gate = live
+            .and_then(|l| l.body_level_db)
+            .map_or(SILENCE_FLOOR_DB, |body| SILENCE_FLOOR_DB.max(body - SILENCE_BELOW_BODY_DB));
+        let equal_power = plan.k == 0.0;
         FadeShape {
             k: plan.k,
-            filter_strength: if self.automix.filter_sweeps { plan.filter_strength } else { 0.0 },
-            beats,
-            rate: plan.rate.filter(|_| self.automix.match_tempo && room),
-            silence_gate_db: plan.silence_gate_db,
-            headroom_db: plan.headroom_db,
+            filter_strength: plan.filter_strength,
+            steps: plan.low_pass_glide().map(|glide| LowPassSteps { beats: plan.beat_progress(), glide }),
+            rate: plan.beat_match_rate.filter(|_| room),
+            silence_gate_db: (!equal_power).then_some(gate as f32),
+            headroom_db: plan.headroom_db as f32,
         }
     }
 

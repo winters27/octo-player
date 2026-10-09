@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::automix::{SectionAnalysis, SectionAnalyzer};
+use crate::automix::{SectionAnalysis, SectionAnalyzer, SectionKind};
 use crate::decode::Decoder;
 use crate::error::{ErrorKind, Failure};
 use crate::source::{self, http::HttpOptions};
@@ -88,15 +88,22 @@ pub struct ScoutJob {
 }
 
 impl ScoutJob {
-    /// Starts decoding `part` of `source` and summing it up.
-    pub fn start(source: String, mut http: HttpOptions, part: SectionPart) -> ScoutJob {
+    /// Starts decoding `part` of `source` and analyzing it. `tag_bpm` is the
+    /// song's tempo from its tags, when it has one.
+    pub fn start(source: String, mut http: HttpOptions, part: SectionPart, tag_bpm: Option<f64>) -> ScoutJob {
         let cancel = Arc::new(AtomicBool::new(false));
         http.cancel = Some(cancel.clone());
         let result = Arc::new(Mutex::new(None));
         let (c, r) = (cancel.clone(), result.clone());
         let spawned = thread::Builder::new().name("octo-scout".into()).spawn(move || {
-            let mut analyzer = SectionAnalyzer::new();
-            let outcome = scout_section(&source, http, part, &c, &mut analyzer).map(|_| analyzer.finish());
+            let kind = match part {
+                SectionPart::Head { .. } => SectionKind::Head,
+                SectionPart::Tail { .. } => SectionKind::Tail,
+            };
+            let mut analyzer = SectionAnalyzer::new(kind, tag_bpm);
+            let outcome = scout_section(&source, http, part, &c, &mut analyzer).and_then(|_| {
+                analyzer.finish().ok_or_else(|| Failure::new(ErrorKind::Other, "the section had no sound"))
+            });
             if let Err(f) = &outcome
                 && !c.load(Ordering::Relaxed)
             {
@@ -231,6 +238,7 @@ mod tests {
             path.to_string_lossy().into(),
             HttpOptions::default(),
             SectionPart::Head { secs: 1.5 },
+            None,
         );
         let until = Instant::now() + Duration::from_secs(5);
         while !job.is_settled(Duration::from_secs(20)) {
@@ -238,8 +246,8 @@ mod tests {
             thread::sleep(Duration::from_millis(2));
         }
         let a = job.analysis().unwrap();
-        assert_eq!((a.start_secs, a.sample_rate), (0.0, 48_000));
-        assert!((a.secs - 1.5).abs() < 1e-9);
+        assert_eq!((a.envelope.start_ms, a.envelope.size()), (0, 150));
+        assert_eq!(a.features.sound_start_ms, Some(0));
 
         let cancel = AtomicBool::new(true);
         let mut sink = Collect::default();

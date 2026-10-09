@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use crate::crossfade::{fade_in_volume, fade_out_volume};
 use crate::deck::Deck;
 use crate::lane::Lane;
-use crate::mixer::{FadeShape, Marker, MixState, Mixer, Transition};
+use crate::mixer::{FadeShape, LowPassSteps, Marker, MixState, Mixer, Transition};
 use crate::pace::Pace;
 use crate::sound::model::ReplayGainSettings;
 use crate::sound::model::SoundSettings;
@@ -246,20 +246,20 @@ fn the_curve_follows_k() {
     let (out, _) = blend(FadeShape { k, ..Default::default() }, fade, 0.0, 96_000);
     let fade_start = 48_000 + LATENCY;
     for i in (0..fade as usize).step_by(1_999) {
-        let (gout, _) = crate::automix::gains(i as f32 / fade as f32, k);
-        assert!((out[(fade_start + i) * 2] - 0.25 * gout).abs() < 1e-6, "at {i}");
+        let (gout, _) = crate::automix::gains(i as f64 / fade as f64, k);
+        assert!((out[(fade_start + i) * 2] as f64 - 0.25 * gout).abs() < 1e-6, "at {i}");
     }
     // Halfway the outgoing song is at cos(pi/4) * (1 - k) + k / 2.
-    let half = out[(fade_start + fade as usize / 2) * 2] / 0.25;
-    assert!((half - (std::f32::consts::FRAC_1_SQRT_2 * (1.0 - k) + k / 2.0)).abs() < 1e-4, "{half}");
+    let half = out[(fade_start + fade as usize / 2) * 2] as f64 / 0.25;
+    assert!((half - (std::f64::consts::FRAC_1_SQRT_2 * (1.0 - k) + k / 2.0)).abs() < 1e-4, "{half}");
 }
 
 #[test]
 fn filter_sweeps_touch_only_the_blend() {
     let fade = 24_000u64;
     let plain = FadeShape { k: 0.4, ..Default::default() };
-    let swept =
-        FadeShape { k: 0.4, filter_strength: 0.7, beats: vec![0.0, 0.25, 0.5, 0.75], ..Default::default() };
+    let steps = LowPassSteps { beats: vec![0.25, 0.5, 0.75], glide: 0.125 };
+    let swept = FadeShape { k: 0.4, filter_strength: 0.7, steps: Some(steps), ..Default::default() };
     let (a, _) = blend(plain, fade, 0.0, 96_000);
     let (b, _) = blend(swept, fade, 0.0, 96_000);
     assert_eq!(a.len(), b.len());
@@ -310,29 +310,31 @@ fn a_matched_tempo_eases_back_to_normal() {
     let shape = FadeShape { k: 0.4, rate: Some(1.05), ..Default::default() };
     let (out, markers) = blend(shape, fade, 0.0, b_frames);
     let fade_start = 48_000 + LATENCY;
-    // Through the blend B moves at 1.05, then eases back over 5 s
-    // (1.025 on average), then plays on at its own rate.
+    // Through the blend B moves at 1.05, then eases back over 5 s on a
+    // half cosine (1.025 on average), then plays on at its own rate.
     let b_out = 1.0 + 5.0 + (9.0 - 1.05 - 5.125);
     let expected = fade_start as f64 + b_out * RATE as f64;
     assert!((out.len() as f64 / 2.0 - expected).abs() < 1_500.0, "{} vs {expected}", out.len() / 2);
     // The clock follows B's own time throughout.
-    let mut seen_eased = false;
     for m in markers.iter().filter(|m| m.key == 2) {
         let t = (m.frame as f64 - fade_start as f64) / RATE as f64;
         let song = if t <= 1.0 {
             t * 1.05
         } else if t <= 6.0 {
             let e = t - 1.0;
-            1.05 + e + 0.05 * (e - e * e / 10.0)
+            let pi = std::f64::consts::PI;
+            1.05 + 1.025 * e + 0.125 / pi * (pi * e / 5.0).sin()
         } else {
-            seen_eased = true;
             6.175 + (t - 6.0)
         };
         assert!((m.secs - song).abs() < 0.05, "{m:?}: want {song}");
     }
-    assert!(seen_eased, "no marker after the ease: {markers:?}");
+    // The ease lands softly, so the clock's last new marker comes at its
+    // very end, already at B's own rate.
     let last = markers.iter().rfind(|m| m.key == 2).unwrap();
-    assert!((last.secs_per_frame - 1.0 / RATE as f64).abs() < 1e-12, "{last:?}");
+    let t = (last.frame as f64 - fade_start as f64) / RATE as f64;
+    assert!(t > 5.9, "no marker near the end of the ease: {markers:?}");
+    assert!((last.secs_per_frame - 1.0 / RATE as f64).abs() < 1e-11, "{last:?}");
 }
 
 // A with sound for its first `sound` frames and silence after, into B as
@@ -366,6 +368,7 @@ fn a_blend_finishes_early_once_the_outgoing_song_falls_silent() {
     let at = 48_000 + LATENCY + 38_400;
     assert!((early[at * 2 + 1] - 0.25).abs() < 1e-6, "{}", early[at * 2 + 1]);
     let (_, gin) = crate::automix::gains(0.8, k);
+    let gin = gin as f32;
     assert!((late[at * 2 + 1] - 0.25 * gin).abs() < 1e-6);
     assert!(late[at * 2 + 1] < 0.249);
     // Before the quiet has lasted 0.3 s, both are the same.
@@ -384,12 +387,12 @@ fn headroom_lowers_the_middle_of_a_blend() {
     let fade_start = 48_000 + LATENCY;
     let mid = fade_start + fade as usize / 2;
     let (gout, _) = crate::automix::gains(0.5, k);
-    let down = 10f32.powf(-1.0 / 20.0);
-    assert!((out[mid * 2] - 0.25 * gout * down).abs() < 1e-6, "{}", out[mid * 2]);
+    let down = 10f64.powf(-1.0 / 20.0);
+    assert!((out[mid * 2] as f64 - 0.25 * gout * down).abs() < 1e-6, "{}", out[mid * 2]);
     // Coming in gradually: barely lowered at the very start.
     let (g0, _) = crate::automix::gains(0.01, k);
     let start = fade_start + fade as usize / 100;
-    assert!(out[start * 2] > 0.25 * g0 * down);
+    assert!(out[start * 2] as f64 > 0.25 * g0 * down);
     // Gone once the blend is over: B at its own level.
     let after = fade_start + fade as usize + 10;
     assert_eq!(place_of(out[after * 2 + 1]), (fade as usize + 10) % 15_000);
@@ -405,11 +408,12 @@ fn the_live_tap_hears_the_playing_song_before_shaping() {
     lane.last = true;
     mixer.start(lane, Transition::Start);
     render_all(&mut mixer);
-    let live = mixer.live_analysis(1).expect("tapped");
-    assert!((live.secs - 1.0).abs() < 1e-9, "{}", live.secs);
+    let live = mixer.live_analysis(1, None).expect("tapped");
+    assert_eq!(live.heard_ms, 1_000);
     // Mono of 0.25 on one side is 0.125.
-    assert!((live.mean_db - 20.0 * 0.125f32.log10()).abs() < 1e-3, "{}", live.mean_db);
-    assert!(mixer.live_analysis(2).is_none());
+    let body = live.body_level_db.unwrap();
+    assert!((body - 20.0 * 0.125f64.log10()).abs() < 1e-3, "{body}");
+    assert!(mixer.live_analysis(2, None).is_none());
 }
 
 #[test]

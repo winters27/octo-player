@@ -189,15 +189,24 @@ When the next song is close, the player opens it and decides how it
 follows: gapless, or a blend. A song with no length in the queue (outside
 songs on radio) is decided once its decoder reports the length, at the
 latest just before the crossfade would have to start. With smart
-transitions on, the end of the playing song and the start of the next are
-decoded on a scout thread (a stream's end only when its server answers
-ranges) and `automix::plan` turns them into a `TransitionPlan`: when the
-blend starts, where the next song comes in, how long both sound, the curve,
-the filter sweeps and an optional rate. The mixer runs it; the outgoing
-song stops when the blend ends, and finishes early when it falls silent. A
-plan whose start has passed, or comes in under 3 s, becomes the late plan
-at the end of the song. The live tap sums up the playing song as it is
-mixed, for the planner.
+transitions on, the end of the playing song (60 s) and the start of the
+next (30 s) are decoded on a scout thread (a stream's end only when its
+server answers ranges) into envelopes: level, bass level and a 3-band
+spectral flux every 10 ms. From those `automix::plan` finds each song's
+body level, sound start and end, outro, section boundaries and beat grid,
+and chooses a `TransitionPlan`: when the blend starts (on a bar line when
+both tempos are trusted, scored against the outro and the boundaries),
+where the next song comes in, how long both sound, the curve, the filter
+sweeps and an optional rate. The mixer runs it; the outgoing song stops
+when the blend ends, and finishes early when it falls silent. Without the
+end's analysis, or with no start left at least 3 s ahead, the plan is a
+late one at the end of the song. The live tap keeps the playing song's
+envelope as it is mixed, for its whole-song level and tempo. Genres such as
+classical or podcast get the plain crossfade.
+
+The analysis and planner are the same as the app's Kotlin copy in
+`shared/core`: `automix::vectors` runs every case in
+`shared/core/src/commonTest/resources/automix-vectors.json`.
 
 ```sh
 cargo run --release --example render_transition -- a.flac b.flac out.wav --filters 0.7

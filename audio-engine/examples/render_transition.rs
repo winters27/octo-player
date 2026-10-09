@@ -21,10 +21,13 @@ use std::io::Write;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
-use octo_audio::automix::{self, AutomixSettings, PlanInput, SectionAnalyzer, TransitionPlan};
+use octo_audio::automix::{
+    self, PlanSettings, SectionAnalyzer, SectionKind, TransitionContext, TransitionPlan,
+};
+use octo_audio::crossfade::FadeSong;
 use octo_audio::deck::Deck;
 use octo_audio::lane::Lane;
-use octo_audio::mixer::{FadeShape, MixState, Mixer, Transition};
+use octo_audio::mixer::{FadeShape, LowPassSteps, MixState, Mixer, Transition};
 use octo_audio::pace::Pace;
 use octo_audio::scout::{SectionPart, scout_section};
 use octo_audio::sound::model::{ReplayGainSettings, SoundSettings};
@@ -64,10 +67,11 @@ fn length_of(source: &str) -> f64 {
 }
 
 fn scout(source: &str, part: SectionPart) -> Option<automix::SectionAnalysis> {
-    let mut analyzer = SectionAnalyzer::new();
+    let kind = if matches!(part, SectionPart::Head { .. }) { SectionKind::Head } else { SectionKind::Tail };
+    let mut analyzer = SectionAnalyzer::new(kind, None);
     let never = AtomicBool::new(false);
     match scout_section(source, HttpOptions::default(), part, &never, &mut analyzer) {
-        Ok(()) => Some(analyzer.finish()),
+        Ok(()) => analyzer.finish(),
         Err(f) => {
             eprintln!("could not scout {source}: {f}");
             None
@@ -102,7 +106,7 @@ fn main() {
     let mut crossfade_ms = 8_000u32;
     let mut plain = false;
     let (mut start, mut entry, mut overlap) = (None::<f64>, None::<f64>, None::<f64>);
-    let (mut k, mut filters, mut rate, mut headroom) = (None::<f32>, None::<f32>, None::<f32>, None::<f32>);
+    let (mut k, mut filters, mut rate, mut headroom) = (None::<f64>, None::<f64>, None::<f64>, None::<f64>);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--crossfade" => crossfade_ms = value(&mut args, &arg),
@@ -122,40 +126,35 @@ fn main() {
         fail("usage: render_transition <A> <B> <out.wav> [options]");
     };
     let (a_len, b_len) = (length_of(a), length_of(b));
-    let blend = (crossfade_ms as f64 / 1_000.0).min(a_len.min(b_len) / 2.0);
-    let settings = AutomixSettings {
-        smart_transitions: true,
-        filter_sweeps: true,
-        match_tempo: true,
-        max_overlap_ms: crossfade_ms,
-    };
+    let blend_ms = (crossfade_ms as f64).min(a_len.min(b_len) / 2.0 * 1_000.0) as i64;
     let mut plan = if plain {
-        TransitionPlan::fixed(a_len, blend, 0.0, "fixed crossfade")
+        TransitionPlan::fixed_crossfade((a_len * 1_000.0) as i64, blend_ms, "fixed crossfade")
     } else {
         let tail = scout(a, SectionPart::Tail { secs: automix::TAIL_SECS, len_secs: Some(a_len) });
         let head = scout(b, SectionPart::Head { secs: automix::HEAD_SECS });
-        match (tail, head) {
-            (Some(tail), Some(head)) => automix::plan(&PlanInput {
-                a_len_secs: a_len,
-                b_len_secs: b_len,
-                a_tail: &tail,
-                b_head: &head,
-                a_live: None,
-                fixed_overlap_secs: blend,
-                max_overlap_secs: blend,
-                settings: &settings,
-            }),
-            _ => TransitionPlan::fixed(a_len, blend, automix::PLAIN_K, "plain crossfade, no analysis"),
-        }
+        let song = |len: f64, album: &str| FadeSong {
+            album_id: Some(album.into()),
+            album_order: None,
+            duration_ms: (len * 1_000.0) as u64,
+        };
+        let settings = PlanSettings { beat_match: true, ..PlanSettings::new(crossfade_ms as i64) };
+        automix::plan_transition(
+            &song(a_len, "a"),
+            Some(&song(b_len, "b")),
+            tail.as_ref(),
+            head.as_ref(),
+            &settings,
+            &TransitionContext { played_ms: (a_len * 1_000.0) as i64, ..Default::default() },
+        )
     };
     if let Some(v) = start {
-        plan.start_secs = v;
+        plan.start_ms = (v * 1_000.0) as i64;
     }
     if let Some(v) = entry {
-        plan.entry_secs = v;
+        plan.entry_ms = (v * 1_000.0) as i64;
     }
     if let Some(v) = overlap {
-        plan.overlap_secs = v;
+        plan.overlap_ms = (v * 1_000.0) as i64;
     }
     if let Some(v) = k {
         plan.k = v;
@@ -164,16 +163,16 @@ fn main() {
         plan.filter_strength = v;
     }
     if rate.is_some() {
-        plan.rate = rate;
+        plan.beat_match_rate = rate;
     }
     if let Some(v) = headroom {
         plan.headroom_db = v;
     }
     println!("{}", plan.describe());
 
-    let from = (plan.start_secs - AROUND_SECS).max(0.0);
+    let from = (plan.start_secs() - AROUND_SECS).max(0.0);
     let a_deck = Deck::open(1, a.clone(), from, HttpOptions::default());
-    let b_deck = Deck::open(2, b.clone(), plan.entry_secs, HttpOptions::default());
+    let b_deck = Deck::open(2, b.clone(), plan.entry_secs(), HttpOptions::default());
     let until = Instant::now() + Duration::from_secs(30);
     while !(a_deck.is_ready() && b_deck.is_ready()) {
         if Instant::now() > until {
@@ -185,19 +184,18 @@ fn main() {
     let mut lane = Lane::new(a_deck, Loudness::default(), &ReplayGainSettings::default(), RATE);
     lane.last = true;
     mixer.start(lane, Transition::Start);
-    let overlap = plan.overlap_secs;
-    let beats = plan.beats_secs.iter().map(|t| ((t - plan.start_secs) / overlap.max(1e-9)) as f32).collect();
+    let overlap = plan.overlap_secs();
     let shape = FadeShape {
         k: plan.k,
         filter_strength: plan.filter_strength,
-        beats,
-        rate: plan.rate,
-        silence_gate_db: plan.silence_gate_db,
-        headroom_db: plan.headroom_db,
+        steps: plan.low_pass_glide().map(|glide| LowPassSteps { beats: plan.beat_progress(), glide }),
+        rate: plan.beat_match_rate,
+        silence_gate_db: (plan.k != 0.0).then_some(automix::SILENCE_FLOOR_DB as f32),
+        headroom_db: plan.headroom_db as f32,
     };
-    mixer.plan_fade(1, plan.start_secs, (overlap * RATE as f64) as u64, b_deck, Loudness::default(), shape);
+    mixer.plan_fade(1, plan.start_secs(), (overlap * RATE as f64) as u64, b_deck, Loudness::default(), shape);
 
-    let wanted = ((plan.start_secs - from + overlap + AROUND_SECS) * RATE as f64) as usize;
+    let wanted = ((plan.start_secs() - from + overlap + AROUND_SECS) * RATE as f64) as usize;
     let mut samples = Vec::with_capacity(wanted * 2);
     let mut block = vec![0.0f32; 2_048];
     let mut markers = Vec::new();
@@ -218,7 +216,7 @@ fn main() {
     println!(
         "wrote {out}: {:.1} s, the blend from {:.1} s in, peak {:.2} dBFS",
         samples.len() as f64 / 2.0 / RATE as f64,
-        plan.start_secs - from,
+        plan.start_secs() - from,
         20.0 * peak.max(1e-10).log10()
     );
 }

@@ -88,6 +88,8 @@ fn item(id: &str, path: &Path) -> QueueItem {
         duration_ms: None,
         replay_gain: None,
         headers: Vec::new(),
+        genre: None,
+        bpm: None,
     }
 }
 
@@ -690,7 +692,7 @@ fn a_next_song_of_unknown_length_still_crossfades() {
         unreachable!()
     };
     assert_eq!((start_ms, entry_ms, overlap_ms), (2_000, 0, 1_000));
-    assert!(reason.starts_with("automix: equal-power at 2.00s"), "{reason}");
+    assert!(reason.starts_with("automix: crossfade at 2.00 s over 1.00 s"), "{reason}");
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
     assert!(!events.all().iter().any(|e| matches!(e, EngineEvent::GaplessTransition { .. })));
     engine.shutdown();
@@ -713,9 +715,11 @@ fn a_crossfade_off_still_says_why_the_join_is_gapless() {
 }
 
 fn test_plan(input: &crate::automix::PlanInput) -> crate::automix::TransitionPlan {
-    let mut plan = crate::automix::TransitionPlan::fixed(input.a_len_secs, 0.5, 0.4, "test plan");
-    plan.start_secs = 9.0;
-    plan.entry_secs = 0.5;
+    let len = input.current.duration_ms as i64;
+    let mut plan = crate::automix::TransitionPlan::fixed_crossfade(len, 500, "test plan");
+    plan.k = 0.4;
+    plan.start_ms = 9_000;
+    plan.entry_ms = 500;
     plan
 }
 
@@ -777,7 +781,7 @@ fn starting_inside_the_blend_window_blends_over_what_is_left() {
     let planned = events
         .wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
     let EngineEvent::TransitionPlanned { start_ms, overlap_ms, reason, .. } = planned else { unreachable!() };
-    assert!((2_200..2_400).contains(&start_ms), "{start_ms}: {reason}");
+    assert!((2_200..2_450).contains(&start_ms), "{start_ms}: {reason}");
     assert!((start_ms + overlap_ms).abs_diff(3_000) <= 1, "{reason}");
     assert!(reason.contains("late"), "{reason}");
     let fade = events.wait_for("crossfade", Duration::from_secs(10), |e| {

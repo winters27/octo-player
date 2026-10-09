@@ -3423,6 +3423,17 @@ data class QueueItem (
     val `replayGain`: ReplayGainInfo? = null 
     , 
     val `headers`: List<HttpHeader> = listOf() 
+    , 
+    /**
+     * The song's genre; some genres are never mixed into the next song.
+     */
+    val `genre`: kotlin.String? = null 
+    , 
+    /**
+     * The song's tempo from its tags, which settles whether a beat found in
+     * it runs at double or half time.
+     */
+    val `bpm`: kotlin.Double? = null 
     
 ){
     
@@ -3446,6 +3457,8 @@ public object FfiConverterTypeQueueItem: FfiConverterRustBuffer<QueueItem> {
             FfiConverterOptionalULong.read(buf),
             FfiConverterOptionalTypeReplayGainInfo.read(buf),
             FfiConverterSequenceTypeHttpHeader.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalDouble.read(buf),
         )
     }
 
@@ -3456,7 +3469,9 @@ public object FfiConverterTypeQueueItem: FfiConverterRustBuffer<QueueItem> {
             FfiConverterOptionalInt.allocationSize(value.`albumOrder`) +
             FfiConverterOptionalULong.allocationSize(value.`durationMs`) +
             FfiConverterOptionalTypeReplayGainInfo.allocationSize(value.`replayGain`) +
-            FfiConverterSequenceTypeHttpHeader.allocationSize(value.`headers`)
+            FfiConverterSequenceTypeHttpHeader.allocationSize(value.`headers`) +
+            FfiConverterOptionalString.allocationSize(value.`genre`) +
+            FfiConverterOptionalDouble.allocationSize(value.`bpm`)
     )
 
     override fun write(value: QueueItem, buf: ByteBuffer) {
@@ -3467,6 +3482,8 @@ public object FfiConverterTypeQueueItem: FfiConverterRustBuffer<QueueItem> {
             FfiConverterOptionalULong.write(value.`durationMs`, buf)
             FfiConverterOptionalTypeReplayGainInfo.write(value.`replayGain`, buf)
             FfiConverterSequenceTypeHttpHeader.write(value.`headers`, buf)
+            FfiConverterOptionalString.write(value.`genre`, buf)
+            FfiConverterOptionalDouble.write(value.`bpm`, buf)
     }
 }
 
@@ -4661,6 +4678,38 @@ public object FfiConverterOptionalFloat: FfiConverterRustBuffer<kotlin.Float?> {
         } else {
             buf.put(1)
             FfiConverterFloat.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalDouble: FfiConverterRustBuffer<kotlin.Double?> {
+    override fun read(buf: ByteBuffer): kotlin.Double? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterDouble.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Double?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterDouble.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Double?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterDouble.write(value, buf)
         }
     }
 }

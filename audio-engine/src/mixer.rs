@@ -9,8 +9,8 @@
 use std::collections::VecDeque;
 
 use crate::automix::{
-    LiveAnalysis, LiveAnalyzer, RATE_EASE_SECS, RATE_RANGE, gains, incoming_high_pass_hz,
-    outgoing_high_pass_hz, outgoing_low_pass_hz, stepped_low_pass_hz,
+    BEAT_MATCH_SETTLE_MS, Biquad, LiveAnalysis, LiveAnalyzer, RATE_RANGE, beat_match_rate_at, gains,
+    incoming_high_pass_hz, outgoing_high_pass_hz, outgoing_low_pass_hz, stepped_outgoing_low_pass_hz,
 };
 use crate::deck::Deck;
 use crate::error::Failure;
@@ -19,7 +19,7 @@ use crate::lane::{Lane, LaneState, Span};
 use crate::pace::{Pace, PaceStage, Stretch};
 use crate::scout::PcmSink;
 use crate::sound::biquad::FilterBank;
-use crate::sound::model::{SoundSettings, pass_coefficients};
+use crate::sound::model::SoundSettings;
 use crate::sound::replaygain::Loudness;
 use crate::sound::shaper::SoundShaper;
 
@@ -37,7 +37,7 @@ const RUSH_SECS: f64 = 0.25;
 
 /// How far into and out of a blend the headroom takes to come and go, as
 /// a share of the blend.
-const HEADROOM_RAMP: f32 = 0.1;
+const HEADROOM_RAMP: f64 = 0.1;
 
 /// What began at a point in the output.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -73,18 +73,27 @@ pub enum MixState {
     Ended,
 }
 
+/// The outgoing song's low-pass stepping on the beat rather than sweeping
+/// smoothly: `beats` are the beats inside the blend as progress from 0 to 1,
+/// and `glide` how long, in the same units, the cutoff takes to move to each
+/// beat's value (see `automix::stepped_outgoing_low_pass_hz`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LowPassSteps {
+    pub beats: Vec<f64>,
+    pub glide: f64,
+}
+
 /// How a crossfade sounds. The default is the plain equal-power crossfade.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FadeShape {
-    /// Gain curve parameter: 0 is equal power (see `automix::gains`).
-    pub k: f32,
+    /// Gain curve weight: 0 is equal power (see `automix::gains`).
+    pub k: f64,
     /// How deep the filter sweeps go, 0 for none.
-    pub filter_strength: f32,
-    /// Beats of the outgoing song inside the blend, as progress from 0 to 1,
-    /// for stepping its low-pass; empty for a smooth sweep.
-    pub beats: Vec<f32>,
+    pub filter_strength: f64,
+    /// Steps for the outgoing low-pass; `None` sweeps it smoothly.
+    pub steps: Option<LowPassSteps>,
     /// The incoming song's rate through the blend, eased back to 1 after.
-    pub rate: Option<f32>,
+    pub rate: Option<f64>,
     /// When the outgoing song stays below this level (dBFS) for 0.3 s
     /// during the blend, the blend finishes early.
     pub silence_gate_db: Option<f32>,
@@ -119,7 +128,7 @@ struct Fade {
     frames: u64,
     done: u64,
     clock: FadeClock,
-    k: f32,
+    k: f64,
     sweeps: Option<Sweeps>,
     // Mean square under which the outgoing song counts as silent.
     gate: Option<f32>,
@@ -133,16 +142,16 @@ struct Fade {
 struct FadeClock {
     frames: u64,
     // From `done`, at progress `from`, the rest of the way over `len` frames.
-    rush: Option<(u64, f32, u64)>,
+    rush: Option<(u64, f64, u64)>,
 }
 
 impl FadeClock {
-    fn progress(&self, done: u64) -> f32 {
+    fn progress(&self, done: u64) -> f64 {
         match self.rush {
             Some((at, from, len)) => {
-                from + (1.0 - from) * (done.saturating_sub(at) as f32 / len.max(1) as f32).min(1.0)
+                from + (1.0 - from) * (done.saturating_sub(at) as f64 / len.max(1) as f64).min(1.0)
             }
-            None => done as f32 / self.frames.max(1) as f32,
+            None => done as f64 / self.frames.max(1) as f64,
         }
     }
 
@@ -155,12 +164,12 @@ impl FadeClock {
 }
 
 // Lowers a blend by `db` at progress `p`, coming in and going out smoothly.
-fn headroom(db: f32, p: f32) -> f32 {
+fn headroom(db: f32, p: f64) -> f64 {
     let w = (p / HEADROOM_RAMP).min((1.0 - p) / HEADROOM_RAMP).clamp(0.0, 1.0);
-    10f32.powf(-db * w / 20.0)
+    10f64.powf(-db as f64 * w / 20.0)
 }
 
-// Sums up the playing song's sound as it is mixed, before the sound
+// Follows the playing song's sound as it is mixed, before the sound
 // shaping and with its ReplayGain taken back out, for the planner.
 struct LiveTap {
     key: Option<u64>,
@@ -187,35 +196,34 @@ impl LiveTap {
 // the incoming one. They move every `SWEEP_STEP` frames.
 struct Sweeps {
     rate: u32,
-    strength: f32,
-    beats: Vec<f32>,
+    strength: f64,
+    steps: Option<LowPassSteps>,
     outgoing: FilterBank,
     incoming: FilterBank,
 }
 
 impl Sweeps {
-    fn new(rate: u32, strength: f32, beats: Vec<f32>) -> Self {
+    fn new(rate: u32, strength: f64, steps: Option<LowPassSteps>) -> Self {
         let mut sweeps = Sweeps {
             rate,
             strength,
-            beats,
-            outgoing: FilterBank::new(2, vec![pass_coefficients(false, 18_000.0, rate); 2]),
-            incoming: FilterBank::new(2, vec![pass_coefficients(true, 20.0, rate)]),
+            steps,
+            outgoing: FilterBank::new(2, vec![Biquad::low_pass(rate, 18_000.0).coefficients(); 2]),
+            incoming: FilterBank::new(2, vec![Biquad::high_pass(rate, 20.0).coefficients()]),
         };
         sweeps.tune(0.0);
         sweeps
     }
 
-    fn tune(&mut self, t: f32) {
+    fn tune(&mut self, t: f64) {
         let s = self.strength;
-        let low = if self.beats.is_empty() {
-            outgoing_low_pass_hz(t, s)
-        } else {
-            stepped_low_pass_hz(t, s, &self.beats)
+        let low = match &self.steps {
+            None => outgoing_low_pass_hz(t, s),
+            Some(steps) => stepped_outgoing_low_pass_hz(t, s, &steps.beats, steps.glide),
         };
-        self.outgoing.set(0, pass_coefficients(false, low, self.rate));
-        self.outgoing.set(1, pass_coefficients(true, outgoing_high_pass_hz(t, s), self.rate));
-        self.incoming.set(0, pass_coefficients(true, incoming_high_pass_hz(t, s), self.rate));
+        self.outgoing.set(0, Biquad::low_pass(self.rate, low).coefficients());
+        self.outgoing.set(1, Biquad::high_pass(self.rate, outgoing_high_pass_hz(t, s)).coefficients());
+        self.incoming.set(0, Biquad::high_pass(self.rate, incoming_high_pass_hz(t, s)).coefficients());
     }
 
     // Filters `frames` frames of each song, `done` frames into a blend
@@ -226,7 +234,7 @@ impl Sweeps {
         incoming: &mut [f32],
         frames: usize,
         done: u64,
-        progress: impl Fn(u64) -> f32,
+        progress: impl Fn(u64) -> f64,
     ) {
         let mut at = 0;
         while at < frames {
@@ -241,7 +249,8 @@ impl Sweeps {
 
 // The incoming song played at another rate, pitch kept, to line its tempo
 // up with the outgoing one: held through the blend, then eased back to
-// normal, after which it passes straight through and is dropped.
+// normal (`automix::beat_match_rate_at`), after which it passes straight
+// through and is dropped.
 struct Rated {
     key: u64,
     out_rate: u32,
@@ -258,14 +267,14 @@ struct Rated {
 }
 
 impl Rated {
-    fn new(key: u64, out_rate: u32, rate: f32, hold: u64) -> Self {
-        let from = rate.clamp(1.0 - RATE_RANGE, 1.0 + RATE_RANGE) as f64;
+    fn new(key: u64, out_rate: u32, rate: f64, hold: u64) -> Self {
+        let from = rate.clamp(1.0 - RATE_RANGE, 1.0 + RATE_RANGE);
         Rated {
             key,
             out_rate,
             from,
             hold,
-            ease: (RATE_EASE_SECS * out_rate as f64) as u64,
+            ease: (BEAT_MATCH_SETTLE_MS / 1_000.0 * out_rate as f64) as u64,
             done: 0,
             stretch: Stretch::new(out_rate, 2, from),
             out: Fifo::with_capacity(BLOCK * 32),
@@ -276,11 +285,8 @@ impl Rated {
     }
 
     fn rate_at(&self, done: u64) -> f64 {
-        if done < self.hold {
-            return self.from;
-        }
-        let p = (done - self.hold) as f64 / self.ease.max(1) as f64;
-        if p >= 1.0 { 1.0 } else { self.from + (1.0 - self.from) * p }
+        let ms = |frames: u64| frames as f64 * 1_000.0 / self.out_rate as f64;
+        beat_match_rate_at(self.from, ms(done), ms(self.hold))
     }
 
     fn available(&self) -> usize {
@@ -413,9 +419,10 @@ impl Mixer {
     }
 
     /// What the live tap has learned so far about song `key`, while it is
-    /// the one playing (the incoming one, during a blend).
-    pub fn live_analysis(&self, key: u64) -> Option<LiveAnalysis> {
-        (self.tap.key == Some(key)).then(|| self.tap.analyzer.summary())
+    /// the one playing (the incoming one, during a blend). `tag_bpm` picks
+    /// the tempo's octave.
+    pub fn live_analysis(&self, key: u64, tag_bpm: Option<f64>) -> Option<LiveAnalysis> {
+        (self.tap.key == Some(key)).then(|| self.tap.analyzer.summary(tag_bpm))
     }
 
     /// Starts playing `lane` in place of whatever played.
@@ -730,6 +737,7 @@ impl Mixer {
                     gout *= h;
                     gin *= h;
                 }
+                let (gout, gin) = (gout as f32, gin as f32);
                 self.block[i * 2] = self.a[i * 2] * gin + self.b[i * 2] * gout;
                 self.block[i * 2 + 1] = self.a[i * 2 + 1] * gin + self.b[i * 2 + 1] * gout;
             }
@@ -785,7 +793,7 @@ impl Mixer {
         self.next_transition = Some(Transition::Crossfade { from, frames: plan.frames });
         let shape = plan.shape;
         let sweeps =
-            (shape.filter_strength > 0.0).then(|| Sweeps::new(self.rate, shape.filter_strength, shape.beats));
+            (shape.filter_strength > 0.0).then(|| Sweeps::new(self.rate, shape.filter_strength, shape.steps));
         self.rated =
             shape.rate.filter(|r| (r - 1.0).abs() > 1e-4).map(|r| Rated::new(to, self.rate, r, plan.frames));
         let gate = shape.silence_gate_db.map(|db| 10f32.powf(db / 10.0));

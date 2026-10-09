@@ -1070,6 +1070,7 @@ dependencies = [
  "rubato",
  "rustls",
  "rustls-platform-verifier",
+ "serde_json",
  "symphonia",
  "symphonia-core",
  "thiserror 2.0.21",

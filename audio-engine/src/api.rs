@@ -57,6 +57,13 @@ pub struct QueueItem {
     pub replay_gain: Option<ReplayGainInfo>,
     #[uniffi(default)]
     pub headers: Vec<HttpHeader>,
+    /// The song's genre; some genres are never mixed into the next song.
+    #[uniffi(default)]
+    pub genre: Option<String>,
+    /// The song's tempo from its tags, which settles whether a beat found in
+    /// it runs at double or half time.
+    #[uniffi(default)]
+    pub bpm: Option<f64>,
 }
 
 /// What happens at the end of the queue or the song.

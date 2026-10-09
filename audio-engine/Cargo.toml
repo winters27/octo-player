@@ -47,6 +47,8 @@ log = "0.4.34"
 uniffi = "0.32.2"
 
 [dev-dependencies]
+# Reads the shared automix test vectors.
+serde_json = "1.0.151"
 flacenc = "0.5.1"
 # Makes self-signed certificates for the HTTPS test server.
 rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "ring"] }
