@@ -11,9 +11,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 
-// Start loading the next song this long before the blend, so it is ready.
-private const val LOAD_AHEAD_MS = 5_000L
-
 // How often to check on the song: rarely while the end is far off, and
 // every frame or so near it and during the blend.
 private const val FAR_CHECK_MS = 1_000L
@@ -87,15 +84,25 @@ internal class Crossfader(private val player: OctoPlayer, private var spare: Exo
             return
         }
         val next = deck.nextMediaItemIndex
-        val length = blendLength(deck, next)
+        // In real time: at 1.5x speed the song's last 6 seconds pass in 4.
+        val remaining = ((lengthOf(deck) - deck.currentPosition) / deck.playbackParameters.speed).toLong()
+        val songs = songsFor(deck, next)
+        val length = songs?.let { (current, nextSong) -> blendLength(deck, current, nextSong) } ?: 0L
         if (length == 0L) {
+            if (songs != null && waitsOnLength(songs.first, songs.second, fadeMs, deck.repeatMode == Player.REPEAT_MODE_ONE, deck.pauseAtEndOfMediaItems)) {
+                // The next song's length is only known once it has opened, so
+                // open it early on the spare and decide once it says.
+                val lead = loadLeadMs(0, fadeMs, lengthKnown = false)
+                if (loadedFor != next && remaining <= lead) load(next)
+                schedule(if (remaining > lead + FAR_CHECK_MS) FAR_CHECK_MS else NEAR_CHECK_MS)
+                return
+            }
             unloadSpare()
             schedule(FAR_CHECK_MS)
             return
         }
-        // In real time: at 1.5x speed the song's last 6 seconds pass in 4.
-        val remaining = ((lengthOf(deck) - deck.currentPosition) / deck.playbackParameters.speed).toLong()
-        if (loadedFor != next && remaining <= length + LOAD_AHEAD_MS) load(next)
+        val lead = loadLeadMs(length, fadeMs, lengthKnown = listedLengthOf(deck, next) > 0)
+        if (loadedFor != next && remaining <= lead) load(next)
         if (loadedFor == next && remaining <= length && spare.playbackState == Player.STATE_READY) {
             // Late (after a seek near the end, say): blend over what is left.
             val blend = remaining.coerceAtMost(length)
@@ -106,20 +113,34 @@ internal class Crossfader(private val player: OctoPlayer, private var spare: Exo
             }
         }
         // If the spare is not ready in time, the song simply ends as usual.
-        schedule(if (remaining > length + LOAD_AHEAD_MS + FAR_CHECK_MS) FAR_CHECK_MS else NEAR_CHECK_MS)
+        schedule(if (remaining > lead + FAR_CHECK_MS) FAR_CHECK_MS else NEAR_CHECK_MS)
     }
 
-    private fun blendLength(deck: ExoPlayer, next: Int): Long {
-        if (next == C.INDEX_UNSET) return 0
-        val current = deck.currentMediaItem ?: return 0
-        return crossfadeLength(
-            current = current.fadeSong(lengthOf(deck)),
-            next = deck.getMediaItemAt(next).let { it.fadeSong(it.mediaMetadata.durationMs ?: 0) },
+    // The playing song and the next one as the crossfade sees them, the
+    // next one's length taken from the spare once it has opened the song
+    // when the list does not know it. Null with nothing next.
+    private fun songsFor(deck: ExoPlayer, next: Int): Pair<FadeSong, FadeSong>? {
+        if (next == C.INDEX_UNSET) return null
+        val current = deck.currentMediaItem ?: return null
+        val spareMs = if (loadedFor == next && spare.playbackState == Player.STATE_READY) {
+            spare.duration.takeIf { it != C.TIME_UNSET }
+        } else {
+            null
+        }
+        val nextLength = nextSongLengthMs(listedLengthOf(deck, next), spareMs)
+        return current.fadeSong(lengthOf(deck)) to deck.getMediaItemAt(next).fadeSong(nextLength)
+    }
+
+    private fun listedLengthOf(deck: ExoPlayer, index: Int): Long = deck.getMediaItemAt(index).mediaMetadata.durationMs ?: 0
+
+    private fun blendLength(deck: ExoPlayer, current: FadeSong, next: FadeSong): Long =
+        crossfadeLength(
+            current = current,
+            next = next,
             fadeMs = fadeMs,
             repeatOne = deck.repeatMode == Player.REPEAT_MODE_ONE,
             stopAtEndOfSong = deck.pauseAtEndOfMediaItems,
         )
-    }
 
     // How long the song is: what the deck measured, or the library's length
     // for a stream that has not said.
