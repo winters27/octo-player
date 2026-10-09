@@ -410,6 +410,17 @@ fn check(vectors: &Value) -> Vec<String> {
             c.near(&format!("{what} sine {i}"), x.as_f64(), sine.get(i).copied(), t("sample"));
         }
     }
+    for v in list(vectors, "tempoTrust") {
+        let (confidence, consistency) = (num(v, "confidence"), num(v, "consistency"));
+        let tempo =
+            Tempo { bpm: 120.0, confidence, consistency, beat_ms: 500.0, first_beat_ms: 0.0, downbeat_ms: 0.0 };
+        if tempo.confident() != flag(v, "confident") {
+            c.fail(format!(
+                "tempo with peak ratio {confidence} and consistency {consistency}: confident {}",
+                tempo.confident()
+            ));
+        }
+    }
     for r in list(vectors, "rates") {
         let actual = beat_match_rate_at(num(r, "rate"), num(r, "sinceEntryMs"), num(r, "overlapMs"));
         c.near(

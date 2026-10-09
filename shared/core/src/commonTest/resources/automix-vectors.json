@@ -8,6 +8,7 @@
         "sections: render samples floor(fromMs*rate/1000) to floor(min(toMs, lengthMs)*rate/1000) exclusive, interleave, feed the envelope builder in blocks of 4093 samples with startMs = floor(fromMs*rate/1000)*1000/rate (integer division), then analyze. probes are envelope values at hop indexes.",
         "sections are analyzed as a tail (analyzeTail: last 60 s) or a head (analyzeHead: first 30 s); tagBpm, when set, is the song's tag tempo.",
         "plans: run the planner with the untagged tail section of song a and head section of song b (null when tailMissing / headMissing) and the given context.",
+        "tempoTrust: whether a beat grid with this autocorrelation peak ratio (confidence) and share of beats on an onset peak (consistency) is trusted for bar lock.",
         "biquads: cookbook second-order low-pass / high-pass at the given rate, cutoff and Q; coefficients are b0, b1, b2, a1, a2 (a0 = 1); impulse is the answer to a 1 at sample 0, sine the answer to 0.5 * sin(2 pi 1000 n / rate), 512 samples each, from a fresh filter.",
         "Times are ms, levels dBFS, rates as multiples of normal speed. tolerances: db for levels, ms for times, bpm, confidenceShare as a share of the expected confidence, curve for gains, k and rates, hzShare as a share of the expected cutoff, onset for onset values, sample for filter coefficients and samples."
     ],
@@ -13036,6 +13037,48 @@
                 0.3732295573727859,
                 0.45200972389673244
             ]
+        }
+    ],
+    "tempoTrust": [
+        {
+            "confidence": 1.5,
+            "consistency": 0.55,
+            "confident": true
+        },
+        {
+            "confidence": 1.499,
+            "consistency": 0.9,
+            "confident": false
+        },
+        {
+            "confidence": 1.501,
+            "consistency": 0.9,
+            "confident": true
+        },
+        {
+            "confidence": 9.0,
+            "consistency": 0.549,
+            "confident": false
+        },
+        {
+            "confidence": 9.0,
+            "consistency": 0.551,
+            "confident": true
+        },
+        {
+            "confidence": 1.499,
+            "consistency": 0.55,
+            "confident": false
+        },
+        {
+            "confidence": 1.5,
+            "consistency": 0.549,
+            "confident": false
+        },
+        {
+            "confidence": 1.501,
+            "consistency": 0.551,
+            "confident": true
         }
     ],
     "rates": [

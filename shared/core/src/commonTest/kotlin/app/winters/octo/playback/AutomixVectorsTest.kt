@@ -191,6 +191,13 @@ class AutomixVectorsTest {
                 putJsonArray("sine") { sineOf(biquadOf(type, rate, hz), rate).forEach { add(it) } }
             }
         }
+        putJsonArray("tempoTrust") {
+            for ((confidence, consistency) in TRUST_CASES) addJsonObject {
+                put("confidence", confidence)
+                put("consistency", consistency)
+                put("confident", trusted(confidence, consistency))
+            }
+        }
         putJsonArray("rates") {
             for (since in listOf(0.0, 4_000.0, 8_000.0, 9_000.0, 10_500.0, 12_999.0, 13_000.0, 20_000.0)) addJsonObject {
                 put("rate", 1.03)
@@ -418,12 +425,22 @@ class AutomixVectorsTest {
             val sine = sineOf(biquadOf(type, rate, hz), rate)
             f.getValue("sine").jsonArray.forEachIndexed { i, x -> near("$what sine $i", x.jsonPrimitive.double, sine[i], t("sample")) }
         }
+        for (c in vectors.getValue("tempoTrust").jsonArray.map { it.jsonObject }) {
+            val (confidence, consistency) = c.num("confidence") to c.num("consistency")
+            val actual = trusted(confidence, consistency)
+            if (actual != c.bool("confident")) failures += "tempo with peak ratio $confidence and consistency $consistency: confident $actual"
+        }
         for (r in vectors.getValue("rates").jsonArray.map { it.jsonObject }) {
             val actual = beatMatchRateAt(r.num("rate"), r.num("sinceEntryMs"), r.num("overlapMs"))
             near("rate at ${r.num("sinceEntryMs")}", r.num("value"), actual, t("curve"))
         }
         return failures
     }
+
+    // Whether a 120 BPM grid with this autocorrelation peak ratio and beat
+    // consistency is trusted for bar lock.
+    private fun trusted(confidence: Double, consistency: Double) =
+        Tempo(120.0, confidence, consistency, 500.0, 0.0, 0.0).confident
 
     private fun JsonObject.str(key: String) = getValue(key).jsonPrimitive.content
     private fun JsonObject.num(key: String) = getValue(key).jsonPrimitive.double
@@ -472,6 +489,19 @@ class AutomixVectorsTest {
     private companion object {
         const val FILTER_VECTOR_SAMPLES = 512
 
+        // Peak ratios and beat consistencies on and either side of the
+        // thresholds a tempo must reach to be trusted.
+        val TRUST_CASES = listOf(
+            1.5 to 0.55,
+            1.499 to 0.9,
+            1.501 to 0.9,
+            9.0 to 0.549,
+            9.0 to 0.551,
+            1.499 to 0.55,
+            1.5 to 0.549,
+            1.501 to 0.551,
+        )
+
         val ABOUT = JsonArray(
             listOf(
                 "Shared automix cases: the Kotlin tests (AutomixVectorsTest) and the audio engine's Rust tests both run them.",
@@ -482,6 +512,7 @@ class AutomixVectorsTest {
                 "sections: render samples floor(fromMs*rate/1000) to floor(min(toMs, lengthMs)*rate/1000) exclusive, interleave, feed the envelope builder in blocks of 4093 samples with startMs = floor(fromMs*rate/1000)*1000/rate (integer division), then analyze. probes are envelope values at hop indexes.",
                 "sections are analyzed as a tail (analyzeTail: last 60 s) or a head (analyzeHead: first 30 s); tagBpm, when set, is the song's tag tempo.",
                 "plans: run the planner with the untagged tail section of song a and head section of song b (null when tailMissing / headMissing) and the given context.",
+                "tempoTrust: whether a beat grid with this autocorrelation peak ratio (confidence) and share of beats on an onset peak (consistency) is trusted for bar lock.",
                 "biquads: cookbook second-order low-pass / high-pass at the given rate, cutoff and Q; coefficients are b0, b1, b2, a1, a2 (a0 = 1); impulse is the answer to a 1 at sample 0, sine the answer to 0.5 * sin(2 pi 1000 n / rate), 512 samples each, from a fresh filter.",
                 "Times are ms, levels dBFS, rates as multiples of normal speed. tolerances: db for levels, ms for times, bpm, confidenceShare as a share of the expected confidence, curve for gains, k and rates, hzShare as a share of the expected cutoff, onset for onset values, sample for filter coefficients and samples.",
             ).map(::JsonPrimitive),
