@@ -306,7 +306,8 @@ class OctoDspProcessor(
             inputBuffer.asFloatBuffer().get(input, 0, count)
         }
         inputBuffer.position(inputBuffer.position() + frames * format.bytesPerFrame)
-        tap?.push(input, count)
+        // The tap is only for planning blends.
+        if (keepActive()) tap?.push(input, count)
         val out = current.process(input, frames, output)
         shapeTransition(out)
         emit(out * format.channelCount)

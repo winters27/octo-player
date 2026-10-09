@@ -201,7 +201,11 @@ class TransitionShaper(val sampleRate: Int, val channels: Int) {
     // `songMs` in its song and each frame moves the song on `msPerFrame`.
     fun process(samples: FloatArray, frames: Int, songMs: Double, msPerFrame: Double) {
         val transition = current
-        if (transition == null && gain == 1.0 && wet == 0.0) return
+        if (gain == 1.0 && wet == 0.0) {
+            if (transition == null) return
+            // An outgoing song before its blend is left exactly as it is.
+            if (!transition.incoming && transition.progressAt(songMs + frames * msPerFrame) < 0) return
+        }
         var frame = 0
         while (frame < frames) {
             val count = min(AUTOMATION_BLOCK_FRAMES, frames - frame)
