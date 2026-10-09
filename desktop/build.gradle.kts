@@ -385,9 +385,11 @@ compose.desktop {
 // works from the first moment and the keys go when Octo is removed. The
 // plugin clears jpackage's resources folder before it runs, so its WiX
 // template cannot carry them. macOS has the scheme in its Info.plist
-// above. On Linux the installed app writes its own menu entry with
-// x-scheme-handler/octo at its first start (system/LinkRegistration.kt),
-// as it does on Windows for a moved install.
+// above. The .deb and .rpm get the same afterwards from
+// packaging/linux/add-url-scheme.sh: x-scheme-handler/octo in the menu
+// entry, and a post-install step that registers it. The installed app also
+// writes its own entry at its first start (system/LinkRegistration.kt), as
+// it does on Windows for a moved install.
 tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask>()
     .matching { it.name == "packageMsi" || it.name == "packageReleaseMsi" }
     .configureEach {
@@ -398,6 +400,21 @@ tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJPackageT
                 val process = ProcessBuilder("cscript", "//nologo", script.absolutePath, msi.absolutePath).redirectErrorStream(true).start()
                 val output = process.inputStream.bufferedReader().readText()
                 if (process.waitFor() != 0) throw GradleException("Adding the octo:// scheme to ${msi.name} failed: " + output)
+                logger.lifecycle(output.trim())
+            }
+        }
+    }
+
+tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask>()
+    .matching { it.name in setOf("packageDeb", "packageRpm", "packageReleaseDeb", "packageReleaseRpm") }
+    .configureEach {
+        val script = file("packaging/linux/add-url-scheme.sh")
+        inputs.file(script)
+        doLast {
+            destinationDir.get().asFile.listFiles { f -> f.extension == "deb" || f.extension == "rpm" }?.forEach { pkg ->
+                val process = ProcessBuilder("sh", script.absolutePath, pkg.absolutePath).redirectErrorStream(true).start()
+                val output = process.inputStream.bufferedReader().readText()
+                if (process.waitFor() != 0) throw GradleException("Adding the octo:// scheme to ${pkg.name} failed: " + output)
                 logger.lifecycle(output.trim())
             }
         }
