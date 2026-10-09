@@ -25,8 +25,9 @@ opus = ["dep:opus-decoder", "dep:symphonia-core"]
 bindgen = ["uniffi/cli"]
 
 [dependencies]
+# id3v2 and ape read the tags MP3 files carry (ReplayGain, tempo).
 symphonia = { version = "0.6.1", default-features = false, features = [
-    "flac", "mp3", "aac", "isomp4", "alac", "vorbis", "ogg", "wav", "aiff", "pcm", "opt-simd",
+    "flac", "mp3", "aac", "isomp4", "alac", "vorbis", "ogg", "wav", "aiff", "pcm", "opt-simd", "id3v2", "ape",
 ] }
 opus-decoder = { version = "0.1.1", optional = true }
 # Named directly for the codec registration macro.

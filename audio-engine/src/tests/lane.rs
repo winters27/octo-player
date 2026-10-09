@@ -147,6 +147,26 @@ fn replaygain_applies_per_song() {
 }
 
 #[test]
+fn replaygain_from_an_mp3s_id3_tag_applies() {
+    let audio = std::fs::read(fixture("tone-440-44k-mono.mp3")).unwrap();
+    let dir = temp_dir();
+    let (plain, tagged) = (dir.join("plain.mp3"), dir.join("tagged.mp3"));
+    std::fs::write(&plain, &audio).unwrap();
+    std::fs::write(&tagged, with_id3v2(&audio, &[], &[("REPLAYGAIN_TRACK_GAIN", "-6.02 dB")])).unwrap();
+    let settings =
+        ReplayGainSettings { mode: ReplayGainMode::Track, prevent_clipping: false, ..Default::default() };
+    let level = |path: &Path| {
+        let mut lane = Lane::new(deck(1, path), Loudness::default(), &settings, 44_100);
+        lane.last = true;
+        let (out, _) = play_out(&mut lane);
+        let body = &out[8_000..80_000];
+        (body.iter().map(|&s| (s as f64).powi(2)).sum::<f64>() / body.len() as f64).sqrt()
+    };
+    let ratio = level(&tagged) / level(&plain);
+    assert!((ratio - 0.5).abs() < 0.01, "{ratio}");
+}
+
+#[test]
 fn seek_restarts_the_lane_at_the_new_place() {
     let dir = temp_dir();
     let path = dir.join("ramp.wav");

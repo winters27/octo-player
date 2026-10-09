@@ -412,8 +412,14 @@ fn check(vectors: &Value) -> Vec<String> {
     }
     for v in list(vectors, "tempoTrust") {
         let (confidence, consistency) = (num(v, "confidence"), num(v, "consistency"));
-        let tempo =
-            Tempo { bpm: 120.0, confidence, consistency, beat_ms: 500.0, first_beat_ms: 0.0, downbeat_ms: 0.0 };
+        let tempo = Tempo {
+            bpm: 120.0,
+            confidence,
+            consistency,
+            beat_ms: 500.0,
+            first_beat_ms: 0.0,
+            downbeat_ms: 0.0,
+        };
         if tempo.confident() != flag(v, "confident") {
             c.fail(format!(
                 "tempo with peak ratio {confidence} and consistency {consistency}: confident {}",
