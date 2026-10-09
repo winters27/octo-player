@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.settings
 
+import app.winters.octo.playback.StartAfter
+import app.winters.octo.playback.StreamQuality
 import app.winters.octo.sound.SoundSettings
 import app.winters.octo.desktop.system.SystemPrefs
 import app.winters.octo.desktop.discord.DiscordPrefs
@@ -295,6 +297,10 @@ data class PlaybackPrefs(
     // When the queue runs out, songs like the last one keep playing. On by
     // default, as on the phone.
     val autoplay: Boolean = true,
+    // How songs stream from the server: its file as it is, or an MP3 made
+    // on the way; and how much of one is ready before it starts.
+    val streamQuality: StreamQuality = StreamQuality.Original,
+    val startAfter: StartAfter = StartAfter.Short,
 )
 
 private val json = Json {

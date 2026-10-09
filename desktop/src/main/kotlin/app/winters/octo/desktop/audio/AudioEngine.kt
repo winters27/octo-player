@@ -50,6 +50,9 @@ interface AudioEngine : AutoCloseable {
 
     fun setStopAfterCurrent(on: Boolean)
 
+    // How much of a stream is ready before a song starts, in milliseconds.
+    fun setStartAfter(ms: Int)
+
     fun setCrossfade(ms: Int)
 
     // How blends are chosen and shaped: smart transitions, filter sweeps,
@@ -140,6 +143,8 @@ class NativeAudioEngine(private val engine: Engine) : AudioEngine {
     override fun setRepeat(mode: EngineRepeat) = ifOpen(Unit) { engine.setRepeat(mode) }
 
     override fun setStopAfterCurrent(on: Boolean) = ifOpen(Unit) { engine.setStopAfterCurrent(on) }
+
+    override fun setStartAfter(ms: Int) = ifOpen(Unit) { engine.setStartAfter(ms.coerceAtLeast(0).toUInt()) }
 
     override fun setCrossfade(ms: Int) = ifOpen(Unit) { engine.setCrossfade(ms.coerceAtLeast(0).toUInt()) }
 

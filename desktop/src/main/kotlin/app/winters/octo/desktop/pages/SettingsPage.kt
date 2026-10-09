@@ -36,6 +36,10 @@ import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.nav.shortcutList
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.OCTO_LYRICS
+import app.winters.octo.playback.START_AFTER_HELP
+import app.winters.octo.playback.START_AFTER_SETTING
+import app.winters.octo.playback.StartAfter
+import app.winters.octo.playback.StreamQuality
 import app.winters.octo.server.serverOffers
 import app.winters.octo.desktop.setAutoplay
 import app.winters.octo.desktop.settings.AmbienceMotion
@@ -161,6 +165,9 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
     }
 }
 
+// A stream quality as the setting names it.
+internal fun streamQualityName(quality: StreamQuality): String = quality.kbps?.let { "$it kbps MP3" } ?: "Original"
+
 // The text sizes to choose from: the system's, then Octo's own steps.
 private val TextSizes = listOf(0, 100, 115, 130)
 
@@ -177,6 +184,16 @@ private fun PlaybackRows(app: AppState, settings: AppSettings) {
     Rows {
         SwitchRow("Autoplay", "When the queue ends, similar songs keep playing.", settings.playback.autoplay) { on ->
             app.setAutoplay(on)
+        }
+        ChoiceRow(
+            "Stream quality",
+            "Original plays the server's file as it is. A smaller size has the server make an MP3 on the way, for a slow connection.",
+            StreamQuality.entries,
+            settings.playback.streamQuality,
+            ::streamQualityName,
+        ) { quality -> app.settings.update { it.copy(playback = it.playback.copy(streamQuality = quality)) } }
+        ChoiceRow(START_AFTER_SETTING, START_AFTER_HELP, StartAfter.entries, settings.playback.startAfter, { it.label }) { wait ->
+            app.settings.update { it.copy(playback = it.playback.copy(startAfter = wait)) }
         }
         ActionRow("Equalizer, loudness, crossfade and speed", null, "Open Sound", { app.navigator.go(Page.Sound) })
     }

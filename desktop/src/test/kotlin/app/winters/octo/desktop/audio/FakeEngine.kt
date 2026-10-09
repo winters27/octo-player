@@ -97,6 +97,10 @@ class FakeEngine : AudioEngine {
         calls += "stop after $on"
     }
 
+    override fun setStartAfter(ms: Int) {
+        calls += "start after $ms"
+    }
+
     override fun setCrossfade(ms: Int) {
         fadeMs = ms
     }
