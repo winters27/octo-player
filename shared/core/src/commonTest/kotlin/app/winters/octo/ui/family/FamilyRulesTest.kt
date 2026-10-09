@@ -311,6 +311,30 @@ class FamilyRulesTest {
     }
 
     @Test
+    fun pairingFallsBackToTheHomeAddressWhenTheOutsideOneCantBeReached() = runBlocking {
+        FamilyFakeServer().use { home ->
+            home.answer("octoFamilyPair") { """"familyPair":{"username":"alex","secret":"abcdefghijklmnopqrstuvwxyz012345","deviceId":"d_11"}""" }
+            // Nothing listens on port 1: the outside address can't be reached.
+            val outside = "http://127.0.0.1:1/octo".toHttpUrl()
+            val joined = joinFamily(outside, "alex", "482913", "Pixel 9", FamilyPlatform.Android, OkHttpClient(), home = home.url)
+            assertEquals(home.url, (joined as JoinOutcome.Paired).at)
+            assertEquals(1, home.called("octoFamilyPair").size)
+
+            // Without a home address it fails as before.
+            val alone = joinFamily(outside, "alex", "482913", "Pixel 9", FamilyPlatform.Android, OkHttpClient())
+            assertTrue((alone as JoinOutcome.Failed).unreachable)
+
+            // A code the server turned down is never tried at home.
+            FamilyFakeServer().use { reached ->
+                reached.failWith("octoFamilyPair", 40, "That code did not work. Ask for a new one.")
+                val refused = joinFamily(reached.url, "alex", "000000", "Pixel 9", FamilyPlatform.Android, OkHttpClient(), home = home.url)
+                assertEquals("That code did not work. Ask for a new one.", (refused as JoinOutcome.Failed).message)
+                assertEquals(1, home.called("octoFamilyPair").size)
+            }
+        }
+    }
+
+    @Test
     fun aJoinSaysWhatIsMissing() {
         val url = "https://music.example.com/".toHttpUrl()
         assertEquals("Type the server's address", joinProblem(null, "alex", "123456"))

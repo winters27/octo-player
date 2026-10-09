@@ -125,10 +125,10 @@ class FamilyModelTest {
             """"familyDeviceAdded":{"deviceId":"d_9","kind":"OctoApp","appPassword":null,"pairCode":"482913","expires":"2026-10-20T18:15:00Z","server":"https://music.example.com","username":"alex"}"""
         }
         model.addDevice("Laptop", FamilyDeviceKind.OctoApp)
-        until("code shown") { model.added != null }
-        assertEquals("482913", model.added?.pairCode)
+        until("code shown") { model.sheet?.code != null }
+        assertEquals("482913", model.sheet?.code?.pairCode)
         model.dismissAdded()
-        assertNull(model.added)
+        assertNull(model.sheet)
 
         server.answer("signOutFamilyDevice") { "" }
         model.signOut(app.winters.octo.subsonic.FamilyDevice(id = "d_2", name = "Symfonium"))
@@ -150,16 +150,16 @@ class FamilyModelTest {
     fun aManagerAddsAMemberAndSeesTheirInviteAsAQrCode() = runBlocking {
         server.raw("members") { """{"member":{"username":"sam","displayName":"Sam","role":"Kid"},"inviteLink":"https://music.example.com/family/join#invite=t9"}""" }
         model.addMember("sam", "Sam", app.winters.octo.subsonic.FamilyPreset.Kid)
-        until("invite shown") { model.shown != null }
-        assertEquals("Invite Sam", model.shown!!.title)
-        assertEquals("https://music.example.com/family/join#invite=t9", model.shown!!.url)
+        until("invite shown") { model.invite != null }
+        assertEquals("Invite Sam", model.invite!!.title)
+        assertEquals("https://music.example.com/family/join#invite=t9", model.invite!!.url)
         // Signed as every call is, never with a password.
         val call = server.called("members").single().url
         assertEquals("alex", call.queryParameter("u"))
         assertNull(call.queryParameter("p"))
         assertTrue(server.called("auth").isEmpty())
-        model.closeShown()
-        assertNull(model.shown)
+        model.closeInvite()
+        assertNull(model.invite)
     }
 
     @Test
@@ -168,13 +168,13 @@ class FamilyModelTest {
             """"familyDeviceAdded":{"deviceId":"d_5","kind":"OctoApp","pairCode":"104729","username":"${call.url.queryParameter("username")}"}"""
         }
         model.addMemberDevice(app.winters.octo.subsonic.FamilyMember(username = "sam", displayName = "Sam"))
-        until("code shown") { model.added != null }
-        assertEquals("104729", model.added!!.pairCode)
-        assertEquals("sam", model.added!!.username)
-        assertEquals("Sam", model.addedFor)
+        until("code shown") { model.sheet?.code != null }
+        assertEquals("104729", model.sheet!!.code!!.pairCode)
+        assertEquals("sam", model.sheet!!.code!!.username)
+        assertEquals("Add a device for Sam", model.sheet!!.title)
         assertEquals("sam", server.called("addFamilyDevice").single().url.queryParameter("username"))
         model.dismissAdded()
-        assertNull(model.addedFor)
+        assertNull(model.sheet)
         // Nothing asked the family page for a password.
         assertTrue(server.called("auth").isEmpty())
     }

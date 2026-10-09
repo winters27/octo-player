@@ -155,6 +155,14 @@ data class FamilyMember(
 // not know.
 fun familyRole(name: String): FamilyRole? = FamilyRole.entries.firstOrNull { it.name == name }
 
+// A join or invite link two ways: through the server's outside address,
+// which works anywhere, and through its home address.
+@Serializable
+data class FamilyLinkChoices(val anywhere: String? = null, val home: String? = null) {
+    // Never print a link: it carries a code or an invite.
+    override fun toString() = "FamilyLinkChoices(anywhere=${anywhere != null}, home=${home != null})"
+}
+
 // What a manager sees of the whole family.
 @Serializable
 data class FamilyManager(
@@ -241,6 +249,17 @@ data class FamilyDeviceAdded(
     val expires: String? = null,
     val server: String? = null,
     val username: String = "",
+    // The server's home network address, carried in the join link so a
+    // device at home can pair when the public one does not loop back.
+    val home: String? = null,
+    // The join link as the server made it, when it gives one: the default.
+    val link: String? = null,
+    // The same code's link two ways: through the outside address, which
+    // works anywhere (null until the server has one), and the home one.
+    val links: FamilyLinkChoices? = null,
+    val anywhereAvailable: Boolean = true,
+    // The server has no public address yet: the link works only at home.
+    val homeOnly: Boolean = false,
 ) {
     // Never print the password or the code, even by accident in a log.
     override fun toString() = "FamilyDeviceAdded(deviceId=$deviceId, kind=$kind, username=$username)"
@@ -329,13 +348,17 @@ suspend fun SubsonicClient.signOutFamilyDevice(id: String) = send("signOutFamily
 // Adds a device by hand: an Octo app (a pair code) or another Subsonic app
 // (an app password). A manager may name a member (`username`) and gets
 // that member's code or password.
-suspend fun SubsonicClient.addFamilyDevice(name: String, kind: FamilyDeviceKind, username: String? = null): FamilyDeviceAdded =
+// `replaces` names a pair code made earlier for the same popup: the server
+// ends it, if it is still unused, before making the new one, so only one
+// code is live at a time.
+suspend fun SubsonicClient.addFamilyDevice(name: String, kind: FamilyDeviceKind, username: String? = null, replaces: String? = null): FamilyDeviceAdded =
     get(
         "addFamilyDevice",
         buildMap {
             put("name", name.trim())
             put("kind", kind.name)
             username?.trim()?.takeIf(String::isNotEmpty)?.let { put("username", it) }
+            replaces?.takeIf(String::isNotBlank)?.let { put("replaces", it) }
         },
         "familyDeviceAdded",
         FamilyDeviceAdded.serializer(),

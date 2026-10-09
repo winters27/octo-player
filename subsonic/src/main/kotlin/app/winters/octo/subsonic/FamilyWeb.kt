@@ -22,7 +22,26 @@ data class FamilyWebUser(val username: String = "", val role: String = "")
 
 // A member just added by a manager, and the link that invites them.
 @Serializable
-data class FamilyMemberAdded(val member: FamilyMember = FamilyMember(), val inviteLink: String = "")
+data class FamilyMemberAdded(
+    val member: FamilyMember = FamilyMember(),
+    val inviteLink: String = "",
+    val links: FamilyLinkChoices? = null,
+    val anywhereAvailable: Boolean = true,
+    val homeOnly: Boolean = false,
+) {
+    override fun toString() = "FamilyMemberAdded(member=${member.username})"
+}
+
+// A fresh invite for a member who has not joined yet.
+@Serializable
+data class FamilyNewInvite(
+    val inviteLink: String = "",
+    val links: FamilyLinkChoices? = null,
+    val anywhereAvailable: Boolean = true,
+    val homeOnly: Boolean = false,
+) {
+    override fun toString() = "FamilyNewInvite(anywhereAvailable=$anywhereAvailable)"
+}
 
 // The presets a manager picks for a new member.
 enum class FamilyPreset { CoAdmin, Member, Listener, Kid }
@@ -56,32 +75,55 @@ class FamilyWeb(
     // Accepts an invite: the new member's name and the password they chose.
     // Signs this page in as them, and answers their username.
     suspend fun join(token: String, password: String, displayName: String): String =
-        call("POST", "join", mapOf("token" to token, "password" to password, "displayName" to displayName.trim()), FamilyWebUser.serializer()).username
+        call("POST", "join", body("token" to token, "password" to password, "displayName" to displayName.trim()), FamilyWebUser.serializer()).username
 
     // A new device for the member signed in: a pair code for an Octo app,
-    // or an app password for any other app.
-    suspend fun addMyDevice(name: String, kind: FamilyDeviceKind): FamilyDeviceAdded =
-        call("POST", "me/devices", mapOf("name" to name.trim(), "kind" to kind.name), FamilyDeviceAdded.serializer())
+    // or an app password for any other app. `replaces` ends an earlier
+    // unused code first.
+    suspend fun addMyDevice(name: String, kind: FamilyDeviceKind, replaces: String? = null): FamilyDeviceAdded =
+        call("POST", "me/devices", deviceBody(name, kind, replaces), FamilyDeviceAdded.serializer())
 
     // A manager's new device for a member: that member's pair code or app
     // password.
-    suspend fun addMemberDevice(username: String, name: String, kind: FamilyDeviceKind): FamilyDeviceAdded =
-        call("POST", "members/${encodeComponent(username)}/devices", mapOf("name" to name.trim(), "kind" to kind.name), FamilyDeviceAdded.serializer())
+    suspend fun addMemberDevice(username: String, name: String, kind: FamilyDeviceKind, replaces: String? = null): FamilyDeviceAdded =
+        call("POST", "members/${encodeComponent(username)}/devices", deviceBody(name, kind, replaces), FamilyDeviceAdded.serializer())
 
-    // A manager adds a member, and gets the link that invites them.
-    suspend fun addMember(username: String, displayName: String, preset: FamilyPreset): FamilyMemberAdded =
-        call(
+    private fun deviceBody(name: String, kind: FamilyDeviceKind, replaces: String?) = body(
+        "name" to name.trim(),
+        "kind" to kind.name,
+        *listOfNotNull(replaces?.takeIf(String::isNotBlank)?.let { "replaces" to it }).toTypedArray(),
+    )
+
+    private fun body(vararg fields: Pair<String, String>) = JsonObject(fields.associate { (k, v) -> k to kotlinx.serialization.json.JsonPrimitive(v) })
+
+    // A manager adds a member, and gets the link that invites them. Then
+    // whether they may listen away from home is set as an edit to their
+    // abilities.
+    suspend fun addMember(username: String, displayName: String, preset: FamilyPreset, away: Boolean = true): FamilyMemberAdded {
+        val added = call(
             "POST",
             "members",
-            mapOf("username" to username.trim(), "displayName" to displayName.trim(), "preset" to preset.name),
+            body("username" to username.trim(), "displayName" to displayName.trim(), "preset" to preset.name),
             FamilyMemberAdded.serializer(),
         )
+        val name = added.member.username.ifBlank { username.trim() }
+        call(
+            "PUT",
+            "members/${encodeComponent(name)}",
+            JsonObject(mapOf("edits" to JsonObject(mapOf("away" to kotlinx.serialization.json.JsonPrimitive(away))))),
+            FamilyMember.serializer(),
+        )
+        return added
+    }
 
-    private suspend fun <T> call(method: String, path: String, body: Map<String, String>?, serializer: kotlinx.serialization.KSerializer<T>): T {
+    // A new invite link for a member, in place of the last one.
+    suspend fun newInvite(username: String): FamilyNewInvite =
+        call("POST", "members/${encodeComponent(username)}/invite", null, FamilyNewInvite.serializer())
+
+    private suspend fun <T> call(method: String, path: String, body: JsonObject?, serializer: kotlinx.serialization.KSerializer<T>): T {
         val plain = server.newBuilder().addPathSegment("api").addPathSegment("family").addEncodedPathSegments(path).build()
         val url = sign?.invoke(plain) ?: plain
-        val payload = (body?.let { json.encodeToString(JsonObject.serializer(), JsonObject(it.mapValues { (_, v) -> kotlinx.serialization.json.JsonPrimitive(v) })) } ?: "{}")
-            .toRequestBody(JSON)
+        val payload = (body?.let { json.encodeToString(JsonObject.serializer(), it) } ?: "{}").toRequestBody(JSON)
         val request = Request.Builder().url(url).header("X-Octo-Family", "1").header("Accept", "application/json").method(method, payload).build()
         val text = try {
             val response = http.newCall(request).await()

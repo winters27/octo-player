@@ -21,18 +21,22 @@ fun joinProblem(address: HttpUrl?, username: String, code: String): String? = wh
 }
 
 // What joining came to: the account and its secret, to sign in with like
-// any password; a certificate the device does not trust yet, to ask about
-// and try again; or why it did not work.
+// any password, and the address that answered; a certificate the device
+// does not trust yet, to ask about and try again; or why it did not work,
+// and whether the server could not be reached at all.
 sealed interface JoinOutcome {
-    class Paired(val pair: FamilyPair) : JoinOutcome
+    class Paired(val pair: FamilyPair, val at: HttpUrl? = null) : JoinOutcome
     class Untrusted(val host: String) : JoinOutcome
-    class Failed(val message: String) : JoinOutcome
+    class Failed(val message: String, val unreachable: Boolean = false) : JoinOutcome
 }
 
 // Pairs this device with a family code. The secret it answers is this
 // device's password from then on; the caller signs in with it. `http`
 // is set up to trust what the listener trusted, so a server with a
 // certificate of its own is asked about first, as signing in does.
+// `home`, from the link, is the server's home network address: tried when
+// `address` can't be reached at all (no connection, or its certificate
+// failed), never after the server turned the code down.
 suspend fun joinFamily(
     address: HttpUrl,
     username: String,
@@ -40,8 +44,11 @@ suspend fun joinFamily(
     deviceName: String,
     platform: FamilyPlatform,
     http: OkHttpClient,
-): JoinOutcome = joining(address, "That code did not work. Ask for a new one.") {
-    pairWithFamilyCode(address, http, username, code.filter { !it.isWhitespace() }, deviceName, platform)
+    home: HttpUrl? = null,
+): JoinOutcome = orAtHome(address, home) { at ->
+    joining(at, "That code did not work. Ask for a new one.") {
+        pairWithFamilyCode(at, http, username, code.filter { !it.isWhitespace() }, deviceName, platform)
+    }
 }
 
 // What an invite still needs before it is accepted, or null when it can go.
@@ -65,21 +72,40 @@ suspend fun joinWithInvite(
     deviceName: String,
     platform: FamilyPlatform,
     http: OkHttpClient,
-): JoinOutcome = joining(address, "That invite did not work. Ask for a new one.") {
-    val web = FamilyWeb(address, http)
-    val username = web.join(token, password, displayName)
-    val code = web.addMyDevice(deviceName, FamilyDeviceKind.OctoApp).pairCode
-        ?: throw SubsonicException.Server(0, "The server made no pair code for this device.")
-    pairWithFamilyCode(address, http, username, code, deviceName, platform)
+    home: HttpUrl? = null,
+): JoinOutcome = orAtHome(address, home) { at ->
+    joining(at, "That invite did not work. Ask for a new one.") {
+        val web = FamilyWeb(at, http)
+        val username = web.join(token, password, displayName)
+        val code = web.addMyDevice(deviceName, FamilyDeviceKind.OctoApp).pairCode
+            ?: throw SubsonicException.Server(0, "The server made no pair code for this device.")
+        pairWithFamilyCode(at, http, username, code, deviceName, platform)
+    }
+}
+
+// Joins at the address that works from anywhere; when that can't be
+// reached at all and the link named a home address, joins there instead.
+// A certificate question from home is asked; otherwise the first answer
+// stands.
+private suspend fun orAtHome(address: HttpUrl, home: HttpUrl?, join: suspend (HttpUrl) -> JoinOutcome): JoinOutcome {
+    val first = join(address)
+    val unreached = (first is JoinOutcome.Failed && first.unreachable) || first is JoinOutcome.Untrusted
+    if (home == null || home == address || !unreached) return first
+    val second = join(home)
+    return when {
+        second is JoinOutcome.Paired -> second
+        second is JoinOutcome.Untrusted && first !is JoinOutcome.Untrusted -> second
+        else -> first
+    }
 }
 
 private suspend fun joining(address: HttpUrl, refused: String, pair: suspend () -> FamilyPair): JoinOutcome = try {
     val made = pair()
-    if (made.secret.isBlank()) JoinOutcome.Failed("The server did not answer with a sign-in. Ask for a new code.") else JoinOutcome.Paired(made)
+    if (made.secret.isBlank()) JoinOutcome.Failed("The server did not answer with a sign-in. Ask for a new code.") else JoinOutcome.Paired(made, address)
 } catch (e: SubsonicException.WrongCredentials) {
     JoinOutcome.Failed(e.message ?: refused)
 } catch (e: SubsonicException.Unreachable) {
-    if (e.cause is SSLException) JoinOutcome.Untrusted(address.host) else JoinOutcome.Failed("Octo can't reach that address. Check it and try again.")
+    if (e.cause is SSLException) JoinOutcome.Untrusted(address.host) else JoinOutcome.Failed("Octo can't reach that address. Check it and try again.", unreachable = true)
 } catch (e: SubsonicException.NotSubsonic) {
     JoinOutcome.Failed(if (e.status == 404) "That server has no family codes. Check the address, or update Octo on the server." else e.message?.takeIf { e.status != null } ?: "That address did not answer like an Octo server.")
 } catch (e: SubsonicException) {

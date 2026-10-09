@@ -53,17 +53,39 @@ class FamilyWebTest {
 
     @Test
     fun aManagerAddsAMemberAndGetsTheirLink() = runTest {
-        answer("""{"member":{"username":"sam","displayName":"Sam","role":"Kid"},"inviteLink":"https://music.example.com/family/join#invite=t9"}""")
-        val added = web().addMember("sam", "Sam", FamilyPreset.Kid)
+        answer("""{"member":{"username":"sam","displayName":"Sam","role":"Kid"},"inviteLink":"https://music.example.com/family/join#invite=t9",
+            "links":{"anywhere":null,"home":"http://192.168.1.20:4533/family/join#invite=t9"},"anywhereAvailable":false}""")
+        answer("""{"username":"sam","displayName":"Sam","role":"Kid"}""")
+        val added = web().addMember("sam", "Sam", FamilyPreset.Kid, away = false)
         assertEquals("Kid", added.member.roleName)
         assertEquals("https://music.example.com/family/join#invite=t9", added.inviteLink)
+        assertFalse(added.anywhereAvailable)
+        assertEquals(null, added.links!!.anywhere)
+        assertEquals("http://192.168.1.20:4533/family/join#invite=t9", added.links!!.home)
         assertTrue(server.takeRequest().body!!.utf8().contains("\"preset\":\"Kid\""))
+        // Listening away from home, set as an edit to the new member's abilities.
+        val edit = server.takeRequest()
+        assertEquals("PUT", edit.method)
+        assertEquals("/api/family/members/sam", edit.url.encodedPath)
+        assertEquals("""{"edits":{"away":false}}""", edit.body!!.utf8())
 
         answer("""{"deviceId":"d_5","kind":"OctoApp","pairCode":"104729","username":"sam smith"}""")
         assertEquals("104729", web().addMemberDevice("sam smith", "Tablet", FamilyDeviceKind.OctoApp).pairCode)
         val device = server.takeRequest()
         assertEquals("/api/family/members/sam%20smith/devices", device.url.encodedPath)
         assertTrue(device.body!!.utf8().contains("\"name\":\"Tablet\""))
+
+        answer("""{"deviceId":"d_6","kind":"OctoApp","pairCode":"220431","username":"sam smith"}""")
+        web().addMemberDevice("sam smith", "Tablet", FamilyDeviceKind.OctoApp, replaces = "d_5")
+        assertTrue(server.takeRequest().body!!.utf8().contains("\"replaces\":\"d_5\""))
+
+        answer("""{"inviteLink":"https://music.example.com/family/join#invite=t10","homeOnly":true}""")
+        val fresh = web().newInvite("sam smith")
+        assertEquals("https://music.example.com/family/join#invite=t10", fresh.inviteLink)
+        assertTrue(fresh.homeOnly)
+        val again = server.takeRequest()
+        assertEquals("POST", again.method)
+        assertEquals("/api/family/members/sam%20smith/invite", again.url.encodedPath)
     }
 
     @Test
@@ -87,6 +109,7 @@ class FamilyWebTest {
     @Test
     fun anAppsCallsCarryItsSubsonicSignInAndNoPassword() = runTest {
         answer("""{"member":{"username":"sam"},"inviteLink":"https://music.example.com/family/join#invite=t9"}""")
+        answer("""{"username":"sam"}""")
         val client = SubsonicClient(server.url("/"), Credentials("winters", "pw"), OkHttpClient())
         client.familyWeb().addMember("sam", "Sam", FamilyPreset.Kid)
         val url = server.takeRequest().url
@@ -99,5 +122,16 @@ class FamilyWebTest {
         // The password itself never travels.
         assertEquals(null, url.queryParameter("p"))
         assertFalse(url.toString().contains("pw"))
+    }
+
+    @Test
+    fun aServerBehindAPathKeepsItInEveryCall() = runTest {
+        answer("""{"deviceId":"d_1","kind":"OctoApp","pairCode":"482913","username":"alex"}""")
+        FamilyWeb(server.url("/octo"), OkHttpClient()).addMyDevice("Phone", FamilyDeviceKind.OctoApp)
+        assertEquals("/octo/api/family/me/devices", server.takeRequest().url.encodedPath)
+
+        answer("""{"subsonic-response":{"status":"ok","version":"1.16.1","familyPair":{"username":"alex","secret":"s3cret-s3cret-s3cret","deviceId":"d_1"}}}""")
+        pairWithFamilyCode(server.url("/octo/"), OkHttpClient(), "alex", "482913", "Phone", FamilyPlatform.Android)
+        assertEquals("/octo/rest/octoFamilyPair", server.takeRequest().url.encodedPath)
     }
 }

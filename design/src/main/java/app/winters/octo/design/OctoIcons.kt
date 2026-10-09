@@ -152,5 +152,8 @@ object OctoIcons {
     // Scanning and showing QR codes.
     val Camera = R.drawable.sym_camera
     val QrCode = R.drawable.sym_qr_code
+    // Copying a link, code or password, and the link beside it.
+    val Copy = R.drawable.sym_copy
+    val Link = R.drawable.sym_link
     val AudioQuality = R.drawable.sym_equalizer
 }

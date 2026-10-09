@@ -69,6 +69,10 @@ class FamilyModel(
     // notices do not tell it again.
     private val answered: (FamilyRequest) -> Unit = {},
     private val pollMs: Long = FAMILY_POLL_MS,
+    // The time now in milliseconds, and how often an open Add a device
+    // popup looks at its code's expiry.
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val tickMs: Long = 250,
 ) {
     var info by mutableStateOf<FamilyInfo?>(null)
         private set
@@ -91,11 +95,17 @@ class FamilyModel(
     var saved by mutableStateOf(SavedOutside())
         private set
 
-    // A device just added: its pair code or app password, shown once, and
-    // the member it is for when a manager added it for someone else.
-    var added by mutableStateOf<FamilyDeviceAdded?>(null)
+    // The Add a device popup while it is open: the pair code or app
+    // password, shown once, and the member it is for when a manager adds
+    // one for someone else.
+    var sheet by mutableStateOf<DeviceSheet?>(null)
         private set
-    var addedFor by mutableStateOf<String?>(null)
+    private var sheets = 0
+    private var renewing: Job? = null
+
+    // Whether the window or app is on screen; a code is only renewed while
+    // someone could be looking at it.
+    var onScreen by mutableStateOf(true)
         private set
 
     // What the server said about the last thing asked, in its own words.
@@ -107,7 +117,7 @@ class FamilyModel(
 
     // A new member's invite, shown as a QR code with a way to copy it,
     // until closed.
-    var shown by mutableStateOf<ShownLink?>(null)
+    var invite by mutableStateOf<InviteSheet?>(null)
         private set
 
     private var watching: Job? = null
@@ -160,10 +170,9 @@ class FamilyModel(
         inbox = emptyList()
         devices = emptyList()
         saved = SavedOutside()
-        added = null
+        dismissAdded()
         said = null
-        shown = null
-        addedFor = null
+        invite = null
     }
 
     // Reads the account's abilities only, for the parts of the app that follow it (song
@@ -260,27 +269,134 @@ class FamilyModel(
     }
 
     // A new device: an Octo app gets a pair code, any other app a password.
-    fun addDevice(name: String, kind: FamilyDeviceKind) = act {
-        added = addFamilyDevice(deviceNameOr(name, kind), kind)
-        addedFor = null
-        null
-    }
+    // The popup opens at once and fills in when the server answers.
+    fun addDevice(name: String, kind: FamilyDeviceKind) =
+        openSheet(DeviceSheet(deviceName = name.trim(), view = viewFor(kind), awayAllowed = me?.abilities?.away != false))
 
     // A manager's new device for a member: that member's pair code or app
     // password, shown as for one's own.
-    fun addMemberDevice(member: FamilyMember, kind: FamilyDeviceKind = FamilyDeviceKind.OctoApp, name: String = "") = act {
-        added = addFamilyDevice(deviceNameOr(name, kind), kind, username = member.username)
-        addedFor = member.displayName.ifBlank { member.username }
-        null
+    fun addMemberDevice(member: FamilyMember, kind: FamilyDeviceKind = FamilyDeviceKind.OctoApp, name: String = "") = openSheet(
+        DeviceSheet(
+            forName = member.displayName.ifBlank { member.username },
+            forUsername = member.username,
+            deviceName = name.trim(),
+            view = viewFor(kind),
+            awayAllowed = member.username !in keptHome,
+        ),
+    )
+
+    // After an hour open the popup stops renewing its code and asks;
+    // this starts it again with a fresh code.
+    fun newCode() {
+        val open = sheet ?: return
+        sheet = open.copy(openedAt = clock(), stale = false, refreshFailed = false)
+        fetch(DeviceSheetView.Code)
+        renew(open.id)
     }
 
-    private fun deviceNameOr(name: String, kind: FamilyDeviceKind) = name.ifBlank { if (kind == FamilyDeviceKind.OctoApp) "Octo app" else "Music app" }
+    // The window or app shown or hidden: renewing pauses while hidden, and
+    // a code that expired meanwhile is replaced on return.
+    fun sheetOnScreen(visible: Boolean) {
+        onScreen = visible
+    }
+
+    // The app password view, for Symfonium or another app. Its password is
+    // made the first time it is asked for.
+    fun showOtherApps() = switchTo(DeviceSheetView.OtherApps)
+
+    fun backToCode() = switchTo(DeviceSheetView.Code)
+
+    // Asks again for what failed.
+    fun retrySheet() {
+        val open = sheet ?: return
+        fetch(open.view)
+    }
 
     // The code or password has been seen; it is never shown again.
     fun dismissAdded() {
-        added = null
-        addedFor = null
+        renewing?.cancel()
+        renewing = null
+        sheet = null
     }
+
+    private fun viewFor(kind: FamilyDeviceKind) = if (kind == FamilyDeviceKind.OctoApp) DeviceSheetView.Code else DeviceSheetView.OtherApps
+
+    private fun openSheet(open: DeviceSheet) {
+        sheets += 1
+        sheet = open.copy(id = sheets, openedAt = clock())
+        fetch(open.view)
+        renew(sheets)
+    }
+
+    // While the popup is open and on screen, a pair code is replaced a few
+    // seconds before it expires, ending the old one, so the QR code on
+    // screen always works. A failed try is made again every 10 seconds.
+    // After an hour open it stops and asks instead, so codes never pile up.
+    private fun renew(id: Int) {
+        renewing?.cancel()
+        renewing = scope.launch {
+            while (isActive) {
+                val open = sheet?.takeIf { it.id == id } ?: return@launch
+                val code = open.code
+                val due = when {
+                    !onScreen || open.loading || open.stale || code == null -> null
+                    open.refreshFailed -> open.retryAt
+                    else -> expiresAtMs(code.expires)?.minus(RENEW_LEAD_MS)
+                }
+                if (due != null && clock() >= due) {
+                    if (clock() - open.openedAt >= RENEW_FOR_MS) {
+                        sheet = open.copy(stale = true, refreshFailed = false)
+                        return@launch
+                    }
+                    replaceCode(open, code!!)
+                }
+                delay(tickMs)
+            }
+        }
+    }
+
+    private suspend fun replaceCode(open: DeviceSheet, old: FamilyDeviceAdded) {
+        val client = client() ?: return
+        sheet = open.copy(loading = true)
+        val got = runCatching {
+            client.addFamilyDevice(deviceNameOr(open.deviceName, FamilyDeviceKind.OctoApp), FamilyDeviceKind.OctoApp, username = open.forUsername, replaces = old.deviceId)
+        }
+        val now = sheet?.takeIf { it.id == open.id } ?: return
+        sheet = got.fold(
+            { now.copy(code = it, loading = false, refreshFailed = false, renewed = now.renewed + 1) },
+            { now.copy(loading = false, refreshFailed = true, retryAt = clock() + RENEW_RETRY_MS) },
+        )
+    }
+
+    private fun switchTo(view: DeviceSheetView) {
+        val open = sheet ?: return
+        sheet = open.copy(view = view, error = null)
+        if (open.loading) return
+        if ((view == DeviceSheetView.Code && open.code == null) || (view == DeviceSheetView.OtherApps && open.password == null)) fetch(view)
+    }
+
+    // Asks the server for a pair code or an app password for the popup
+    // that is open, and fills it in; an answer for a popup since closed is
+    // dropped.
+    private fun fetch(view: DeviceSheetView) {
+        val client = client() ?: return
+        val asked = sheet ?: return
+        val kind = if (view == DeviceSheetView.Code) FamilyDeviceKind.OctoApp else FamilyDeviceKind.SubsonicApp
+        // A code asked for again ends the one it replaces.
+        val replaces = if (view == DeviceSheetView.Code) asked.code?.deviceId else null
+        sheet = asked.copy(loading = true, error = null)
+        scope.launch {
+            val got = runCatching { client.addFamilyDevice(deviceNameOr(asked.deviceName, kind), kind, username = asked.forUsername, replaces = replaces) }
+            val now = sheet?.takeIf { it.id == asked.id } ?: return@launch
+            sheet = got.fold(
+                { if (view == DeviceSheetView.Code) now.copy(code = it, loading = false) else now.copy(password = it, loading = false) },
+                { now.copy(loading = false, error = if (now.view != view) null else if (view == DeviceSheetView.Code) CODE_FAILED else PASSWORD_FAILED) },
+            )
+            if (got.isSuccess) refresh()
+        }
+    }
+
+    private fun deviceNameOr(name: String, kind: FamilyDeviceKind) = name.ifBlank { if (kind == FamilyDeviceKind.OctoApp) "Octo app" else "Music app" }
 
     // Takes a song out of this member's own library.
     fun removeFromMyLibrary(id: String, title: String) = act {
@@ -294,17 +410,46 @@ class FamilyModel(
         "Removed from Saved"
     }
 
-    // A manager adds a member; their invite shows as a QR code to scan or
-    // a link to send.
-    fun addMember(username: String, displayName: String, preset: FamilyPreset) = manage { web ->
-        val added = web.addMember(username, displayName, preset)
+    // A manager adds a member, who may listen away from home or not; their
+    // invite shows as a QR code to scan or a link to send.
+    fun addMember(username: String, displayName: String, preset: FamilyPreset, away: Boolean = true) = manage { web ->
+        val added = web.addMember(username, displayName, preset, away)
         val name = added.member.displayName.ifBlank { displayName.ifBlank { username } }
-        shown = ShownLink("Invite $name", added.inviteLink, "$name scans this with their phone, or opens the link. They choose a password, and that device joins.")
+        val member = added.member.username.ifBlank { username.trim() }
+        keptHome = if (away) keptHome - member else keptHome + member
+        invite = InviteSheet(
+            name,
+            member,
+            added.inviteLink,
+            links = added.links,
+            anywhereAvailable = added.anywhereAvailable,
+            homeOnly = added.homeOnly,
+            awayAllowed = away,
+        )
         "Added $name"
     }
 
-    fun closeShown() {
-        shown = null
+    // Members added here who may not listen away from home: their popups
+    // offer only the home link.
+    private var keptHome = emptySet<String>()
+
+    // A new link for the invite that is open, in place of the last one.
+    fun sendNewLink() {
+        val client = client() ?: return
+        val asked = invite ?: return
+        invite = asked.copy(loading = true, error = null)
+        scope.launch {
+            val got = runCatching { client.familyWeb().newInvite(asked.username) }
+            val now = invite?.takeIf { it.username == asked.username } ?: return@launch
+            invite = got.fold(
+                { now.copy(url = it.inviteLink, links = it.links, anywhereAvailable = it.anywhereAvailable, homeOnly = it.homeOnly, loading = false) },
+                { now.copy(loading = false, error = LINK_FAILED) },
+            )
+        }
+    }
+
+    fun closeInvite() {
+        invite = null
     }
 
     // A change on the family page, signed as every call this app makes.
@@ -347,16 +492,14 @@ class FamilyModel(
     }
 }
 
-// A link shown as a QR code: what it is for, the link, and a line on how
-// to use it.
-data class ShownLink(val title: String, val url: String, val note: String) {
-    override fun toString() = "ShownLink(title=$title)"
-}
-
 // The https link for a device just added with a pair code, which any
-// camera opens; null for an app password, which has no link.
-fun addedDeviceLink(added: FamilyDeviceAdded, server: String): String? =
-    added.pairCode?.let { familyJoinUrl(added.server?.takeIf(String::isNotBlank) ?: server, added.username, it) }
+// camera opens, with the home address when the server names one; null for
+// an app password, which has no link. The server's own link wins.
+fun addedDeviceLink(added: FamilyDeviceAdded, server: String): String? {
+    val code = added.pairCode ?: return null
+    added.link?.takeIf(String::isNotBlank)?.let { return it }
+    return familyJoinUrl(added.server?.takeIf(String::isNotBlank) ?: server, added.username, code, added.home)
+}
 
 // How often the open view reads the server again.
 const val FAMILY_POLL_MS = 30_000L

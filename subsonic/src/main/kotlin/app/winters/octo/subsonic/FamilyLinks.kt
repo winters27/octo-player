@@ -14,17 +14,22 @@ fun isFamilyCode(code: String): Boolean = code.length == 6 && code.all(Char::isD
 //   octo://join?server=<address>&username=<name>&code=<6 digits>
 //   octo://join?server=<address>&invite=<token>
 // Secrets ride in the https link's # part, which browsers never send.
+// `server` is the address that works from anywhere, which may carry a path
+// (https://example.com/octo); either form may add `home=<address>`, the
+// server's address on its home network, tried when `server` can't be
+// reached and kept as the account's home address.
 sealed interface FamilyLink {
     val server: String
+    val home: String?
 }
 
-data class FamilyJoinLink(override val server: String, val username: String, val code: String) : FamilyLink {
+data class FamilyJoinLink(override val server: String, val username: String, val code: String, override val home: String? = null) : FamilyLink {
     // Never print the code, even by accident in a log.
-    override fun toString() = "FamilyJoinLink(server=$server, username=$username)"
+    override fun toString() = "FamilyJoinLink(server=$server, username=$username, home=$home)"
 }
 
-data class FamilyInviteLink(override val server: String, val token: String) : FamilyLink {
-    override fun toString() = "FamilyInviteLink(server=$server)"
+data class FamilyInviteLink(override val server: String, val token: String, override val home: String? = null) : FamilyLink {
+    override fun toString() = "FamilyInviteLink(server=$server, home=$home)"
 }
 
 // Reads a family link, or null when the text is not one. Spaces around it
@@ -45,11 +50,16 @@ private fun parseAppLink(text: String): FamilyLink? {
     val query = text.substringAfter('?', "")
     val params = readParams(query)
     val server = params["server"]?.trim()?.takeIf(String::isNotEmpty) ?: return null
-    params["invite"]?.trim()?.takeIf(String::isNotEmpty)?.let { return FamilyInviteLink(server, it) }
+    val home = homeIn(params)
+    params["invite"]?.trim()?.takeIf(String::isNotEmpty)?.let { return FamilyInviteLink(server, it, home) }
     val username = params["username"]?.trim()?.takeIf(String::isNotEmpty) ?: return null
     val code = params["code"]?.trim()?.takeIf(::isFamilyCode) ?: return null
-    return FamilyJoinLink(server, username, code)
+    return FamilyJoinLink(server, username, code, home)
 }
+
+// The home address a link names, when it is an address at all.
+private fun homeIn(params: Map<String, String>): String? =
+    params["home"]?.trim()?.takeIf(String::isNotEmpty)?.let(::normalizeServerUrl)?.toString()?.removeSuffix("/")
 
 private fun parseWebLink(text: String): FamilyLink? {
     val fragment = text.substringAfter('#', "")
@@ -60,10 +70,11 @@ private fun parseWebLink(text: String): FamilyLink? {
     val base = url.newBuilder().encodedPath("/").apply { segments.dropLast(2).forEach { addPathSegment(it) } }.query(null).build()
     val server = base.toString().removeSuffix("/")
     val params = readParams(fragment)
-    params["invite"]?.trim()?.takeIf(String::isNotEmpty)?.let { return FamilyInviteLink(server, it) }
+    val home = homeIn(params)
+    params["invite"]?.trim()?.takeIf(String::isNotEmpty)?.let { return FamilyInviteLink(server, it, home) }
     val username = params["u"]?.trim()?.takeIf(String::isNotEmpty) ?: return null
     val code = params["c"]?.trim()?.takeIf(::isFamilyCode) ?: return null
-    return FamilyJoinLink(server, username, code)
+    return FamilyJoinLink(server, username, code, home)
 }
 
 private fun readParams(text: String): Map<String, String> = text.split('&').mapNotNull { part ->
@@ -73,18 +84,20 @@ private fun readParams(text: String): Map<String, String> = text.split('&').mapN
 
 // The https link for a pair code: what a QR code shows and what is copied.
 // Any camera or browser opens it; the server's page hands it on to Octo.
-fun familyJoinUrl(server: String, username: String, code: String): String =
-    "${server.trim().removeSuffix("/")}/family/join#u=${encodeComponent(username)}&c=${encodeComponent(code)}"
+fun familyJoinUrl(server: String, username: String, code: String, home: String? = null): String =
+    "${server.trim().removeSuffix("/")}/family/join#u=${encodeComponent(username)}&c=${encodeComponent(code)}${homePart(home)}"
 
 // The https link for an invite.
-fun familyInviteUrl(server: String, token: String): String =
-    "${server.trim().removeSuffix("/")}/family/join#invite=${encodeComponent(token)}"
+fun familyInviteUrl(server: String, token: String, home: String? = null): String =
+    "${server.trim().removeSuffix("/")}/family/join#invite=${encodeComponent(token)}${homePart(home)}"
 
 // The app's own form of a link, for opening Octo directly.
 fun familyAppLink(link: FamilyLink): String = when (link) {
-    is FamilyJoinLink -> "octo://join?server=${encodeComponent(link.server)}&username=${encodeComponent(link.username)}&code=${encodeComponent(link.code)}"
-    is FamilyInviteLink -> "octo://join?server=${encodeComponent(link.server)}&invite=${encodeComponent(link.token)}"
+    is FamilyJoinLink -> "octo://join?server=${encodeComponent(link.server)}&username=${encodeComponent(link.username)}&code=${encodeComponent(link.code)}${homePart(link.home)}"
+    is FamilyInviteLink -> "octo://join?server=${encodeComponent(link.server)}&invite=${encodeComponent(link.token)}${homePart(link.home)}"
 }
+
+private fun homePart(home: String?): String = home?.trim()?.takeIf(String::isNotEmpty)?.let { "&home=${encodeComponent(it)}" }.orEmpty()
 
 // Percent-encodes text the way RFC 3986 asks: letters, digits and - . _ ~
 // stay; every other character goes as its UTF-8 bytes, %XX each.

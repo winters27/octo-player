@@ -277,6 +277,7 @@ class FamilyParsingTest {
         assertEquals("SubsonicApp", url.queryParameter("kind"))
         // One's own device names no member.
         assertNull(url.queryParameter("username"))
+        assertNull(url.queryParameter("replaces"))
         assertEquals("ABCD-EFGH-JKMN-PQRS", app.appPassword)
         assertNull(app.pairCode)
         assertEquals("https://navidrome.winters.app", app.server)
@@ -293,6 +294,11 @@ class FamilyParsingTest {
         assertEquals("2026-10-20T18:15:00Z", octo.expires)
         assertNull(octo.appPassword)
         assertFalse(octo.toString().contains("482913"))
+
+        // A fresh code for the same popup ends the one it replaces.
+        answer("addFamilyDeviceOcto")
+        client().addFamilyDevice("Laptop", FamilyDeviceKind.OctoApp, replaces = "d_9")
+        assertEquals("d_9", server.takeRequest().url.queryParameter("replaces"))
     }
 
     @Test
@@ -398,6 +404,26 @@ class FamilyParsingTest {
         assertEquals(invite, parseFamilyLink(familyAppLink(invite)))
         assertNull(parseFamilyJoinLink("https://music.example.com/family/join#invite=tok"))
         assertFalse(invite.toString().contains("tok_"))
+    }
+
+    @Test
+    fun aLinksHomeAddressIsReadInBothFormsAndThePathIsKept() {
+        val join = FamilyJoinLink("https://example.com/octo", "alex", "482913", home = "http://192.168.1.20:4533")
+        val web = "https://example.com/octo/family/join#u=alex&c=482913&home=http%3A%2F%2F192.168.1.20%3A4533"
+        assertEquals(join, parseFamilyLink(web))
+        assertEquals(join, parseFamilyLink("octo://join?server=https%3A%2F%2Fexample.com%2Focto&username=alex&code=482913&home=http%3A%2F%2F192.168.1.20%3A4533"))
+        assertEquals(web, familyJoinUrl("https://example.com/octo", "alex", "482913", home = "http://192.168.1.20:4533"))
+        assertEquals(join, parseFamilyLink(familyAppLink(join)))
+
+        val invite = FamilyInviteLink("https://example.com/octo", "tok_1", home = "http://music.lan")
+        assertEquals(invite, parseFamilyLink("https://example.com/octo/family/join#invite=tok_1&home=http%3A%2F%2Fmusic.lan"))
+        assertEquals(invite, parseFamilyLink("octo://join?server=https%3A%2F%2Fexample.com%2Focto&invite=tok_1&home=http%3A%2F%2Fmusic.lan"))
+        assertEquals(invite, parseFamilyLink(familyInviteUrl("https://example.com/octo", "tok_1", "http://music.lan")))
+
+        // No home address, or one that is not an address, is no home at all.
+        assertNull(parseFamilyLink("https://example.com/family/join#u=alex&c=482913")!!.home)
+        assertNull(parseFamilyLink("https://example.com/family/join#u=alex&c=482913&home=")!!.home)
+        assertNull(parseFamilyLink("https://example.com/family/join#u=alex&c=482913&home=%3A%2F%2F")!!.home)
     }
 
     @Test

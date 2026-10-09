@@ -85,6 +85,11 @@ object OctoIcons {
     val Key by sym("sym_key")
     // A QR code shown for another device.
     val QrCode by sym("sym_qr_code")
+    // Copying a link, code or password, and the link beside it.
+    val Copy by sym("sym_copy")
+    val Link by sym("sym_link")
+    // How long a code has left.
+    val Timer by sym("sym_timer")
 
     // Back and forward through the pages, and opening the full player: the
     // chevron turned.
