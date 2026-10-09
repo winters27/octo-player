@@ -7,9 +7,11 @@
 //!   Control Centre, the Touch Bar, AirPods), plus sleep and wake.
 //! - Windows only, since version 3: the taskbar button's thumbnail buttons
 //!   and progress, and the jump list.
+//! - Every system, since version 4: a webcam's pictures, for reading QR
+//!   codes.
 //!
-//! Linux does all of this on the Kotlin side over D-Bus, so this library is
-//! not built there.
+//! Linux does the rest on the Kotlin side over D-Bus, so there this library
+//! only has the camera.
 //!
 //! Strings are UTF-8 and NUL terminated. Every call returns 0 when it
 //! worked, or a negative number (an HRESULT on Windows) when it did not.
@@ -28,6 +30,8 @@ mod taskbar;
 mod windows_controls;
 #[cfg(windows)]
 use windows_controls as platform;
+
+mod camera;
 
 #[cfg(target_os = "macos")]
 mod mac_controls;
@@ -158,7 +162,7 @@ unsafe fn text(value: *const c_char) -> String {
 /// Which version of these calls the library offers.
 #[unsafe(no_mangle)]
 pub extern "C" fn octo_system_version() -> i32 {
-    3
+    4
 }
 
 /// Starts listening to the system: its media buttons, and sleep and wake.
@@ -277,6 +281,84 @@ pub unsafe extern "C" fn octo_system_describe_sessions(buffer: *mut u8, capacity
         }
         Ok(Err(code)) => code as i64,
         Err(_) => PANICKED as i64,
+    }
+}
+
+// The webcam, on every system (version 4 on).
+
+/// The camera stopped or could not start.
+pub const CAMERA_FAILED: i32 = -5;
+
+static CAMERAS: Mutex<Vec<(i64, camera::Running)>> = Mutex::new(Vec::new());
+static NEXT_CAMERA: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
+
+/// The cameras the system has, one name a line, in the order
+/// `octo_camera_open` counts them. Writes up to `capacity` bytes and
+/// answers the full length, or a negative number when it cannot tell.
+///
+/// # Safety
+/// `buffer` must point to `capacity` writable bytes, or be null with 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn octo_camera_names(buffer: *mut u8, capacity: usize) -> i64 {
+    match catch_unwind(camera::names) {
+        Ok(Ok(names)) => unsafe { write_lines(&names, buffer, capacity) },
+        Ok(Err(_)) => CAMERA_FAILED as i64,
+        Err(_) => PANICKED as i64,
+    }
+}
+
+/// Starts camera `index`. Answers a handle above 0 for the other calls.
+#[unsafe(no_mangle)]
+pub extern "C" fn octo_camera_open(index: u32) -> i64 {
+    let Ok(running) = catch_unwind(|| camera::open(index)) else { return PANICKED as i64 };
+    let handle = NEXT_CAMERA.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    match CAMERAS.lock() {
+        Ok(mut cameras) => {
+            cameras.push((handle, running));
+            handle
+        }
+        Err(_) => PANICKED as i64,
+    }
+}
+
+/// Copies the camera's newest picture, when it is newer than `seen`, into
+/// `buffer` as RGB, three bytes a pixel, and its width and height into
+/// `size[0]` and `size[1]`. Answers the picture's number (above 0), 0 when
+/// there is no newer one yet or it does not fit (the size says how big it
+/// is), or CAMERA_FAILED once the camera has stopped.
+///
+/// # Safety
+/// `buffer` must point to `capacity` writable bytes and `size` to two
+/// writable numbers.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn octo_camera_picture(handle: i64, seen: u64, buffer: *mut u8, capacity: usize, size: *mut u32) -> i64 {
+    if buffer.is_null() || size.is_null() {
+        return BAD_ARGUMENT as i64;
+    }
+    let Ok(cameras) = CAMERAS.lock() else { return PANICKED as i64 };
+    let Some((_, running)) = cameras.iter().find(|(h, _)| *h == handle) else { return BAD_ARGUMENT as i64 };
+    let out = unsafe { std::slice::from_raw_parts_mut(buffer, capacity) };
+    match running.copy_newest(seen, out) {
+        Ok((serial, width, height)) => {
+            unsafe {
+                *size = width;
+                *size.add(1) = height;
+            }
+            serial as i64
+        }
+        Err(_) => CAMERA_FAILED as i64,
+    }
+}
+
+/// Stops the camera and lets it go.
+#[unsafe(no_mangle)]
+pub extern "C" fn octo_camera_close(handle: i64) {
+    let running = CAMERAS.lock().ok().and_then(|mut cameras| {
+        let at = cameras.iter().position(|(h, _)| *h == handle)?;
+        Some(cameras.remove(at).1)
+    });
+    if let Some(running) = running {
+        let _ = catch_unwind(AssertUnwindSafe(|| running.close()));
     }
 }
 
@@ -520,7 +602,7 @@ mod tests {
     #[test]
     fn the_rate_call_checks_its_status_too() {
         assert_eq!(octo_system_set_playback_at_rate(9, 0, 0, 0, 1.5), BAD_ARGUMENT);
-        assert_eq!(octo_system_version(), 3);
+        assert_eq!(octo_system_version(), 4);
     }
 
     #[test]
