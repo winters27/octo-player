@@ -64,6 +64,15 @@ class FamilyRulesTest {
     }
 
     @Test
+    fun removeFromMyLibraryGoesOnlyOnMarkedSongsWhenTheServerMarks() {
+        // A server that marks: only the member's own songs.
+        assertTrue(offersRemoveOn(personal = true, serverMarksPersonal = true))
+        assertFalse(offersRemoveOn(personal = false, serverMarksPersonal = true))
+        // A server that marks none: every library song, and its refusal says why.
+        assertTrue(offersRemoveOn(personal = false, serverMarksPersonal = false))
+    }
+
+    @Test
     fun offlineCopiesFollowThePlan() {
         assertFalse(offlineCopiesAllowed(member(offline = false)))
         assertTrue(offlineCopiesAllowed(member(offline = true)))

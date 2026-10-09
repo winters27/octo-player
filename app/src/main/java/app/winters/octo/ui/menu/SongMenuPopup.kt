@@ -155,6 +155,8 @@ private fun SongActionsPage(
     val upgradable by produceState(emptyList<UpgradeAsk>(), trackId, canUpgrade) { value = if (canUpgrade) vm.upgradable(trackId) else emptyList() }
     val canRemove by vm.canRemove.collectAsStateWithLifecycle()
     val onDisk by produceState(false, trackId, canRemove) { value = canRemove && vm.deletable(trackId) }
+    val removesFromMine = vm.family.removesFromMine
+    val inMine by produceState(false, trackId, removesFromMine) { value = removesFromMine && vm.removableFromMine(trackId) }
     val isLiked = trackId in liked
     val keptRow = kept[trackId]
     val byHand = keptRow?.reasons?.contains(Reasons.MANUAL) == true
@@ -172,7 +174,7 @@ private fun SongActionsPage(
         findSongs = canFindSongs,
         disk = onDisk,
         requestCopy = vm.family.outside.offersRequest,
-        removeFromMine = vm.family.removesFromMine,
+        removeFromMine = inMine,
     )
     // A family member whose songs are saved rather than added.
     val saves = vm.family.outside.addLabel != null

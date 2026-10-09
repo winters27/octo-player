@@ -341,4 +341,19 @@ class FamilyParsingTest {
         assertFalse(RequestQuality.Flac.allowedUnder(RequestQuality.Mp3))
         assertTrue(RequestQuality.Best.allowedUnder(RequestQuality.Best))
     }
+
+    @Test
+    fun songsInTheMembersOwnLibraryAreMarked() = runTest {
+        server.enqueue(
+            MockResponse.Builder().body(
+                """{"subsonic-response":{"status":"ok","version":"1.16.1","type":"octo","searchResult3":{"song":[
+                {"id":"tr-1","title":"Mine","octoPersonal":true},
+                {"id":"tr-2","title":"Shared"},
+                {"id":"tr-3","title":"Mine too","octoPersonal":"true"},
+                {"id":"tr-4","title":"Odd","octoPersonal":"no"}]}}}""",
+            ).build(),
+        )
+        val songs = client().search("x").song
+        assertEquals(listOf(true, false, true, false), songs.map { it.octoPersonal })
+    }
 }

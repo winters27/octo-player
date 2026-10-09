@@ -78,6 +78,9 @@ data class SourceTrackEntity(
     val mbAlbumId: String? = null,
     val mbReleaseGroupId: String? = null,
     @ColumnInfo(defaultValue = "") val mbArtistIds: String = "",
+    // A server copy in the signed-in family member's own library rather
+    // than the shared one, as the server marks it.
+    @ColumnInfo(defaultValue = "0") val personal: Boolean = false,
 )
 
 @Entity(tableName = "source_album", indices = [Index("sourceId")])

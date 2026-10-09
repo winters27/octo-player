@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.ui.family.offersRemoveOn
 import app.winters.octo.desktop.removeFromMyLibrary
 import app.winters.octo.design.LocalPopups
 import app.winters.octo.desktop.pages.askForCopy
@@ -142,7 +143,8 @@ fun ColumnScope.SongMenu(
                 canFind = app.downloads?.supported == true,
                 canDelete = canDeleteFromDisk(app, songs),
                 canRequest = family.offersRequest,
-                canRemoveFromMine = offersRemoveFromMyLibrary(me),
+                canRemoveFromMine = offersRemoveFromMyLibrary(me) &&
+                    songs.all { offersRemoveOn(it.octoPersonal, index?.marksPersonal == true) },
             ).forEachIndexed { index, group ->
                 if (index > 0) MenuSeparator()
                 group.forEach { action ->

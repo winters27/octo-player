@@ -35,6 +35,10 @@ class LibraryIndex(val songs: List<Song>, val albums: List<Album>, val artists: 
     private val byTitle = TitleIndex(songs, { it.title }, { it.artist.orEmpty() })
     private val byIsrc = IsrcIndex(songs) { it.isrc }
 
+    // Whether the server marks any song as in a family member's own
+    // library. One that marks none is one that never marks.
+    val marksPersonal: Boolean by lazy { songs.any { it.octoPersonal } }
+
     // Every genre, with its counts, A to Z. A song's genres are its
     // OpenSubsonic list when it has one, else its single genre. Worked out
     // with the rest of the index, away from the window's thread.

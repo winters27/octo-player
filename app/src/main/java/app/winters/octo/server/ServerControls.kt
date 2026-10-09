@@ -1,5 +1,6 @@
 package app.winters.octo.server
 
+import app.winters.octo.ui.family.offersRemoveOn
 import android.util.Log
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.SourceDao
@@ -139,6 +140,17 @@ class ServerControls @Inject constructor(
     suspend fun serverSongId(trackId: String): String? {
         val session = session() ?: return null
         return sources.copies(trackId).filter { it.sourceId == session.sourceId }.minOfOrNull { it.nativeId }
+    }
+
+    // The server's id of a song a family member can take out of their own
+    // library: its copy the server marks as theirs, or on a server that marks
+    // no song at all, its copy there. Null when there is none to offer.
+    suspend fun removableId(trackId: String): String? {
+        val session = session() ?: return null
+        val copies = sources.copies(trackId).filter { it.sourceId == session.sourceId }
+        if (copies.isEmpty()) return null
+        val marks = sources.marksPersonal(session.sourceId)
+        return copies.filter { offersRemoveOn(it.personal, marks) }.minOfOrNull { it.nativeId }
     }
 
     // The server's id for a library album, when its songs came from one

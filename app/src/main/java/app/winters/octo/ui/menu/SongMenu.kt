@@ -304,12 +304,16 @@ class SongMenuViewModel @Inject constructor(
 
     fun deleteFromDisk(track: TrackEntity) = files.deleteFromDisk(listOf(track.id), track.title)
 
+    // Whether the song can be taken out of this family member's own library.
+    suspend fun removableFromMine(trackId: String): Boolean =
+        family.removesFromMine && !isFind(trackId) && controls.removableId(trackId) != null
+
     // Takes a library song out of this family member's own library, by its
     // copy on the server.
     fun removeFromMyLibrary(track: TrackEntity) {
         viewModelScope.launch {
-            val id = controls.serverSongId(track.id)
-            if (id == null) feedback.show("This song has no copy on the server") else family.removeFromMyLibrary(id, track.title)
+            val id = controls.removableId(track.id)
+            if (id == null) feedback.show("This song is not in your own library") else family.removeFromMyLibrary(id, track.title)
         }
     }
 

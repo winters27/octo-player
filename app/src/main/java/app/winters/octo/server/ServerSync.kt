@@ -66,8 +66,9 @@ private const val STALE_MS = 6 * 60 * 60 * 1000L
 // download that arrived could bring in with its album; version 5 gives
 // covers a fallback for when the server answers with its stand-in picture,
 // and marks only songs the server calls explicit, not every song of an
-// album holding one.
-private const val ROWS_VERSION = 5
+// album holding one; version 6 keeps which songs are in a family member's
+// own library.
+private const val ROWS_VERSION = 6
 
 // Whose library is in place: a kept server's id, or this for the phone's
 // music alone.

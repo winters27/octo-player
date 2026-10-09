@@ -24,12 +24,16 @@ fun outsideActions(me: FamilyMe?): OutsideActions = when (me?.abilities?.addToLi
     AddToLibrary.SaveOnly -> OutsideActions(addLabel = SAVE, offersRequest = false)
 }
 
-// Whether "Remove from my library" is offered on library songs: for a
-// member the family manages, whose own library sits beside the shared one.
-// A song of the shared library is refused by the server in plain words,
-// since a song does not say which library it is in.
+// Whether "Remove from my library" can be offered at all: to a member the
+// family manages, whose own library sits beside the shared one.
 fun offersRemoveFromMyLibrary(me: FamilyMe?): Boolean =
     me != null && me.managed && me.role != FamilyRole.Owner && me.role != FamilyRole.Unmanaged
+
+// Whether "Remove from my library" goes on one song. The server marks the
+// songs of the member's own library (octoPersonal), so only those get it.
+// A server that marks no song at all gets it on every library song, and
+// its refusal of a shared song says why.
+fun offersRemoveOn(personal: Boolean, serverMarksPersonal: Boolean): Boolean = personal || !serverMarksPersonal
 
 // Whether this account may keep offline copies. Without a family, always.
 fun offlineCopiesAllowed(me: FamilyMe?): Boolean = me?.abilities?.offlineCopies ?: true
