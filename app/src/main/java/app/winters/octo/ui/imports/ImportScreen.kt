@@ -64,6 +64,7 @@ import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.screenPadding
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
@@ -77,8 +78,16 @@ import javax.inject.Inject
 // server in use starts it over, as the desktop's does: nothing of the last
 // server's lists stays.
 @HiltViewModel
-class ImportViewModel @Inject constructor(sessions: SessionRepository, val inbox: ImportInbox) : ViewModel() {
-    val model = ImportModel({ (sessions.state.value as? SessionState.SignedIn)?.session?.client }, viewModelScope)
+class ImportViewModel @Inject constructor(
+    @ApplicationContext context: Context,
+    sessions: SessionRepository,
+    val inbox: ImportInbox,
+) : ViewModel() {
+    val model = ImportModel(
+        { (sessions.state.value as? SessionState.SignedIn)?.session?.client },
+        viewModelScope,
+        openUrl = { openInBrowser(context, it) },
+    )
 
     // Whether the screen is showing, so the new server is asked at once.
     private var showing = false
