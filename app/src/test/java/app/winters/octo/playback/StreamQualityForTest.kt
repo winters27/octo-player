@@ -34,3 +34,20 @@ class StreamQualityForTest {
         assertEquals(StreamQuality.Original, streamQualityFor(appPicksQuality(true, null), onMobile = true, prefs = prefs))
     }
 }
+
+// Original is where every phone starts, and it asks for the file untouched.
+class OriginalStreamTest {
+    @Test
+    fun originalIsTheDefaultOnWifiAndMobileData() {
+        val prefs = StreamPrefs()
+        assertEquals(StreamQuality.Original, prefs.wifi)
+        assertEquals(StreamQuality.Original, prefs.mobile)
+        assertEquals(StreamQuality.Original, StreamQuality.entries.first())
+    }
+
+    @Test
+    fun originalSendsNoTranscodeAsk() {
+        assertEquals(mapOf("format" to "raw"), streamRequest("audio/flac", 900_000, StreamQuality.Original).params)
+        assertEquals("audio/flac", streamRequest("audio/flac", 900_000, StreamQuality.Original).mimeType("audio/flac"))
+    }
+}

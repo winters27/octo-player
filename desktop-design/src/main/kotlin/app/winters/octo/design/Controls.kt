@@ -165,7 +165,8 @@ fun TextAction(text: String, onClick: () -> Unit, modifier: Modifier = Modifier,
 }
 
 // A row of choices in one glaze, the chosen one a darker pill set into it,
-// the way the phone's tab bar marks its tab.
+// the way the phone's tab bar marks its tab. A choice `enabled` refuses is
+// shown dimmed and cannot be picked.
 @Composable
 fun <T> GlazeSegments(
     options: List<T>,
@@ -173,17 +174,24 @@ fun <T> GlazeSegments(
     label: (T) -> String,
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
+    enabled: (T) -> Boolean = { true },
 ) {
     GlazeTabs(
         count = options.size,
         selected = options.indexOf(selected),
-        onSelect = { onSelect(options[it]) },
+        onSelect = { if (enabled(options[it])) onSelect(options[it]) },
         modifier = modifier.pointerHoverIcon(PointerIcon.Hand),
         height = 36.dp,
         fillWidth = false,
         indication = FocusRing(CircleShape),
+        enabled = { enabled(options[it]) },
     ) { index, chosen ->
-        Txt(label(options[index]), OctoType.label, if (chosen) OctoColors.TextPrimary else OctoColors.TextSecondary)
+        val color = when {
+            !enabled(options[index]) -> OctoColors.TextMuted
+            chosen -> OctoColors.TextPrimary
+            else -> OctoColors.TextSecondary
+        }
+        Txt(label(options[index]), OctoType.label, color)
     }
 }
 

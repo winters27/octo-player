@@ -23,6 +23,7 @@ import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.nav.DownloadsRoute
+import app.winters.octo.ui.family.ORIGINAL_LABEL
 import app.winters.octo.ui.offline.sizeLabel
 import app.winters.octo.ui.settings.rows.ActionRow
 import app.winters.octo.ui.settings.rows.ChoiceRow
@@ -111,7 +112,7 @@ private fun ahead(count: Int): String = when (count) {
 private val StreamQuality.downloadLabel: String get() = kbps?.let { "$it kbps MP3" } ?: "Original"
 
 private val StreamQuality.downloadChoice: Choice
-    get() = Choice(downloadLabel, kbps?.let { "About ${Math.round(it * 0.03)} MB for a 4 minute song" } ?: "The server's file, unchanged")
+    get() = kbps?.let { Choice(downloadLabel, "About ${Math.round(it * 0.03)} MB for a 4 minute song") } ?: Choice(ORIGINAL_LABEL)
 
 // How music from a server plays, the cache of songs played lately, fetching
 // the next songs ahead, and downloads. Each choice opens a sheet.

@@ -16,6 +16,7 @@ import app.winters.octo.subsonic.StreamQuality
 import app.winters.octo.ui.family.QUALITY_AT_HOME
 import app.winters.octo.ui.family.QUALITY_AWAY
 import app.winters.octo.ui.family.QUALITY_ON_THIS_DEVICE
+import app.winters.octo.ui.family.ORIGINAL_LABEL
 import app.winters.octo.ui.family.appPicksQuality
 import app.winters.octo.ui.family.awayLimit
 import app.winters.octo.ui.family.deviceModeLine
@@ -76,18 +77,30 @@ internal fun AudioQualityRows(app: AppState, settings: AppSettings) {
     }
 }
 
+// A quality picker, Original first. Under a family limit Original cannot be
+// picked and the caption says why; a bitrate above the limit plays at it.
 @Composable
 private fun QualityRow(title: String, caption: String?, chosen: StreamQuality, limit: Int, dim: Boolean = false, pick: (StreamQuality) -> Unit) {
+    SettingRow(title, qualityCaption(caption, chosen, limit), dim = dim) {
+        val options = qualityOptions(limit)
+        GlazeSegments(options.map { it.quality }, chosen, ::qualityName, pick, enabled = { q -> options.first { it.quality == q }.enabled })
+    }
+}
+
+// What a quality picker says under its title: its own words, what Original
+// is, and what a family limit does to the choices.
+internal fun qualityCaption(caption: String?, chosen: StreamQuality, limit: Int): String {
     val options = qualityOptions(limit)
-    val held = options.filter { it.limited }.map { it.name }
+    val blocked = options.firstNotNullOfOrNull { it.blocked }
+    val held = options.filter { it.limited && it.enabled }.map { it.name }
+    val verb = if (held.size == 1) "plays" else "play"
     val note = when {
-        held.isEmpty() -> null
-        options.first { it.quality == chosen }.limited -> "Plays at $limit kbps, your family's limit."
-        else -> "${held.joinToString(" and ")} play at $limit kbps, your family's limit."
+        blocked != null && held.isNotEmpty() -> "$blocked, so Original is off and ${held.joinToString(" and ")} $verb at $limit kbps."
+        blocked != null -> "$blocked, so Original is off."
+        else -> null
     }
-    SettingRow(title, listOfNotNull(caption, note).joinToString(" "), dim = dim) {
-        GlazeSegments(options.map { it.quality }, chosen, ::qualityName, pick)
-    }
+    val chosenNote = if (limit > 0 && options.first { it.quality == chosen }.limited && chosen != StreamQuality.Original) "Plays at $limit kbps." else null
+    return listOfNotNull(caption, if (blocked == null) "$ORIGINAL_LABEL." else null, note, chosenNote).joinToString(" ")
 }
 
 // Offline: songs kept on this computer to play without a connection. The

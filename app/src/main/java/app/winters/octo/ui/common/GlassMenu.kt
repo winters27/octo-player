@@ -128,9 +128,9 @@ private fun MenuOption(option: Choice, selected: Boolean, pickable: Boolean, onC
             .hoverable(interaction)
             .then(
                 if (pickable) {
-                    Modifier.selectable(selected = selected, interactionSource = interaction, indication = null, role = Role.RadioButton, onClick = onClick)
+                    Modifier.selectable(selected = selected, enabled = option.enabled, interactionSource = interaction, indication = null, role = Role.RadioButton, onClick = onClick)
                 } else {
-                    Modifier.clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
+                    Modifier.clickable(enabled = option.enabled, interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
                 },
             ),
         contentAlignment = Alignment.CenterStart,
@@ -142,7 +142,7 @@ private fun MenuOption(option: Choice, selected: Boolean, pickable: Boolean, onC
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Column(Modifier.weight(1f)) {
-                Text(option.label, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
+                Text(option.label, style = OctoType.bodySmall, color = if (option.enabled) OctoColors.TextPrimary else OctoColors.TextMuted)
                 option.detail?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
             }
             // The check's room is kept on every line, so the menu's width

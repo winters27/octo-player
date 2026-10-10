@@ -17,10 +17,13 @@ import app.winters.octo.player.PlayerSettings
 import app.winters.octo.player.StreamPrefs
 import app.winters.octo.playback.StreamQuality
 import app.winters.octo.subsonic.DeviceQualityMode
+import app.winters.octo.subsonic.StreamQuality as FamilyStreamQuality
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.LocalChoiceSheet
+import app.winters.octo.ui.family.ORIGINAL_LABEL
 import app.winters.octo.ui.family.QUALITY_AT_HOME
+import app.winters.octo.ui.family.QualityOption
 import app.winters.octo.ui.family.QUALITY_AWAY
 import app.winters.octo.ui.family.QUALITY_ON_THIS_DEVICE
 import app.winters.octo.ui.family.appPicksQuality
@@ -29,6 +32,7 @@ import app.winters.octo.ui.family.deviceModeLine
 import app.winters.octo.ui.family.deviceModeName
 import app.winters.octo.ui.family.familyLimitLines
 import app.winters.octo.ui.family.homeLimit
+import app.winters.octo.ui.family.originalBlockedBy
 import app.winters.octo.ui.family.qualityName
 import app.winters.octo.ui.family.qualityOptions
 import app.winters.octo.ui.settings.rows.ChoiceRow
@@ -87,13 +91,13 @@ fun AudioQualityPage(onBack: () -> Unit, highlight: String?, vm: AudioQualityVie
                 familyLimitLines(quality).forEach { NoteRow(it, color = OctoColors.SignalOrange) }
                 ChoiceRow(SettingsIndex.AccountHome, value = qualityName(quality.home), onClick = {
                     val options = qualityOptions(homeLimit(quality))
-                    sheet.show(ChoiceRequest(QUALITY_AT_HOME, options.map { Choice(it.name, limitedLine(it.line, it.limited, homeLimit(quality))) }, options.indexOfFirst { it.quality == quality.home }) {
+                    sheet.show(ChoiceRequest(QUALITY_AT_HOME, options.map { it.choice(homeLimit(quality)) }, options.indexOfFirst { it.quality == quality.home }) {
                         model.setQuality(home = options[it].quality)
                     })
                 })
                 ChoiceRow(SettingsIndex.AccountAway, value = qualityName(quality.away), onClick = {
                     val options = qualityOptions(awayLimit(quality))
-                    sheet.show(ChoiceRequest(QUALITY_AWAY, options.map { Choice(it.name, limitedLine(it.line, it.limited, awayLimit(quality))) }, options.indexOfFirst { it.quality == quality.away }) {
+                    sheet.show(ChoiceRequest(QUALITY_AWAY, options.map { it.choice(awayLimit(quality)) }, options.indexOfFirst { it.quality == quality.away }) {
                         model.setQuality(away = options[it].quality)
                     })
                 })
@@ -110,20 +114,34 @@ fun AudioQualityPage(onBack: () -> Unit, highlight: String?, vm: AudioQualityVie
             }
         }
         val applies = appPicksQuality(familyOn, model.deviceMode)
+        // A family limit holds this app's choices too: none can be Original.
+        val wifiLimit = if (familyOn && me != null) homeLimit(me.quality) else 0
+        val mobileLimit = if (familyOn && me != null) awayLimit(me.quality) else 0
         SettingsGroup(title = if (familyOn) "This app's quality" else "Streaming", icon = OctoIcons.Wifi) {
             if (!applies) NoteRow("Your account's choice applies now. These apply when this phone is left to the app.")
             ChoiceRow(SettingsIndex.StreamWifi, value = prefs.wifi.label, onClick = {
-                sheet.show(ChoiceRequest(SettingsIndex.StreamWifi.title, qualities.map { it.choice }, qualities.indexOf(prefs.wifi)) { vm.setWifi(qualities[it]) })
+                sheet.show(ChoiceRequest(SettingsIndex.StreamWifi.title, qualities.map { it.choice(wifiLimit) }, qualities.indexOf(prefs.wifi)) { vm.setWifi(qualities[it]) })
             })
             ChoiceRow(SettingsIndex.StreamMobile, value = prefs.mobile.label, onClick = {
-                sheet.show(ChoiceRequest(SettingsIndex.StreamMobile.title, qualities.map { it.choice }, qualities.indexOf(prefs.mobile)) { vm.setMobile(qualities[it]) })
+                sheet.show(ChoiceRequest(SettingsIndex.StreamMobile.title, qualities.map { it.choice(mobileLimit) }, qualities.indexOf(prefs.mobile)) { vm.setMobile(qualities[it]) })
             })
         }
     }
 }
 
-private fun limitedLine(line: String, limited: Boolean, limit: Int): String = if (limited) "Plays at $limit kbps, your family's limit" else line
+// A family quality as its sheet lists it: Original says what it is, a
+// bitrate above the family's limit says it plays at the limit, and Original
+// under a limit cannot be picked and says why.
+private fun QualityOption.choice(limit: Int): Choice = when {
+    blocked != null -> Choice(ORIGINAL_LABEL, blocked, enabled = false)
+    quality == FamilyStreamQuality.Original -> Choice(ORIGINAL_LABEL)
+    limited -> Choice(name, "Plays at $limit kbps, your family's limit")
+    else -> Choice(name, line)
+}
 
 // A size as its sheet lists it, with roughly how much data an hour uses.
-private val StreamQuality.choice: Choice
-    get() = Choice(label, kbps?.let { "MP3, about ${Math.round(it * 0.45)} MB an hour" } ?: "The server's file, unchanged")
+// Under a family limit Original cannot be picked and says why.
+private fun StreamQuality.choice(familyLimit: Int): Choice {
+    val kbps = kbps ?: return originalBlockedBy(familyLimit)?.let { Choice(ORIGINAL_LABEL, it, enabled = false) } ?: Choice(ORIGINAL_LABEL)
+    return Choice(label, "MP3, about ${Math.round(kbps * 0.45)} MB an hour")
+}

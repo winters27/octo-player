@@ -72,7 +72,7 @@ class SettingsSummariesTest {
 
     @Test
     fun streaming() {
-        assertEquals("Wi-Fi Original · mobile 192 kbps · 2 GB cache", streamingSummary(StreamPrefs(), OfflinePrefs()))
+        assertEquals("Wi-Fi Original · mobile Original · 2 GB cache", streamingSummary(StreamPrefs(), OfflinePrefs()))
         assertEquals(
             "Wi-Fi 320 kbps · mobile 128 kbps · no cache",
             streamingSummary(StreamPrefs(wifi = StreamQuality.Kbps320, mobile = StreamQuality.Kbps128), OfflinePrefs(cacheSize = CacheSize.Off)),

@@ -2,6 +2,7 @@ package app.winters.octo.player
 
 import android.content.Context
 import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
@@ -103,15 +104,14 @@ data class PlayerPrefs(
     val radioTuning: RadioTuning get() = RadioTuning(radioDiscovery, radioAdventure, radioVariety, radioFavorites)
 }
 
-// Where songs play from when a server is connected. On mobile data a 192
-// kbps MP3 by default: it sounds close to the original on phone headphones
-// and uses about 86 MB an hour, where a lossless file can use five times
-// that.
+// Where songs play from when a server is connected, and how big a stream
+// is on Wi-Fi and on mobile data: Original (the file as it is) by default
+// on both, a smaller MP3 when chosen.
 @Serializable
 data class StreamPrefs(
     val copies: CopyPreference = CopyPreference.PhoneFirst,
     val wifi: StreamQuality = StreamQuality.Original,
-    val mobile: StreamQuality = StreamQuality.Kbps192,
+    val mobile: StreamQuality = StreamQuality.Original,
     // How much of a stream is ready before a song starts.
     val startAfter: StartAfter = StartAfter.Short,
 )
@@ -147,8 +147,8 @@ private val AMBIENT_SEARCH = booleanPreferencesKey("ambient_search")
 private val AMBIENT_SETTINGS = booleanPreferencesKey("ambient_settings")
 private val AMBIENT_BAR = booleanPreferencesKey("ambient_bar")
 private val AMBIENT_PAGE_ARTWORK = booleanPreferencesKey("ambient_page_artwork")
-private val STREAM_WIFI = stringPreferencesKey("stream_wifi")
-private val STREAM_MOBILE = stringPreferencesKey("stream_mobile")
+internal val STREAM_WIFI = stringPreferencesKey("stream_wifi")
+internal val STREAM_MOBILE = stringPreferencesKey("stream_mobile")
 private val START_AFTER = stringPreferencesKey("start_after")
 private val BACKGROUND_MODE = stringPreferencesKey("immersive_background")
 private val BACKGROUND_BRIGHTNESS_CAP = intPreferencesKey("immersive_bg_brightness_cap")
@@ -165,6 +165,17 @@ private val LIBRARY_ONLY = booleanPreferencesKey("library_only")
 // A saved choice, or the default when nothing (or something unknown) is saved.
 private inline fun <reified T : Enum<T>> choice(name: String?, default: T): T =
     enumValues<T>().firstOrNull { it.name == name } ?: default
+
+// The streaming choices as stored, each one not stored yet at its default.
+internal fun streamPrefsOf(stored: Preferences): StreamPrefs {
+    val defaults = StreamPrefs()
+    return StreamPrefs(
+        copies = choice(stored[COPIES], defaults.copies),
+        wifi = choice(stored[STREAM_WIFI], defaults.wifi),
+        mobile = choice(stored[STREAM_MOBILE], defaults.mobile),
+        startAfter = choice(stored[START_AFTER], defaults.startAfter),
+    )
+}
 
 @Singleton
 class PlayerSettings @Inject constructor(@ApplicationContext private val context: Context) {
@@ -216,15 +227,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
         )
     }
 
-    val streamPrefs: Flow<StreamPrefs> = context.playerPrefs.data.map { stored ->
-        val defaults = StreamPrefs()
-        StreamPrefs(
-            copies = choice(stored[COPIES], defaults.copies),
-            wifi = choice(stored[STREAM_WIFI], defaults.wifi),
-            mobile = choice(stored[STREAM_MOBILE], defaults.mobile),
-            startAfter = choice(stored[START_AFTER], defaults.startAfter),
-        )
-    }
+    val streamPrefs: Flow<StreamPrefs> = context.playerPrefs.data.map(::streamPrefsOf)
 
     suspend fun setLiveBackground(on: Boolean) {
         context.playerPrefs.edit { it[LIVE_BACKGROUND] = on }

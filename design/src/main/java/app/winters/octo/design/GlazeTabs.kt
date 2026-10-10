@@ -67,6 +67,9 @@ fun GlazeTabs(
     fillWidth: Boolean = true,
     // What a tab shows while it has the keyboard; none by default.
     indication: Indication? = null,
+    // Whether a tab can be picked; a tab that cannot is shown but ignores
+    // presses.
+    enabled: (Int) -> Boolean = { true },
     tab: @Composable (index: Int, chosen: Boolean) -> Unit,
 ) {
     val motion = motionScale()
@@ -99,6 +102,7 @@ fun GlazeTabs(
                     Box(
                         Modifier.selectable(
                             selected = chosen,
+                            enabled = enabled(index),
                             interactionSource = null,
                             indication = indication,
                             role = Role.Tab,

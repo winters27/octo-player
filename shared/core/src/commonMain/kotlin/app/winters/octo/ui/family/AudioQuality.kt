@@ -17,21 +17,40 @@ fun qualityName(quality: StreamQuality): String = when (quality) {
 }
 
 fun qualityLine(quality: StreamQuality): String = when (quality) {
-    StreamQuality.Original -> "The file as it is, lossless when it is"
+    StreamQuality.Original -> ORIGINAL_LINE
     StreamQuality.High -> "256 kbps"
     StreamQuality.Standard -> "160 kbps"
     StreamQuality.DataSaver -> "96 kbps, for slow or metered connections"
 }
 
-// One choice of quality, and whether the family's limit holds it lower
-// than it says: Original, or any above the limit, then plays at the limit.
-data class QualityOption(val quality: StreamQuality, val limited: Boolean) {
+// Original, as the pickers say it: the file as it is stored, sent without
+// being made smaller.
+const val ORIGINAL_LINE = "As the file is, FLAC stays FLAC"
+const val ORIGINAL_LABEL = "Original (as the file is, FLAC stays FLAC)"
+
+// Why Original cannot be picked under a family limit of `limitKbps`, or
+// null when it can (no limit).
+fun originalBlockedBy(limitKbps: Int): String? =
+    if (limitKbps > 0) "Your family plan streams up to $limitKbps kbps" else null
+
+// One choice of quality, and whether the family's limit holds it lower than
+// it says: a bitrate above the limit then plays at the limit. Original
+// cannot be picked under a limit, and `blocked` says why.
+data class QualityOption(val quality: StreamQuality, val limited: Boolean, val blocked: String? = null) {
     val name: String get() = qualityName(quality)
-    val line: String get() = qualityLine(quality)
+    val line: String get() = blocked ?: qualityLine(quality)
+    val enabled: Boolean get() = blocked == null
 }
 
+// Every quality, Original first, under a family limit of `limitKbps` (0 for
+// none).
 fun qualityOptions(limitKbps: Int): List<QualityOption> = StreamQuality.entries.map { quality ->
-    QualityOption(quality, limited = limitKbps > 0 && (quality.kbps == 0 || quality.kbps > limitKbps))
+    val original = quality.kbps == 0
+    QualityOption(
+        quality,
+        limited = limitKbps > 0 && (original || quality.kbps > limitKbps),
+        blocked = if (original) originalBlockedBy(limitKbps) else null,
+    )
 }
 
 // The home and away limits that apply: away is the home limit unless the
