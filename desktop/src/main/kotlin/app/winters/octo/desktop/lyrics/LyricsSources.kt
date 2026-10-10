@@ -4,6 +4,7 @@ import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.OCTO_LYRICS
 import app.winters.octo.desktop.settings.LyricsPrefs
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.discovery.knownLengthMs
 import app.winters.octo.lyrics.Lyrics
 import app.winters.octo.lyrics.LyricsSource
 import app.winters.octo.lyrics.OnlineCopy
@@ -11,6 +12,7 @@ import app.winters.octo.lyrics.OnlineLyrics
 import app.winters.octo.lyrics.parseLyricsText
 import app.winters.octo.lyrics.serverLyrics
 import app.winters.octo.lyrics.songFileLyrics
+import app.winters.octo.playback.RealLengths
 import app.winters.octo.subsonic.LYRICS_AUTO
 import app.winters.octo.subsonic.LYRICS_NONE
 import app.winters.octo.subsonic.Song
@@ -120,6 +122,8 @@ class LyricsSources(
     private val http: OkHttpClient,
     private val online: OnlineLyrics,
     private val settings: SettingsStore,
+    // Real lengths learned by playing, which the online library matches by.
+    private val lengths: RealLengths = RealLengths(),
 ) {
     // Answers already found, for the server signed in to and whether the
     // online library could be asked, so neither change shows an old answer.
@@ -161,7 +165,7 @@ class LyricsSources(
             add { fromServer(song).also { serverAnswered = true } }
             add { fromSongFile(song) }
             if (prefs.online && song.title.isNotBlank() && !song.artist.isNullOrBlank()) {
-                add { if (decides && serverAnswered) null else online.find(song.title, song.artist.orEmpty(), song.album.orEmpty(), song.duration * 1000L) }
+                add { if (decides && serverAnswered) null else online.find(song.title, song.artist.orEmpty(), song.album.orEmpty(), lengthOf(song)) }
             }
         }
         for ((index, step) in steps.withIndex()) {
@@ -186,6 +190,12 @@ class LyricsSources(
             else -> LyricsAnswer.Failed
         }
     }
+
+    // The length the online library matches a song by: its real one once
+    // playing it found the listing wrong, else the listed one, unless that
+    // is Octo's guess. Read when the online library is asked, after the
+    // server, by when the song playing has usually opened.
+    private fun lengthOf(song: Song): Long = lengths.lengthMs(song.id, knownLengthMs(song))
 
     private suspend fun <T> attempt(fetch: suspend () -> T?): T? = try {
         fetch()
@@ -256,7 +266,7 @@ class LyricsSources(
         val fromServer = async { attempt { fromServer(song) } }
         val copies = async {
             if (prefs.online && song.title.isNotBlank() && !song.artist.isNullOrBlank()) {
-                attempt { online.copiesOf(song.title, song.artist.orEmpty(), song.album.orEmpty(), song.duration * 1000L) }.orEmpty()
+                attempt { online.copiesOf(song.title, song.artist.orEmpty(), song.album.orEmpty(), lengthOf(song)) }.orEmpty()
             } else {
                 emptyList()
             }

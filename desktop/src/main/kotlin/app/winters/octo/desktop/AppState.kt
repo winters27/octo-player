@@ -129,7 +129,7 @@ class AppState(
     val sleep = SleepTimer(player, scope)
 
     // The lyrics of the song playing, for the side panel and the full player.
-    val lyrics = LyricsModel(player, LyricsSources({ connection }, http, lyricsLibrary, settings), settings, scope)
+    val lyrics = LyricsModel(player, LyricsSources({ connection }, http, lyricsLibrary, settings, player.lengths), settings, scope)
 
     val navigator = Navigator()
     val popups = PopupHost()
@@ -303,7 +303,17 @@ class AppState(
     // until it is let go.
     var infoSong by mutableStateOf<Song?>(null)
 
+    // The real lengths of songs whose listing was wrong, learned by playing
+    // them, as screen state so rows already showing pick them up.
+    var realLengths by mutableStateOf<Map<String, Long>>(emptyMap())
+        private set
+
+    // A song's real length in whole seconds, once playing it found its
+    // listing wrong; null while the listing stands.
+    fun realSeconds(song: Song): Int? = realLengths[song.id]?.let { ((it + 500) / 1_000).toInt() }
+
     init {
+        scope.launch { player.lengths.corrected.collect { realLengths = it } }
         if (listeningRoot != null) {
             plays.start()
             queueKeeper.start()

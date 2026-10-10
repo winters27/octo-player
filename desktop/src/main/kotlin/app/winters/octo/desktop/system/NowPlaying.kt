@@ -2,6 +2,7 @@ package app.winters.octo.desktop.system
 
 import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.RepeatMode
+import app.winters.octo.discovery.knownLengthMs
 import app.winters.octo.subsonic.Song
 
 // The song the system should show, taken from the player: what the media
@@ -54,7 +55,7 @@ fun nowPlayingOf(state: PlayerState): NowPlaying? {
         artist = (song.displayArtist ?: song.artist).orEmpty(),
         album = shownAlbum(song),
         albumArtist = (song.displayAlbumArtist ?: song.albumArtists.joinToString(", ") { it.name }.ifBlank { null }).orEmpty(),
-        durationMs = state.durationMs.takeIf { it > 0 } ?: (song.duration * 1000L),
+        durationMs = state.durationMs.takeIf { it > 0 } ?: knownLengthMs(song),
         coverId = song.coverArt,
         trackNumber = song.track,
         discNumber = song.discNumber,

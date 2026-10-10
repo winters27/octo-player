@@ -50,8 +50,8 @@ class PlayCounter(
             counted = false
         }
         if (current == null) return
-        val length = knownLengthMs(current.song)
-        durationMs = if (length > 0) length else state.durationMs
+        // The player's length is the sound's own once it has opened.
+        durationMs = state.durationMs.takeIf { it > 0 } ?: knownLengthMs(current.song)
         val hearing = state.playing && !state.buffering
         if (hearing && hearingSince == null) {
             hearingSince = clock()

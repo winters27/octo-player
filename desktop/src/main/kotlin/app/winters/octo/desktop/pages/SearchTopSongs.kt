@@ -154,7 +154,7 @@ private fun RankedSong(app: AppState, ranked: List<Song>, index: Int, entry: Top
             )
             if (about.isNotEmpty()) Txt(about.joinToString(" · "), OctoType.caption, OctoColors.TextMuted)
         }
-        Txt(lengthText((knownLengthMs(song) / 1000).toInt()), OctoType.caption, OctoColors.TextMuted, Modifier.width(52.dp))
+        Txt(lengthText(app.realSeconds(song) ?: (knownLengthMs(song) / 1000).toInt()), OctoType.caption, OctoColors.TextMuted, Modifier.width(52.dp))
         LibraryMark(app, song, outside)
     }
 }
