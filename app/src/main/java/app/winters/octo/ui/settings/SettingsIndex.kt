@@ -1,5 +1,7 @@
 package app.winters.octo.ui.settings
 
+import app.winters.octo.playback.START_AFTER_SETTING
+
 import app.winters.octo.covers.PLAYLIST_COVERS_SETTING
 import app.winters.octo.catalog.searchKey
 import kotlinx.serialization.Serializable
@@ -318,6 +320,10 @@ object SettingsIndex {
     val StreamWifi = add(
         "stream_wifi", SettingsPage.Streaming, "Streaming on Wi-Fi", "Quality over Wi-Fi",
         listOf("quality", "bitrate", "kbps"), section = "Streaming",
+    )
+    val StartAfter = add(
+        "start_after", SettingsPage.Streaming, START_AFTER_SETTING, "How much of a song is ready before it starts",
+        listOf("buffer", "preload", "start", "slow", "wait", "stutter"), section = "Streaming",
     )
     val StreamMobile = add(
         "stream_mobile", SettingsPage.Streaming, "Streaming on mobile data", "Quality over mobile data",

@@ -7,16 +7,6 @@ import app.winters.octo.sound.storedReplayGain
 // Which copy plays when a song is both on the phone and on a server.
 enum class CopyPreference { PhoneFirst, BestQuality }
 
-// How big a stream is: the server's file as it is, or an MP3 made on the
-// way at most this many kilobits a second.
-enum class StreamQuality(val kbps: Int?) {
-    Original(null),
-    Kbps320(320),
-    Kbps256(256),
-    Kbps192(192),
-    Kbps128(128),
-}
-
 // A copy from a server streams; any other copy is a file on the phone.
 val SourceTrackEntity.isServerCopy: Boolean get() = sourceId.startsWith("server:")
 

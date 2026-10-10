@@ -588,6 +588,55 @@ fn a_lost_device_that_will_not_reopen_carries_on_once_one_does() {
     engine.shutdown();
 }
 
+// A stream waits for the set amount of sound before it starts; with none
+// set it starts as soon as there is sound. A file never waits.
+#[test]
+fn a_stream_waits_for_start_after() {
+    use crate::testing::http_server::{Behaviour, TestServer};
+    // Noise, so the file is as big as real music.
+    let mut x: u32 = 1;
+    let noise: Vec<i16> = (0..RATE as usize * 8)
+        .map(|_| {
+            x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (x >> 16) as i16 / 4
+        })
+        .collect();
+    let song = flac_bytes(RATE, 2, &noise, &[]);
+    // The song arrives as fast as it plays, as on a slow connection.
+    let quiet = Behaviour { per_second: Some(song.len() / 4), ..Behaviour::default() };
+    let time_to_start = |start_after: u32| {
+        let server = TestServer::start(song.clone(), quiet.clone());
+        let (engine, events, _) = engine(1.0);
+        engine.set_start_after(start_after).unwrap();
+        let begun = Instant::now();
+        engine
+            .load(vec![QueueItem { source: server.url(), ..item("s", Path::new("")) }], 0, 0, true)
+            .unwrap();
+        events.wait_for("start", Duration::from_secs(15), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+        let took = begun.elapsed();
+        engine.shutdown();
+        took
+    };
+    let at_once = time_to_start(0);
+    let waited = time_to_start(2_500);
+    assert!(at_once < Duration::from_millis(2_000), "{at_once:?}");
+    assert!(waited >= Duration::from_millis(2_500), "{waited:?}");
+}
+
+// A stream shorter than the wait starts once all of it is in.
+#[test]
+fn a_stream_shorter_than_start_after_starts_at_its_end() {
+    use crate::testing::http_server::{Behaviour, TestServer};
+    let song = flac_bytes(RATE, 2, &sine(440.0, RATE, 2, 0, 12_000, 0.3), &[]);
+    let server = TestServer::start(song, Behaviour::default());
+    let (engine, events, _) = engine(4.0);
+    engine.set_start_after(10_000).unwrap();
+    engine.load(vec![QueueItem { source: server.url(), ..item("tiny", Path::new("")) }], 0, 0, true).unwrap();
+    events.wait_for("queue end", Duration::from_secs(5), |e| matches!(e, EngineEvent::QueueEnded));
+    assert_eq!(events.story(), ["start tiny", "end tiny Finished", "queue end"]);
+    engine.shutdown();
+}
+
 #[test]
 fn a_server_with_a_trusted_certificate_plays() {
     use crate::api::TrustedCertificate;

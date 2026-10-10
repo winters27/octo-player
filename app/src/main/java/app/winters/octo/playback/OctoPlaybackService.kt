@@ -162,9 +162,12 @@ class OctoPlaybackService : MediaLibraryService() {
         // While crossfade is on, each deck's sound processor stays in the
         // path so a blend can be shaped there.
         val sounds = HashMap<ExoPlayer, DeckSound>()
+        // Each deck's buffering, told how long a stream waits before it starts.
+        val loads = ArrayList<OctoLoadControl>()
         fun deck(): ExoPlayer {
             val renderers = OctoRenderersFactory(this, { sound.current.value }, albums, crossfadeOn::get)
-            return buildDeck(this, streams.mediaSourceFactory(), renderers, audioSession.id)
+            val control = OctoLoadControl().also(loads::add)
+            return buildDeck(this, streams.mediaSourceFactory(), renderers, audioSession.id, control)
                 .also { deck -> renderers.sound?.let { sounds[deck] = it } }
         }
         val scout = Scout(streams.scoutSourceFactory(), streams.extractors())
@@ -225,6 +228,9 @@ class OctoPlaybackService : MediaLibraryService() {
             prefs.map { it.pace }.distinctUntilChanged().collect { local.setPlaybackParameters(PlaybackParameters(it.speed, it.pitch)) }
         }
         scope.launch { prefs.map { it.skipSilence }.distinctUntilChanged().collect { local.skipSilence = it } }
+        scope.launch {
+            playerSettings.streamPrefs.map { it.startAfter.ms }.distinctUntilChanged().collect { ms -> loads.forEach { it.startAfterMs = ms } }
+        }
         // Headphones connecting can start the music again. With that on, the
         // service stays in the foreground for the whole 30 minutes it waits
         // after a pause, since Android may refuse to bring it back later.

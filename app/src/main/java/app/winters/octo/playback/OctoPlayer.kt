@@ -24,10 +24,12 @@ import com.google.common.util.concurrent.ListenableFuture
 // handled above them, so each deck ignores it. `sources` opens both phone
 // files and streams, `renderers` puts Octo's sound shaping in the audio
 // path, and both decks play in one audio session, so an equalizer app
-// attached to it hears both.
+// attached to it hears both. `loads` decides when a stream has enough to
+// start.
 @OptIn(UnstableApi::class)
-fun buildDeck(context: Context, sources: MediaSource.Factory, renderers: RenderersFactory, audioSessionId: Int): ExoPlayer =
+fun buildDeck(context: Context, sources: MediaSource.Factory, renderers: RenderersFactory, audioSessionId: Int, loads: OctoLoadControl): ExoPlayer =
     ExoPlayer.Builder(context, renderers, sources)
+        .setLoadControl(loads)
         .setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)

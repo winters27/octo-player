@@ -7,6 +7,8 @@ import app.winters.octo.desktop.player.QueueEntry
 import app.winters.octo.desktop.system.isOpenedFile
 import app.winters.octo.desktop.system.openedFileOf
 import app.winters.octo.discovery.knownLengthMs
+import app.winters.octo.playback.StreamQuality
+import app.winters.octo.query.isLosslessFormat
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 
@@ -21,21 +23,34 @@ fun interface SongSources {
 }
 
 // Songs from the signed-in server, as the phone streams them: the file as
-// it is ("format=raw", the original quality), at an address signed the way
-// every other call is, with the server's extra headers. The engine reuses
-// the address for range requests and reconnects, so it is signed when the
-// song is queued. A song found online that the server has since fetched
-// into the library (`landed` names its library id) plays from that file.
+// it is ("format=raw", the original quality) or, at a smaller `quality`, an
+// MP3 the server makes on the way, at an address signed the way every
+// other call is, with the server's extra headers. The engine reuses the
+// address for range requests and reconnects (a made MP3 it opens again at
+// a time instead), so it is signed when the song is queued. A song found
+// online that the server has since fetched into the library (`landed`
+// names its library id) plays from that file.
 class ServerSongs(
     private val headers: () -> Map<String, String> = { emptyMap() },
     private val landed: (String) -> String? = { null },
+    private val quality: () -> StreamQuality = { StreamQuality.Original },
     private val client: () -> SubsonicClient?,
 ) : SongSources {
     override fun addressOf(song: Song): SongAddress? {
         val server = client() ?: return null
         val id = landed(song.id) ?: song.id
-        return SongAddress(server.url("stream", mapOf("id" to id, "format" to "raw")).toString(), headers())
+        return SongAddress(server.url("stream", mapOf("id" to id) + streamFormat(song, quality())).toString(), headers())
     }
+}
+
+// What to ask the server for, as the phone asks: the file as it is, or an
+// MP3 capped at the quality's size. A lossy file already within it plays as
+// it is, since making it an MP3 would only lose quality.
+fun streamFormat(song: Song, quality: StreamQuality): Map<String, String> {
+    val cap = quality.kbps ?: return mapOf("format" to "raw")
+    val bitRate = song.bitRate?.takeIf { it > 0 }
+    if (!isLosslessFormat(song.suffix, song.bitDepth) && bitRate != null && bitRate <= cap) return mapOf("format" to "raw")
+    return mapOf("format" to "mp3", "maxBitRate" to "$cap", "estimateContentLength" to "true")
 }
 
 // A song's id on the server, for asking the server about it: the library

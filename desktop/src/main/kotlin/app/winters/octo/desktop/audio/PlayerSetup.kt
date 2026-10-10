@@ -38,9 +38,11 @@ fun openPlayer(
     return try {
         val engine = opened.getOrThrow()
         keepTrust(engine, settings, scope)
+        keepStartAfter(engine, settings, scope)
         val device = playback.outputDevice?.takeUnless { it == DEFAULT_OUTPUT }
         val profiles = EngineProfiles(scope, ServerTransitions(client, transitions)::current, { serverSongId(it, landed) }, engine::setSongProfile)
-        val player = EnginePlayer(engine, LocalOrServer(ServerSongs(headers, landed, client)), volume = playback.volume, device = device, profiles = profiles)
+        val quality = { settings.current.playback.streamQuality }
+        val player = EnginePlayer(engine, LocalOrServer(ServerSongs(headers, landed, quality, client)), volume = playback.volume, device = device, profiles = profiles)
         OpenedPlayer(player, null)
     } catch (e: Throwable) {
         if (e is VirtualMachineError) throw e
@@ -66,6 +68,13 @@ class ServerTransitions(private val client: () -> SubsonicClient?, private val o
         kept
     }
 }
+
+// Tells the engine how much of a stream to have ready before a song
+// starts, now and after every change.
+fun keepStartAfter(engine: AudioEngine, settings: SettingsStore, scope: CoroutineScope): Job =
+    scope.launch(start = CoroutineStart.UNDISPATCHED) {
+        settings.state.map { it.playback.startAfter.ms }.distinctUntilChanged().collect { engine.setStartAfter(it) }
+    }
 
 // Gives the engine the certificates the listener trusted, now and after
 // every change, since it fetches songs itself: a server whose own
