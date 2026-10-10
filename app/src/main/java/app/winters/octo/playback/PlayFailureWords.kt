@@ -4,10 +4,11 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.datasource.HttpDataSource
 
 // Which of the shared reasons a player error is, from Media3's error code
-// and, for an HTTP answer, its status.
-fun playFailureOf(errorCode: Int, httpStatus: Int? = null): PlayFailure = when (errorCode) {
+// and, for an HTTP answer, its status. A song found online (`outside`) was
+// never on the server, so a "not found" for it is the server not sending it.
+fun playFailureOf(errorCode: Int, httpStatus: Int? = null, outside: Boolean = false): PlayFailure = when (errorCode) {
     PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ->
-        if (httpStatus == 404 || httpStatus == 410) PlayFailure.Missing else PlayFailure.Refused
+        if ((httpStatus == 404 || httpStatus == 410) && !outside) PlayFailure.Missing else PlayFailure.Refused
     PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> PlayFailure.Missing
     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
@@ -28,5 +29,5 @@ fun playFailureOf(errorCode: Int, httpStatus: Int? = null): PlayFailure = when (
     else -> PlayFailure.Other
 }
 
-fun playFailureOf(error: PlaybackException): PlayFailure =
-    playFailureOf(error.errorCode, (error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode)
+fun playFailureOf(error: PlaybackException, outside: Boolean = false): PlayFailure =
+    playFailureOf(error.errorCode, (error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode, outside)

@@ -57,6 +57,9 @@ data class PlaylistEntity(
     // song count as they were, to tell whether the server changed since.
     val syncedName: String? = null,
     val serverStamp: String? = null,
+    // Which of Octo's notice lists the server copy is ("review",
+    // "duplicates"), so its cover carries that list's glyph.
+    val octoNotice: String? = null,
 )
 
 @Entity(

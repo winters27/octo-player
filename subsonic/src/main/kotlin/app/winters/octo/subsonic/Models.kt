@@ -216,12 +216,12 @@ data class Artists(val index: List<ArtistIndex> = emptyList())
 data class AlbumList(val album: List<Album> = emptyList())
 
 // The OpenSubsonic extension an Octo server lists when it makes the lists
-// "Made for you" (New Releases, Rediscover, Deep Cuts). Each comes as a
-// read-only playlist naming its kind in `octoList`.
+// "Made for you" (Liked Songs, New Releases, Rediscover, Deep Cuts). Each
+// comes as a read-only playlist naming its kind in `octoList`.
 const val OCTO_LISTS = "octoLists"
 
 // The kinds of Made for you list, in the order Home shows them.
-val OCTO_LIST_KINDS = listOf("newReleases", "rediscover", "deepCuts")
+val OCTO_LIST_KINDS = listOf("liked", "newReleases", "rediscover", "deepCuts")
 
 @Serializable
 data class Playlist(
@@ -242,6 +242,12 @@ data class Playlist(
     // The kind of Made for you list this is, when Octo made it for the
     // listener; otherwise null.
     val octoList: String? = null,
+    // Which of Octo's notice lists this is ("review", "duplicates"), when
+    // it is one; otherwise null.
+    val octoNotice: String? = null,
+    // Shorter words for the list's cover than its name, when the server
+    // gives them ("Popular" for "Popular right now").
+    val octoCoverTitle: String? = null,
 )
 
 @Serializable
@@ -264,6 +270,8 @@ data class PlaylistWithSongs(
     val changed: String? = null,
     val readonly: Boolean = false,
     val octoList: String? = null,
+    val octoNotice: String? = null,
+    val octoCoverTitle: String? = null,
 )
 
 // Where one of a playlist's songs sits on the server, for writing a

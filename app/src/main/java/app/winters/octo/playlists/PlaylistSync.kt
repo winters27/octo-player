@@ -181,6 +181,11 @@ class PlaylistSync @Inject constructor(
             deleted = store.deleted(server.account),
         )
         val failed = steps.count { failureOf { run(server, it) } != null }
+        val notices = keep.associate { it.id to it.octoNotice }
+        for (row in user.serverPlaylists(server.sourceId)) {
+            val notice = row.serverId?.let(notices::get)
+            if (row.serverId != null && notice != row.octoNotice) user.markNotice(row.id, notice)
+        }
         if (steps.isNotEmpty()) {
             // Counts only, like the library sync's line.
             val kinds = steps.groupingBy { it::class.simpleName }.eachCount().entries.joinToString { "${it.value} ${it.key}" }

@@ -200,6 +200,10 @@ interface UserDao {
     )
     suspend fun linkPlaylist(id: String, serverId: String, sourceId: String, syncedAt: Long, name: String, stamp: String)
 
+    // The server's notice mark for its copy of a playlist.
+    @Query("UPDATE playlist SET octoNotice = :notice WHERE id = :id")
+    suspend fun markNotice(id: String, notice: String?)
+
     // Both sides now agree on what the playlist was at `syncedAt`.
     @Query("UPDATE playlist SET syncedAt = :syncedAt, syncedName = :name, serverStamp = :stamp WHERE id = :id")
     suspend fun markSynced(id: String, syncedAt: Long, name: String, stamp: String)
@@ -207,7 +211,8 @@ interface UserDao {
     // Turns a playlist back into one only on the phone.
     @Query(
         """
-        UPDATE playlist SET serverId = NULL, sourceId = NULL, syncedAt = NULL, syncedName = NULL, serverStamp = NULL
+        UPDATE playlist SET serverId = NULL, sourceId = NULL, syncedAt = NULL, syncedName = NULL, serverStamp = NULL,
+            octoNotice = NULL
         WHERE id = :id
         """,
     )

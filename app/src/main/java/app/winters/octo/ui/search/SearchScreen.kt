@@ -1,5 +1,6 @@
 package app.winters.octo.ui.search
 
+import app.winters.octo.covers.playlistGlyph
 import app.winters.octo.ui.common.phonePlaylistFooter
 import app.winters.octo.ui.common.PlaylistArtwork
 import androidx.compose.foundation.clickable
@@ -259,7 +260,7 @@ private fun LazyListScope.oneKind(found: SearchResults, onOpen: (NavKey) -> Unit
 private fun LazyListScope.playlistRows(found: SearchResults, onOpen: (NavKey) -> Unit) {
     items(found.playlists, key = { "playlist:${it.id}" }) { playlist ->
         PlaylistLine(playlist.name, songs(playlist.songCount), onClick = { onOpen(PlaylistRoute(playlist.id)) }, onServer = playlist.onServer) {
-            PlaylistArtwork(playlist.id, playlist.name, playlist.covers, 56.dp, footer = phonePlaylistFooter(playlist.songCount)) {
+            PlaylistArtwork(playlist.id, playlist.name, playlist.covers, 56.dp, footer = phonePlaylistFooter(playlist.songCount), glyph = playlistGlyph(playlist.octoNotice, null)) {
                 PlaylistCover(playlist.covers, 56.dp)
             }
         }

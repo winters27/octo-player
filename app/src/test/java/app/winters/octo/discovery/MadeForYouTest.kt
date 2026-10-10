@@ -25,6 +25,15 @@ class MadeForYouTest {
     }
 
     @Test
+    fun likedSongsComesFirst() {
+        val playlists = listOf(
+            Playlist("og-new", "New Releases", readonly = true, octoList = "newReleases"),
+            Playlist("og-liked", "Liked Songs", readonly = true, octoList = "liked"),
+        )
+        assertEquals(listOf("og-liked", "og-new"), madeForYouLists(playlists, "src1").map { it.id })
+    }
+
+    @Test
     fun aServerWithoutTheListsHasNone() {
         assertTrue(madeForYouLists(listOf(Playlist("a"), Playlist("b", readonly = true)), "src1").isEmpty())
     }

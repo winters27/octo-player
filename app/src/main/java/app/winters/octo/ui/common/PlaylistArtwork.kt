@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.winters.octo.covers.CoverGlyph
 import app.winters.octo.covers.CoverSpec
 import app.winters.octo.covers.PLAYLIST_COVER_LINE
 import app.winters.octo.covers.PlaylistCoverStyle
@@ -58,7 +59,8 @@ fun playlistCoverStyle(): PlaylistCoverStyle {
 
 // A playlist's or live list's picture, as the listener chose: designed from
 // its name (`line` says what it is, `footer` how big) on colours from its
-// covers, or `mosaic`, its covers in a square.
+// covers, or `mosaic`, its covers in a square. `glyph` marks one of Octo's
+// own lists, drawn in place of the words.
 @Composable
 fun PlaylistArtwork(
     id: String,
@@ -69,6 +71,7 @@ fun PlaylistArtwork(
     shape: Shape = ArtworkShape,
     line: String? = PLAYLIST_COVER_LINE,
     footer: String? = null,
+    glyph: CoverGlyph? = null,
     mosaic: @Composable () -> Unit,
 ) {
     if (playlistCoverStyle() == PlaylistCoverStyle.Mosaic) {
@@ -81,7 +84,7 @@ fun PlaylistArtwork(
     val palette by produceState(art.knownPalette(paletteKey), paletteKey) {
         if (value == null) value = art.palette(id, covers, paletteKey)
     }
-    val spec = palette?.let { CoverSpec(id, name, line, footer, it) }
+    val spec = palette?.let { CoverSpec(id, name, line, footer, it, glyph = glyph) }
     val key = spec?.let { coverArtKey(it, side) }
     // The last picture stays up while a changed one is drawn.
     var shown by remember { mutableStateOf<ImageBitmap?>(null) }

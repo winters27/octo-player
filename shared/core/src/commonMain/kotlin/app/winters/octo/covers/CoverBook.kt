@@ -13,6 +13,8 @@ data class CoverBook(
     val layout: CoverLayoutNumbers,
     val background: BackgroundRule,
     val veil: VeilNumbers,
+    // The glyphs marked lists carry in place of words.
+    val glyphs: GlyphNumbers? = null,
 ) {
     companion object {
         private val json = Json { ignoreUnknownKeys = true }

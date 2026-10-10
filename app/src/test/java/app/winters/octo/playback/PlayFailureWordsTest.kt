@@ -12,6 +12,15 @@ class PlayFailureWordsTest {
         assertEquals(PlayFailure.Missing, playFailureOf(PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND))
     }
 
+    // A song found online was never on the server, so its "not found" is a refusal.
+    @Test
+    fun aNotFoundOnAnOutsideSongIsARefusal() {
+        assertEquals(PlayFailure.Refused, playFailureOf(PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS, 404, outside = true))
+        assertEquals(PlayFailure.Refused, playFailureOf(PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS, 410, outside = true))
+        assertEquals(PlayFailure.Missing, playFailureOf(PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS, 404, outside = false))
+        assertEquals("The server wouldn't send that song.", playFailureOf(PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS, 404, outside = true).words)
+    }
+
     @Test
     fun eachKindOfFailureHasItsWords() {
         assertEquals(PlayFailure.Unreachable, playFailureOf(PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED))

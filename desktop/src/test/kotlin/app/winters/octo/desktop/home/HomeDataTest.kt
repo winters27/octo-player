@@ -105,8 +105,9 @@ class HomeDataTest {
             Playlist("og-new", octoList = "newReleases"),
             Playlist("og-later", octoList = "aKindFromANewerServer"),
             Playlist("og-re", octoList = "rediscover"),
+            Playlist("og-liked", octoList = "liked"),
         )
-        assertEquals(listOf("og-new", "og-re", "og-deep", "og-later"), madeForYou(playlists).map { it.id })
+        assertEquals(listOf("og-liked", "og-new", "og-re", "og-deep", "og-later"), madeForYou(playlists).map { it.id })
         assertEquals(listOf("mine"), yourPlaylists(playlists).map { it.id })
         assertTrue("a server without the lists marks none", madeForYou(listOf(Playlist("a"), Playlist("b"))).isEmpty())
     }

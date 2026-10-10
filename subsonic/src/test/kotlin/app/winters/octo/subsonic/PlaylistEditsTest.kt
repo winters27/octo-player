@@ -202,4 +202,26 @@ class PlaylistEditsTest {
         ok(""","playlist":{"id":"og1","name":"New Releases","readonly":true,"octoList":"newReleases","entry":[]}""")
         assertEquals("newReleases", client().playlist("og1").octoList)
     }
+
+    // Octo's notice lists and the chart's shorter cover words come marked;
+    // other servers' playlists have neither.
+    @Test
+    fun noticeListsAndCoverWordsAreRead() = runTest {
+        ok(
+            ""","playlists":{"playlist":[
+                {"id":"pl1","name":"Mine","owner":"winters","songCount":3},
+                {"id":"pl2","name":"Review","owner":"winters","songCount":4,"octoNotice":"review"},
+                {"id":"og2","name":"Popular right now","songCount":50,"readonly":true,"octoCoverTitle":"Popular"}
+            ]}""",
+        )
+        val lists = client().playlists()
+        assertNull(lists[0].octoNotice)
+        assertNull(lists[0].octoCoverTitle)
+        assertEquals("review", lists[1].octoNotice)
+        assertEquals("Popular", lists[2].octoCoverTitle)
+        ok(""","playlist":{"id":"pl2","name":"Review","octoNotice":"duplicates","octoCoverTitle":"Copies","entry":[]}""")
+        val one = client().playlist("pl2")
+        assertEquals("duplicates", one.octoNotice)
+        assertEquals("Copies", one.octoCoverTitle)
+    }
 }
