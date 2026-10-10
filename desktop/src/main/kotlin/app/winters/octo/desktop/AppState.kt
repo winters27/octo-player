@@ -126,6 +126,8 @@ class AppState(
     private val listeningRoot: File? = null,
     // Looking for new versions of Octo; none in the tests and screenshots.
     val updates: DesktopUpdates? = null,
+    // Opens a web page for the Import page; the screenshots open none.
+    browse: (String) -> Unit = { openInBrowser(it) },
 ) {
     // The Sound page's settings, kept on the engine; none for the silent player.
     val sound: SoundController? = (player as? SoundTarget)?.let { SoundController(it, settings, scope) }
@@ -180,8 +182,8 @@ class AppState(
     // this user do to its files (deleting from disk too), for this sign-in.
     val health = HealthModel({ connection?.client }, scope)
 
-    // The Spotify import page, on an Octo server.
-    val imports = ImportModel({ connection?.client }, scope, openUrl = { openInBrowser(it) })
+    // The Import page, on an Octo server.
+    val imports = ImportModel({ connection?.client }, scope, openUrl = browse)
 
     // Family, on an Octo server with it on: the account's abilities, which song actions and
     // the Family page follow.

@@ -22,7 +22,7 @@ sealed interface Page {
     data object History : Page
     data object RecentlyAdded : Page
     data object LibraryHealth : Page
-    // Spotify import, on an Octo server.
+    // Import, on an Octo server: lists from other services, files and Spotify.
     data object Imports : Page
     // Family: the account's abilities, requests and devices, on an Octo server with it on.
     data object Family : Page

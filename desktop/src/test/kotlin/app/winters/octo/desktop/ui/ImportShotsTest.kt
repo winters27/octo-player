@@ -2,15 +2,18 @@ package app.winters.octo.desktop.ui
 
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.pages.askToPaste
 import app.winters.octo.desktop.pages.showSection
-import app.winters.octo.ui.imports.SPOTIFY_IMPORT
+import app.winters.octo.subsonic.ImportServiceLink
+import app.winters.octo.ui.imports.IMPORT
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import javax.swing.SwingUtilities
 
-// Spotify import as it looks: the account, the lists with their switches, one
+// Import as it looks: Get my music's tiles, the wait for a file and what the
+// server said, the Spotify account, the lists with their switches, one
 // list's songs, and the trickle. Made-up lists, from a pretend Octo server.
 // Only when asked: OCTO_SHOTS=1 ./gradlew :desktop:test --tests '*ImportShotsTest*'.
 // Saved under build/shots/polish/imports/.
@@ -22,13 +25,23 @@ class ImportShotsTest {
         "detail":${detail?.let { "\"$it\"" } ?: "null"},"progress":${progress ?: "null"}}"""
 
     @Test
-    fun drawSpotifyImport() {
+    fun drawImport() {
         assumeTrue(System.getenv("OCTO_SHOTS") == "1")
         FakeServer().use { server ->
             PolishShotsTest.Rig(folder, PolishData.library(100), server).use { rig ->
                 server.answer(
                     "getOpenSubsonicExtensions",
-                    """"openSubsonicExtensions":[{"name":"songLyrics","versions":[1]},{"name":"octoImports","versions":[1]}]""",
+                    """"openSubsonicExtensions":[{"name":"songLyrics","versions":[1]},{"name":"octoImports","versions":[1,2]},{"name":"octoFamily","versions":[1]}]""",
+                    type = "octo",
+                )
+                server.answer("getImportServices", """"importServices":{"services":[${SERVICES.joinToString(",") { (id, name) ->
+                    """{"id":"$id","name":"$name","exportUrl":"https://www.tunemymusic.com/transfer/$id-to-file","tile":"$name"}"""
+                }}],"spotifyConnect":true}""", type = "octo")
+                server.answer("importFile", """"importAction":{"ok":true,"message":"Read 2 lists, 340 songs."}""", type = "octo")
+                server.answer(
+                    "getFamily",
+                    """"family":{"me":{"username":"winters","displayName":"Winters","role":"Kid","managed":true,
+                    "abilities":{"addToLibrary":"Request","autoApprove":false,"importPlaylists":true}}}""",
                     type = "octo",
                 )
                 val angel = track("s:2", "Angel", "Massive Attack", "Mezzanine", "downloading", "Downloading from Soulseek", 0.42)
@@ -59,24 +72,76 @@ class ImportShotsTest {
                 )
                 rig.signIn()
                 val app = rig.app
-                rig.scene(PolishShotsTest.Size.Hd) { scene ->
-                    for (section in listOf("spotify", "lists", "trickle")) {
+                val apple = ImportServiceLink("apple-music", "Apple Music", "https://www.tunemymusic.com/transfer/apple-music-to-file", "Apple Music")
+                val spotify = ImportServiceLink("spotify", "Spotify", "https://www.tunemymusic.com/transfer/spotify-to-file", "Spotify")
+                for (size in listOf(PolishShotsTest.Size.Hd, PolishShotsTest.Size.Min)) {
+                    rig.scene(size) { scene ->
+                        val at = "imports/${size.label}"
+                        for (section in listOf("get", "spotify", "lists", "trickle")) {
+                            rig.reset(scene)
+                            SwingUtilities.invokeAndWait {
+                                app.imports.backToServices()
+                                showSection(IMPORT, section)
+                                app.navigator.go(Page.Imports)
+                            }
+                            rig.shot(scene, "$at/$section", 2_000)
+                        }
                         rig.reset(scene)
                         SwingUtilities.invokeAndWait {
-                            showSection(SPOTIFY_IMPORT, section)
+                            showSection(IMPORT, "get")
+                            app.imports.choose(spotify)
                             app.navigator.go(Page.Imports)
                         }
-                        rig.shot(scene, "imports/$section", 2_000)
+                        rig.shot(scene, "$at/get-spotify", 2_000)
+                        rig.reset(scene)
+                        SwingUtilities.invokeAndWait {
+                            showSection(IMPORT, "get")
+                            app.imports.openExport(apple)
+                            app.navigator.go(Page.Imports)
+                        }
+                        rig.shot(scene, "$at/get-waiting", 2_000)
+                        rig.reset(scene)
+                        SwingUtilities.invokeAndWait {
+                            showSection(IMPORT, "get")
+                            app.imports.sendFile("Apple Music.csv", "Track name,Artist name\nAngel,Massive Attack\n".toByteArray())
+                            app.navigator.go(Page.Imports)
+                        }
+                        rig.shot(scene, "$at/get-sent", 3_000)
+                        rig.reset(scene)
+                        SwingUtilities.invokeAndWait {
+                            app.imports.backToServices()
+                            showSection(IMPORT, "lists")
+                            app.imports.open("spotify-road")
+                            app.navigator.go(Page.Imports)
+                        }
+                        rig.shot(scene, "$at/list-open", 2_000)
+                        SwingUtilities.invokeAndWait { app.imports.close() }
+                        rig.reset(scene)
+                        SwingUtilities.invokeAndWait {
+                            showSection(IMPORT, "get")
+                            app.navigator.go(Page.Imports)
+                            askToPaste(app.popups, app.imports)
+                        }
+                        rig.shot(scene, "$at/paste", 2_000)
+                        SwingUtilities.invokeAndWait { app.popups.close() }
                     }
-                    rig.reset(scene)
-                    SwingUtilities.invokeAndWait {
-                        showSection(SPOTIFY_IMPORT, "lists")
-                        app.imports.open("spotify-road")
-                        app.navigator.go(Page.Imports)
-                    }
-                    rig.shot(scene, "imports/list-open", 2_000)
                 }
             }
         }
+    }
+
+    private companion object {
+        val SERVICES = listOf(
+            "spotify" to "Spotify",
+            "apple-music" to "Apple Music",
+            "youtube-music" to "YouTube Music",
+            "amazon-music" to "Amazon Music",
+            "tidal" to "TIDAL",
+            "deezer" to "Deezer",
+            "qobuz" to "Qobuz",
+            "soundcloud" to "SoundCloud",
+            "pandora" to "Pandora",
+            "youtube" to "YouTube",
+        )
     }
 }

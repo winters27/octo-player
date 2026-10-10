@@ -12,10 +12,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +42,8 @@ import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.imports.ImportDropZone
+import app.winters.octo.desktop.imports.sendImportFile
 import app.winters.octo.ui.imports.ImportModel
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.subsonic.ImportListSummary
@@ -50,9 +52,10 @@ import app.winters.octo.subsonic.ImportTrack
 import app.winters.octo.subsonic.ImportTrackState
 import app.winters.octo.subsonic.TrickleState
 import app.winters.octo.ui.imports.GET_MISSING_SONGS
+import app.winters.octo.ui.imports.GET_MY_MUSIC
+import app.winters.octo.ui.imports.IMPORT
 import app.winters.octo.ui.imports.KEEP_AS_PLAYLIST
 import app.winters.octo.ui.imports.REMOVE_LIST
-import app.winters.octo.ui.imports.SPOTIFY_IMPORT
 import app.winters.octo.ui.imports.countsLine
 import app.winters.octo.ui.imports.label
 import app.winters.octo.ui.imports.line
@@ -60,10 +63,12 @@ import app.winters.octo.ui.imports.originLine
 import app.winters.octo.ui.imports.removeLine
 import app.winters.octo.ui.imports.title
 
-// Spotify import on an Octo server: connect a Spotify account, see what the
-// library has of each liked list and playlist, keep one as a playlist,
-// fetch the songs it is missing, and follow the trickle that fetches them.
-// The server reads, matches and fetches; this page shows what it says.
+// Import on an Octo server: get music from another service through a file
+// TuneMyMusic saves (a tile for each service, then the file by a dialog or
+// dropped on the page, or a pasted list), connect a Spotify account, see
+// what the library has of each list, keep one as a playlist, fetch the
+// songs it is missing, and follow the trickle that fetches them. The
+// server reads, matches and fetches; this page shows what it says.
 @Composable
 fun ImportPage(app: AppState, visit: Visit) {
     val model = app.imports
@@ -77,23 +82,25 @@ fun ImportPage(app: AppState, visit: Visit) {
         SectionedPage(
             app,
             visit,
-            SPOTIFY_IMPORT,
+            IMPORT,
             listOf(
-                PageSection("spotify", "Spotify", OctoIcons.Cloud) {
+                PageSection("get", GET_MY_MUSIC, OctoIcons.Download) {
                     Rows { SettingRow(if (problem == null) "Reading" else "Not here yet", problem ?: "Asking the server about your lists.") }
                 },
             ),
         )
         return
     }
+    val services = model.services
     val trickle = overview.trickle
-    SectionedPage(
-        app,
-        visit,
-        SPOTIFY_IMPORT,
-        listOf(
-            PageSection("spotify", "Spotify", OctoIcons.Cloud, detail = overview.spotify.title()) { SpotifySection(model, overview) },
-            PageSection("lists", "Your lists", OctoIcons.Playlists, detail = listsDetail(overview)) { ListsSection(model, overview) },
+    val scope = rememberCoroutineScope()
+    val sections = buildList {
+        if (services != null) {
+            add(PageSection("get", GET_MY_MUSIC, OctoIcons.Download, detail = getDetail(model)) { GetMyMusicSection(model, services) })
+        }
+        add(PageSection("spotify", "Spotify", OctoIcons.Cloud, detail = overview.spotify.title()) { SpotifySection(model, overview, files = services != null) })
+        add(PageSection("lists", "Your lists", OctoIcons.Playlists, detail = listsDetail(overview)) { ListsSection(model, overview) })
+        add(
             PageSection(
                 "trickle",
                 "Trickle",
@@ -103,8 +110,12 @@ fun ImportPage(app: AppState, visit: Visit) {
                     { PauseSwitch(model, trickle.stage == TrickleState.Paused) }
                 },
             ) { TrickleSection(model, overview) },
-        ),
-    )
+        )
+    }
+    // A list file dropped anywhere on the page is sent, once the server takes files.
+    ImportDropZone(enabled = services != null, onFile = { file -> sendImportFile(scope, model, file) }) {
+        SectionedPage(app, visit, IMPORT, sections)
+    }
 }
 
 private fun listsDetail(overview: ImportOverview): String {
@@ -116,13 +127,15 @@ private fun listsDetail(overview: ImportOverview): String {
 }
 
 @Composable
-private fun Said(model: ImportModel) {
+internal fun Said(model: ImportModel) {
     val said = model.said ?: return
     Txt(said, DesktopType.meta, OctoColors.TextSecondary, Modifier.padding(horizontal = RowInset), maxLines = 4)
 }
 
+// The Spotify account. On a server that takes files, a file from any
+// service is under Get my music; an older one only says where to send one.
 @Composable
-private fun SpotifySection(model: ImportModel, overview: ImportOverview) {
+private fun SpotifySection(model: ImportModel, overview: ImportOverview, files: Boolean) {
     val spotify = overview.spotify
     overview.libraryProblem?.let { Txt(it, DesktopType.body, OctoColors.SignalOrange, Modifier.padding(horizontal = RowInset), maxLines = 4) }
     Rows {
@@ -155,7 +168,7 @@ private fun SpotifySection(model: ImportModel, overview: ImportOverview) {
     Said(model)
     Group("Without signing in") {
         LinkRow(model)
-        SettingRow("A file", "A CSV from Exportify or TuneMyMusic, or Spotify's own data export, imports on the Octo dashboard, on its Spotify import page.")
+        if (!files) SettingRow("A file", "A CSV from Exportify or TuneMyMusic, or Spotify's own data export, imports on the Octo dashboard, on its import page.")
     }
 }
 

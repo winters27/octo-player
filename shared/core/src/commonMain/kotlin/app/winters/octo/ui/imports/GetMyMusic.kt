@@ -20,6 +20,11 @@ const val PASTE_A_LIST = "Paste a list"
 const val CONNECT_SPOTIFY_KEEPS_UPDATING = "Connect Spotify (keeps updating)"
 const val PASTED_LIST_NAME = "Pasted list"
 
+// Every service Octo imports from, for finding Import by a service's name
+// before the server has listed them.
+const val IMPORT_SERVICE_WORDS =
+    "spotify apple music youtube music amazon music tidal deezer qobuz soundcloud pandora youtube"
+
 // What the grid says above its tiles.
 const val GET_MY_MUSIC_LINE = "Pick where your music is now. Octo opens TuneMyMusic, which saves your lists to a file for Octo to read."
 

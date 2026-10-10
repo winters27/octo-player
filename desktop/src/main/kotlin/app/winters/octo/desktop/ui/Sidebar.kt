@@ -132,7 +132,7 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
                 }
                 // Only an Octo server imports; the page itself says when one is too old to.
                 if (app.connection?.isOcto == true) {
-                    item(key = "p:imports") { NavRow("Spotify import", OctoIcons.Cloud, lit == SidebarItem.Top(Page.Imports), rail) { go(Page.Imports) } }
+                    item(key = "p:imports") { NavRow("Import", OctoIcons.Download, lit == SidebarItem.Top(Page.Imports), rail) { go(Page.Imports) } }
                 }
                 // Only while the server has Family on.
                 if (app.connection?.family == true) {
