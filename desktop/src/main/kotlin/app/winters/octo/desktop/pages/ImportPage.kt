@@ -204,7 +204,11 @@ private fun ListsSection(model: ImportModel, overview: ImportOverview) {
         Rows {
             SettingRow(
                 "No lists yet",
-                if (overview.spotify.connected) "Read again under Spotify to look at your Spotify once more." else "Connect Spotify, or add a public link, under Spotify.",
+                when {
+                    overview.spotify.connected -> "Read again under Spotify to look at your Spotify once more."
+                    model.services != null -> "Pick your service under $GET_MY_MUSIC, or add a public link under Spotify."
+                    else -> "Connect Spotify, or add a public link, under Spotify."
+                },
             )
         }
         return
