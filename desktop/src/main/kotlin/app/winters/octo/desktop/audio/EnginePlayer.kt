@@ -24,6 +24,9 @@ import app.winters.octo.desktop.player.libraryFormat
 import app.winters.octo.discovery.knownLengthMs
 import app.winters.octo.playback.PlayFailure
 import app.winters.octo.playback.QueueSource
+import app.winters.octo.playback.RealLengths
+import app.winters.octo.playback.playingLengthMs
+import app.winters.octo.playback.withLengthMs
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -60,6 +63,7 @@ class EnginePlayer(
     device: String? = null,
     // Milliseconds from any fixed point, for how long a jump may take.
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
+    override val lengths: RealLengths = RealLengths(),
 ) : DesktopPlayer, SoundTarget {
     private val queue = PlayQueue(random)
     private val lock = Any()
@@ -79,6 +83,9 @@ class EnginePlayer(
     // device runs at.
     private var decoded: Pair<Long, SongFormat>? = null
     private var deviceFormat: DeviceFormat? = null
+
+    // The decoder's length of the entry that started last, by its key.
+    private var measured: Pair<Long, Long>? = null
 
     // What the listener asked for: playing or not. The engine's own state
     // changes only override it when the engine stops by itself.
@@ -157,7 +164,7 @@ class EnginePlayer(
         run {
             val current = queue.currentEntry ?: return 0
             if (keyOfItem(heard.itemId) == expecting) expecting = null
-            val duration = durationMs()
+            val duration = durationMs(heard)
             val at = pending
             if (at != null) {
                 val waited = clock() - at.at
@@ -179,12 +186,29 @@ class EnginePlayer(
 
     private fun clamp(ms: Long, duration: Long) = if (duration > 0) ms.coerceIn(0, duration) else ms.coerceAtLeast(0)
 
-    // The listed length, or the file's once the engine has it (a song found
-    // online may be listed with a guess).
-    private fun durationMs(): Long {
-        val song = queue.currentEntry?.song ?: return 0
-        knownLengthMs(song).takeIf { it > 0 }?.let { return it }
-        return engine.heard().takeIf { keyOfItem(it.itemId) == queue.currentEntry?.key }?.durationMs ?: 0
+    // How long the current song is: the length of its sound once the engine
+    // has opened it, and the listed one until then (a song found online can
+    // be listed with a guess, or with another copy's length). Positions come
+    // from the engine's clock either way, so the switch moves nothing.
+    private fun durationMs(heard: Heard = engine.heard()): Long {
+        val current = queue.currentEntry ?: return 0
+        val here = heard.takeIf { keyOfItem(it.itemId) == current.key }
+        val engineMs = measured?.takeIf { it.first == current.key }?.second ?: here?.durationMs
+        return playingLengthMs(knownLengthMs(current.song), engineMs, here?.positionMs?.toLong() ?: 0)
+    }
+
+    // Takes the engine's length of an entry's song. A listing more than a
+    // second off is corrected for every entry of that song, and for the
+    // rows that show it; the engine is handed the corrected entries, so the
+    // song's other entries never report the old listing. Answers whether
+    // the queue changed.
+    private fun learnLength(key: Long?, engineMs: Long?): Boolean {
+        val entry = queue.songs.firstOrNull { it.key == key } ?: return false
+        val ms = lengths.learn(entry.song.id, knownLengthMs(entry.song), engineMs) ?: return false
+        if (!queue.updateSong(entry.song.id) { it.withLengthMs(ms) }) return false
+        val current = queue.currentEntry
+        if (current != null && current.key in mirror) engine.replaceQueue(inPlayOrder().map { queueItem(it, sources) }, mirror.indexOf(current.key))
+        return true
     }
 
     // ---- Transport ----
@@ -192,7 +216,7 @@ class EnginePlayer(
     override fun play(songs: List<Song>, start: Int, shuffle: Boolean, source: QueueSource) {
         synchronized(lock) {
             this.shuffle = shuffle
-            queue.replace(songs, start, shuffle, source)
+            queue.replace(songs.map(lengths::applyTo), start, shuffle, source)
             playing = queue.currentEntry != null
             problem = null
             load(startMs = 0, play = playing)
@@ -281,11 +305,11 @@ class EnginePlayer(
 
     // ---- The queue ----
 
-    override fun playNext(songs: List<Song>, source: QueueSource) = changeQueue { queue.playNext(songs, source) }
+    override fun playNext(songs: List<Song>, source: QueueSource) = changeQueue { queue.playNext(songs.map(lengths::applyTo), source) }
 
-    override fun addToQueue(songs: List<Song>, source: QueueSource) = changeQueue { queue.add(songs, source) }
+    override fun addToQueue(songs: List<Song>, source: QueueSource) = changeQueue { queue.add(songs.map(lengths::applyTo), source) }
 
-    override fun insert(songs: List<Song>, before: Long?) = changeQueue { queue.insertBefore(songs, before) }
+    override fun insert(songs: List<Song>, before: Long?) = changeQueue { queue.insertBefore(songs.map(lengths::applyTo), before) }
 
     override fun moveUpcoming(from: Int, to: Int) = changeQueue { queue.moveUpcoming(from, to) }
 
@@ -428,7 +452,7 @@ class EnginePlayer(
     override fun restore(saved: SavedQueue) {
         synchronized(lock) {
             shuffle = saved.shuffle
-            queue.restore(saved.songs, saved.order, saved.index, saved.shuffle, saved.sources)
+            queue.restore(saved.songs.map(lengths::applyTo), saved.order, saved.index, saved.shuffle, saved.sources)
             playing = false
             buffering = false
             stopAfter = false
@@ -530,6 +554,8 @@ class EnginePlayer(
                     val entry = queue.songs.firstOrNull { it.key == key }
                     val info = event.info
                     if (entry != null && info != null) decoded = entry.key to songFormatOf(info, entry.song)
+                    if (entry != null) info?.durationMs?.toLong()?.let { measured = entry.key to it }
+                    learnLength(key, info?.durationMs?.toLong())
                     started(key)
                 }
                 is EngineEvent.TrackEnded -> if (event.reason == EndReason.FINISHED) {
@@ -555,12 +581,18 @@ class EnginePlayer(
                 }
                 is EngineEvent.Position -> {
                     val key = keyOfItem(event.itemId)
+                    // The engine's length of the song heard, which a
+                    // stream may only learn after it started. The decoder's
+                    // word at the start, when it gave one, stands.
+                    val heard = engine.heard().takeIf { keyOfItem(it.itemId) == key }
+                    val corrected = learnLength(key, measured?.takeIf { it.first == key }?.second ?: heard?.durationMs)
                     when {
                         key == expecting -> expecting = null
                         // Heard on another song with no word of it
                         // starting, and nothing awaited (or the song a
                         // jump went for never came): follow it.
                         key != queue.currentEntry?.key && !stillExpecting() -> started(key)
+                        corrected || (heard != null && durationMs(heard) != _state.value.durationMs) -> Unit
                         else -> return
                     }
                 }

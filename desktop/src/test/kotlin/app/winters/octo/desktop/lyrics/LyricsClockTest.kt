@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.lyrics
 
+import app.winters.octo.audio.EngineEvent
+import app.winters.octo.audio.TrackInfo
 import app.winters.octo.desktop.audio.EnginePlayer
 import app.winters.octo.desktop.audio.FakeEngine
 import app.winters.octo.desktop.audio.Heard
@@ -108,6 +110,25 @@ class LyricsClockTest {
         rig.hear(8_010.0)
         view.frameAt(rig, 1_032_000_000)
         assertEquals(8.01, view.lyricTime, 0.02)
+    }
+
+    // The song's length changing under the lyrics (a wrong listing found
+    // out once the song opened) moves no line: they follow the place in
+    // the song, never a share of its length.
+    @Test
+    fun aCorrectedLengthMovesNoLine() {
+        val (kept, corrected) = Rig() to Rig()
+        val (keptView, correctedView) = engineFor() to engineFor()
+        for (rig in listOf(kept, corrected)) rig.hear(8_050.0)
+        keptView.frameAt(kept, 1_000_000_000)
+        correctedView.frameAt(corrected, 1_000_000_000)
+        corrected.engine.emit(EngineEvent.TrackStarted(itemId(corrected.key), 0u, TrackInfo("aac", false, 44_100u, 2u, null, 190_000uL, null)))
+        assertEquals(190_000, corrected.player.state.value.durationMs)
+        assertEquals(200_000, kept.player.state.value.durationMs)
+        keptView.frameAt(kept, 1_016_000_000)
+        correctedView.frameAt(corrected, 1_016_000_000)
+        assertEquals(keptView.lyricTime, correctedView.lyricTime, 0.0)
+        assertEquals("Three", correctedView.lines[correctedView.focus].text)
     }
 
     @Test
