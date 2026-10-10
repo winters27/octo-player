@@ -72,7 +72,12 @@ private const val DUCKED_VOLUME = 0.2f
 // deck that is playing, and hands over to the other deck for a crossfade
 // without anything outside noticing. It also owns audio focus.
 @OptIn(UnstableApi::class)
-class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : ForwardingSimpleBasePlayer(initial), SleepTarget, EditableQueue {
+class OctoPlayer(
+    context: Context,
+    initial: ExoPlayer,
+    spare: ExoPlayer,
+    lengths: RealLengths = RealLengths(),
+) : ForwardingSimpleBasePlayer(initial), SleepTarget, EditableQueue {
     var deck: ExoPlayer = initial
         private set
 
@@ -84,7 +89,7 @@ class OctoPlayer(context: Context, initial: ExoPlayer, spare: ExoPlayer) : Forwa
     private var fadeIn = 1f
     private var fadeOut = 0f
 
-    private val fader = Crossfader(this, spare).also(::addListener)
+    private val fader = Crossfader(this, spare, lengths).also(::addListener)
 
     // Both decks, whichever is playing, so speed and skipping silence can be
     // set on each and a crossfade hands over at the same pace.

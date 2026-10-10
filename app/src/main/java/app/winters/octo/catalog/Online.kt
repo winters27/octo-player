@@ -32,8 +32,9 @@ data class OnlineSongEntity(
     val album: String,
     val albumId: String?,
     val artistId: String?,
-    // Zero when the server only guessed the length, until the player has
-    // played the song and learned it.
+    // Zero when the server only guessed the length. Once the player has
+    // played the song, the length of its sound, where the listing was
+    // missing or more than a second off.
     val durationMs: Long,
     val coverId: String?,
     val mimeType: String?,
@@ -77,10 +78,10 @@ interface OnlineDao {
     @Query("UPDATE online_song SET adoptedId = :trackId WHERE id = :id")
     suspend fun adopt(id: String, trackId: String)
 
-    // Gives a find the length the player learned, only when it has none.
-    // Answers how many rows took it.
-    @Query("UPDATE online_song SET durationMs = :durationMs WHERE id = :id AND durationMs = 0")
-    suspend fun fillLength(id: String, durationMs: Long): Int
+    // Gives a find the length the player measured, where its listing was
+    // missing or wrong. Answers how many rows took it.
+    @Query("UPDATE online_song SET durationMs = :durationMs WHERE id = :id")
+    suspend fun setLength(id: String, durationMs: Long): Int
 
     // Stores what the server says about these songs now, keeping what the
     // app knows about each, and answers them as stored.

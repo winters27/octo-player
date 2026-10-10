@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import androidx.annotation.OptIn
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.BitmapLoader
@@ -126,3 +127,8 @@ fun MediaMetadata.storedLoudness(): ReplayGainInfo? {
     fun value(key: String) = if (extras.containsKey(key)) extras.getFloat(key) else null
     return storedReplayGain(value(EXTRA_TRACK_GAIN), value(EXTRA_TRACK_PEAK), value(EXTRA_ALBUM_GAIN), value(EXTRA_ALBUM_PEAK))
 }
+
+// How long a song is: what a Media3 player measured of its sound
+// (C.TIME_UNSET while it has not), else `listedMs`.
+fun songLengthMs(listedMs: Long, playerMs: Long): Long =
+    playingLengthMs(listedMs, playerMs.takeIf { it != C.TIME_UNSET })

@@ -27,7 +27,12 @@ private const val NEAR_CHECK_MS = 40L
 // Anything the listener does mid-blend (skip, seek, pause, editing the
 // queue) ends the blend at once.
 @OptIn(UnstableApi::class)
-internal class Crossfader(private val player: OctoPlayer, private var spare: ExoPlayer) : Player.Listener {
+internal class Crossfader(
+    private val player: OctoPlayer,
+    private var spare: ExoPlayer,
+    // Real lengths learned by playing, for a next song whose listing was wrong.
+    private val lengths: RealLengths = RealLengths(),
+) : Player.Listener {
     // How long a blend is, or 0 when crossfade is off.
     var fadeMs = 0L
         set(value) {
@@ -114,17 +119,28 @@ internal class Crossfader(private val player: OctoPlayer, private var spare: Exo
         val current = deck.currentMediaItem ?: return 0
         return crossfadeLength(
             current = current.fadeSong(lengthOf(deck)),
-            next = deck.getMediaItemAt(next).let { it.fadeSong(it.mediaMetadata.durationMs ?: 0) },
+            next = deck.getMediaItemAt(next).let { it.fadeSong(nextLengthOf(it, next)) },
             fadeMs = fadeMs,
             repeatOne = deck.repeatMode == Player.REPEAT_MODE_ONE,
             stopAtEndOfSong = deck.pauseAtEndOfMediaItems,
         )
     }
 
-    // How long the song is: what the deck measured, or the library's length
-    // for a stream that has not said.
-    private fun lengthOf(deck: ExoPlayer): Long =
-        deck.duration.takeIf { it != C.TIME_UNSET } ?: deck.currentMediaItem?.mediaMetadata?.durationMs ?: 0
+    // How long the song is: what the deck measured, or the listed length
+    // (corrected where playing it before found it wrong) for a stream that
+    // has not said.
+    private fun lengthOf(deck: ExoPlayer): Long {
+        val item = deck.currentMediaItem ?: return 0
+        return songLengthMs(lengths.lengthMs(item.mediaId, item.mediaMetadata.durationMs ?: 0), deck.duration)
+    }
+
+    // How long the next song is: what the spare measured once it holds that
+    // song, else the listed length, corrected where it was found wrong.
+    private fun nextLengthOf(item: MediaItem, index: Int): Long {
+        val listed = item.mediaMetadata.durationMs ?: 0
+        val spareMs = if (loadedFor == index && spare.currentMediaItem?.mediaId == item.mediaId) spare.duration else C.TIME_UNSET
+        return songLengthMs(lengths.lengthMs(item.mediaId, listed), spareMs)
+    }
 
     // The spare gets the same songs in the same shuffle order, parked
     // silently at the start of the next song.

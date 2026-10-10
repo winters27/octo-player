@@ -2,48 +2,48 @@ package app.winters.octo.discovery
 
 import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.isFind
-import kotlinx.coroutines.flow.MutableStateFlow
+import app.winters.octo.playback.RealLengths
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// The shortest and longest a length from the player is believed, so a
-// stream that reports nonsense is not kept.
-private const val SHORTEST_MS = 1_000L
-private const val LONGEST_MS = 3 * 60 * 60_000L
+// A song's length as a row shows it: the real one once playing it found
+// its listing wrong, else the listed one. Zero when neither is known.
+fun shownLengthMs(listedMs: Long, learnedMs: Long?): Long = learnedMs ?: listedMs.coerceAtLeast(0)
 
-// The length to keep for a find the player has opened: only when none is
-// known yet, and only one that looks like a song's.
-fun lengthToLearn(knownMs: Long, playerMs: Long): Long? = when {
-    knownMs > 0 -> null
-    playerMs < SHORTEST_MS || playerMs > LONGEST_MS -> null
-    else -> playerMs
-}
-
-// A song's length as a row shows it: the one it came with, or else one the
-// player learned since the list was loaded. Zero when neither is known.
-fun shownLengthMs(knownMs: Long, learnedMs: Long?): Long = if (knownMs > 0) knownMs else learnedMs ?: 0
-
-// Lengths of songs found online, learned by playing them. Half the finds
-// come with no length, and the player knows it once the song opens. It is
-// stored with the find, and kept here too so a list already on screen
-// shows it without being loaded again.
+// Lengths learned by playing songs. Half the finds come with no length,
+// and a find's listed length can be another copy's; the phone's player
+// knows the length of the sound once the song opens. A listing more than
+// a second off is corrected in memory for every song, so rows and the
+// queue already on screen show it, and stored with the find, so it shows
+// next time too.
 @Singleton
-class FindLengths internal constructor(private val fill: suspend (String, Long) -> Int) {
-    @Inject constructor(online: OnlineDao) : this(online::fillLength)
+class FindLengths internal constructor(
+    private val store: suspend (String, Long) -> Int,
+    private val real: RealLengths,
+) {
+    @Inject constructor(online: OnlineDao, real: RealLengths) : this(online::setLength, real)
 
-    private val _learned = MutableStateFlow<Map<String, Long>>(emptyMap())
-    val learned: StateFlow<Map<String, Long>> = _learned
+    // The corrected lengths, by song id.
+    val learned: StateFlow<Map<String, Long>> = real.corrected
 
-    // Finds already answered, so the same song opening again asks nothing.
-    private val settled = HashSet<String>()
+    // Finds already stored with their length, so the same song opening
+    // again writes nothing.
+    private val stored = HashMap<String, Long>()
 
-    suspend fun learn(trackId: String, playerMs: Long) {
+    // Takes the player's length of a song listed at `listedMs`.
+    suspend fun learn(trackId: String, listedMs: Long, playerMs: Long) {
+        val ms = real.learn(trackId, listedMs, playerMs) ?: return
         if (!isFind(trackId)) return
-        val ms = lengthToLearn(0, playerMs) ?: return
-        synchronized(settled) { if (!settled.add(trackId)) return }
-        // A find that already had a length keeps it, here as in storage.
-        if (fill(trackId, ms) > 0) _learned.update { it + (trackId to ms) }
+        synchronized(stored) {
+            if (stored[trackId] == ms) return
+            stored[trackId] = ms
+        }
+        try {
+            store(trackId, ms)
+        } catch (e: Exception) {
+            synchronized(stored) { stored.remove(trackId) }
+            throw e
+        }
     }
 }
