@@ -196,12 +196,21 @@ impl Shared {
     }
 
     fn heard_frame(&self) -> Option<f64> {
+        self.heard_frame_at(Instant::now())
+    }
+
+    fn heard_frame_at(&self, now: Instant) -> Option<f64> {
         let output = self.output.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        output.and_then(|o| o.clock.heard(Instant::now()))
+        output.and_then(|o| o.clock.heard(now))
     }
 
     pub fn position(&self) -> PlaybackPosition {
-        let moment = self.timeline.at(self.heard_frame());
+        self.position_at(Instant::now())
+    }
+
+    /// Where playback is at `now` by the audio clock.
+    pub fn position_at(&self, now: Instant) -> PlaybackPosition {
+        let moment = self.timeline.at(self.heard_frame_at(now));
         let status = self.lock_status();
         let Some(moment) = moment else {
             return PlaybackPosition { item_id: None, index: None, position_ms: 0.0, duration_ms: None };
@@ -1317,6 +1326,8 @@ impl Player {
             }
         }
         out.shared.set_expect_sound(self.playing && self.mix_state == MixState::Playing);
+        out.shared.set_mix_ended(self.mix_state == MixState::Ended);
+        out.shared.set_blend_waiting(mixer.planned_fade_waiting());
     }
 
     // Turns what is heard into events, and notices buffering and the end.

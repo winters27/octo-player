@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::api::{EndReason, Engine, EngineEvent, EngineListener, PlaybackState, QueueItem, RepeatMode};
 use crate::error::ErrorKind;
-use crate::output::null::{Capture, NullDriver};
+use crate::output::null::{Capture, NullDriver, Pump};
 use crate::output::{DeviceEvent, OutputFormat};
 use crate::testing::fixtures::*;
 
@@ -56,6 +56,10 @@ impl Recorder {
             .collect()
     }
 
+    fn find(&self, found: impl Fn(&EngineEvent) -> bool) -> Option<EngineEvent> {
+        self.events.lock().unwrap().iter().find(|e| found(e)).cloned()
+    }
+
     fn wait_for(&self, what: &str, timeout: Duration, found: impl Fn(&EngineEvent) -> bool) -> EngineEvent {
         let until = Instant::now() + timeout;
         loop {
@@ -77,6 +81,43 @@ fn engine(speed: f64) -> (Arc<Engine>, Arc<Recorder>, Capture) {
     let recorder = Arc::new(Recorder::default());
     engine.set_listener(recorder.clone());
     (engine, recorder, capture)
+}
+
+// An engine on a device that plays only when the test pumps it, so a busy
+// machine slows the test down without changing what is heard.
+fn driven_engine() -> (Arc<Engine>, Arc<Recorder>, Capture, Pump) {
+    let capture: Capture = Arc::new(Mutex::new(Vec::new()));
+    let (driver, pump) = NullDriver::driven(RATE, 2, Some(capture.clone()));
+    let engine = Engine::with_driver(Box::new(move || Box::new(driver)));
+    let recorder = Arc::new(Recorder::default());
+    engine.set_listener(recorder.clone());
+    (engine, recorder, capture, pump)
+}
+
+// Plays buffers until an event `found` arrives, up to `most` of them, then
+// waits for it.
+fn play_until(
+    pump: &Pump,
+    events: &Recorder,
+    what: &str,
+    most: usize,
+    found: impl Fn(&EngineEvent) -> bool,
+) -> EngineEvent {
+    for _ in 0..most {
+        pump.play();
+        if let Some(e) = events.find(&found) {
+            return e;
+        }
+    }
+    events.wait_for(what, Duration::from_secs(10), found)
+}
+
+fn wait_until(what: &str, done: impl Fn() -> bool) {
+    let until = Instant::now() + Duration::from_secs(10);
+    while !done() {
+        assert!(Instant::now() < until, "never {what}");
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 fn item(id: &str, path: &Path) -> QueueItem {
@@ -101,8 +142,9 @@ fn plays_a_queue_gaplessly_with_events() {
     let (a, b) = (dir.join("a.flac"), dir.join("b.wav"));
     write_flac(&a, RATE, 2, &first, &[]);
     write_wav(&b, RATE, 2, &second);
-    let (engine, events, capture) = engine(1.0);
+    let (engine, events, capture, pump) = driven_engine();
     engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
+    pump.play_out();
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
     let all = events.all();
     let names: Vec<String> = all
@@ -123,7 +165,6 @@ fn plays_a_queue_gaplessly_with_events() {
     assert_eq!(engine.state(), PlaybackState::Ended);
     // What reached the device is the unbroken tone (after the first
     // moment's fade-in and the limiter's short delay at the front).
-    assert_eq!(engine.underruns(), 0, "the device never ran dry");
     let played = capture.lock().unwrap().clone();
     let tone: Vec<f32> = first.iter().chain(&second).map(|&s| s as f32 / 32768.0).collect();
     let lines_up = |k: usize, i: usize| played.get((k + i) * 2) == Some(&tone[i * 2]);
@@ -141,9 +182,10 @@ fn events_arrive_at_other_speeds_too() {
     let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, 30_000, 0.3));
     write_wav(&b, RATE, 2, &sine(300.0, RATE, 2, 30_000, 30_000, 0.3));
-    let (engine, events, _) = engine(2.0);
+    let (engine, events, _, pump) = driven_engine();
     engine.set_speed(1.5, 1.0).unwrap();
     engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
+    pump.play_out();
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
     let all = events.all();
     let starts: Vec<&str> = all
@@ -163,27 +205,28 @@ fn clock_is_monotonic_and_tracks_real_time() {
     let dir = temp_dir();
     let a = dir.join("a.wav");
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 3, 0.3));
-    let (engine, events, _) = engine(1.0);
+    let (engine, events, _, pump) = driven_engine();
     engine.load(vec![item("a", &a)], 0, 0, true).unwrap();
-    events.wait_for("start", Duration::from_secs(5), |e| matches!(e, EngineEvent::TrackStarted { .. }));
-    let started = Instant::now();
-    let first = engine.position().position_ms;
-    let mut last = first;
-    let mut samples = 0;
-    while started.elapsed() < Duration::from_millis(1_200) {
-        let p = engine.position();
-        assert_eq!(p.item_id.as_deref(), Some("a"));
-        assert!(p.position_ms >= last, "went back from {last} to {}", p.position_ms);
-        last = p.position_ms;
-        samples += 1;
-        std::thread::sleep(Duration::from_millis(1));
+    pump.play();
+    events.wait_for("start", Duration::from_secs(10), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    // Each buffer is heard over the 10 ms from when it is played: read the
+    // clock every millisecond across 1.2 s of buffers.
+    let mut first = None;
+    let mut last = 0.0;
+    for buffer in 0..120 {
+        let at = pump.play();
+        for ms in 0..=10 {
+            let p = engine.position_at(at + Duration::from_millis(ms));
+            assert_eq!(p.item_id.as_deref(), Some("a"));
+            assert!(p.position_ms >= last, "went back from {last} to {}", p.position_ms);
+            last = p.position_ms;
+            // It moves as fast as time does, between buffers too.
+            let first = *first.get_or_insert(p.position_ms);
+            let heard = (buffer * 10 + ms) as f64;
+            let moved = p.position_ms - first;
+            assert!((moved - heard).abs() < 0.5, "moved {moved} ms in {heard} ms");
+        }
     }
-    // (How often the loop runs depends on the timer resolution of the machine.)
-    assert!(samples > 20);
-    // It moved as fast as time did, within the device's buffer.
-    let moved = last - first;
-    let elapsed = started.elapsed().as_secs_f64() * 1_000.0;
-    assert!((moved - elapsed).abs() < 40.0, "moved {moved} ms in {elapsed} ms");
     engine.shutdown();
 }
 
@@ -192,22 +235,27 @@ fn seek_and_start_position_are_accurate() {
     let dir = temp_dir();
     let a = dir.join("a.flac");
     write_flac(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 5, 0.3), &[]);
-    let (engine, events, _) = engine(1.0);
+    let (engine, events, _, pump) = driven_engine();
     engine.load(vec![item("a", &a)], 0, 1_000, false).unwrap();
     // Loaded paused at 1 s: that is the position before anything plays.
-    std::thread::sleep(Duration::from_millis(50));
-    assert!((engine.position().position_ms - 1_000.0).abs() < 1.0);
-    engine.play().unwrap();
-    events.wait_for("start", Duration::from_secs(5), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    wait_until("loaded", || engine.position().item_id.is_some());
     let p = engine.position().position_ms;
+    assert!((p - 1_000.0).abs() < 1.0, "{p}");
+    engine.play().unwrap();
+    wait_until("playing", || engine.state() == PlaybackState::Playing);
+    let at = pump.play();
+    events.wait_for("start", Duration::from_secs(10), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    let p = engine.position_at(at + Duration::from_millis(10)).position_ms;
     assert!((1_000.0..1_100.0).contains(&p), "{p}");
     engine.seek(3_250).unwrap();
-    // Straight after the call the position already shows the target.
-    std::thread::sleep(Duration::from_millis(5));
-    let p = engine.position().position_ms;
-    assert!((p - 3_250.0).abs() < 15.0, "{p}");
-    std::thread::sleep(Duration::from_millis(300));
-    let p = engine.position().position_ms;
+    // Once the seek is taken, before any of the new sound is heard, the
+    // position already shows the target.
+    wait_until("at the target", || (engine.position().position_ms - 3_250.0).abs() < 15.0);
+    let mut at = Instant::now();
+    for _ in 0..30 {
+        at = pump.play();
+    }
+    let p = engine.position_at(at + Duration::from_millis(10)).position_ms;
     assert!((3_450.0..3_600.0).contains(&p), "{p}");
     engine.shutdown();
 }
@@ -218,7 +266,7 @@ fn crossfades_between_songs_from_different_albums() {
     let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 3, 0.3));
     write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 3, 0.3));
-    let (engine, events, _) = engine(4.0);
+    let (engine, events, _, pump) = driven_engine();
     engine.set_crossfade(1_000).unwrap();
     // Library lengths, as the app always has them.
     let mut x = item("a", &a);
@@ -230,13 +278,13 @@ fn crossfades_between_songs_from_different_albums() {
     y.album_order = Some(2);
     y.duration_ms = Some(3_000);
     engine.load(vec![x, y], 0, 0, true).unwrap();
-    let fade = events.wait_for("crossfade", Duration::from_secs(10), |e| {
-        matches!(e, EngineEvent::CrossfadeStarted { .. })
-    });
+    let fade =
+        play_until(&pump, &events, "crossfade", 400, |e| matches!(e, EngineEvent::CrossfadeStarted { .. }));
     assert_eq!(
         fade,
         EngineEvent::CrossfadeStarted { from_id: "a".into(), to_id: "b".into(), duration_ms: 1_000 }
     );
+    pump.play_out();
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
     engine.shutdown();
 }
@@ -247,7 +295,7 @@ fn an_album_in_order_stays_gapless_with_crossfade_on() {
     let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 2, 0.3));
     write_wav(&b, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 2, 0.3));
-    let (engine, events, _) = engine(4.0);
+    let (engine, events, _, pump) = driven_engine();
     engine.set_crossfade(1_000).unwrap();
     let mut x = item("a", &a);
     x.album_id = Some("one".into());
@@ -258,6 +306,7 @@ fn an_album_in_order_stays_gapless_with_crossfade_on() {
     y.album_order = Some(2);
     y.duration_ms = Some(2_000);
     engine.load(vec![x, y], 0, 0, true).unwrap();
+    pump.play_out();
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
     let all = events.all();
     assert!(all.iter().any(|e| matches!(e, EngineEvent::GaplessTransition { .. })), "{all:?}");
@@ -271,10 +320,11 @@ fn a_seek_before_the_song_is_heard_still_starts_it() {
     let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 3, 0.3));
     write_wav(&b, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize, 0.3));
-    let (engine, events, _) = engine(4.0);
+    let (engine, events, _, pump) = driven_engine();
     engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
     // Straight after the load, before anything is heard.
     engine.seek(2_500).unwrap();
+    pump.play_out();
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
     let all = events.all();
     let names: Vec<String> = all
@@ -294,18 +344,21 @@ fn a_missing_song_is_reported_and_skipped() {
     let dir = temp_dir();
     let b = dir.join("b.wav");
     write_wav(&b, RATE, 2, &sine(300.0, RATE, 2, 0, 12_000, 0.3));
-    let (engine, events, _) = engine(4.0);
+    let (engine, events, _, pump) = driven_engine();
     let missing = item("gone", Path::new("Z:/no/such/song.flac"));
     engine.load(vec![missing, item("b", &b)], 0, 0, true).unwrap();
-    let error = events.wait_for("error", Duration::from_secs(5), |e| matches!(e, EngineEvent::Error { .. }));
+    let error = events.wait_for("error", Duration::from_secs(10), |e| matches!(e, EngineEvent::Error { .. }));
     assert!(
         matches!(error, EngineEvent::Error { kind: ErrorKind::NotFound, item_id: Some(ref id), .. } if id == "gone")
     );
-    events.wait_for(
+    play_until(
+        &pump,
+        &events,
         "b",
-        Duration::from_secs(5),
+        100,
         |e| matches!(e, EngineEvent::TrackStarted { item_id, .. } if item_id == "b"),
     );
+    pump.play_out();
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
     engine.shutdown();
 }
@@ -316,37 +369,53 @@ fn pause_resume_skip_and_stop() {
     let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 4, 0.3));
     write_wav(&b, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 4, 0.3));
-    let (engine, events, _) = engine(1.0);
+    let (engine, events, _, pump) = driven_engine();
     engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
-    events.wait_for("start", Duration::from_secs(5), |e| matches!(e, EngineEvent::TrackStarted { .. }));
-    std::thread::sleep(Duration::from_millis(200));
+    pump.play();
+    events.wait_for("start", Duration::from_secs(10), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    for _ in 0..20 {
+        pump.play();
+    }
     engine.pause().unwrap();
-    std::thread::sleep(Duration::from_millis(60));
-    assert_eq!(engine.state(), PlaybackState::Paused);
-    let held = engine.position().position_ms;
-    std::thread::sleep(Duration::from_millis(200));
-    assert!((engine.position().position_ms - held).abs() < 1.0, "the clock stands still while paused");
+    wait_until("paused", || engine.state() == PlaybackState::Paused);
+    // The fade out, and then the device keeps asking while paused. (Read a
+    // second on, well past anything a buffer played.)
+    let mut at = Instant::now();
+    for _ in 0..5 {
+        at = pump.play();
+    }
+    let held = engine.position_at(at + Duration::from_secs(1)).position_ms;
+    for _ in 0..20 {
+        at = pump.play();
+    }
+    let still = engine.position_at(at + Duration::from_secs(1)).position_ms;
+    assert!((still - held).abs() < 1.0, "the clock stands still while paused");
     engine.play().unwrap();
-    std::thread::sleep(Duration::from_millis(200));
-    assert!(engine.position().position_ms > held + 100.0);
+    wait_until("playing", || engine.state() == PlaybackState::Playing);
+    let mut at = Instant::now();
+    for _ in 0..20 {
+        at = pump.play();
+    }
+    assert!(engine.position_at(at + Duration::from_millis(10)).position_ms > held + 100.0);
     engine.skip_next().unwrap();
-    events.wait_for(
+    play_until(
+        &pump,
+        &events,
         "b",
-        Duration::from_secs(5),
+        100,
         |e| matches!(e, EngineEvent::TrackStarted { item_id, .. } if item_id == "b"),
     );
     assert!(
         events.all().contains(&EngineEvent::TrackEnded { item_id: "a".into(), reason: EndReason::Skipped })
     );
-    assert_eq!(engine.queue().current_index, Some(1));
+    wait_until("b current", || engine.queue().current_index == Some(1));
     engine.stop().unwrap();
     events.wait_for(
         "stopped",
-        Duration::from_secs(5),
+        Duration::from_secs(10),
         |e| matches!(e, EngineEvent::TrackEnded { item_id, reason: EndReason::Stopped } if item_id == "b"),
     );
-    std::thread::sleep(Duration::from_millis(30));
-    assert_eq!(engine.state(), PlaybackState::Idle);
+    wait_until("idle", || engine.state() == PlaybackState::Idle);
     engine.shutdown();
 }
 
@@ -356,15 +425,25 @@ fn the_same_songs_given_again_keep_the_next_one_lined_up() {
     let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 2, 0.3));
     write_wav(&b, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize / 2, 0.3));
-    let (engine, events, _) = engine(2.0);
-    engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
-    events.wait_for("start", Duration::from_secs(5), |e| matches!(e, EngineEvent::TrackStarted { .. }));
-    // By now b is lined up and read. With its file gone, only the song
-    // already lined up can still play.
-    std::thread::sleep(Duration::from_millis(150));
+    let (engine, events, _, pump) = driven_engine();
+    // An album in order joins gaplessly, once b's length is read from b.
+    engine.set_crossfade(1_000).unwrap();
+    let on_album = |id: &str, path: &Path, order: i32| QueueItem {
+        album_id: Some("one".into()),
+        album_order: Some(order),
+        ..item(id, path)
+    };
+    let songs = || vec![on_album("a", &a, 1), on_album("b", &b, 2)];
+    engine.load(songs(), 0, 0, true).unwrap();
+    pump.play();
+    events.wait_for("start", Duration::from_secs(10), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    // Once the join is planned, b is lined up and read. With its file gone,
+    // only the song already lined up can still play.
+    events.wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
     std::fs::remove_file(&b).unwrap();
-    engine.replace_upcoming(vec![item("b", &b)]).unwrap();
-    engine.replace_queue(vec![item("a", &a), item("b", &b)], 0).unwrap();
+    engine.replace_upcoming(vec![on_album("b", &b, 2)]).unwrap();
+    engine.replace_queue(songs(), 0).unwrap();
+    pump.play_out();
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
     assert_eq!(
         events.story(),
@@ -384,20 +463,20 @@ fn a_new_order_keeps_the_song_playing_and_plays_on_in_the_new_order() {
             item(id, &path)
         })
         .collect();
-    let (engine, events, _) = engine(4.0);
+    let (engine, events, _, pump) = driven_engine();
     engine.load(songs.clone(), 2, 0, true).unwrap();
-    events.wait_for("start c", Duration::from_secs(5), |e| matches!(e, EngineEvent::TrackStarted { .. }));
-    let before = engine.position();
+    let at = pump.play();
+    events.wait_for("start c", Duration::from_secs(10), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    let before = engine.position_at(at + Duration::from_millis(10));
     // The index given is stale on purpose: the playing song is found by id.
     let [a, b, c, d] = [0, 1, 2, 3].map(|i| songs[i].clone());
     engine.replace_queue(vec![d, a, c, b], 0).unwrap();
-    std::thread::sleep(Duration::from_millis(30));
-    let after = engine.position();
+    wait_until("the new order", || engine.queue().item_ids == ["d", "a", "c", "b"]);
+    let after = engine.position_at(at + Duration::from_millis(10));
     assert_eq!(after.item_id.as_deref(), Some("c"));
     assert!(after.position_ms >= before.position_ms, "went back from {before:?} to {after:?}");
-    let queue = engine.queue();
-    assert_eq!(queue.item_ids, ["d", "a", "c", "b"]);
-    assert_eq!(queue.current_index, Some(2));
+    assert_eq!(engine.queue().current_index, Some(2));
+    pump.play_out();
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
     assert_eq!(
         events.story(),
@@ -417,17 +496,22 @@ fn repeat_all_goes_round_the_new_order() {
             item(id, &path)
         })
         .collect();
-    let (engine, events, _) = engine(4.0);
+    let (engine, events, _, pump) = driven_engine();
     engine.set_repeat(RepeatMode::All).unwrap();
     engine.load(songs.clone(), 0, 0, true).unwrap();
-    events.wait_for("start a", Duration::from_secs(5), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    pump.play();
+    events.wait_for("start a", Duration::from_secs(10), |e| matches!(e, EngineEvent::TrackStarted { .. }));
     let [a, b, c] = [0, 1, 2].map(|i| songs[i].clone());
     engine.replace_queue(vec![c, a, b], 1).unwrap();
-    let until = Instant::now() + Duration::from_secs(10);
-    while events.starts().len() < 4 {
-        assert!(Instant::now() < until, "{:?}", events.all());
-        std::thread::sleep(Duration::from_millis(5));
+    wait_until("the new order", || engine.queue().item_ids == ["c", "a", "b"]);
+    // Three 2 s songs and the start of the fourth.
+    for _ in 0..700 {
+        if events.starts().len() >= 4 {
+            break;
+        }
+        pump.play();
     }
+    wait_until("four starts", || events.starts().len() >= 4);
     assert_eq!(events.starts()[..4], ["a", "b", "c", "a"]);
     engine.shutdown();
 }
@@ -437,14 +521,17 @@ fn a_lost_device_that_will_not_reopen_carries_on_once_one_does() {
     let dir = temp_dir();
     let a = dir.join("a.wav");
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 20, 0.3));
-    let driver = NullDriver::new(RATE, 2);
+    let (driver, pump) = NullDriver::driven(RATE, 2, None);
     let (trouble, refuse) = (driver.events(), driver.refusal());
     let engine = Engine::with_driver(Box::new(move || Box::new(driver)));
     let events = Arc::new(Recorder::default());
     engine.set_listener(events.clone());
     engine.load(vec![item("a", &a)], 0, 0, true).unwrap();
-    events.wait_for("start", Duration::from_secs(5), |e| matches!(e, EngineEvent::TrackStarted { .. }));
-    std::thread::sleep(Duration::from_millis(300));
+    pump.play();
+    events.wait_for("start", Duration::from_secs(10), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    for _ in 0..30 {
+        pump.play();
+    }
 
     let device_errors = || {
         events
@@ -453,11 +540,12 @@ fn a_lost_device_that_will_not_reopen_carries_on_once_one_does() {
             .filter(|e| matches!(e, EngineEvent::Error { kind: ErrorKind::Device, .. }))
             .count()
     };
-    // Unplugged, with nothing else to play to. Answers where it stopped.
-    let unplug = || {
+    // Unplugged, with nothing else to play to: told once more. Answers
+    // where it stopped.
+    let unplug = |errors: usize| {
         refuse.store(true, Ordering::Release);
         trouble.lock().unwrap().push(DeviceEvent::Lost("unplugged".into()));
-        std::thread::sleep(Duration::from_millis(100));
+        wait_until("the device error", || device_errors() == errors);
         let held = engine.position();
         assert_eq!(held.item_id.as_deref(), Some("a"));
         std::thread::sleep(Duration::from_millis(200));
@@ -466,35 +554,31 @@ fn a_lost_device_that_will_not_reopen_carries_on_once_one_does() {
     };
     // Carries on from the place held, not from the start.
     let carries_on_from = |held: f64| {
-        let until = Instant::now() + Duration::from_secs(5);
-        let moved = loop {
-            let p = engine.position();
-            if p.position_ms > held + 50.0 {
-                break p;
-            }
-            assert!(Instant::now() < until, "never carried on from {held}; got {:?}", events.all());
-            std::thread::sleep(Duration::from_millis(5));
-        };
+        let mut at = Instant::now();
+        for _ in 0..10 {
+            at = pump.play();
+        }
+        let moved = engine.position_at(at + Duration::from_millis(10));
         assert_eq!(moved.item_id.as_deref(), Some("a"));
+        assert!(moved.position_ms > held + 50.0, "never carried on from {held}; got {:?}", events.all());
         assert!(moved.position_ms < held + 400.0, "from {held} to {}", moved.position_ms);
     };
 
     // Back when Play is pressed.
-    let held = unplug();
+    let held = unplug(1);
     assert!(held > 250.0, "{held}");
-    assert_eq!(device_errors(), 1);
     refuse.store(false, Ordering::Release);
     engine.play().unwrap();
     carries_on_from(held);
 
     // Back when an output is chosen.
-    let held = unplug();
+    let held = unplug(2);
     refuse.store(false, Ordering::Release);
     engine.set_output_device(None).unwrap();
     carries_on_from(held);
 
     // Back by itself, trying again now and then without an error each time.
-    let held = unplug();
+    let held = unplug(3);
     std::thread::sleep(Duration::from_millis(2_500));
     assert_eq!(engine.position().position_ms, held);
     assert_eq!(device_errors(), 3);
@@ -591,8 +675,13 @@ fn a_skip_to_a_song_still_opening_stops_reporting_the_one_left() {
         |e| matches!(e, EngineEvent::Position { item_id, .. } if item_id == "left"),
     );
     engine.skip_to(1).unwrap();
-    // A word already on its way is fine; after that, none for the song left.
-    std::thread::sleep(Duration::from_millis(300));
+    // A word already on its way is fine; once the engine waits on the new
+    // song, none for the song left.
+    events.wait_for(
+        "waiting on slow",
+        Duration::from_secs(10),
+        |e| matches!(e, EngineEvent::Buffering { item_id: Some(id) } if id == "slow"),
+    );
     let before = events.all().len();
     std::thread::sleep(Duration::from_millis(800));
     let after: Vec<EngineEvent> = events.all().split_off(before);
@@ -651,7 +740,11 @@ fn a_skip_to_a_song_that_opens_late_never_reports_the_one_left() {
         |e| matches!(e, EngineEvent::Position { item_id, .. } if item_id == "left"),
     );
     engine.skip_to(1).unwrap();
-    std::thread::sleep(Duration::from_millis(150));
+    events.wait_for(
+        "waiting on late",
+        Duration::from_secs(10),
+        |e| matches!(e, EngineEvent::Buffering { item_id: Some(id) } if id == "late"),
+    );
     let before = events.all().len();
     events.wait_for(
         "late started",
@@ -676,23 +769,24 @@ fn a_next_song_of_unknown_length_still_crossfades() {
     let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 3, 0.3));
     write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 3, 0.3));
-    let (engine, events, _) = engine(4.0);
+    let (engine, events, _, pump) = driven_engine();
     engine.set_crossfade(1_000).unwrap();
     engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
-    let fade = events.wait_for("crossfade", Duration::from_secs(10), |e| {
-        matches!(e, EngineEvent::CrossfadeStarted { .. })
-    });
-    assert_eq!(
-        fade,
-        EngineEvent::CrossfadeStarted { from_id: "a".into(), to_id: "b".into(), duration_ms: 1_000 }
-    );
+    // Nothing is played until the plan is made, however long b takes to open.
     let planned = events
-        .wait_for("plan", Duration::from_secs(1), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+        .wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
     let EngineEvent::TransitionPlanned { start_ms, entry_ms, overlap_ms, reason, .. } = planned else {
         unreachable!()
     };
     assert_eq!((start_ms, entry_ms, overlap_ms), (2_000, 0, 1_000));
     assert!(reason.starts_with("automix: crossfade at 2.00 s over 1.00 s"), "{reason}");
+    let fade =
+        play_until(&pump, &events, "crossfade", 400, |e| matches!(e, EngineEvent::CrossfadeStarted { .. }));
+    assert_eq!(
+        fade,
+        EngineEvent::CrossfadeStarted { from_id: "a".into(), to_id: "b".into(), duration_ms: 1_000 }
+    );
+    pump.play_out();
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
     assert!(!events.all().iter().any(|e| matches!(e, EngineEvent::GaplessTransition { .. })));
     engine.shutdown();
@@ -704,12 +798,13 @@ fn a_crossfade_off_still_says_why_the_join_is_gapless() {
     let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize, 0.3));
     write_wav(&b, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize, 0.3));
-    let (engine, events, _) = engine(4.0);
+    let (engine, events, _, pump) = driven_engine();
     engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
     let planned = events
         .wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
     let EngineEvent::TransitionPlanned { overlap_ms, reason, .. } = planned else { unreachable!() };
     assert_eq!((overlap_ms, reason.as_str()), (0, "automix: gapless, crossfade is off"));
+    pump.play_out();
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
     engine.shutdown();
 }
@@ -733,7 +828,7 @@ fn a_smart_plan_starts_early_enters_late_and_cuts_the_outgoing_song() {
     write_wav(&a, RATE, 2, &a_samples);
     let b_samples: Vec<i16> = (0..RATE as usize * 4).flat_map(|n| [0, (n % 15_000) as i16]).collect();
     write_wav(&b, RATE, 2, &b_samples);
-    let (engine, events, capture) = engine(2.0);
+    let (engine, events, capture, pump) = driven_engine();
     engine.set_test_planner(Some(test_plan));
     engine.set_crossfade(1_000).unwrap();
     engine
@@ -745,20 +840,25 @@ fn a_smart_plan_starts_early_enters_late_and_cuts_the_outgoing_song() {
         })
         .unwrap();
     engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
+    // The tail of A is scouted from a second in; the song then holds still
+    // until the plan is made.
+    for _ in 0..110 {
+        pump.play();
+    }
     let planned = events
-        .wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+        .wait_for("plan", Duration::from_secs(30), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
     let EngineEvent::TransitionPlanned { start_ms, entry_ms, overlap_ms, reason, .. } = planned else {
         unreachable!()
     };
     assert_eq!((start_ms, entry_ms, overlap_ms), (9_000, 500, 500), "{reason}");
     assert!(reason.contains("test plan"), "{reason}");
+    pump.play_out();
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
     engine.shutdown();
 
     let out = capture.lock().unwrap().clone();
     // A is heard for its first 9 s and the half second of the blend, then
-    // stops although it had 2.5 s left. (Counted frame by frame: a slow
-    // test machine can leave gaps of silence in the capture.)
+    // stops although it had 2.5 s left.
     let heard = out.chunks_exact(2).filter(|f| f[0] != 0.0).count();
     assert_eq!(heard, RATE as usize * 19 / 2, "A heard for {heard} frames");
     // From there on B plays alone, from 0.5 s in plus the blend's half second.
@@ -783,7 +883,7 @@ fn a_late_plan_into_a_song_entered_part_way_still_blends() {
     let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 12, 0.3));
     write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 4, 0.3));
-    let (engine, events, _) = engine(1.0);
+    let (engine, events, _, pump) = driven_engine();
     engine.set_test_planner(Some(late_entry_plan));
     engine.set_crossfade(3_000).unwrap();
     engine
@@ -799,7 +899,7 @@ fn a_late_plan_into_a_song_entered_part_way_still_blends() {
         .wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
     let EngineEvent::TransitionPlanned { reason, .. } = planned else { unreachable!() };
     assert!(reason.contains("late"), "{reason}");
-    let joined = events.wait_for("join", Duration::from_secs(10), |e| {
+    let joined = play_until(&pump, &events, "join", 400, |e| {
         matches!(e, EngineEvent::CrossfadeStarted { .. } | EngineEvent::GaplessTransition { .. })
     });
     assert!(matches!(joined, EngineEvent::CrossfadeStarted { .. }), "{joined:?}");
@@ -812,9 +912,10 @@ fn starting_inside_the_blend_window_blends_over_what_is_left() {
     let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
     write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 3, 0.3));
     write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 3, 0.3));
-    let (engine, events, _) = engine(1.0);
+    let (engine, events, _, pump) = driven_engine();
     engine.set_crossfade(1_000).unwrap();
-    // 2.2 s into a 3 s song: the blend at 2 s has already passed.
+    // 2.2 s into a 3 s song: the blend at 2 s has already passed. Nothing is
+    // played until the plan is made, however long song B takes to open.
     engine.load(vec![item("a", &a), item("b", &b)], 0, 2_200, true).unwrap();
     let planned = events
         .wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
@@ -822,9 +923,8 @@ fn starting_inside_the_blend_window_blends_over_what_is_left() {
     assert!((2_200..2_450).contains(&start_ms), "{start_ms}: {reason}");
     assert!((start_ms + overlap_ms).abs_diff(3_000) <= 1, "{reason}");
     assert!(reason.contains("late"), "{reason}");
-    let fade = events.wait_for("crossfade", Duration::from_secs(10), |e| {
-        matches!(e, EngineEvent::CrossfadeStarted { .. })
-    });
+    let fade =
+        play_until(&pump, &events, "crossfade", 100, |e| matches!(e, EngineEvent::CrossfadeStarted { .. }));
     let EngineEvent::CrossfadeStarted { duration_ms, .. } = fade else { unreachable!() };
     assert!(duration_ms.abs_diff(overlap_ms) <= 1, "{duration_ms} vs {overlap_ms}");
     engine.shutdown();
@@ -840,17 +940,20 @@ fn a_song_that_stops_short_of_its_length_still_hands_over() {
     let bytes = std::fs::read(&a).unwrap();
     std::fs::write(&a, &bytes[..44 + RATE as usize * 3 * 4]).unwrap();
     write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 3, 0.3));
-    let (engine, events, _) = engine(4.0);
+    let (engine, events, _, pump) = driven_engine();
     engine.set_crossfade(1_000).unwrap();
     engine
         .set_automix(crate::automix::AutomixSettings { smart_transitions: true, ..Default::default() })
         .unwrap();
     engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
-    events.wait_for(
+    play_until(
+        &pump,
+        &events,
         "b",
-        Duration::from_secs(10),
+        600,
         |e| matches!(e, EngineEvent::TrackStarted { item_id, .. } if item_id == "b"),
     );
+    pump.play_out();
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
     // The join that counts is decided again on the 3 s of sound: a blend
     // inside it, or a gapless join at its end when too little was left.

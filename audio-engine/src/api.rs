@@ -489,6 +489,12 @@ impl Engine {
         })
     }
 
+    /// Where playback is at `now` by the audio clock.
+    #[cfg(test)]
+    pub fn position_at(&self, now: std::time::Instant) -> PlaybackPosition {
+        self.shared.position_at(now)
+    }
+
     /// Plans this engine's transitions with `planner` instead of the real
     /// planner. Other engines are not touched.
     #[cfg(test)]

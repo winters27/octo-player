@@ -507,6 +507,11 @@ impl Mixer {
         self.planned.is_some()
     }
 
+    /// Whether a blend is planned whose incoming song has no sound ready yet.
+    pub fn planned_fade_waiting(&self) -> bool {
+        self.planned.as_ref().is_some_and(|p| !p.deck.is_ready())
+    }
+
     /// What the live tap has learned so far about song `key`, while it is
     /// the one playing (the incoming one, during a blend). `tag_bpm` picks
     /// the tempo's octave.

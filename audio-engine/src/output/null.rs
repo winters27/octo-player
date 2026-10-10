@@ -1,6 +1,7 @@
 //! A silent device for tests and machines without sound: a thread that
 //! pulls from the ring at the pace a real device would, optionally keeping
-//! what it "played" for a test to look at.
+//! what it "played" for a test to look at. Driven by hand instead, it plays
+//! a buffer only when a test asks, so the time it keeps is the test's.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -13,6 +14,9 @@ use crate::error::Failure;
 /// Everything the null device played, interleaved in its channel count.
 pub type Capture = Arc<Mutex<Vec<f32>>>;
 
+// The renderer of a device driven by hand, while it is open.
+type Slot = Arc<Mutex<Option<Renderer>>>;
+
 pub struct NullDriver {
     rate: u32,
     channels: u16,
@@ -23,6 +27,7 @@ pub struct NullDriver {
     running: Arc<AtomicBool>,
     events: Arc<Mutex<Vec<DeviceEvent>>>,
     refuse: Arc<AtomicBool>,
+    driven: Option<Slot>,
 }
 
 impl NullDriver {
@@ -36,7 +41,18 @@ impl NullDriver {
             running: Arc::new(AtomicBool::new(false)),
             events: Arc::new(Mutex::new(Vec::new())),
             refuse: Arc::new(AtomicBool::new(false)),
+            driven: None,
         }
+    }
+
+    /// A device with no pace of its own: it plays a buffer each time the
+    /// returned pump is told to, and nothing in between.
+    pub fn driven(rate: u32, channels: u16, capture: Option<Capture>) -> (Self, Pump) {
+        let slot: Slot = Arc::new(Mutex::new(None));
+        let mut driver = Self::new(rate, channels);
+        driver.driven = Some(slot.clone());
+        let pump = Pump { slot, capture, channels: channels as usize, period: rate as usize / 100 };
+        (driver, pump)
     }
 
     /// Keeps what is played.
@@ -86,6 +102,12 @@ impl Driver for NullDriver {
             return Err(Failure::new(crate::error::ErrorKind::Device, "no sound device"));
         }
         let mut renderer = make(self.rate, self.channels);
+        // Takes floats, as most systems' shared mixers do.
+        let format = OutputFormat::new(self.rate, self.channels, cpal::SampleFormat::F32);
+        if let Some(slot) = &self.driven {
+            *slot.lock().unwrap() = Some(renderer);
+            return Ok(OpenedOutput { format, device: self.device() });
+        }
         let stop = Arc::new(AtomicBool::new(false));
         self.stop = stop.clone();
         self.running.store(true, Ordering::Release);
@@ -118,13 +140,14 @@ impl Driver for NullDriver {
                 }
             })
             .map_err(|e| Failure::new(crate::error::ErrorKind::Device, e.to_string()))?;
-        // Takes floats, as most systems' shared mixers do.
-        let format = OutputFormat::new(self.rate, self.channels, cpal::SampleFormat::F32);
         Ok(OpenedOutput { format, device: self.device() })
     }
 
     fn close(&mut self) {
         self.stop.store(true, Ordering::Release);
+        if let Some(slot) = &self.driven {
+            slot.lock().unwrap().take();
+        }
     }
 
     fn set_running(&mut self, running: bool) {
@@ -139,5 +162,66 @@ impl Driver for NullDriver {
 impl Drop for NullDriver {
     fn drop(&mut self) {
         self.close();
+    }
+}
+
+/// Plays the buffers of a device made with [`NullDriver::driven`].
+pub struct Pump {
+    slot: Slot,
+    capture: Option<Capture>,
+    channels: usize,
+    period: usize,
+}
+
+impl Pump {
+    // Long enough for any machine, however busy, to get a buffer ready.
+    const PATIENCE: Duration = Duration::from_secs(30);
+
+    /// Plays one 10 ms buffer, heard from the moment it is played, and
+    /// returns that moment. Waits first for the device to be open and for
+    /// a whole buffer of sound, unless a jump is to be played, the mixer has
+    /// nothing more to give or playback is paused: a buffer is never cut
+    /// short because the machine was slow to make it. Also waits while a
+    /// planned blend's incoming song has no sound ready, so the blend is
+    /// never reached before that song could have been read.
+    pub fn play(&self) -> Instant {
+        let until = Instant::now() + Self::PATIENCE;
+        let mut buf = vec![0f32; self.period * self.channels];
+        loop {
+            let mut slot = self.slot.lock().unwrap();
+            if let Some(renderer) = slot.as_mut() {
+                let shared = renderer.shared();
+                let full = renderer.playable_frames() >= self.period && !shared.blend_waiting();
+                if full || renderer.jump_pending() || shared.mix_ended() || shared.is_paused() {
+                    let at = Instant::now();
+                    renderer.render_heard_at(&mut buf, at);
+                    drop(slot);
+                    if let Some(c) = &self.capture {
+                        c.lock().unwrap().extend_from_slice(&buf);
+                    }
+                    return at;
+                }
+            }
+            drop(slot);
+            assert!(Instant::now() < until, "no buffer of sound became ready to play");
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    /// Plays buffers until the mixer has given all it has and all of it
+    /// has been played.
+    pub fn play_out(&self) {
+        loop {
+            {
+                let slot = self.slot.lock().unwrap();
+                if let Some(renderer) = slot.as_ref()
+                    && renderer.shared().mix_ended()
+                    && renderer.ring_empty()
+                {
+                    return;
+                }
+            }
+            self.play();
+        }
     }
 }
