@@ -1186,7 +1186,8 @@ fn a_smart_plan_is_made_with_the_decoded_lengths() {
         .unwrap();
     let listed = |id: &str, path: &Path| QueueItem { duration_ms: Some(60_000), ..item(id, path) };
     engine.load(vec![listed("a", &a), listed("b", &b)], 0, 0, true).unwrap();
-    let planned = play_until(&pump, &events, "plan", 1_200, |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    let planned =
+        play_until(&pump, &events, "plan", 1_200, |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
     let EngineEvent::TransitionPlanned { start_ms, overlap_ms, reason, .. } = planned else { unreachable!() };
     assert!(reason.contains("lengths 10000 and 3000"), "{reason}");
     assert_eq!((start_ms, overlap_ms), (9_500, 500), "{reason}");
