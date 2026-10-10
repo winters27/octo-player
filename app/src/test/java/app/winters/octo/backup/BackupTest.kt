@@ -56,7 +56,7 @@ class BackupTest {
         val text = encodeBackup(Backup(player = PlayerPrefs()))
         listOf(
             "liveBackground", "crossfade", "crossfadeSeconds", "lyricsOnline", "speed", "keepPitch", "pitchSemitones",
-            "skipSilence", "resumeWired", "resumeBluetooth", "resumeAlways",
+            "skipSilence", "resumeWired", "resumeBluetooth", "resumeAlways", "smartTransitions", "filterSweeps", "matchTempo",
         ).forEach { assertTrue("$it is missing", text.contains("\"$it\"")) }
     }
 

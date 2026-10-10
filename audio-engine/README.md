@@ -13,7 +13,9 @@ same sound shaping as the Android app, and a sample-accurate clock.
 | --- | --- |
 | `src/api.rs` | The `Engine` object, records, events and listener |
 | `src/player.rs` | The player thread: queue, device, events |
-| `src/mixer.rs` | Lanes, crossfade, speed, shaping, clock markers |
+| `src/mixer.rs` | Lanes, crossfade (curve, filter sweeps, tempo match), speed, shaping, live tap, clock markers |
+| `src/automix.rs` | Transition plans, gain curve and sweep math, the planner and settings |
+| `src/scout.rs` | Decodes the end or start of a queued song for the planner, off the audio path |
 | `src/lane.rs` | Gapless chains of songs through one resampler |
 | `src/deck.rs` | One song decoding ahead on its own thread |
 | `src/decode.rs` | symphonia decoding, gapless trims, seeking, tags |
@@ -24,7 +26,7 @@ same sound shaping as the Android app, and a sample-accurate clock.
 | `src/output/` | Device callback, audio clock, cpal and silent drivers |
 | `src/timeline.rs` | Which song and second each ring frame holds |
 | `bindings/kotlin/` | Generated Kotlin bindings |
-| `examples/` | `play` (manual testing) and `bench` (CPU) |
+| `examples/` | `play` (manual testing), `bench` (CPU), `render_transition` (blends to WAVs, with checks), `bpm_check` (tempo against tags) |
 | `tools/make-fixtures/` | Makes the small mp3 and opus test files |
 
 <!-- markdownlint-enable MD013 -->
@@ -65,7 +67,8 @@ same sound shaping as the Android app, and a sample-accurate clock.
 | Feature | Status |
 | --- | --- |
 | Gapless | Sample-exact, pre-decoded next song, delay/padding trimmed |
-| Crossfade 0 to 12 s | Equal power, per sample; Android's rules, albums in order stay gapless |
+| Crossfade 0 to 16 s | Equal power, per sample; Android's rules, albums in order stay gapless; decided once the next song's real length is known |
+| Smart transitions | Planned start, entry and overlap, S-curve, filter sweeps, tempo match; the planner itself is still the plain crossfade |
 | Volume | Linear and dB, mute, click-free ramps |
 | ReplayGain | Off, track, album, smart; preamp, fallback, clipping prevention, R128 tags, stored server values |
 | EQ | Graphic 10 bands and presets, parametric peak and shelves, headphone correction, auto preamp, 30 ms glides |
@@ -161,7 +164,8 @@ engine.position().positionMs          // audio clock, fractional ms
   `queue`.
 - **Transport:** `play`, `pause`, `stop`, `seek`.
 - **Sound:** `setVolume`, `setVolumeDb`, `setMuted`, `setCrossfade`,
-  `setEq`, `setReplaygain`, `setDsp`, `setSpeed(speed, pitch)`.
+  `setAutomix` (smart transitions, filter sweeps, match tempo, longest
+  blend), `setEq`, `setReplaygain`, `setDsp`, `setSpeed(speed, pitch)`.
 - **Devices:** `devices`, `currentDevice`, `setOutputDevice(id or null)`,
   `outputFormat` (the rate, channels and sample format the device's stream
   was opened with).
@@ -169,7 +173,8 @@ engine.position().positionMs          // audio clock, fractional ms
   `setPositionInterval`, `shutdown`.
 - **Also:** `equalizerPresets()`, `graphicBands()`.
 - **Events:** `TrackStarted`, `TrackEnded` (with a reason),
-  `GaplessTransition`, `CrossfadeStarted`, `Buffering`, `Ready`,
+  `GaplessTransition`, `CrossfadeStarted`, `TransitionPlanned` (how the
+  next song will follow, with an `automix:` line for the log), `Buffering`, `Ready`,
   `StateChanged`, `QueueEnded`, `Error` (with a kind), `DeviceChanged`
   (with the device's format), `Position`. `TrackStarted` carries the song's
   own format as decoded (codec, lossless, rate, channels, bits).
@@ -177,6 +182,46 @@ engine.position().positionMs          // audio clock, fractional ms
 Server streams arrive as signed addresses from the app, as on Android, with
 optional extra headers per item. The engine reuses the address for range
 requests and reconnects.
+
+## Transitions
+
+When the next song is close, the player opens it and decides how it
+follows: gapless, or a blend. A song with no length in the queue (outside
+songs on radio) is decided once its decoder reports the length, at the
+latest just before the crossfade would have to start. With smart
+transitions on, the end of the playing song (60 s) and the start of the
+next (30 s) are decoded on a scout thread (a stream's end only when its
+server answers ranges) into envelopes: level, bass level and a 3-band
+spectral flux every 10 ms. From those `automix::plan` finds each song's
+body level, sound start and end, outro, section boundaries and beat grid,
+and chooses a `TransitionPlan`: when the blend starts (on a bar line when
+both tempos are trusted, scored against the outro and the boundaries),
+where the next song comes in, how long both sound, the curve, the filter
+sweeps and an optional rate. The mixer runs it; the outgoing song stops
+when the blend ends, and finishes early when it falls silent. Without the
+end's analysis, or with no start left at least 3 s ahead, the plan is a
+late one at the end of the song. The live tap keeps the playing song's
+envelope as it is mixed, for its whole-song level and tempo. Genres such as
+classical or podcast get the plain crossfade.
+
+The analysis and planner are the same as the app's Kotlin copy in
+`shared/core`: `automix::vectors` runs every case in
+`shared/core/src/commonTest/resources/automix-vectors.json`.
+
+```sh
+cargo run --release --example render_transition -- a.flac b.flac out.wav --filters 0.7
+cargo run --release --example render_transition -- --batch pairs.txt out/
+cargo run --release --example bpm_check -- ~/Music/some-folder --limit 60
+```
+
+`render_transition` prints each plan and checks the rendered blend: its
+momentary loudness against the two songs' bodies (3 dB under the quieter,
+2 dB over the louder), samples above -0.1 dBFS, and clicks near the blend.
+A pairs file holds one pair a line, split by a tab or ` | `. `bpm_check`
+finds every song's tempo over the whole song, its first 30 s and its last
+60 s, and gives the share within 2 % of the tag tempo after halving or
+doubling. MP3 tags are not read: the engine builds symphonia without its
+ID3 support.
 
 ## Tests
 

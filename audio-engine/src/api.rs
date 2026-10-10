@@ -7,6 +7,7 @@ use std::thread;
 
 use crossbeam_channel::{Sender, bounded, unbounded};
 
+use crate::automix::{AutomixSettings, SongProfile};
 use crate::decode::TrackInfo;
 use crate::error::{EngineError, ErrorKind};
 use crate::output::cpal_driver::CpalDriver;
@@ -56,6 +57,13 @@ pub struct QueueItem {
     pub replay_gain: Option<ReplayGainInfo>,
     #[uniffi(default)]
     pub headers: Vec<HttpHeader>,
+    /// The song's genre; some genres are never mixed into the next song.
+    #[uniffi(default)]
+    pub genre: Option<String>,
+    /// The song's tempo from its tags, which settles whether a beat found in
+    /// it runs at double or half time.
+    #[uniffi(default)]
+    pub bpm: Option<f64>,
 }
 
 /// What happens at the end of the queue or the song.
@@ -161,6 +169,19 @@ pub enum EngineEvent {
     Position {
         item_id: String,
         position_ms: f64,
+    },
+    /// How the next song will follow the playing one, decided ahead of
+    /// time. `start_ms` is when in `from_id` the blend starts (its length
+    /// for a gapless join), `entry_ms` where `to_id` comes in, and
+    /// `overlap_ms` how long both sound, 0 for a gapless join. `reason` is a
+    /// line for the log, starting `automix:`.
+    TransitionPlanned {
+        from_id: String,
+        to_id: String,
+        start_ms: u64,
+        entry_ms: u64,
+        overlap_ms: u64,
+        reason: String,
     },
 }
 
@@ -293,9 +314,30 @@ impl Engine {
         self.send(Command::SetMuted(muted))
     }
 
-    /// Crossfade length in milliseconds, 0 to 12000; 0 turns it off.
+    /// Crossfade length in milliseconds, 0 to 16000; 0 turns it off.
     pub fn set_crossfade(&self, ms: u32) -> Result<(), EngineError> {
         self.send(Command::SetCrossfade(ms.min(crate::crossfade::LONGEST_FADE_MS)))
+    }
+
+    /// How crossfades are chosen and shaped: smart transitions, filter
+    /// sweeps, tempo matching and the longest blend. Applies from the next
+    /// transition on. Smart transitions are off until this is called.
+    pub fn set_automix(&self, settings: AutomixSettings) -> Result<(), EngineError> {
+        let max_overlap_ms = settings.max_overlap_ms.min(crate::crossfade::LONGEST_FADE_MS);
+        self.send(Command::SetAutomix(AutomixSettings { max_overlap_ms, ..settings }))
+    }
+
+    /// The transition profile of the song queued as `item_id`, from its
+    /// server, or `None` to forget it. With one, that song's start and end
+    /// are planned from it instead of being read from the stream.
+    pub fn set_song_profile(&self, item_id: String, profile: Option<SongProfile>) -> Result<(), EngineError> {
+        let profile = match profile {
+            None => None,
+            Some(p) => Some(Arc::new(
+                p.to_profile().ok_or_else(|| invalid("a profile without its levels or length"))?,
+            )),
+        };
+        self.send(Command::SetProfile { item_id, profile })
     }
 
     pub fn set_eq(&self, eq: EqSettings) -> Result<(), EngineError> {
@@ -445,6 +487,19 @@ impl Engine {
             player: Mutex::new(Some(player)),
             events: Mutex::new(Some(events)),
         })
+    }
+
+    /// Where playback is at `now` by the audio clock.
+    #[cfg(test)]
+    pub fn position_at(&self, now: std::time::Instant) -> PlaybackPosition {
+        self.shared.position_at(now)
+    }
+
+    /// Plans this engine's transitions with `planner` instead of the real
+    /// planner. Other engines are not touched.
+    #[cfg(test)]
+    pub fn set_test_planner(&self, planner: Option<crate::automix::Planner>) {
+        *self.shared.planner.lock().unwrap_or_else(|e| e.into_inner()) = planner;
     }
 
     fn send(&self, command: Command) -> Result<(), EngineError> {

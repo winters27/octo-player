@@ -56,13 +56,17 @@ class CoverSwap<T : Any> {
         private set
 
     // A new cover arrives now and its fade starts. Mid-fade, the new fade
-    // starts from whichever cover shows most. Returns the covers to fade
-    // from and to.
-    fun arrive(next: T, fade: CoverFade, nowMs: Long): Pair<T, T> {
+    // starts from the two as they show at that moment (`blend` mixes them,
+    // as the wash does), so nothing jumps. Picking whichever showed most
+    // snapped the old cover back when a song's real cover came in just
+    // after its stand-in, as an outside song's does on radio. Returns the
+    // covers to fade from and to.
+    fun arrive(next: T, fade: CoverFade, nowMs: Long, blend: (old: T, new: T, mix: Float) -> T): Pair<T, T> {
         val current = new
+        val previous = old
         val from = when {
             current == null -> next
-            fade.running && fade.mix < 0.5f -> old ?: current
+            fade.running && previous != null && previous !== current -> blend(previous, current, fade.mix)
             else -> current
         }
         old = from

@@ -26,6 +26,9 @@ const val EXTRA_ARTIST_ID = "app.winters.octo.artistId"
 const val EXTRA_MIME = "app.winters.octo.mime"
 const val EXTRA_ALBUM_ORDER = "app.winters.octo.albumOrder"
 
+// The song's beats a minute from its tags or its server, when known.
+const val EXTRA_BPM = "app.winters.octo.bpm"
+
 // Android's own key for an explicit song (MediaConstants.METADATA_KEY_IS_EXPLICIT),
 // so a car's screen marks it too, and the value that says it is.
 const val EXTRA_IS_EXPLICIT = "android.media.IS_EXPLICIT"
@@ -45,9 +48,9 @@ private fun artworkUri(ref: String?): Uri? = ref?.let { Uri.fromParts(ART_SCHEME
 fun TrackEntity.toMediaItem(): MediaItem = toMediaItem(uri, mimeType)
 
 // A song from the catalog, playing from one of its copies: where that copy
-// is, what the player will receive from it, and how loud the song is when
-// its source says.
-fun TrackEntity.toMediaItem(uri: String?, mimeType: String?, loudness: ReplayGainInfo? = null): MediaItem =
+// is, what the player will receive from it, how loud the song is when its
+// source says, and its tempo when any copy knows it.
+fun TrackEntity.toMediaItem(uri: String?, mimeType: String?, loudness: ReplayGainInfo? = null, bpm: Int? = null): MediaItem =
     MediaItem.Builder()
         .setMediaId(id)
         .setUri(uri)
@@ -73,6 +76,7 @@ fun TrackEntity.toMediaItem(uri: String?, mimeType: String?, loudness: ReplayGai
                         putString(EXTRA_MIME, mimeType)
                         putInt(EXTRA_ALBUM_ORDER, albumOrder)
                         if (explicit == true) putLong(EXTRA_IS_EXPLICIT, ATTRIBUTE_PRESENT)
+                        if (bpm != null && tagBpm(bpm) != null) putInt(EXTRA_BPM, bpm)
                         loudness?.trackGain?.let { putFloat(EXTRA_TRACK_GAIN, it) }
                         loudness?.trackPeak?.let { putFloat(EXTRA_TRACK_PEAK, it) }
                         loudness?.albumGain?.let { putFloat(EXTRA_ALBUM_GAIN, it) }
@@ -119,6 +123,13 @@ fun MediaMetadata.extra(key: String): String? = (extras ?: Bundle.EMPTY).getStri
 
 // Whether a song was sent marked explicit.
 fun MediaMetadata.isExplicit(): Boolean = (extras ?: Bundle.EMPTY).getLong(EXTRA_IS_EXPLICIT, 0L) == ATTRIBUTE_PRESENT
+
+// The tempo a song was sent with, if any copy of it knew one.
+fun MediaMetadata.tagBpm(): Double? = tagBpm((extras ?: Bundle.EMPTY).getInt(EXTRA_BPM, 0))
+
+// A stored tempo the automix analysis can use: none for a missing or
+// nonsense value.
+fun tagBpm(stored: Int?): Double? = stored?.takeIf { it in 1..999 }?.toDouble()
 
 // The loudness a song was sent with, if its source knew it.
 fun MediaMetadata.storedLoudness(): ReplayGainInfo? {

@@ -17,6 +17,9 @@ pub struct Opened {
     /// The file extension or type, for the format guess.
     pub hint: Option<String>,
     pub remote: bool,
+    /// A jump far into the song is cheap: a file, or a stream whose server
+    /// answers with ranges.
+    pub seeks_cheaply: bool,
 }
 
 /// Whether a source string names a stream rather than a file.
@@ -30,7 +33,8 @@ pub fn open(source: &str, http: HttpOptions) -> Result<Opened, Failure> {
     if is_remote(source) {
         let stream = HttpSource::open(source, http)?;
         let hint = stream.content_type().and_then(extension_for_type).or_else(|| url_extension(source));
-        return Ok(Opened { source: Box::new(stream), hint, remote: true });
+        let seeks_cheaply = stream.answered_with_range();
+        return Ok(Opened { source: Box::new(stream), hint, remote: true, seeks_cheaply });
     }
     let path = source.strip_prefix("file://").unwrap_or(source);
     let file = File::open(path).map_err(|e| {
@@ -39,7 +43,7 @@ pub fn open(source: &str, http: HttpOptions) -> Result<Opened, Failure> {
         Failure::new(kind, format!("{path}: {e}"))
     })?;
     let hint = Path::new(path).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
-    Ok(Opened { source: Box::new(file), hint, remote: false })
+    Ok(Opened { source: Box::new(file), hint, remote: false, seeks_cheaply: true })
 }
 
 // The extension a server's content type stands for.

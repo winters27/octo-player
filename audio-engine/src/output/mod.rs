@@ -103,6 +103,10 @@ pub struct OutputShared {
     // The mixer has sound flowing, so a dry ring is a glitch, not a start,
     // an end or a wait for the network.
     expect_sound: AtomicBool,
+    // The mixer has given all it has: what is in the ring is the last of it.
+    mix_ended: AtomicBool,
+    // A blend is planned whose incoming song has no sound ready yet.
+    blend_waiting: AtomicBool,
     pub clock: Clock,
 }
 
@@ -116,6 +120,8 @@ impl OutputShared {
             underruns: AtomicU64::new(0),
             silent: AtomicBool::new(true),
             expect_sound: AtomicBool::new(false),
+            mix_ended: AtomicBool::new(false),
+            blend_waiting: AtomicBool::new(false),
             clock: Clock::new(rate),
         }
     }
@@ -160,6 +166,26 @@ impl OutputShared {
     pub fn underruns(&self) -> u64 {
         self.underruns.load(Ordering::Relaxed)
     }
+
+    /// Whether the mixer has given all it has, so no more sound will reach
+    /// the ring until something new plays.
+    pub fn set_mix_ended(&self, ended: bool) {
+        self.mix_ended.store(ended, Ordering::Release);
+    }
+
+    pub fn mix_ended(&self) -> bool {
+        self.mix_ended.load(Ordering::Acquire)
+    }
+
+    /// Whether a blend is planned whose incoming song has no sound ready
+    /// yet: it starts only if that song is ready by then.
+    pub fn set_blend_waiting(&self, waiting: bool) {
+        self.blend_waiting.store(waiting, Ordering::Release);
+    }
+
+    pub fn blend_waiting(&self) -> bool {
+        self.blend_waiting.load(Ordering::Acquire)
+    }
 }
 
 /// The part that runs in the device callback.
@@ -201,7 +227,15 @@ impl Renderer {
     /// Fills one device buffer. `latency` is how long until its first frame
     /// is heard.
     pub fn render<T: cpal::SizedSample + cpal::FromSample<f32>>(&mut self, out: &mut [T], latency: Duration) {
-        let now = Instant::now();
+        self.render_heard_at(out, Instant::now() + latency);
+    }
+
+    /// Fills one device buffer whose first frame is heard at `heard_at`.
+    pub fn render_heard_at<T: cpal::SizedSample + cpal::FromSample<f32>>(
+        &mut self,
+        out: &mut [T],
+        heard_at: Instant,
+    ) {
         let ch = self.channels;
         let frames = out.len() / ch;
         let volume = f32::from_bits(self.shared.volume.load(Ordering::Relaxed));
@@ -255,8 +289,30 @@ impl Renderer {
         self.shared.silent.store(paused && self.pause_gain <= 0.0, Ordering::Release);
         self.shared.read.store(self.read, Ordering::Release);
         if let Some((index, offset)) = last_played {
-            self.shared.clock.record(index, offset, now + latency);
+            self.shared.clock.record(index, offset, heard_at);
         }
+    }
+
+    /// Ring frames the next buffer can play: what is waiting, less what a
+    /// jump still has to drop.
+    pub fn playable_frames(&self) -> usize {
+        let flush_to = self.shared.flush_to.load(Ordering::Acquire);
+        let dropping = flush_to.saturating_sub(self.read) as usize;
+        (self.consumer.slots() / 2).saturating_sub(dropping)
+    }
+
+    /// Whether the next buffer starts with a jump: a fade out and a drop.
+    pub fn jump_pending(&self) -> bool {
+        self.flushing || self.shared.flush_to.load(Ordering::Acquire) > self.read
+    }
+
+    /// Whether the ring holds no sound at all.
+    pub fn ring_empty(&self) -> bool {
+        self.consumer.slots() == 0
+    }
+
+    pub fn shared(&self) -> &Arc<OutputShared> {
+        &self.shared
     }
 
     // Plays `n` frames from the ring into `out` from frame `at`, ramping

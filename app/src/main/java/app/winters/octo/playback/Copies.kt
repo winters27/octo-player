@@ -131,6 +131,11 @@ fun streamRequest(mimeType: String?, bitrate: Int?, quality: StreamQuality): Str
 // The loudness a copy's source keeps for it, if any.
 fun SourceTrackEntity.storedLoudness(): ReplayGainInfo? = storedReplayGain(trackGain, trackPeak, albumGain, albumPeak)
 
+// The song's tempo: the playing copy's, or failing that the first other
+// copy's that has one, since each copy is the same recording.
+fun songBpm(playing: SourceTrackEntity?, copies: List<SourceTrackEntity>): Int? =
+    playing?.bpm?.takeIf { it > 0 } ?: copies.firstNotNullOfOrNull { it.bpm?.takeIf { bpm -> bpm > 0 } }
+
 // The stored loudness to play a song at: the playing copy's, or failing that
 // another copy's of the same song, since each copy is the same recording.
 fun storedLoudness(playing: SourceTrackEntity?, copies: List<SourceTrackEntity>): ReplayGainInfo? =

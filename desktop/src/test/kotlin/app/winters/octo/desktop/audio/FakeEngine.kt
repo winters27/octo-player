@@ -1,11 +1,13 @@
 package app.winters.octo.desktop.audio
 
+import app.winters.octo.audio.AutomixSettings
 import app.winters.octo.audio.DspSettings
 import app.winters.octo.audio.EngineEvent
 import app.winters.octo.audio.EqSettings
 import app.winters.octo.audio.PlaybackState
 import app.winters.octo.audio.QueueItem
 import app.winters.octo.audio.ReplayGainSettings
+import app.winters.octo.audio.SongProfile
 import app.winters.octo.audio.OutputDevice as EngineDevice
 import app.winters.octo.audio.OutputFormat as EngineFormat
 import app.winters.octo.audio.RepeatMode as EngineRepeat
@@ -26,15 +28,23 @@ class FakeEngine : AudioEngine {
     var lastReplayGain: ReplayGainSettings? = null
     var lastDsp: DspSettings? = null
     var fadeMs = -1
+    var lastAutomix: AutomixSettings? = null
     var speed = 1f to 1f
     var listed = listOf(EngineDevice("spk", "Speakers", true), EngineDevice("usb", "USB DAC", false))
     var current: EngineDevice? = null
     var format: EngineFormat? = null
     var pins: Map<String, String>? = null
 
+    // The profiles handed over, by queue item id.
+    val profiles = java.util.concurrent.ConcurrentHashMap<String, SongProfile>()
+
     val ids: List<String> get() = queue.map { it.id }
 
     fun emit(event: EngineEvent) = listener(event)
+
+    override fun setSongProfile(itemId: String, profile: SongProfile?) {
+        if (profile == null) profiles.remove(itemId) else profiles[itemId] = profile
+    }
 
     override fun setListener(listener: (EngineEvent) -> Unit) {
         this.listener = listener
@@ -89,6 +99,10 @@ class FakeEngine : AudioEngine {
 
     override fun setCrossfade(ms: Int) {
         fadeMs = ms
+    }
+
+    override fun setAutomix(settings: AutomixSettings) {
+        lastAutomix = settings
     }
 
     override fun setEq(eq: EqSettings) {

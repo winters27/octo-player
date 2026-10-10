@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.sound
 
+import app.winters.octo.audio.AutomixSettings
 import app.winters.octo.audio.DspSettings
 import app.winters.octo.audio.EqSettings
 import app.winters.octo.audio.ReplayGainSettings
@@ -48,6 +49,8 @@ class SoundControllerTest {
         var dsp: DspSettings? = null
         var shapes = 0
         var fade = -1
+        var lastAutomix: AutomixSettings? = null
+        var automixSent = 0
         var pace = 0f to 0f
 
         override fun shape(eq: EqSettings, replayGain: ReplayGainSettings, dsp: DspSettings) {
@@ -59,6 +62,11 @@ class SoundControllerTest {
 
         override fun setCrossfade(ms: Int) {
             fade = ms
+        }
+
+        override fun setAutomix(settings: AutomixSettings) {
+            lastAutomix = settings
+            automixSent++
         }
 
         override fun setSpeed(speed: Float, pitch: Float) {
@@ -195,6 +203,25 @@ class SoundControllerTest {
         // Twelve semitones is an octave: twice the pitch. (Held to six.)
         assertEquals(Math.pow(2.0, 0.5).toFloat(), target.pace.second, 1e-4f)
         assertEquals("the equalizer is not sent again for a crossfade change", shapes, target.shapes)
+    }
+
+    @Test
+    fun transitionsFollowTheCrossfadeSettings() {
+        val target = FakeTarget()
+        val settings = SettingsStore(file())
+        SoundController(target, settings, scope)
+        assertEquals(AutomixSettings(smartTransitions = true, filterSweeps = true, matchTempo = false, maxOverlapMs = 0u), target.lastAutomix)
+        settings.update { it.copy(playback = it.playback.copy(crossfadeSeconds = 16, filterSweeps = false, matchTempo = true)) }
+        assertEquals(16_000, target.fade)
+        assertEquals(AutomixSettings(smartTransitions = true, filterSweeps = false, matchTempo = true, maxOverlapMs = 16_000u), target.lastAutomix)
+        // A value past the longest blend is held to it.
+        settings.update { it.copy(playback = it.playback.copy(crossfadeSeconds = 30, smartTransitions = false)) }
+        assertEquals(16_000, target.fade)
+        assertEquals(false, target.lastAutomix?.smartTransitions)
+        // A change elsewhere sends nothing new.
+        val sent = target.automixSent
+        settings.update { it.copy(playback = it.playback.copy(speed = 1.5f)) }
+        assertEquals(sent, target.automixSent)
     }
 
     @Test

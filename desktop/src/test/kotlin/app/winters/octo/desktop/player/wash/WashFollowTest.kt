@@ -36,7 +36,7 @@ class WashFollowTest {
     fun aCoverThatDidNotComeIsAskedForAgainAndTheRealOneFollows() = runBlocking {
         val asked = AtomicInteger()
         serving(misses = 2, asked).use { server ->
-            val covers = WashCovers(OkHttpClient(), retryMs = listOf(30L, 30L, 30L))
+            val covers = WashCovers(OkHttpClient(), retryMs = listOf(30L, 30L, 30L), holdMs = 0)
             val shown = withTimeout(5_000) { covers.follow(server.client(), "al-1", WashTuning()).take(2).toList() }
             assertEquals(3, asked.get())
             assertNotEquals("the blend first, then the cover", shown[0].main, shown[1].main)
@@ -50,7 +50,7 @@ class WashFollowTest {
     fun aMissIsNotKept() = runBlocking {
         val asked = AtomicInteger()
         serving(misses = 1, asked).use { server ->
-            val covers = WashCovers(OkHttpClient(), retryMs = emptyList())
+            val covers = WashCovers(OkHttpClient(), retryMs = emptyList(), holdMs = 0)
             val blend = covers.prepare(server.client(), "al-1", WashTuning())
             val real = covers.prepare(server.client(), "al-1", WashTuning())
             assertEquals(2, asked.get())
@@ -63,7 +63,7 @@ class WashFollowTest {
         val asked = AtomicInteger()
         serving(misses = 1, asked).use { server ->
             // Too long a wait to reach in this test: only the arrival can.
-            val covers = WashCovers(OkHttpClient(), retryMs = listOf(60_000L))
+            val covers = WashCovers(OkHttpClient(), retryMs = listOf(60_000L), holdMs = 0)
             val shown = mutableListOf<WashCover>()
             val following = launch { covers.follow(server.client(), "al-7", WashTuning()).collect { shown += it } }
             withTimeout(5_000) { while (shown.isEmpty()) delay(10) }
@@ -87,5 +87,53 @@ class WashFollowTest {
             assertEquals(1, shown.size)
             assertEquals(0, asked.get())
         }
+    }
+
+    // Brandon: on radio the background went through the blend and on to the
+    // cover a moment later. A cover that comes in within the hold is the
+    // first thing sent; the blend never shows.
+    @Test
+    fun aCoverComingInWithinTheHoldIsSentWithoutTheBlend() = runBlocking {
+        val asked = AtomicInteger()
+        serving(misses = 1, asked).use { server ->
+            val covers = WashCovers(OkHttpClient(), retryMs = listOf(60_000L), holdMs = 60_000L)
+            val shown = mutableListOf<WashCover>()
+            val following = launch { covers.follow(server.client(), "al-9", WashTuning()).collect { shown += it } }
+            withTimeout(5_000) { while (asked.get() < 1) delay(10) }
+            delay(100)
+            assertEquals("nothing sent while it waits", 0, shown.size)
+            CoverArrivals.arrived("al-9")
+            withTimeout(5_000) { while (shown.isEmpty()) delay(10) }
+            val real = covers.prepare(server.client(), "al-9", WashTuning())
+            assertEquals(1, shown.size)
+            assertEquals("the real cover, not the blend", real.main, shown[0].main)
+            following.cancel()
+        }
+    }
+
+    // With no cover coming, the blend comes once the hold is over.
+    @Test
+    fun theBlendStandsInAfterTheHold() = runBlocking {
+        val asked = AtomicInteger()
+        serving(misses = 10, asked).use { server ->
+            val covers = WashCovers(OkHttpClient(), retryMs = emptyList(), holdMs = 50L)
+            val shown = withTimeout(5_000) { covers.follow(server.client(), "al-3", WashTuning()).toList() }
+            assertEquals(1, shown.size)
+            assertEquals(2, asked.get())
+        }
+    }
+
+    // A fade that starts mid-fade starts from the two covers as the wash
+    // shows them: a quarter of the way from red to blue is mostly red.
+    @Test
+    fun coversMixAsTheWashMixesThem() {
+        fun square(colour: Int) = Surface.makeRasterN32Premul(8, 8).run {
+            canvas.clear(colour)
+            makeImageSnapshot()
+        }
+        val mixed = mixCovers(square(0xFFFF0000.toInt()), square(0xFF0000FF.toInt()), 0.25f)
+        val pixel = org.jetbrains.skia.Bitmap.makeFromImage(mixed).getColor(4, 4)
+        assertEquals(191f, (pixel shr 16 and 0xFF).toFloat(), 2f)
+        assertEquals(64f, (pixel and 0xFF).toFloat(), 2f)
     }
 }

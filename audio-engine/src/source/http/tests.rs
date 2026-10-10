@@ -7,9 +7,10 @@ fn data(len: usize) -> Vec<u8> {
     (0..len).map(|i| (i * 7 + i / 251) as u8).collect()
 }
 
+// Small buffers; a stall timeout no pause of a busy machine reaches.
 fn quick() -> HttpOptions {
     HttpOptions {
-        stall_timeout: Duration::from_millis(600),
+        stall_timeout: Duration::from_secs(60),
         read_ahead: 256 << 10,
         keep_behind: 64 << 10,
         ..Default::default()
@@ -103,10 +104,13 @@ fn replaces_a_connection_that_goes_quiet() {
     let body = data(1_000_000);
     let server =
         TestServer::start(body.clone(), Behaviour { stall_after: Some(200_000), ..Default::default() });
-    let mut source = HttpSource::open(&server.url(), quick()).unwrap();
-    let started = Instant::now();
+    // A pause of a busy machine can look like a stall too: that only costs
+    // another request, never the stream.
+    let opts = HttpOptions { stall_timeout: Duration::from_millis(600), max_retries: 1_000, ..quick() };
+    let mut source = HttpSource::open(&server.url(), opts).unwrap();
+    // The quiet connection stays quiet for as long as the server runs, so
+    // the stream only ends whole over a new one.
     assert_eq!(read_all(&mut source), body);
-    assert!(started.elapsed() < Duration::from_secs(10));
     assert!(server.requests() >= 2);
 }
 

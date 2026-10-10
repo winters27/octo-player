@@ -139,6 +139,8 @@ fn main() {
             duration_ms: None,
             replay_gain: None,
             headers: Vec::new(),
+            genre: None,
+            bpm: None,
         })
         .collect();
     engine.load(items, 0, start, true).unwrap();

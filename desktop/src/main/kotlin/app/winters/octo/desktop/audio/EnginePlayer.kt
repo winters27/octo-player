@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.audio
 
+import app.winters.octo.audio.AutomixSettings
 import app.winters.octo.audio.DspSettings
 import app.winters.octo.audio.EndReason
 import app.winters.octo.audio.EngineEvent
@@ -41,6 +42,8 @@ interface SoundTarget {
 
     fun setCrossfade(ms: Int)
 
+    fun setAutomix(settings: AutomixSettings)
+
     fun setSpeed(speed: Float, pitch: Float)
 }
 
@@ -60,6 +63,9 @@ class EnginePlayer(
     device: String? = null,
     // Milliseconds from any fixed point, for how long a jump may take.
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
+    // Hands the engine the server's transition profiles of the songs about
+    // to blend, when it has them.
+    private val profiles: EngineProfiles? = null,
 ) : DesktopPlayer, SoundTarget {
     private val queue = PlayQueue(random)
     private val lock = Any()
@@ -156,7 +162,6 @@ class EnginePlayer(
     private fun positionLocked(heard: Heard): Long {
         run {
             val current = queue.currentEntry ?: return 0
-            if (keyOfItem(heard.itemId) == expecting) expecting = null
             val duration = durationMs()
             val at = pending
             if (at != null) {
@@ -417,6 +422,8 @@ class EnginePlayer(
 
     override fun setCrossfade(ms: Int) = engine.setCrossfade(ms)
 
+    override fun setAutomix(settings: AutomixSettings) = engine.setAutomix(settings)
+
     override fun setSpeed(speed: Float, pitch: Float) {
         synchronized(lock) {
             this.speed = speed
@@ -464,6 +471,7 @@ class EnginePlayer(
         engine.load(ordered.map { queueItem(it, sources) }, mirror.indexOf(current.key), startMs, play)
         expect(current.key)
         setPending(current.key, startMs)
+        askProfiles()
     }
 
     // Moves the engine to the current entry: a skip within its queue when
@@ -479,6 +487,7 @@ class EnginePlayer(
         expect(current.key)
         setPending(current.key, 0)
         syncQueue()
+        askProfiles()
     }
 
     // Gives the engine the whole queue in play order, when it differs from
@@ -495,6 +504,17 @@ class EnginePlayer(
         if (keys == mirror) return
         engine.replaceQueue(ordered.map { queueItem(it, sources) }, keys.indexOf(current.key))
         mirror = keys
+        askProfiles()
+    }
+
+    // The playing entry and the one after it get their profiles, so a
+    // song's profile is usually there from when it is next.
+    private fun askProfiles() {
+        val profiles = profiles ?: return
+        val current = queue.currentEntry ?: return
+        val ordered = inPlayOrder()
+        val at = ordered.indexOfFirst { it.key == current.key }
+        profiles.follow(listOfNotNull(current, ordered.getOrNull(at + 1)))
     }
 
     // Every entry, in the order they play.
@@ -564,6 +584,11 @@ class EnginePlayer(
                         else -> return
                     }
                 }
+                // How the next song will follow, for checking blends in the field.
+                is EngineEvent.TransitionPlanned -> {
+                    System.err.println(event.reason)
+                    return
+                }
                 is EngineEvent.DeviceChanged -> {
                     playingOn = event.device?.let { OutputDevice(it.id, it.name) }
                     deviceFormat = event.format?.let(::deviceFormatOf)
@@ -598,6 +623,7 @@ class EnginePlayer(
         lastStarted = key
         if (pending?.key != key) pending = null
         problem = null
+        askProfiles()
     }
 
     // A song played to its end. With stop-after-current, the engine is now

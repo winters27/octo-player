@@ -10,18 +10,26 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink
 // audio output it builds gets its own shaping step, reading the shared
 // settings. The output always takes 16-bit sound, because the player only
 // runs these steps on 16-bit sound; the shaping turns it into floats itself.
+// `keepActive` keeps the shaping step running with nothing to shape (for
+// crossfade), and `sound` is the latest shaping step, for the crossfade to
+// drive.
 @UnstableApi
 class OctoRenderersFactory(
     context: Context,
     private val settings: () -> SoundSettings,
     private val albums: AlbumRun,
+    private val keepActive: () -> Boolean = { false },
 ) : DefaultRenderersFactory(context) {
+    @Volatile var sound: DeckSound? = null
+        private set
+
     override fun buildAudioSink(
         context: Context,
         enableFloatOutput: Boolean,
         enableAudioOutputPlaybackParams: Boolean,
     ): AudioSink {
-        val shaping = OctoDspProcessor(settings)
+        val shaping = OctoDspProcessor(keepActive, LiveTapFeed(), settings = settings)
+        sound = shaping
         val sink = DefaultAudioSink.Builder(context)
             .setEnableFloatOutput(false)
             .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)

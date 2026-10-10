@@ -12,6 +12,7 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSourceBitmapLoader
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
@@ -24,6 +25,8 @@ import androidx.media3.session.SessionResult
 import app.winters.octo.MainActivity
 import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.isFind
+import app.winters.octo.data.SessionRepository
+import app.winters.octo.data.SessionState
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.FindLengths
@@ -38,6 +41,7 @@ import app.winters.octo.player.PlayerSettings
 import app.winters.octo.server.QueueSync
 import app.winters.octo.sound.AlbumRun
 import app.winters.octo.sound.AudioSession
+import app.winters.octo.sound.DeckSound
 import app.winters.octo.sound.OctoRenderersFactory
 import app.winters.octo.sound.SoundEngine
 import app.winters.octo.ui.common.Feedback
@@ -60,6 +64,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.guava.future
@@ -68,6 +73,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 // The like toggle offered in the notification and on the lock screen, the
@@ -117,12 +123,15 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var deviceMedia: DeviceMedia
     @Inject lateinit var feedback: Feedback
     @Inject lateinit var switcher: ServerSwitch
+    @Inject lateinit var sessions: SessionRepository
 
     private val scope = MainScope()
     // While the server in use changes, the emptied player is not saved over
     // the queue handed over.
     private var holding = false
     private val side = Side()
+    // Whether crossfade is on, read by the decks' audio path.
+    private val crossfadeOn = AtomicBoolean(false)
     // The phone's own player (two decks for crossfade), and the player the
     // session holds, which is the phone's or, while casting, the one that
     // drives the TV or speaker.
@@ -150,13 +159,17 @@ class OctoPlaybackService : MediaLibraryService() {
         // memory of the last album for Smart ReplayGain, since a crossfade
         // hands the next song to the other deck.
         val albums = AlbumRun()
-        fun deck() = buildDeck(
-            this,
-            streams.mediaSourceFactory(),
-            OctoRenderersFactory(this, { sound.current.value }, albums),
-            audioSession.id,
-        )
-        local = OctoPlayer(this, deck(), deck())
+        // While crossfade is on, each deck's sound processor stays in the
+        // path so a blend can be shaped there.
+        val sounds = HashMap<ExoPlayer, DeckSound>()
+        fun deck(): ExoPlayer {
+            val renderers = OctoRenderersFactory(this, { sound.current.value }, albums, crossfadeOn::get)
+            return buildDeck(this, streams.mediaSourceFactory(), renderers, audioSession.id)
+                .also { deck -> renderers.sound?.let { sounds[deck] = it } }
+        }
+        val scout = Scout(streams.scoutSourceFactory(), streams.extractors())
+        val profiles = ServerProfiles(scope) { (sessions.state.value as? SessionState.SignedIn)?.session }
+        local = OctoPlayer(this, deck(), deck(), sounds::get, scout, profiles)
         player = OutputSwitch(local)
         tracker = PlayTracker(plays::started, plays::record, isPlaying = { player.isPlaying })
         player.addListener(tracker)
@@ -185,6 +198,9 @@ class OctoPlaybackService : MediaLibraryService() {
 
         scope.launch {
             try {
+                // Whether crossfade is on decides how the decks' sound path
+                // is set up, so it is known before anything is loaded.
+                crossfadeOn.set(playerSettings.prefs.first().crossfade)
                 restoreQueue()
             } finally {
                 restored.complete(Unit)
@@ -199,7 +215,12 @@ class OctoPlaybackService : MediaLibraryService() {
         // settings, each only when it changes, so a blend is not cut short.
         val prefs = playerSettings.prefs.stateIn(scope, SharingStarted.Eagerly, PlayerPrefs())
         // These belong to the phone's own player, and wait there while casting.
-        scope.launch { prefs.map { it.crossfadeMs }.distinctUntilChanged().collect { local.crossfadeMs = it } }
+        scope.launch {
+            prefs.map { it.automix }.distinctUntilChanged().collect {
+                crossfadeOn.set(it.maxOverlapMs > 0)
+                local.automix = it
+            }
+        }
         scope.launch {
             prefs.map { it.pace }.distinctUntilChanged().collect { local.setPlaybackParameters(PlaybackParameters(it.speed, it.pitch)) }
         }

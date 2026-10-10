@@ -193,4 +193,22 @@ class CopiesTest {
         assertNull(small.bitDepth)
         assertEquals(192_000, bitrateOf(small))
     }
+
+    @Test
+    fun theTempoComesFromThePlayingCopyOrAnyOther() {
+        val phone = phoneMp3.copy(bpm = 0)
+        val server = serverFlac.copy(bpm = 128)
+        assertEquals(128, songBpm(phone, listOf(phone, server)))
+        assertEquals(96, songBpm(phone.copy(bpm = 96), listOf(phone, server)))
+        assertEquals(128, songBpm(null, listOf(phone, server)))
+        assertNull(songBpm(phone, listOf(phone)))
+    }
+
+    @Test
+    fun onlyASensibleStoredTempoReachesTheAnalysis() {
+        assertEquals(128.0, tagBpm(128)!!, 0.0)
+        assertNull(tagBpm(0))
+        assertNull(tagBpm(-5))
+        assertNull(tagBpm(null))
+    }
 }

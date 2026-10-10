@@ -108,6 +108,55 @@ fn mp3_decodes_with_its_delay_and_padding_trimmed() {
     assert!((landed - 0.5).abs() < 0.001);
 }
 
+// The MP3 fixture with ReplayGain and a tempo in an ID3v2 tag.
+fn tagged_mp3() -> std::path::PathBuf {
+    let audio = std::fs::read(fixture("tone-440-44k-mono.mp3")).unwrap();
+    let bytes = with_id3v2(
+        &audio,
+        &[("TBPM", "128")],
+        &[("REPLAYGAIN_TRACK_GAIN", "-6.02 dB"), ("REPLAYGAIN_TRACK_PEAK", "0.501")],
+    );
+    let path = temp_dir().join("tagged.mp3");
+    std::fs::write(&path, bytes).unwrap();
+    path
+}
+
+#[test]
+fn reads_replaygain_and_tempo_from_mp3_id3_tags() {
+    let path = tagged_mp3();
+    let mut d = open(&path);
+    let rg = d.info().replay_gain.expect("ID3 ReplayGain read");
+    assert_eq!(rg.track_gain, Some(-6.02));
+    assert_eq!(rg.track_peak, Some(0.501));
+    // The tag does not get in the way of decoding.
+    assert_eq!(decode_all(&mut d).len() / 2, 44_100);
+
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::formats::probe::Hint;
+    use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
+    use symphonia::core::meta::{MetadataOptions, StandardTag};
+    let file = std::fs::File::open(&path).unwrap();
+    let mss = MediaSourceStream::new(Box::new(file), MediaSourceStreamOptions::default());
+    let mut format = symphonia::default::get_probe()
+        .probe(Hint::new().with_extension("mp3"), mss, FormatOptions::default(), MetadataOptions::default())
+        .unwrap();
+    let mut bpm = None;
+    let mut metadata = format.metadata();
+    loop {
+        if let Some(rev) = metadata.current() {
+            for tag in &rev.media.tags {
+                if let Some(StandardTag::Bpm(b)) = &tag.std {
+                    bpm = Some(*b);
+                }
+            }
+        }
+        if metadata.pop().is_none() {
+            break;
+        }
+    }
+    assert_eq!(bpm, Some(128));
+}
+
 #[cfg(feature = "opus")]
 #[test]
 fn opus_decodes_with_its_pre_skip_trimmed() {

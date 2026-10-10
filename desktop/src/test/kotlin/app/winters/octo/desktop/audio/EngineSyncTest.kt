@@ -493,4 +493,22 @@ class EngineSyncTest {
         val mp3 = songFormatOf(TrackInfo("mp3", false, 44_100u, 2u, null, null, null), Song("y", bitRate = 320))
         assertEquals(SongFormat("mp3", false, 44_100, null, 2, 320), mp3)
     }
+
+    // Polled right after a skip, the engine can already give the next
+    // song's start as its place, before that song is heard. That is no word
+    // of it: a late report of the song before must not take the player back.
+    @Test
+    fun aSkipIsNotUndoneByTheSongBeforeOnceTheNextIsPolled() {
+        val (p, engine) = setUp()
+        p.play(songs)
+        engine.emit(EngineEvent.TrackStarted(itemId(p.key("s1")), 0u, null))
+        p.next()
+        engine.heard = Heard(itemId(p.key("s2")), 0.0, null)
+        p.positionMs()
+        now += 1_000
+        engine.emit(EngineEvent.Position(itemId(p.key("s1")), 0.0))
+        assertEquals("s2", p.state.value.current?.song?.id)
+        engine.emit(EngineEvent.TrackStarted(itemId(p.key("s2")), 1u, null))
+        assertEquals("s2", p.state.value.current?.song?.id)
+    }
 }

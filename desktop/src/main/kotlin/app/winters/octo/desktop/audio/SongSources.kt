@@ -38,6 +38,14 @@ class ServerSongs(
     }
 }
 
+// A song's id on the server, for asking the server about it: the library
+// copy of a song found online once it has one, and nothing for a file on
+// this computer.
+fun serverSongId(song: Song, landed: (String) -> String?): String? = when {
+    song.id.startsWith(LOCAL_PREFIX) || isOpenedFile(song.id) -> null
+    else -> landed(song.id) ?: song.id
+}
+
 // Songs whose id starts with this are files on this computer, the rest of
 // the id being the path.
 const val LOCAL_PREFIX = "local:"
@@ -82,8 +90,14 @@ fun queueItem(entry: QueueEntry, sources: SongSources): QueueItem {
         durationMs = knownLengthMs(song).takeIf { it > 0 }?.toULong(),
         replayGain = gain,
         headers = address?.headers.orEmpty().map { (name, value) -> HttpHeader(name, value) },
+        genre = genreOf(song),
+        bpm = song.bpm?.takeIf { it > 0 }?.toDouble(),
     )
 }
+
+// Every genre a song has, in one line: a song in any genre that is never
+// mixed (classical, a podcast) gets the plain crossfade.
+fun genreOf(song: Song): String? = (listOfNotNull(song.genre) + song.genres).distinct().joinToString("; ").ifEmpty { null }
 
 // An address no file has, for a song with nowhere to play from.
 private const val UNREACHABLE = "octo-unreachable:"

@@ -4,7 +4,7 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -15,7 +15,8 @@ pub struct Behaviour {
     pub ranges: bool,
     /// On the first request, closes the connection after this many bytes.
     pub drop_after: Option<usize>,
-    /// On the first request, goes quiet after this many bytes.
+    /// On the first request, goes quiet after this many bytes, until the
+    /// server is dropped.
     pub stall_after: Option<usize>,
     /// Answers every request with this status and no body.
     pub status: Option<u16>,
@@ -59,6 +60,7 @@ pub struct TestServer {
     port: u16,
     ranges: Arc<Mutex<Vec<u64>>>,
     requests: Arc<AtomicUsize>,
+    stopped: Arc<AtomicBool>,
 }
 
 impl TestServer {
@@ -84,23 +86,25 @@ impl TestServer {
         let port = listener.local_addr().unwrap().port();
         let ranges = Arc::new(Mutex::new(Vec::new()));
         let requests = Arc::new(AtomicUsize::new(0));
+        let stopped = Arc::new(AtomicBool::new(false));
         let body = Arc::new(body);
-        let (log, count) = (ranges.clone(), requests.clone());
+        let (log, count, stop) = (ranges.clone(), requests.clone(), stopped.clone());
         let scheme = if tls.is_some() { "https" } else { "http" };
         thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                let (body, behaviour, log, count, tls) =
-                    (body.clone(), behaviour.clone(), log.clone(), count.clone(), tls.clone());
+                let (body, behaviour, log, count, stop, tls) =
+                    (body.clone(), behaviour.clone(), log.clone(), count.clone(), stop.clone(), tls.clone());
                 thread::spawn(move || match tls {
-                    None => serve(stream, &body, &behaviour, &log, &count),
+                    None => serve(stream, &body, &behaviour, &log, &count, &stop),
                     Some(config) => {
                         let Ok(conn) = rustls::ServerConnection::new(config) else { return };
-                        serve(rustls::StreamOwned::new(conn, stream), &body, &behaviour, &log, &count)
+                        let stream = rustls::StreamOwned::new(conn, stream);
+                        serve(stream, &body, &behaviour, &log, &count, &stop)
                     }
                 });
             }
         });
-        Self { scheme, port, ranges, requests }
+        Self { scheme, port, ranges, requests, stopped }
     }
 
     pub fn url(&self) -> String {
@@ -114,6 +118,12 @@ impl TestServer {
 
     pub fn requests(&self) -> usize {
         self.requests.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for TestServer {
+    fn drop(&mut self) {
+        self.stopped.store(true, Ordering::Release);
     }
 }
 
@@ -136,7 +146,14 @@ impl Conn for rustls::StreamOwned<rustls::ServerConnection, TcpStream> {
     }
 }
 
-fn serve(mut stream: impl Conn, body: &[u8], b: &Behaviour, log: &Mutex<Vec<u64>>, count: &AtomicUsize) {
+fn serve(
+    mut stream: impl Conn,
+    body: &[u8],
+    b: &Behaviour,
+    log: &Mutex<Vec<u64>>,
+    count: &AtomicUsize,
+    stopped: &AtomicBool,
+) {
     let mut range = None;
     {
         let mut reader = BufReader::new(&mut stream);
@@ -208,7 +225,9 @@ fn serve(mut stream: impl Conn, body: &[u8], b: &Behaviour, log: &Mutex<Vec<u64>
         sent += chunk.len();
         if cut.is_some_and(|limit| sent >= limit) {
             if nth == 0 && b.stall_after.is_some() {
-                thread::sleep(Duration::from_secs(3));
+                while !stopped.load(Ordering::Acquire) {
+                    thread::sleep(Duration::from_millis(20));
+                }
             }
             stream.close();
             return;

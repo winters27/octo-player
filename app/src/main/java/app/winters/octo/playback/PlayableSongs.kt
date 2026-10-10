@@ -96,10 +96,11 @@ class PlayableSongs @Inject constructor(
             }
             val copy = chooseCopy(all, download, streamInstead, prefs.copies, reachable) { it.uri in missing }
             val loudness = storedLoudness(copy, all)
+            val bpm = songBpm(copy, all)
             when {
-                copy == null -> track.toMediaItem(track.uri, track.mimeType, loudness)
-                copy.isServerCopy -> track.toMediaItem(streams.uriFor(copy), streams.mimeTypeFor(copy, prefs), loudness)
-                else -> track.toMediaItem(copy.uri, copy.mimeType, loudness)
+                copy == null -> track.toMediaItem(track.uri, track.mimeType, loudness, bpm)
+                copy.isServerCopy -> track.toMediaItem(streams.uriFor(copy), streams.mimeTypeFor(copy, prefs), loudness, bpm)
+                else -> track.toMediaItem(copy.uri, copy.mimeType, loudness, bpm)
             }
         }
     }

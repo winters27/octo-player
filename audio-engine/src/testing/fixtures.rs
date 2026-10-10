@@ -116,3 +116,37 @@ pub fn frequency(stereo: &[f32], rate: u32) -> f64 {
     let span = (crossings[crossings.len() - 1] - crossings[0]) as f64;
     (crossings.len() - 1) as f64 * rate as f64 / span
 }
+
+/// `audio` with an ID3v2.3 tag in front holding `text` frames (like
+/// "TBPM") and `user` TXXX frames (description, value), as taggers write
+/// them into MP3 files.
+pub fn with_id3v2(audio: &[u8], text: &[(&str, &str)], user: &[(&str, &str)]) -> Vec<u8> {
+    let mut frames = Vec::new();
+    let mut frame = |id: &str, body: Vec<u8>| {
+        frames.extend_from_slice(id.as_bytes());
+        frames.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        frames.extend_from_slice(&[0, 0]);
+        frames.extend_from_slice(&body);
+    };
+    for (id, value) in text {
+        let mut body = vec![0u8];
+        body.extend_from_slice(value.as_bytes());
+        frame(id, body);
+    }
+    for (description, value) in user {
+        let mut body = vec![0u8];
+        body.extend_from_slice(description.as_bytes());
+        body.push(0);
+        body.extend_from_slice(value.as_bytes());
+        frame("TXXX", body);
+    }
+    let size = frames.len() as u32;
+    let synchsafe =
+        [(size >> 21) as u8 & 0x7f, (size >> 14) as u8 & 0x7f, (size >> 7) as u8 & 0x7f, size as u8 & 0x7f];
+    let mut out = b"ID3".to_vec();
+    out.extend_from_slice(&[3, 0, 0]);
+    out.extend_from_slice(&synchsafe);
+    out.extend_from_slice(&frames);
+    out.extend_from_slice(audio);
+    out
+}
