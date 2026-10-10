@@ -1,6 +1,8 @@
 package app.winters.octo.desktop
 
 import app.winters.octo.desktop.library.LibraryIndex
+import app.winters.octo.radio.RadioDiscovery
+import app.winters.octo.radio.RadioTuning
 import app.winters.octo.subsonic.Song
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -9,6 +11,8 @@ import org.junit.Test
 import kotlin.random.Random
 
 class RadioSongsTest {
+    private val LibraryOnly = RadioTuning(discovery = RadioDiscovery.LibraryOnly)
+
     private val library = LibraryIndex(
         listOf(
             Song("s1", "One", albumId = "al1", artist = "A", genre = "Rock", year = 1995, duration = 200),
@@ -52,6 +56,32 @@ class RadioSongsTest {
         val found = (1..6).map { Song("f$it", "Found $it", artist = "Out $it", isExternal = true) }
         val picks = radioSongs(first, listOf(first), found, library, emptySet(), { 0 }, random = Random(1)).map { it.id }
         assertTrue(picks.toString(), picks.count { it.startsWith("f") } >= 2)
+    }
+
+    @Test
+    fun onlyMyLibraryNeverAddsAFoundSong() {
+        val first = library.songs.first { it.id == "s1" }
+        val found = (1..6).map { Song("f$it", "Found $it", artist = "Out $it", isExternal = true) }
+        val picks = radioSongs(first, listOf(first), found, library, emptySet(), { 0 }, LibraryOnly, random = Random(1)).map { it.id }
+        assertTrue(picks.toString(), picks.isNotEmpty() && picks.none { it.startsWith("f") })
+    }
+
+    @Test
+    fun onlyMyLibraryKeepsFoundSongsOutOfTheFallback() {
+        // Nothing the radio itself can play (the one library song is an
+        // intro, which it leaves out), so the server's order stands, less
+        // what it found outside the library.
+        val first = Song("x", "X", artist = "Z")
+        val similar = listOf(
+            Song("y1", "Y1", artist = "Y", isExternal = true),
+            library.songs.first { it.id == "s4" },
+            Song("y2", "Y2", artist = "W", isExternal = true),
+        )
+        val picks = radioSongs(first, listOf(first), similar, library, emptySet(), { 0 }, LibraryOnly, random = Random(1)).map { it.id }
+        assertEquals(listOf("s4"), picks)
+        // Only songs from outside: nothing at all, rather than the server's order.
+        val outside = radioSongs(first, listOf(first), similar.filter { it.isExternal }, library, emptySet(), { 0 }, LibraryOnly, random = Random(1))
+        assertTrue(outside.toString(), outside.isEmpty())
     }
 
     @Test

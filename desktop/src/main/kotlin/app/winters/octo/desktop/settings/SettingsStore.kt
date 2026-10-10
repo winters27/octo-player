@@ -19,6 +19,10 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.FileOutputStream
+import app.winters.octo.radio.RadioAdventure
+import app.winters.octo.radio.RadioDiscovery
+import app.winters.octo.radio.RadioTuning
+import app.winters.octo.radio.RadioVariety
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -301,7 +305,15 @@ data class PlaybackPrefs(
     // on the way; and how much of one is ready before it starts.
     val streamQuality: StreamQuality = StreamQuality.Original,
     val startAfter: StartAfter = StartAfter.Short,
-)
+    // How Octo's radio is tuned (see RadioTuning).
+    val radioDiscovery: RadioDiscovery = RadioDiscovery.Balanced,
+    val radioAdventure: RadioAdventure = RadioAdventure.Balanced,
+    val radioVariety: RadioVariety = RadioVariety.Normal,
+    val radioFavorites: Boolean = false,
+) {
+    // How radio and Autoplay pick their songs.
+    val radioTuning: RadioTuning get() = RadioTuning(radioDiscovery, radioAdventure, radioVariety, radioFavorites)
+}
 
 private val json = Json {
     ignoreUnknownKeys = true

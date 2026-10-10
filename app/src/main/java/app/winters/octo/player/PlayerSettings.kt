@@ -20,6 +20,10 @@ import app.winters.octo.playback.StreamQuality
 import app.winters.octo.playback.paceOf
 import app.winters.octo.playback.snapSpeed
 import app.winters.octo.player.immersive.BackgroundPrefs
+import app.winters.octo.radio.RadioAdventure
+import app.winters.octo.radio.RadioDiscovery
+import app.winters.octo.radio.RadioTuning
+import app.winters.octo.radio.RadioVariety
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -57,6 +61,11 @@ data class PlayerPrefs(
     val skipSilence: Boolean = false,
     // Similar songs keep playing once the queue runs out.
     val autoplay: Boolean = true,
+    // How Octo's radio is tuned (see RadioTuning).
+    val radioDiscovery: RadioDiscovery = RadioDiscovery.Balanced,
+    val radioAdventure: RadioAdventure = RadioAdventure.Balanced,
+    val radioVariety: RadioVariety = RadioVariety.Normal,
+    val radioFavorites: Boolean = false,
     // Carrying on when headphones come back: over a cable, over Bluetooth,
     // and whether to play on connect even when the music was not paused by
     // the headphones going.
@@ -86,6 +95,9 @@ data class PlayerPrefs(
 
     // Whether speed and pitch are as they came.
     val paceIsDefault: Boolean get() = speed == 1f && keepPitch && pitchSemitones == 0
+
+    // How radio and Autoplay pick their songs.
+    val radioTuning: RadioTuning get() = RadioTuning(radioDiscovery, radioAdventure, radioVariety, radioFavorites)
 }
 
 // Where songs play from when a server is connected. On mobile data a 192
@@ -117,6 +129,10 @@ private val KEEP_PITCH = booleanPreferencesKey("keep_pitch")
 private val PITCH_SEMITONES = intPreferencesKey("pitch_semitones")
 private val SKIP_SILENCE = booleanPreferencesKey("skip_silence")
 private val AUTOPLAY = booleanPreferencesKey("autoplay")
+private val RADIO_DISCOVERY = stringPreferencesKey("radio_discovery")
+private val RADIO_ADVENTURE = stringPreferencesKey("radio_adventure")
+private val RADIO_VARIETY = stringPreferencesKey("radio_variety")
+private val RADIO_FAVORITES = booleanPreferencesKey("radio_favorites")
 private val RESUME_WIRED = booleanPreferencesKey("resume_wired")
 private val RESUME_BLUETOOTH = booleanPreferencesKey("resume_bluetooth")
 private val RESUME_ALWAYS = booleanPreferencesKey("resume_always")
@@ -173,6 +189,10 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
                 .coerceIn(-PITCH_RANGE_SEMITONES, PITCH_RANGE_SEMITONES),
             skipSilence = stored[SKIP_SILENCE] ?: defaults.skipSilence,
             autoplay = stored[AUTOPLAY] ?: defaults.autoplay,
+            radioDiscovery = choice(stored[RADIO_DISCOVERY], defaults.radioDiscovery),
+            radioAdventure = choice(stored[RADIO_ADVENTURE], defaults.radioAdventure),
+            radioVariety = choice(stored[RADIO_VARIETY], defaults.radioVariety),
+            radioFavorites = stored[RADIO_FAVORITES] ?: defaults.radioFavorites,
             resumeWired = stored[RESUME_WIRED] ?: defaults.resumeWired,
             resumeBluetooth = stored[RESUME_BLUETOOTH] ?: defaults.resumeBluetooth,
             resumeAlways = stored[RESUME_ALWAYS] ?: defaults.resumeAlways,
@@ -263,6 +283,22 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
         context.playerPrefs.edit { it[AUTOPLAY] = on }
     }
 
+    suspend fun setRadioDiscovery(discovery: RadioDiscovery) {
+        context.playerPrefs.edit { it[RADIO_DISCOVERY] = discovery.name }
+    }
+
+    suspend fun setRadioAdventure(adventure: RadioAdventure) {
+        context.playerPrefs.edit { it[RADIO_ADVENTURE] = adventure.name }
+    }
+
+    suspend fun setRadioVariety(variety: RadioVariety) {
+        context.playerPrefs.edit { it[RADIO_VARIETY] = variety.name }
+    }
+
+    suspend fun setRadioFavorites(on: Boolean) {
+        context.playerPrefs.edit { it[RADIO_FAVORITES] = on }
+    }
+
     suspend fun setResumeWired(on: Boolean) {
         context.playerPrefs.edit { it[RESUME_WIRED] = on }
     }
@@ -328,6 +364,10 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             it[PITCH_SEMITONES] = player.pitchSemitones.coerceIn(-PITCH_RANGE_SEMITONES, PITCH_RANGE_SEMITONES)
             it[SKIP_SILENCE] = player.skipSilence
             it[AUTOPLAY] = player.autoplay
+            it[RADIO_DISCOVERY] = player.radioDiscovery.name
+            it[RADIO_ADVENTURE] = player.radioAdventure.name
+            it[RADIO_VARIETY] = player.radioVariety.name
+            it[RADIO_FAVORITES] = player.radioFavorites
             it[RESUME_WIRED] = player.resumeWired
             it[RESUME_BLUETOOTH] = player.resumeBluetooth
             it[RESUME_ALWAYS] = player.resumeAlways
