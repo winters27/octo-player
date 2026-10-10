@@ -8,6 +8,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -61,7 +62,8 @@ private val FieldShape = RoundedCornerShape(12.dp)
 // muted hint while empty, and an optional icon at the start. `leading` and
 // `trailing` hold small controls inside the field, before and after the
 // text (a choice of scheme, a button that shows a password). Enter calls
-// `onSubmit`; Escape calls `onEscape`.
+// `onSubmit`; Escape calls `onEscape`. With `lines` over 1 it is a box of
+// that many lines that scrolls its own text, and Enter starts a new line.
 @Composable
 fun GlassField(
     value: String,
@@ -76,7 +78,9 @@ fun GlassField(
     enabled: Boolean = true,
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
+    lines: Int = 1,
 ) {
+    val single = lines <= 1
     val typing = LocalTyping.current
     var focused by remember { mutableStateOf(false) }
     // A field that leaves while focused must not leave the window thinking
@@ -90,25 +94,28 @@ fun GlassField(
         fill = Color.Black.copy(alpha = 0.30f),
         shape = FieldShape,
         modifier = modifier
-            .height(40.dp)
+            .height(if (single) 40.dp else (lines * 20 + 20).dp)
             .focusRing(FieldShape, { ring }, width = 1.5.dp, color = OctoColors.Accent.copy(alpha = 0.60f))
             .pointerInput(inner) { detectTapGestures { runCatching { inner.requestFocus() } } },
     ) {
         Row(
             // A control inside sits closer to the edge, as far in as it is from the top.
-            Modifier.fillMaxWidth().padding(start = if (leading != null) 6.dp else 12.dp, end = if (trailing != null) 4.dp else 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            Modifier
+                .fillMaxWidth()
+                .padding(start = if (leading != null) 6.dp else 12.dp, end = if (trailing != null) 4.dp else 12.dp)
+                .then(if (single) Modifier else Modifier.padding(vertical = 10.dp)),
+            verticalAlignment = if (single) Alignment.CenterVertically else Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (icon != null) Glyph(icon, size = 18.dp, tint = OctoColors.TextMuted)
             leading?.invoke()
-            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            Box(Modifier.weight(1f), contentAlignment = if (single) Alignment.CenterStart else Alignment.TopStart) {
                 if (value.isEmpty()) Txt(placeholder, OctoType.bodySmall, OctoColors.TextMuted)
                 BasicTextField(
                     value = value,
                     onValueChange = onValueChange,
                     enabled = enabled,
-                    singleLine = true,
+                    singleLine = single,
                     textStyle = OctoType.bodySmall.copy(color = OctoColors.TextPrimary),
                     cursorBrush = SolidColor(Color.White),
                     visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
@@ -119,6 +126,7 @@ fun GlassField(
                     keyboardActions = KeyboardActions(onDone = { onSubmit?.invoke() }),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .then(if (single) Modifier else Modifier.fillMaxHeight())
                         // Named by its hint, which a screen reader cannot see.
                         .then(if (placeholder.isNotBlank()) Modifier.semantics { contentDescription = placeholder } else Modifier)
                         .focusRequester(inner)
@@ -131,7 +139,7 @@ fun GlassField(
                         .onPreviewKeyEvent { event ->
                             if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                             when {
-                                event.key == Key.Enter && onSubmit != null -> {
+                                event.key == Key.Enter && onSubmit != null && single -> {
                                     onSubmit()
                                     true
                                 }

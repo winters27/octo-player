@@ -42,7 +42,6 @@ import app.winters.octo.desktop.server.OCTO_LYRICS
 import app.winters.octo.playback.START_AFTER_HELP
 import app.winters.octo.playback.START_AFTER_SETTING
 import app.winters.octo.playback.StartAfter
-import app.winters.octo.playback.StreamQuality
 import app.winters.octo.server.serverOffers
 import app.winters.octo.desktop.setAutoplay
 import app.winters.octo.desktop.settings.AmbienceMotion
@@ -66,6 +65,7 @@ import app.winters.octo.desktop.discord.DiscordMark
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.desktop.hotkeys.GlobalShortcutGroup
 import app.winters.octo.desktop.ui.LocalSoftwareDrawing
+import app.winters.octo.ui.family.AUDIO_QUALITY
 import kotlin.math.roundToInt
 
 // Settings: the servers, how Octo looks, playback, listening, lyrics,
@@ -84,6 +84,8 @@ fun SettingsPage(app: AppState, visit: Visit) {
             PageSection("servers", "Servers", OctoIcons.Servers) { ServerRows(app) },
             PageSection("look", "Appearance", OctoIcons.Appearance) { AppearanceGroups(app, settings) },
             PageSection("playback", "Playback", OctoIcons.Playback) { PlaybackRows(app, settings) },
+            PageSection("quality", AUDIO_QUALITY, OctoIcons.Equalizer, detail = "At home, away, and on this computer.") { AudioQualityRows(app, settings) },
+            PageSection("offline", "Offline", OctoIcons.Download, detail = "Songs kept here to play without a connection.") { OfflineRows(app, settings) },
             PageSection("listening", "Listening", OctoIcons.Headphones) { ListeningRows(app, settings) },
             PageSection("lyrics", "Lyrics", OctoIcons.Lyrics) { LyricsRows(app, settings) },
             if (discord) PageSection("discord", "Discord", DiscordMark, detail = "Show what you're playing to your friends.", brand = true) { DiscordRows(app) } else null,
@@ -171,9 +173,6 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
     }
 }
 
-// A stream quality as the setting names it.
-internal fun streamQualityName(quality: StreamQuality): String = quality.kbps?.let { "$it kbps MP3" } ?: "Original"
-
 // The text sizes to choose from: the system's, then Octo's own steps.
 private val TextSizes = listOf(0, 100, 115, 130)
 
@@ -191,13 +190,6 @@ private fun PlaybackRows(app: AppState, settings: AppSettings) {
         SwitchRow("Autoplay", "When the queue ends, similar songs keep playing.", settings.playback.autoplay) { on ->
             app.setAutoplay(on)
         }
-        ChoiceRow(
-            "Stream quality",
-            "Original plays the server's file as it is. A smaller size has the server make an MP3 on the way, for a slow connection.",
-            StreamQuality.entries,
-            settings.playback.streamQuality,
-            ::streamQualityName,
-        ) { quality -> app.settings.update { it.copy(playback = it.playback.copy(streamQuality = quality)) } }
         ChoiceRow(START_AFTER_SETTING, START_AFTER_HELP, StartAfter.entries, settings.playback.startAfter, { it.label }) { wait ->
             app.settings.update { it.copy(playback = it.playback.copy(startAfter = wait)) }
         }

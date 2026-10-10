@@ -315,6 +315,7 @@ private fun Categories(onOpen: (NavKey) -> Unit, vm: SettingsViewModel) {
         CategoryRow(OctoIcons.Library, SettingsPage.Library.title, librarySummary(access, songs, folders)) { open(SettingsPage.Library) }
         CategoryRow(OctoIcons.Cloud, SettingsPage.Server.title, serverLine) { open(SettingsPage.Server) }
         CategoryRow(OctoIcons.Download, SettingsPage.Streaming.title, streamingSummary(stream, offline)) { open(SettingsPage.Streaming) }
+        CategoryRow(OctoIcons.AudioQuality, SettingsPage.AudioQuality.title, "At home, away, on Wi-Fi and on mobile data") { open(SettingsPage.AudioQuality) }
     }
     SettingsGroup(title = "Lyrics and history", separatorInset = IconRowInset) {
         CategoryRow(OctoIcons.Lyrics, SettingsPage.Lyrics.title, lyricsSummary(player.lyricsOnline, keepScreenOn)) { open(SettingsPage.Lyrics) }
@@ -340,6 +341,7 @@ fun SettingsPageScreen(page: SettingsPage, highlight: String?, onOpen: (NavKey) 
         SettingsPage.Library -> LibraryPage(onBack, highlight)
         SettingsPage.Server -> ServerPage(onOpen, onBack, highlight)
         SettingsPage.Streaming -> StreamingPage(onOpen, onBack, highlight)
+        SettingsPage.AudioQuality -> AudioQualityPage(onBack, highlight)
         SettingsPage.Lyrics -> LyricsPage(onBack, highlight)
         SettingsPage.Scrobbling -> ScrobblingPage(onBack, highlight)
         SettingsPage.Backup -> BackupPage(onBack, highlight)

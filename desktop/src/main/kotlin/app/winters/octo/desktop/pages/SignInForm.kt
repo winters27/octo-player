@@ -1,5 +1,12 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.subsonic.normalizeServerUrl
+import app.winters.octo.ui.family.inviteProblem
+import app.winters.octo.subsonic.parseFamilyLink
+import app.winters.octo.subsonic.FamilyInviteLink
+import app.winters.octo.subsonic.FamilyLink
+import app.winters.octo.subsonic.FamilyHandOverLink
+import app.winters.octo.subsonic.FamilySignInPrefill
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -58,6 +65,18 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
 
     // A certificate the system does not trust, waiting for an answer.
     var question by mutableStateOf<CertificateQuestion?>(null)
+
+    // A sign-in from another device of one's own, while it comes, and what
+    // is happening, in plain words.
+    var handOver by mutableStateOf<FamilyHandOverLink?>(null)
+    var handOverStep by mutableStateOf<String?>(null)
+
+    // An invite opened (a link or its QR code): the new member's name and
+    // the password they choose, twice.
+    var invite by mutableStateOf<FamilyInviteLink?>(null)
+    var inviteName by mutableStateOf("")
+    var invitePassword by mutableStateOf("")
+    var inviteAgain by mutableStateOf("")
 
     // The server's extensions from last time, when it is the one typed.
     private val lastServer = last
@@ -148,6 +167,64 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
         val old = headers.getOrNull(index) ?: return
         headers[index] = old.copy(value = value)
     }
+
+    // Takes a family link, pasted or opened: an invite to sign up with, a
+    // sign-in from another device of one's own, or a server and username
+    // to fill in. False for any other text, which a field takes as typed.
+    fun takeJoinLink(text: String): Boolean {
+        val link = parseFamilyLink(text) ?: return false
+        take(link)
+        return true
+    }
+
+    // A link's home address becomes this account's home address, so the
+    // app uses the home network at home and the outside address away.
+    fun take(link: FamilyLink) {
+        typeAddress(link.server)
+        link.home?.let { home = it }
+        invite = null
+        handOver = null
+        handOverStep = null
+        when (link) {
+            is FamilyInviteLink -> invite = link
+            is FamilyHandOverLink -> handOver = link
+            is FamilySignInPrefill -> {
+                if (link.username.isNotBlank()) username = link.username
+                password = ""
+                useApiKey = false
+            }
+        }
+        result = null
+    }
+
+    // Back to the plain sign-in.
+    fun leaveLink() {
+        invite = null
+        handOver = null
+        handOverStep = null
+        result = null
+    }
+
+    // What is missing before signing up from an invite, or null when it can go.
+    val inviteProblem: String?
+        get() = if (url == null) "Type the server's address" else inviteProblem(inviteName, invitePassword, inviteAgain)
+
+    val inviteReady: Boolean get() = !busy && invite != null && inviteProblem == null
+
+    // The home address typed or from a link, when it is one.
+    val homeUrl: HttpUrl? get() = home.trim().takeIf(String::isNotEmpty)?.let(::normalizeServerUrl)
+
+    // Signing in after signing up, with the username the server gave and
+    // the password just chosen, remembered like any typed one.
+    fun signUpRequest(username: String, password: String): SignInRequest = SignInRequest(
+        address = url?.toString() ?: (scheme.prefix + address.trim()),
+        username = username,
+        secret = password,
+        mode = AuthMode.Token,
+        home = home,
+        headers = headers.toList(),
+        rememberPassword = rememberPassword,
+    )
 
     fun request(): SignInRequest = SignInRequest(
         address = url?.toString() ?: (scheme.prefix + address.trim()),

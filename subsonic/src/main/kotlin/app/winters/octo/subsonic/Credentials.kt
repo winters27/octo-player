@@ -28,6 +28,9 @@ class Credentials(
 ) {
     fun sign(salt: String): String = md5Hex(secret + salt)
 
+    // The secret itself, only for sealing it into a hand-over.
+    internal fun handOverSecret(): String = secret
+
     // The query parameters that prove who is asking, fresh for each request.
     fun authParams(): List<Pair<String, String>> = when (mode) {
         AuthMode.Token -> {

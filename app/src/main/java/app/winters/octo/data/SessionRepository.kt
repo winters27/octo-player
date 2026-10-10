@@ -445,9 +445,11 @@ class SessionRepository @Inject constructor(
     // Changes the signed-in user's password on the server. The current one is
     // checked first; on success the new one is sealed in place of the old,
     // and the client in use already signs in with it.
-    suspend fun changePassword(current: String, new: String): PasswordChange {
+    // A family member's password goes through the family's own call, which
+    // signs every other app and device out.
+    suspend fun changePassword(current: String, new: String, family: Boolean = false): PasswordChange {
         val session = this.current ?: return PasswordChange.Failed("Connect a server first.")
-        val result = changeOwnPassword(session.client, current, new)
+        val result = changeOwnPassword(session.client, current, new, family)
         if (result != PasswordChange.Changed) return result
         changes.withLock {
             _servers.value.find(session.id)?.let { saved ->

@@ -30,6 +30,9 @@ fun openPlayer(
     landed: (String) -> String? = { null },
     // Whether the server signed in now hands out transition profiles.
     transitions: () -> Boolean = { false },
+    // What streams ask for, and a copy kept on this computer for a song.
+    params: () -> Map<String, String> = { mapOf("format" to "raw") },
+    kept: (String) -> java.io.File? = { null },
     // The engine, opened beforehand off the window's thread (Startup), or
     // why it would not open.
     opened: Result<AudioEngine> = runCatching { NativeAudioEngine.open() },
@@ -41,8 +44,8 @@ fun openPlayer(
         keepStartAfter(engine, settings, scope)
         val device = playback.outputDevice?.takeUnless { it == DEFAULT_OUTPUT }
         val profiles = EngineProfiles(scope, ServerTransitions(client, transitions)::current, { serverSongId(it, landed) }, engine::setSongProfile)
-        val quality = { settings.current.playback.streamQuality }
-        val player = EnginePlayer(engine, LocalOrServer(ServerSongs(headers, landed, quality, client)), volume = playback.volume, device = device, profiles = profiles)
+        val sources = LocalOrServer(ServerSongs(headers, landed, params, client), kept)
+        val player = EnginePlayer(engine, sources, volume = playback.volume, device = device, profiles = profiles)
         OpenedPlayer(player, null)
     } catch (e: Throwable) {
         if (e is VirtualMachineError) throw e

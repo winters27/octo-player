@@ -91,6 +91,120 @@ class ImportsTest {
         assertNull(result.url)
     }
 
+    @Test
+    fun aListFromAServiceThisAppDoesNotKnowStillReads() = runBlocking {
+        answer(ok(""""imports":{"lists":[{"id":"t1","name":"Gym","source":"textList"},{"id":"f1","name":"Road","source":"file"}]}"""))
+        val lists = client().imports().lists
+        assertEquals(listOf(ImportSource.Unknown, ImportSource.File), lists.map { it.origin })
+    }
+
+    @Test
+    fun theOverviewSaysWhoApprovesAFamilyMembersDownloads() = runBlocking {
+        answer(ok(""""imports":{"lists":[],"approval":{"needed":true,"by":"Sam","later":1}}"""))
+        assertEquals(ImportApproval(needed = true, by = "Sam"), client().imports().approval)
+        answer(ok(""""imports":{"lists":[],"approval":{"needed":true,"by":""}}"""))
+        assertEquals(ImportApproval(needed = true, by = ""), client().imports().approval)
+        answer(ok(""""imports":{"lists":[],"approval":{"needed":true}}"""))
+        assertEquals(ImportApproval(needed = true, by = null), client().imports().approval)
+    }
+
+    @Test
+    fun anOverviewWithoutApprovalReadsAsNone() = runBlocking {
+        answer(ok(""""imports":{"lists":[]}"""))
+        assertNull(client().imports().approval)
+        answer(ok(""""imports":{"lists":[],"approval":null}"""))
+        assertNull(client().imports().approval)
+    }
+
+    // ---- Version 2: services, files and text ---------------------------------------------------
+
+    @Test
+    fun version2IsReadFromTheExtensionsList() = runBlocking {
+        answer(ok(""""openSubsonicExtensions":[{"name":"octoImports","versions":[1,2]}]"""))
+        assertTrue(client().supports(OCTO_IMPORTS, OCTO_IMPORTS_FILES))
+        answer(ok(""""openSubsonicExtensions":[{"name":"octoImports","versions":[1]}]"""))
+        assertFalse(client().supports(OCTO_IMPORTS, OCTO_IMPORTS_FILES))
+    }
+
+    @Test
+    fun readsTheServices() = runBlocking {
+        answer(
+            ok(
+                """"importServices":{"services":[
+                {"id":"spotify","name":"Spotify","exportUrl":"https://www.tunemymusic.com/transfer/spotify-to-file","tile":"Spotify"},
+                {"id":"apple-music","name":"Apple Music","exportUrl":"https://www.tunemymusic.com/transfer/apple-music-to-file","tile":"Apple Music","later":1}],
+                "spotifyConnect":true}""",
+            ),
+        )
+        val services = client().importServices()
+        assertEquals("/rest/getImportServices", server.takeRequest().url.encodedPath)
+        assertTrue(services.spotifyConnect)
+        assertEquals(listOf("spotify", "apple-music"), services.services.map { it.id })
+        assertEquals("Apple Music", services.services[1].tile)
+        assertEquals("https://www.tunemymusic.com/transfer/apple-music-to-file", services.services[1].exportUrl)
+    }
+
+    @Test
+    fun noServicesKeyReadsAsNone() = runBlocking {
+        answer(ok(""""other":{}"""))
+        val services = client().importServices()
+        assertTrue(services.services.isEmpty())
+        assertFalse(services.spotifyConnect)
+    }
+
+    @Test
+    fun aFileIsSentAsAMultipartPost() = runBlocking {
+        answer(ok(""""importAction":{"ok":true,"message":"Read 2 lists, 340 songs.","count":2}"""))
+        val bytes = "Track name,Artist name\nAngel,Massive Attack\n".toByteArray()
+        val result = client().importFile("My Spotify Library.csv", bytes)
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/rest/importFile", request.url.encodedPath)
+        assertEquals("My Spotify Library.csv", request.url.queryParameter("name"))
+        assertEquals("winters", request.url.queryParameter("u"))
+        assertTrue(request.headers["Content-Type"]!!.startsWith("multipart/form-data"))
+        val sent = request.body!!.utf8()
+        assertTrue(sent.contains("""name="file"; filename="My Spotify Library.csv""""))
+        assertTrue(sent.contains("Content-Type: text/csv"))
+        assertTrue(sent.contains("Angel,Massive Attack"))
+        assertTrue(result.ok)
+        assertEquals("Read 2 lists, 340 songs.", result.message)
+    }
+
+    @Test
+    fun aRefusedFileReadsAsTheServersWords() = runBlocking {
+        answer(ok(""""importAction":{"ok":false,"message":"No songs found. Each line should read Artist - Title."}"""))
+        val result = client().importFile("notes.txt", "hello".toByteArray())
+        assertFalse(result.ok)
+        assertEquals("No songs found. Each line should read Artist - Title.", result.message)
+    }
+
+    @Test
+    fun textIsSentInAFormBody() = runBlocking {
+        answer(ok(""""importAction":{"ok":true,"message":"Read 1 list, 2 songs."}"""))
+        val result = client().importText("Pasted list", "Massive Attack - Angel\nMGMT - Kids")
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/rest/importText", request.url.encodedPath)
+        assertNull(request.url.queryParameter("text"))
+        val form = request.body!!.utf8().split('&').associate { pair ->
+            val (key, value) = pair.split('=', limit = 2)
+            key to java.net.URLDecoder.decode(value, Charsets.UTF_8)
+        }
+        assertEquals("Pasted list", form["name"])
+        assertEquals("Massive Attack - Angel\nMGMT - Kids", form["text"])
+        assertTrue(result.ok)
+    }
+
+    @Test
+    fun theFileTypeFollowsTheName() {
+        assertEquals("text/csv", importFileType("a.CSV").toString())
+        assertEquals("text/plain", importFileType("a.txt").toString())
+        assertEquals("application/zip", importFileType("export.zip").toString())
+        assertEquals("application/json", importFileType("x.json").toString())
+        assertEquals("application/octet-stream", importFileType("noending").toString())
+    }
+
     // ---- The loopback page -------------------------------------------------------------------
 
     @Test

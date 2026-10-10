@@ -1,5 +1,20 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.desktop.family.clipboardText
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.Image
+import app.winters.octo.design.ProgressRing
+import app.winters.octo.design.PopupHost
+import app.winters.octo.design.LocalPopups
+import app.winters.octo.ui.family.MIN_PASSWORD
+import app.winters.octo.connection.fingerprint
+import app.winters.octo.ui.family.joinWithInvite
+import app.winters.octo.desktop.server.osName
+import app.winters.octo.desktop.server.familyPlatform
+import app.winters.octo.subsonic.DEVICE_NAME_HEADER
+import app.winters.octo.ui.family.JoinOutcome
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
@@ -126,6 +141,24 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
         }
     }
 
+    // Signs up from an invite, or takes a sign-in from another device of
+    // one's own, then signs in.
+    fun go() {
+        if (form.busy) return
+        if (form.invite != null && !form.inviteReady) return
+        again = ::go
+        form.busy = true
+        form.result = null
+        scope.launch {
+            val done = if (form.invite != null) signUpFromForm(app, form) else receiveFromForm(app, form)
+            done?.let { app.signedIn(it.connection, it.note) }
+            form.busy = false
+        }
+    }
+
+    // A sign-in from another device starts at once: there is nothing to type.
+    LaunchedEffect(form.handOver) { if (form.handOver != null && form.handOverStep == null && form.result == null) go() }
+
     // Focus starts in the address, or in the password when the server and
     // user are already filled in.
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
@@ -167,21 +200,34 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
         ) {
             SignInCard(backdrop, short) {
                 Txt("Octo", OctoType.display)
-                Txt("Sign in to your music server. Any Subsonic, Navidrome or Octo server works.", OctoType.bodySmall, OctoColors.TextSecondary, maxLines = 3)
+                Txt(
+                    when {
+                        form.invite != null -> "Sign up for your family's Octo server. Your login then works in Octo and any other music app."
+                        form.handOver != null -> "Signing in with the login from your other device."
+                        else -> "Sign in to your music server. Any Subsonic, Navidrome or Octo server works."
+                    },
+                    OctoType.bodySmall,
+                    OctoColors.TextSecondary,
+                    maxLines = 3,
+                )
 
                 Label("Server address")
                 GlassField(
                     form.address,
-                    form::typeAddress,
+                    { if (!form.takeJoinLink(it)) form.typeAddress(it) },
                     Modifier.fillMaxWidth(),
                     placeholder = "music.example.com or 192.168.1.20:4533",
                     focusRequester = if (form.startsAtPassword) null else first,
-                    onSubmit = ::signIn,
+                    onSubmit = { if (form.invite != null) go() else signIn() },
                     leading = { SchemeToggle(form.scheme.prefix, form::toggleScheme) },
                 )
                 form.url?.let { Txt("Connects to ${shownAddress(it)}", OctoType.caption, OctoColors.TextMuted) }
                 if (form.insecure) Txt("This address isn't encrypted and isn't on your home network, so others could read what is sent.", OctoType.caption, OctoColors.Error, maxLines = 3)
 
+                if (form.invite != null || form.handOver != null) {
+                    LinkCard(form, ::go, onLeave = form::leaveLink)
+                    return@SignInCard
+                }
                 Label(if (form.useApiKey) "Username (optional)" else "Username")
                 GlassField(form.username, { form.username = it; form.result = null }, Modifier.fillMaxWidth(), onSubmit = ::signIn)
                 if (!form.useApiKey) {
@@ -204,6 +250,11 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                     GlazeCapsule(null, "Test connection", ::test, enabled = form.ready)
                     AccentButton("Sign in", ::signIn, Modifier.widthIn(min = 150.dp), enabled = form.ready, loading = form.busy, size = ButtonSize.Medium)
                 }
+                // An invite, or a sign-in link from another device, copied anywhere.
+                TextAction("Paste a family link", {
+                    val text = clipboardText()
+                    if (text == null || !form.takeJoinLink(text)) form.result = false to "The clipboard holds no family link. Copy the link from your invite or your other device first."
+                }, Modifier.align(Alignment.CenterHorizontally), icon = OctoIcons.Family)
             }
             OtherServers(app)
         }
@@ -435,6 +486,6 @@ internal fun TrustQuestion(question: CertificateQuestion, onTrust: () -> Unit, o
 }
 
 @Composable
-private fun Label(text: String) {
+internal fun Label(text: String) {
     Txt(text, OctoType.caption, OctoColors.TextMuted, Modifier.padding(top = 4.dp))
 }

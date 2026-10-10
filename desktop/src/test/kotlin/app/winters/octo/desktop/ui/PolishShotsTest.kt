@@ -427,7 +427,7 @@ class PolishShotsTest {
             settings.update { it.copy(lyrics = it.lyrics.copy(online = false)) }
             player = EnginePlayer(NativeAudioEngine.open(silent = true), LocalOrServer(ServerSongs { app.connection?.client }))
             SwingUtilities.invokeAndWait {
-                app = AppState(settings, accounts, http, CoroutineScope(SupervisorJob() + Dispatchers.Main), DesktopOs.Windows, player, OnlineLyrics(http, server.address.toHttpUrl()), listeningRoot = File(root, "listening"))
+                app = AppState(settings, accounts, http, CoroutineScope(SupervisorJob() + Dispatchers.Main), DesktopOs.Windows, player, OnlineLyrics(http, server.address.toHttpUrl()), listeningRoot = File(root, "listening"), browse = {})
             }
         }
 

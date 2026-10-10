@@ -79,6 +79,21 @@ object OctoIcons {
     val Loudness by sym("sym_loudness")
     val Balance by sym("sym_balance")
     val Crossfade by sym("sym_crossfade")
+    // The family: its page, a member's devices, and an app password.
+    val Family by sym("sym_listeners")
+    val Device by sym("sym_smartphone")
+    val Key by sym("sym_key")
+    // A QR code shown for another device.
+    val QrCode by sym("sym_qr_code")
+    // Copying a link, code or password, and the link beside it.
+    val Copy by sym("sym_copy")
+    val Link by sym("sym_link")
+    // How long a code has left.
+    val Timer by sym("sym_timer")
+    // Where a join link works: anywhere, or behind a lock until the outside
+    // address is set.
+    val Globe by sym("sym_globe")
+    val Lock by sym("sym_lock")
 
     // Back and forward through the pages, and opening the full player: the
     // chevron turned.

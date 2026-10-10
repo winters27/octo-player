@@ -1,5 +1,6 @@
 package app.winters.octo.ui.settings
 
+import app.winters.octo.ui.nav.SettingsPageRoute
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -95,10 +96,6 @@ private val CopyChoices = mapOf(
     CopyPreference.BestQuality to Choice("Best quality", "Plays whichever copy sounds better, even when that means streaming."),
 )
 
-// A size as its sheet lists it, with roughly how much data an hour uses.
-private val StreamQuality.choice: Choice
-    get() = Choice(label, kbps?.let { "MP3, about ${Math.round(it * 0.45)} MB an hour" } ?: "The server's file, unchanged")
-
 private val CacheSize.choice: Choice
     get() = Choice(label, if (this == CacheSize.Off) "Songs stream every time, and nothing is fetched ahead" else null)
 
@@ -143,12 +140,9 @@ fun StreamingPage(
                     },
                 )
             })
-            ChoiceRow(SettingsIndex.StreamWifi, value = prefs.wifi.label, onClick = {
-                sheet.show(ChoiceRequest(SettingsIndex.StreamWifi.title, qualities.map { it.choice }, qualities.indexOf(prefs.wifi)) { vm.setWifi(qualities[it]) })
-            })
-            ChoiceRow(SettingsIndex.StreamMobile, value = prefs.mobile.label, onClick = {
-                sheet.show(ChoiceRequest(SettingsIndex.StreamMobile.title, qualities.map { it.choice }, qualities.indexOf(prefs.mobile)) { vm.setMobile(qualities[it]) })
-            })
+            // Quality on Wi-Fi and mobile data, and a family account's own
+            // choice, are on Audio quality.
+            ActionRow(null, onClick = { onOpen(SettingsPageRoute(SettingsPage.AudioQuality)) }, title = SettingsPage.AudioQuality.title, helper = "On Wi-Fi ${prefs.wifi.label}, on mobile data ${prefs.mobile.label}")
             val waits = StartAfter.entries
             ChoiceRow(SettingsIndex.StartAfter, value = prefs.startAfter.label, helper = START_AFTER_HELP, onClick = {
                 sheet.show(ChoiceRequest(SettingsIndex.StartAfter.title, waits.map { Choice(it.label) }, waits.indexOf(prefs.startAfter)) { vm.setStartAfter(waits[it]) })

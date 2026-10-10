@@ -155,6 +155,7 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
                 mbRecordingId = musicId(song.musicBrainzId),
                 mbAlbumId = musicId(listedAlbum?.musicBrainzId),
                 mbArtistIds = joinLines(song.artists.mapNotNull { artistIds[it.id] }.distinct()),
+                personal = song.octoPersonal,
             )
         }
     }

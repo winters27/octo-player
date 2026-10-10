@@ -26,6 +26,7 @@ import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.Credentials
 import app.winters.octo.subsonic.Extension
 import app.winters.octo.subsonic.OCTO_ACQUISITIONS
+import app.winters.octo.subsonic.OCTO_FAMILY
 import app.winters.octo.subsonic.ServerInfo
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
@@ -75,6 +76,9 @@ class Connection(
     val acquires: Boolean get() = supports(OCTO_ACQUISITIONS)
 
     val lyricsByIdOn: Boolean get() = supports(SONG_LYRICS)
+
+    // Whether the server has Family on: members, requests and devices.
+    val family: Boolean get() = supports(OCTO_FAMILY)
 }
 
 // What testing a connection found: which server, which version, and the
@@ -421,8 +425,8 @@ class Accounts(
 
     // Changes the signed-in user's password on the server in use, then keeps
     // the new one where the old one was kept.
-    suspend fun changePassword(connection: Connection, current: String, new: String): PasswordOutcome {
-        val result = changeOwnPassword(connection.client, current, new)
+    suspend fun changePassword(connection: Connection, current: String, new: String, family: Boolean = false): PasswordOutcome {
+        val result = changeOwnPassword(connection.client, current, new, family)
         if (result != PasswordChange.Changed) return PasswordOutcome(result)
         val server = find(connection.server.id) ?: connection.server
         memory[server.id] = new

@@ -1,7 +1,7 @@
 package app.winters.octo.desktop.settings
 
+import app.winters.octo.offline.KeepChoices
 import app.winters.octo.playback.StartAfter
-import app.winters.octo.playback.StreamQuality
 import app.winters.octo.sound.SoundSettings
 import app.winters.octo.desktop.system.SystemPrefs
 import app.winters.octo.desktop.discord.DiscordPrefs
@@ -87,6 +87,22 @@ data class AppSettings(
     // Only songs in the library: albums, search, artists and radio leave
     // out songs found online.
     val libraryOnly: Boolean = false,
+    // This install's id, made once, which its own server tells it apart
+    // by. Empty until first needed.
+    val deviceId: String = "",
+    // Songs kept on this computer to play without a connection.
+    val offline: OfflinePrefs = OfflinePrefs(),
+)
+
+// Where kept songs go (empty for the usual folder), and what is kept from
+// each server, by its id.
+@Serializable
+data class OfflinePrefs(
+    val folder: String = "",
+    // How kept songs are fetched: the file as it is, or Opus at a lower
+    // bitrate (a StreamQuality name), as the phone's download quality.
+    val downloadQuality: String = "Original",
+    val servers: Map<String, KeepChoices> = emptyMap(),
 )
 
 // A song table as the listener set it up: the columns shown, in order (by
@@ -304,9 +320,10 @@ data class PlaybackPrefs(
     // When the queue runs out, songs like the last one keep playing. On by
     // default, as on the phone.
     val autoplay: Boolean = true,
-    // How songs stream from the server: its file as it is, or an MP3 made
-    // on the way; and how much of one is ready before it starts.
-    val streamQuality: StreamQuality = StreamQuality.Original,
+    // How songs stream when this app picks the quality: the file as it is,
+    // or Opus at a lower bitrate (a StreamQuality name); and how much of a
+    // stream is ready before it starts.
+    val streamQuality: String = "Original",
     val startAfter: StartAfter = StartAfter.Short,
     // How Octo's radio is tuned (see RadioTuning).
     val radioDiscovery: RadioDiscovery = RadioDiscovery.Balanced,

@@ -1,0 +1,92 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "octo",
+    "openSubsonic": true,
+    "familyRequests": {
+      "request": [
+        {
+          "id": "r_9xK2",
+          "username": "alex",
+          "displayName": "Alex",
+          "kind": "Song",
+          "target": "ext-deezer-song-12345",
+          "title": "Song",
+          "artist": "Artist",
+          "album": "Album",
+          "coverArt": "ext-deezer-song-12345",
+          "quality": "Flac",
+          "state": "Pending",
+          "created": "2026-10-20T18:00:00Z",
+          "decided": null,
+          "decidedBy": null,
+          "note": "",
+          "failure": null,
+          "librarySongId": null,
+          "outcome": null
+        },
+        {
+          "id": "r_2",
+          "username": "alex",
+          "displayName": "Alex",
+          "kind": "Album",
+          "target": "ext-deezer-song-12345",
+          "title": "Album",
+          "artist": "Artist",
+          "album": "Album",
+          "coverArt": null,
+          "quality": "Best",
+          "state": "Done",
+          "created": "2026-10-20T18:00:00Z",
+          "decided": "2026-10-20T18:05:00Z",
+          "decidedBy": "jordan",
+          "note": "",
+          "failure": null,
+          "librarySongId": "tr-77",
+          "outcome": "AddedFromFamily"
+        },
+        {
+          "id": "r_3",
+          "username": "alex",
+          "displayName": "Alex",
+          "kind": "Song",
+          "target": "ext-deezer-song-12345",
+          "title": "Song",
+          "artist": "Artist",
+          "album": "Album",
+          "coverArt": "ext-deezer-song-12345",
+          "quality": "Mp3",
+          "state": "Declined",
+          "created": "2026-10-20T18:00:00Z",
+          "decided": "2026-10-21T09:00:00Z",
+          "decidedBy": "jordan",
+          "note": "We have the live one",
+          "failure": null,
+          "librarySongId": null,
+          "outcome": null
+        },
+        {
+          "id": "r_4",
+          "username": "alex",
+          "displayName": "Alex",
+          "kind": "Song",
+          "target": "ext-deezer-song-12345",
+          "title": "Song",
+          "artist": "Artist",
+          "album": "Album",
+          "coverArt": "ext-deezer-song-12345",
+          "quality": "Flac",
+          "state": "Failed",
+          "created": "2026-10-20T18:00:00Z",
+          "decided": null,
+          "decidedBy": null,
+          "note": "",
+          "failure": "No real FLAC copy found",
+          "librarySongId": null,
+          "outcome": null
+        }
+      ]
+    }
+  }
+}

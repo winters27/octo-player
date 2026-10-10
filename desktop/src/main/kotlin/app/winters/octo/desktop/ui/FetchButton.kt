@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.ui.family.SAVE
+import app.winters.octo.ui.family.outsideActions
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -88,6 +90,11 @@ fun FetchButton(
     iconSize: Dp = IconSize.Transport,
     tint: Color = OctoColors.TextPrimary.copy(alpha = 0.7f),
 ) {
+    // A family member who saves songs rather than adding them gets a heart.
+    if (outsideActions(app.family.me).addLabel != null) {
+        SaveHeart(app, song, size, iconSize, tint)
+        return
+    }
     val fetches = app.fetches ?: return
     val phases by fetches.phases.collectAsState()
     val phase = phases[song.id] ?: FetchPhase.None
@@ -119,6 +126,29 @@ fun FetchButton(
                 FetchPhase.Done -> Glyph(OctoIcons.Check, size = iconSize, tint = OctoColors.Accent)
                 is FetchPhase.Failed -> Glyph(OctoIcons.Info, size = iconSize, tint = OctoColors.Error)
             }
+        }
+    }
+}
+
+// The heart that saves a song found online for a family member whose songs
+// are saved rather than added: it plays from the internet, and shows in
+// Family under Saved, where a copy can be asked for.
+@Composable
+private fun SaveHeart(app: AppState, song: Song, size: Dp, iconSize: Dp, tint: Color) {
+    val saved = app.isStarred(song)
+    OctoTooltip(if (saved) "Saved. Press to take it off Saved" else "Not in your library. Press to save it") {
+        Box(
+            Modifier
+                .size(size)
+                .hoverLift(CircleShape)
+                .clickable { app.setStarred(listOf(song), !saved) }
+                .semantics {
+                    contentDescription = SAVE
+                    stateDescription = if (saved) "Saved" else "Not saved"
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Glyph(if (saved) OctoIcons.Liked else OctoIcons.Like, size = iconSize, tint = if (saved) OctoColors.Accent else tint)
         }
     }
 }

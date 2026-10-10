@@ -1,0 +1,16 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "octo",
+    "openSubsonic": true,
+    "device": {
+      "id": "d_7Qm2abc",
+      "username": "alex",
+      "name": "Pixel 9",
+      "kind": "OctoApp",
+      "current": true,
+      "quality": "App"
+    }
+  }
+}

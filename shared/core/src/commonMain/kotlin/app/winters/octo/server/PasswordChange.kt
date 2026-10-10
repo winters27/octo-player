@@ -42,7 +42,9 @@ sealed interface PasswordChange {
 // first by signing in with it, so a mistyped one is caught before anything
 // changes. On success the client signs in with the new one from then on;
 // keeping it (the system's store, the phone's vault) is the caller's part.
-suspend fun changeOwnPassword(client: SubsonicClient, current: String, new: String): PasswordChange {
+// A family member's password goes through the family's own call, which
+// also signs out every other app and device.
+suspend fun changeOwnPassword(client: SubsonicClient, current: String, new: String, family: Boolean = false): PasswordChange {
     if (client.authMode == AuthMode.ApiKey) return PasswordChange.UsesKey
     try {
         client.withSecret(current).ping()
@@ -52,7 +54,7 @@ suspend fun changeOwnPassword(client: SubsonicClient, current: String, new: Stri
         return failure(e)
     }
     return try {
-        client.changePassword(client.username, new)
+        if (family) client.changeFamilyPassword(current, new) else client.changePassword(client.username, new)
         PasswordChange.Changed
     } catch (e: SubsonicException) {
         failure(e)
@@ -72,9 +74,10 @@ private fun failure(e: SubsonicException): PasswordChange = when {
 // What a server answers for a call it does not have.
 private val NotThere = setOf(404, 405, 501)
 
-// What to tell the listener about a change of password.
-fun passwordChangeWords(result: PasswordChange): String = when (result) {
-    PasswordChange.Changed -> "Your password is changed. Octo uses the new one from now on."
+// What to tell the listener about a change of password. A family member's
+// change signs every other app and device out.
+fun passwordChangeWords(result: PasswordChange, family: Boolean = false): String = when (result) {
+    PasswordChange.Changed -> if (family) "Your password is changed. Octo uses the new one; every other app and device now needs it." else "Your password is changed. Octo uses the new one from now on."
     PasswordChange.WrongCurrent -> "That isn't your current password."
     PasswordChange.NotAllowed -> "Your server doesn't let this account change its password. Ask whoever runs the server."
     PasswordChange.NotOffered -> "Your server doesn't take new passwords from apps. Change it on the server's own web page."

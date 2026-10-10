@@ -167,6 +167,12 @@ class ServerCatalogTest {
     }
 
     @Test
+    fun aSongInTheMembersOwnLibraryIsKeptAsTheirs() {
+        val catalog = buildServerCatalog(source, Library(listOf(song.copy(octoPersonal = true), song.copy(id = "s2")), listOf(album), emptyList()))
+        assertEquals(mapOf(true to 1, false to 1), catalog.tracks.groupingBy { it.personal }.eachCount())
+    }
+
+    @Test
     fun blankDetailsAreNotKept() {
         val blank = song.copy(musicBrainzId = "", comment = "", displayComposer = " ", explicitStatus = "", bpm = 0)
         val row = buildServerCatalog(source, Library(listOf(blank), listOf(album), emptyList())).tracks.single()

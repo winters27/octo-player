@@ -14,9 +14,18 @@ import javax.inject.Singleton
 // answer, without touching the shared client, which stays with the server
 // in use.
 @Singleton
-class ServerClients @Inject constructor(@ApplicationContext private val context: Context) {
-    fun forServer(main: HttpUrl, settings: ConnectionSettings, seconds: Long): OkHttpClient {
-        val security = ConnectionSecurity(context).apply { configure(main, settings) }
+class ServerClients @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val devices: DeviceIds,
+) {
+    fun forServer(main: HttpUrl, settings: ConnectionSettings, seconds: Long): OkHttpClient = clientFor(main, settings, seconds).first
+
+    // The same, with its security too, which keeps a certificate the client
+    // refused, to ask about (joining a family pairs before signing in).
+    fun forJoin(main: HttpUrl, settings: ConnectionSettings, seconds: Long = 20): Pair<OkHttpClient, ConnectionSecurity> = clientFor(main, settings, seconds)
+
+    private fun clientFor(main: HttpUrl, settings: ConnectionSettings, seconds: Long): Pair<OkHttpClient, ConnectionSecurity> {
+        val security = ConnectionSecurity(context, devices).apply { configure(main, settings) }
         return OkHttpClient.Builder()
             .connectTimeout(seconds, TimeUnit.SECONDS)
             .callTimeout(seconds, TimeUnit.SECONDS)
@@ -24,6 +33,6 @@ class ServerClients @Inject constructor(@ApplicationContext private val context:
                 chain.proceed(chain.request().newBuilder().header("User-Agent", "Octo/${BuildConfig.VERSION_NAME} (Android)").build())
             }
             .let(security::install)
-            .build()
+            .build() to security
     }
 }

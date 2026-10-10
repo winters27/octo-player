@@ -1,0 +1,17 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "octo",
+    "openSubsonic": true,
+    "familyLogin": {
+      "username": "alex",
+      "servers": {
+        "anywhere": "https://music.example.com",
+        "home": "http://192.168.1.20:4533"
+      },
+      "anywhereAvailable": true,
+      "awayAllowed": false
+    }
+  }
+}

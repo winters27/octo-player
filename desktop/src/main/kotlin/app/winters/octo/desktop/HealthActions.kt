@@ -1,5 +1,7 @@
 package app.winters.octo.desktop
 
+import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.subsonic.removeFromMyLibrary
 import app.winters.octo.health.FixOutcome
 import app.winters.octo.health.FixStep
 import app.winters.octo.health.HealthCheck
@@ -54,6 +56,28 @@ fun AppState.deleteFromDisk(songs: List<Song>) {
     runFix("Deleting", steps) { outcome ->
         if (outcome.failed.isEmpty() && !outcome.rehearsed && !outcome.stopped) deletedLine(outcome.done.size, songs.singleOrNull()?.title)
         else outcome.summary()
+    }
+}
+
+// Takes songs out of a family member's own library. The server refuses a
+// song of the shared library, and says why in its own words.
+fun AppState.removeFromMyLibrary(songs: List<Song>) {
+    val client = connection?.client ?: return
+    scope.launch {
+        var removed = 0
+        var refused: String? = null
+        for (song in songs) {
+            try {
+                client.removeFromMyLibrary(song.id)
+                removed++
+            } catch (e: SubsonicException) {
+                refused = e.message ?: "The server kept ${song.title}."
+            }
+        }
+        notice = refused ?: if (removed == 1) "Removed ${songs.single().title} from your library" else "Removed $removed songs from your library"
+        noticeDetail = null
+        noticeAction = null
+        if (removed > 0) catchUp()
     }
 }
 

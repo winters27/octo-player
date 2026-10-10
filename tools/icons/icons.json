@@ -104,6 +104,10 @@
     "sym_timer": { "icon": "timer", "weight": "regular" },
     "sym_listeners": { "icon": "users-three", "weight": "regular" },
     "sym_layout": { "icon": "layout", "weight": "regular" },
-    "sym_wifi": { "icon": "wifi-high", "weight": "regular" }
+    "sym_wifi": { "icon": "wifi-high", "weight": "regular" },
+    "sym_camera": { "icon": "camera", "weight": "regular" },
+    "sym_qr_code": { "icon": "qr-code", "weight": "regular" },
+    "sym_copy": { "icon": "copy", "weight": "regular" },
+    "sym_link": { "icon": "link-simple", "weight": "regular" }
   }
 }

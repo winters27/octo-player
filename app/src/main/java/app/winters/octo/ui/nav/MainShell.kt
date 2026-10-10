@@ -1,5 +1,12 @@
 package app.winters.octo.ui.nav
 
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import app.winters.octo.ui.family.FamilyShellViewModel
+import app.winters.octo.ui.family.FamilyRequestSheetHost
+import app.winters.octo.ui.family.FamilyScreen
+import app.winters.octo.subsonic.familyAppLink
+import app.winters.octo.subsonic.parseFamilyLink
+import app.winters.octo.family.FamilyOpen
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterExitState
@@ -52,7 +59,8 @@ import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.player.PlayerArtCorner
 import app.winters.octo.player.PlayerOverlay
 import app.winters.octo.ui.admin.OctoAdminScreen
-import app.winters.octo.ui.imports.SpotifyImportScreen
+import app.winters.octo.ui.imports.ImportScreen
+import app.winters.octo.ui.imports.ImportShellViewModel
 import app.winters.octo.ui.album.AlbumScreen
 import app.winters.octo.ui.artist.ArtistScreen
 import app.winters.octo.ui.common.ChoiceSheet
@@ -156,6 +164,29 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         }
     }
     val open: (NavKey) -> Unit = { stack.add(it) }
+    // A notice tapped or a family link opened: the Family screen, or the
+    // join form filled in, on the Settings tab.
+    val familyHub = hiltViewModel<FamilyShellViewModel>().hub
+    val familyOpen by familyHub.opens.collectAsStateWithLifecycle()
+    LaunchedEffect(familyOpen) {
+        val what = familyOpen ?: return@LaunchedEffect
+        familyHub.opened()
+        selected = stacks.lastIndex
+        stacks.last().add(
+            when (what) {
+                FamilyOpen.Family -> FamilyRoute
+                is FamilyOpen.Join -> FamilyJoinRoute(familyAppLink(what.link))
+            },
+        )
+    }
+    // A list shared to Octo: Import, on the Settings tab, which sends it.
+    val importInbox = hiltViewModel<ImportShellViewModel>().inbox
+    val shared by importInbox.pending.collectAsStateWithLifecycle()
+    LaunchedEffect(shared) {
+        if (shared == null) return@LaunchedEffect
+        selected = stacks.lastIndex
+        if (stacks.last().lastOrNull() != ImportRoute) stacks.last().add(ImportRoute)
+    }
     val back: () -> Unit = { stack.removeLastOrNull() }
     val hasTrack = now.trackId != null
     // The bar's small player, and the full one over everything.
@@ -313,6 +344,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                 DisconnectSheetHost(disconnectPrompt)
                 ChoiceSheetHost(choiceSheet)
                 ShareSheetHost(shareSheet)
+                FamilyRequestSheetHost()
                 app.winters.octo.ui.downloads.ServerDownloadsHost()
                 // Above the sheets, so an undo stays reachable while one is open.
                 FeedbackHost(feedback)
@@ -368,7 +400,9 @@ private fun pagesFor(stack: NavBackStack<NavKey>): (NavKey) -> NavEntry<NavKey> 
         entry<EditConnectionRoute> { SignInScreen(back, editing = true) }
         entry<ServerFormRoute> { route -> SignInScreen(back, form = route.form, serverId = route.id, note = route.note) }
         entry<OctoAdminRoute> { OctoAdminScreen(back) }
-        entry<SpotifyImportRoute> { SpotifyImportScreen(back) }
+        entry<ImportRoute> { ImportScreen(back) }
+        entry<FamilyRoute> { FamilyScreen(back, onImport = { open(ImportRoute) }) }
+        entry<FamilyJoinRoute> { route -> SignInScreen(back, join = parseFamilyLink(route.link)) }
         entry<ChartsRoute> { app.winters.octo.ui.charts.ChartsScreen(back) }
         entry<SoundRoute> { SoundScreen(back) }
         entry<SharesRoute> { SharesScreen(back) }

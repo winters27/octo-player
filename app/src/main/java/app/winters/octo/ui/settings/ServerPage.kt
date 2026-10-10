@@ -1,5 +1,8 @@
 package app.winters.octo.ui.settings
 
+import app.winters.octo.family.FamilyHub
+import app.winters.octo.ui.nav.FamilyRoute
+import app.winters.octo.family.family
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -67,7 +70,7 @@ import app.winters.octo.ui.common.PopupQuestion
 import app.winters.octo.ui.common.rememberOpenedBeside
 import app.winters.octo.ui.nav.EditConnectionRoute
 import app.winters.octo.ui.nav.OctoAdminRoute
-import app.winters.octo.ui.nav.SpotifyImportRoute
+import app.winters.octo.ui.nav.ImportRoute
 import app.winters.octo.ui.nav.SignInRoute
 import app.winters.octo.ui.settings.rows.ActionRow
 import app.winters.octo.ui.settings.rows.ChoiceRow
@@ -88,6 +91,7 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class ServerViewModel @Inject constructor(
     private val sessions: SessionRepository,
+    private val family: FamilyHub,
     private val sync: ServerSync,
     private val playlists: PlaylistSync,
     private val switcher: ServerSwitch,
@@ -142,7 +146,10 @@ class ServerViewModel @Inject constructor(
 
     fun disconnect() = sync.disconnect()
 
-    suspend fun changePassword(current: String, new: String): PasswordChange = sessions.changePassword(current, new)
+    suspend fun changePassword(current: String, new: String): PasswordChange = sessions.changePassword(current, new, family = family.model.me?.managed == true)
+
+    // Opens "Sign in on another device" on the Family screen.
+    fun signInElsewhere() = family.model.handOver.open()
 
     suspend fun look(): ServerLook? = sessions.look()
 }
@@ -221,7 +228,15 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
                     ActionRow(SettingsIndex.EditConnection, onClick = { onOpen(EditConnectionRoute) })
                     if (client.authMode != AuthMode.ApiKey) ActionRow(SettingsIndex.ChangePassword, onClick = { changing = true })
                     if (current.session.runsOcto) ActionRow(SettingsIndex.OctoAdmin, onClick = { onOpen(OctoAdminRoute) })
-                    if (current.session.runsOcto) ActionRow(SettingsIndex.SpotifyImport, onClick = { onOpen(SpotifyImportRoute) })
+                    if (current.session.runsOcto) ActionRow(SettingsIndex.Import, onClick = { onOpen(ImportRoute) })
+                    // Only while the server has Family on.
+                    if (current.session.family) ActionRow(SettingsIndex.Family, onClick = { onOpen(FamilyRoute) })
+                    if (current.session.family) {
+                        ActionRow(SettingsIndex.SignInElsewhere, onClick = {
+                            vm.signInElsewhere()
+                            onOpen(FamilyRoute)
+                        })
+                    }
                 }
 
                 ServerFacts(vm, current.session)

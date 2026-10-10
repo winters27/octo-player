@@ -1,5 +1,8 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.ui.family.passwordStrength
+import app.winters.octo.ui.family.HANDOVER_TITLE
+import app.winters.octo.desktop.family.showHandOver
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -200,6 +203,13 @@ private fun OverviewRows(app: AppState, connection: Connection) {
     val kept = if (app.accounts.remembersSignIn) "Octo keeps you signed in on this computer." else "You'll sign in again the next time Octo opens."
     SettingRow("Signed in as ${connection.client.username.ifEmpty { "API key" }}", overview.passwordNote ?: kept) {
         if (overview.canChangePassword) RowAction("Change password", { changePassword(app) })
+    }
+    // Any account on a family server: a QR code another device scans to
+    // sign in with the same login.
+    if (connection.family) {
+        SettingRow(HANDOVER_TITLE, "Show a QR code to sign in on your phone or another computer, without typing your password.") {
+            RowAction("Show QR code", { showHandOver(app.popups, app, app.family) }, icon = OctoIcons.QrCode)
+        }
     }
     ActionRow("Read the library again", "When new music hasn't shown up yet.", "Read again", {
         app.library?.load()
@@ -421,7 +431,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
 fun changePassword(app: AppState) {
     val connection = app.connection ?: return
     val opening = Any()
-    app.popups.showCentred(width = SettingsSize.Sheet) { close -> key(opening) { PasswordSheet(app, connection, close) } }
+    app.popups.showCentred(width = SettingsSize.Sheet, scrim = true) { close -> key(opening) { PasswordSheet(app, connection, close) } }
 }
 
 @Composable
@@ -434,6 +444,9 @@ private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, clo
     // The form's own problem shows once something was tried, not while typing.
     var tried by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
+    // A family member's password: the family's own call, which signs every
+    // other app and device out.
+    val family = connection.family && app.family.me?.managed == true
 
     fun change() {
         tried = true
@@ -442,11 +455,11 @@ private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, clo
         busy = true
         problem = null
         scope.launch {
-            val outcome = app.accounts.changePassword(connection, draft.current, draft.new)
+            val outcome = app.accounts.changePassword(connection, draft.current, draft.new, family)
             busy = false
             if (outcome.result == PasswordChange.Changed) {
                 close()
-                app.notice = listOfNotNull(passwordChangeWords(outcome.result), outcome.note).joinToString(" ")
+                app.notice = listOfNotNull(passwordChangeWords(outcome.result, family), outcome.note).joinToString(" ")
             } else {
                 problem = passwordChangeWords(outcome.result)
             }
@@ -456,13 +469,15 @@ private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, clo
     MenuTitle("Change password")
     PopupPadding {
         Txt(
-            "For ${connection.client.username} on ${connection.server.name}. Your other apps will ask for the new password the next time they sign in.",
+            if (family) "For ${connection.client.username} on ${connection.server.name}. Every other app and device is signed out and needs the new password."
+            else "For ${connection.client.username} on ${connection.server.name}. Your other apps will ask for the new password the next time they sign in.",
             DesktopType.meta,
             OctoColors.TextSecondary,
             maxLines = 3,
         )
         Field("Current password") { SecretField(draft.current, { draft = draft.copy(current = it); problem = null }, "Current password", ::change, first) }
         Field("New password") { SecretField(draft.new, { draft = draft.copy(new = it); problem = null }, "New password", ::change) }
+        passwordStrength(draft.new)?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted) }
         Field("New password again") { SecretField(draft.confirm, { draft = draft.copy(confirm = it); problem = null }, "New password again", ::change) }
         val shown = problem ?: if (tried) passwordDraftProblem(draft) else null
         shown?.let { Txt(it, DesktopType.meta, OctoColors.Error, maxLines = 3) }

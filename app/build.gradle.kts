@@ -92,6 +92,15 @@ dependencies {
     implementation(libs.androidx.navigation3.runtime)
     implementation(libs.androidx.navigation3.ui)
     implementation(libs.androidx.datastore.preferences)
+    // Checking family requests now and then, even while the app is closed.
+    implementation(libs.androidx.work.runtime)
+    // The camera, for scanning a family QR code on the join screen. CameraX
+    // is part of Android's own libraries (no Google Play services); the code
+    // is read by ZXing, through the shared core.
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.hilt.android)
     implementation(libs.hilt.lifecycle.viewmodel.compose)
@@ -122,4 +131,8 @@ dependencies {
     testImplementation(libs.mockwebserver)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(libs.mockwebserver)
+    debugImplementation(libs.compose.ui.test.manifest)
 }

@@ -80,6 +80,7 @@ import app.winters.octo.desktop.nav.SidebarItem
 import app.winters.octo.desktop.playlists.choosePlaylistFile
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.subsonic.Playlist
+import app.winters.octo.ui.family.FAMILY
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
 
@@ -140,7 +141,11 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
                 }
                 // Only an Octo server imports; the page itself says when one is too old to.
                 if (app.connection?.isOcto == true) {
-                    item(key = "p:imports") { NavRow("Spotify import", OctoIcons.Cloud, lit == SidebarItem.Top(Page.Imports), rail) { go(Page.Imports) } }
+                    item(key = "p:imports") { NavRow("Import", OctoIcons.Download, lit == SidebarItem.Top(Page.Imports), rail) { go(Page.Imports) } }
+                }
+                // Only while the server has Family on.
+                if (app.connection?.family == true) {
+                    item(key = "p:family") { NavRow(FAMILY, OctoIcons.Family, lit == SidebarItem.Top(Page.Family), rail) { go(Page.Family) } }
                 }
             }
             val pinned = frame.pinnedPlaylists

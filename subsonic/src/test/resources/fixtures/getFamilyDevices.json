@@ -1,0 +1,39 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "octo",
+    "openSubsonic": true,
+    "familyDevices": {
+      "device": [
+        {
+          "id": "d_7Qm2abc",
+          "username": "alex",
+          "name": "Pixel 9",
+          "app": "Octo 1.6 (Android)",
+          "firstSeen": "2026-10-19T10:00:00Z",
+          "lastSeen": "2026-10-20T18:00:00Z",
+          "place": "Away",
+          "playing": {
+            "songId": "tr-9",
+            "title": "Song",
+            "artist": "Artist"
+          },
+          "current": true,
+          "quality": "App"
+        },
+        {
+          "id": "d_2",
+          "username": "alex",
+          "name": "Symfonium",
+          "app": "Symfonium",
+          "firstSeen": "2026-10-19T10:00:00Z",
+          "lastSeen": "2026-10-19T11:00:00Z",
+          "place": "Home",
+          "playing": null,
+          "current": false
+        }
+      ]
+    }
+  }
+}

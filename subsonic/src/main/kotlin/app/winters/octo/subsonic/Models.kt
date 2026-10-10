@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -158,6 +159,10 @@ data class Song(
     // "Last.fm", "ListenBrainz", "Sounds alike", "Your library"). Only radio
     // answers carry it, and only from Octo.
     val octoSuggestedBy: String? = null,
+    // Octo's mark, in a family, for a song in the signed-in member's own
+    // library rather than the shared one. Only those can be removed by the
+    // member. Unmarked on servers without Family.
+    @Serializable(with = LooseBoolean::class) val octoPersonal: Boolean = false,
 )
 
 @Serializable
@@ -404,6 +409,19 @@ internal object LooseStrings : KSerializer<List<String>> {
 
     override fun serialize(encoder: Encoder, value: List<String>) =
         ListSerializer(String.serializer()).serialize(encoder, value)
+}
+
+// A yes or no sent as a boolean or as text ("true"), as an answer turned
+// from XML attributes may carry it. Anything else reads as no.
+internal object LooseBoolean : KSerializer<Boolean> {
+    override val descriptor = PrimitiveSerialDescriptor("LooseBoolean", PrimitiveKind.BOOLEAN)
+
+    override fun deserialize(decoder: Decoder): Boolean {
+        val primitive = (decoder as? JsonDecoder)?.decodeJsonElement() as? JsonPrimitive ?: return false
+        return primitive.booleanOrNull ?: primitive.contentOrNull?.trim().equals("true", ignoreCase = true)
+    }
+
+    override fun serialize(encoder: Encoder, value: Boolean) = encoder.encodeBoolean(value)
 }
 
 // A whole number sent as a number or as text ("120", "120.5"). Anything

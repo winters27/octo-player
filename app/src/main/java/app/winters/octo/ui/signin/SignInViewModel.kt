@@ -1,5 +1,26 @@
 package app.winters.octo.ui.signin
 
+import app.winters.octo.ui.family.joinWithInvite
+import app.winters.octo.ui.family.inviteProblem
+import app.winters.octo.subsonic.parseFamilyLink
+import app.winters.octo.subsonic.FamilyInviteLink
+import app.winters.octo.subsonic.FamilyLink
+import app.winters.octo.connection.fingerprint
+import app.winters.octo.connection.ConnectionSettings
+import app.winters.octo.data.resolveHeaders
+import app.winters.octo.connection.cleanHeaders
+import app.winters.octo.connection.ServerClients
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import app.winters.octo.ui.family.JoinOutcome
+import app.winters.octo.ui.family.HandOverResult
+import app.winters.octo.ui.family.HANDOVER_SIGNED_IN
+import app.winters.octo.ui.family.receiveHandOver
+import app.winters.octo.subsonic.FamilyHandOverLink
+import app.winters.octo.subsonic.FamilySignInPrefill
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import app.winters.octo.subsonic.FamilyPlatform
+import app.winters.octo.connection.DeviceIds
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -39,7 +60,35 @@ import javax.inject.Inject
 class SignInViewModel @Inject constructor(
     private val sessions: SessionRepository,
     private val switcher: ServerSwitch,
+    private val clients: ServerClients,
+    private val devices: DeviceIds,
 ) : ViewModel() {
+    // A family link's card in place of the password: signing up from an
+    // invite, or a sign-in coming from another device of one's own.
+    var joining by mutableStateOf(false)
+
+    // A sign-in from another device, while it comes, and what is happening,
+    // in plain words.
+    var handOver by mutableStateOf<FamilyHandOverLink?>(null)
+        private set
+    var handOverStep by mutableStateOf<String?>(null)
+        private set
+
+    // Signed up from an invite, kept until signed in: an invite works once,
+    // so a certificate asked about afterwards does not sign up again.
+    private var signedUp: JoinOutcome.SignedUp? = null
+
+    // An invite opened: the new member's name and the password they choose,
+    // twice. Signing up runs the invite's steps, then signs this phone in.
+    var invite by mutableStateOf<FamilyInviteLink?>(null)
+        private set
+    var inviteName by mutableStateOf("")
+    var invitePassword by mutableStateOf("")
+    var inviteAgain by mutableStateOf("")
+
+    // The camera scanner, over the join form.
+    var scanning by mutableStateOf(false)
+
     // The address in two parts, as the desktop keeps it: the scheme, shown
     // as a button at the start of the field, and the rest as typed.
     var address by mutableStateOf("")
@@ -136,6 +185,175 @@ class SignInViewModel @Inject constructor(
             if (!schemePicked) scheme = automaticScheme(text)
         }
         error = null
+    }
+
+    // Takes a family link (the https form a QR code carries, or the app's
+    // own octo:// form, scanned, opened or pasted). An invite shows the
+    // sign-up card; a sign-in from another device starts at once; a sign-in
+    // link fills in the server and username for the password. False for any
+    // other text.
+    fun takeJoinLink(text: String): Boolean {
+        val link = parseFamilyLink(text) ?: return false
+        startJoin(link)
+        return true
+    }
+
+    fun startJoin(link: FamilyLink? = null) {
+        scanning = false
+        error = null
+        if (link == null) {
+            joining = true
+            return
+        }
+        typeAddress(link.server)
+        // A link's home address becomes this account's home address, so the
+        // app uses the home network at home and the outside address away.
+        link.home?.let { home = it }
+        signedUp = null
+        invite = null
+        handOver = null
+        handOverStep = null
+        when (link) {
+            is FamilyInviteLink -> {
+                invite = link
+                joining = true
+            }
+            is FamilyHandOverLink -> {
+                handOver = link
+                joining = true
+                receive()
+            }
+            is FamilySignInPrefill -> {
+                joining = false
+                if (link.username.isNotBlank()) username = link.username
+                password = ""
+                useApiKey = false
+            }
+        }
+    }
+
+    fun stopJoin() {
+        joining = false
+        invite = null
+        handOver = null
+        handOverStep = null
+        error = null
+    }
+
+    // What is missing before signing up, or null when it can go.
+    val joinProblem: String?
+        get() = when {
+            invite == null -> "Scan or open your invite first"
+            url == null -> "Type the server's address"
+            else -> inviteProblem(inviteName, invitePassword, inviteAgain)
+        }
+
+    // Takes the sign-in another device of one's own hands over: redeems the
+    // token from its link, waits for that device to allow it, opens what it
+    // sends with the key from the link, and signs in with it like a typed one.
+    fun receive() {
+        val link = handOver ?: return
+        if (busy) return
+        val base = link.base.toHttpUrlOrNull() ?: return
+        busy = true
+        error = null
+        viewModelScope.launch {
+            val (http, _) = clients.forJoin(base, ConnectionSettings())
+            val got = withContext(Dispatchers.IO) {
+                receiveHandOver(link, http, devices.current().name, FamilyPlatform.Android, step = { handOverStep = it })
+            }
+            if (got !is HandOverResult.Received) {
+                handOverStep = null
+                error = (got as HandOverResult.Refused).message
+                busy = false
+                return@launch
+            }
+            val signIn = got.signIn
+            val request = SignInRequest(
+                address = signIn.server,
+                username = signIn.username,
+                secret = signIn.secret,
+                authMode = runCatching { AuthMode.valueOf(signIn.mode) }.getOrDefault(AuthMode.Token),
+                home = signIn.home.orEmpty(),
+                headers = emptyList(),
+                pins = emptyMap(),
+                clientCertAlias = null,
+            )
+            val (failed, words) = switcher.signIn(request)
+            when (failed) {
+                null -> {
+                    handOverStep = HANDOVER_SIGNED_IN
+                    notice = words
+                    handOver = null
+                    signedIn = true
+                }
+                is SignInError.Untrusted -> question = failed
+                else -> {
+                    handOverStep = null
+                    error = failed.userMessage()
+                }
+            }
+            busy = false
+        }
+    }
+
+    // Signs up from the invite: the name and password chosen go to the
+    // family page, then this phone signs in with that username and password
+    // like any typed sign-in. The server then is the one in use.
+    fun join() {
+        val url = url
+        if (busy || joinProblem != null || url == null) return
+        busy = true
+        error = null
+        viewModelScope.launch {
+            // Set up as signing in to the server would be: the certificates
+            // trusted for it, its headers and its client certificate.
+            val homeUrl = home.trim().takeIf(String::isNotEmpty)?.let(::normalizeServerUrl)
+            val (http, security) = clients.forJoin(url, ConnectionSettings(home = homeUrl, headers = cleanHeaders(resolveHeaders(headers.toList(), emptyList())), pins = pins.toMap(), clientCertAlias = clientCert))
+            val invited = invite ?: return@launch
+            val account = signedUp ?: when (val joined = withContext(Dispatchers.IO) {
+                joinWithInvite(url, invited.token, inviteName, invitePassword, http, home = homeUrl)
+            }) {
+                is JoinOutcome.SignedUp -> joined.also { signedUp = it }
+                // A certificate of the server's own is asked about as signing
+                // in asks; trusting it signs up again.
+                is JoinOutcome.Untrusted -> {
+                    val leaf = security.takeRejected(joined.host)
+                    if (leaf != null) question = SignInError.Untrusted(joined.host, leaf.fingerprint()) else error = "This server's certificate is not trusted."
+                    busy = false
+                    return@launch
+                }
+                is JoinOutcome.Failed -> {
+                    error = joined.message
+                    busy = false
+                    return@launch
+                }
+            }
+            val request = SignInRequest(
+                address = url.toString(),
+                username = account.username,
+                secret = account.password,
+                authMode = AuthMode.Token,
+                home = home,
+                headers = headers.toList(),
+                pins = pins.toMap(),
+                clientCertAlias = clientCert,
+            )
+            val (failed, words) = switcher.signIn(request)
+            when (failed) {
+                null -> {
+                    notice = words
+                    invitePassword = ""
+                    inviteAgain = ""
+                    invite = null
+                    signedUp = null
+                    signedIn = true
+                }
+                is SignInError.Untrusted -> question = failed
+                else -> error = failed.userMessage()
+            }
+            busy = false
+        }
     }
 
     // Switches between https and http by hand.
@@ -344,7 +562,7 @@ class SignInViewModel @Inject constructor(
         val asked = question ?: return
         pins[pinKey(asked.host)] = asked.fingerprint
         question = null
-        submit()
+        if (joining) join() else submit()
     }
 
     fun distrust() {

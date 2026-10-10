@@ -214,7 +214,7 @@ class A11yTest {
             val second = s.focused()?.name()
             assertTrue("Down moved on: $first then $second", second != null && second != first)
             // Tab stays inside the menu.
-            val rows = setOf("Play", "Play next", "Add to queue", "Start radio", "Add to playlist", "Add to favorites", "Rate", "Go to album", "Go to artist", "Song details")
+            val rows = setOf("Play", "Play next", "Add to queue", "Start radio", "Add to playlist", "Add to favorites", "Rate", "Download", "Go to album", "Go to artist", "Song details")
             repeat(30) {
                 s.press(Key.Tab)
                 assertTrue("still in the menu: ${s.focused()?.name()}", s.app.popups.open && s.focused()?.name() in rows)

@@ -1,5 +1,12 @@
 package app.winters.octo
 
+import app.winters.octo.subsonic.parseFamilyLink
+import app.winters.octo.family.FamilyOpen
+import app.winters.octo.family.FamilyNotifier
+import app.winters.octo.family.FamilyHub
+import app.winters.octo.ui.imports.ImportInbox
+import app.winters.octo.ui.imports.fromHistory
+import app.winters.octo.ui.imports.sharedImport
 import android.app.SearchManager
 import android.content.Intent
 import android.os.Bundle
@@ -36,6 +43,10 @@ class MainActivity : ComponentActivity() {
     // Launcher shortcuts and "Open with Octo".
     @Inject lateinit var systemEntries: SystemEntries
     @Inject lateinit var updates: AppUpdates
+    // Family links and family notices.
+    @Inject lateinit var family: FamilyHub
+    // Lists shared to Octo, for Import.
+    @Inject lateinit var imports: ImportInbox
 
     // Counts up each time a home screen widget asks for the full player.
     private var openPlayer by mutableIntStateOf(0)
@@ -50,6 +61,8 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) {
             playIfAsked(intent)
             openPlayerIfAsked(intent)
+            familyIfAsked(intent)
+            importIfShared(intent)
             systemEntries.handle(this, intent) { openPlayer++ }
         }
     }
@@ -58,7 +71,36 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         playIfAsked(intent)
         openPlayerIfAsked(intent)
+        familyIfAsked(intent)
+        importIfShared(intent)
         systemEntries.handle(this, intent) { openPlayer++ }
+    }
+
+    // A list shared to Octo opens Import, which sends it.
+    private fun importIfShared(intent: Intent) {
+        if (intent.fromHistory()) return
+        intent.sharedImport()?.let(imports::offer)
+    }
+
+    // Coming to the front: a family link on the clipboard is offered once.
+    // Android lets only the app in front read the clipboard.
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) return
+        val clip = runCatching { getSystemService(android.content.ClipboardManager::class.java)?.primaryClip?.getItemAt(0)?.text?.toString() }.getOrNull()
+        family.offerClipboard(clip)
+    }
+
+    // A family link (an invite, or a sign-in from another device, from a QR
+    // code the camera read or a link tapped) opens the sign-in form filled
+    // in; a family notice opens Family.
+    private fun familyIfAsked(intent: Intent) {
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
+        when {
+            intent.action == FamilyNotifier.OPEN_FAMILY -> family.open(FamilyOpen.Family)
+            intent.action == Intent.ACTION_VIEW ->
+                parseFamilyLink(intent.dataString.orEmpty())?.let { family.open(FamilyOpen.Join(it)) }
+        }
     }
 
     // A widget's artwork or title opens the player. Coming back from recents

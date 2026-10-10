@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.audio
 
+import java.io.File
 import app.winters.octo.audio.HttpHeader
 import app.winters.octo.audio.QueueItem
 import app.winters.octo.audio.ReplayGainInfo
@@ -7,8 +8,6 @@ import app.winters.octo.desktop.player.QueueEntry
 import app.winters.octo.desktop.system.isOpenedFile
 import app.winters.octo.desktop.system.openedFileOf
 import app.winters.octo.discovery.knownLengthMs
-import app.winters.octo.playback.StreamQuality
-import app.winters.octo.query.isLosslessFormat
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 
@@ -33,24 +32,16 @@ fun interface SongSources {
 class ServerSongs(
     private val headers: () -> Map<String, String> = { emptyMap() },
     private val landed: (String) -> String? = { null },
-    private val quality: () -> StreamQuality = { StreamQuality.Original },
+    // What the stream asks for: the file as it is unless this app picks a
+    // lower quality (see streamParams).
+    private val params: () -> Map<String, String> = { mapOf("format" to "raw") },
     private val client: () -> SubsonicClient?,
 ) : SongSources {
     override fun addressOf(song: Song): SongAddress? {
         val server = client() ?: return null
         val id = landed(song.id) ?: song.id
-        return SongAddress(server.url("stream", mapOf("id" to id) + streamFormat(song, quality())).toString(), headers())
+        return SongAddress(server.url("stream", mapOf("id" to id) + params()).toString(), headers())
     }
-}
-
-// What to ask the server for, as the phone asks: the file as it is, or an
-// MP3 capped at the quality's size. A lossy file already within it plays as
-// it is, since making it an MP3 would only lose quality.
-fun streamFormat(song: Song, quality: StreamQuality): Map<String, String> {
-    val cap = quality.kbps ?: return mapOf("format" to "raw")
-    val bitRate = song.bitRate?.takeIf { it > 0 }
-    if (!isLosslessFormat(song.suffix, song.bitDepth) && bitRate != null && bitRate <= cap) return mapOf("format" to "raw")
-    return mapOf("format" to "mp3", "maxBitRate" to "$cap", "estimateContentLength" to "true")
 }
 
 // A song's id on the server, for asking the server about it: the library
@@ -66,9 +57,14 @@ fun serverSongId(song: Song, landed: (String) -> String?): String? = when {
 const val LOCAL_PREFIX = "local:"
 
 // Files on this computer by path, and everything else from the server.
-class LocalOrServer(private val server: SongSources) : SongSources {
+class LocalOrServer(
+    private val server: SongSources,
+    // A copy kept on this computer, played in place of the server's.
+    private val kept: (String) -> File? = { null },
+) : SongSources {
     override fun addressOf(song: Song): SongAddress? =
         when {
+            kept(song.id) != null -> SongAddress(kept(song.id)!!.absolutePath)
             song.id.startsWith(LOCAL_PREFIX) -> SongAddress(song.id.removePrefix(LOCAL_PREFIX))
             // A file opened from the system (a double click, a drop): the
             // file itself, or the address it was opened from.

@@ -4,9 +4,15 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import app.winters.octo.subsonic.IMPORT_FILE_MAX_BYTES
 import app.winters.octo.subsonic.ImportActions
+import app.winters.octo.subsonic.ImportAnswer
 import app.winters.octo.subsonic.ImportListDetail
 import app.winters.octo.subsonic.ImportOverview
+import app.winters.octo.subsonic.ImportServiceLink
+import app.winters.octo.subsonic.ImportServices
+import app.winters.octo.subsonic.OCTO_IMPORTS
+import app.winters.octo.subsonic.OCTO_IMPORTS_FILES
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.CoroutineScope
@@ -15,11 +21,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-// The Spotify import view's state, for the server in use, on the phone and
-// the desktop alike: the server's overview, the list opened, the last thing
-// the server said, and the sign-in while it waits for the browser. The server
-// does the work; this asks it, every few seconds while the view is open and
-// something moves.
+// The Import view's state, for the server in use, on the phone and the
+// desktop alike: the server's overview, the services to get music from and
+// where a "Get my music" visit stands, the list opened, the last thing the
+// server said, and the Spotify sign-in while it waits for the browser. The
+// server does the work; this asks it, every few seconds while the view is
+// open and something moves.
 @Stable
 class ImportModel(
     private val client: () -> SubsonicClient?,
@@ -31,7 +38,19 @@ class ImportModel(
     var overview by mutableStateOf<ImportOverview?>(null)
         private set
 
-    // Why the server could not be read, or that it has no Spotify import.
+    // The services to get music from, on a server that lists them (octoImports
+    // version 2); null on an older one, which shows the Spotify import alone.
+    var services by mutableStateOf<ImportServices?>(null)
+        private set
+
+    // Where a "Get my music" visit stands.
+    var step by mutableStateOf<ImportStep>(ImportStep.Choose)
+        private set
+
+    // Whether the server lists octoImports version 2, or null until it said.
+    private var filesKnown: Boolean? = null
+
+    // Why the server could not be read, or that it has no imports.
     var problem by mutableStateOf<String?>(null)
         private set
 
@@ -72,6 +91,9 @@ class ImportModel(
         stop()
         signIn?.cancel()
         overview = null
+        services = null
+        filesKnown = null
+        step = ImportStep.Choose
         problem = null
         openId = null
         detail = null
@@ -83,14 +105,125 @@ class ImportModel(
         try {
             overview = client.imports()
             problem = null
+            readServices(client)
         } catch (e: SubsonicException.Unreachable) {
             problem = "Octo can't reach the server right now."
         } catch (e: SubsonicException) {
             // An Octo from before Spotify import passes the call on to Navidrome, which does not know it.
-            problem = if (overview == null) "This server has no Spotify import yet. Update Octo on the server to use it." else e.message
+            problem = if (overview == null) "This server has no imports yet. Update Octo on the server to use it." else e.message
         }
         val id = openId ?: return
         runCatching { client.importList(id) }.onSuccess { if (openId == id) detail = it }
+    }
+
+    // The services, once the server says it has them. Asked once a server;
+    // a server that could not say is asked again next time.
+    private suspend fun readServices(client: SubsonicClient) {
+        if (filesKnown == null) filesKnown = client.supportsIfKnown(OCTO_IMPORTS, OCTO_IMPORTS_FILES)
+        if (filesKnown != true || services != null) return
+        try {
+            services = client.importServices()
+        } catch (e: SubsonicException) {
+            // Asked again on the next read.
+        }
+    }
+
+    // ---- Get my music ---------------------------------------------------------------------
+
+    // A service's tile tapped. Spotify, when the server can sign in to it,
+    // first offers that; every other service opens its export page.
+    fun choose(service: ImportServiceLink) {
+        if (step is ImportStep.Sending) return
+        said = null
+        if (service.offersSpotifySignIn(services?.spotifyConnect == true)) step = ImportStep.SpotifyWays(service)
+        else openExport(service)
+    }
+
+    // Opens the service's export page on TuneMyMusic in the browser and
+    // waits for the file. Any other address is refused.
+    fun openExport(service: ImportServiceLink) {
+        val url = tuneMyMusicUrl(service.exportUrl)
+        if (url == null) {
+            said = NOT_TUNEMYMUSIC
+            step = ImportStep.Choose
+            return
+        }
+        openUrl(url)
+        step = ImportStep.Waiting(service)
+    }
+
+    // Waits for a file with no service picked: one saved earlier.
+    fun useAFile() {
+        if (step is ImportStep.Sending) return
+        said = null
+        step = ImportStep.Waiting(null)
+    }
+
+    // The Spotify sign-in from the Spotify tile; its lists keep updating.
+    fun connectSpotify(open: (String) -> Unit = openUrl) {
+        step = ImportStep.Choose
+        connect(open)
+    }
+
+    // Back to the grid.
+    fun backToServices() {
+        if (step is ImportStep.Sending) return
+        step = ImportStep.Choose
+    }
+
+    // Sends a list file to the server. The server's words show either way;
+    // a refused file leaves the wait open to try another.
+    fun sendFile(name: String, bytes: ByteArray) {
+        val refused = when {
+            !isImportFileName(name) -> NOT_A_LIST_FILE
+            bytes.isEmpty() -> FILE_EMPTY
+            bytes.size > IMPORT_FILE_MAX_BYTES -> FILE_TOO_BIG
+            else -> null
+        }
+        if (refused != null) {
+            said = refused
+            return
+        }
+        send(name) { it.importFile(name, bytes) }
+    }
+
+    // Sends a typed or pasted list to the server.
+    fun sendText(text: String, name: String = PASTED_LIST_NAME) {
+        if (text.isBlank()) return
+        val called = name.ifBlank { PASTED_LIST_NAME }
+        send(called) { it.importText(called, text) }
+    }
+
+    // Something that went wrong before a file could be sent, like a file
+    // that could not be read, in words to show.
+    fun tell(words: String) {
+        said = words
+    }
+
+    private fun send(name: String, call: suspend (SubsonicClient) -> ImportAnswer) {
+        val client = client() ?: return
+        if (step is ImportStep.Sending) return
+        val waiting = step.service
+        step = ImportStep.Sending(waiting, name)
+        said = null
+        scope.launch {
+            try {
+                val answer = call(client)
+                if (answer.ok) {
+                    // The overview read after the send says whether the new lists wait for approval.
+                    refresh()
+                    step = ImportStep.Sent(answer.message, overview?.approvalLine())
+                    return@launch
+                } else {
+                    said = answer.message.ifBlank { "The server could not read that file." }
+                    step = ImportStep.Waiting(waiting)
+                }
+            } catch (e: SubsonicException) {
+                said = e.message ?: "Octo could not reach the server."
+                step = ImportStep.Waiting(waiting)
+            }
+            refresh()
+        }
     }
 
     // Opens Spotify in the browser and waits for its answer on this device.

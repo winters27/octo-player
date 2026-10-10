@@ -15,8 +15,11 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.FormBody
 import okhttp3.HttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -211,6 +214,31 @@ class SubsonicClient(
             ImportAnswer.serializer(),
             ImportAnswer(),
         )
+
+    // The services a person can bring their music from. Only for servers
+    // that list octoImports at OCTO_IMPORTS_FILES.
+    suspend fun importServices(): ImportServices =
+        get("getImportServices", key = "importServices", serializer = ImportServices.serializer(), default = ImportServices())
+
+    // Sends a list file (.txt, .csv, .json or .zip) for the server to read
+    // into lists. The answer is the server's, ok or not, in its own words.
+    suspend fun importFile(name: String, bytes: ByteArray): ImportAnswer {
+        val part = bytes.toRequestBody(importFileType(name))
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", name, part)
+            .build()
+        val request = Request.Builder().url(url("importFile", mapOf("name" to name))).post(body).build()
+        val answer = exchange(request, "importFile", patient)
+        return withContext(Dispatchers.Default) { decode(answer, "importAction", ImportAnswer.serializer(), ImportAnswer()) }
+    }
+
+    // A list typed or pasted as text, one song a line, for the server to
+    // read. Sent in a form body, since a list can be long.
+    suspend fun importText(name: String, text: String): ImportAnswer {
+        val answer = postForm("importText", listOf("name" to name, "text" to text), patient)
+        return withContext(Dispatchers.Default) { decode(answer, "importAction", ImportAnswer.serializer(), ImportAnswer()) }
+    }
 
     // One song, by its id on the server.
     suspend fun song(id: String): Song = get("getSong", mapOf("id" to id), "song", Song.serializer())
@@ -562,12 +590,12 @@ class SubsonicClient(
     // Sends the params in a form body rather than the address, and hands
     // back the answer once it is known to be ok. Only the sign-in is in the
     // address.
-    private suspend fun postForm(endpoint: String, params: List<Pair<String, String>>): String {
+    private suspend fun postForm(endpoint: String, params: List<Pair<String, String>>, http: OkHttpClient = this.http): String {
         val form = FormBody.Builder().apply { params.forEach { (key, value) -> add(key, value) } }.build()
-        return exchange(Request.Builder().url(url(endpoint)).post(form).build(), endpoint)
+        return exchange(Request.Builder().url(url(endpoint)).post(form).build(), endpoint, http)
     }
 
-    private suspend fun exchange(request: Request, endpoint: String): String {
+    private suspend fun exchange(request: Request, endpoint: String, http: OkHttpClient = this.http): String {
         val body = try {
             val response = http.newCall(request).await()
             withContext(Dispatchers.IO) {
@@ -587,11 +615,28 @@ class SubsonicClient(
     // for an admin. The password goes in a form body, never in the
     // address, which proxies and servers write to their logs. When it is
     // the signed-in user's own, this client signs in with it from then on.
+    // A family member's own password, which the server checks against the
+    // current one. Every app then needs the new one; this client switches
+    // to it at once.
+    suspend fun changeFamilyPassword(current: String, next: String) {
+        postForm("changeFamilyPassword", listOf("current" to current, "next" to next))
+        val now = credentials
+        if (now.mode != AuthMode.ApiKey) credentials = Credentials(now.username, next, now.mode)
+    }
+
+    // What this client signs in with, for sealing into a hand-over to the
+    // same person's other device. Never logged or sent anywhere else.
+    fun handOverSecret(): String = credentials.handOverSecret()
+
     suspend fun changePassword(username: String, newPassword: String) {
         postForm("changePassword", listOf("username" to username, "password" to newPassword))
         val now = credentials
         if (username == now.username && now.mode != AuthMode.ApiKey) credentials = Credentials(username, newPassword, now.mode)
     }
+
+    // The family page's calls on this server, through this client's
+    // connections and headers, each signed as every Subsonic call is.
+    fun familyWeb(): FamilyWeb = FamilyWeb(baseUrl, http, ::signed)
 
     // The same server, headers and route signed in with another secret, for
     // checking a password without touching this client.
@@ -599,13 +644,28 @@ class SubsonicClient(
         SubsonicClient(primaryUrl, Credentials(username, secret, authMode), plainHttp, clientName, headers, musicFolderId, route)
 
     // A call that only answers ok or an error. The params may repeat a name.
-    private suspend fun send(endpoint: String, params: List<Pair<String, String>>) {
+    internal suspend fun send(endpoint: String, params: List<Pair<String, String>>) {
         val url = url(endpoint).newBuilder().apply { params.forEach { (key, value) -> addQueryParameter(key, value) } }.build()
         val body = fetch(url, endpoint)
         withContext(Dispatchers.Default) { decode(body, null, ServerInfo.serializer(), null) }
     }
 
-    private suspend fun <T> get(
+    // A call whose answer may leave its key out, or null: null then.
+    internal suspend fun <T> getOptional(endpoint: String, params: Map<String, String>, key: String, serializer: KSerializer<T>): T? {
+        val body = fetch(url(endpoint, params), endpoint)
+        return withContext(Dispatchers.Default) {
+            val root = decode(body, null, kotlinx.serialization.json.JsonObject.serializer(), null)
+            val payload = root[key]
+            if (payload == null || payload is kotlinx.serialization.json.JsonNull) null else json.decodeFromJsonElement(serializer, payload)
+        }
+    }
+
+    // Params in a form body rather than the address; only ok or an error.
+    internal suspend fun sendForm(endpoint: String, params: List<Pair<String, String>>) {
+        postForm(endpoint, params)
+    }
+
+    internal suspend fun <T> get(
         endpoint: String,
         params: Map<String, String> = emptyMap(),
         key: String?,
@@ -723,7 +783,7 @@ class SubsonicClient(
     suspend fun deleteRadioStation(id: String) = send("deleteInternetRadioStation", listOf("id" to id))
 
     // Like get, for params that may repeat a name.
-    private suspend fun <T> getWith(
+    internal suspend fun <T> getWith(
         endpoint: String,
         params: List<Pair<String, String>>,
         key: String,
@@ -746,7 +806,7 @@ class SubsonicClient(
 
 // Runs the call without blocking a thread, and cancels it if the caller
 // stops waiting.
-private suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
+internal suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
     cont.invokeOnCancellation { cancel() }
     enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) = cont.resumeWithException(e)
@@ -755,3 +815,12 @@ private suspend fun Call.await(): Response = suspendCancellableCoroutine { cont 
         }
     })
 }
+
+// The type a list file is sent as, by its name's ending.
+internal fun importFileType(name: String) = when (name.substringAfterLast('.', "").lowercase()) {
+    "csv" -> "text/csv"
+    "json" -> "application/json"
+    "zip" -> "application/zip"
+    "txt" -> "text/plain"
+    else -> "application/octet-stream"
+}.toMediaType()

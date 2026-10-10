@@ -74,7 +74,14 @@ enum class ServerForm {
 // note to show first (why its password is asked for).
 @Serializable data class ServerFormRoute(val form: ServerForm, val id: String? = null, val note: String? = null) : NavKey
 @Serializable data object OctoAdminRoute : NavKey
-@Serializable data object SpotifyImportRoute : NavKey
+@Serializable data object ImportRoute : NavKey
+
+// Family on the server in use: what the account may do, requests, devices and, for a
+// manager, the members and the requests waiting.
+@Serializable data object FamilyRoute : NavKey
+
+// Signing up or signing in, filled in from a family link.
+@Serializable data class FamilyJoinRoute(val link: String) : NavKey
 
 // The charts and new songs, on an Octo server that has them.
 @Serializable data object ChartsRoute : NavKey

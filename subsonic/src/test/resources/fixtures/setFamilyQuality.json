@@ -1,0 +1,14 @@
+{
+  "subsonic-response": {
+    "status": "ok",
+    "version": "1.16.1",
+    "type": "octo",
+    "openSubsonic": true,
+    "quality": {
+      "home": "High",
+      "away": "DataSaver",
+      "familyLimitKbps": 0,
+      "familyAwayLimitKbps": 0
+    }
+  }
+}

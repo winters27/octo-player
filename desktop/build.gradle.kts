@@ -371,6 +371,47 @@ compose.desktop {
     }
 }
 
+// The octo:// URL scheme in the Windows installer: once the MSI is made,
+// packaging/windows/add-url-scheme.vbs adds the scheme's registry keys to
+// it (HKCU, as it installs per user), so a family link's "Open in Octo"
+// works from the first moment and the keys go when Octo is removed. The
+// plugin clears jpackage's resources folder before it runs, so its WiX
+// template cannot carry them. macOS has the scheme in its Info.plist
+// above. The .deb and .rpm get the same afterwards from
+// packaging/linux/add-url-scheme.sh: x-scheme-handler/octo in the menu
+// entry, and a post-install step that registers it. The installed app also
+// writes its own entry at its first start (system/LinkRegistration.kt), as
+// it does on Windows for a moved install.
+tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask>()
+    .matching { it.name == "packageMsi" || it.name == "packageReleaseMsi" }
+    .configureEach {
+        val script = file("packaging/windows/add-url-scheme.vbs")
+        inputs.file(script)
+        doLast {
+            destinationDir.get().asFile.listFiles { f -> f.extension == "msi" }?.forEach { msi ->
+                val process = ProcessBuilder("cscript", "//nologo", script.absolutePath, msi.absolutePath).redirectErrorStream(true).start()
+                val output = process.inputStream.bufferedReader().readText()
+                if (process.waitFor() != 0) throw GradleException("Adding the octo:// scheme to ${msi.name} failed: " + output)
+                logger.lifecycle(output.trim())
+            }
+        }
+    }
+
+tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask>()
+    .matching { it.name in setOf("packageDeb", "packageRpm", "packageReleaseDeb", "packageReleaseRpm") }
+    .configureEach {
+        val script = file("packaging/linux/add-url-scheme.sh")
+        inputs.file(script)
+        doLast {
+            destinationDir.get().asFile.listFiles { f -> f.extension == "deb" || f.extension == "rpm" }?.forEach { pkg ->
+                val process = ProcessBuilder("sh", script.absolutePath, pkg.absolutePath).redirectErrorStream(true).start()
+                val output = process.inputStream.bufferedReader().readText()
+                if (process.waitFor() != 0) throw GradleException("Adding the octo:// scheme to ${pkg.name} failed: " + output)
+                logger.lifecycle(output.trim())
+            }
+        }
+    }
+
 // The JDK's security providers and the modules they live in; any other
 // name listed (the JDK's own, in java.base) always stays.
 val providerModules = mapOf(

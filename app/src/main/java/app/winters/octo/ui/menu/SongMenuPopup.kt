@@ -1,5 +1,9 @@
 package app.winters.octo.ui.menu
 
+import app.winters.octo.ui.family.REMOVE_FROM_MY_LIBRARY
+import app.winters.octo.ui.family.REQUEST_A_COPY
+import app.winters.octo.ui.family.SAVED
+import app.winters.octo.ui.family.SAVE
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -151,6 +155,8 @@ private fun SongActionsPage(
     val upgradable by produceState(emptyList<UpgradeAsk>(), trackId, canUpgrade) { value = if (canUpgrade) vm.upgradable(trackId) else emptyList() }
     val canRemove by vm.canRemove.collectAsStateWithLifecycle()
     val onDisk by produceState(false, trackId, canRemove) { value = canRemove && vm.deletable(trackId) }
+    val removesFromMine = vm.family.removesFromMine
+    val inMine by produceState(false, trackId, removesFromMine) { value = removesFromMine && vm.removableFromMine(trackId) }
     val isLiked = trackId in liked
     val keptRow = kept[trackId]
     val byHand = keptRow?.reasons?.contains(Reasons.MANUAL) == true
@@ -167,7 +173,11 @@ private fun SongActionsPage(
         upgrade = upgradable.isNotEmpty(),
         findSongs = canFindSongs,
         disk = onDisk,
+        requestCopy = vm.family.outside.offersRequest,
+        removeFromMine = inMine,
     )
+    // A family member whose songs are saved rather than added.
+    val saves = vm.family.outside.addLabel != null
 
     GlassMenuPage(
         header = {
@@ -189,7 +199,13 @@ private fun SongActionsPage(
                     state.close()
                     vm.startRadio(song)
                 })
-                SongAction.Download -> {
+                SongAction.Download -> if (saves) {
+                    val saved = vm.family.isSaved(trackId)
+                    GlassMenuAction(if (saved) OctoIcons.Liked else OctoIcons.Like, if (saved) "Remove from $SAVED" else SAVE, onClick = {
+                        state.close()
+                        vm.family.toggleSaved(trackId, song.title)
+                    })
+                } else {
                     val download = downloads[trackId] ?: DownloadState.None
                     val icon = when (download) {
                         DownloadState.None, DownloadState.Requested -> OctoIcons.AddToLibrary
@@ -197,6 +213,14 @@ private fun SongActionsPage(
                     }
                     GlassMenuAction(icon, downloadLabel(download), enabled = download == DownloadState.None, onClick = { vm.download(song) })
                 }
+                SongAction.RequestCopy -> GlassMenuAction(OctoIcons.Download, REQUEST_A_COPY, opensPage = true, onClick = {
+                    state.close()
+                    vm.family.ask(trackId, song.title)
+                })
+                SongAction.RemoveFromMyLibrary -> GlassMenuAction(OctoIcons.RemoveFromPlaylist, REMOVE_FROM_MY_LIBRARY, destructive = true, onClick = {
+                    state.close()
+                    vm.removeFromMyLibrary(song)
+                })
                 SongAction.AddToLastPlaylist -> GlassMenuAction(
                     OctoIcons.AddToPlaylist,
                     "Add to last playlist: ${last?.name.orEmpty()}",

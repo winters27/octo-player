@@ -23,6 +23,10 @@ interface SourceDao {
     suspend fun artists(sourceId: String): List<SourceArtistEntity>
 
     // Every copy of one library song, from every source that has it.
+    // Whether a source marks any song as in a family member's own library.
+    @Query("SELECT EXISTS(SELECT 1 FROM source_track WHERE sourceId = :sourceId AND personal = 1)")
+    suspend fun marksPersonal(sourceId: String): Boolean
+
     @Query("SELECT * FROM source_track WHERE mergedId = :trackId")
     suspend fun copies(trackId: String): List<SourceTrackEntity>
 

@@ -1,5 +1,8 @@
 package app.winters.octo.playback
 
+import app.winters.octo.ui.family.appPicksQuality
+import app.winters.octo.family.family
+import app.winters.octo.family.FamilyHub
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -38,6 +41,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withTimeoutOrNull
+import app.winters.octo.subsonic.OctoPurpose
+import app.winters.octo.subsonic.markedFor
 import okhttp3.OkHttpClient
 import java.io.IOException
 import javax.inject.Inject
@@ -61,6 +66,9 @@ class Streams @Inject constructor(
     private val settings: PlayerSettings,
     private val http: OkHttpClient,
     private val saved: StreamCache,
+    // A family account's device left to its account plays the file as it
+    // is, and the server applies the account's quality.
+    private val family: FamilyHub,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
@@ -95,7 +103,10 @@ class Streams @Inject constructor(
         connectivity.activeNetwork?.let(connectivity::getNetworkCapabilities)
 
     // The stream size for the connection the phone is on.
-    private fun quality(prefs: StreamPrefs): StreamQuality = if (onMobileData()) prefs.mobile else prefs.wifi
+    private fun quality(prefs: StreamPrefs): StreamQuality {
+        val familyOn = (sessions.state.value as? SessionState.SignedIn)?.session?.family == true
+        return streamQualityFor(appPicksQuality(familyOn, family.model.deviceMode), onMobileData(), prefs)
+    }
 
     // Where the queue keeps a server copy.
     fun uriFor(copy: SourceTrackEntity): String = streamUri(refFor(copy))
@@ -148,7 +159,7 @@ class Streams @Inject constructor(
     // Reads a server song for downloading: from its saved copy when there is
     // one, otherwise from the server, without filling the saved copies.
     fun downloadSource(): DataSource {
-        val signed = signedFactory(networkFactory())
+        val signed = signedFactory(offlineNetworkFactory())
         if (!saved.enabled.value) return signed.createDataSource()
         return cachedFactory(signed).setCacheWriteDataSinkFactory(null).createDataSource()
     }
@@ -183,6 +194,13 @@ class Streams @Inject constructor(
     }
 
     private fun networkFactory(): DataSource.Factory = DefaultDataSource.Factory(context, OkHttpDataSource.Factory(http))
+
+    // The same, with every request marked as an offline copy. The server's
+    // own addresses are told so (X-Octo-Purpose), and an Octo server does
+    // not count it as playing; no other host hears of it.
+    private fun offlineNetworkFactory(): DataSource.Factory = DefaultDataSource.Factory(context, OkHttpDataSource.Factory(offlineHttp))
+
+    private val offlineHttp: OkHttpClient by lazy { http.markedFor(OctoPurpose.Offline) }
 
     private fun signedFactory(upstream: DataSource.Factory): DataSource.Factory = signedSources(upstream, ::isStream, ::sign)
 
@@ -305,4 +323,13 @@ private class SplitDataSource(private val pick: (DataSpec) -> DataSource) : Data
             current = null
         }
     }
+}
+
+// The quality a stream asks for: this app's, for the connection the phone
+// is on, when it picks; otherwise the file as it is, and the server applies
+// the account's choice.
+fun streamQualityFor(appPicks: Boolean, onMobile: Boolean, prefs: StreamPrefs): StreamQuality = when {
+    !appPicks -> StreamQuality.Original
+    onMobile -> prefs.mobile
+    else -> prefs.wifi
 }

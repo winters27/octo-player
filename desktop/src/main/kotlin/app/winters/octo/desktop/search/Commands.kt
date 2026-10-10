@@ -11,6 +11,8 @@ import app.winters.octo.desktop.ui.newLiveList
 import app.winters.octo.desktop.ui.newPlaylist
 import app.winters.octo.playback.SleepState
 import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.ui.family.FAMILY
+import app.winters.octo.ui.imports.IMPORT_SERVICE_WORDS
 import kotlinx.coroutines.launch
 import java.text.Normalizer
 
@@ -38,7 +40,11 @@ fun commandsFor(app: AppState): List<Command> = buildList {
     page("Recently played", Page.History, "history")
     page("Recently added", Page.RecentlyAdded, "new")
     page("Library health", Page.LibraryHealth, "duplicates missing tags problems")
-    if (app.connection?.isOcto == true) page("Spotify import", Page.Imports, "import spotify playlists liked songs missing download")
+    if (app.connection?.isOcto == true) {
+        val services = app.imports.services?.services.orEmpty().joinToString(" ") { it.name }
+        page("Import", Page.Imports, "get my music move transfer $IMPORT_SERVICE_WORDS $services tunemymusic playlists liked songs file csv txt paste list missing download")
+    }
+    if (app.connection?.family == true) page(FAMILY, Page.Family, "family members requests devices plan approve")
     if (app.search?.charts?.offered == true) page("Charts", Page.Charts, "top songs popular right now best new trending genre chart hip hop pop country")
     page("Sound", Page.Sound, "equalizer eq loudness crossfade blend transitions automix tempo")
     page("Settings", Page.Settings, "preferences options")

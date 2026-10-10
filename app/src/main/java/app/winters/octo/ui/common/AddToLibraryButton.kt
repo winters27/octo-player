@@ -1,5 +1,7 @@
 package app.winters.octo.ui.common
 
+import app.winters.octo.ui.family.SAVE
+import app.winters.octo.family.FamilyHub
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -43,6 +45,7 @@ class DownloadsViewModel @Inject constructor(
     private val feedback: Feedback,
     player: PlayerSettings,
     private val serverDownloads: app.winters.octo.data.ServerDownloads,
+    val family: FamilyHub,
 ) : ViewModel() {
     val phases: StateFlow<Map<String, DownloadPhase>> = downloads.phases
 
@@ -81,6 +84,31 @@ fun downloadStateText(phase: DownloadPhase): String = when (phase) {
     is DownloadPhase.Failed -> "Could not download"
 }
 
+// The heart that saves a song found online for a family member whose songs
+// are saved rather than added: it plays from the internet, and shows in
+// Family under Saved, where a copy can be asked for.
+@Composable
+private fun SaveHeart(track: TrackEntity, family: FamilyHub, modifier: Modifier, size: Dp, iconSize: Dp) {
+    val saved = family.isSaved(track.id)
+    Box(
+        modifier
+            .size(size)
+            .combinedClickable(interactionSource = null, indication = null, role = Role.Button) { family.toggleSaved(track.id, track.title) }
+            .semantics {
+                contentDescription = SAVE
+                stateDescription = if (saved) "Saved" else "Not saved"
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        GlowIcon(
+            painterResource(if (saved) OctoIcons.Liked else OctoIcons.Like),
+            tint = if (saved) Color.White else Color.White.copy(alpha = 0.6f),
+            lit = saved,
+            modifier = Modifier.size(iconSize),
+        )
+    }
+}
+
 // Where a heart would be for a song not in the library: a plus that has the
 // server download the song into the library. The download arrow means
 // something else (saving a library song to the phone), so it is not used
@@ -95,6 +123,11 @@ fun AddToLibraryButton(
     iconSize: Dp = 24.dp,
     vm: DownloadsViewModel = hiltViewModel(),
 ) {
+    // A family member whose songs are saved rather than added gets a heart.
+    if (vm.family.outside.addLabel != null) {
+        SaveHeart(track, vm.family, modifier, size, iconSize)
+        return
+    }
     val phases by vm.phases.collectAsStateWithLifecycle()
     val phase = phases[track.id] ?: DownloadPhase.None
     val appCalm by vm.reduceMotion.collectAsStateWithLifecycle()

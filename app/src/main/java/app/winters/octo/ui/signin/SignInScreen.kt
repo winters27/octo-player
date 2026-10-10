@@ -1,5 +1,11 @@
 package app.winters.octo.ui.signin
 
+import app.winters.octo.design.Spinner
+import app.winters.octo.ui.family.QrScanner
+import app.winters.octo.ui.family.MIN_PASSWORD
+import app.winters.octo.design.ButtonSize
+import app.winters.octo.ui.family.passwordStrength
+import app.winters.octo.subsonic.FamilyLink
 import android.security.KeyChain
 import androidx.activity.compose.LocalActivity
 import androidx.annotation.DrawableRes
@@ -102,9 +108,13 @@ fun SignInScreen(
     form: ServerForm? = null,
     serverId: String? = null,
     note: String? = null,
+    // Opened from a family link: an invite, a sign-in from another device,
+    // or a server and username to fill in.
+    join: FamilyLink? = null,
     vm: SignInViewModel = hiltViewModel(),
 ) {
     val feedback = LocalFeedback.current
+    LaunchedEffect(join) { if (join != null) vm.startJoin(join) }
     LaunchedEffect(editing) { if (editing) vm.startEditing() }
     LaunchedEffect(form) { if (form != null) vm.start(form, serverId, note) }
     LaunchedEffect(vm.signedIn) {
@@ -117,6 +127,8 @@ fun SignInScreen(
     Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
         SignInForm(vm)
         BackButton(onBack)
+        // The camera, over everything, until it reads a family link.
+        if (vm.scanning) QrScanner(onFound = { vm.startJoin(it) }, onClose = { vm.scanning = false })
     }
     TrustSheet(vm.question, onTrust = vm::trust, onCancel = vm::distrust)
 }
@@ -173,7 +185,13 @@ private fun SignInForm(vm: SignInViewModel) {
                 if (heading == null) {
                     Text("Octo", style = OctoType.display, color = OctoColors.TextPrimary)
                     Text(
-                        if (vm.editing) "Change how Octo connects" else "Sign in to your music server",
+                        when {
+                            vm.invite != null -> "Sign up for your family's server"
+                            vm.handOver != null -> "Signing in with your other device's login"
+                            vm.joining -> "Scan the QR code from your invite or your other device"
+                            vm.editing -> "Change how Octo connects"
+                            else -> "Sign in to your music server"
+                        },
                         style = OctoType.bodySmall,
                         color = OctoColors.TextSecondary,
                         modifier = Modifier.padding(top = 4.dp),
@@ -203,7 +221,7 @@ private fun SignInForm(vm: SignInViewModel) {
                 ) {
                     GlassInput(
                         value = vm.address,
-                        onValueChange = vm::typeAddress,
+                        onValueChange = { if (!vm.takeJoinLink(it)) vm.typeAddress(it) },
                         placeholder = "music.example.com",
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
                         leading = { SchemeButton(vm.scheme, onClick = vm::toggleScheme) },
@@ -216,6 +234,10 @@ private fun SignInForm(vm: SignInViewModel) {
                             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
                             leading = { FieldIcon(OctoIcons.Rename) },
                         )
+                    }
+                    if (vm.joining) {
+                        JoinFields(vm)
+                        return@Column
                     }
                     GlassInput(
                         value = vm.username,
@@ -242,6 +264,10 @@ private fun SignInForm(vm: SignInViewModel) {
 
                 ConnectionNote(vm)
 
+                if (vm.joining) {
+                    JoinButtons(vm)
+                    return@Column
+                }
                 AccentButton(
                     text = when (vm.form) {
                         ServerForm.Add -> "Add"
@@ -267,11 +293,118 @@ private fun SignInForm(vm: SignInViewModel) {
                     )
                 }
 
+                if (vm.form == null && !vm.editing) {
+                    // An invite, or a sign-in shown on another device of one's own.
+                    GlazeButton(
+                        "Scan a family QR code",
+                        {
+                            vm.startJoin()
+                            vm.scanning = true
+                        },
+                        size = ButtonSize.Small,
+                        icon = painterResource(OctoIcons.Camera),
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                }
                 AdvancedToggle(vm.advancedOpen) { vm.advancedOpen = !vm.advancedOpen }
                 AnimatedVisibility(vm.advancedOpen) { Advanced(vm) }
             }
         }
     }
+}
+
+// The rest of the card for a family link. With an invite: the new
+// member's name and the password they choose, with how strong it looks.
+// With a sign-in from another device: what is happening, step by step.
+// A family link pasted into any field fills them in; the camera reads a
+// family QR code.
+@Composable
+private fun JoinFields(vm: SignInViewModel) {
+    val handOver = vm.handOver
+    if (handOver != null) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(vertical = 6.dp)) {
+            if (vm.busy) Spinner(size = 22.dp)
+            Text(vm.handOverStep ?: "Ready to sign in to ${handOver.server.substringAfter("://")}", style = OctoType.body, color = OctoColors.TextPrimary)
+        }
+        Text("On your other device, tap Allow when it asks about this phone.", style = OctoType.caption, color = OctoColors.TextMuted)
+        return
+    }
+    val invite = vm.invite
+    if (invite == null) {
+        Text(
+            "Your invite, or Sign in on another device on your other phone or computer, shows a QR code. Scan it, or open its link on this phone.",
+            style = OctoType.bodySmall,
+            color = OctoColors.TextSecondary,
+        )
+        return
+    }
+    if (invite != null) {
+        Text(
+            "You're invited to ${invite.server.substringAfter("://")}. Choose your name and a password. Your login then works in Octo and any other music app.",
+            style = OctoType.bodySmall,
+            color = OctoColors.TextSecondary,
+        )
+        GlassInput(
+            value = vm.inviteName,
+            onValueChange = { vm.inviteName = it },
+            placeholder = "Your name",
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
+            leading = { FieldIcon(OctoIcons.Artist) },
+        )
+        GlassInput(
+            value = vm.invitePassword,
+            onValueChange = { vm.invitePassword = it },
+            placeholder = "Password, at least $MIN_PASSWORD characters",
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
+            visualTransformation = PasswordVisualTransformation(),
+            contentType = ContentType.NewPassword,
+            leading = { FieldIcon(OctoIcons.Key) },
+        )
+        passwordStrength(vm.invitePassword)?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
+        GlassInput(
+            value = vm.inviteAgain,
+            onValueChange = { vm.inviteAgain = it },
+            placeholder = "The same password again",
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { vm.join() }),
+            visualTransformation = PasswordVisualTransformation(),
+            contentType = ContentType.NewPassword,
+            leading = { FieldIcon(OctoIcons.Key) },
+        )
+    }
+}
+
+// Sign up (or, for a sign-in from another device, Try again), what went
+// wrong, the scanner, and the way back to signing in with a password.
+@Composable
+private fun JoinButtons(vm: SignInViewModel) {
+    when {
+        vm.invite != null -> AccentButton(
+            text = "Sign up",
+            onClick = vm::join,
+            loading = vm.busy,
+            enabled = vm.joinProblem == null,
+            modifier = Modifier.padding(top = 20.dp).fillMaxWidth(),
+        )
+        vm.handOver != null && !vm.busy -> AccentButton(
+            text = "Try again",
+            onClick = vm::receive,
+            modifier = Modifier.padding(top = 20.dp).fillMaxWidth(),
+        )
+    }
+    vm.error?.let {
+        Text(it, style = OctoType.bodySmall, color = OctoColors.Error, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
+    }
+    if (vm.handOver == null) {
+        GlazeButton(
+            "Scan the QR code",
+            { vm.scanning = true },
+            size = ButtonSize.Small,
+            icon = painterResource(OctoIcons.Camera),
+            modifier = Modifier.padding(top = 12.dp),
+        )
+    }
+    GlazeButton("Sign in with a password", vm::stopJoin, size = ButtonSize.Small, modifier = Modifier.padding(top = 12.dp))
 }
 
 // How the octopus and the words come in: a soft spring, or with calm

@@ -1,5 +1,10 @@
 package app.winters.octo.design
 
+import androidx.compose.foundation.background
+import dev.chrisbanes.haze.blur.hazeBlur
+import dev.chrisbanes.haze.blur.HazeColorEffect
+import dev.chrisbanes.haze.blur.HazeBlurStyle
+import dev.chrisbanes.haze.HazeInput
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -126,7 +131,21 @@ class PopupRequest(
     val content: @Composable ColumnScope.(close: () -> Unit) -> Unit,
     // How tall it may grow before it scrolls; never past the window.
     val maxHeight: Dp = PopupMaxHeight,
+    // A dialog: the window behind dims and blurs, and clicks there do not
+    // reach the page.
+    val scrim: Boolean = false,
+    // The content scrolls itself (to keep a footer in place), so the card
+    // only gives it the room there is.
+    val scrollsItself: Boolean = false,
 )
+
+// How far the page behind a dialog blurs.
+private val ScrimBlur = HazeBlurStyle {
+    backgroundColor(OctoColors.Background)
+    blurRadius(18.dp)
+    noiseFactor(0f)
+    fallbackColorEffect(HazeColorEffect.tint(Color.Black.copy(alpha = 0.35f)))
+}
 
 // How tall a menu may grow before it scrolls.
 val PopupMaxHeight = 560.dp
@@ -150,8 +169,14 @@ class PopupHost {
 
     // Opens in the middle of the window, for a small form. A taller form
     // may ask for more room before it scrolls.
-    fun showCentred(width: Dp? = 380.dp, maxHeight: Dp = PopupMaxHeight, content: @Composable ColumnScope.(close: () -> Unit) -> Unit) {
-        request = PopupRequest(null, null, width, content, maxHeight)
+    fun showCentred(
+        width: Dp? = 380.dp,
+        maxHeight: Dp = PopupMaxHeight,
+        scrim: Boolean = false,
+        scrollsItself: Boolean = false,
+        content: @Composable ColumnScope.(close: () -> Unit) -> Unit,
+    ) {
+        request = PopupRequest(null, null, width, content, maxHeight, scrim, scrollsItself)
     }
 
     fun close() {
@@ -224,6 +249,16 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
         grow.animateTo(1f, octoTween(motion, POPUP_MS))
     }
     var origin by remember(request) { mutableStateOf(TransformOrigin(0f, 0f)) }
+    if (request.scrim) {
+        // The page behind, dimmed and blurred, for a dialog.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer { alpha = grow.value }
+                .hazeBlur(input = HazeInput.Backdrop(backdrop), style = ScrimBlur)
+                .background(Color.Black.copy(alpha = 0.55f)),
+        )
+    }
     Layout(
         content = {
             // The menu plate's halo and inner hairline keep its words
@@ -256,8 +291,7 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
                         .focusProperties { onExit = { if (host.request === request) cancelFocusChange() } }
                         .focusGroup()
                         .heightIn(max = request.maxHeight)
-                        .scrollbar(scroll)
-                        .verticalScroll(scroll)
+                        .then(if (request.scrollsItself) Modifier else Modifier.scrollbar(scroll).verticalScroll(scroll))
                         .padding(vertical = 6.dp),
                 ) {
                     request.content(this) { host.close() }
@@ -275,7 +309,13 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
                     it.hasFocus -> had = true
                     had && host.request === request && tries < 3 -> {
                         tries++
-                        scope.launch { takeKeyboard(rows = true) }
+                        // On the next frame: a row that went away is still
+                        // being taken down now, and moving the keyboard in the
+                        // middle of that breaks the pop-up.
+                        scope.launch {
+                            withFrameNanos { }
+                            takeKeyboard(rows = true)
+                        }
                     }
                 }
             }

@@ -19,11 +19,15 @@ import javax.inject.Singleton
 import javax.net.ssl.SSLContext
 
 // What the network needs to know about the signed-in server: its
-// addresses, extra headers, trusted certificates and client certificate.
+// addresses, extra headers, trusted certificates and client certificate,
+// and this phone's id and name, which go to those addresses only.
 // The one shared HTTP client (API, covers and streams) reads it on every
 // request, so a change applies everywhere at once.
 @Singleton
-class ConnectionSecurity @Inject constructor(@ApplicationContext context: Context) {
+class ConnectionSecurity @Inject constructor(
+    @ApplicationContext context: Context,
+    private val devices: DeviceIds,
+) {
     private class Current(
         val origins: Set<String>,
         val hosts: Set<String>,
@@ -84,7 +88,7 @@ class ConnectionSecurity @Inject constructor(@ApplicationContext context: Contex
         val tls = SSLContext.getInstance("TLS").apply { init(arrayOf(keyManager), arrayOf(trustManager), null) }
         return builder
             .addInterceptor(watch)
-            .addNetworkInterceptor(ServerHeaders { current?.let { HeaderScope(it.origins, it.headers) } })
+            .addNetworkInterceptor(ServerHeaders { current?.let { HeaderScope(it.origins, it.headers, devices.current()) } })
             .sslSocketFactory(tls.socketFactory, trustManager)
             .hostnameVerifier(PinningHostnameVerifier(pins, remember))
     }
