@@ -40,6 +40,17 @@ class SongLengthTest {
         assertEquals(0, playingLengthMs(listedMs = 0, playerMs = 10_000, positionMs = 12_000))
     }
 
+    // A stream whose length is only known at its end, listed shorter than
+    // it is: the length grows with the song rather than holding the place
+    // at the listed end.
+    @Test
+    fun aSongPlayingPastItsListingIsAtLeastThatLong() {
+        assertEquals(291_000, playingLengthMs(listedMs = 291_000, playerMs = null, positionMs = 290_000))
+        assertEquals(293_500, playingLengthMs(listedMs = 291_000, playerMs = null, positionMs = 293_500))
+        // Nothing listed: still unknown.
+        assertEquals(0, playingLengthMs(listedMs = 0, playerMs = null, positionMs = 293_500))
+    }
+
     @Test
     fun aListingWithinASecondIsRight() {
         assertNull(correctedLengthMs(listedMs = 291_000, playerMs = 291_600))

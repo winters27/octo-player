@@ -26,11 +26,15 @@ fun measuredLengthMs(playerMs: Long?, positionMs: Long = 0): Long? {
 }
 
 // How long the song playing is: the player's measure of the sound once it
-// has a believable one, else the listed length (0 when that is unknown).
+// has a believable one, else the listed length (0 when that is unknown),
+// stretched to where the song has played to when it has played past it.
 // Everything timed by the song (the scrub bar, the time left, the end of
 // the song, the scrobble) uses this.
-fun playingLengthMs(listedMs: Long, playerMs: Long?, positionMs: Long = 0): Long =
-    measuredLengthMs(playerMs, positionMs) ?: listedMs.coerceAtLeast(0)
+fun playingLengthMs(listedMs: Long, playerMs: Long?, positionMs: Long = 0): Long {
+    measuredLengthMs(playerMs, positionMs)?.let { return it }
+    val listed = listedMs.coerceAtLeast(0)
+    return if (listed > 0 && positionMs > listed) positionMs else listed
+}
 
 // What a song's listed length should be corrected to, or null when the
 // listing is right: a believable measure more than a second away from the
