@@ -78,7 +78,8 @@ class DesktopOfflineTest {
         val fetched = server.calls.first { it.url.pathSegments.last() == "stream" }
         assertEquals("offline", fetched.headers[PURPOSE_HEADER])
         assertEquals("raw", fetched.url.queryParameter("format"))
-        assertEquals(1, offline.status.kept)
+        // The count is updated just after the file lands.
+        until("counted") { offline.status.kept == 1 }
         assertEquals(1000L, offline.status.bytes)
 
         // Let go: the file goes too.
