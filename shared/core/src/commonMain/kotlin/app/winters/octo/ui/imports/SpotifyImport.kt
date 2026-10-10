@@ -17,7 +17,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
-// Spotify import as the phone and the desktop both show it: the words for each
+// Imports as the phone and the desktop both show them: the words for each
 // state, what a list's line says, and the Spotify sign-in, which runs the same
 // way on both. The server does the reading, matching and fetching; the apps
 // draw what it says and pass on what was tapped.
@@ -30,7 +30,6 @@ const val IMPORTS_IDLE_POLL_MS = 20_000L
 // Whether anything is moving on the server, so the view asks again soon.
 fun ImportOverview.moving(): Boolean = reading.busy || trickle.queued > 0 || trickle.downloading > 0
 
-const val SPOTIFY_IMPORT = "Spotify import"
 const val KEEP_AS_PLAYLIST = "Keep as playlist"
 const val GET_MISSING_SONGS = "Get missing songs"
 

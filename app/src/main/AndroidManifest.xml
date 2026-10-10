@@ -83,6 +83,25 @@
             </intent-filter>
         </activity>
 
+        <!-- "Share to Octo" for a list: a file TuneMyMusic saved, or text.
+             It hands the list to the main screen in Octo's own task, which
+             opens Import, and closes at once. -->
+        <activity
+            android:name=".system.ShareToImportActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:label="@string/app_name"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="text/csv" />
+                <data android:mimeType="text/comma-separated-values" />
+            </intent-filter>
+        </activity>
+
         <!-- "Open with Octo" for audio files. It hands the file to the main
              screen in Octo's own task and closes at once. -->
         <activity

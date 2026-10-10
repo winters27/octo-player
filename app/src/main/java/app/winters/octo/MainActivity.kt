@@ -4,6 +4,9 @@ import app.winters.octo.subsonic.parseFamilyLink
 import app.winters.octo.family.FamilyOpen
 import app.winters.octo.family.FamilyNotifier
 import app.winters.octo.family.FamilyHub
+import app.winters.octo.ui.imports.ImportInbox
+import app.winters.octo.ui.imports.fromHistory
+import app.winters.octo.ui.imports.sharedImport
 import android.app.SearchManager
 import android.content.Intent
 import android.os.Bundle
@@ -42,6 +45,8 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var updates: AppUpdates
     // Family links and family notices.
     @Inject lateinit var family: FamilyHub
+    // Lists shared to Octo, for Import.
+    @Inject lateinit var imports: ImportInbox
 
     // Counts up each time a home screen widget asks for the full player.
     private var openPlayer by mutableIntStateOf(0)
@@ -57,6 +62,7 @@ class MainActivity : ComponentActivity() {
             playIfAsked(intent)
             openPlayerIfAsked(intent)
             familyIfAsked(intent)
+            importIfShared(intent)
             systemEntries.handle(this, intent) { openPlayer++ }
         }
     }
@@ -66,7 +72,14 @@ class MainActivity : ComponentActivity() {
         playIfAsked(intent)
         openPlayerIfAsked(intent)
         familyIfAsked(intent)
+        importIfShared(intent)
         systemEntries.handle(this, intent) { openPlayer++ }
+    }
+
+    // A list shared to Octo opens Import, which sends it.
+    private fun importIfShared(intent: Intent) {
+        if (intent.fromHistory()) return
+        intent.sharedImport()?.let(imports::offer)
     }
 
     // Coming to the front: a family link on the clipboard is offered once.

@@ -57,7 +57,8 @@ import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.player.PlayerArtCorner
 import app.winters.octo.player.PlayerOverlay
 import app.winters.octo.ui.admin.OctoAdminScreen
-import app.winters.octo.ui.imports.SpotifyImportScreen
+import app.winters.octo.ui.imports.ImportScreen
+import app.winters.octo.ui.imports.ImportShellViewModel
 import app.winters.octo.ui.album.AlbumScreen
 import app.winters.octo.ui.artist.ArtistScreen
 import app.winters.octo.ui.common.ChoiceSheet
@@ -150,6 +151,14 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                 is FamilyOpen.Join -> FamilyJoinRoute(familyAppLink(what.link))
             },
         )
+    }
+    // A list shared to Octo: Import, on the Settings tab, which sends it.
+    val importInbox = hiltViewModel<ImportShellViewModel>().inbox
+    val shared by importInbox.pending.collectAsStateWithLifecycle()
+    LaunchedEffect(shared) {
+        if (shared == null) return@LaunchedEffect
+        selected = stacks.lastIndex
+        if (stacks.last().lastOrNull() != ImportRoute) stacks.last().add(ImportRoute)
     }
     val back: () -> Unit = { stack.removeLastOrNull() }
     val hasTrack = now.trackId != null
@@ -274,8 +283,8 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                             entry<EditConnectionRoute> { SignInScreen(back, editing = true) }
                             entry<ServerFormRoute> { route -> SignInScreen(back, form = route.form, serverId = route.id, note = route.note) }
                             entry<OctoAdminRoute> { OctoAdminScreen(back) }
-                            entry<SpotifyImportRoute> { SpotifyImportScreen(back) }
-                            entry<FamilyRoute> { FamilyScreen(back) }
+                            entry<ImportRoute> { ImportScreen(back) }
+                            entry<FamilyRoute> { FamilyScreen(back, onImport = { open(ImportRoute) }) }
                             entry<FamilyJoinRoute> { route -> SignInScreen(back, join = parseFamilyLink(route.link)) }
                             entry<SoundRoute> { SoundScreen(back) }
                             entry<SharesRoute> { SharesScreen(back) }

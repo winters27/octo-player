@@ -2,6 +2,7 @@ package app.winters.octo.ui.imports
 
 import android.content.Context
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,9 +23,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -38,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
@@ -68,11 +72,12 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 // The screen's state is the shared ImportModel, kept for as long as the
-// screen is, so a sign-in waiting for the browser outlives the screen going
-// to the background. Another server in use starts it over, as the desktop's
-// does: nothing of the last server's lists stays.
+// screen is, so a sign-in waiting for the browser, or a wait for a file
+// TuneMyMusic saves, outlives the screen going to the background. Another
+// server in use starts it over, as the desktop's does: nothing of the last
+// server's lists stays.
 @HiltViewModel
-class SpotifyImportViewModel @Inject constructor(sessions: SessionRepository) : ViewModel() {
+class ImportViewModel @Inject constructor(sessions: SessionRepository, val inbox: ImportInbox) : ViewModel() {
     val model = ImportModel({ (sessions.state.value as? SessionState.SignedIn)?.session?.client }, viewModelScope)
 
     // Whether the screen is showing, so the new server is asked at once.
@@ -100,42 +105,76 @@ class SpotifyImportViewModel @Inject constructor(sessions: SessionRepository) : 
     override fun onCleared() = model.forget()
 }
 
-private fun openInBrowser(context: Context, url: String) {
+// Opens Import when another app shares a list to Octo.
+@HiltViewModel
+class ImportShellViewModel @Inject constructor(val inbox: ImportInbox) : ViewModel()
+
+internal fun openInBrowser(context: Context, url: String) {
     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }
 
-// Spotify import on an Octo server: connect Spotify, see what the library has
-// of each list, keep one as a playlist, fetch what it is missing, and follow
-// the trickle. The server does the work; this shows what it says.
+// Import on an Octo server: get music from another service through a file
+// TuneMyMusic saves, a shared file or a pasted list; connect Spotify; see
+// what the library has of each list, keep one as a playlist, fetch what it
+// is missing, and follow the trickle. The server does the work; this shows
+// what it says.
 @Composable
-fun SpotifyImportScreen(onBack: () -> Unit, owner: SpotifyImportViewModel = hiltViewModel()) {
+fun ImportScreen(onBack: () -> Unit, owner: ImportViewModel = hiltViewModel()) {
     val context = LocalContext.current
     val vm = owner.model
     DisposableEffect(Unit) {
         owner.show()
         onDispose { owner.hide() }
     }
+    val scope = rememberCoroutineScope()
+    var pasting by rememberSaveable { mutableStateOf(false) }
+    val sendFile: (android.net.Uri, String?) -> Unit = { uri, type -> scope.launch { sendPickedFile(context, vm, uri, type) } }
+    val pick = rememberLauncherForActivityResult(OpenInDownloads()) { uri -> uri?.let { sendFile(it, null) } }
+    val pickFile = { pick.launch(IMPORT_PICK_TYPES) }
+    // A list shared to Octo is sent once the server is known to answer.
+    val shared by owner.inbox.pending.collectAsStateWithLifecycle()
+    val ready = vm.overview != null
+    LaunchedEffect(shared, ready) {
+        if (shared == null || !ready) return@LaunchedEffect
+        when (val share = owner.inbox.take()) {
+            is SharedImport.File -> sendFile(share.file, share.type)
+            is SharedImport.Text -> vm.sendText(share.text, share.name ?: PASTED_LIST_NAME)
+            null -> Unit
+        }
+    }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
-            item(key = "title") { ScreenTitle(SPOTIFY_IMPORT) }
+            item(key = "title") { ScreenTitle(IMPORT) }
             val overview = vm.overview
             if (overview == null) {
                 item(key = "waiting") { Line(vm.problem ?: "Asking the server about your lists.") }
             } else {
                 overview.libraryProblem?.let { item(key = "library") { Line(it, OctoColors.SignalOrange) } }
-                spotify(vm, overview) { openInBrowser(context, it) }
-                vm.said?.let { item(key = "said") { Line(it, OctoColors.TextSecondary) } }
+                val services = vm.services
+                if (services != null) {
+                    getMyMusic(vm, services, pickFile = pickFile, paste = { pasting = true })
+                    vm.said?.let { item(key = "said") { Line(it, OctoColors.TextSecondary) } }
+                    item(key = "spotify:title") { SectionTitle("Spotify", Modifier.padding(top = 12.dp)) }
+                    spotify(vm, overview) { openInBrowser(context, it) }
+                } else {
+                    spotify(vm, overview) { openInBrowser(context, it) }
+                    vm.said?.let { item(key = "said") { Line(it, OctoColors.TextSecondary) } }
+                }
                 val opened = overview.lists.firstOrNull { it.id == vm.openId }
                 if (opened != null) openedList(vm, opened) else lists(vm, overview)
                 trickle(vm, overview)
             }
         }
         BackButton(onBack)
+        PasteSheet(pasting, onDismiss = { pasting = false }) { text, name ->
+            pasting = false
+            vm.sendText(text, name)
+        }
     }
 }
 
 @Composable
-private fun Line(text: String, color: androidx.compose.ui.graphics.Color = OctoColors.TextMuted) {
+internal fun Line(text: String, color: androidx.compose.ui.graphics.Color = OctoColors.TextMuted) {
     Text(text, style = OctoType.bodySmall, color = color, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
 }
 
@@ -195,7 +234,13 @@ private fun LazyListScope.lists(vm: ImportModel, overview: ImportOverview) {
     item(key = "lists:title") { SectionTitle("Your lists", Modifier.padding(top = 8.dp)) }
     if (overview.lists.isEmpty()) {
         item(key = "lists:none") {
-            Line(if (overview.spotify.connected) "No lists yet. Read again to look at your Spotify once more." else "No lists yet. Connect Spotify, or add a link.")
+            Line(
+                when {
+                    overview.spotify.connected -> "No lists yet. Read again to look at your Spotify once more."
+                    vm.services != null -> "No lists yet. Pick your service under $GET_MY_MUSIC, or add a link."
+                    else -> "No lists yet. Connect Spotify, or add a link."
+                },
+            )
         }
     }
     items(overview.lists, key = { "list:${it.id}" }) { list -> ListRow(vm, list) }

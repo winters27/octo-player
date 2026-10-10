@@ -1,5 +1,7 @@
 package app.winters.octo.ui.family
 
+import app.winters.octo.ui.imports.GET_MY_MUSIC
+import app.winters.octo.ui.imports.IMPORT
 import app.winters.octo.ui.common.LocalFeedback
 import app.winters.octo.design.OctoSwitch
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -85,7 +87,7 @@ class FamilyShellViewModel @Inject constructor(val hub: FamilyHub) : ViewModel()
 // account's requests, devices and saved songs. The server decides; this
 // shows what it says.
 @Composable
-fun FamilyScreen(onBack: () -> Unit, owner: FamilyShellViewModel = hiltViewModel()) {
+fun FamilyScreen(onBack: () -> Unit, onImport: () -> Unit = {}, owner: FamilyShellViewModel = hiltViewModel()) {
     val hub = owner.hub
     val model = hub.model
     var changingPassword by remember { mutableStateOf(false) }
@@ -107,7 +109,7 @@ fun FamilyScreen(onBack: () -> Unit, owner: FamilyShellViewModel = hiltViewModel
                     model.login?.let { login(model, hub, it, onPassword = { changingPassword = true }) }
                     if (model.approves) inbox(model)
                     info.manager?.let { members(model, it.members, it.liveStreams, onReset = { resetting = it }) }
-                    plan(info.me)
+                    plan(info.me, onImport)
                     requests(model)
                     devices(model, onPassword = { changingPassword = true })
                     saved(hub, info.me)
@@ -185,7 +187,7 @@ private fun NoticesRow() {
     }
 }
 
-private fun LazyListScope.plan(me: FamilyMe) {
+private fun LazyListScope.plan(me: FamilyMe, onImport: () -> Unit) {
     val can = me.abilities
     title("plan", MY_PLAN)
     item(key = "plan:who") {
@@ -210,6 +212,16 @@ private fun LazyListScope.plan(me: FamilyMe) {
                 modifier = Modifier.size(16.dp),
             )
             Text(line.text, style = OctoType.bodySmall, color = if (line.on) OctoColors.TextPrimary else OctoColors.TextMuted, modifier = Modifier.padding(start = 12.dp))
+        }
+    }
+    // Bringing their music over from another service, when the plan allows it.
+    if (can.importPlaylists) {
+        item(key = "plan:import") {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(GET_MY_MUSIC, style = OctoType.body, color = OctoColors.TextPrimary)
+                Text("Bring your playlists and liked songs over from Spotify, Apple Music, YouTube Music and more.", style = OctoType.caption, color = OctoColors.TextMuted)
+                GlazeButton(IMPORT, onImport, size = ButtonSize.Small)
+            }
         }
     }
 }

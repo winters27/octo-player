@@ -258,9 +258,13 @@ object SettingsIndex {
         "octo_admin", SettingsPage.Server, "Octo admin", "What Octo is doing: services, stations and downloads",
         listOf("admin", "health", "services", "stations"), section = "Connection",
     )
-    val SpotifyImport = add(
-        "spotify_import", SettingsPage.Server, "Spotify import", "Your Spotify songs and playlists, and fetching what is missing",
-        listOf("spotify", "import", "playlists", "liked", "missing", "download"), section = "Connection",
+    val Import = add(
+        "import", SettingsPage.Server, "Import", "Your music from another service, a file or a list, and fetching what is missing",
+        listOf(
+            "import", "get my music", "move", "transfer", "spotify", "apple music", "youtube music", "amazon music", "tidal", "deezer",
+            "qobuz", "soundcloud", "pandora", "youtube", "tunemymusic", "playlists", "liked", "file", "csv", "paste", "missing", "download",
+        ),
+        section = "Connection",
     )
     val Family = add(
         "family", SettingsPage.Server, "Family", "Your plan, requests and devices, and the family's",
