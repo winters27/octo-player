@@ -2,7 +2,6 @@ package app.winters.octo.desktop.ui
 
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.SidePanel
-import org.junit.Assert.assertEquals
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
@@ -11,7 +10,7 @@ import javax.swing.SwingUtilities
 
 // The downloads drawer as it looks: the list with a download on its way, a
 // higher quality copy, a picked one and a failure; the pill beside the
-// player while the drawer is closed; one download's log; and Find songs
+// player while the drawer is closed; a finished log and a running one; and Find songs
 // with its copies. Only when asked:
 // OCTO_SHOTS=1 ./gradlew :desktop:test --tests '*DownloadsShotsTest*'.
 // Saved under build/shots/polish/downloads/.
@@ -42,12 +41,6 @@ class DownloadsShotsTest {
     )
 
     @Test
-    fun thePillCountsTheSongsOnTheirWay() {
-        assertEquals("1 downloading", downloadingText(1))
-        assertEquals("3 downloading", downloadingText(3))
-    }
-
-    @Test
     fun drawTheDownloadsDrawer() {
         assumeTrue(System.getenv("OCTO_SHOTS") == "1")
         FakeServer().use { server ->
@@ -75,11 +68,14 @@ class DownloadsShotsTest {
                     """"upgrades":[{"id":"nd-9","title":"Holocene","artist":"Bon Iver","state":"upgraded","detail":"Now FLAC 16-bit 44.1 kHz, 31.0 MB, was MP3 220 kbps, 7.1 MB.","acquisition":"soulseek:a4","updatedAt":"2026-10-04T18:08:00Z"}]""",
                     type = "octo",
                 )
-                server.answer(
-                    "getAcquisition",
-                    """"acquisition":${row("soulseek:a5", "Da Funk", "Daft Punk", "done", ""","quality":"FLAC 16-bit 44.1 kHz","peer":"vinylhead","libraryId":"nd-5","event":[${log.joinToString(",")}]""", kind = "pick")}""",
-                    type = "octo",
-                )
+                // Da Funk's whole story, and Around the World as it downloads.
+                server.answerBy("getAcquisition") { request ->
+                    if (request.url.queryParameter("key") == "soulseek:a1") {
+                        server.ok(""""acquisition":${row("soulseek:a1", "Around the World", "Daft Punk", "downloading", ""","progress":0.62,"quality":"FLAC 16-bit 44.1 kHz","peer":"vinylhead","event":[${log.take(6).joinToString(",")}]""")}""", type = "octo")
+                    } else {
+                        server.ok(""""acquisition":${row("soulseek:a5", "Da Funk", "Daft Punk", "done", ""","quality":"FLAC 16-bit 44.1 kHz","peer":"vinylhead","libraryId":"nd-5","event":[${log.joinToString(",")}]""", kind = "pick")}""", type = "octo")
+                    }
+                }
                 server.answer(
                     "findSongs",
                     """"foundSongs":{"id":"f1","state":"done","song":{"artist":"Bon Iver","title":"Holocene","album":"Bon Iver, Bon Iver","duration":337,"libraryId":"nd-9","format":"mp3","quality":"MP3 220 kbps","size":7100000},
@@ -105,6 +101,10 @@ class DownloadsShotsTest {
 
                     SwingUtilities.invokeAndWait { app.downloads!!.showLog("soulseek:a5") }
                     rig.shot(scene, "downloads/log", 2_000)
+
+                    // A running one opens on its newest step.
+                    SwingUtilities.invokeAndWait { app.downloads!!.showLog("soulseek:a1") }
+                    rig.shot(scene, "downloads/log-running", 2_500)
 
                     SwingUtilities.invokeAndWait { app.downloads!!.find("nd-9", "Holocene") }
                     rig.shot(scene, "downloads/find", 2_000)

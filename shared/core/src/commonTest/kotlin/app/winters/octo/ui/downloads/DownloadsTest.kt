@@ -1,6 +1,7 @@
 package app.winters.octo.ui.downloads
 
 import app.winters.octo.subsonic.Acquisition
+import app.winters.octo.subsonic.AcquisitionEvent
 import app.winters.octo.subsonic.FoundCandidate
 import app.winters.octo.subsonic.FoundSongs
 import app.winters.octo.subsonic.PickResult
@@ -379,5 +380,54 @@ class DownloadsTest {
     fun aCopysKeyIsItsIdOrItsPlace() {
         assertEquals("id:c1", copyKey(FoundCandidate(index = 0, id = "c1")))
         assertEquals("at:0", copyKey(FoundCandidate(index = 0)))
+    }
+
+    @Test
+    fun thePillSpeaksForTheSongFurthestAlong() {
+        val rows = listOf(
+            rowOf(download("s:a", "queued", startedAt = "2026-10-04T17:50:00Z")),
+            rowOf(download("s:b", "downloading", startedAt = "2026-10-04T17:52:00Z", progress = 0.42f)),
+            rowOf(download("s:c", "downloading", startedAt = "2026-10-04T17:51:00Z", progress = 0.9f)),
+            rowOf(download("s:d", "done")),
+        )
+        // Two at the same step: the one that started first, not the one further in.
+        assertEquals("s:c", pillLead(rows)?.key)
+        assertEquals("Downloading 90%", stepWords(pillLead(rows)!!))
+        assertEquals("Downloading 90%, Song s:c. 2 more on the way", pillSpoken(rows))
+        assertNull(pillLead(listOf(rowOf(download("s:d", "done")))))
+        assertEquals("Checking", stepWords(rowOf(download("s:a", "verifying"))))
+        assertEquals("Adding", stepWords(rowOf(download("s:a", "importing"))))
+        assertEquals("Searching", stepWords(rowOf(download("s:a", "searching"))))
+        assertEquals("Downloading", stepWords(rowOf(download("s:a", "downloading"))))
+    }
+
+    @Test
+    fun eachPhaseSitsOnItsStep_AndAFailureStopsWhereItsLogGot() {
+        assertEquals(0, stepOf(rowOf(download("s:a", "queued"))))
+        assertEquals(1, stepOf(rowOf(download("s:a", "downloading"))))
+        assertEquals(2, stepOf(rowOf(download("s:a", "verifying"))))
+        assertEquals(3, stepOf(rowOf(download("s:a", "importing"))))
+        assertEquals(DownloadStep.entries.size, stepOf(rowOf(download("s:a", "done"))))
+        val failed = rowOf(download("s:a", "failed"))
+        val log = listOf(
+            AcquisitionEvent(kind = "search", text = "Looking"),
+            AcquisitionEvent(kind = "transfer", text = "Downloading"),
+            AcquisitionEvent(kind = "check", text = "Checking the file"),
+            AcquisitionEvent(kind = "failed", text = "Wrong song"),
+            AcquisitionEvent(kind = "note", text = "Gave up"),
+        )
+        assertEquals(DownloadStep.Check.ordinal, stepOf(failed, log))
+        assertEquals(DownloadStep.Find.ordinal, stepOf(failed))
+    }
+
+    @Test
+    fun aCopysBadgeTakesItsKind_AndTheFactsKeepTheRest() {
+        val flac = FoundCandidate(source = "Soulseek", format = "flac", quality = "FLAC 16-bit 44.1 kHz", size = 36_100_000, length = 329, freeSlot = true)
+        assertEquals("FLAC", copyBadge(flac))
+        assertEquals(listOf("16-bit 44.1 kHz", "34.4 MB", "5:29", "Soulseek", "Free to send now"), badgeFacts(flac, Locale.ROOT))
+        val plain = FoundCandidate(source = "Soulseek", format = "flac", quality = "FLAC")
+        assertEquals(listOf("Soulseek"), badgeFacts(plain, Locale.ROOT))
+        assertNull(copyBadge(FoundCandidate(source = "Lidarr")))
+        assertEquals(listOf("1st choice", "2nd choice", "3rd choice", "4th choice", "11th choice", "22nd choice"), listOf(1, 2, 3, 4, 11, 22).map(::rankWords))
     }
 }
