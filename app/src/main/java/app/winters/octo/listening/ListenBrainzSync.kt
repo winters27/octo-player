@@ -9,6 +9,7 @@ import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.isFind
 import app.winters.octo.catalog.songDetails
+import app.winters.octo.playback.RealLengths
 import app.winters.octo.playback.isOpenedFile
 import app.winters.octo.playback.isRadio
 import app.winters.octo.playback.openedFileOf
@@ -39,6 +40,8 @@ class ListenBrainzSync @Inject constructor(
     private val catalog: CatalogDao,
     private val sources: SourceDao,
     private val online: OnlineDao,
+    // Real lengths learned by playing, for songs whose listing was wrong.
+    private val lengths: RealLengths,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val api = ListenBrainzApi(listenBrainzClient(http, "Octo/${BuildConfig.VERSION_NAME} (Android)"))
@@ -198,7 +201,9 @@ class ListenBrainzSync @Inject constructor(
 
     // What the app knows about a song that played. Radio streams are left
     // out; an opened file goes only when it has a title and artist.
-    private suspend fun songOf(trackId: String): PlayedSong? = when {
+    private suspend fun songOf(trackId: String): PlayedSong? = listedSongOf(trackId)?.let { it.copy(durationMs = lengths.lengthMs(trackId, it.durationMs)) }
+
+    private suspend fun listedSongOf(trackId: String): PlayedSong? = when {
         isRadio(trackId) -> null
         isOpenedFile(trackId) -> openedFileOf(trackId)?.let { PlayedSong(it.title, it.artist, "", 0, null, reachesServer = false) }
         isFind(trackId) -> online.song(trackId)?.let { PlayedSong(it.title, it.artist, it.album, it.durationMs, null, reachesServer = true) }

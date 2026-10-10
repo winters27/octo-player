@@ -119,6 +119,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var downloads: Downloads
     @Inject lateinit var online: OnlineDao
     @Inject lateinit var lengths: FindLengths
+    @Inject lateinit var realLengths: RealLengths
     @Inject lateinit var outputs: Outputs
     @Inject lateinit var deviceMedia: DeviceMedia
     @Inject lateinit var feedback: Feedback
@@ -172,7 +173,7 @@ class OctoPlaybackService : MediaLibraryService() {
         }
         val scout = Scout(streams.scoutSourceFactory(), streams.extractors())
         val profiles = ServerProfiles(scope) { (sessions.state.value as? SessionState.SignedIn)?.session }
-        local = OctoPlayer(this, deck(), deck(), sounds::get, scout, profiles)
+        local = OctoPlayer(this, deck(), deck(), sounds::get, scout, profiles, realLengths)
         player = OutputSwitch(local)
         tracker = PlayTracker(plays::started, plays::record, isPlaying = { player.isPlaying })
         player.addListener(tracker)
@@ -342,16 +343,22 @@ class OctoPlaybackService : MediaLibraryService() {
         pauseAllPlayersAndStopSelf()
     }
 
-    // A song found online often comes with no length. Once the phone's own
-    // player knows it, it is kept with the song, so its row shows it from
-    // then on. A TV or speaker's idea of the length is not trusted for this.
+    // A song can come with no length (many found online do), or with one
+    // that is not its sound's (a find listed with another copy's length).
+    // Once the phone's own player has opened it, its length is the one
+    // plays are counted by, and a listing more than a second off is
+    // corrected for the queue, the rows and, for a find, in storage. A TV
+    // or speaker's idea of the length is not trusted for this.
     private fun learnLength() {
         if (player.isRemote || player.isCurrentMediaItemLive) return
-        val id = player.currentMediaItem?.mediaId?.takeIf(::isFind) ?: return
-        val ms = player.duration.takeIf { it != C.TIME_UNSET } ?: return
+        val item = player.currentMediaItem ?: return
+        val listed = item.mediaMetadata.durationMs ?: 0
+        val measured = player.duration.takeIf { it != C.TIME_UNSET }
+        tracker.lengthFound(item.mediaId, playingLengthMs(realLengths.lengthMs(item.mediaId, listed), measured))
+        if (measured == null) return
         scope.launch {
             try {
-                lengths.learn(id, ms)
+                lengths.learn(item.mediaId, listed, measured)
             } catch (e: Exception) {
                 Log.w("Octo", "could not keep a song's length", e)
             }

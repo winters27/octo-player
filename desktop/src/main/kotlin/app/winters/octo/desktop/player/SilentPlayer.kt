@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.player
 
 import app.winters.octo.playback.QueueSource
+import app.winters.octo.playback.RealLengths
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -47,6 +48,9 @@ class SilentPlayer(
 
     private val _state = MutableStateFlow(PlayerState(volume = level, output = system, outputs = listOf(system)))
     override val state: StateFlow<PlayerState> = _state
+
+    // Nothing is measured without sound, so nothing is learned here.
+    override val lengths = RealLengths()
 
     private val ticker: Job? = scope?.launch {
         while (isActive) {

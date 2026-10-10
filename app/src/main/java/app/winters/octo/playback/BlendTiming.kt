@@ -8,11 +8,10 @@ internal const val SPARE_LOAD_AHEAD_MS = 5_000L
 // length is only known once they have opened.
 internal const val SLOW_SPARE_LOAD_AHEAD_MS = 15_000L
 
-// The next song's length as far as the crossfade knows it: its listed
-// length, or, when the list does not know it (0), what the spare deck
-// measured once it opened the song. 0 while nothing knows it.
-internal fun nextSongLengthMs(listedMs: Long, spareMs: Long?): Long =
-    if (listedMs > 0) listedMs else spareMs?.takeIf { it > 0 } ?: 0
+// The next song's length as far as the crossfade knows it: what the spare
+// deck measured once it opened the song, when that is believable, else its
+// listed length. 0 while nothing knows it.
+internal fun nextSongLengthMs(listedMs: Long, spareMs: Long?): Long = playingLengthMs(listedMs, spareMs)
 
 // Whether a blend into the next song waits only on its length: with any
 // length it would blend, but its length is not known yet.

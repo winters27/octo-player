@@ -2,10 +2,10 @@ package app.winters.octo.discovery
 
 import app.winters.octo.catalog.OnlineSongEntity
 import app.winters.octo.catalog.keptFind
+import app.winters.octo.playback.RealLengths
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Test
 
 // A find's length, learned from the player when the server sent none.
@@ -16,24 +16,13 @@ class FindLengthsTest {
         bitrate = 128, seenAt = 1, requestedAt = requestedAt, adoptedId = adoptedId,
     )
 
+    // A row shows the real length once playing the song found its listing
+    // wrong, and the listing until then.
     @Test
-    fun onlyAnUnknownLengthIsLearned() {
-        assertEquals(215_000L, lengthToLearn(knownMs = 0, playerMs = 215_000))
-        assertNull(lengthToLearn(knownMs = 200_000, playerMs = 215_000))
-    }
-
-    @Test
-    fun aLengthThatIsNotASongsIsNotKept() {
-        assertNull(lengthToLearn(0, playerMs = 0))
-        assertNull(lengthToLearn(0, playerMs = -1))
-        assertNull(lengthToLearn(0, playerMs = 400))
-        assertNull(lengthToLearn(0, playerMs = 4 * 60 * 60_000L))
-    }
-
-    @Test
-    fun aRowShowsTheKnownLengthFirst() {
-        assertEquals(200_000L, shownLengthMs(200_000, learnedMs = 215_000))
+    fun aRowShowsTheRealLengthFirst() {
+        assertEquals(215_000L, shownLengthMs(200_000, learnedMs = 215_000))
         assertEquals(215_000L, shownLengthMs(0, learnedMs = 215_000))
+        assertEquals(200_000L, shownLengthMs(200_000, learnedMs = null))
         assertEquals(0L, shownLengthMs(0, learnedMs = null))
     }
 
@@ -68,39 +57,59 @@ class FindLengthsTest {
         assertEquals(0L, keptFind(refreshed(180), find("find:a", ms = 0)).durationMs)
     }
 
-    // Storage that, like the real one, only fills a length that is zero.
+    // Storage of finds' lengths, as the real one keeps them.
     private class Lengths(vararg rows: Pair<String, Long>) {
         val rows = mutableMapOf(*rows)
         var asked = 0
 
-        suspend fun fill(id: String, ms: Long): Int {
+        suspend fun store(id: String, ms: Long): Int {
             asked++
-            if (rows[id] != 0L) return 0
+            if (id !in rows) return 0
             rows[id] = ms
             return 1
         }
     }
 
+    // A find listed with no length, or with one more than a second off its
+    // sound, takes the player's length, in storage and on screen.
     @Test
-    fun aLearnedLengthIsStoredAndShownOnlyInPlaceOfZero() = runBlocking {
-        val storage = Lengths("find:a" to 0L, "find:b" to 180_000L)
-        val lengths = FindLengths(storage::fill)
-        lengths.learn("find:a", 215_000)
-        lengths.learn("find:b", 215_000)
+    fun aMissingOrWrongLengthIsStoredAndShown() = runBlocking {
+        val storage = Lengths("find:a" to 0L, "find:b" to 296_000L, "find:c" to 213_000L)
+        val lengths = FindLengths(storage::store, RealLengths())
+        lengths.learn("find:a", listedMs = 0, playerMs = 215_000)
+        lengths.learn("find:b", listedMs = 296_000, playerMs = 291_000)
+        lengths.learn("find:c", listedMs = 213_000, playerMs = 213_400)
         assertEquals(215_000L, storage.rows["find:a"])
-        // One that had a length keeps it, in storage and on screen.
-        assertEquals(180_000L, storage.rows["find:b"])
-        assertEquals(mapOf("find:a" to 215_000L), lengths.learned.value)
+        assertEquals(291_000L, storage.rows["find:b"])
+        // Within a second: the listing was right.
+        assertEquals(213_000L, storage.rows["find:c"])
+        assertEquals(mapOf("find:a" to 215_000L, "find:b" to 291_000L), lengths.learned.value)
     }
 
     @Test
-    fun librarySongsAndRepeatsAskNothing() = runBlocking {
+    fun aLengthThatIsNotASongsIsNotKept() = runBlocking {
         val storage = Lengths("find:a" to 0L)
-        val lengths = FindLengths(storage::fill)
-        lengths.learn("t-42", 215_000)
-        lengths.learn("find:a", 215_000)
-        lengths.learn("find:a", 216_000)
+        val lengths = FindLengths(storage::store, RealLengths())
+        lengths.learn("find:a", 0, playerMs = 0)
+        lengths.learn("find:a", 0, playerMs = -1)
+        lengths.learn("find:a", 0, playerMs = 400)
+        lengths.learn("find:a", 0, playerMs = 25 * 60 * 60_000L)
+        assertEquals(0, storage.asked)
+        assertEquals(emptyMap<String, Long>(), lengths.learned.value)
+    }
+
+    // A library song's wrong listing is corrected on screen only (the next
+    // library read would undo a stored one); repeats store nothing again.
+    @Test
+    fun librarySongsAndRepeatsStoreNothing() = runBlocking {
+        val storage = Lengths("find:a" to 0L)
+        val real = RealLengths()
+        val lengths = FindLengths(storage::store, real)
+        lengths.learn("t-42", listedMs = 200_000, playerMs = 215_000)
+        lengths.learn("find:a", listedMs = 0, playerMs = 215_000)
+        lengths.learn("find:a", listedMs = 0, playerMs = 215_000)
         assertEquals(1, storage.asked)
         assertEquals(215_000L, storage.rows["find:a"])
+        assertEquals(215_000L, real.lengthMs("t-42", 200_000))
     }
 }

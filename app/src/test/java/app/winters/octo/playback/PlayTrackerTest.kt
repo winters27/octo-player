@@ -43,6 +43,32 @@ class PlayTrackerTest {
         assertEquals(70_000L, waiting?.first)
     }
 
+    // Listed at 296 s, the song's sound is 291 s: once the player has
+    // measured it, half of 291 s counts, and the play carries 291 s.
+    @Test
+    fun theMeasuredLengthReplacesTheListedOne() {
+        val lengths = mutableListOf<Long>()
+        val tracker = PlayTracker(
+            started = {},
+            record = { id, _, heard, length -> if (countsAsPlay(heard, length)) { records += id to heard; lengths += length } },
+            isPlaying = { playing },
+            clock = { now },
+            wallClock = { now },
+            later = { ms, block -> waiting = ms to block; { waiting = null } },
+        )
+        tracker.moved("a", 296_000)
+        assertEquals(148_000L, waiting?.first)
+        // Another song's length changes nothing.
+        tracker.lengthFound("b", 200_000)
+        assertEquals(148_000L, waiting?.first)
+        tracker.lengthFound("a", 291_000)
+        assertEquals(145_500L, waiting?.first)
+        now += 145_500
+        waiting!!.second()
+        assertEquals(listOf("a" to 145_500L), records)
+        assertEquals(listOf(291_000L), lengths)
+    }
+
     @Test
     fun aSongSkippedEarlyNeverCounts() {
         tracker.moved("a", 200_000)

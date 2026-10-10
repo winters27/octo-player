@@ -278,6 +278,22 @@ class PlayQueue(private val random: Random = Random.Default) {
         current = -1
     }
 
+    // Gives every entry of one song a new copy of it (with its real length,
+    // say), the queue's own and the ones an undo would bring back. Keys,
+    // order and what can be undone stay as they are. Answers whether any
+    // entry changed.
+    fun updateSong(id: String, change: (Song) -> Song): Boolean {
+        fun List<QueueEntry>.updated() = map { if (it.song.id == id) it.copy(song = change(it.song)) else it }
+        val now = entries.updated()
+        if (now == entries) return false
+        entries.clear()
+        entries += now
+        val kept = undos.map { Undo(Snapshot(it.before.entries.updated(), it.before.order, it.before.shuffled, it.before.playing), it.stampBefore, it.stampAfter) }
+        undos.clear()
+        undos += kept
+        return true
+    }
+
     // ---- Undo ----
 
     // The queue as it was before an edit: its entries, play order and

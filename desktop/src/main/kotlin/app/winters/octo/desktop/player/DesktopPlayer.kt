@@ -2,6 +2,7 @@ package app.winters.octo.desktop.player
 
 import app.winters.octo.playback.NoSource
 import app.winters.octo.playback.QueueSource
+import app.winters.octo.playback.RealLengths
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.flow.StateFlow
 
@@ -82,6 +83,10 @@ data class SavedQueue(
 // contract tests (DesktopPlayerContract).
 interface DesktopPlayer : AutoCloseable {
     val state: StateFlow<PlayerState>
+
+    // The real lengths of songs whose listing was wrong, learned by playing
+    // them, for every row that shows a song's length.
+    val lengths: RealLengths
 
     // Where the song is, in milliseconds, right now.
     fun positionMs(): Long

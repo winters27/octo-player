@@ -15,10 +15,12 @@ class BlendTimingTest {
     fun anUnknownLengthComesFromTheSpareOnceItHasOpened() {
         assertEquals(0L, nextSongLengthMs(listedMs = 0, spareMs = null))
         assertEquals(214_000L, nextSongLengthMs(listedMs = 0, spareMs = 214_000))
-        // The list's own length wins when it has one.
-        assertEquals(190_000L, nextSongLengthMs(listedMs = 190_000, spareMs = 214_000))
+        // The spare's measure of the sound wins over a listed length.
+        assertEquals(214_000L, nextSongLengthMs(listedMs = 190_000, spareMs = 214_000))
+        assertEquals(190_000L, nextSongLengthMs(listedMs = 190_000, spareMs = null))
         // A spare that has not measured it yet does not count.
         assertEquals(0L, nextSongLengthMs(listedMs = 0, spareMs = 0))
+        assertEquals(190_000L, nextSongLengthMs(listedMs = 190_000, spareMs = 0))
     }
 
     @Test

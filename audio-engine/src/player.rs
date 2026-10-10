@@ -548,6 +548,11 @@ impl Player {
         }
     }
 
+    // The length the decoder found for an entry, once it opened.
+    fn decoded_length(&self, key: u64) -> Option<u64> {
+        self.infos.get(&key).and_then(|i| i.duration_ms).filter(|&ms| ms > 0)
+    }
+
     fn entry(&mut self, item: QueueItem) -> Entry {
         let key = self.next_key;
         self.next_key += 1;
@@ -566,7 +571,10 @@ impl Player {
             .into_iter()
             .map(|mut item| match known.remove(&item.id) {
                 Some(e) => {
-                    if item.duration_ms.is_none() {
+                    // The decoder's length stands over the listed one.
+                    if let Some(ms) = self.decoded_length(e.key) {
+                        item.duration_ms = Some(ms);
+                    } else if item.duration_ms.is_none() {
                         item.duration_ms = e.item.duration_ms;
                     }
                     Entry { key: e.key, item, failed: e.failed }
@@ -877,15 +885,16 @@ impl Player {
             }
         }
         let Some(lane) = mixer.lane() else { return };
-        // Keep what the decoder found out, for events and positions.
+        // Keep what the decoder found out, for events and positions. Its
+        // length is the sound's own, so it stands over the listed one.
         for deck in [Some(lane.current()), lane.next()].into_iter().flatten() {
             if !self.infos.contains_key(&deck.key())
                 && let Some(info) = deck.info()
             {
                 if let Some(i) = self.queue.iter().position(|e| e.key == deck.key())
-                    && self.queue[i].item.duration_ms.is_none()
+                    && let Some(ms) = info.duration_ms.filter(|&ms| ms > 0)
                 {
-                    self.queue[i].item.duration_ms = info.duration_ms;
+                    self.queue[i].item.duration_ms = Some(ms);
                 }
                 self.infos.insert(deck.key(), info);
             }
@@ -964,10 +973,11 @@ impl Player {
         Some(stated.map_or(heard, |s| s.min(heard))).filter(|&d| d > 0)
     }
 
-    // A queued song's length in milliseconds, from its decoder or the queue.
+    // A queued song's length in milliseconds: its decoder's once it opened,
+    // else the queue's.
     fn length_ms(&self, index: usize) -> Option<u64> {
         let entry = &self.queue[index];
-        self.infos.get(&entry.key).and_then(|i| i.duration_ms).or(entry.item.duration_ms).filter(|&d| d > 0)
+        self.decoded_length(entry.key).or(entry.item.duration_ms).filter(|&d| d > 0)
     }
 
     // With smart transitions on, decodes the end of the playing song once
@@ -1083,8 +1093,9 @@ impl Player {
         if let Some(info) = up.deck.info()
             && !self.infos.contains_key(&up_key)
         {
-            if self.queue[next].item.duration_ms.is_none() {
-                self.queue[next].item.duration_ms = info.duration_ms;
+            // The decoder's length stands over the listed one.
+            if let Some(ms) = info.duration_ms.filter(|&ms| ms > 0) {
+                self.queue[next].item.duration_ms = Some(ms);
             }
             self.infos.insert(up_key, info);
         }
@@ -1103,10 +1114,14 @@ impl Player {
             && !self.stop_after_current
             && !failed
             && next != current;
-        let next_known = self.length_ms(next).is_some() || self.infos.contains_key(&up_key) || up_failed;
+        // The next song's length is its decoder's once it has opened. Until
+        // the deadline the decision waits for that; after it, a listed
+        // length will do.
+        let opened = self.infos.contains_key(&up_key) || up_failed;
+        let next_known = opened || self.length_ms(next).is_some();
         let scouted = !self.automix.smart_transitions || self.scouts_settled(self.queue[current].key, up_key);
         let deadline = remaining.is_none_or(|r| r <= blend_secs + DECIDE_MARGIN_SECS);
-        if can_blend && !deadline && !(next_known && scouted) {
+        if can_blend && !deadline && !(opened && scouted) {
             return;
         }
         // Past the deadline the next song's length is still worth waiting

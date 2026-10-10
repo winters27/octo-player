@@ -41,6 +41,18 @@ class PlayCounterTest {
         assertEquals(emptyList<HeardPlay>(), counted)
     }
 
+    // A song listed longer than its sound: the player's length, the
+    // sound's own, is what a play is measured by and reported with.
+    @Test
+    fun thePlayersLengthBeatsAWrongListing() {
+        val listed = QueueEntry(4, Song("o", "Outside", duration = 296))
+        counter.update(PlayerState(current = listed, playing = true, durationMs = 291_000))
+        assertEquals(145_500L, counter.msUntilCounted())
+        now += 145_500
+        counter.check()
+        assertEquals(291_000, counted.single().durationMs)
+    }
+
     @Test
     fun lessThanHalfDoesNotCount() {
         on(a)

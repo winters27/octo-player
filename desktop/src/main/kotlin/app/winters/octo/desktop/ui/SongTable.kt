@@ -718,7 +718,7 @@ private fun SongRow(
             // One line for a screen reader: the song and its state. The
             // table's keys and the song menu do what the row's links do.
             .clearAndSetSemantics {
-                contentDescription = rowSpeech(row.song, playing, sounding, picked, outside, app.failedSongs[row.song.id])
+                contentDescription = rowSpeech(row.song, playing, sounding, picked, outside, app.failedSongs[row.song.id], app.realSeconds(row.song))
                 awtRole = AccessibleRole.LIST_ITEM
                 selected = picked
                 this.focused = focused
@@ -764,12 +764,12 @@ private fun SongRow(
 // What a screen reader says for a row: title (and "explicit" when the
 // small "E" shows after it), artist, album and length, then whether it
 // plays, is picked, is outside the library, or failed.
-internal fun rowSpeech(song: Song, playing: Boolean, sounding: Boolean, picked: Boolean, outside: Boolean, failed: String?): String = buildString {
+internal fun rowSpeech(song: Song, playing: Boolean, sounding: Boolean, picked: Boolean, outside: Boolean, failed: String?, realSeconds: Int? = null): String = buildString {
     append(song.title)
     if (song.isExplicit) append(", explicit")
     (song.displayArtist ?: song.artist)?.takeIf(String::isNotBlank)?.let { append(", ").append(it) }
     song.album?.takeIf(String::isNotBlank)?.let { append(", ").append(it) }
-    lengthText(song.duration).takeIf(String::isNotBlank)?.let { append(", ").append(it) }
+    lengthText(realSeconds ?: song.duration).takeIf(String::isNotBlank)?.let { append(", ").append(it) }
     if (playing) append(if (sounding) ", playing" else ", paused")
     if (picked) append(", picked")
     if (outside) append(", not in your library")
@@ -851,7 +851,7 @@ private fun SongCell(
                 )
             }
         }
-        SongColumn.Length -> Txt(lengthText(song.duration), numbers, muted, align = TextAlign.End)
+        SongColumn.Length -> Txt(lengthText(app.realSeconds(song) ?: song.duration), numbers, muted, align = TextAlign.End)
     }
 }
 

@@ -120,7 +120,8 @@ class LyricsModel(
         }
         @OptIn(ExperimentalCoroutinesApi::class)
         scope.launch {
-            combine(player.state.map { it.current?.song }.distinctUntilChanged(), sources.revisions) { song, revisions ->
+            // By id: the same song with its length corrected is not a new song.
+            combine(player.state.map { it.current?.song }.distinctUntilChanged { a, b -> a?.id == b?.id }, sources.revisions) { song, revisions ->
                 song to (song?.let { revisions[it.id] } ?: 0)
             }
                 .distinctUntilChanged()

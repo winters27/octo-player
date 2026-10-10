@@ -47,6 +47,7 @@ data class NowPlaying(
 class PlaybackConnection @Inject constructor(
     @ApplicationContext private val context: Context,
     private val catalog: CatalogDao,
+    private val lengths: RealLengths,
 ) {
     private val scope = MainScope()
     private var future: ListenableFuture<MediaController>? = null
@@ -70,6 +71,19 @@ class PlaybackConnection @Inject constructor(
     // lyrics take a fresh anchor on each.
     private val _timeEvents = MutableStateFlow(0)
     val timeEvents: StateFlow<Int> = _timeEvents
+
+    init {
+        // A song's real length found out while it plays reaches the queue
+        // rows already on screen.
+        scope.launch {
+            lengths.corrected.collect {
+                controller?.let { c ->
+                    publish(c)
+                    publishQueue(c)
+                }
+            }
+        }
+    }
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
@@ -270,7 +284,7 @@ class PlaybackConnection @Inject constructor(
             quality = audioQuality(meta?.extra(EXTRA_MIME), player.currentTracks)
                 ?.playingAt(if (player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) null else outputRate()),
             isPlaying = player.isPlaying,
-            durationMs = player.duration.takeIf { it > 0 } ?: meta?.durationMs ?: 0,
+            durationMs = songLengthMs(listedLengthMs(item), player.duration),
             shuffle = player.shuffleModeEnabled,
             repeatMode = player.repeatMode,
             casting = player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE,
@@ -303,7 +317,7 @@ class PlaybackConnection @Inject constructor(
                 title = meta.title?.toString().orEmpty(),
                 artist = meta.artist?.toString().orEmpty(),
                 artwork = meta.artworkRef(),
-                durationMs = meta.durationMs ?: 0,
+                durationMs = listedLengthMs(item),
                 explicit = meta.isExplicit(),
                 autoplay = item.isAutoplay,
                 source = item.queueSource,
@@ -316,6 +330,10 @@ class PlaybackConnection @Inject constructor(
             timeline.getPreviousWindowIndex(it, Player.REPEAT_MODE_OFF, shuffle)
         }.map(::entry)
     }
+
+    // A song's listed length, corrected where playing it found it wrong.
+    private fun listedLengthMs(item: MediaItem?): Long =
+        item?.let { lengths.lengthMs(it.mediaId, it.mediaMetadata.durationMs ?: 0) } ?: 0
 
     // The rate the phone's audio output mixes at, which Android resamples
     // songs to unless it plays them bit for bit.

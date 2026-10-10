@@ -14,6 +14,7 @@ import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.device.DEVICE
 import app.winters.octo.device.TagReader
+import app.winters.octo.playback.RealLengths
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.server.serverSourceId
 import app.winters.octo.subsonic.LYRICS_AUTO
@@ -146,6 +147,8 @@ class LyricsRepository @Inject constructor(
     private val online: OnlineLyrics,
     private val settings: PlayerSettings,
     private val choices: LyricsChoices,
+    // Real lengths learned by playing, which the online library matches by.
+    private val lengths: RealLengths,
 ) {
     private val answers = LyricsAnswers(LyricsCache(File(context.cacheDir, "lyrics")))
 
@@ -208,7 +211,7 @@ class LyricsRepository @Inject constructor(
             songFile = phone?.let { file -> suspend { fromSongFile(file) } },
             lyricsFile = phone?.let { file -> suspend { fromLyricsFile(file) } },
             online = if (onlineAllowed && facts.title.isNotBlank() && facts.artist.isNotBlank()) {
-                suspend { online.find(facts.title, facts.artist, facts.album, facts.durationMs) }
+                suspend { online.find(facts.title, facts.artist, facts.album, lengthOf(facts)) }
             } else {
                 null
             },
@@ -384,10 +387,10 @@ class LyricsRepository @Inject constructor(
         val songFile = async { phone?.let { attempt(LyricsSource.SongFile) { fromSongFile(it) } } }
         val lyricsFile = async { phone?.let { attempt(LyricsSource.LyricsFile) { fromLyricsFile(it) } } }
         val match = async {
-            if (askOnline) attempt(LyricsSource.Online) { online.exact(facts.title, facts.artist, facts.album, facts.durationMs) } else null
+            if (askOnline) attempt(LyricsSource.Online) { online.exact(facts.title, facts.artist, facts.album, lengthOf(facts)) } else null
         }
         val search = async {
-            if (askOnline) attempt(LyricsSource.Online) { online.copiesOf(facts.title, facts.artist, facts.album, facts.durationMs) } else null
+            if (askOnline) attempt(LyricsSource.Online) { online.copiesOf(facts.title, facts.artist, facts.album, lengthOf(facts)) } else null
         }
         val found = buildList {
             server.await()?.let { add(LyricsCandidate(LyricsPick.Own(LyricsSource.Server), CandidateOrigin.Server, it)) }
@@ -484,6 +487,11 @@ class LyricsRepository @Inject constructor(
     private suspend fun fromLyricsFile(file: Uri): Lyrics? = withContext(Dispatchers.IO) {
         files.beside(file)?.let { parseLyricsText(it, LyricsSource.LyricsFile) }
     }
+
+    // The length the online library matches a song by: its real one once
+    // playing it found the listing wrong. Read when the online library is
+    // asked, after the server, by when the song playing has usually opened.
+    private fun lengthOf(song: LyricsSong): Long = lengths.lengthMs(song.id, song.durationMs)
 
     // The library's own facts for the song where it has them, since what the
     // player shows can be shortened.

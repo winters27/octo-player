@@ -57,6 +57,14 @@ class PlayTracker(
         }
     }
 
+    // The song's length as the player measured it, once it has opened: a
+    // play is measured by the length of its sound, not its listing.
+    fun lengthFound(id: String, length: Long) {
+        if (id != trackId || length <= 0 || length == durationMs) return
+        durationMs = length
+        if (callOff != null) watch()
+    }
+
     // Once per song, the first time it actually plays.
     private fun announce() {
         if (announced) return

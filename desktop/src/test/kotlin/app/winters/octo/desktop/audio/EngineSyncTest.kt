@@ -484,6 +484,77 @@ class EngineSyncTest {
         assertEquals(1, p.state.value.ended)
     }
 
+    // An outside song can be listed with another copy's length. Once the
+    // engine has opened it, the length of its sound is the one shown and
+    // sought within, the place in the song does not move, and every entry
+    // of the song (and the next time it is queued) carries that length.
+    @Test
+    fun theSoundsLengthReplacesAWrongListing() {
+        val (p, engine) = setUp()
+        val listed = Song("o", "Outside", duration = 296)
+        p.play(listOf(listed, Song("n", "Next", duration = 200), listed))
+        val key = p.key("o")
+        // Until the engine has opened it, the listing stands in.
+        assertEquals(296_000, p.state.value.durationMs)
+        assertEquals(296_000uL, engine.queue[0].durationMs)
+        now += 100_000
+        engine.heard = Heard(itemId(key), 100_000.0, 296_000)
+        assertEquals(100_000, p.positionMs())
+        engine.emit(EngineEvent.TrackStarted(itemId(key), 0u, TrackInfo("aac", false, 44_100u, 2u, null, 291_000uL, null)))
+        assertEquals(291_000, p.state.value.durationMs)
+        assertEquals(100_000, p.positionMs())
+        assertEquals(listOf(291, 200, 291), p.state.value.queue.map { it.song.duration })
+        assertEquals(mapOf("o" to 291_000L), p.lengths.corrected.value)
+        // The engine holds the corrected listing for the song's next entry.
+        assertEquals(listOf(291_000uL, 200_000uL, 291_000uL), engine.queue.map { it.durationMs })
+        // The scrub bar ends at the sound's end.
+        p.seekTo(295_000)
+        assertEquals("seek 291000", engine.calls.last())
+        // A word from the engine still carrying the listing changes nothing.
+        engine.heard = Heard(itemId(key), 291_000.0, 296_000)
+        now += 3_000
+        engine.emit(EngineEvent.Position(itemId(key), 291_000.0))
+        assertEquals(291_000, p.state.value.durationMs)
+        assertEquals(291, p.state.value.current?.song?.duration)
+        // Queued again from a list that still has the listing.
+        p.addToQueue(listOf(listed))
+        assertEquals(291, p.state.value.queue.last().song.duration)
+        assertEquals(291_000uL, engine.queue.last().durationMs)
+    }
+
+    // A stream that only knows its length once it has played a while: the
+    // listing holds until then, and the switch moves the place not at all.
+    @Test
+    fun aLengthTheEngineLearnsLaterTakesOverWithoutAJump() {
+        val (p, engine) = setUp()
+        p.play(listOf(Song("o", "Outside", duration = 296)))
+        val key = p.key("o")
+        engine.emit(EngineEvent.TrackStarted(itemId(key), 0u, null))
+        now += 100_000
+        engine.heard = Heard(itemId(key), 100_000.0, 296_000)
+        assertEquals(100_000, p.positionMs())
+        assertEquals(296_000, p.state.value.durationMs)
+        now += 250
+        engine.heard = Heard(itemId(key), 100_250.0, 291_000)
+        engine.emit(EngineEvent.Position(itemId(key), 100_250.0))
+        assertEquals(291_000, p.state.value.durationMs)
+        assertEquals(100_250, p.positionMs())
+        assertEquals(291, p.state.value.current?.song?.duration)
+    }
+
+    // A length within a second of the listing is the listing: the song is
+    // left as it was.
+    @Test
+    fun aListingWithinASecondIsKept() {
+        val (p, engine) = setUp()
+        val listed = Song("l", "Library", duration = 291)
+        p.play(listOf(listed))
+        engine.emit(EngineEvent.TrackStarted(itemId(p.key("l")), 0u, TrackInfo("flac", true, 44_100u, 2u, 16u, 291_480uL, null)))
+        assertEquals(291_480, p.state.value.durationMs)
+        assertEquals(listed, p.state.value.current?.song)
+        assertEquals(emptyMap<String, Long>(), p.lengths.corrected.value)
+    }
+
     @Test
     fun theDecodersWordIsNamedForPeople() {
         val pcm = TrackInfo("pcm_s16le", true, 48_000u, 1u, 16u, null, null)

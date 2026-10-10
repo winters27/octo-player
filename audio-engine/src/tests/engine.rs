@@ -1110,3 +1110,87 @@ fn a_profile_that_is_not_whole_is_refused_and_one_can_be_forgotten() {
     engine.set_song_profile("a".into(), None).unwrap();
     engine.shutdown();
 }
+
+#[test]
+fn the_decoders_length_stands_over_the_listed_one() {
+    let dir = temp_dir();
+    let a = dir.join("a.wav");
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 2, 0.3));
+    let (engine, events, _) = engine(1.0);
+    // Listed longer than the file is, as an outside song can be.
+    let mut x = item("a", &a);
+    x.duration_ms = Some(5_000);
+    engine.load(vec![x.clone()], 0, 0, true).unwrap();
+    events.wait_for("start", Duration::from_secs(10), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    let until = Instant::now() + Duration::from_secs(5);
+    while engine.position().duration_ms != Some(2_000) {
+        assert!(Instant::now() < until, "length {:?}", engine.position().duration_ms);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The app handing the queue over again with the listed length does
+    // not bring the listed length back.
+    engine.replace_queue(vec![x], 0).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(engine.position().duration_ms, Some(2_000));
+    engine.shutdown();
+}
+
+// Songs listed with lengths their sound does not have, as outside songs
+// can be: the blend is timed by the lengths the decoders found. By its
+// listing the next song is too short for more than 0.6 s of blend.
+#[test]
+fn a_crossfade_is_timed_by_the_decoded_lengths() {
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 3, 0.3));
+    write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 3, 0.3));
+    let (engine, events, _, pump) = driven_engine();
+    engine.set_crossfade(1_000).unwrap();
+    let listed = |id: &str, path: &Path, ms: u64| QueueItem { duration_ms: Some(ms), ..item(id, path) };
+    engine.load(vec![listed("a", &a, 60_000), listed("b", &b, 1_200)], 0, 0, true).unwrap();
+    let planned = events
+        .wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    let EngineEvent::TransitionPlanned { start_ms, entry_ms, overlap_ms, reason, .. } = planned else {
+        unreachable!()
+    };
+    assert_eq!((start_ms, entry_ms, overlap_ms), (2_000, 0, 1_000), "{reason}");
+    let fade =
+        play_until(&pump, &events, "crossfade", 400, |e| matches!(e, EngineEvent::CrossfadeStarted { .. }));
+    assert_eq!(
+        fade,
+        EngineEvent::CrossfadeStarted { from_id: "a".into(), to_id: "b".into(), duration_ms: 1_000 }
+    );
+    pump.play_out();
+    events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
+    engine.shutdown();
+}
+
+// Says in its reason which lengths the planner was handed.
+fn length_telling_plan(input: &crate::automix::PlanInput) -> crate::automix::TransitionPlan {
+    let len = input.current.duration_ms as i64;
+    let why = format!("lengths {} and {}", input.current.duration_ms, input.next.duration_ms);
+    crate::automix::TransitionPlan::fixed_crossfade(len, 500, &why)
+}
+
+#[test]
+fn a_smart_plan_is_made_with_the_decoded_lengths() {
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 10, 0.3));
+    write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 3, 0.3));
+    let (engine, events, _, pump) = driven_engine();
+    engine.set_test_planner(Some(length_telling_plan));
+    engine.set_crossfade(1_000).unwrap();
+    engine
+        .set_automix(crate::automix::AutomixSettings { smart_transitions: true, ..Default::default() })
+        .unwrap();
+    let listed = |id: &str, path: &Path| QueueItem { duration_ms: Some(60_000), ..item(id, path) };
+    engine.load(vec![listed("a", &a), listed("b", &b)], 0, 0, true).unwrap();
+    let planned = play_until(&pump, &events, "plan", 1_200, |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    let EngineEvent::TransitionPlanned { start_ms, overlap_ms, reason, .. } = planned else { unreachable!() };
+    assert!(reason.contains("lengths 10000 and 3000"), "{reason}");
+    assert_eq!((start_ms, overlap_ms), (9_500, 500), "{reason}");
+    pump.play_out();
+    events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
+    engine.shutdown();
+}

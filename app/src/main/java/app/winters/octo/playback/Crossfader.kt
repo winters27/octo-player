@@ -54,6 +54,8 @@ internal class Crossfader(
     private val soundOf: (ExoPlayer) -> DeckSound?,
     private val scout: Scout?,
     private val profiles: ProfileSource? = null,
+    // Real lengths learned by playing, for a song whose listing was wrong.
+    private val lengths: RealLengths = RealLengths(),
 ) : Player.Listener {
     // How transitions are planned; a longest blend of 0 turns them off.
     var settings = AutomixSettings(maxOverlapMs = 0)
@@ -283,27 +285,32 @@ internal class Crossfader(
         schedule(if (toStart > PLAN_LOAD_LEAD_MS + FAR_CHECK_MS) FAR_CHECK_MS else NEAR_CHECK_MS)
     }
 
-    // The playing song and the next one as the crossfade sees them, the
-    // next one's length taken from the spare once it has opened the song
-    // when the list does not know it. Null with nothing next.
+    // The playing song and the next one as the crossfade sees them, each by
+    // its real length: what its deck measured once it holds the song, else
+    // its listed length, corrected where playing it before found it wrong.
+    // Null with nothing next.
     private fun songsFor(deck: ExoPlayer, next: Int): Pair<FadeSong, FadeSong>? {
         if (next == C.INDEX_UNSET) return null
         val current = deck.currentMediaItem ?: return null
-        val spareMs = if (loadedFor == next && spare.playbackState == Player.STATE_READY) {
-            spare.duration.takeIf { it != C.TIME_UNSET }
-        } else {
-            null
-        }
-        val nextLength = nextSongLengthMs(listedLengthOf(deck, next), spareMs)
-        return current.fadeSong(lengthOf(deck)) to deck.getMediaItemAt(next).fadeSong(nextLength)
+        val item = deck.getMediaItemAt(next)
+        return current.fadeSong(lengthOf(deck)) to item.fadeSong(nextLengthOf(item, next))
     }
 
-    private fun listedLengthOf(deck: ExoPlayer, index: Int): Long = deck.getMediaItemAt(index).mediaMetadata.durationMs ?: 0
+    // How long the song is: what the deck measured, or the listed length
+    // (corrected where playing it before found it wrong) for a stream that
+    // has not said.
+    private fun lengthOf(deck: ExoPlayer): Long {
+        val item = deck.currentMediaItem ?: return 0
+        return songLengthMs(lengths.lengthMs(item.mediaId, item.mediaMetadata.durationMs ?: 0), deck.duration)
+    }
 
-    // How long the song is: what the deck measured, or the library's length
-    // for a stream that has not said.
-    private fun lengthOf(deck: ExoPlayer): Long =
-        deck.duration.takeIf { it != C.TIME_UNSET } ?: deck.currentMediaItem?.mediaMetadata?.durationMs ?: 0
+    // How long the next song is: what the spare measured once it holds that
+    // song, else the listed length, corrected where it was found wrong.
+    private fun nextLengthOf(item: MediaItem, index: Int): Long {
+        val listed = lengths.lengthMs(item.mediaId, item.mediaMetadata.durationMs ?: 0)
+        val spareMs = if (loadedFor == index && spare.currentMediaItem?.mediaId == item.mediaId) spare.duration else C.TIME_UNSET
+        return nextSongLengthMs(listed, spareMs.takeIf { it != C.TIME_UNSET })
+    }
 
     // Whether the song moved more than a plan can follow since the last check.
     private fun jumped(position: Long, speed: Float): Boolean {

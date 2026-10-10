@@ -86,6 +86,7 @@ class OctoPlayer(
     soundOf: (ExoPlayer) -> DeckSound? = { null },
     scout: Scout? = null,
     profiles: ProfileSource? = null,
+    lengths: RealLengths = RealLengths(),
 ) : ForwardingSimpleBasePlayer(initial), SleepTarget, EditableQueue {
     var deck: ExoPlayer = initial
         private set
@@ -95,7 +96,7 @@ class OctoPlayer(
     // During a crossfade: the deck playing out the old song.
     private var outgoing: ExoPlayer? = null
 
-    private val fader = Crossfader(this, spare, soundOf, scout, profiles).also(::addListener)
+    private val fader = Crossfader(this, spare, soundOf, scout, profiles, lengths).also(::addListener)
 
     // Both decks, whichever is playing, so speed and skipping silence can be
     // set on each and a crossfade hands over at the same pace.

@@ -231,7 +231,7 @@ private fun OutsideSong(app: AppState, songs: List<Song>, index: Int, song: Song
             MarkedTitle(song, OctoType.bodySmall) { Txt(song.title, OctoType.bodySmall, modifier = it) }
             Txt(listOfNotNull(song.displayArtist ?: song.artist, song.album).joinToString(" · "), OctoType.caption, OctoColors.TextMuted)
         }
-        Txt(lengthText((knownLengthMs(song) / 1000).toInt()), OctoType.caption, OctoColors.TextMuted, Modifier.width(52.dp))
+        Txt(lengthText(app.realSeconds(song) ?: (knownLengthMs(song) / 1000).toInt()), OctoType.caption, OctoColors.TextMuted, Modifier.width(52.dp))
         FetchButton(app, song)
         FetchProblem(app, song)
     }
