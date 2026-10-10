@@ -118,7 +118,7 @@ fun LyricsPage(onBack: () -> Unit, highlight: String?, vm: LyricsSettingsViewMod
     val outputTiming by vm.outputTiming.collectAsStateWithLifecycle()
     val sheet = LocalChoiceSheet.current
 
-    SettingsPageFrame("Lyrics", onBack, highlight, icon = OctoIcons.Lyrics) {
+    SettingsPageFrame("Lyrics", onBack, highlight) {
         SettingsGroup {
             SwitchRow(
                 SettingsIndex.LyricsOnline,

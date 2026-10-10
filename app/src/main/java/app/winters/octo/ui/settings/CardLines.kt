@@ -20,7 +20,7 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.OctoType
-import app.winters.octo.design.glassPanel
+import app.winters.octo.design.raisedPanel
 
 // A titled card with lines, as the Sound page draws its parts. The settings
 // pages use the rows in `rows/` instead.
@@ -33,7 +33,7 @@ internal fun Card(title: String, modifier: Modifier = Modifier, content: @Compos
         modifier
             .padding(horizontal = 20.dp)
             .fillMaxWidth()
-            .glassPanel(CardShape)
+            .raisedPanel(CardShape)
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {

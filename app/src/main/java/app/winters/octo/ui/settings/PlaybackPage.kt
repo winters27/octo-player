@@ -75,7 +75,7 @@ fun PlaybackPage(onBack: () -> Unit, highlight: String?, vm: PlaybackViewModel =
     var speedOpen by rememberSaveable { mutableStateOf(false) }
     val sheet = LocalChoiceSheet.current
 
-    SettingsPageFrame("Playback", onBack, highlight, icon = OctoIcons.Playback) {
+    SettingsPageFrame("Playback", onBack, highlight) {
         SettingsGroup {
             SwitchRow(
                 SettingsIndex.Crossfade,

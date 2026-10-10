@@ -1,6 +1,7 @@
 package app.winters.octo.design
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.dropShadow
@@ -21,6 +22,17 @@ fun Modifier.glassPanel(shape: Shape): Modifier = this
     .background(OctoColors.BackgroundSecondary)
     // Light along the top edge only.
     .innerShadow(shape, Shadow(radius = 0.dp, color = Color.White.copy(alpha = 0.08f), offset = DpOffset(0.dp, 1.dp)))
+
+// A panel that holds rows to read and change, as settings do: a solid
+// surface a clear step up from the page, with a faint rim, so each group
+// stands apart and the lines between its rows show.
+fun Modifier.raisedPanel(shape: Shape): Modifier = this
+    .dropShadow(shape, Shadow(radius = 0.dp, spread = 0.5.dp, color = Color.Black.copy(alpha = 0.40f)))
+    .elevation1(shape)
+    .clip(shape)
+    .background(OctoColors.SurfaceRaised)
+    .border(1.dp, Color.White.copy(alpha = 0.06f), shape)
+    .innerShadow(shape, Shadow(radius = 0.dp, color = Color.White.copy(alpha = 0.06f), offset = DpOffset(0.dp, 1.dp)))
 
 // The lowest rung of the shadow ladder: a tight contact shadow, then a
 // softer one.

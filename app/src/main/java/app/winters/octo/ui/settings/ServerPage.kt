@@ -172,7 +172,7 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
 
     val kept by vm.servers.collectAsStateWithLifecycle()
 
-    SettingsPageFrame("Server and sync", onBack, highlight, icon = OctoIcons.Cloud) {
+    SettingsPageFrame("Server and sync", onBack, highlight) {
         // Once a server is kept, the list of them leads the page.
         if (state !is SessionState.Loading && kept.servers.isNotEmpty()) ServerList(vm, onOpen, onChangePassword = { changing = true })
         when (val current = state) {

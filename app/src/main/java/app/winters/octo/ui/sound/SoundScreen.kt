@@ -40,7 +40,7 @@ import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.OctoType
-import app.winters.octo.design.glassPanel
+import app.winters.octo.design.raisedPanel
 import app.winters.octo.sound.EqFilter
 import app.winters.octo.sound.EqMode
 import app.winters.octo.sound.EqPresets
@@ -153,7 +153,7 @@ private fun SwitchCard(
         Modifier
             .padding(horizontal = 20.dp)
             .fillMaxWidth()
-            .glassPanel(CardShape)
+            .raisedPanel(CardShape)
             .padding(horizontal = 16.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {

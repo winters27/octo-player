@@ -99,7 +99,7 @@ fun AboutPage(onBack: () -> Unit, highlight: String?) {
         onPauseOrDispose { }
     }
 
-    SettingsPageFrame("About", onBack, highlight, icon = OctoIcons.Info) {
+    SettingsPageFrame("About", onBack, highlight) {
         SettingsGroup {
             InfoRow(SettingsIndex.Version, BuildConfig.VERSION_NAME)
             state.ready?.let { ready ->

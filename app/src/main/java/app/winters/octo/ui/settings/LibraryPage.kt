@@ -54,7 +54,7 @@ fun LibraryPage(onBack: () -> Unit, highlight: String?, vm: LibrarySettingsViewM
     val requestAccess = rememberAccessRequest(vm.library, access)
     val granted = access == Access.Granted
 
-    SettingsPageFrame("Library", onBack, highlight, icon = OctoIcons.Library) {
+    SettingsPageFrame("Library", onBack, highlight) {
         SettingsGroup(title = "Music on this phone", icon = OctoIcons.Phone) {
             if (granted) {
                 InfoRow(SettingsIndex.PhoneAccess, "Allowed")

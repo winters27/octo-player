@@ -112,7 +112,7 @@ fun ScrobblingPage(onBack: () -> Unit, highlight: String?, vm: ScrobblingViewMod
     val sheet = LocalChoiceSheet.current
     val modes = SendPlays.entries
 
-    SettingsPageFrame("Scrobbling", onBack, highlight, icon = OctoIcons.Scrobbling) {
+    SettingsPageFrame("Scrobbling", onBack, highlight) {
         SettingsGroup(title = "ListenBrainz", icon = OctoIcons.ListenBrainz, brand = true) {
             SwitchRow(
                 SettingsIndex.ListenBrainz,

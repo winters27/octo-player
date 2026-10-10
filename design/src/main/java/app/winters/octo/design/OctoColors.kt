@@ -17,6 +17,9 @@ object OctoColors {
     // The solid surface under cards and glazed controls.
     val BackgroundTertiary = Color(0xFF1A1A1B)
     val Accent = Color(0xFF97B1B9)
+    // A raised surface for rows to read and change: the solid grey with a
+    // touch of the accent, a clear step up from the page.
+    val SurfaceRaised = mix(Color(0xFF1A1A1B), Color(0xFF97B1B9), 0.06f)
     val AccentHover = Color(0xFFADC4CC)
     val TextPrimary = Color.White
     val TextSecondary = Accent
