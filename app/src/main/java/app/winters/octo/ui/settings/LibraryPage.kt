@@ -11,6 +11,8 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.device.Access
 import app.winters.octo.device.DEVICE
 import app.winters.octo.device.DeviceLibrary
+import app.winters.octo.discovery.LIBRARY_ONLY_HELP
+import app.winters.octo.player.PlayerSettings
 import app.winters.octo.ui.common.accessButtonLabel
 import app.winters.octo.ui.common.rememberAccessRequest
 import app.winters.octo.ui.settings.rows.ActionRow
@@ -23,6 +25,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -30,7 +33,16 @@ import kotlinx.coroutines.launch
 class LibrarySettingsViewModel @Inject constructor(
     val library: DeviceLibrary,
     dao: CatalogDao,
+    private val player: PlayerSettings,
 ) : ViewModel() {
+    // Whether songs found online are left out everywhere.
+    val libraryOnly: StateFlow<Boolean> =
+        player.prefs.map { it.libraryOnly }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun setLibraryOnly(on: Boolean) {
+        viewModelScope.launch { player.setLibraryOnly(on) }
+    }
+
     val songCount: StateFlow<Int> =
         dao.trackCount(DEVICE).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
@@ -51,6 +63,7 @@ fun LibraryPage(onBack: () -> Unit, highlight: String?, vm: LibrarySettingsViewM
     val scanning by vm.library.scanning.collectAsStateWithLifecycle()
     val count by vm.songCount.collectAsStateWithLifecycle()
     val folders by vm.library.folders.collectAsStateWithLifecycle()
+    val libraryOnly by vm.libraryOnly.collectAsStateWithLifecycle()
     val requestAccess = rememberAccessRequest(vm.library, access)
     val granted = access == Access.Granted
 
@@ -70,6 +83,9 @@ fun LibraryPage(onBack: () -> Unit, highlight: String?, vm: LibrarySettingsViewM
                 enabled = granted,
                 chevron = false,
             )
+        }
+        SettingsGroup(title = "Songs found online", icon = OctoIcons.AddToLibrary) {
+            SwitchRow(SettingsIndex.LibraryOnly, libraryOnly, vm::setLibraryOnly, helper = LIBRARY_ONLY_HELP)
         }
         if (folders.isNotEmpty()) {
             SettingsGroup(title = SettingsIndex.MusicFolders.title, icon = OctoIcons.Folder) {

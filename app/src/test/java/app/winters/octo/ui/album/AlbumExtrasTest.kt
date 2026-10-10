@@ -14,6 +14,19 @@ class AlbumExtrasTest {
         genre = genre, rating = rating,
     )
 
+    // With "Library songs only" (or the album's own toggle) the page lists
+    // only its library songs, and a row's place in that list is the song
+    // that plays.
+    @Test
+    fun onlyLibrarySongsAreListedAndEachPlaysItself() {
+        val album = listOf(track("1"), track("find:2"), track("3"), track("find:4"), track("5"))
+        val shown = albumSongsShown(album, libraryOnly = true)
+        assertEquals(listOf("1", "3", "5"), shown.map { it.id })
+        assertEquals("5", shown[shown.indexOf(album[4])].id)
+        assertEquals(2, shown.indexOf(album[4]))
+        assertEquals(album, albumSongsShown(album, libraryOnly = false))
+    }
+
     @Test
     fun theGenreIsTheOneMostSongsHave() {
         assertEquals("Synthpop", albumGenre(listOf(track("1", "Synthpop"), track("2", "Rock"), track("3", "synthpop"))))

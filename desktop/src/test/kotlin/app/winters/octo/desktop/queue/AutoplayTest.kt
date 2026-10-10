@@ -156,6 +156,24 @@ class AutoplayTest {
         }
     }
 
+    // "Library songs only": the server's songs found online are left out.
+    @Test
+    fun libraryOnlyLeavesOutTheServersFinds() = runBlocking {
+        FakeServer().use { server ->
+            server.answer(
+                "getSimilarSongs2",
+                """"similarSongs2":{"song":[{"id":"ext1","title":"Out","genre":"Rock","isExternal":true},{"id":"g1","title":"G1","genre":"Rock"}]}""",
+            )
+            val seed = Song("seed", "Seed", artistId = "r1", genre = "Rock")
+            val client = server.connection().client
+            val all = autoplaySongs(seed, setOf("a1", "a2"), client = client, index = library).map { it.id }
+            assertTrue("ext1" in all)
+            val mine = autoplaySongs(seed, setOf("a1", "a2"), client = client, index = library, libraryOnly = true).map { it.id }
+            assertTrue("ext1" !in mine)
+            assertTrue("g1" in mine)
+        }
+    }
+
     @Test
     fun withNothingAlikeAnySongFromTheLibraryWillDo() = runBlocking {
         val seed = Song("seed", "Seed", artistId = "r9", genre = "Folk")

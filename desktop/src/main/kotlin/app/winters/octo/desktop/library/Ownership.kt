@@ -2,6 +2,7 @@ package app.winters.octo.desktop.library
 
 import app.winters.octo.desktop.search.FetchPhase
 import app.winters.octo.desktop.system.isOpenedFile
+import app.winters.octo.discovery.librarySongsOnly
 import app.winters.octo.subsonic.Song
 
 // Whether a song is one the server found online rather than a file in the
@@ -24,6 +25,16 @@ fun outsideIds(songs: List<Song>, index: LibraryIndex?, canFetch: Boolean): Set<
         .filter { if (marked) it.isExternal && !isOpenedFile(it.id) else isOutsideSong(it, index, canFetch) }
         .mapTo(HashSet()) { it.id }
 }
+
+// A list's songs as "Library songs only" leaves them: with `hide`, none
+// of those `outside` names, in their order.
+fun librarySongs(songs: List<Song>, outside: Set<String>, hide: Boolean): List<Song> =
+    librarySongsOnly(songs, hide) { it.id in outside }
+
+// Songs from the server (a radio's, top songs) as "Library songs only"
+// leaves them: with `hide`, only those in the library.
+fun libraryOnlySongs(songs: List<Song>, index: LibraryIndex?, hide: Boolean): List<Song> =
+    librarySongsOnly(songs, hide) { isOutsideSong(it, index, canFetch = true) }
 
 // The quiet line under an album's heading while some of its songs are not
 // in the library, and the action that adds the ones that can be asked for.

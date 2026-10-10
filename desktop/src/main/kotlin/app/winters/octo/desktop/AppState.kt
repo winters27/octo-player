@@ -291,6 +291,7 @@ class AppState(
                 autoplaySongs(
                     seed, exclude, connection?.client, library?.index, before, anchors,
                     rating = { ratingOf(it) }, tuning = settings.current.playback.radioTuning,
+                    libraryOnly = settings.current.libraryOnly,
                 )
             }
         },
@@ -401,7 +402,7 @@ class AppState(
         return ServerViews(
             store,
             if (connection.acquires) Fetches(connection.client, scope, onArrived = { store.load() }, onAsked = { downloads?.wake() }) else null,
-            SearchModel(connection, { store.index }, { playlists }, scope),
+            SearchModel(connection, { store.index }, { playlists }, scope, { settings.current.libraryOnly }),
             HomeStore(connection, scope),
             // Any Octo server: whether it can look for FLACs is asked live,
             // since the extensions saved at sign-in may be older than it.

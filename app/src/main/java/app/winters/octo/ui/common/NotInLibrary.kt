@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.math.sqrt
 
@@ -50,12 +51,27 @@ val LocalAdoptions = compositionLocalOf<Map<String, String>?> { null }
 // Where a find's row follows the library song it became.
 val LocalAdoptedSongs = staticCompositionLocalOf<AdoptedSongs?> { null }
 
+// Whether songs found online are left out everywhere ("Library songs
+// only"), and how to switch it from a screen.
+val LocalLibraryOnly = compositionLocalOf { false }
+val LocalSetLibraryOnly = staticCompositionLocalOf<(Boolean) -> Unit> { {} }
+
 @HiltViewModel
 class AdoptedFindsViewModel @Inject constructor(
     downloads: Downloads,
-    player: PlayerSettings,
+    private val player: PlayerSettings,
     val songs: AdoptedSongs,
 ) : ViewModel() {
+    // "Library songs only", for every screen.
+    val libraryOnly: StateFlow<Boolean> = player.prefs
+        .map { it.libraryOnly }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun setLibraryOnly(on: Boolean) {
+        viewModelScope.launch { player.setLibraryOnly(on) }
+    }
+
     val adopted: StateFlow<Set<String>> = downloads.phases
         .map(::adoptedFinds)
         .distinctUntilChanged()
@@ -76,7 +92,10 @@ fun ProvideAdoptedFinds(vm: AdoptedFindsViewModel = hiltViewModel(), content: @C
     val adopted by vm.adopted.collectAsStateWithLifecycle()
     val adoptions by vm.adoptions.collectAsStateWithLifecycle()
     val appCalm by vm.reduceMotion.collectAsStateWithLifecycle()
+    val libraryOnly by vm.libraryOnly.collectAsStateWithLifecycle()
     CompositionLocalProvider(
+        LocalLibraryOnly provides libraryOnly,
+        LocalSetLibraryOnly provides vm::setLibraryOnly,
         LocalAdoptedFinds provides adopted,
         LocalAdoptions provides adoptions,
         LocalAdoptedSongs provides vm.songs,

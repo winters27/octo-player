@@ -6,6 +6,7 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -140,19 +141,26 @@ fun GlazeCapsule(
 // A quiet action in words: accent text that lifts under the pointer, with
 // no border and no fill.
 @Composable
-fun TextAction(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, icon: ImageVector? = null) {
+fun TextAction(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, icon: ImageVector? = null, checked: Boolean? = null) {
+    // With `checked` it is a switch, in white while on.
+    val press = if (checked == null) {
+        Modifier.clickable(interactionSource = null, indication = FocusRing(CircleShape), enabled = enabled, role = Role.Button, onClick = onClick)
+    } else {
+        Modifier.toggleable(checked, interactionSource = null, indication = FocusRing(CircleShape), enabled = enabled, role = Role.Switch, onValueChange = { onClick() })
+    }
+    val tint = if (checked == true) OctoColors.TextPrimary else OctoColors.TextSecondary
     Row(
         modifier
             .alpha(if (enabled) 1f else 0.5f)
             .hoverLift(CircleShape, clickable = enabled)
             .tabStop(LocalTabStops.current)
-            .clickable(interactionSource = null, indication = FocusRing(CircleShape), enabled = enabled, role = Role.Button, onClick = onClick)
+            .then(press)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        if (icon != null) Glyph(icon, size = 16.dp, tint = OctoColors.TextSecondary)
-        Txt(text, OctoType.label, OctoColors.TextSecondary)
+        if (icon != null) Glyph(icon, size = 16.dp, tint = tint)
+        Txt(text, OctoType.label, tint)
     }
 }
 

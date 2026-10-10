@@ -105,6 +105,26 @@ class SearchTest {
         assertEquals(listOf("e-wattba"), splitResults(sent, "drake", SearchFilter.Albums, emptyList(), library, outsideOn = true).outside.partAlbums.map { it.id })
     }
 
+    // "Library songs only": what was found online is hidden, never merged
+    // in among the library's.
+    @Test
+    fun libraryOnlyHidesWhatWasFoundOnline() {
+        val found = splitResults(sent, "radiohead", SearchFilter.All, emptyList(), library, outsideOn = true, hideOutside = true)
+        assertEquals(listOf("lib1"), found.library.songs.map { it.id })
+        assertEquals(listOf("alb1"), found.library.albums.map { it.id })
+        assertEquals(listOf("art1"), found.library.artists.map { it.id })
+        assertTrue(found.outside.isEmpty)
+        // Where they would otherwise count as the library's, marked finds go too.
+        val marked = sent.copy(
+            album = listOf(Album("alb1", "OK Computer"), Album("ext-alb", "Kid A Mnesia", isExternal = true)),
+            song = listOf(Song("lib1", "Karma Police"), Song("ext1", "Lift", isExternal = true)),
+        )
+        val plain = splitResults(marked, "radiohead", SearchFilter.All, emptyList(), library, outsideOn = false, hideOutside = true)
+        assertEquals(listOf("lib1"), plain.library.songs.map { it.id })
+        assertEquals(listOf("alb1"), plain.library.albums.map { it.id })
+        assertTrue(plain.outside.isEmpty)
+    }
+
     @Test
     fun anyOtherServerShowsEverythingAsTheLibrary() {
         val found = splitResults(sent, "radiohead", SearchFilter.All, emptyList(), library, outsideOn = false)

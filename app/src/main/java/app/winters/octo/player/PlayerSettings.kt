@@ -82,6 +82,9 @@ data class PlayerPrefs(
     // casting ends by itself (otherwise it pauses).
     val castRenderers: Boolean = true,
     val castKeepPlaying: Boolean = false,
+    // Only songs in the library: albums, search, artists and radio leave
+    // out songs found online.
+    val libraryOnly: Boolean = false,
 ) {
     // What the player uses: the longest blend, or 0 for none.
     val crossfadeMs: Long get() = if (crossfade) crossfadeSeconds * 1_000L else 0
@@ -157,6 +160,7 @@ private val BACKGROUND_SPEED = intPreferencesKey("immersive_bg_speed")
 private val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
 private val CAST_RENDERERS = booleanPreferencesKey("cast_renderers")
 private val CAST_KEEP_PLAYING = booleanPreferencesKey("cast_keep_playing")
+private val LIBRARY_ONLY = booleanPreferencesKey("library_only")
 
 // A saved choice, or the default when nothing (or something unknown) is saved.
 private inline fun <reified T : Enum<T>> choice(name: String?, default: T): T =
@@ -208,6 +212,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             reduceMotion = stored[REDUCE_MOTION] ?: defaults.reduceMotion,
             castRenderers = stored[CAST_RENDERERS] ?: defaults.castRenderers,
             castKeepPlaying = stored[CAST_KEEP_PLAYING] ?: defaults.castKeepPlaying,
+            libraryOnly = stored[LIBRARY_ONLY] ?: defaults.libraryOnly,
         )
     }
 
@@ -345,6 +350,10 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
         context.playerPrefs.edit { it[CAST_KEEP_PLAYING] = on }
     }
 
+    suspend fun setLibraryOnly(on: Boolean) {
+        context.playerPrefs.edit { it[LIBRARY_ONLY] = on }
+    }
+
     // Everything at once, for a backup.
     suspend fun snapshot(): Pair<PlayerPrefs, StreamPrefs> = prefs.first() to streamPrefs.first()
 
@@ -381,6 +390,7 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             it[REDUCE_MOTION] = player.reduceMotion
             it[CAST_RENDERERS] = player.castRenderers
             it[CAST_KEEP_PLAYING] = player.castKeepPlaying
+            it[LIBRARY_ONLY] = player.libraryOnly
             it[COPIES] = stream.copies.name
             it[STREAM_WIFI] = stream.wifi.name
             it[STREAM_MOBILE] = stream.mobile.name

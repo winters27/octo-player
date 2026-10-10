@@ -46,6 +46,7 @@ import app.winters.octo.desktop.library.SongColumn
 import app.winters.octo.desktop.library.appearsOn
 import app.winters.octo.desktop.library.coverBucket
 import app.winters.octo.desktop.library.coverKey
+import app.winters.octo.desktop.library.librarySongs
 import app.winters.octo.desktop.library.monogramOf
 import app.winters.octo.desktop.library.songsAlbumByAlbum
 import app.winters.octo.desktop.library.sortAlbums
@@ -61,6 +62,7 @@ import app.winters.octo.desktop.ui.PageSide
 import app.winters.octo.desktop.ui.SongTable
 import app.winters.octo.desktop.ui.rememberListState
 import app.winters.octo.desktop.ui.rememberLoad
+import app.winters.octo.desktop.ui.rememberOutside
 import app.winters.octo.desktop.ui.rowHeightFor
 import app.winters.octo.desktop.ui.show
 import app.winters.octo.discovery.cleanBiography
@@ -135,6 +137,10 @@ private suspend fun loadArtist(connection: Connection, id: String): ArtistView =
 private fun ArtistBody(app: AppState, id: String, fallbackName: String, artist: ArtistView, list: androidx.compose.foundation.lazy.LazyListState) {
     val name = artist.name.ifEmpty { fallbackName }
     val index = rememberIndex(app)
+    // Top songs found online are left out with "Library songs only" on.
+    val settings by app.settings.state.collectAsState()
+    val topOutside = rememberOutside(app, artist.top)
+    val top = remember(artist, topOutside, settings.libraryOnly) { librarySongs(artist.top, topOutside, settings.libraryOnly) }
     val own = remember(artist) { artist.albums.mapTo(HashSet()) { it.id } }
     // Albums by others they are on, from the library's songs, worked out
     // away from the window's thread.
@@ -222,7 +228,7 @@ private fun ArtistBody(app: AppState, id: String, fallbackName: String, artist: 
             page.item("jump") {
                 JumpLinks(
                     buildList {
-                        if (artist.top.isNotEmpty()) add("Top songs" to { jump("top-title") })
+                        if (top.isNotEmpty()) add("Top songs" to { jump("top-title") })
                         groups.forEach { (group, _) -> add(group.title to { jump("group-${group.name}") }) }
                         if (artist.similar.isNotEmpty()) add("Similar artists" to { jump("similar-title") })
                         if (artist.albums.isNotEmpty()) add("All songs" to { jump("all-title") })
@@ -230,18 +236,18 @@ private fun ArtistBody(app: AppState, id: String, fallbackName: String, artist: 
                 )
             }
             artist.about?.let { about -> page.item("about") { Biography(about) } }
-            if (artist.top.isNotEmpty()) {
+            if (top.isNotEmpty()) {
                 page.item("top-title") {
                     GroupTitle(
                         "Top songs",
                         action = when {
-                            artist.top.size <= TOP_SHOWN -> null
+                            top.size <= TOP_SHOWN -> null
                             topAll -> "Show fewer"
-                            else -> "Show all ${artist.top.size}"
+                            else -> "Show all ${top.size}"
                         },
                     ) { topAll = !topAll }
                 }
-                page.item("top") { TopSongs(app, if (topAll) artist.top else artist.top.take(TOP_SHOWN)) }
+                page.item("top") { TopSongs(app, if (topAll) top else top.take(TOP_SHOWN)) }
             }
             if (groups.isEmpty()) {
                 page.item("no-albums") {

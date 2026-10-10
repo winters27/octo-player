@@ -1,6 +1,7 @@
 package app.winters.octo.desktop
 
 import app.winters.octo.desktop.library.LibraryIndex
+import app.winters.octo.desktop.library.libraryOnlySongs
 import app.winters.octo.desktop.library.sortAlbums
 import app.winters.octo.desktop.queue.radioName
 import app.winters.octo.desktop.server.userMessage
@@ -128,7 +129,7 @@ fun AppState.startRadioFrom(first: Song, seeds: List<Song>, exclude: Set<String>
     val index = library?.index
     scope.launch {
         val similar = try {
-            client.similarSongs(first.id, settings.current.playback.radioTuning.suggestions)
+            libraryOnlySongs(client.similarSongs(first.id, settings.current.playback.radioTuning.suggestions), index, settings.state.value.libraryOnly)
         } catch (e: SubsonicException) {
             emptyList()
         }
@@ -145,8 +146,9 @@ fun AppState.startArtistRadio(artistId: String, name: String) {
     val client = connection.client
     val index = library?.index
     scope.launch {
+        val libraryOnly = settings.state.value.libraryOnly
         val similar = try {
-            client.similarSongs(artistId, settings.current.playback.radioTuning.suggestions)
+            libraryOnlySongs(client.similarSongs(artistId, settings.current.playback.radioTuning.suggestions), index, libraryOnly)
         } catch (e: SubsonicException) {
             emptyList()
         }
@@ -154,16 +156,17 @@ fun AppState.startArtistRadio(artistId: String, name: String) {
             .ifEmpty {
                 try {
                     val byId = connection.supports("topSongsByArtistId")
-                    client.topSongs(name, RADIO_SONGS, if (byId) artistId else null)
+                    libraryOnlySongs(client.topSongs(name, RADIO_SONGS, if (byId) artistId else null), index, libraryOnly)
                 } catch (e: SubsonicException) {
                     emptyList()
                 }
             }
-        // Only my library: with none of the artist's songs to open with, the
-        // radio opens with a library song, not one found online.
-        val libraryOnly = settings.current.playback.radioTuning.discovery == RadioDiscovery.LibraryOnly
+        // Only my library, or Library songs only: with none of the artist's
+        // songs to open with, the radio opens with a library song, not one
+        // found online.
+        val ownedOnly = libraryOnly || settings.current.playback.radioTuning.discovery == RadioDiscovery.LibraryOnly
         val owned = index?.songs?.mapTo(HashSet()) { it.id }.orEmpty()
-        val first = radioSeed(own) ?: radioPicks(null, similar).firstOrNull { !libraryOnly || it.id in owned }
+        val first = radioSeed(own) ?: radioPicks(null, similar).firstOrNull { !ownedOnly || it.id in owned }
         if (first == null) {
             notice = "Couldn't find songs like $name"
             return@launch

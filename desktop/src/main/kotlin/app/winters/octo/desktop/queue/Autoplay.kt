@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.queue
 
 import app.winters.octo.desktop.library.LibraryIndex
+import app.winters.octo.desktop.library.libraryOnlySongs
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.RepeatMode
@@ -122,7 +123,8 @@ class Autoplay(
 // `before`. When the radio finds nothing (a seed with no genre and no
 // server answer), the old rules: the library's songs by the same artist,
 // then in the same genre, else any from the library. Never one in
-// `exclude` or played lately.
+// `exclude` or played lately. With `libraryOnly`, the server's songs found
+// online are left out.
 suspend fun autoplaySongs(
     seed: Song,
     exclude: Set<String>,
@@ -134,11 +136,12 @@ suspend fun autoplaySongs(
     tuning: RadioTuning = RadioTuning(),
     now: Long = System.currentTimeMillis(),
     random: Random = Random.Default,
+    libraryOnly: Boolean = false,
 ): List<Song> {
     val recent = index?.history?.take(RECENT_PLAYS)?.map { it.id }.orEmpty()
     val skip = exclude + recent + seed.id
     val similar = try {
-        client?.similarSongs(seed.id, tuning.suggestions).orEmpty()
+        libraryOnlySongs(client?.similarSongs(seed.id, tuning.suggestions).orEmpty(), index, libraryOnly)
     } catch (e: SubsonicException) {
         emptyList()
     }

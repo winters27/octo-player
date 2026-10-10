@@ -1,5 +1,6 @@
 package app.winters.octo.ui.settings
 
+import app.winters.octo.discovery.LIBRARY_ONLY_SETTING
 import app.winters.octo.playback.START_AFTER_SETTING
 
 import app.winters.octo.covers.PLAYLIST_COVERS_SETTING
@@ -226,6 +227,10 @@ object SettingsIndex {
     val Rescan = add(
         "rescan", SettingsPage.Library, "Rescan", "Look for new music on this phone",
         listOf("scan", "refresh", "find", "update", "new music"), section = "Music on this phone",
+    )
+    val LibraryOnly = add(
+        "library_only", SettingsPage.Library, LIBRARY_ONLY_SETTING, "Leave songs found online out of albums, search, artists and radio",
+        listOf("outside", "online", "found", "hide", "only", "my songs", "not in library", "discover"), section = "Songs found online",
     )
     val MusicFolders = add(
         "music_folders", SettingsPage.Library, "Music folders", "Leave a folder's music out of your library",

@@ -90,6 +90,8 @@ import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.design.chromeFilm
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.setLibraryOnly
+import app.winters.octo.discovery.LIBRARY_ONLY_SETTING
 import app.winters.octo.desktop.NoticeAction
 import app.winters.octo.desktop.actionFor
 import app.winters.octo.desktop.library.Cover
@@ -400,6 +402,16 @@ private fun TitleBar(app: AppState, frame: Frame?, onClose: () -> Unit) {
         if (app.connection != null) {
             IconAction(OctoIcons.Back, "Back", { app.navigator.back() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.navigator.canGoBack)
             IconAction(OctoIcons.Forward, "Forward", { app.navigator.forward() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.navigator.canGoForward)
+            val settings by app.settings.state.collectAsState()
+            IconAction(
+                OctoIcons.Library,
+                LIBRARY_ONLY_SETTING,
+                { app.setLibraryOnly(!settings.libraryOnly) },
+                size = ControlHeight.S,
+                iconSize = IconSize.Toolbar,
+                active = settings.libraryOnly,
+                toggled = settings.libraryOnly,
+            )
         }
         Box(Modifier.weight(1f).fillMaxHeight().then(if (frame != null) Modifier.dragsWindow(frame) else Modifier))
         if (frame != null) WindowButtons(frame, onClose)

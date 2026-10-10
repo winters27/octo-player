@@ -84,6 +84,9 @@ data class AppSettings(
     val trustedCertificates: Map<String, String> = emptyMap(),
     // Looking for new versions of Octo, and how they are put in.
     val updates: UpdatePrefs = UpdatePrefs(),
+    // Only songs in the library: albums, search, artists and radio leave
+    // out songs found online.
+    val libraryOnly: Boolean = false,
 )
 
 // A song table as the listener set it up: the columns shown, in order (by

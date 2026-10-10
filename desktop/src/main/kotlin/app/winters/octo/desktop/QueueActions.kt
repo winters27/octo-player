@@ -91,3 +91,9 @@ fun AppState.saveQueueAsPlaylist(name: String) {
 }
 
 fun AppState.setAutoplay(on: Boolean) = settings.update { it.copy(playback = it.playback.copy(autoplay = on)) }
+
+// "Library songs only": songs found online are left out everywhere.
+fun AppState.setLibraryOnly(on: Boolean) {
+    settings.update { it.copy(libraryOnly = on) }
+    search?.again()
+}

@@ -31,6 +31,9 @@ import app.winters.octo.design.RowHeight
 import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.setLibraryOnly
+import app.winters.octo.discovery.LIBRARY_ONLY_HELP
+import app.winters.octo.discovery.LIBRARY_ONLY_SETTING
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.nav.shortcutList
@@ -198,6 +201,7 @@ private fun PlaybackRows(app: AppState, settings: AppSettings) {
         ChoiceRow(START_AFTER_SETTING, START_AFTER_HELP, StartAfter.entries, settings.playback.startAfter, { it.label }) { wait ->
             app.settings.update { it.copy(playback = it.playback.copy(startAfter = wait)) }
         }
+        SwitchRow(LIBRARY_ONLY_SETTING, LIBRARY_ONLY_HELP, settings.libraryOnly) { on -> app.setLibraryOnly(on) }
         ActionRow("Equalizer, loudness, crossfade and speed", null, "Open Sound", { app.navigator.go(Page.Sound) })
     }
     val playback = settings.playback

@@ -69,7 +69,12 @@ import app.winters.octo.ui.common.Pickable
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistCircle
 import app.winters.octo.ui.common.ArtistRow
+import app.winters.octo.discovery.LIBRARY_ONLY_SETTING
+import app.winters.octo.discovery.inLibraryOnly
+import app.winters.octo.ui.common.LocalLibraryOnly
+import app.winters.octo.ui.common.LocalSetLibraryOnly
 import app.winters.octo.ui.common.NotInLibraryText
+import app.winters.octo.ui.library.FilterChip
 import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.SectionTitle
@@ -93,8 +98,13 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
     val discover by vm.discover.collectAsStateWithLifecycle()
     val recent by vm.recent.collectAsStateWithLifecycle()
     val addHint by vm.addHint.collectAsStateWithLifecycle()
-    val top by vm.topSongs.collectAsStateWithLifecycle()
-    val chart by vm.chart.collectAsStateWithLifecycle()
+    val anyTop by vm.topSongs.collectAsStateWithLifecycle()
+    val anyChart by vm.chart.collectAsStateWithLifecycle()
+    // "Library songs only" leaves out what the server found online.
+    val libraryOnly = LocalLibraryOnly.current
+    val setLibraryOnly = LocalSetLibraryOnly.current
+    val top = if (libraryOnly) anyTop?.inLibraryOnly() else anyTop
+    val chart = if (libraryOnly) anyChart?.inLibraryOnly() else anyChart
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 120.dp
     val keyboard = LocalSoftwareKeyboardController.current
     val list = rememberLazyListState()
@@ -127,10 +137,13 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
             onSelect = { pick(SearchFilter.entries[it]) },
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp),
         )
+        if (signedIn) {
+            FilterChip(LIBRARY_ONLY_SETTING, libraryOnly, Modifier.padding(start = 20.dp, top = 10.dp)) { setLibraryOnly(!libraryOnly) }
+        }
         val found = results
         // What the server found, of the kinds the filter shows, less any
         // song the library results already list.
-        val online = discover.only(filter).without(found?.listedFinds.orEmpty())
+        val online = if (libraryOnly) DiscoverState.Idle else discover.only(filter).without(found?.listedFinds.orEmpty())
         // Nothing to show online: not looking, or looked and found nothing.
         val nothingOnline = online is DiscoverState.Idle || (online is DiscoverState.Done && online.found.isEmpty)
         when {
