@@ -15,8 +15,11 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.FormBody
 import okhttp3.HttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -211,6 +214,31 @@ class SubsonicClient(
             ImportAnswer.serializer(),
             ImportAnswer(),
         )
+
+    // The services a person can bring their music from. Only for servers
+    // that list octoImports at OCTO_IMPORTS_FILES.
+    suspend fun importServices(): ImportServices =
+        get("getImportServices", key = "importServices", serializer = ImportServices.serializer(), default = ImportServices())
+
+    // Sends a list file (.txt, .csv, .json or .zip) for the server to read
+    // into lists. The answer is the server's, ok or not, in its own words.
+    suspend fun importFile(name: String, bytes: ByteArray): ImportAnswer {
+        val part = bytes.toRequestBody(importFileType(name))
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", name, part)
+            .build()
+        val request = Request.Builder().url(url("importFile", mapOf("name" to name))).post(body).build()
+        val answer = exchange(request, "importFile", patient)
+        return withContext(Dispatchers.Default) { decode(answer, "importAction", ImportAnswer.serializer(), ImportAnswer()) }
+    }
+
+    // A list typed or pasted as text, one song a line, for the server to
+    // read. Sent in a form body, since a list can be long.
+    suspend fun importText(name: String, text: String): ImportAnswer {
+        val answer = postForm("importText", listOf("name" to name, "text" to text), patient)
+        return withContext(Dispatchers.Default) { decode(answer, "importAction", ImportAnswer.serializer(), ImportAnswer()) }
+    }
 
     // One song, by its id on the server.
     suspend fun song(id: String): Song = get("getSong", mapOf("id" to id), "song", Song.serializer())
@@ -539,12 +567,12 @@ class SubsonicClient(
     // Sends the params in a form body rather than the address, and hands
     // back the answer once it is known to be ok. Only the sign-in is in the
     // address.
-    private suspend fun postForm(endpoint: String, params: List<Pair<String, String>>): String {
+    private suspend fun postForm(endpoint: String, params: List<Pair<String, String>>, http: OkHttpClient = this.http): String {
         val form = FormBody.Builder().apply { params.forEach { (key, value) -> add(key, value) } }.build()
-        return exchange(Request.Builder().url(url(endpoint)).post(form).build(), endpoint)
+        return exchange(Request.Builder().url(url(endpoint)).post(form).build(), endpoint, http)
     }
 
-    private suspend fun exchange(request: Request, endpoint: String): String {
+    private suspend fun exchange(request: Request, endpoint: String, http: OkHttpClient = this.http): String {
         val body = try {
             val response = http.newCall(request).await()
             withContext(Dispatchers.IO) {
@@ -764,3 +792,12 @@ internal suspend fun Call.await(): Response = suspendCancellableCoroutine { cont
         }
     })
 }
+
+// The type a list file is sent as, by its name's ending.
+internal fun importFileType(name: String) = when (name.substringAfterLast('.', "").lowercase()) {
+    "csv" -> "text/csv"
+    "json" -> "application/json"
+    "zip" -> "application/zip"
+    "txt" -> "text/plain"
+    else -> "application/octet-stream"
+}.toMediaType()

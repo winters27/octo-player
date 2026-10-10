@@ -8,6 +8,36 @@ import kotlinx.serialization.Serializable
 // field names below are the server's, so they decode by name.
 const val OCTO_IMPORTS = "octoImports"
 
+// The octoImports version that adds the services list and file and text
+// imports: getImportServices, importFile and importText.
+const val OCTO_IMPORTS_FILES = 2
+
+// The largest file importFile takes.
+const val IMPORT_FILE_MAX_BYTES = 64L * 1024 * 1024
+
+// The services a person can bring their music from, and whether the
+// server can also sign in to Spotify itself.
+@Serializable
+data class ImportServices(
+    val services: List<ImportServiceLink> = emptyList(),
+    // The owner set a Spotify client ID, so the Spotify sign-in works.
+    val spotifyConnect: Boolean = false,
+)
+
+// One service: its name, the page that exports its lists to a file, and
+// the words on that page's tile for it, since the page does not pick the
+// service by itself.
+@Serializable
+data class ImportServiceLink(
+    val id: String = "",
+    val name: String = "",
+    val exportUrl: String = "",
+    val tile: String = "",
+)
+
+// The service id the server gives Spotify.
+const val SPOTIFY_SERVICE = "spotify"
+
 // Everything the import view shows for the signed-in user.
 @Serializable
 data class ImportOverview(
