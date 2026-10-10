@@ -562,3 +562,27 @@ fn says_what_the_device_runs_at_and_what_the_song_is() {
     assert_eq!((info.sample_rate, info.channels, info.bits_per_sample), (44_100, 2, Some(16)));
     engine.shutdown();
 }
+
+#[test]
+fn the_decoders_length_stands_over_the_listed_one() {
+    let dir = temp_dir();
+    let a = dir.join("a.wav");
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 2, 0.3));
+    let (engine, events, _) = engine(1.0);
+    // Listed longer than the file is, as an outside song can be.
+    let mut x = item("a", &a);
+    x.duration_ms = Some(5_000);
+    engine.load(vec![x.clone()], 0, 0, true).unwrap();
+    events.wait_for("start", Duration::from_secs(10), |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    let until = Instant::now() + Duration::from_secs(5);
+    while engine.position().duration_ms != Some(2_000) {
+        assert!(Instant::now() < until, "length {:?}", engine.position().duration_ms);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The app handing the queue over again with the listed length does
+    // not bring the listed length back.
+    engine.replace_queue(vec![x], 0).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(engine.position().duration_ms, Some(2_000));
+    engine.shutdown();
+}
