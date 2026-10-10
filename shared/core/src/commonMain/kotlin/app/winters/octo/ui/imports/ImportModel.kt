@@ -11,12 +11,10 @@ import app.winters.octo.subsonic.ImportListDetail
 import app.winters.octo.subsonic.ImportOverview
 import app.winters.octo.subsonic.ImportServiceLink
 import app.winters.octo.subsonic.ImportServices
-import app.winters.octo.subsonic.OCTO_FAMILY
 import app.winters.octo.subsonic.OCTO_IMPORTS
 import app.winters.octo.subsonic.OCTO_IMPORTS_FILES
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
-import app.winters.octo.subsonic.family
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -212,7 +210,10 @@ class ImportModel(
             try {
                 val answer = call(client)
                 if (answer.ok) {
-                    step = ImportStep.Sent(answer.message, approvalFor(client))
+                    // The overview read after the send says whether the new lists wait for approval.
+                    refresh()
+                    step = ImportStep.Sent(answer.message, overview?.approvalLine())
+                    return@launch
                 } else {
                     said = answer.message.ifBlank { "The server could not read that file." }
                     step = ImportStep.Waiting(waiting)
@@ -223,13 +224,6 @@ class ImportModel(
             }
             refresh()
         }
-    }
-
-    // Who approves this member's downloads, when their lists wait for that.
-    private suspend fun approvalFor(client: SubsonicClient): String? = try {
-        if (client.supportsIfKnown(OCTO_FAMILY) == true && client.family().me.listsNeedApproval()) approvalLine(null) else null
-    } catch (e: SubsonicException) {
-        null
     }
 
     // Opens Spotify in the browser and waits for its answer on this device.

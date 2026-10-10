@@ -48,6 +48,16 @@ data class ImportOverview(
     // Why the server cannot tell which songs the library has, when it cannot.
     // Nothing is fetched until it can.
     val libraryProblem: String? = null,
+    // Set only for a family member whose missing songs wait for approval.
+    val approval: ImportApproval? = null,
+)
+
+// Who approves a family member's downloads before Octo fetches them.
+@Serializable
+data class ImportApproval(
+    val needed: Boolean = false,
+    // The approver's name; blank when the server has none.
+    val by: String? = null,
 )
 
 @Serializable

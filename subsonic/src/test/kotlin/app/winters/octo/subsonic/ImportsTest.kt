@@ -98,6 +98,24 @@ class ImportsTest {
         assertEquals(listOf(ImportSource.Unknown, ImportSource.File), lists.map { it.origin })
     }
 
+    @Test
+    fun theOverviewSaysWhoApprovesAFamilyMembersDownloads() = runBlocking {
+        answer(ok(""""imports":{"lists":[],"approval":{"needed":true,"by":"Sam","later":1}}"""))
+        assertEquals(ImportApproval(needed = true, by = "Sam"), client().imports().approval)
+        answer(ok(""""imports":{"lists":[],"approval":{"needed":true,"by":""}}"""))
+        assertEquals(ImportApproval(needed = true, by = ""), client().imports().approval)
+        answer(ok(""""imports":{"lists":[],"approval":{"needed":true}}"""))
+        assertEquals(ImportApproval(needed = true, by = null), client().imports().approval)
+    }
+
+    @Test
+    fun anOverviewWithoutApprovalReadsAsNone() = runBlocking {
+        answer(ok(""""imports":{"lists":[]}"""))
+        assertNull(client().imports().approval)
+        answer(ok(""""imports":{"lists":[],"approval":null}"""))
+        assertNull(client().imports().approval)
+    }
+
     // ---- Version 2: services, files and text ---------------------------------------------------
 
     @Test

@@ -1,8 +1,6 @@
 package app.winters.octo.ui.imports
 
-import app.winters.octo.subsonic.AddToLibrary
-import app.winters.octo.subsonic.FamilyMe
-import app.winters.octo.subsonic.FamilyRole
+import app.winters.octo.subsonic.ImportOverview
 import app.winters.octo.subsonic.ImportServiceLink
 import app.winters.octo.subsonic.SPOTIFY_SERVICE
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -100,12 +98,10 @@ const val NOT_A_LIST_FILE = "Octo reads lists from CSV, TXT, JSON or ZIP files."
 // Whether a Spotify tile also offers the sign-in that keeps lists updating.
 fun ImportServiceLink.offersSpotifySignIn(spotifyConnect: Boolean): Boolean = spotifyConnect && id == SPOTIFY_SERVICE
 
-// Whether this family member's lists wait for approval before Octo fetches
-// their missing songs: a member who asks for copies, whose asks are not
-// approved on their own.
-fun FamilyMe.listsNeedApproval(): Boolean =
-    managed && role != FamilyRole.Owner && abilities.addToLibrary == AddToLibrary.Request && !abilities.autoApprove
-
 // What a member reads once their lists are in and wait for approval.
 fun approvalLine(owner: String?): String =
     "Your lists are in. ${owner?.trim()?.takeIf(String::isNotEmpty) ?: "The owner"} approves downloads before Octo fetches the missing songs."
+
+// The approval line when the server says this member's downloads wait for
+// approval, else null.
+fun ImportOverview.approvalLine(): String? = approval?.takeIf { it.needed }?.let { approvalLine(it.by) }

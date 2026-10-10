@@ -1,8 +1,7 @@
 package app.winters.octo.ui.imports
 
-import app.winters.octo.subsonic.AddToLibrary
-import app.winters.octo.subsonic.FamilyAbilities
-import app.winters.octo.subsonic.FamilyMe
+import app.winters.octo.subsonic.ImportApproval
+import app.winters.octo.subsonic.ImportOverview
 import app.winters.octo.subsonic.ImportServiceLink
 import app.winters.octo.ui.family.FamilyFakeServer
 import kotlinx.coroutines.CoroutineScope
@@ -38,13 +37,9 @@ class GetMyMusicTest {
 
     private fun until(check: () -> Boolean) = runBlocking { withTimeout(5_000) { while (!check()) delay(20) } }
 
-    private fun octo(versions: String = "[1,2]", spotifyConnect: Boolean = false, family: Boolean = false) {
-        val extensions = buildList {
-            add("""{"name":"octoImports","versions":$versions}""")
-            if (family) add("""{"name":"octoFamily","versions":[1]}""")
-        }
-        server.answer("getOpenSubsonicExtensions") { """"openSubsonicExtensions":[${extensions.joinToString(",")}]""" }
-        server.answer("getImports") { """"imports":{"lists":[],"trickle":{"state":"idle"}}""" }
+    private fun octo(versions: String = "[1,2]", spotifyConnect: Boolean = false, approval: String? = null) {
+        server.answer("getOpenSubsonicExtensions") { """"openSubsonicExtensions":[{"name":"octoImports","versions":$versions}]""" }
+        server.answer("getImports") { """"imports":{"lists":[],"trickle":{"state":"idle"}${approval?.let { ",\"approval\":$it" }.orEmpty()}}""" }
         server.answer("getImportServices") {
             """"importServices":{"services":[
             {"id":"spotify","name":"Spotify","exportUrl":"${spotify.exportUrl}","tile":"Spotify"},
@@ -231,41 +226,49 @@ class GetMyMusicTest {
     }
 
     @Test
-    fun onlyAMemberWhoAsksForCopiesWaitsForApproval() {
-        fun me(role: String, add: AddToLibrary, auto: Boolean = false, managed: Boolean = true) =
-            FamilyMe(roleName = role, managed = managed, abilities = FamilyAbilities(addToLibrary = add, autoApprove = auto))
-        assertTrue(me("Kid", AddToLibrary.Request).listsNeedApproval())
-        assertTrue(me("Listener", AddToLibrary.Request).listsNeedApproval())
-        assertTrue(!me("Kid", AddToLibrary.Request, auto = true).listsNeedApproval())
-        assertTrue(!me("Member", AddToLibrary.Direct).listsNeedApproval())
-        assertTrue(!me("Owner", AddToLibrary.Request).listsNeedApproval())
-        assertTrue(!me("Unmanaged", AddToLibrary.Request, managed = false).listsNeedApproval())
+    fun theApprovalLineComesFromTheOverview() {
+        assertEquals(
+            "Your lists are in. Sam approves downloads before Octo fetches the missing songs.",
+            ImportOverview(approval = ImportApproval(needed = true, by = "Sam")).approvalLine(),
+        )
+        assertEquals(
+            "Your lists are in. The owner approves downloads before Octo fetches the missing songs.",
+            ImportOverview(approval = ImportApproval(needed = true, by = "")).approvalLine(),
+        )
+        assertNull(ImportOverview(approval = ImportApproval(needed = false, by = "Sam")).approvalLine())
+        assertNull(ImportOverview().approvalLine())
     }
 
-    @Test
-    fun aMemberWhoseDownloadsAreApprovedFirstIsToldOnceTheListsAreIn() {
-        octo(family = true)
+    private fun sentWith(approval: String?): ImportStep.Sent {
+        octo(approval = approval)
         server.answer("importFile") { """"importAction":{"ok":true,"message":"Read 1 list, 12 songs."}""" }
         val model = model()
         until { model.services != null }
         model.choose(apple)
         model.sendFile("Apple.csv", "Track name,Artist name\nAngel,Massive Attack\n".toByteArray())
         until { model.step is ImportStep.Sent }
+        return model.step as ImportStep.Sent
+    }
+
+    @Test
+    fun aMemberWhoseDownloadsWaitIsToldWhoApprovesThem() {
         assertEquals(
-            ImportStep.Sent("Read 1 list, 12 songs.", "Your lists are in. The owner approves downloads before Octo fetches the missing songs."),
-            model.step,
+            ImportStep.Sent("Read 1 list, 12 songs.", "Your lists are in. Sam approves downloads before Octo fetches the missing songs."),
+            sentWith("""{"needed":true,"by":"Sam"}"""),
         )
     }
 
     @Test
-    fun aMemberWhoAddsSongsAtOnceIsNotToldToWait() {
-        octo(family = true)
-        server.answer("getFamily") { """"family":{"me":${FamilyFakeServer.me(role = "Member", addToLibrary = "Direct")}}""" }
-        server.answer("importText") { """"importAction":{"ok":true,"message":"Read 1 list, 2 songs."}""" }
-        val model = model()
-        until { model.services != null }
-        model.sendText("Massive Attack - Angel")
-        until { model.step is ImportStep.Sent }
-        assertNull((model.step as ImportStep.Sent).approval)
+    fun anApproverWithNoNameIsTheOwner() {
+        assertEquals(
+            "Your lists are in. The owner approves downloads before Octo fetches the missing songs.",
+            sentWith("""{"needed":true,"by":""}""").approval,
+        )
+    }
+
+    @Test
+    fun noApprovalInTheOverviewMeansNoLine() {
+        assertNull(sentWith(null).approval)
+        assertTrue(server.called("getFamily").isEmpty())
     }
 }

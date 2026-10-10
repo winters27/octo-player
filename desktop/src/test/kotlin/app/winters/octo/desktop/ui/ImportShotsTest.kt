@@ -31,24 +31,18 @@ class ImportShotsTest {
             PolishShotsTest.Rig(folder, PolishData.library(100), server).use { rig ->
                 server.answer(
                     "getOpenSubsonicExtensions",
-                    """"openSubsonicExtensions":[{"name":"songLyrics","versions":[1]},{"name":"octoImports","versions":[1,2]},{"name":"octoFamily","versions":[1]}]""",
+                    """"openSubsonicExtensions":[{"name":"songLyrics","versions":[1]},{"name":"octoImports","versions":[1,2]}]""",
                     type = "octo",
                 )
                 server.answer("getImportServices", """"importServices":{"services":[${SERVICES.joinToString(",") { (id, name) ->
                     """{"id":"$id","name":"$name","exportUrl":"https://www.tunemymusic.com/transfer/$id-to-file","tile":"$name"}"""
                 }}],"spotifyConnect":true}""", type = "octo")
                 server.answer("importFile", """"importAction":{"ok":true,"message":"Read 2 lists, 340 songs."}""", type = "octo")
-                server.answer(
-                    "getFamily",
-                    """"family":{"me":{"username":"winters","displayName":"Winters","role":"Kid","managed":true,
-                    "abilities":{"addToLibrary":"Request","autoApprove":false,"importPlaylists":true}}}""",
-                    type = "octo",
-                )
                 val angel = track("s:2", "Angel", "Massive Attack", "Mezzanine", "downloading", "Downloading from Soulseek", 0.42)
                 server.answer(
                     "getImports",
                     """"imports":{"spotify":{"configured":true,"connected":true,"account":"Brandon","redirectUri":"http://127.0.0.1/callback",
-                    "endsUtc":"2027-04-01T00:00:00Z"},"reading":{"busy":false},
+                    "endsUtc":"2027-04-01T00:00:00Z"},"reading":{"busy":false},"approval":{"needed":true,"by":"Sam"},
                     "lists":[
                       {"id":"spotify-liked","name":"Liked Songs","source":"spotifyLiked","total":412,"have":371,"missing":28,"queued":9,"downloading":1,"notFound":3,"getMissing":true,"canRefresh":true},
                       {"id":"spotify-road","name":"Road trip","source":"spotifyPlaylist","total":48,"have":44,"missing":4,"keepPlaylist":true,"playlistId":"pl1","canRefresh":true},
