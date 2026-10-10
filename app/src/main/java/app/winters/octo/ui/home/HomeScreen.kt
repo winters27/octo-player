@@ -1,5 +1,6 @@
 package app.winters.octo.ui.home
 
+import app.winters.octo.ui.nav.ChartsRoute
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -84,12 +85,17 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
             item(key = "resume") { ResumeCard() }
             item(key = "whats-new") { WhatsNewCard() }
             when {
-                layout.empty -> item(key = "empty") { EmptyCard(offerAccess = !layout.askAccess) }
+                layout.empty -> {
+                    item(key = "empty") { EmptyCard(offerAccess = !layout.askAccess) }
+                    // An empty library is where the charts help most: songs to start from.
+                    songShelf("Charts", vm.charts, vm::play, onTitle = { onOpen(ChartsRoute) })
+                }
                 layout.shelves -> {
                     pinnedShelf(pinned, onOpen)
                     shelf("Recently played", recentlyPlayed, onOpen, onTitle = { onOpen(HistoryRoute()) })
                     stationShelf("Made for you", vm.madeForYou, vm.startingStation, vm::playStation)
                     stationShelf("Stations", vm.stations, vm.startingStation, vm::playStation)
+                    songShelf("Charts", vm.charts, vm::play, onTitle = { onOpen(ChartsRoute) })
                     shelf("Recently added", recent.orEmpty(), onOpen)
                     shelf("Favorite albums", favouriteAlbums, onOpen, onTitle = { onOpen(FavouritesRoute(albums = true)) })
                     songShelf("Most played", mostPlayed, vm::play, onTitle = { onOpen(HistoryRoute(mostPlayed = true)) })

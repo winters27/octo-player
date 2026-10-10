@@ -349,9 +349,25 @@ class SubsonicClient(
         get("getTransitionProfile", mapOf("id" to id), "transitionProfile", TransitionProfileAnswer.serializer(), TransitionProfileAnswer(id))
 
     // The songs played most right now, ranked like an artist's top songs.
-    // Only for servers that list the octoTopSongs extension.
-    suspend fun topChart(count: Int = 20): TopSongs =
-        get("getTopChart", mapOf("count" to "$count"), "topSongs", TopSongs.serializer(), TopSongs())
+    // `chart` picks another chart (CHART_NEW_SONGS, CHART_TRENDING, a genre's
+    // number) on servers that list octoTopSongs version 2; without it, the
+    // overall chart. Only for servers that list the octoTopSongs extension.
+    suspend fun topChart(count: Int = 20, chart: String? = null): TopSongs =
+        get(
+            "getTopChart",
+            buildMap {
+                put("count", "$count")
+                chart?.let { put("chart", it) }
+            },
+            "topSongs",
+            TopSongs.serializer(),
+            TopSongs(),
+        )
+
+    // The charts the server's country has. Only for servers that list
+    // octoTopSongs version 2.
+    suspend fun charts(): ChartChoices =
+        get("getCharts", emptyMap(), "charts", ChartChoices.serializer(), ChartChoices())
 
     // On Octo this call also sets up per-user playlists and the radio
     // profile, so callers keep the result for the session.

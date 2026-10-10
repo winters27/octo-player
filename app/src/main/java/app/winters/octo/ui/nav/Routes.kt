@@ -76,6 +76,9 @@ enum class ServerForm {
 @Serializable data object OctoAdminRoute : NavKey
 @Serializable data object SpotifyImportRoute : NavKey
 
+// The charts and new songs, on an Octo server that has them.
+@Serializable data object ChartsRoute : NavKey
+
 // The server's shared links, and its internet radio stations.
 @Serializable data object SharesRoute : NavKey
 @Serializable data object RadioStationsRoute : NavKey

@@ -122,7 +122,7 @@ private fun LazyListScope.rankedSongs(
 // and whether it is in the library. A click plays the list from it, as the
 // songs found online do; a right click opens its menu.
 @Composable
-private fun RankedSong(app: AppState, ranked: List<Song>, index: Int, entry: TopSong, withArtist: Boolean) {
+internal fun RankedSong(app: AppState, ranked: List<Song>, index: Int, entry: TopSong, withArtist: Boolean) {
     val songs = rememberLibraryCopies(app, ranked)
     val song = songs.getOrNull(index) ?: return
     val outside = isOutside(app, song)

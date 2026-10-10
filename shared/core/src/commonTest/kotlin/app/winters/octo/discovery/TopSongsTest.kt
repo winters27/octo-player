@@ -3,7 +3,9 @@ package app.winters.octo.discovery
 import app.winters.octo.subsonic.TOP_SONGS_DEEZER
 import app.winters.octo.subsonic.TOP_SONGS_LASTFM
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TopSongsTest {
@@ -44,5 +46,29 @@ class TopSongsTest {
         assertEquals("Most played on Last.fm", rankedBy(TOP_SONGS_LASTFM))
         assertEquals("Most popular on Deezer", rankedBy(TOP_SONGS_DEEZER))
         assertNull(rankedBy(""))
+    }
+
+    @Test
+    fun appleListsSayWhichKindTheyAre() {
+        assertEquals("Most played on Apple Music", rankedBy("apple"))
+        assertEquals("Most played on Apple Music", rankedBy("apple", "18"))
+        assertEquals("Picked by Apple Music", rankedBy("apple", "new"))
+        assertEquals("Trending on Apple Music", rankedBy("apple", "trending"))
+        assertEquals("Most popular on Deezer", rankedBy("deezer", "34"))
+    }
+
+    @Test
+    fun roomsHoldAHundredChartsFifty() {
+        assertEquals(100, chartSongs("new"))
+        assertEquals(100, chartSongs("trending"))
+        assertEquals(50, chartSongs("34"))
+        assertEquals(50, chartSongs("18"))
+    }
+
+    @Test
+    fun theChartsPageNeedsTheSecondVersion() {
+        assertFalse(chartsOffered(listOf(app.winters.octo.subsonic.Extension("octoTopSongs", listOf(1)))))
+        assertTrue(chartsOffered(listOf(app.winters.octo.subsonic.Extension("octoTopSongs", listOf(1, 2)))))
+        assertFalse(chartsOffered(emptyList()))
     }
 }

@@ -99,14 +99,18 @@ fun HomePage(app: AppState, visit: Visit) {
         when {
             home == null && failure != null -> item(key = "failed") { FailedLine("Couldn't read Home from your server. $failure", store::retry) }
             home == null -> item(key = "loading") { LoadingLine() }
-            home.isEmpty && playlists.isEmpty() && forYou.isEmpty() && (found == null || found.isEmpty) -> item(key = "empty") {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.M)) {
-                    NothingHere("No music yet", "Music on your server shows up here on its own. Once some is there, look again.")
-                    GlazeCapsule(null, "Look again", {
-                        store.retry()
-                        app.library?.load()
-                    })
+            home.isEmpty && playlists.isEmpty() && forYou.isEmpty() && (found == null || found.isEmpty) -> {
+                item(key = "empty") {
+                    Column(verticalArrangement = Arrangement.spacedBy(Space.M)) {
+                        NothingHere("No music yet", "Music on your server shows up here on its own. Once some is there, look again.")
+                        GlazeCapsule(null, "Look again", {
+                            store.retry()
+                            app.library?.load()
+                        })
+                    }
                 }
+                // An empty library is where the charts help most: songs to start from.
+                app.search?.charts?.let { chartsRow(app, it) }
             }
             else -> {
                 albums(app, "Recently played", home.recentlyPlayed) { app.navigator.go(Page.History) }
@@ -135,6 +139,7 @@ fun HomePage(app: AppState, visit: Visit) {
                         }
                     }
                 }
+                app.search?.charts?.let { chartsRow(app, it) }
                 albums(app, "Recently added", home.recentlyAdded) { app.navigator.go(Page.RecentlyAdded) }
                 albums(app, "Most played", home.mostPlayed, whole = home.mostPlayed.size < SHELF_SIZE, seeAll = open(AlbumShelf.MostPlayed))
                 albums(app, "Favorite albums", home.favourites) {
