@@ -875,7 +875,8 @@ final class Player {
     /// A song that fails while music should play is skipped with one line; once as many songs
     /// have failed in a row as the queue holds, or nothing is next, it stops. The count starts
     /// over only when a song becomes ready. A live station that fails stops there with its line,
-    /// never moving on to the next station by itself.
+    /// never moving on to the next station by itself. A library song whose file on the phone
+    /// would not play first plays from its other copy, such as the server's, in its place.
     private func failed(_ item: QueueItem, _ error: PlayError) {
         // The server began sending another file for the playing song: it opens again from where
         // it is, once for each time it is in the queue.
@@ -885,10 +886,32 @@ final class Player {
             return
         }
         guard engine.playWhenReady else { return }
+        playbackLog.notice("playback failed: \(error.detail, privacy: .public)")
+        if data != nil, let entry = item.entryId,
+           triesAnotherCopy(trackId: item.trackId, uri: item.uri, isFind: item.isFind, tried: PlayableItems.unplayableCopies) {
+            PlayableItems.unplayableCopies.insert(item.uri)
+            Task { await playOtherCopy(item, entry: entry, error) }
+            return
+        }
+        skip(item, error)
+    }
+
+    /// Plays the song at its place from another of its copies, chosen again now that its phone
+    /// file is passed over; with no other copy it is skipped. Nothing changes when the listener
+    /// moved on meanwhile.
+    private func playOtherCopy(_ item: QueueItem, entry: String, _ error: PlayError) async {
+        let other = await playable.items(ids: [item.trackId], source: item.source).first ?? nil
+        guard engine.playWhenReady, engine.queue.currentItem?.entryId == entry, let at = engine.queue.position(ofEntry: entry) else { return }
+        guard let other, other.uri != item.uri else { return skip(item, error) }
+        playbackLog.notice("playing \(item.title, privacy: .public) from another copy")
+        engine.update(at: at) { $0 = other.withSource(item.source) }
+        engine.seek(to: at)
+    }
+
+    private func skip(_ item: QueueItem, _ error: PlayError) {
         let why = item.isRadioStation ? stationFailureWords(error) : playFailureOf(error, outside: item.isFind).words
         let title = item.title.trimmingCharacters(in: .whitespaces).isEmpty ? "a song" : item.title
         failuresInARow += 1
-        playbackLog.info("playback failed: \(error.detail, privacy: .public)")
         if item.isRadioStation || failuresInARow >= engine.queue.count || engine.queue.nextForSkip == nil {
             announce(stoppedLine(title, why))
             engine.pause()
