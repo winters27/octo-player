@@ -56,8 +56,7 @@ internal const val LINK_KEY = "Software\\Classes\\octo"
 
 // The desktop entry for the installed program. The package keeps its icon
 // beside the program: /opt/octo/bin/Octo has /opt/octo/lib/Octo.png.
-fun linuxDesktopEntry(program: String): String {
-    val icon = program.substringBeforeLast('/').substringBeforeLast('/') + "/lib/Octo.png"
+fun linuxDesktopEntry(program: String, icon: String = program.substringBeforeLast('/').substringBeforeLast('/') + "/lib/Octo.png"): String {
     val types = (AUDIO_TYPES + "x-scheme-handler/octo").joinToString(";", postfix = ";")
     return """
         [Desktop Entry]
@@ -76,9 +75,32 @@ fun linuxDesktopEntry(program: String): String {
 // when it differs, and makes Octo the handler for octo:// links. Audio files
 // only gain "Open with Octo"; the listener's usual player stays the default.
 // True once written.
-fun registerWithLinuxDesktop(program: String, applications: java.io.File, makeDefault: Boolean = true): Boolean {
+fun registerWithLinuxDesktop(
+    program: String,
+    applications: java.io.File,
+    makeDefault: Boolean = true,
+    env: (String) -> String? = System::getenv,
+): Boolean {
+    // Flatpak exports its own desktop entry, with a sandbox-aware command.
+    if (!env("FLATPAK_ID").isNullOrBlank()) return true
+    val appImage = env("APPIMAGE")?.takeIf(String::isNotBlank)
+    // An extracted AppImage has no durable file to register.
+    if (appImage == null && !env("APPDIR").isNullOrBlank()) return true
     val entry = java.io.File(applications, LINUX_ENTRY)
-    val text = linuxDesktopEntry(program)
+    // The AppImage's mount disappears on exit. Keep its icon outside it and
+    // point Exec at the original .AppImage, including when its path has spaces.
+    val icon = if (appImage != null) {
+        val source = java.io.File(program).parentFile.parentFile.resolve("lib/Octo.png")
+        val target = applications.parentFile.resolve("icons/hicolor/512x512/apps/octo.png")
+        if (!runCatching {
+            target.parentFile.mkdirs()
+            source.copyTo(target, overwrite = true)
+        }.isSuccess) return false
+        target.path
+    } else {
+        program.substringBeforeLast('/').substringBeforeLast('/') + "/lib/Octo.png"
+    }
+    val text = linuxDesktopEntry(appImage ?: program, icon)
     if (entry.isFile && runCatching { entry.readText() }.getOrNull() == text) return true
     return runCatching {
         applications.mkdirs()

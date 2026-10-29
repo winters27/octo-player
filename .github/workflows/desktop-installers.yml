@@ -1,6 +1,7 @@
 # Builds the desktop installers on each system, since each is only made on
 # its own: the MSI and a portable zip on Windows, the DMG on macOS, and the
-# DEB, RPM and a portable zip on Linux. Run by hand from the Actions tab, the
+# DEB, RPM, AppImage, Flatpak, pacman package and portable zip on Linux.
+# Pull requests and manual runs build and check the same artifacts. On manual runs the
 # installers are kept as the run's artifacts. On a desktop-v<version> tag
 # (desktop-v1.2.0, or desktop-v1.3.0-beta.1 for an early version) they are
 # also published, signed, as a release on the public Octo repository, where
@@ -9,6 +10,20 @@ name: desktop-installers
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/desktop-installers.yml'
+      - '.github/workflows/publish-player-release.yml'
+      - 'scripts/release/**'
+      - 'desktop/**'
+      - 'desktop-design/**'
+      - 'design/**'
+      - 'shared/**'
+      - 'subsonic/**'
+      - 'audio-engine/**'
+      - 'gradle/**'
+      - '*.gradle.kts'
+      - 'gradle.properties'
   push:
     tags: ["desktop-v*"]
 
@@ -20,18 +35,28 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.tag.outputs.version }}
+      build: ${{ steps.tag.outputs.build }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: Version from the tag
         id: tag
         run: |
+          build=$(git rev-list --count HEAD)
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          version="1.0.$build"
           if [[ "$GITHUB_REF" == refs/tags/desktop-v* ]]; then
             version="${GITHUB_REF_NAME#desktop-v}"
             if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
               echo "::error::$GITHUB_REF_NAME must look like desktop-v1.2.0 or desktop-v1.3.0-beta.1."
               exit 1
             fi
-            echo "version=$version" >> "$GITHUB_OUTPUT"
           fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Release asset tests
+        run: python3 scripts/release/release_assets.py self-test
 
   package:
     needs: version
@@ -42,8 +67,9 @@ jobs:
           - os: windows-latest
             tasks: ":desktop:packageMsi :desktop:packagePortableZip"
           # macOS stays out until the Mac build has been opened on a Mac.
-          - os: ubuntu-latest
-            tasks: ":desktop:packageDeb :desktop:packageRpm :desktop:packagePortableZip"
+          # A fixed glibc baseline, also older than the Flatpak runtime.
+          - os: ubuntu-24.04
+            tasks: ":desktop:packageDeb :desktop:packageRpm :desktop:packagePortableZip :desktop:packageAppImage :desktop:packageFlatpak :desktop:packagePacman"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -53,8 +79,16 @@ jobs:
 
       - name: Linux build packages
         if: runner.os == 'Linux'
-        # ALSA headers for the audio engine, and the tools the DEB and RPM need.
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config fakeroot rpm
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config fakeroot rpm flatpak flatpak-builder \
+            desktop-file-utils appstream libsecret-1-0 libasound2-plugins pulseaudio pulseaudio-utils xvfb zstd
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive flathub org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
       - uses: actions/setup-java@v6
         with:
@@ -70,18 +104,20 @@ jobs:
             audio-engine
             desktop/system-shim -> ../build/system-shim
 
-      - name: Build number
-        shell: bash
-        run: echo "OCTO_BUILD=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
-
       - name: Tests
         run: ./gradlew :desktop:test --no-daemon
 
       - name: Installers
-        # A tag's version (none when run by hand) goes into the app and its installers.
+        # The same version goes into the app, all packages and the manifest rehearsal.
         # Bash on every system: PowerShell splits -PoctoDesktopVersion=1.1.0 at its first dot.
         shell: bash
-        run: ./gradlew ${{ matrix.tasks }} -PoctoBuild=${{ env.OCTO_BUILD }} ${{ needs.version.outputs.version && format('-PoctoDesktopVersion={0}', needs.version.outputs.version) || '' }} --no-daemon
+        run: ./gradlew ${{ matrix.tasks }} -PoctoBuild=${{ needs.version.outputs.build }} -PoctoDesktopVersion=${{ needs.version.outputs.version }} --no-daemon
+
+      - name: Linux package smoke tests
+        if: runner.os == 'Linux'
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: bash desktop/packaging/linux/smoke-test.sh desktop/build/compose/binaries/main "$VERSION"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -93,11 +129,33 @@ jobs:
             desktop/build/compose/binaries/main/deb/*.deb
             desktop/build/compose/binaries/main/rpm/*.rpm
             desktop/build/compose/binaries/main/zip/*.zip
+            desktop/build/compose/binaries/main/appimage/*.AppImage
+            desktop/build/compose/binaries/main/flatpak/*.flatpak
+            desktop/build/compose/binaries/main/pacman/*.pkg.tar.zst
           if-no-files-found: error
 
-  publish:
+  verify:
     needs: [version, package]
-    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: octo-desktop-*
+          path: artifacts
+      - name: Rehearse release staging and manifest (no signing key or publishing token)
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          python3 scripts/release/release_assets.py stage-desktop --version "$VERSION" --artifacts artifacts --out release \
+            --require-platform windows-x64 --require-platform linux-x64
+          python3 scripts/release/release_assets.py manifest --app desktop --tag "desktop-v$VERSION" --notes README.md --dir release
+          cd release
+          sha256sum --check SHA256SUMS
+
+  publish:
+    needs: [version, verify]
+    if: github.repository == 'winters27/octo-player' && startsWith(github.ref, 'refs/tags/desktop-v') && github.event_name != 'pull_request'
     uses: ./.github/workflows/publish-player-release.yml
     with:
       app: desktop

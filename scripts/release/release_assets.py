@@ -53,7 +53,8 @@ QUIET = re.compile(r"^(ci|tools|build|scripts|test|tests|docs)(\([^)]*\))?:", re
 # commit touched, which release notes leave out.
 AREA = re.compile(r"^[a-z][a-z0-9 /-]{0,30}: ")
 # Files the manifest describes, by name: Octo-<version>-<system>-<chip>[-portable].<type>
-DESKTOP_NAME = re.compile(r"^Octo-(?P<version>.+)-(?P<os>windows|macos|linux)-(?P<arch>x64|arm64)(?P<portable>-portable)?\.(?P<kind>msi|dmg|deb|rpm|zip)$")
+DESKTOP_NAME = re.compile(r"^Octo-(?P<version>.+)-(?P<os>windows|macos|linux)-(?P<arch>x64|arm64)(?P<portable>-portable)?\.(?P<kind>msi|dmg|deb|rpm|zip|AppImage|flatpak|pkg\.tar\.zst)$")
+DESKTOP_KINDS = {"windows": ["msi", "zip"], "macos": ["dmg"], "linux": ["deb", "rpm", "zip", "AppImage", "flatpak", "pkg.tar.zst"]}
 ANDROID_NAME = re.compile(r"^Octo-(?P<version>.+)-android\.apk$")
 MANIFEST = "update.json"
 SIGNATURE = "update.json.sig"
@@ -94,13 +95,13 @@ def git(*args: str) -> str:
 
 # The built files, under the names the release shows. Each artifact folder
 # is named octo-desktop-<runner os>-<runner arch>, as the workflow uploads them.
-def stage_desktop(version: str, artifacts: Path, out: Path) -> list[Path]:
+def stage_desktop(version: str, artifacts: Path, out: Path, require_platforms: list[str] = ()) -> list[Path]:
     check_version(version)
     out.mkdir(parents=True, exist_ok=True)
     systems = {"windows": "windows", "macos": "macos", "linux": "linux"}
     chips = {"x64": "x64", "arm64": "arm64"}
-    wanted = {"windows": ["msi", "zip"], "macos": ["dmg"], "linux": ["deb", "rpm", "zip"]}
     staged = []
+    platforms = set()
     folders = sorted(p for p in artifacts.iterdir() if p.is_dir() and p.name.startswith("octo-desktop-"))
     if not folders:
         fail(f"no octo-desktop-* folders in {artifacts}")
@@ -109,7 +110,11 @@ def stage_desktop(version: str, artifacts: Path, out: Path) -> list[Path]:
         system, arch = systems.get(os_name), chips.get(chip)
         if system is None or arch is None:
             fail(f"unexpected artifact folder {folder.name}")
-        for kind in wanted[system]:
+        platform = f"{system}-{arch}"
+        if platform in platforms:
+            fail(f"more than one artifact folder for {platform}")
+        platforms.add(platform)
+        for kind in DESKTOP_KINDS[system]:
             found = [p for p in folder.rglob(f"*.{kind}") if p.is_file()]
             if len(found) != 1:
                 fail(f"{folder.name} should hold one .{kind}, found {len(found)}")
@@ -117,6 +122,9 @@ def stage_desktop(version: str, artifacts: Path, out: Path) -> list[Path]:
             target = out / f"Octo-{version}-{system}-{arch}{suffix}.{kind}"
             shutil.copyfile(found[0], target)
             staged.append(target)
+    missing = set(require_platforms) - platforms
+    if missing:
+        fail(f"missing desktop platforms: {', '.join(sorted(missing))}")
     return staged
 
 
@@ -133,7 +141,9 @@ def describe(name: str, app: str, version: str) -> dict:
         match = DESKTOP_NAME.match(name)
         if not match or match["version"] != version:
             fail(f"{name} is not named like Octo-{version}-<system>-<chip>.<type>")
-        return {"os": match["os"], "arch": match["arch"], "kind": match["kind"]}
+        if match["kind"] not in DESKTOP_KINDS[match["os"]] or bool(match["portable"]) != (match["kind"] == "zip"):
+            fail(f"{name} has the wrong package kind for its system")
+        return {"os": match["os"], "arch": match["arch"], "kind": match["kind"].lower()}
     match = ANDROID_NAME.match(name)
     if not match or match["version"] != version:
         fail(f"{name} is not named like Octo-{version}-android.apk")
@@ -264,7 +274,8 @@ def self_test() -> None:
         for folder, names in {
             "octo-desktop-Windows-X64": ["msi/Octo-1.0.0.msi", "zip/Octo-1.0.0-win32-x86-64.zip"],
             "octo-desktop-macOS-ARM64": ["dmg/Octo-1.0.0.dmg"],
-            "octo-desktop-Linux-X64": ["deb/octo_1.0.0-1_amd64.deb", "rpm/octo-1.0.0-1.x86_64.rpm", "zip/Octo-1.0.0-linux-x86-64.zip"],
+            "octo-desktop-Linux-X64": ["deb/octo_1.0.0-1_amd64.deb", "rpm/octo-1.0.0-1.x86_64.rpm", "zip/Octo-1.0.0-linux-x86-64.zip",
+                                       "appimage/Octo-1.0.0-linux-x64.AppImage", "flatpak/Octo-1.0.0-linux-x64.flatpak", "pacman/Octo-1.0.0-linux-x64.pkg.tar.zst"],
         }.items():
             for name in names:
                 path = artifacts / folder / name
@@ -275,12 +286,34 @@ def self_test() -> None:
         assert sorted(p.name for p in staged) == sorted([
             "Octo-1.2.0-windows-x64.msi", "Octo-1.2.0-windows-x64-portable.zip", "Octo-1.2.0-macos-arm64.dmg",
             "Octo-1.2.0-linux-x64.deb", "Octo-1.2.0-linux-x64.rpm", "Octo-1.2.0-linux-x64-portable.zip",
+            "Octo-1.2.0-linux-x64.AppImage", "Octo-1.2.0-linux-x64.flatpak", "Octo-1.2.0-linux-x64.pkg.tar.zst",
         ]), staged
         manifest = json.loads(write_manifest("desktop", "desktop-v1.2.0", "- Hello.", out).read_bytes())
-        assert manifest["version"] == "1.2.0" and manifest["product"] == "desktop" and len(manifest["assets"]) == 6
+        assert manifest["version"] == "1.2.0" and manifest["product"] == "desktop" and len(manifest["assets"]) == 9
         msi = next(a for a in manifest["assets"] if a["kind"] == "msi")
         assert msi == {"name": "Octo-1.2.0-windows-x64.msi", "sha256": hashlib.sha256(b"msi/Octo-1.0.0.msi").hexdigest(), "size": 18, "os": "windows", "arch": "x64", "kind": "msi"}
-        assert (out / SUMS).read_text().count("\n") == 6
+        assert (out / SUMS).read_text().count("\n") == 9
+        for kind in ["appimage", "flatpak", "pkg.tar.zst"]:
+            asset = next(a for a in manifest["assets"] if a["kind"] == kind)
+            assert asset["os"] == "linux" and asset["arch"] == "x64"
+            assert asset["sha256"] == sha256(out / asset["name"])
+            assert asset["size"] == (out / asset["name"]).stat().st_size
+        assert refuses(lambda: stage_desktop("1.2.0", artifacts, out, ["linux-arm64"]))
+        stage_desktop("1.3.0-beta.1", artifacts, root / "early", ["windows-x64", "linux-x64"])
+        early = json.loads(write_manifest("desktop", "desktop-v1.3.0-beta.1", "", root / "early").read_bytes())
+        assert len(early["assets"]) == 9
+        assert refuses(lambda: describe("Octo-1.2.0-windows-x64.flatpak", "desktop", "1.2.0"))
+        assert refuses(lambda: describe("Octo-1.2.0-linux-x64-portable.AppImage", "desktop", "1.2.0"))
+        linux = artifacts / "octo-desktop-Linux-X64"
+        appimage = next(linux.rglob("*.AppImage"))
+        data = appimage.read_bytes()
+        appimage.unlink()
+        assert refuses(lambda: stage_desktop("1.2.0", artifacts, root / "missing"))
+        appimage.write_bytes(data)
+        duplicate = linux / "another.AppImage"
+        duplicate.write_bytes(data)
+        assert refuses(lambda: stage_desktop("1.2.0", artifacts, root / "duplicate"))
+        duplicate.unlink()
         # A rehearsal build is never staged or described for a release.
         assert refuses(lambda: stage_desktop("1.1.0-rehearsal.1", artifacts, root / "never"))
         assert refuses(lambda: stage_android("1.1.0-rehearsal.1", root / "app-release.apk", root / "never"))
@@ -307,6 +340,7 @@ def main() -> None:
     desktop.add_argument("--version", required=True)
     desktop.add_argument("--artifacts", type=Path, required=True)
     desktop.add_argument("--out", type=Path, required=True)
+    desktop.add_argument("--require-platform", action="append", default=[], help="fail if this platform is absent, e.g. linux-x64 (repeatable)")
     android = commands.add_parser("stage-android")
     android.add_argument("--version", required=True)
     android.add_argument("--apk", type=Path, required=True)
@@ -332,7 +366,7 @@ def main() -> None:
         REHEARSAL = True
 
     if args.command == "stage-desktop":
-        for path in stage_desktop(args.version, args.artifacts, args.out):
+        for path in stage_desktop(args.version, args.artifacts, args.out, args.require_platform):
             print(path.name)
     elif args.command == "stage-android":
         print(stage_android(args.version, args.apk, args.out).name)

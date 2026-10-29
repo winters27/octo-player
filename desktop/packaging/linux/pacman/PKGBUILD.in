@@ -1,0 +1,27 @@
+# Repackages the very same app image as the other Linux installers.
+# package-linux.py fills the version and checksum of the local build.
+pkgname=octo-player
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='A music player for Subsonic, Navidrome and Octo servers'
+arch=('x86_64')
+url='https://github.com/winters27/octo-player'
+license=('GPL-3.0-or-later')
+depends=('alsa-lib' 'fontconfig' 'freetype2' 'glibc' 'libglvnd' 'libsecret'
+         'libx11' 'libxext' 'libxi' 'libxrender' 'libxtst' 'gcc-libs' 'xdg-utils' 'zlib')
+optdepends=('alsa-plugins: PulseAudio output through ALSA'
+            'gnome-keyring: remember server passwords (or another Secret Service)')
+conflicts=('octo-player-bin')
+# The JVM's CDS archive and the bundled native libraries must stay intact.
+options=('!strip' '!debug')
+source=('octo.tar.gz')
+sha256sums=('@SHA256@')
+
+package() {
+    install -dm755 "$pkgdir/opt/octo-player" "$pkgdir/usr/bin"
+    cp -a --no-preserve=ownership "$srcdir/Octo/." "$pkgdir/opt/octo-player/"
+    ln -s /opt/octo-player/bin/Octo "$pkgdir/usr/bin/octo"
+    install -Dm644 "$srcdir/octo.desktop" "$pkgdir/usr/share/applications/octo-Octo.desktop"
+    install -Dm644 "$srcdir/octo.png" "$pkgdir/usr/share/icons/hicolor/512x512/apps/app.winters.octo.png"
+    install -Dm644 "$srcdir/Octo/share/licenses/octo/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

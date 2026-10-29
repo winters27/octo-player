@@ -66,6 +66,11 @@ Download the latest release:
 
 New versions appear on the [Octo Releases page](https://github.com/winters27/octo/releases), tagged `desktop-v` and `android-v`.
 
+Linux release builds also produce **AppImage**, **Flatpak bundles** and **Arch Linux
+packages** (`.pkg.tar.zst`, installed with `pacman -U`). See the
+[Linux packages guide](desktop/packaging/linux/README.md) for installation,
+updates, system requirements and building these formats.
+
 ## Build from source
 
 You need JDK 17. The Android app also needs the Android SDK (platform 37). The desktop app plays through its own audio engine, written in Rust, so it needs Rust 1.88 or newer and:
@@ -86,6 +91,7 @@ cd octo-player
 # Desktop installers, each on its own system
 ./gradlew :desktop:packageMsi :desktop:packagePortableZip                        # Windows
 ./gradlew :desktop:packageDeb :desktop:packageRpm :desktop:packagePortableZip    # Linux
+./gradlew :desktop:packageAppImage :desktop:packageFlatpak :desktop:packagePacman # Linux x86_64, extra build tools in the guide above
 
 # Tests
 ./gradlew :shared:core:allTests :app:testDebugUnitTest :desktop:test

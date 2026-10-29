@@ -21,7 +21,8 @@ data class UpdateManifest(
 )
 
 // One file of a release. `os` is windows, macos, linux or android; `arch`
-// x64, arm64 or any; `kind` the file's type (msi, dmg, deb, rpm, zip, apk).
+// x64, arm64 or any; `kind` the file's type (msi, dmg, deb, rpm, zip, apk,
+// appimage, flatpak, pkg.tar.zst). Unknown kinds can be read and ignored.
 @Serializable
 data class ManifestAsset(
     val name: String,

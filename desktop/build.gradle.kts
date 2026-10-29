@@ -283,25 +283,8 @@ compose.desktop {
         // or -Pocto.discordAppId=... . Without one, Settings leaves Discord out.
         providers.gradleProperty("octo.discordAppId").orNull?.takeIf(String::isNotBlank)?.let { jvmArgs("-Docto.discordAppId=${it.trim()}") }
         nativeDistributions {
-            // MSI for Windows, DMG for macOS, DEB and RPM for Linux.
-            //
-            // An AppImage is one extra step on Linux, from the app image
-            // that createDistributable makes:
-            //   ./gradlew :desktop:createDistributable
-            //   mkdir -p Octo.AppDir/usr
-            //   cp -r desktop/build/compose/binaries/main/app/Octo/* Octo.AppDir/usr/
-            //   cp desktop/icons/octo.png Octo.AppDir/octo.png
-            //   ln -s usr/bin/Octo Octo.AppDir/AppRun
-            // then Octo.AppDir/octo-Octo.desktop (the name the media controls
-            // announce) with these lines:
-            //   [Desktop Entry]
-            //   Type=Application
-            //   Name=Octo
-            //   Exec=Octo %U
-            //   Icon=octo
-            //   Categories=AudioVideo;Audio;Player;
-            //   MimeType=audio/mpeg;audio/flac;audio/mp4;audio/ogg;audio/opus;audio/wav;x-scheme-handler/octo;
-            // and last: appimagetool Octo.AppDir Octo-1.0.0-x86_64.AppImage
+            // jpackage's formats. AppImage, Flatpak and pacman use the same
+            // createDistributable image through the tasks below.
             targetFormats(TargetFormat.Msi, TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "Octo"
             // Files beside the jars: the native libraries (shareAppNatives).
@@ -490,4 +473,31 @@ val packagePortableZip by tasks.registering(Zip::class) {
     from(file("portable/octo-portable")) { into(if (hostName.startsWith("windows")) "Octo/app" else "Octo/lib/app") }
     archiveFileName = "Octo-$desktopVersion-$jnaFolder.zip"
     destinationDirectory = layout.buildDirectory.dir("compose/binaries/main/zip")
+}
+
+// The Linux formats jpackage does not make. Each gets a private copy of the
+// image, so its launchers and metadata never leak into another installer.
+mapOf("AppImage" to "appimage", "Flatpak" to "flatpak", "Pacman" to "pacman").forEach { (title, kind) ->
+    tasks.register<Exec>("package$title") {
+        group = "compose desktop"
+        description = "Packages the Linux x86_64 app as $title."
+        dependsOn("createDistributable")
+        val image = layout.buildDirectory.dir("compose/binaries/main/app/Octo")
+        val output = layout.buildDirectory.dir("compose/binaries/main/$kind")
+        inputs.dir(image)
+        inputs.dir(file("packaging/linux"))
+        inputs.file(rootProject.file("LICENSE"))
+        inputs.dir(rootProject.file("design/licenses"))
+        inputs.file(file("icons/octo.png"))
+        inputs.property("version", desktopVersion)
+        outputs.dir(output)
+        doFirst {
+            if (!hostName.startsWith("linux") || hostArch != "x86-64") {
+                throw GradleException("$title packages are built on Linux x86_64")
+            }
+            output.get().asFile.deleteRecursively()
+        }
+        commandLine("python3", file("packaging/linux/package-linux.py"), kind,
+            "--image", image.get().asFile, "--out", output.get().asFile, "--version", desktopVersion)
+    }
 }
