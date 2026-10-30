@@ -14,7 +14,9 @@ import app.winters.octo.subsonic.Upgrade
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.Locale
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -164,10 +166,26 @@ class DownloadsTest {
         val cleared = mutableListOf<String?>()
         var fail = false
 
+        // Each Keep anyway sent, and what the server does with one: keeps
+        // it (the list then shows it kept) or says no.
+        val kept = mutableListOf<String>()
+        var keepAnswer: suspend (String) -> Unit = { key ->
+            list = list.map { if (it.key == key) it.copy(state = "done", keepAnyway = false) else it }
+        }
+
+        // When set, the next list asked for is the list as it is now,
+        // answered only once this completes.
+        var slowNext: CompletableDeferred<Unit>? = null
+
         override suspend fun acquisitions(): List<Acquisition> {
             calls++
             if (fail) throw SubsonicException.Server(0, "down")
-            return list
+            val now = list
+            slowNext?.let { gate ->
+                slowNext = null
+                gate.await()
+            }
+            return now
         }
 
         override suspend fun upgrades(): List<Upgrade> = emptyList()
@@ -176,6 +194,147 @@ class DownloadsTest {
             cleared += key
             list = list.filter { !(it.stage.name == "Done" && (key == null || it.key == key)) }
         }
+
+        override suspend fun keepAnyway(key: String) {
+            kept += key
+            keepAnswer(key)
+        }
+    }
+
+    private fun held(key: String, keepAnyway: Boolean = true) =
+        download(key, "searching", note = "1 track waits: play it once, or keep it anyway").copy(keepAnyway = keepAnyway)
+
+    @Test
+    fun onlyARowTheServerMarksOffersKeepAnyway() {
+        val offered = rowOf(held("s:a"))
+        assertTrue(offered.keepAnyway)
+        assertEquals(KEEP_ANYWAY, keepAnywayLabel(offered))
+        assertEquals("1 track waits: play it once, or keep it anyway", offered.status)
+
+        assertNull("Left out", keepAnywayLabel(rowOf(held("s:a", keepAnyway = false))))
+        assertNull("A plain download", keepAnywayLabel(rowOf(download("s:a", "downloading"))))
+        assertNull("No key to send back", keepAnywayLabel(rowOf(held("s:a").copy(key = null))))
+        assertNull("A higher quality copy waiting its turn", keepAnywayLabel(rowOf(upgrade("nd-1", "queued"))))
+    }
+
+    @Test
+    fun keepAnywaySendsTheKey_ThenAsksForTheListAgain() = runTest {
+        val source = FakeDownloads().apply { list = listOf(held("s:a"), download("s:b", "downloading")) }
+        val watch = DownloadsWatch(source, TestScope(StandardTestDispatcher(testScheduler)), clock = { now })
+        watch.poll()
+        assertEquals(1, source.calls)
+
+        watch.keepAnyway("s:a")
+        assertEquals(listOf("s:a"), source.kept)
+        assertEquals("Asked again once it answered", 2, source.calls)
+        val row = watch.rows.value.first { it.key == "s:a" }
+        assertEquals(RowPhase.Done, row.phase)
+        assertNull("The refreshed row offers it no more", keepAnywayLabel(row))
+        assertTrue("Nothing left on the row", watch.keeping.value.isEmpty())
+    }
+
+    @Test
+    fun keepAnywayIsSendingUntilTheListCameBack_AndASecondTapSendsNothing() = runTest {
+        val source = FakeDownloads().apply { list = listOf(held("s:a")) }
+        val answer = CompletableDeferred<Unit>()
+        source.keepAnswer = { answer.await() }
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val watch = DownloadsWatch(source, scope, clock = { now })
+        watch.poll()
+
+        scope.launch { watch.keepAnyway("s:a") }
+        scope.runCurrent()
+        assertEquals(Keeping(sending = true), watch.keeping.value["s:a"])
+        watch.keepAnyway("s:a")
+        assertEquals("A second tap while one is out", listOf("s:a"), source.kept)
+
+        answer.complete(Unit)
+        scope.runCurrent()
+        assertEquals(2, source.calls)
+        assertNull(watch.keeping.value["s:a"])
+    }
+
+    @Test
+    fun aRefusalShowsTheServersWordsOnTheRow() = runTest {
+        val source = FakeDownloads().apply { list = listOf(held("s:a"), held("s:b")) }
+        source.keepAnswer = { throw SubsonicException.NotFound("Nothing is waiting to be kept") }
+        val watch = DownloadsWatch(source, TestScope(StandardTestDispatcher(testScheduler)), clock = { now })
+        watch.poll()
+
+        watch.keepAnyway("s:a")
+        assertEquals(Keeping(error = "Nothing is waiting to be kept"), watch.keeping.value["s:a"])
+        assertNull("Only on its own row", watch.keeping.value["s:b"])
+        assertEquals("The list is asked again all the same", 2, source.calls)
+
+        // Still offered after the next look: the words stay.
+        watch.poll()
+        assertEquals("Nothing is waiting to be kept", watch.keeping.value["s:a"]?.error)
+
+        // Tapped again and kept: the old words go with the button.
+        source.keepAnswer = { key -> source.list = source.list.map { if (it.key == key) it.copy(keepAnyway = false) else it } }
+        watch.keepAnyway("s:a")
+        assertNull(watch.keeping.value["s:a"])
+    }
+
+    @Test
+    fun aRefusalLeavesOnceTheRowNoLongerOffersKeepAnyway() = runTest {
+        val source = FakeDownloads().apply { list = listOf(held("s:a")) }
+        source.keepAnswer = { throw SubsonicException.Server(10, "Name the person whose copy to keep.") }
+        val watch = DownloadsWatch(source, TestScope(StandardTestDispatcher(testScheduler)), clock = { now })
+        watch.poll()
+        watch.keepAnyway("s:a")
+        assertEquals("Name the person whose copy to keep", watch.keeping.value["s:a"]?.error)
+
+        source.list = listOf(download("s:a", "done"))
+        watch.poll()
+        assertTrue(watch.keeping.value.isEmpty())
+    }
+
+    @Test
+    fun aServerOutOfReachSaysSoOnTheRow() = runTest {
+        val source = FakeDownloads().apply { list = listOf(held("s:a")) }
+        source.keepAnswer = { throw SubsonicException.Unreachable(java.io.IOException("Failed to connect to /10.0.0.2:4533")) }
+        val watch = DownloadsWatch(source, TestScope(StandardTestDispatcher(testScheduler)), clock = { now })
+        watch.poll()
+        source.fail = true
+        watch.keepAnyway("s:a")
+        assertEquals(KEEP_ANYWAY_UNREACHABLE, watch.keeping.value["s:a"]?.error)
+        assertTrue("The row stays as it was", keepAnywayLabel(watch.rows.value.single()) != null)
+
+        assertEquals(KEEP_ANYWAY_UNREACHABLE, keepAnywayError(SubsonicException.NotSubsonic("HTTP 502 from keepAcquisitionAnyway", 502)))
+        assertEquals("Not allowed", keepAnywayError(SubsonicException.Server(50, " Not allowed. ")))
+    }
+
+    @Test
+    fun anOlderAnswerNeverLandsAfterANewerOne() = runTest {
+        val source = FakeDownloads().apply { list = listOf(held("s:a")) }
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val watch = DownloadsWatch(source, scope, clock = { now })
+        // Asked first, with the list as it was, and answered only later.
+        val slow = CompletableDeferred<Unit>()
+        source.slowNext = slow
+        scope.launch { watch.poll() }
+        scope.runCurrent()
+        assertEquals(1, source.calls)
+
+        source.list = listOf(download("s:a", "done"))
+        scope.launch { watch.poll() }
+        scope.runCurrent()
+        slow.complete(Unit)
+        scope.runCurrent()
+        assertEquals(RowPhase.Done, watch.rows.value.single().phase)
+    }
+
+    @Test
+    fun aNewSignInForgetsEveryKeepAnyway() = runTest {
+        val source = FakeDownloads().apply { list = listOf(held("s:a")) }
+        source.keepAnswer = { throw SubsonicException.NotFound("Nothing is waiting to be kept") }
+        val watch = DownloadsWatch(source, TestScope(StandardTestDispatcher(testScheduler)), clock = { now })
+        watch.poll()
+        watch.keepAnyway("s:a")
+        assertTrue(watch.keeping.value.isNotEmpty())
+        watch.reset()
+        assertTrue(watch.keeping.value.isEmpty())
     }
 
     @Test

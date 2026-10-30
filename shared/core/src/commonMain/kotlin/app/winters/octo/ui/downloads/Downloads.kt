@@ -7,6 +7,7 @@ import app.winters.octo.subsonic.AcquisitionStage
 import app.winters.octo.subsonic.FoundCandidate
 import app.winters.octo.subsonic.FoundSongs
 import app.winters.octo.subsonic.LogKind
+import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.Upgrade
 import app.winters.octo.subsonic.UpgradeStage
 import java.time.Instant
@@ -74,6 +75,9 @@ data class DownloadRow(
     val findId: String?,
     // The id the download was asked for with, when it is one.
     val askedId: String? = null,
+    // Whether the server offers to keep this held download anyway, by
+    // `logKey`.
+    val keepAnyway: Boolean = false,
 ) {
     val finished: Boolean get() = phase.finished
 }
@@ -142,6 +146,7 @@ fun rowOf(acquisition: Acquisition, upgrade: Upgrade? = null): DownloadRow {
         logKey = acquisition.key,
         findId = upgrade?.id ?: acquisition.libraryId ?: acquisition.id.takeIf(String::isNotBlank),
         askedId = acquisition.id.takeIf(String::isNotBlank),
+        keepAnyway = acquisition.keepAnyway && acquisition.key != null,
     )
 }
 
@@ -201,6 +206,24 @@ fun statusOf(acquisition: Acquisition): String = when (acquisition.stage) {
     AcquisitionStage.Importing -> "Adding to your library"
     AcquisitionStage.Done -> "In your library"
     AcquisitionStage.Failed -> acquisition.error?.let(::sentence) ?: "Could not get it"
+}
+
+// A held download's own way out, as a quiet button under its row's words:
+// keeps the version the person heard, or an album's held tracks, though Octo
+// could not prove them.
+const val KEEP_ANYWAY = "Keep anyway"
+
+// What a row's Keep anyway says when the server could not be asked.
+const val KEEP_ANYWAY_UNREACHABLE = "Could not reach the server"
+
+// The words on a row's Keep anyway button, or null when the row offers none.
+fun keepAnywayLabel(row: DownloadRow): String? = if (row.keepAnyway && row.logKey != null) KEEP_ANYWAY else null
+
+// What a row's Keep anyway says when the call failed: the server's own words
+// when it gave a reason, otherwise that it could not be asked.
+fun keepAnywayError(e: SubsonicException): String = when (e) {
+    is SubsonicException.Unreachable, is SubsonicException.NotSubsonic -> KEEP_ANYWAY_UNREACHABLE
+    else -> e.message?.let(::sentence) ?: KEEP_ANYWAY_UNREACHABLE
 }
 
 // "What it is for", as a small word beside the title, or null for a plain

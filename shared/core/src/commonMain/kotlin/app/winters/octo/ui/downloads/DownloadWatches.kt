@@ -14,8 +14,12 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.getAndUpdate
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 
 // How often the drawer's list is asked for: while it is open, while
@@ -44,7 +48,15 @@ interface DownloadsSource {
 
     // Takes finished downloads off the list on the server, or one by key.
     suspend fun clear(key: String?)
+
+    // Keeps the held download with this key anyway, or throws with the
+    // server's reason.
+    suspend fun keepAnyway(key: String)
 }
+
+// A row's Keep anyway once tapped: `sending` until the server answered and
+// the list was asked for again, then the server's words if it said no.
+data class Keeping(val sending: Boolean = false, val error: String? = null)
 
 // Follows the drawer's rows for one server, for as long as it is started.
 // Not tied to any thread: the rows are a StateFlow and every change goes
@@ -82,6 +94,17 @@ class DownloadsWatch(
     // Rows cleared here that the server still lists: upgrades, which it
     // keeps a week for the apps to read.
     private val hidden = HashSet<String>()
+
+    private val _keeping = MutableStateFlow<Map<String, Keeping>>(emptyMap())
+
+    // Each tapped Keep anyway by its row's log key, while it is sent and
+    // after the server said no. A refusal stays until the row is tapped
+    // again or no longer offers Keep anyway.
+    val keeping: StateFlow<Map<String, Keeping>> = _keeping
+
+    // One look at the server at a time, so an older answer never lands
+    // after a newer one.
+    private val looking = Mutex()
 
     // Whether the drawer is open: it is then asked for every two seconds.
     @Volatile
@@ -121,6 +144,7 @@ class DownloadsWatch(
         _listedSince.value = null
         _rows.value = emptyList()
         _upgrades.value = emptyList()
+        _keeping.value = emptyMap()
     }
 
     // Asks again now, as after a song was asked for.
@@ -136,6 +160,10 @@ class DownloadsWatch(
 
     // One look at the server.
     suspend fun poll() {
+        looking.withLock { look() }
+    }
+
+    private suspend fun look() {
         val askedAt = clock()
         try {
             lastAcquisitions = source.acquisitions()
@@ -154,7 +182,29 @@ class DownloadsWatch(
     }
 
     private fun show() {
-        _rows.value = synchronized(hidden) { drawerRows(lastAcquisitions, lastUpgrades, clock(), hidden.toSet()) }
+        val rows = synchronized(hidden) { drawerRows(lastAcquisitions, lastUpgrades, clock(), hidden.toSet()) }
+        _rows.value = rows
+        _keeping.update { now -> now.filter { (key, state) -> state.sending || offers(rows, key) } }
+    }
+
+    private fun offers(rows: List<DownloadRow>, key: String) = rows.any { it.logKey == key && keepAnywayLabel(it) != null }
+
+    // Sends a row's Keep anyway, by its log key, then asks for the list
+    // again so the row shows what came of it. A second tap while one is out
+    // sends nothing.
+    suspend fun keepAnyway(key: String) {
+        val before = _keeping.getAndUpdate { if (it[key]?.sending == true) it else it + (key to Keeping(sending = true)) }
+        if (before[key]?.sending == true) return
+        val error = try {
+            source.keepAnyway(key)
+            null
+        } catch (e: SubsonicException) {
+            keepAnywayError(e)
+        }
+        poll()
+        _keeping.update { now ->
+            if (error != null && offers(_rows.value, key)) now + (key to Keeping(error = error)) else now - key
+        }
     }
 
     // The key of the newest download of a song by the id it was asked for
