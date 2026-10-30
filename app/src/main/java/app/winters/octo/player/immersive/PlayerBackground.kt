@@ -177,13 +177,13 @@ fun StillArtwork(cover: WashCover?, dolly: () -> Float) {
     val timing = remember { CoverFade() }
     val fadeMs = remember(cover) { if (cover == null) 0L else timing.start(SystemClock.uptimeMillis()) }
     val pictures = remember { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) StillPictures() else null }
-    DisposableEffect(pictures) { onDispose { pictures?.close() } }
+    DisposableEffect(pictures) { onDispose { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) pictures?.close() } }
     var area by remember { mutableStateOf(IntSize.Zero) }
     Crossfade(cover, animationSpec = tween(fadeMs.toInt(), easing = EaseInOutCubicCurve), label = "still artwork", modifier = Modifier.onSizeChanged { area = it }) { shown ->
         if (shown != null) {
             val blurred = shown.stillBlurred
             val density = LocalDensity.current
-            val picture = if (blurred == null && pictures != null) pictures.rememberPicture(shown.square, area, with(density) { StillBlur.toPx() }) else null
+            val picture = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && blurred == null && pictures != null) pictures.rememberPicture(shown.square, area, with(density) { StillBlur.toPx() }) else null
             // A little oversized, so the way in never shows an edge.
             val oversized = Modifier
                 .fillMaxSize()
