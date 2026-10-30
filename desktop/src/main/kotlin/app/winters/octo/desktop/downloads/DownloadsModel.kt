@@ -82,7 +82,7 @@ class DownloadsModel(
         scope,
     )
 
-    private val logWatch = DownloadLogWatch({ client.acquisition(it) }, scope)
+    private val logWatch = DownloadLogWatch({ client.acquisition(it, keepsAnyway) }, scope)
 
     private val findWatch = FindSongsWatch(
         object : FindSource {
@@ -249,10 +249,10 @@ class DownloadsModel(
         scope.launch { watch.clear(key) }
     }
 
-    // Keeps a held download anyway, by its row's log key; the row shows
-    // how it went.
+    // Keeps a held download anyway, by its log key, from its row or its
+    // open log; both show how it went.
     fun keepAnyway(key: String) {
-        scope.launch { watch.keepAnyway(key) }
+        scope.launch { watch.keepAnyway(key) { logWatch.readAgain(key) } }
     }
 
     // The server is left: nothing more is asked of it.

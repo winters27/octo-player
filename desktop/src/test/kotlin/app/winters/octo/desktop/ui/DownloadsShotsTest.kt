@@ -119,9 +119,10 @@ class DownloadsShotsTest {
 
     // Held rows with Keep anyway, on a server listing octoAcquisitions 4: a
     // song held while AcoustID is off and an album holding two tracks, beside
-    // a download on its way. Then the album's Keep anyway while it is sent,
-    // refused with the server's words, and the song's kept and refreshed.
-    // Saved as downloads/keep-anyway*.png.
+    // a download on its way. Then the album's Keep these anyway while it is
+    // sent, refused with the server's words, the song's log with Keep anyway
+    // under its heading, the album's log with the refusal, and the song kept
+    // and refreshed. Saved as downloads/keep-anyway*.png.
     @Test
     fun drawKeepAnyway() {
         assumeTrue(System.getenv("OCTO_SHOTS") == "1")
@@ -134,20 +135,28 @@ class DownloadsShotsTest {
                 )
                 server.answer("getUpgrades", """"upgrades":[]""", type = "octo")
                 val kept = AtomicBoolean(false)
-                server.answerBy("getAcquisitions") {
-                    val song = if (kept.get()) {
+                val song = {
+                    if (kept.get()) {
                         row("deezer:1", "Help!", "The Beatles", "done", ""","note":"kept by you, version not proven"""")
                     } else {
                         row("deezer:1", "Help!", "The Beatles", "searching", ""","note":"AcoustID is off, so Octo cannot check what played","keepAnyway":true""")
                     }
+                }
+                val album = row("deezer:2", "Rubber Soul", "The Beatles", "searching", ""","note":"2 tracks wait: play them once, or keep them anyway","keepAnyway":true,"heldTracks":2""")
+                server.answerBy("getAcquisitions") {
                     server.ok(
                         """"acquisitions":{"acquisition":[
-                            $song,
-                            ${row("deezer:2", "Rubber Soul", "The Beatles", "searching", ""","note":"2 tracks wait: play them once, or keep them anyway","keepAnyway":true""")},
+                            ${song()},
+                            $album,
                             ${row("soulseek:3", "Around the World", "Daft Punk", "downloading", ""","progress":0.62""")}
                         ]}""",
                         type = "octo",
                     )
+                }
+                // Each held download's log: its row with the first steps.
+                server.answerBy("getAcquisition") { request ->
+                    val held = if (request.url.queryParameter("key") == "deezer:2") album else song()
+                    server.ok(""""acquisition":${held.dropLast(1)},"event":[${log.take(3).joinToString(",")}]}""", type = "octo")
                 }
                 val answer = CountDownLatch(1)
                 server.answerBy("keepAcquisitionAnyway") { request ->
@@ -175,6 +184,13 @@ class DownloadsShotsTest {
                     answer.countDown()
                     rig.shot(scene, "downloads/keep-anyway-refused", 1_500)
 
+                    SwingUtilities.invokeAndWait { app.downloads!!.showLog("deezer:1") }
+                    rig.shot(scene, "downloads/keep-anyway-log", 2_000)
+
+                    SwingUtilities.invokeAndWait { app.downloads!!.showLog("deezer:2") }
+                    rig.shot(scene, "downloads/keep-anyway-log-refused", 2_000)
+
+                    SwingUtilities.invokeAndWait { app.downloads!!.showList() }
                     SwingUtilities.invokeAndWait { app.downloads!!.keepAnyway("deezer:1") }
                     rig.shot(scene, "downloads/keep-anyway-kept", 1_500)
                     SwingUtilities.invokeAndWait { app.showSidePanel(null) }

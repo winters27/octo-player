@@ -71,6 +71,8 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
@@ -308,23 +310,41 @@ private fun DownloadLine(
     }
 }
 
-// A held download's Keep anyway, lined up with its row's words: dimmed
-// while it is sent, and the server's words under it when it said no.
+// A held download's Keep anyway, lined up with its row's words and set like
+// the artist line above it: dimmed while it is sent, and the server's words
+// under it when it said no. Its edge below is the rows' usual gap.
 @Composable
 private fun KeepAnywayLine(label: String, keeping: Keeping?, onKeep: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(start = LineCover + Space.L)) {
-        // The action's own inset pulled back, so its words start where the row's do.
-        TextAction(label, onKeep, Modifier.offset(x = -TextActionInset), enabled = keeping?.sending != true)
-        keeping?.error?.let {
-            Txt(
-                it,
-                DesktopType.meta,
-                OctoColors.SignalOrange,
-                Modifier.padding(bottom = Space.M).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
-                maxLines = 2,
-            )
-        }
+        // The action's own inset pulled back, so its words start where the
+        // row's do, and its inset below taken down to a row's edge.
+        TextAction(
+            label,
+            onKeep,
+            Modifier.offset(x = -TextActionInset).trimBottom(TextActionInsetY - Space.S),
+            enabled = keeping?.sending != true,
+            style = DesktopType.meta,
+        )
+        keeping?.error?.let { KeepRefusal(it, Modifier.padding(bottom = Space.S)) }
     }
+}
+
+// The server's words when it would not keep a download anyway.
+@Composable
+private fun KeepRefusal(words: String, modifier: Modifier = Modifier) {
+    Txt(
+        words,
+        DesktopType.meta,
+        OctoColors.SignalOrange,
+        modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+        maxLines = 2,
+    )
+}
+
+// Lays out `by` shorter at the bottom, drawing the same.
+private fun Modifier.trimBottom(by: Dp) = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    layout(placeable.width, (placeable.height - by.roundToPx()).coerceAtLeast(0)) { placeable.place(0, 0) }
 }
 
 // "Higher quality" or "Picked", small beside a title.
@@ -347,8 +367,12 @@ private fun DownloadLog(app: AppState, model: DownloadsModel, key: String, modif
     val rows by model.rows.collectAsState()
     val log by model.log.collectAsState()
     val problem by model.logProblem.collectAsState()
+    val keeping by model.keeping.collectAsState()
     // The list's row knows how an upgrade ended; the log's own row is the download.
     val row = rows.firstOrNull { it.logKey == key } ?: log?.let { rowOf(it) }
+    // Offered while the log's own reading of the download says so.
+    val keep = log?.let { keepAnywayLabel(rowOf(it)) }
+    val keepState = keeping[key]
     val events = log?.event.orEmpty()
     val running = row?.finished == false
     val list = rememberLazyListState()
@@ -367,9 +391,20 @@ private fun DownloadLog(app: AppState, model: DownloadsModel, key: String, modif
         if (follow == true && events.isNotEmpty()) list.animateScrollToItem(events.lastIndex)
     }
     Column(modifier) {
+        // The heading's line has no room for it beside the page's name, so
+        // Keep anyway is the log's control line, under the heading.
+        if (keep != null) {
+            TextAction(
+                keep,
+                { model.keepAnyway(key) },
+                Modifier.padding(start = Space.L - TextActionInset),
+                enabled = keepState?.sending != true,
+            )
+        }
         // The song and where it is stay put; only the steps scroll.
         if (row != null) LogHead(row, events, Modifier.padding(horizontal = Space.L))
         problem?.let { Txt(it, DesktopType.meta, OctoColors.SignalOrange, Modifier.padding(horizontal = Space.L, vertical = Space.S), maxLines = 2) }
+        if (keep != null) keepState?.error?.let { KeepRefusal(it, Modifier.padding(horizontal = Space.L, vertical = Space.S)) }
         Separator(Modifier.padding(top = Space.L))
         Box(Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(Modifier.fillMaxSize().topFade(Space.Xl).scrollbar(list), state = list, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.L, bottom = Space.Xl)) {
@@ -889,8 +924,9 @@ private val MoreBelowFade = Color(0xF0141416)
 private val LineCover = RowHeight.Regular
 private val HeadCover = FrameSize.PlayerCover + Space.Xs
 
-// How far a TextAction's words sit inside its edge.
+// How far a TextAction's words sit inside its edge, beside and below.
 private val TextActionInset = 12.dp
+private val TextActionInsetY = 8.dp
 private val MarkSize = IconSize.Transport + Space.Xxs
 private val StepLine = Space.Xs
 private val Chip = Color.White.copy(alpha = 0.08f)
