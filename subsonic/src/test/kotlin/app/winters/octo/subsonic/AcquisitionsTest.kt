@@ -168,11 +168,13 @@ class AcquisitionsTest {
         server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":$code,"message":"$message"}}}""").build())
 
     // A held song the server offers to keep anyway, a held album that says
-    // nothing of it, and a song still on its way.
+    // nothing of it, a song still on its way, and an album holding two
+    // tracks.
     private val heldRows = """"acquisitions":{"acquisition":[
         {"id":"dz-1","title":"Help!","state":"searching","key":"deezer:1","kind":"download","keepAnyway":true},
         {"id":"dz-2","title":"Help!","state":"searching","key":"deezer:2","kind":"download"},
-        {"id":"dz-3","title":"Yesterday","state":"downloading","key":"deezer:3","kind":"download","keepAnyway":false}]}"""
+        {"id":"dz-3","title":"Yesterday","state":"downloading","key":"deezer:3","kind":"download","keepAnyway":false},
+        {"id":"dz-4","title":"Rubber Soul","state":"searching","key":"deezer:4","kind":"download","keepAnyway":true,"heldTracks":2}]}"""
 
     @Test
     fun keepAnywayIsReadFromAServerListingVersion4() = runTest {
@@ -181,26 +183,35 @@ class AcquisitionsTest {
         assertTrue(byKey.getValue("deezer:1").keepAnyway)
         assertFalse("Left out is no", byKey.getValue("deezer:2").keepAnyway)
         assertFalse(byKey.getValue("deezer:3").keepAnyway)
+        assertTrue(byKey.getValue("deezer:4").keepAnyway)
+        assertEquals(2, byKey.getValue("deezer:4").heldTracks)
+        assertNull("A song's row has none", byKey.getValue("deezer:1").heldTracks)
     }
 
     @Test
     fun keepAnywayIsNeverReadBelowVersion4_EvenWhenSent() = runTest {
         ok(heldRows)
         val list = client().acquisitions()
-        assertEquals(3, list.size)
+        assertEquals(4, list.size)
         assertTrue(list.none { it.keepAnyway })
+        assertTrue(list.none { it.heldTracks != null })
 
         ok(heldRows)
-        assertTrue(client().acquisitions(keepsAnyway = false).none { it.keepAnyway })
+        val older = client().acquisitions(keepsAnyway = false)
+        assertTrue(older.none { it.keepAnyway || it.heldTracks != null })
     }
 
     @Test
     fun oneDownloadReadsKeepAnywayTheSameWay() = runTest {
-        val one = """"acquisition":{"id":"dz-1","title":"Help!","state":"searching","key":"deezer:1","keepAnyway":true}"""
+        val one = """"acquisition":{"id":"dz-4","title":"Rubber Soul","state":"searching","key":"deezer:4","keepAnyway":true,"heldTracks":3}"""
         ok(one)
-        assertTrue(client().acquisition("deezer:1", keepsAnyway = true).keepAnyway)
+        val fromVersion4 = client().acquisition("deezer:4", keepsAnyway = true)
+        assertTrue(fromVersion4.keepAnyway)
+        assertEquals(3, fromVersion4.heldTracks)
         ok(one)
-        assertFalse(client().acquisition("deezer:1").keepAnyway)
+        val fromOlder = client().acquisition("deezer:4")
+        assertFalse(fromOlder.keepAnyway)
+        assertNull(fromOlder.heldTracks)
     }
 
     @Test

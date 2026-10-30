@@ -184,15 +184,21 @@ class DownloadsWatch(
     private fun show() {
         val rows = synchronized(hidden) { drawerRows(lastAcquisitions, lastUpgrades, clock(), hidden.toSet()) }
         _rows.value = rows
-        _keeping.update { now -> now.filter { (key, state) -> state.sending || offers(rows, key) } }
+        _keeping.update { now -> now.filter { (key, state) -> state.sending || stillOffered(rows, key) } }
     }
 
-    private fun offers(rows: List<DownloadRow>, key: String) = rows.any { it.logKey == key && keepAnywayLabel(it) != null }
+    // Whether a refusal for `key` still has a button to sit under: its row
+    // offers Keep anyway, or the list does not show it and only its log can.
+    private fun stillOffered(rows: List<DownloadRow>, key: String): Boolean {
+        val row = rows.firstOrNull { it.logKey == key } ?: return true
+        return keepAnywayLabel(row) != null
+    }
 
-    // Sends a row's Keep anyway, by its log key, then asks for the list
-    // again so the row shows what came of it. A second tap while one is out
-    // sends nothing.
-    suspend fun keepAnyway(key: String) {
+    // Sends Keep anyway for a download, by its log key, then asks for the
+    // list again, and does `also` (reading an open log again), so the row
+    // and the log show what came of it before the button comes back. A
+    // second tap while one is out sends nothing.
+    suspend fun keepAnyway(key: String, also: suspend () -> Unit = {}) {
         val before = _keeping.getAndUpdate { if (it[key]?.sending == true) it else it + (key to Keeping(sending = true)) }
         if (before[key]?.sending == true) return
         val error = try {
@@ -202,8 +208,9 @@ class DownloadsWatch(
             keepAnywayError(e)
         }
         poll()
+        also()
         _keeping.update { now ->
-            if (error != null && offers(_rows.value, key)) now + (key to Keeping(error = error)) else now - key
+            if (error != null && stillOffered(_rows.value, key)) now + (key to Keeping(error = error)) else now - key
         }
     }
 
@@ -258,6 +265,13 @@ class DownloadLogWatch(
 
     private var job: Job? = null
 
+    // The download followed, or null once the log closes.
+    @Volatile
+    private var followed: String? = null
+
+    // One read at a time, so an older answer never lands after a newer one.
+    private val reading = Mutex()
+
     // Whether the log is still being asked for.
     val following: Boolean get() = job?.isActive == true
 
@@ -267,14 +281,14 @@ class DownloadLogWatch(
         job?.cancel()
         _row.value = null
         _problem.value = null
+        followed = key
         job = scope.launch {
             // How long it has been seen finished here.
             var finishedFor = 0L
             while (isActive) {
                 front.first { it }
                 try {
-                    val now = load(key)
-                    _row.value = now
+                    val now = reading.withLock { load(key).also { _row.value = it } }
                     _problem.value = null
                     if (now.stage == AcquisitionStage.Done || now.stage == AcquisitionStage.Failed) {
                         val age = ageMs(now.updatedAt, clock()) ?: 0L
@@ -290,9 +304,28 @@ class DownloadLogWatch(
         }
     }
 
+    // Reads the download again now when it is the one followed, as after an
+    // action on it, so the log shows what came of it at once. A read that
+    // fails changes nothing; the log's own reads say what is wrong.
+    suspend fun readAgain(key: String) {
+        if (followed != key) return
+        try {
+            reading.withLock {
+                val now = load(key)
+                if (followed == key) {
+                    _row.value = now
+                    _problem.value = null
+                }
+            }
+        } catch (e: SubsonicException) {
+            // Kept as it was.
+        }
+    }
+
     fun close() {
         job?.cancel()
         job = null
+        followed = null
         _row.value = null
         _problem.value = null
     }

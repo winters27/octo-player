@@ -76,8 +76,9 @@ data class DownloadRow(
     // The id the download was asked for with, when it is one.
     val askedId: String? = null,
     // Whether the server offers to keep this held download anyway, by
-    // `logKey`.
+    // `logKey`, and on an album's row how many of its tracks are held.
     val keepAnyway: Boolean = false,
+    val heldTracks: Int? = null,
 ) {
     val finished: Boolean get() = phase.finished
 }
@@ -147,6 +148,7 @@ fun rowOf(acquisition: Acquisition, upgrade: Upgrade? = null): DownloadRow {
         findId = upgrade?.id ?: acquisition.libraryId ?: acquisition.id.takeIf(String::isNotBlank),
         askedId = acquisition.id.takeIf(String::isNotBlank),
         keepAnyway = acquisition.keepAnyway && acquisition.key != null,
+        heldTracks = acquisition.heldTracks,
     )
 }
 
@@ -208,16 +210,22 @@ fun statusOf(acquisition: Acquisition): String = when (acquisition.stage) {
     AcquisitionStage.Failed -> acquisition.error?.let(::sentence) ?: "Could not get it"
 }
 
-// A held download's own way out, as a quiet button under its row's words:
-// keeps the version the person heard, or an album's held tracks, though Octo
-// could not prove them.
+// A held download's own way out, as a quiet button under its row's words
+// and in its log's header: keeps the version the person heard, or an
+// album's held tracks, though Octo could not prove them. An album holding
+// two tracks or more says "these".
 const val KEEP_ANYWAY = "Keep anyway"
+const val KEEP_THESE_ANYWAY = "Keep these anyway"
 
 // What a row's Keep anyway says when the server could not be asked.
 const val KEEP_ANYWAY_UNREACHABLE = "Could not reach the server"
 
+// The words on a Keep anyway button for a download holding `heldTracks`
+// tracks: none for a song.
+fun keepAnywayWords(heldTracks: Int?): String = if ((heldTracks ?: 0) >= 2) KEEP_THESE_ANYWAY else KEEP_ANYWAY
+
 // The words on a row's Keep anyway button, or null when the row offers none.
-fun keepAnywayLabel(row: DownloadRow): String? = if (row.keepAnyway && row.logKey != null) KEEP_ANYWAY else null
+fun keepAnywayLabel(row: DownloadRow): String? = if (row.keepAnyway && row.logKey != null) keepAnywayWords(row.heldTracks) else null
 
 // What a row's Keep anyway says when the call failed: the server's own words
 // when it gave a reason, otherwise that it could not be asked.

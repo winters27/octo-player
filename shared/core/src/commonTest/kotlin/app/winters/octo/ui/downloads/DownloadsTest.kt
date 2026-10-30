@@ -218,6 +218,68 @@ class DownloadsTest {
     }
 
     @Test
+    fun anAlbumHoldingTwoOrMoreSaysKeepTheseAnyway() {
+        assertEquals("Keep anyway", keepAnywayWords(null))
+        assertEquals("Keep anyway", keepAnywayWords(1))
+        assertEquals("Keep these anyway", keepAnywayWords(2))
+        assertEquals("Keep these anyway", keepAnywayWords(12))
+
+        assertEquals(KEEP_ANYWAY, keepAnywayLabel(rowOf(held("s:a"))))
+        assertEquals(KEEP_ANYWAY, keepAnywayLabel(rowOf(held("s:a").copy(heldTracks = 1))))
+        assertEquals(KEEP_THESE_ANYWAY, keepAnywayLabel(rowOf(held("s:a").copy(heldTracks = 2))))
+        assertNull("Tracks held, but nothing to keep anyway", keepAnywayLabel(rowOf(held("s:a", keepAnyway = false).copy(heldTracks = 2))))
+    }
+
+    @Test
+    fun keepAnywayReadsAnOpenLogAgainBeforeTheButtonComesBack() = runTest {
+        val source = FakeDownloads().apply { list = listOf(held("s:a")) }
+        val watch = DownloadsWatch(source, TestScope(StandardTestDispatcher(testScheduler)), clock = { now })
+        watch.poll()
+        var also = 0
+        watch.keepAnyway("s:a") {
+            also++
+            assertEquals("After the list came back", 2, source.calls)
+            assertEquals("Still sending meanwhile", Keeping(sending = true), watch.keeping.value["s:a"])
+        }
+        assertEquals(1, also)
+        assertNull(watch.keeping.value["s:a"])
+    }
+
+    @Test
+    fun aRefusalForADownloadTheListDoesNotShowStaysForItsLog() = runTest {
+        val source = FakeDownloads().apply { list = listOf(held("s:b")) }
+        source.keepAnswer = { throw SubsonicException.NotFound("Nothing is waiting to be kept") }
+        val watch = DownloadsWatch(source, TestScope(StandardTestDispatcher(testScheduler)), clock = { now })
+        watch.poll()
+        watch.keepAnyway("s:x")
+        assertEquals("Nothing is waiting to be kept", watch.keeping.value["s:x"]?.error)
+        watch.poll()
+        assertEquals("Nothing is waiting to be kept", watch.keeping.value["s:x"]?.error)
+    }
+
+    @Test
+    fun aLogIsReadAgainAtOnce_OnlyWhileItIsTheOneFollowed() = runTest {
+        var loads = 0
+        var state = "searching"
+        val scope = TestScope(StandardTestDispatcher(testScheduler))
+        val watch = DownloadLogWatch({ key -> loads++; download(key, state) }, scope, pollMs = 60_000, clock = { now })
+        watch.follow("s:a")
+        scope.runCurrent()
+        assertEquals(1, loads)
+
+        state = "done"
+        watch.readAgain("s:a")
+        assertEquals(2, loads)
+        assertEquals("done", watch.row.value!!.state)
+
+        watch.readAgain("s:b")
+        assertEquals("Another download's log is not read", 2, loads)
+        watch.close()
+        watch.readAgain("s:a")
+        assertEquals("A closed log is not read", 2, loads)
+    }
+
+    @Test
     fun keepAnywaySendsTheKey_ThenAsksForTheListAgain() = runTest {
         val source = FakeDownloads().apply { list = listOf(held("s:a"), download("s:b", "downloading")) }
         val watch = DownloadsWatch(source, TestScope(StandardTestDispatcher(testScheduler)), clock = { now })

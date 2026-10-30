@@ -129,8 +129,8 @@ class SubsonicClient(
     // The downloads Octo is doing for the signed-in user, and the ones it
     // finished lately. Only for servers that list the octoAcquisitions
     // extension; others answer with an error. `keepsAnyway` is whether the
-    // server lists OCTO_KEEP_ANYWAY_VERSION; only then is a row's
-    // `keepAnyway` read.
+    // server lists OCTO_KEEP_ANYWAY_VERSION; only then are a row's
+    // `keepAnyway` and `heldTracks` read.
     suspend fun acquisitions(keepsAnyway: Boolean = false): List<Acquisition> =
         get("getAcquisitions", key = "acquisitions", serializer = Acquisitions.serializer(), default = Acquisitions())
             .acquisition.map { it.listedBy(keepsAnyway) }

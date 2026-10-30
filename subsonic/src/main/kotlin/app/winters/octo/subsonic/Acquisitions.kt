@@ -13,8 +13,8 @@ const val OCTO_ACQUISITIONS = "octoAcquisitions"
 // answer PICK_CONFIRM with the question to ask.
 const val OCTO_REPLACE_ANYWAY_VERSION = 3
 
-// The version of octoAcquisitions whose rows carry `keepAnyway` and which
-// takes keepAcquisitionAnyway.
+// The version of octoAcquisitions whose rows carry `keepAnyway` and
+// `heldTracks`, and which takes keepAcquisitionAnyway.
 const val OCTO_KEEP_ANYWAY_VERSION = 4
 
 // Where one download on the server has got to.
@@ -80,12 +80,17 @@ data class Acquisition(
     // anyway with keepAcquisitionAnyway and `key`. Read only as `listedBy`
     // leaves it, so an older server's never counts.
     val keepAnyway: Boolean = false,
+    // From version 4 on, on an album's row: how many of its tracks are held.
+    // Read only as `listedBy` leaves it.
+    val heldTracks: Int? = null,
 ) {
     val stage: AcquisitionStage get() = AcquisitionStage.of(state)
 
-    // The row as a server means it: `keepAnyway` only from one that lists
-    // octoAcquisitions at OCTO_KEEP_ANYWAY_VERSION (`keepsAnyway`).
-    fun listedBy(keepsAnyway: Boolean): Acquisition = if (keepsAnyway || !keepAnyway) this else copy(keepAnyway = false)
+    // The row as a server means it: `keepAnyway` and `heldTracks` only from
+    // one that lists octoAcquisitions at OCTO_KEEP_ANYWAY_VERSION
+    // (`keepsAnyway`).
+    fun listedBy(keepsAnyway: Boolean): Acquisition =
+        if (keepsAnyway || (!keepAnyway && heldTracks == null)) this else copy(keepAnyway = false, heldTracks = null)
 
     // How far along, kept between 0 and 1, or null when unknown.
     val fraction: Float?
