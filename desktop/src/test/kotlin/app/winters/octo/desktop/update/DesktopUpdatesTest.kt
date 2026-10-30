@@ -377,17 +377,29 @@ class DesktopUpdatesTest {
     }
 
     @Test
+    fun sandboxedAndAppImageCopiesNeverOfferTheHostsDebOrRpm() {
+        val flatpak = updaterAvailability("1.2.0", installed = true, portable = false, forced = false, hasKeys = true, flatpak = true, appImage = false)
+        assertTrue(flatpak is UpdaterAvailability.Off)
+        assertTrue((flatpak as UpdaterAvailability.Off).why.contains(".flatpak"))
+        val appImage = updaterAvailability("1.2.0", installed = true, portable = true, forced = false, hasKeys = true, flatpak = false, appImage = true)
+        assertTrue(appImage is UpdaterAvailability.Off)
+        assertTrue((appImage as UpdaterAvailability.Off).why.contains("AppImage"))
+    }
+
+    @Test
     fun eachSystemGetsItsOwnInstaller() {
         fun asset(os: String, arch: String, kind: String) = ManifestAsset("Octo-$os-$arch.$kind", "a".repeat(64), 1, os, arch, kind)
         val assets = listOf(
             asset("windows", "x64", "zip"), asset("windows", "x64", "msi"), asset("macos", "arm64", "dmg"),
             asset("linux", "x64", "deb"), asset("linux", "x64", "rpm"), asset("linux", "x64", "zip"),
+            asset("linux", "x64", "appimage"), asset("linux", "x64", "flatpak"), asset("linux", "x64", "pkg.tar.zst"),
         )
         assertEquals("msi", installerFor(assets, DesktopOs.Windows, "x64", null)?.kind)
         assertEquals("dmg", installerFor(assets, DesktopOs.Mac, "arm64", null)?.kind)
         assertNull("no DMG for an Intel Mac", installerFor(assets, DesktopOs.Mac, "x64", null))
         assertEquals("rpm", installerFor(assets, DesktopOs.Linux, "x64", "rpm")?.kind)
         assertEquals("deb", installerFor(assets, DesktopOs.Linux, "x64", "deb")?.kind)
+        assertEquals("pkg.tar.zst", installerFor(assets, DesktopOs.Linux, "x64", "pkg.tar.zst")?.kind)
         assertNull(installerFor(assets, DesktopOs.Linux, "x64", null))
         assertNull(installerFor(assets, DesktopOs.Windows, "arm64", null))
     }
@@ -400,7 +412,10 @@ class DesktopUpdatesTest {
         assertEquals("rpm", linuxPackageKind("ID=\"opensuse-tumbleweed\"\nID_LIKE=\"opensuse suse\"\n", false, false))
         assertEquals("rpm", linuxPackageKind("ID=rocky\nID_LIKE=\"rhel centos fedora\"\n", true, true))
         assertEquals("deb", linuxPackageKind(null, true, false))
-        assertNull(linuxPackageKind("ID=arch\n", false, false))
+        assertEquals("pkg.tar.zst", linuxPackageKind("ID=arch\n", false, false))
+        assertEquals("pkg.tar.zst", linuxPackageKind("ID=manjaro\nID_LIKE=arch\n", true, true))
+        assertEquals("pkg.tar.zst", linuxPackageKind("ID=endeavouros\nID_LIKE=arch\n", false, false))
+        assertNull(linuxPackageKind("ID=alpine\n", false, false))
         assertEquals("x64", archName("amd64"))
         assertEquals("arm64", archName("aarch64"))
     }

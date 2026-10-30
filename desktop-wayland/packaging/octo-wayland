@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+if [ -x "$ROOT/runtime/bin/java" ]; then
+    JAVA="$ROOT/runtime/bin/java"
+elif [ -n "${JAVA_HOME:-}" ]; then
+    JAVA="$JAVA_HOME/bin/java"
+else
+    JAVA=java
+fi
+unset DISPLAY
+LOG_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/octo/wayland"
+mkdir -p "$LOG_DIR"
+exec "$JAVA" --enable-native-access=ALL-UNNAMED -Djava.awt.headless=true \
+    -Xms64m -Xmx1g -XX:+UseG1GC -XX:+UseStringDeduplication \
+    "-Dkdt.library.folder.path=$ROOT/lib/kdt" "-Dkdt.native.log.path=$LOG_DIR/native.log" \
+    -cp "$ROOT/octo-wayland.jar:$ROOT/lib/*" app.winters.octo.wayland.MainKt "$@"

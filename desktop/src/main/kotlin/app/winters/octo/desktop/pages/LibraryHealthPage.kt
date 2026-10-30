@@ -64,8 +64,7 @@ import app.winters.octo.health.meaning
 import app.winters.octo.health.overview
 import app.winters.octo.health.title
 import app.winters.octo.subsonic.Song
-import java.awt.Toolkit
-import java.awt.datatransfer.StringSelection
+import app.winters.octo.desktop.system.DesktopServices
 
 // Library health: what is worth fixing in the library's files, and the
 // fixes. The checks that found something are listed with their counts; the
@@ -235,7 +234,7 @@ private fun songRows(app: AppState, health: HealthModel, report: HealthReport<So
         if (undo) MenuRow(UNDO_LAST_CHANGE, { close(); app.runFix("Putting it back", listOf(FixStep.Undo(song.id, song.title))) }, OctoIcons.History)
         if (path != null) {
             MenuRow("Copy file path", {
-                runCatching { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(path), null) }
+                runCatching { DesktopServices.clipboard.put(path) }
                 close()
             }, OctoIcons.Folder)
         }

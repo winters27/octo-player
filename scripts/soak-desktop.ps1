@@ -347,7 +347,7 @@ if ($SelfTest) {
 
 if (-not $App) { $App = Join-Path $root "desktop\build\compose\binaries\main\app\Octo" }
 $App = (Resolve-Path $App).Path
-if (-not (Test-Path (Join-Path $Jdk "bin\jcmd.exe"))) { throw "No jcmd in $Jdk; pass -Jdk <a full JDK 17>" }
+if (-not (Test-Path (Join-Path $Jdk "bin\jcmd.exe"))) { throw "No jcmd in $Jdk; pass -Jdk <a full JDK 27>" }
 $soak = Join-Path $root "desktop\build\soak"
 $out = Join-Path $soak $Label
 if (Test-Path $out) { Remove-Item -Recurse -Force $out -Confirm:$false }

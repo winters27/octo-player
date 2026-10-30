@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,8 +41,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.awt.FileDialog
-import java.awt.Frame
+import app.winters.octo.desktop.system.DesktopServices
+import app.winters.octo.desktop.system.FileRequest
 import java.io.File
 import java.io.IOException
 import java.net.URI
@@ -56,15 +57,9 @@ fun downloadsFolder(home: String = System.getProperty("user.home").orEmpty()): F
 
 // The system's file window for a list file, starting in Downloads. On
 // Windows the window lists only list files; elsewhere the name filter does.
-fun chooseImportFile(os: DesktopOs = currentOs()): File? {
-    val dialog = FileDialog(null as Frame?, "Choose your list file", FileDialog.LOAD)
-    downloadsFolder()?.let { dialog.directory = it.path }
-    if (os == DesktopOs.Windows) dialog.file = IMPORT_FILE_ENDINGS.joinToString(";") { "*.$it" }
-    dialog.setFilenameFilter { _, name -> isImportFileName(name) }
-    dialog.isVisible = true
-    val name = dialog.file ?: return null
-    return File(dialog.directory, name)
-}
+suspend fun chooseImportFile(os: DesktopOs = currentOs()): File? = DesktopServices.files.choose(
+    FileRequest("Choose your list file", folder = downloadsFolder(), extensions = IMPORT_FILE_ENDINGS.toSet()),
+)
 
 // The list files among the addresses a drop carries. Anything that is not
 // a local file Octo reads lists from is left out.
@@ -107,6 +102,15 @@ fun sendImportFile(scope: CoroutineScope, model: ImportModel, file: File) {
 fun ImportDropZone(enabled: Boolean, onFile: (File) -> Unit, content: @Composable () -> Unit) {
     var over by remember { mutableStateOf(false) }
     val send by rememberUpdatedState(onFile)
+    val nativeDrops = DesktopServices.nativeFileDrops
+    DisposableEffect(nativeDrops, enabled) {
+        val registration = if (enabled) nativeDrops?.register { addresses ->
+            val file = droppedImportFiles(addresses).firstOrNull()
+            if (file != null) send(file)
+            file != null
+        } else null
+        onDispose { registration?.close() }
+    }
     val target = remember {
         object : DragAndDropTarget {
             override fun onEntered(event: DragAndDropEvent) {
@@ -131,7 +135,7 @@ fun ImportDropZone(enabled: Boolean, onFile: (File) -> Unit, content: @Composabl
         }
     }
     Box(
-        if (!enabled) Modifier.fillMaxSize() else Modifier.fillMaxSize().dragAndDropTarget(
+        if (!enabled || nativeDrops != null) Modifier.fillMaxSize() else Modifier.fillMaxSize().dragAndDropTarget(
             shouldStartDragAndDrop = { event -> holdsListFile(event) },
             target = target,
         ),

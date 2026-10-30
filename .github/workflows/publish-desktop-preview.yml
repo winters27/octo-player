@@ -1,0 +1,59 @@
+# This path already exists on the fork's default branch, so its workflow can
+# also be dispatched at this native-preview branch after testing the CI bundle.
+name: publish-desktop-preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful wayland-preview build in this fork
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: wayland-preview-publish-${{ inputs.build_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'VibeProgramm/octo-player'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN_ID: ${{ inputs.build_run_id }}
+    steps:
+      - name: Validate the source build
+        id: source
+        run: |
+          [[ "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN_ID" > "$RUNNER_TEMP/build.json"
+          jq -e --arg repo "$GH_REPO" '
+            .status == "completed" and .conclusion == "success" and
+            (.event == "workflow_dispatch" or .event == "push") and
+            .path == ".github/workflows/wayland-preview.yml" and
+            .repository.full_name == $repo and .head_repository.full_name == $repo
+          ' "$RUNNER_TEMP/build.json"
+          sha=$(jq -r '.head_sha' "$RUNNER_TEMP/build.json")
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.build_run_id }}
+          name: octo-wayland-linux-x64
+          path: release
+      - name: Publish the checked CI artifacts
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: bash desktop-wayland/packaging/publish-preview.sh

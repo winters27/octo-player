@@ -27,7 +27,9 @@ import app.winters.octo.ui.family.familyLimitLines
 import app.winters.octo.ui.family.homeLimit
 import app.winters.octo.ui.family.qualityName
 import app.winters.octo.ui.family.qualityOptions
-import javax.swing.JFileChooser
+import app.winters.octo.desktop.system.DesktopServices
+import app.winters.octo.desktop.system.FileRequest
+import kotlinx.coroutines.launch
 
 // Audio quality: with Family on, the account's own quality at home and
 // away (kept on the server for every app), the family's limits in plain
@@ -134,11 +136,9 @@ internal fun OfflineRows(app: AppState, settings: AppSettings) {
         }
         SettingRow("Folder", offline.folder.absolutePath) {
             RowAction("Change", {
-                val chooser = JFileChooser(offline.folder).apply {
-                    fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-                    dialogTitle = "Choose where kept songs go"
+                app.scope.launch {
+                    DesktopServices.files.choose(FileRequest("Choose where kept songs go", folder = offline.folder, directory = true))?.let(offline::moveTo)
                 }
-                if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) offline.moveTo(chooser.selectedFile)
             })
         }
         SwitchRow("Keep Liked songs", "Every song you like, as you like it.", choices.liked) { on -> offline.keepLiked(on) }

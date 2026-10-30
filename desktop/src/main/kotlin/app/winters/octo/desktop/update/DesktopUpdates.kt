@@ -49,10 +49,14 @@ fun updaterAvailability(
     portable: Boolean = runningFolder()?.let { File(it, PORTABLE_MARK).isFile } == true,
     forced: Boolean = System.getProperty(FORCE_PROPERTY) == "true",
     hasKeys: Boolean = trustedKeys().isNotEmpty(),
+    flatpak: Boolean = !System.getenv("FLATPAK_ID").isNullOrBlank(),
+    appImage: Boolean = !System.getenv("APPIMAGE").isNullOrBlank() || !System.getenv("APPDIR").isNullOrBlank(),
 ): UpdaterAvailability {
     val running = PlayerVersion.parse(version) ?: return UpdaterAvailability.Off("This is a development build, so it doesn't update itself.")
     if (!hasKeys) return UpdaterAvailability.Off("This build has no key to check updates with.")
     if (forced) return UpdaterAvailability.On(running)
+    if (flatpak) return UpdaterAvailability.Off("This is the Flatpak copy. Install the new .flatpak bundle from Octo's releases page to update it.")
+    if (appImage) return UpdaterAvailability.Off("This is the AppImage copy. Replace it with the new AppImage from Octo's releases page to update it.")
     if (portable) return UpdaterAvailability.Off("This is the portable copy. New versions are on Octo's releases page.")
     if (!installed) return UpdaterAvailability.Off("Only an installed Octo updates itself.")
     return UpdaterAvailability.On(running)
@@ -74,6 +78,7 @@ fun linuxPackageKind(osRelease: String?, hasDpkg: Boolean, hasRpm: Boolean): Str
         .map { it.lowercase() }
         .toSet()
     return when {
+        words.any { it in setOf("arch", "manjaro", "endeavouros") } -> "pkg.tar.zst"
         words.any { it in setOf("debian", "ubuntu") } -> "deb"
         words.any { it in setOf("fedora", "rhel", "centos", "suse", "opensuse") || it.startsWith("opensuse") } -> "rpm"
         hasDpkg -> "deb"
@@ -245,10 +250,10 @@ class DesktopUpdates(
     fun installHelp(update: UpdateCheck.Ready): String = when (os) {
         DesktopOs.Windows -> "Octo closes, installs it, and opens again. Your queue and settings stay."
         DesktopOs.Mac -> "Opens the disk image; drag Octo into Applications to replace this one."
-        DesktopOs.Linux -> if (update.asset.kind == "deb") {
-            "Install it with your software center, or: sudo apt install ./${update.file.name}"
-        } else {
-            "Install it with your software center, or: sudo dnf install ./${update.file.name}"
+        DesktopOs.Linux -> when (update.asset.kind) {
+            "deb" -> "Install it with your software center, or: sudo apt install ./${update.file.name}"
+            "pkg.tar.zst" -> "Install it with: sudo pacman -U ./${update.file.name}"
+            else -> "Install it with your software center, or: sudo dnf install ./${update.file.name}"
         }
     }
 

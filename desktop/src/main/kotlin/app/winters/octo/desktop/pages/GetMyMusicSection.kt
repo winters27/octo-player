@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.pages
 
+import kotlinx.coroutines.launch
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -92,7 +94,7 @@ internal fun GetMyMusicSection(model: ImportModel, services: ImportServices) {
     val scope = rememberCoroutineScope()
     val popups = LocalPopups.current
     val step = model.step
-    val pickFile = { chooseImportFile()?.let { sendImportFile(scope, model, it) } ?: Unit }
+    val pickFile: () -> Unit = { scope.launch { chooseImportFile()?.let { sendImportFile(scope, model, it) } } }
     val paste = { askToPaste(popups, model) }
     val grid = @Composable {
         Txt(GET_MY_MUSIC_LINE, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(horizontal = RowInset), maxLines = 3)

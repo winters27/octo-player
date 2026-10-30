@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Octo
+Comment=A music player for Subsonic, Navidrome and Octo servers
+Exec=octo %U
+Icon=app.winters.octo
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+MimeType=audio/mpeg;audio/flac;audio/mp4;audio/aac;audio/ogg;audio/opus;audio/wav;audio/aiff;x-scheme-handler/octo;

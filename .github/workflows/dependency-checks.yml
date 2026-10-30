@@ -1,0 +1,83 @@
+name: dependency-checks
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/dependency-checks.yml'
+      - '**/*.gradle.kts'
+      - 'gradle/**'
+      - 'gradle.properties'
+      - 'audio-engine/**'
+      - 'wayland-probe/**'
+      - 'tools/cover-art/**'
+  pull_request:
+    paths:
+      - '.github/workflows/dependency-checks.yml'
+      - '**/*.gradle.kts'
+      - 'gradle/**'
+      - 'gradle.properties'
+      - 'audio-engine/**'
+      - 'wayland-probe/**'
+      - 'tools/cover-art/**'
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Android platform
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-37.0' 'build-tools;37.0.0'
+      - name: Shared tests, Android tests and APK
+        # Also verifies that configuring desktop does not need JDK 27.
+        run: ./gradlew :shared:core:allTests :app:testDebugUnitTest :app:assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: android-test-reports
+          path: |
+            app/build/reports/tests
+            shared/core/build/reports/tests
+
+  native-and-probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 27
+      - name: Rust
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: audio-engine
+      - name: Audio tests
+        run: cargo test --manifest-path audio-engine/Cargo.toml --locked
+      - name: Compile Wayland GPU probe
+        # Hosted runners do not supply a physical GPU/Wayland compositor.
+        # Compilation is not a native GPU acceptance test.
+        run: ./gradlew :wayland-probe:installDist --no-daemon
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Cover-art dependencies
+        run: |
+          python -m pip install -r tools/cover-art/requirements.txt
+          python -m pip check
+          python tools/cover-art/cover_art.py candidates --family liquid --count 1 --size 128 --workers 1 --out "$RUNNER_TEMP/cover-liquid"
+          python tools/cover-art/cover_art.py candidates --family silk --count 1 --size 128 --workers 1 --out "$RUNNER_TEMP/cover-silk"

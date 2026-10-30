@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+# CPAL uses ALSA. The runtime's ALSA PulseAudio plugin reaches the host's
+# PulseAudio or PipeWire socket without access to its sound devices.
+export ALSA_CONFIG_PATH=/app/share/octo/asound.conf
+exec /app/octo/bin/Octo "$@"

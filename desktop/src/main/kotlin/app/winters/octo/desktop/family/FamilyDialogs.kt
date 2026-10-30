@@ -125,8 +125,7 @@ import app.winters.octo.ui.family.secondsLeft
 import app.winters.octo.ui.family.shownLink
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.awt.Toolkit
-import java.awt.datatransfer.StringSelection
+import app.winters.octo.desktop.system.DesktopServices
 import java.time.Instant
 import app.winters.octo.subsonic.FamilySignInPending
 import app.winters.octo.ui.family.ALLOW
@@ -836,5 +835,5 @@ private fun Footer(done: FocusRequester, close: () -> Unit, start: @Composable R
 }
 
 internal fun copyText(text: String) {
-    runCatching { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null) }
+    runCatching { DesktopServices.clipboard.put(text) }
 }

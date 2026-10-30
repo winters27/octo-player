@@ -29,7 +29,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.winters.octo.ui.family.qrCode
-import java.awt.Toolkit
+import app.winters.octo.desktop.system.DesktopServices
 import java.awt.datatransfer.Clipboard
 import java.awt.datatransfer.DataFlavor
 
@@ -56,7 +56,8 @@ fun QrImage(text: String, modifier: Modifier = Modifier, side: Dp = 220.dp, labe
 
 // The clipboard's text, for a family link pasted or offered when the app
 // opens.
-fun clipboardText(clipboard: Clipboard = Toolkit.getDefaultToolkit().systemClipboard): String? = runCatching {
+fun clipboardText(clipboard: Clipboard? = null): String? = runCatching {
+    if (clipboard == null) return@runCatching DesktopServices.clipboard.text()
     val contents = clipboard.getContents(null)
     if (contents?.isDataFlavorSupported(DataFlavor.stringFlavor) == true) contents.getTransferData(DataFlavor.stringFlavor) as? String else null
 }.getOrNull()?.trim()?.takeIf(String::isNotEmpty)

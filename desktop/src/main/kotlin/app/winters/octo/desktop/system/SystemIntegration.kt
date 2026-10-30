@@ -71,6 +71,7 @@ class SystemIntegration(
     // Where global shortcuts are claimed; the system's own unless a test
     // hands in a pretend one.
     hotkeys: HotkeyBackend? = null,
+    val nativeHost: Boolean = false,
 ) : AutoCloseable {
     val controls: SystemMediaControls = when (os) {
         DesktopOs.Windows -> NativeMediaControls.load("System media controls") ?: NoMediaControls()
@@ -100,7 +101,7 @@ class SystemIntegration(
 
     private val sleepWatch = if (os == DesktopOs.Linux) LinuxSleepWatch() else null
 
-    val trayAvailable: Boolean = runCatching { isTraySupported }.getOrDefault(false)
+    val trayAvailable: Boolean = !nativeHost && runCatching { isTraySupported }.getOrDefault(false)
     val trayState = TrayState()
     // The tray's icon, drawn from the vector at the size the tray asks for.
     val trayIcon: Painter? = OctoIconPainter(FlatShape)
@@ -139,6 +140,7 @@ class SystemIntegration(
 
     // Set by the window: bring it forward, and quit the app.
     var focusWindow: () -> Unit = {}
+    var minimizeWindow: () -> Unit = {}
     var quit: () -> Unit = {}
 
     // Closing the window keeps Octo in the tray, when there is a tray.
@@ -257,7 +259,7 @@ class SystemIntegration(
 
     fun hideWindow() {
         windowVisible = false
-        GpuCacheTrim.soon()
+        if (!nativeHost) GpuCacheTrim.soon()
     }
 
     fun toggleMiniPlayer() = setMiniPlayer(!miniPlayerOpen)
@@ -359,6 +361,7 @@ class SystemIntegration(
         if (trayAvailable) {
             hideWindow()
         } else {
+            if (nativeHost) return minimizeWindow()
             (mainWindow as? java.awt.Frame)?.let { it.extendedState = it.extendedState or java.awt.Frame.ICONIFIED }
         }
     }
@@ -379,6 +382,14 @@ class SystemIntegration(
     // Whether the system asks for less motion, read once, for the mini player.
     private val systemCalm by lazy { systemReducesMotion(os) }
 
+    fun focusChanged(focused: Boolean) {
+        windowInFront = focused
+        if (focused) {
+            app.windowCameBack()
+            family.offerClipboard()
+        }
+    }
+
     // Follows the window's focus, for the notices, and takes on its
     // taskbar button.
     fun watch(window: java.awt.Window) {
@@ -386,13 +397,11 @@ class SystemIntegration(
         shell.attach(window)
         window.addWindowFocusListener(object : WindowAdapter() {
             override fun windowGainedFocus(e: WindowEvent?) {
-                windowInFront = true
-                app.windowCameBack()
-                family.offerClipboard()
+                focusChanged(true)
             }
 
             override fun windowLostFocus(e: WindowEvent?) {
-                windowInFront = false
+                focusChanged(false)
             }
         })
     }

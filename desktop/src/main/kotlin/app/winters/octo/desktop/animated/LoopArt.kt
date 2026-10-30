@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -77,6 +78,12 @@ private const val WaitMs = 100u
 
 // Whether this computer can decode loops at all, asked once.
 private val videoAvailable: Boolean by lazy { runCatching { loopVideoAvailable() }.getOrDefault(false) }
+
+// Scene-local so integration tests can observe and gate the real decoder's
+// lifecycle without replacing the frame reader or sharing a global hook.
+internal val LocalLoopVideoOpener = staticCompositionLocalOf<(File, IntSize) -> LoopVideo> {
+    { file, size -> LoopVideo.open(file.path, size.width.toUInt(), size.height.toUInt()) }
+}
 
 // What a loop on screen does now: the shared rule, with this window's
 // motion setting and the computer's power saving.
@@ -150,11 +157,12 @@ internal fun rememberLoopFeed(file: File?, play: LoopPlay, size: IntSize, small:
     val playing by rememberUpdatedState(play)
     val opened = file != null && play != LoopPlay.StillOnly && size != IntSize.Zero && videoAvailable
     val wanted by rememberUpdatedState(size)
+    val openVideo = LocalLoopVideoOpener.current
     LaunchedEffect(feed, opened) {
         val target = file?.takeIf { opened } ?: return@LaunchedEffect
         val at = wanted
         openAndUse(
-            open = { LoopVideo.open(target.path, at.width.toUInt(), at.height.toUInt()) },
+            open = { openVideo(target, at) },
             close = { video ->
                 video.stop()
                 video.destroy()

@@ -18,6 +18,7 @@ import app.winters.octo.desktop.discord.SECOND_LINE
 import app.winters.octo.desktop.pages.ActionRow
 import app.winters.octo.desktop.pages.ChoiceRow
 import app.winters.octo.desktop.pages.Group
+import app.winters.octo.desktop.pages.InfoRow
 import app.winters.octo.desktop.pages.SettingRow
 import app.winters.octo.desktop.pages.SwitchRow
 import app.winters.octo.desktop.settings.DesktopOs
@@ -31,11 +32,15 @@ fun MiniPlayerGroup(app: AppState) {
     val command = if (app.os == DesktopOs.Mac) "Cmd+M" else "Ctrl+M"
     Group("Mini player") {
         SwitchRow("Mini player", "A small window in place of this one. $command opens it too.", system.miniPlayerOpen) { on -> system.setMiniPlayer(on) }
-        SwitchRow("Keep it above other windows", null, settings.system.miniPlayerOnTop) { on ->
-            app.settings.update { it.copy(system = it.system.copy(miniPlayerOnTop = on)) }
-        }
-        SwitchRow("Pin it in place", "It stays where it is. The pin in the mini player does this too.", settings.system.miniPlayerPinned) { on ->
-            app.settings.update { it.copy(system = it.system.copy(miniPlayerPinned = on)) }
+        if (system.nativeHost) {
+            InfoRow("Keep above / position", "Use your compositor's window menu or window rules.", "Managed by Wayland")
+        } else {
+            SwitchRow("Keep it above other windows", null, settings.system.miniPlayerOnTop) { on ->
+                app.settings.update { it.copy(system = it.system.copy(miniPlayerOnTop = on)) }
+            }
+            SwitchRow("Pin it in place", "It stays where it is. The pin in the mini player does this too.", settings.system.miniPlayerPinned) { on ->
+                app.settings.update { it.copy(system = it.system.copy(miniPlayerPinned = on)) }
+            }
         }
     }
 }

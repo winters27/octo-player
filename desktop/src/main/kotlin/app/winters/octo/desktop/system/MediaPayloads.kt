@@ -136,7 +136,7 @@ object Mpris {
         "HasTrackList" to false,
         "Identity" to "Octo",
         // The launcher file the Linux packages install: package name, then app name.
-        "DesktopEntry" to "octo-Octo",
+        "DesktopEntry" to (System.getenv("FLATPAK_ID")?.takeIf(String::isNotBlank) ?: "octo-Octo"),
         "SupportedUriSchemes" to listOf("file", "octo"),
         "SupportedMimeTypes" to listOf("audio/mpeg", "audio/flac", "audio/mp4", "audio/aac", "audio/ogg", "audio/opus", "audio/wav", "audio/aiff"),
         "CanSetFullscreen" to false,

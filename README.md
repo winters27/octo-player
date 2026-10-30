@@ -66,9 +66,29 @@ Download the latest release:
 
 New versions appear on the [Octo Releases page](https://github.com/winters27/octo/releases), tagged `desktop-v` and `android-v`.
 
+Linux release builds also produce **AppImage**, **Flatpak bundles** and **Arch Linux
+packages** (`.pkg.tar.zst`, installed with `pacman -U`). See the
+[Linux packages guide](desktop/packaging/linux/README.md) for installation,
+updates, system requirements and building these formats.
+
+### Native Wayland preview (Linux x86_64)
+
+[Octo 1.0.1677-wayland.1](https://github.com/VibeProgramm/octo-player/releases/tag/preview-wayland-1.0.1677-wayland.1-run-41057075594)
+runs the full player directly on Wayland through EGL/OpenGL ES and Skia.
+The portable bundle includes Java 27 and requires hardware rendering, with no
+XWayland dependency. It supports the library, search, Rust audio playback,
+mini player, native clipboard, IME, file dialogs and incoming file drops.
+See the [native player guide](desktop-wayland/README.md) for installation,
+verified checks and preview limitations. The ordinary desktop installers use
+Compose/AWT; the [GPU probe](wayland-probe/README.md) provides isolated diagnostics.
+
 ## Build from source
 
-You need JDK 17. The Android app also needs the Android SDK (platform 37). The desktop app plays through its own audio engine, written in Rust, so it needs Rust 1.88 or newer and:
+You need JDK 17 for shared/Android and ordinary desktop compilation, and JDK 27
+for desktop tests, launching, packaging and the FFM-based Wayland modules.
+Gradle selects them through Java toolchains. The Android app also needs the
+Android SDK (platform 37). The desktop app plays through its own audio engine,
+written in Rust, so it needs Rust 1.88 or newer and:
 
 - Windows: the MSVC build tools.
 - Linux: `libasound2-dev` and `pkg-config` (Fedora: `alsa-lib-devel`), plus `fakeroot` and `rpm` to build packages.
@@ -86,6 +106,7 @@ cd octo-player
 # Desktop installers, each on its own system
 ./gradlew :desktop:packageMsi :desktop:packagePortableZip                        # Windows
 ./gradlew :desktop:packageDeb :desktop:packageRpm :desktop:packagePortableZip    # Linux
+./gradlew :desktop:packageAppImage :desktop:packageFlatpak :desktop:packagePacman # Linux x86_64, extra build tools in the guide above
 
 # Tests
 ./gradlew :shared:core:allTests :app:testDebugUnitTest :desktop:test
@@ -100,6 +121,8 @@ cd octo-player
 | --- | --- |
 | `app/` | the Android app |
 | `desktop/` | the desktop app |
+| `desktop-wayland/` | native Linux Wayland host for the full player; portable Java 27 bundle |
+| `wayland-probe/` | standalone Linux x86_64 Wayland/EGL rendering and input diagnostics |
 | `shared/core/` | what both apps share: lyrics, sound, queue rules, song matching, covers, updates |
 | `subsonic/` | the Subsonic and OpenSubsonic client, with Octo's extensions |
 | `design/`, `desktop-design/` | colours, type, icons and fonts |

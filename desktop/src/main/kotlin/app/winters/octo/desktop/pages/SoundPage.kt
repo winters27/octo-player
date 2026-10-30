@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.pages
 
+import kotlinx.coroutines.launch
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -97,8 +99,9 @@ import app.winters.octo.ui.sound.withMode
 import app.winters.octo.ui.sound.withNewFilter
 import app.winters.octo.ui.sound.withPreset
 import app.winters.octo.ui.sound.withoutFilter
-import java.awt.FileDialog
-import java.awt.Frame
+import app.winters.octo.desktop.system.DesktopServices
+import app.winters.octo.desktop.system.FileRequest
+import androidx.compose.runtime.rememberCoroutineScope
 import java.io.File
 import java.util.Locale
 import kotlin.math.abs
@@ -490,6 +493,7 @@ private fun PlaybackRows(app: AppState, playback: PlaybackPrefs) {
 // file, and the whole curve written out as one.
 @Composable
 private fun CorrectionRows(sound: SoundController) {
+    val scope = rememberCoroutineScope()
     val settings by sound.current.collectAsState()
     // Why the last import or export did not work, shown on its row.
     var importProblem by remember { mutableStateOf<String?>(null) }
@@ -509,28 +513,27 @@ private fun CorrectionRows(sound: SoundController) {
             importProblem ?: "From a ParametricEQ.txt file made for your headphones.",
             "Import",
             {
-                val file = chooseFile("Choose a ParametricEQ.txt file", save = false) ?: return@ActionRow
-                val read = runCatching { ParametricEqFile.correction(file.name, file.readText()) }.getOrNull()
-                importProblem = if (read == null) "That file has no filters Octo can read." else null
-                if (read != null) sound.update { it.copy(eqEnabled = true, correction = read) }
+                scope.launch {
+                    val file = chooseFile("Choose a ParametricEQ.txt file", save = false) ?: return@launch
+                    val read = runCatching { ParametricEqFile.correction(file.name, file.readText()) }.getOrNull()
+                    importProblem = if (read == null) "That file has no filters Octo can read." else null
+                    if (read != null) sound.update { it.copy(eqEnabled = true, correction = read) }
+                }
             },
         )
         ActionRow("Export my curve", exportProblem ?: "Saves the equalizer as a ParametricEQ.txt file.", "Export", {
-            val file = chooseFile("Save the curve", save = true, suggested = "Octo ParametricEQ.txt") ?: return@ActionRow
-            val on = settings.copy(eqEnabled = true)
-            exportProblem = if (runCatching { file.writeText(ParametricEqFile.write(on.effectivePreampDb(), on.activeFilters())) }.isSuccess) null else "The file could not be saved."
+            scope.launch {
+                val file = chooseFile("Save the curve", save = true, suggested = "Octo ParametricEQ.txt") ?: return@launch
+                val on = settings.copy(eqEnabled = true)
+                exportProblem = if (runCatching { file.writeText(ParametricEqFile.write(on.effectivePreampDb(), on.activeFilters())) }.isSuccess) null else "The file could not be saved."
+            }
         })
     }
 }
 
 // The system's own file window, for one file to open or save.
-private fun chooseFile(title: String, save: Boolean, suggested: String? = null): File? {
-    val dialog = FileDialog(null as Frame?, title, if (save) FileDialog.SAVE else FileDialog.LOAD)
-    suggested?.let { dialog.file = it }
-    dialog.isVisible = true
-    val name = dialog.file ?: return null
-    return File(dialog.directory, name)
-}
+private suspend fun chooseFile(title: String, save: Boolean, suggested: String? = null): File? =
+    DesktopServices.files.choose(FileRequest(title, save = save, suggested = suggested))
 
 // The shape of the crossfade, picked from a menu that draws each one. With
 // smart transitions on they pick the curve, and the row says so and names

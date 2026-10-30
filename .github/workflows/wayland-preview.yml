@@ -1,0 +1,85 @@
+name: wayland-preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/java27-wayland]
+    paths: ['desktop-wayland/**', 'desktop/**', 'wayland-probe/**', '.github/workflows/wayland-preview.yml']
+  pull_request:
+    paths: ['desktop-wayland/**', 'desktop/**', 'desktop-design/**', 'shared/**', 'subsonic/**', 'audio-engine/**', 'gradle/**', '*.gradle.kts', '.github/workflows/wayland-preview.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wayland-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Native build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libasound2-plugins pkg-config libsecret-1-0 \
+            libegl1 libgles2 libgl1-mesa-dri libxkbcommon0 libwayland-client0 libwayland-egl1 \
+            weston pulseaudio pulseaudio-utils strace
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 27
+      - name: Rust
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: audio-engine
+      - name: Version
+        id: version
+        run: |
+          build=$(git rev-list --count HEAD)
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "version=1.0.$build-wayland.1" >> "$GITHUB_OUTPUT"
+      - name: Native-adapter tests
+        run: ./gradlew :desktop-wayland:test --no-daemon --max-workers=3
+      - name: Build the portable Java 27 bundle
+        run: ./gradlew :desktop-wayland:packagePortable -PoctoBuild=${{ steps.version.outputs.build }} -PoctoDesktopVersion=${{ steps.version.outputs.version }} --no-daemon --max-workers=3
+      - name: Packaged Wayland / audio / TLS smoke
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: bash desktop-wayland/check/ci-smoke.sh
+      - name: Full desktop regression suite
+        run: ./gradlew :desktop:test --no-daemon --max-workers=3
+      - name: Checksums and provenance
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cd desktop-wayland/build/distributions
+          sha256sum ./*.tar.gz > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          jq -n --arg version "$VERSION" --arg sha "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" \
+            '{version:$version, commit:$sha, run:$run, backend:"Wayland/EGL", java:27, ciRenderer:"llvmpipe (explicit test-only opt-in)"}' > build.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: octo-wayland-linux-x64
+          path: desktop-wayland/build/distributions/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: wayland-test-results
+          path: |
+            desktop-wayland/build/reports/tests/
+            desktop/build/reports/tests/
+            desktop-wayland/build/ci-check/*.log
+            desktop-wayland/build/ci-check/*.png
+            hs_err_pid*.log
+          if-no-files-found: ignore

@@ -187,7 +187,7 @@ impl<In: Transport> Transport for IdleTransport<In> {
 /// The wait for input, at most `limit`.
 fn idle_limited(timeout: NextTimeout, limit: Duration) -> NextTimeout {
     if timeout.after.is_not_happening() || *timeout.after > limit {
-        NextTimeout { after: ureq::unversioned::transport::time::Duration::Exact(limit), reason: timeout.reason }
+        NextTimeout { after: ureq::unversioned::transport::time::Duration::Exact(limit), ..timeout }
     } else {
         timeout
     }

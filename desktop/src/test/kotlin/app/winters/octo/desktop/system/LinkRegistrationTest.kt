@@ -65,4 +65,38 @@ class LinkRegistrationTest {
         assertEquals(java.io.File("/x/data", "applications"), linuxApplicationsFolder(mapOf("XDG_DATA_HOME" to "/x/data")::get, "/home/b"))
         assertEquals(java.io.File("/home/b/.local/share", "applications"), linuxApplicationsFolder({ null }, "/home/b"))
     }
+
+    @Test
+    fun flatpakAndExtractedImagesDoNotRegisterSandboxOrTemporaryPaths() {
+        val folder = kotlin.io.path.createTempDirectory("octo-flatpak").toFile()
+        try {
+            val applications = folder.resolve("applications")
+            assertTrue(registerWithLinuxDesktop("/app/octo/bin/Octo", applications, false, mapOf("FLATPAK_ID" to "app.winters.octo")::get))
+            assertTrue(registerWithLinuxDesktop("/tmp/appdir/usr/bin/Octo", applications, false, mapOf("APPDIR" to "/tmp/appdir")::get))
+            assertTrue(!applications.exists())
+        } finally {
+            folder.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun appImageLinksAndIconsSurviveUnmounting() {
+        val folder = kotlin.io.path.createTempDirectory("octo-image").toFile()
+        try {
+            val mount = folder.resolve("mount/usr")
+            mount.resolve("lib").mkdirs()
+            mount.resolve("lib/Octo.png").writeBytes(byteArrayOf(1, 2, 3))
+            val applications = folder.resolve("data/applications")
+            val image = folder.resolve("My Apps/Octo.AppImage").path
+            assertTrue(registerWithLinuxDesktop(mount.resolve("bin/Octo").path, applications, false, mapOf("APPIMAGE" to image, "APPDIR" to mount.parent)::get))
+            mount.parentFile.deleteRecursively()
+            val text = applications.resolve("octo-Octo.desktop").readText()
+            assertTrue("Exec=\"$image\" %U" in text)
+            assertTrue(!text.contains(mount.path))
+            val icon = java.io.File(text.lineSequence().first { it.startsWith("Icon=") }.substringAfter('='))
+            assertTrue(icon.readBytes().contentEquals(byteArrayOf(1, 2, 3)))
+        } finally {
+            folder.deleteRecursively()
+        }
+    }
 }

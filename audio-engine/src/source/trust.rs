@@ -205,7 +205,10 @@ impl<In: Transport> Connector<In> for PinnedTls {
         let name =
             ServerName::try_from(bare).map_err(|_| ureq::Error::Tls("not a valid host name"))?.to_owned();
         let mut conn = ClientConnection::new(config, name)?;
-        let mut sock = TransportAdapter::new(Box::new(transport) as Box<dyn Transport>);
+        let mut sock = TransportAdapter::new(
+            Box::new(transport) as Box<dyn Transport>,
+            details.current_time.clone(),
+        );
         sock.set_timeout(details.timeout);
         conn.complete_io(&mut sock)?;
         let buffers =

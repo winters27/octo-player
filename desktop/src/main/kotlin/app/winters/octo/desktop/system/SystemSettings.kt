@@ -36,7 +36,7 @@ fun SystemRows(app: AppState) {
                 app.settings.update { it.copy(system = it.system.copy(nowPlayingNotices = on)) }
             }
         }
-        if (!mac) {
+        if (!mac && system?.nativeHost != true) {
             SwitchRow("Use the system title bar", "Takes effect the next time Octo opens.", settings.systemTitleBar) { on ->
                 app.settings.update { it.copy(systemTitleBar = on) }
             }

@@ -11,6 +11,36 @@ plugins {
 
 kotlin { jvmToolchain(17) }
 
+// Shared code still targets Java 17 for Android. The desktop process and
+// the jlink/jpackage tools use Java 27, including when Gradle runs on 17.
+// Keep this lazy: configuring an Android-only build must not require JDK 27.
+val desktopJava = javaToolchains.launcherFor {
+    languageVersion.set(JavaLanguageVersion.of(27))
+}
+val desktopJavaHome = desktopJava.map { it.metadata.installationPath.asFile.absolutePath }
+
+// Compose installs its task defaults after evaluation; replace those defaults
+// together so tests, run, the runtime probe, jlink and jpackage agree.
+afterEvaluate {
+    tasks.withType<JavaExec>().configureEach {
+        javaLauncher.set(desktopJava)
+        // Compose also sets an explicit executable. Replace it at execution
+        // time so Android-only task graphs do not resolve the desktop JDK.
+        doFirst { setExecutable(desktopJava.get().executablePath.asFile.absolutePath) }
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
+    }
+    tasks.withType<Test>().configureEach {
+        javaLauncher.set(desktopJava)
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
+    }
+    tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJvmToolOperationTask>().configureEach {
+        javaHome.set(desktopJavaHome)
+    }
+    tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractCheckNativeDistributionRuntime>().configureEach {
+        jdkHome.set(desktopJavaHome)
+    }
+}
+
 // The version the installers carry and the app shows. Windows only
 // replaces an installed Octo with a higher version, so every build handed
 // out must count up: a test build passes -PoctoBuild=<commit count>, as the
@@ -245,6 +275,7 @@ compose.desktop {
     application {
         mainClass = "app.winters.octo.desktop.MainKt"
         jvmArgs("-Docto.version=$desktopVersion")
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
         // The heap, for `run` and the installers alike. Left to itself the
         // JVM takes a quarter of the machine's memory as its limit and a
         // 64th as its start (8 GB and 512 MB on 32 GB), never gives it back
@@ -283,25 +314,8 @@ compose.desktop {
         // or -Pocto.discordAppId=... . Without one, Settings leaves Discord out.
         providers.gradleProperty("octo.discordAppId").orNull?.takeIf(String::isNotBlank)?.let { jvmArgs("-Docto.discordAppId=${it.trim()}") }
         nativeDistributions {
-            // MSI for Windows, DMG for macOS, DEB and RPM for Linux.
-            //
-            // An AppImage is one extra step on Linux, from the app image
-            // that createDistributable makes:
-            //   ./gradlew :desktop:createDistributable
-            //   mkdir -p Octo.AppDir/usr
-            //   cp -r desktop/build/compose/binaries/main/app/Octo/* Octo.AppDir/usr/
-            //   cp desktop/icons/octo.png Octo.AppDir/octo.png
-            //   ln -s usr/bin/Octo Octo.AppDir/AppRun
-            // then Octo.AppDir/octo-Octo.desktop (the name the media controls
-            // announce) with these lines:
-            //   [Desktop Entry]
-            //   Type=Application
-            //   Name=Octo
-            //   Exec=Octo %U
-            //   Icon=octo
-            //   Categories=AudioVideo;Audio;Player;
-            //   MimeType=audio/mpeg;audio/flac;audio/mp4;audio/ogg;audio/opus;audio/wav;x-scheme-handler/octo;
-            // and last: appimagetool Octo.AppDir Octo-1.0.0-x86_64.AppImage
+            // jpackage's formats. AppImage, Flatpak and pacman use the same
+            // createDistributable image through the tasks below.
             targetFormats(TargetFormat.Msi, TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "Octo"
             // Files beside the jars: the native libraries (shareAppNatives).
@@ -486,8 +500,39 @@ val packagePortableZip by tasks.registering(Zip::class) {
     group = "compose desktop"
     description = "Packs the app into a zip that runs without installing."
     dependsOn("createDistributable")
-    from(layout.buildDirectory.dir("compose/binaries/main/app"))
+    from(layout.buildDirectory.dir("compose/binaries/main/app")) {
+        // Reproducible archives default to 0644, including the Linux launcher
+        // and Java's subprocess helper. Keep executable source files runnable.
+        eachFile { if (hostName.startsWith("linux") && file.canExecute()) permissions { unix("rwxr-xr-x") } }
+    }
     from(file("portable/octo-portable")) { into(if (hostName.startsWith("windows")) "Octo/app" else "Octo/lib/app") }
     archiveFileName = "Octo-$desktopVersion-$jnaFolder.zip"
     destinationDirectory = layout.buildDirectory.dir("compose/binaries/main/zip")
+}
+
+// The Linux formats jpackage does not make. Each gets a private copy of the
+// image, so its launchers and metadata never leak into another installer.
+mapOf("AppImage" to "appimage", "Flatpak" to "flatpak", "Pacman" to "pacman").forEach { (title, kind) ->
+    tasks.register<Exec>("package$title") {
+        group = "compose desktop"
+        description = "Packages the Linux x86_64 app as $title."
+        dependsOn("createDistributable")
+        val image = layout.buildDirectory.dir("compose/binaries/main/app/Octo")
+        val output = layout.buildDirectory.dir("compose/binaries/main/$kind")
+        inputs.dir(image)
+        inputs.dir(file("packaging/linux"))
+        inputs.file(rootProject.file("LICENSE"))
+        inputs.dir(rootProject.file("design/licenses"))
+        inputs.file(file("icons/octo.png"))
+        inputs.property("version", desktopVersion)
+        outputs.dir(output)
+        doFirst {
+            if (!hostName.startsWith("linux") || hostArch != "x86-64") {
+                throw GradleException("$title packages are built on Linux x86_64")
+            }
+            output.get().asFile.deleteRecursively()
+        }
+        commandLine("python3", file("packaging/linux/package-linux.py"), kind,
+            "--image", image.get().asFile, "--out", output.get().asFile, "--version", desktopVersion)
+    }
 }

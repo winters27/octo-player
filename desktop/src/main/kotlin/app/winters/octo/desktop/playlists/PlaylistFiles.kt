@@ -9,8 +9,8 @@ import app.winters.octo.playlists.parseM3u
 import app.winters.octo.playlists.playlistNameOf
 import app.winters.octo.playlists.shown
 import app.winters.octo.subsonic.Song
-import java.awt.FileDialog
-import java.awt.Frame
+import app.winters.octo.desktop.system.DesktopServices
+import app.winters.octo.desktop.system.FileRequest
 import java.io.File
 
 // Playlist files on the desktop: what a playlist writes out, and what a
@@ -52,15 +52,10 @@ fun missedDetail(missed: List<String>, shown: Int = 3): String? {
 // The system's own file window, for a playlist file to open or save. On
 // Windows the open window lists only playlist files; elsewhere the name
 // filter does it. A file saved without an ending gets ".m3u".
-fun choosePlaylistFile(save: Boolean, windows: Boolean, suggested: String? = null): File? {
-    val dialog = FileDialog(null as Frame?, if (save) "Export playlist" else "Import a playlist file", if (save) FileDialog.SAVE else FileDialog.LOAD)
-    when {
-        suggested != null -> dialog.file = suggested
-        !save && windows -> dialog.file = "*.m3u;*.m3u8"
-    }
-    if (!save) dialog.setFilenameFilter { _, name -> name.endsWith(".m3u", ignoreCase = true) || name.endsWith(".m3u8", ignoreCase = true) }
-    dialog.isVisible = true
-    val name = dialog.file ?: return null
-    val file = File(dialog.directory, name)
+suspend fun choosePlaylistFile(save: Boolean, windows: Boolean, suggested: String? = null): File? {
+    val file = DesktopServices.files.choose(FileRequest(
+        if (save) "Export playlist" else "Import a playlist file",
+        save = save, suggested = suggested, extensions = setOf("m3u", "m3u8"),
+    )) ?: return null
     return if (save && file.extension.isEmpty()) File(file.path + ".m3u") else file
 }

@@ -1,11 +1,7 @@
 package app.winters.octo.desktop.animated
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.ImageComposeScene
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Density
 import app.winters.octo.animated.AnimatedArtSetting
@@ -258,42 +254,19 @@ class AnimatedArtTest {
     @Test(timeout = 60_000)
     fun aLoopPlaysItsFramesAndHeldItStops() {
         assumeTrue(fixture.isFile && runCatching { loopVideoAvailable() }.getOrDefault(false))
-        val play = mutableStateOf(LoopPlay.Play)
-        val scene = ImageComposeScene(90, 90, Density(1f)) {
-            Box(Modifier.fillMaxSize().background(Color.Black)) { LoopFrames(fixture, play.value, Modifier.fillMaxSize()) }
-        }
-        fun frame(): Pair<Int, Int> {
-            var top = 0
-            var bottom = 0
-            SwingUtilities.invokeAndWait {
-                val image = scene.render(System.nanoTime())
-                val bitmap = org.jetbrains.skia.Bitmap.makeFromImage(image)
-                top = bitmap.getColor(45, 10)
-                bottom = bitmap.getColor(45, 80)
-                bitmap.close()
-                image.close()
-            }
-            return top to bottom
-        }
-        try {
-            val until = System.currentTimeMillis() + 5_000
-            var seen = frame()
-            while (System.currentTimeMillis() < until && (seen.first shr 16 and 0xFF) < 200) {
-                Thread.sleep(30)
-                seen = frame()
-            }
-            // Faded in from nothing over black: red over blue.
-            assertTrue("top ${Integer.toHexString(seen.first)}", (seen.first shr 16 and 0xFF) > 200 && (seen.first and 0xFF) < 60)
-            assertTrue("bottom ${Integer.toHexString(seen.second)}", (seen.second and 0xFF) > 200 && (seen.second shr 16 and 0xFF) < 60)
-            // Held, the frame stays.
-            repeat(20) { frame(); Thread.sleep(30) }
-            play.value = LoopPlay.Hold
-            repeat(5) { frame(); Thread.sleep(30) }
-            val held = frame()
-            repeat(10) { frame(); Thread.sleep(30) }
-            assertEquals(held, frame())
-        } finally {
-            SwingUtilities.invokeAndWait { scene.close() }
+        LoopScene(fixture).use { scene ->
+            scene.awaitPicture()
+            val playing = scene.probe.copies.get()
+            scene.await("successive decoded frames") { scene.probe.copies.get() >= playing + 2 }
+            scene.play(LoopPlay.Hold)
+            scene.await("reader cancellation followed by native hold") { scene.probe.holds.get() == 1 }
+            val held = scene.frame()
+            val copies = scene.probe.copies.get()
+            scene.heldFrames(20) { assertEquals(held, it) }
+            assertEquals("held reader must not copy frames", copies, scene.probe.copies.get())
+            scene.play(LoopPlay.Play)
+            scene.await("frames after resuming") { scene.probe.copies.get() >= copies + 2 }
+            LoopScene.assertColors(scene.frame(), scene.diagnostics())
         }
     }
 }

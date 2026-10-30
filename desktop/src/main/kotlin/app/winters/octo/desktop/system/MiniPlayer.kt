@@ -547,7 +547,9 @@ private fun SongWords(state: PlayerState, modifier: Modifier) {
 private fun WindowButtons(pinned: Boolean, bar: Boolean, actions: MiniActions) {
     Row(horizontalArrangement = Arrangement.spacedBy(Space.Xxs), verticalAlignment = Alignment.CenterVertically) {
         val quiet = OctoColors.TextSecondary
-        IconAction(if (pinned) OctoIcons.Pinned else OctoIcons.Pin, if (pinned) "Unpin so it can move" else "Pin it in place", actions.pin, size = ControlHeight.Xs, iconSize = IconSize.Inline, active = pinned, tint = if (pinned) OctoColors.TextPrimary else quiet)
+        if (LocalSystem.current?.nativeHost != true) {
+            IconAction(if (pinned) OctoIcons.Pinned else OctoIcons.Pin, if (pinned) "Unpin so it can move" else "Pin it in place", actions.pin, size = ControlHeight.Xs, iconSize = IconSize.Inline, active = pinned, tint = if (pinned) OctoColors.TextPrimary else quiet)
+        }
         if (bar) {
             IconAction(OctoIcons.Expand, "Show the cover large", { actions.resize(MINI_SQUARE_WIDTH, MINI_SQUARE_HEIGHT) }, size = ControlHeight.Xs, iconSize = IconSize.Inline, tint = quiet)
         } else {

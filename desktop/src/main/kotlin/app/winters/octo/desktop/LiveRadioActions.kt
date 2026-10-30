@@ -27,8 +27,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
-import java.awt.Toolkit
-import java.awt.datatransfer.StringSelection
+import app.winters.octo.desktop.system.DesktopServices
 
 // What the Live radio page, Home's Live radio shelf and Settings > Radio
 // stations do with a live station.
@@ -148,7 +147,7 @@ fun AppState.searchFor(words: String) {
 // Puts words on the clipboard, saying so in passing.
 fun AppState.copyWords(words: String, said: String) {
     if (words.isBlank()) return
-    val copied = runCatching { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(words), null) }.isSuccess
+    val copied = runCatching { DesktopServices.clipboard.put(words) }.isSuccess
     if (copied) passingNotice(said)
 }
 

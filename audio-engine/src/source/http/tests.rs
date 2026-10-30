@@ -142,14 +142,23 @@ fn a_quiet_connection_lets_go_of_the_stream_once_replaced() {
 fn a_wait_for_input_is_limited_and_a_shorter_one_kept() {
     use ureq::unversioned::transport::time::Duration as Wait;
     let limit = Duration::from_secs(30);
-    let endless = NextTimeout { after: Wait::NotHappening, reason: ureq::Timeout::RecvBody };
+    let endless = NextTimeout { after: Wait::NotHappening, reason: ureq::Timeout::RecvBody, ..Default::default() };
     assert_eq!(*idle_limited(endless, limit).after, limit);
-    let long = NextTimeout { after: Wait::Exact(Duration::from_secs(90)), reason: ureq::Timeout::RecvBody };
+    let long = NextTimeout { after: Wait::Exact(Duration::from_secs(90)), reason: ureq::Timeout::RecvBody, ..Default::default() };
     assert_eq!(*idle_limited(long, limit).after, limit);
-    let short = NextTimeout { after: Wait::Exact(Duration::from_secs(5)), reason: ureq::Timeout::RecvResponse };
+    let short = NextTimeout { after: Wait::Exact(Duration::from_secs(5)), reason: ureq::Timeout::RecvResponse, ..Default::default() };
     let kept = idle_limited(short, limit);
     assert_eq!(*kept.after, Duration::from_secs(5));
     assert_eq!(kept.reason, ureq::Timeout::RecvResponse);
+    let per_io = NextTimeout {
+        per_read: Some(Wait::Exact(Duration::from_secs(2))),
+        per_write: Some(Wait::Exact(Duration::from_secs(3))),
+        ..endless
+    };
+    let capped = idle_limited(per_io, limit);
+    assert_eq!(capped.per_read, per_io.per_read);
+    assert_eq!(capped.per_write, per_io.per_write);
+    assert_eq!(*capped.for_read().after, Duration::from_secs(2));
 }
 
 #[test]

@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+appdir=${APPDIR:-$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)}
+export APPDIR="$appdir"
+exec "$appdir/usr/bin/Octo" "$@"

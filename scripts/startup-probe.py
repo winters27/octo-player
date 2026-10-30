@@ -55,7 +55,7 @@ options = [line.split("=", 1)[1].replace("$APPDIR", app) for line in cfg if line
 exe = "java.exe" if os.name == "nt" else "java"
 launcher = os.path.join(args.jdk, "bin", exe) if args.jdk else shutil.which("java")
 if not launcher or not os.path.exists(launcher):
-    sys.exit("No JDK launcher: pass --jdk <the JDK 17 the runtime was built from>")
+    sys.exit("No JDK launcher: pass --jdk <the JDK 27 the runtime was built from>")
 
 work = tempfile.mkdtemp(prefix="octo-probe-")
 try:

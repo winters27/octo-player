@@ -25,6 +25,7 @@ suspend fun checkSound(app: AppState, file: File, close: () -> Unit) {
     val player = app.player
     val engine = (player as? EnginePlayer)?.engine
     println("check: version ${System.getProperty("octo.version") ?: "not stamped"}")
+    println("check: java ${Runtime.version().feature()}")
     println("check: playing ${file.absolutePath} on ${if (engine == null) "the silent player" else "the audio engine"}")
     // Silent, and only for this run: the player's own volume, not the
     // listener's saved one.
