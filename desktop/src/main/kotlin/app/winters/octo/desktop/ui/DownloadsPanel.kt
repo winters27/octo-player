@@ -136,6 +136,8 @@ import app.winters.octo.ui.downloads.findReplaces
 import app.winters.octo.ui.family.MORE_BELOW
 import kotlinx.coroutines.launch
 import app.winters.octo.ui.downloads.FIND_SONGS
+import app.winters.octo.ui.downloads.Keeping
+import app.winters.octo.ui.downloads.keepAnywayLabel
 import app.winters.octo.ui.downloads.LogMark
 import app.winters.octo.ui.downloads.RowPhase
 import app.winters.octo.ui.downloads.candidateTitle
@@ -227,6 +229,7 @@ private fun BackTo(words: String, go: () -> Unit) {
 private fun DownloadList(model: DownloadsModel, modifier: Modifier) {
     val rows by model.rows.collectAsState()
     val loaded by model.loaded.collectAsState()
+    val keeping by model.keeping.collectAsState()
     Column(modifier) {
         Txt(drawerSummary(rows), DesktopType.meta, OctoColors.TextMuted, Modifier.fillMaxWidth().padding(start = Space.L, end = Space.S, top = Space.S))
         if (rows.isEmpty()) {
@@ -242,6 +245,8 @@ private fun DownloadList(model: DownloadsModel, modifier: Modifier) {
                     onOpen = row.logKey?.let { key -> { model.showLog(key) } },
                     onFind = row.findId?.let { id -> { model.find(id, row.title, row.logKey) } },
                     onClear = { model.clear(row.key) },
+                    keeping = row.logKey?.let { keeping[it] },
+                    onKeep = { row.logKey?.let(model::keepAnyway) },
                 )
             }
         }
@@ -250,12 +255,23 @@ private fun DownloadList(model: DownloadsModel, modifier: Modifier) {
 
 // One download: its cover, its names, the line saying where it is, and a
 // ring while it runs. Hovered, a finished one offers to leave the list, and
-// any can be looked for again.
+// any can be looked for again. A held one the server offers to keep anyway
+// has Keep anyway under its words, part of the row; the cover and the ring
+// stay centered on the words alone, so nothing moves as it is sent or
+// refused.
 @Composable
-private fun DownloadLine(row: DownloadRow, onOpen: (() -> Unit)?, onFind: (() -> Unit)?, onClear: () -> Unit) {
+private fun DownloadLine(
+    row: DownloadRow,
+    onOpen: (() -> Unit)?,
+    onFind: (() -> Unit)?,
+    onClear: () -> Unit,
+    keeping: Keeping? = null,
+    onKeep: () -> Unit = {},
+) {
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
-    Row(
+    val keep = keepAnywayLabel(row)
+    Column(
         Modifier
             .fillMaxWidth()
             .hoverable(hover)
@@ -265,27 +281,48 @@ private fun DownloadLine(row: DownloadRow, onOpen: (() -> Unit)?, onFind: (() ->
                 contentDescription = "${row.title}, ${row.artist}"
                 stateDescription = row.status
             }
-            .padding(horizontal = Space.S, vertical = Space.S),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.L),
+            // The Keep anyway line's own inset is the row's bottom edge.
+            .padding(start = Space.S, end = Space.S, top = Space.S, bottom = if (keep != null) 0.dp else Space.S),
     ) {
-        Cover(row.coverArt, Modifier.size(LineCover), shape = Corner.ArtSShape, placeholder = OctoIcons.Songs)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
-                CutTxt(row.title, DesktopType.tableTitle, OctoColors.TextPrimary, Modifier.weight(1f, fill = false))
-                kindLabel(row.kind)?.let { KindMark(it) }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
+            Cover(row.coverArt, Modifier.size(LineCover), shape = Corner.ArtSShape, placeholder = OctoIcons.Songs)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
+                    CutTxt(row.title, DesktopType.tableTitle, OctoColors.TextPrimary, Modifier.weight(1f, fill = false))
+                    kindLabel(row.kind)?.let { KindMark(it) }
+                }
+                if (row.artist.isNotBlank()) Txt(row.artist, DesktopType.meta, OctoColors.TextSecondary)
+                Txt(row.status, DesktopType.meta, if (row.phase == RowPhase.Failed) OctoColors.SignalOrange else OctoColors.TextMuted, maxLines = 2)
             }
-            if (row.artist.isNotBlank()) Txt(row.artist, DesktopType.meta, OctoColors.TextSecondary)
-            Txt(row.status, DesktopType.meta, if (row.phase == RowPhase.Failed) OctoColors.SignalOrange else OctoColors.TextMuted, maxLines = 2)
+            when {
+                hovered && onFind != null && row.finished -> Row {
+                    IconAction(OctoIcons.Search, FIND_SONGS, onFind, size = ControlHeight.S, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
+                    IconAction(OctoIcons.Close, "Clear this one", onClear, size = ControlHeight.S, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
+                }
+                !row.finished -> ProgressRing(row.fraction, size = IconSize.Transport)
+                row.phase == RowPhase.Done -> Glyph(OctoIcons.Downloaded, size = IconSize.Table, tint = OctoColors.TextSecondary)
+                else -> Glyph(OctoIcons.Info, size = IconSize.Table, tint = OctoColors.SignalOrange)
+            }
         }
-        when {
-            hovered && onFind != null && row.finished -> Row {
-                IconAction(OctoIcons.Search, FIND_SONGS, onFind, size = ControlHeight.S, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
-                IconAction(OctoIcons.Close, "Clear this one", onClear, size = ControlHeight.S, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
-            }
-            !row.finished -> ProgressRing(row.fraction, size = IconSize.Transport)
-            row.phase == RowPhase.Done -> Glyph(OctoIcons.Downloaded, size = IconSize.Table, tint = OctoColors.TextSecondary)
-            else -> Glyph(OctoIcons.Info, size = IconSize.Table, tint = OctoColors.SignalOrange)
+        if (keep != null) KeepAnywayLine(keep, keeping, onKeep)
+    }
+}
+
+// A held download's Keep anyway, lined up with its row's words: dimmed
+// while it is sent, and the server's words under it when it said no.
+@Composable
+private fun KeepAnywayLine(label: String, keeping: Keeping?, onKeep: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(start = LineCover + Space.L)) {
+        // The action's own inset pulled back, so its words start where the row's do.
+        TextAction(label, onKeep, Modifier.offset(x = -TextActionInset), enabled = keeping?.sending != true)
+        keeping?.error?.let {
+            Txt(
+                it,
+                DesktopType.meta,
+                OctoColors.SignalOrange,
+                Modifier.padding(bottom = Space.M).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+                maxLines = 2,
+            )
         }
     }
 }
@@ -851,6 +888,9 @@ private val PillShape = RoundedCornerShape(50)
 private val MoreBelowFade = Color(0xF0141416)
 private val LineCover = RowHeight.Regular
 private val HeadCover = FrameSize.PlayerCover + Space.Xs
+
+// How far a TextAction's words sit inside its edge.
+private val TextActionInset = 12.dp
 private val MarkSize = IconSize.Transport + Space.Xxs
 private val StepLine = Space.Xs
 private val Chip = Color.White.copy(alpha = 0.08f)

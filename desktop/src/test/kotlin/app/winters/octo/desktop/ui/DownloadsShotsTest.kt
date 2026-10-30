@@ -6,6 +6,9 @@ import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.SwingUtilities
 
 // The downloads drawer as it looks: the list with a download on its way, a
@@ -108,6 +111,72 @@ class DownloadsShotsTest {
 
                     SwingUtilities.invokeAndWait { app.downloads!!.find("nd-9", "Holocene") }
                     rig.shot(scene, "downloads/find", 2_000)
+                    SwingUtilities.invokeAndWait { app.showSidePanel(null) }
+                }
+            }
+        }
+    }
+
+    // Held rows with Keep anyway, on a server listing octoAcquisitions 4: a
+    // song held while AcoustID is off and an album holding two tracks, beside
+    // a download on its way. Then the album's Keep anyway while it is sent,
+    // refused with the server's words, and the song's kept and refreshed.
+    // Saved as downloads/keep-anyway*.png.
+    @Test
+    fun drawKeepAnyway() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        FakeServer().use { server ->
+            PolishShotsTest.Rig(folder, PolishData.library(100), server).use { rig ->
+                server.answer(
+                    "getOpenSubsonicExtensions",
+                    """"openSubsonicExtensions":[{"name":"songLyrics","versions":[1]},{"name":"octoAcquisitions","versions":[1,2,3,4]},{"name":"octoLibraryActions","versions":[1,2]}]""",
+                    type = "octo",
+                )
+                server.answer("getUpgrades", """"upgrades":[]""", type = "octo")
+                val kept = AtomicBoolean(false)
+                server.answerBy("getAcquisitions") {
+                    val song = if (kept.get()) {
+                        row("deezer:1", "Help!", "The Beatles", "done", ""","note":"kept by you, version not proven"""")
+                    } else {
+                        row("deezer:1", "Help!", "The Beatles", "searching", ""","note":"AcoustID is off, so Octo cannot check what played","keepAnyway":true""")
+                    }
+                    server.ok(
+                        """"acquisitions":{"acquisition":[
+                            $song,
+                            ${row("deezer:2", "Rubber Soul", "The Beatles", "searching", ""","note":"2 tracks wait: play them once, or keep them anyway","keepAnyway":true""")},
+                            ${row("soulseek:3", "Around the World", "Daft Punk", "downloading", ""","progress":0.62""")}
+                        ]}""",
+                        type = "octo",
+                    )
+                }
+                val answer = CountDownLatch(1)
+                server.answerBy("keepAcquisitionAnyway") { request ->
+                    if (request.url.queryParameter("key") == "deezer:2") {
+                        answer.await(10, TimeUnit.SECONDS)
+                        server.failed(70, "Nothing is waiting to be kept")
+                    } else {
+                        kept.set(true)
+                        server.ok(type = "octo")
+                    }
+                }
+                rig.signIn()
+                val app = rig.app
+                val end = System.currentTimeMillis() + 10_000
+                while (app.downloads?.rows?.value?.size != 3 && System.currentTimeMillis() < end) Thread.sleep(50)
+                check(app.downloads?.rows?.value?.size == 3) { "the drawer never read the list" }
+                rig.scene(PolishShotsTest.Size.Hd) { scene ->
+                    rig.reset(scene)
+                    SwingUtilities.invokeAndWait { app.showSidePanel(SidePanel.Downloads) }
+                    rig.shot(scene, "downloads/keep-anyway", 1_500)
+
+                    SwingUtilities.invokeAndWait { app.downloads!!.keepAnyway("deezer:2") }
+                    rig.shot(scene, "downloads/keep-anyway-sending", 800)
+
+                    answer.countDown()
+                    rig.shot(scene, "downloads/keep-anyway-refused", 1_500)
+
+                    SwingUtilities.invokeAndWait { app.downloads!!.keepAnyway("deezer:1") }
+                    rig.shot(scene, "downloads/keep-anyway-kept", 1_500)
                     SwingUtilities.invokeAndWait { app.showSidePanel(null) }
                 }
             }
