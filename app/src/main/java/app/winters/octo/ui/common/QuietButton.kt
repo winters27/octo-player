@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoInk
@@ -19,12 +20,13 @@ import app.winters.octo.design.OctoType
 @Composable
 fun QuietButton(text: String, onClick: () -> Unit) = QuietButton(text, enabled = true, onClick = onClick)
 
-// The same, dimmed and out of reach while not `enabled`.
+// The same, dimmed and out of reach while not `enabled`. `style` sets it in
+// the words beside it instead, as under a list row's own lines.
 @Composable
-fun QuietButton(text: String, enabled: Boolean, onClick: () -> Unit) {
+fun QuietButton(text: String, enabled: Boolean, style: TextStyle = OctoType.label, onClick: () -> Unit) {
     Text(
         text,
-        style = OctoType.label,
+        style = style,
         color = OctoColors.TextSecondary,
         maxLines = 1,
         modifier = Modifier

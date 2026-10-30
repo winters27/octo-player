@@ -100,7 +100,7 @@ class ServerDownloads @Inject constructor(
         object : DownloadsSource {
             override suspend fun acquisitions(): List<Acquisition> {
                 val session = session() ?: return emptyList()
-                return session.client.acquisitions(keepsAnyway = "$OCTO_ACQUISITIONS:$OCTO_KEEP_ANYWAY_VERSION" in session.extensions)
+                return session.client.acquisitions(keepsAnyway = KEEPS_ANYWAY in session.extensions)
             }
 
             override suspend fun upgrades(): List<Upgrade> {
@@ -119,7 +119,10 @@ class ServerDownloads @Inject constructor(
         scope,
     )
 
-    private val logWatch = DownloadLogWatch({ key -> client()?.acquisition(key) ?: throw SubsonicException.NotFound("Not signed in") }, scope)
+    private val logWatch = DownloadLogWatch({ key ->
+        val session = session() ?: throw SubsonicException.NotFound("Not signed in")
+        session.client.acquisition(key, keepsAnyway = KEEPS_ANYWAY in session.extensions)
+    }, scope)
 
     private val findWatch = FindSongsWatch(
         object : FindSource {
@@ -310,10 +313,10 @@ class ServerDownloads @Inject constructor(
         scope.launch { watch.clear(key) }
     }
 
-    // Keeps a held download anyway, by its row's log key; the row shows
-    // how it went.
+    // Keeps a held download anyway, by its log key, from its row or its
+    // open log; both show how it went.
     fun keepAnyway(key: String) {
-        scope.launch { watch.keepAnyway(key) }
+        scope.launch { watch.keepAnyway(key) { logWatch.readAgain(key) } }
     }
 
     // Whether any of the app's screens is in front: the list is asked for
@@ -344,3 +347,7 @@ class ServerDownloads @Inject constructor(
         override fun onActivityDestroyed(activity: Activity) = Unit
     }
 }
+
+// How a server lists octoAcquisitions when its held downloads may be kept
+// anyway.
+private val KEEPS_ANYWAY = "$OCTO_ACQUISITIONS:$OCTO_KEEP_ANYWAY_VERSION"

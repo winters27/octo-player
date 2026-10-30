@@ -61,6 +61,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -283,23 +284,29 @@ private fun DownloadLine(row: DownloadRow, art: String?, keepBelow: Boolean = fa
 }
 
 // A held download's Keep anyway, under its row's words and lined up with
-// them: dimmed while it is sent, and the server's words under it when it
-// said no. The row above never moves for it.
+// them, set like the artist line above it: dimmed while it is sent, and the
+// server's words under it when it said no. The row above never moves for it.
 @Composable
 private fun KeepAnywayLine(label: String, keeping: Keeping?, onKeep: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(start = LineText, end = 20.dp, bottom = 2.dp)) {
         // The button's own inset pulled back, so its words start where the row's do.
-        Box(Modifier.offset(x = -QuietInset)) { QuietButton(label, enabled = keeping?.sending != true, onClick = onKeep) }
-        keeping?.error?.let {
-            Text(
-                it,
-                style = OctoType.caption,
-                color = OctoColors.SignalOrange,
-                maxLines = 2,
-                modifier = Modifier.padding(bottom = 6.dp).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
-            )
+        Box(Modifier.offset(x = -QuietInset)) {
+            QuietButton(label, enabled = keeping?.sending != true, style = OctoType.bodySmall, onClick = onKeep)
         }
+        keeping?.error?.let { KeepRefusal(it, Modifier.padding(bottom = 6.dp)) }
     }
+}
+
+// The server's words when it would not keep a download anyway.
+@Composable
+private fun KeepRefusal(words: String, modifier: Modifier = Modifier) {
+    Text(
+        words,
+        style = OctoType.caption,
+        color = OctoColors.SignalOrange,
+        maxLines = 2,
+        modifier = modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+    )
 }
 
 @Composable
@@ -322,7 +329,11 @@ private fun ColumnScope.DownloadLog(model: ServerDownloads, key: String) {
     val rows by model.rows.collectAsStateWithLifecycle()
     val log by model.log.collectAsStateWithLifecycle()
     val problem by model.logProblem.collectAsStateWithLifecycle()
+    val keeping by model.keeping.collectAsStateWithLifecycle()
     val row = rows.firstOrNull { it.logKey == key } ?: log?.let { rowOf(it) }
+    // Offered while the log's own reading of the download says so.
+    val keep = log?.let { keepAnywayLabel(rowOf(it)) }
+    val keepState = keeping[key]
     val events = log?.event.orEmpty()
     val running = row?.finished == false
     val list = rememberLazyListState()
@@ -342,6 +353,7 @@ private fun ColumnScope.DownloadLog(model: ServerDownloads, key: String) {
     }
     Bar(LOG_TITLE, back = "Back to $SERVER_DOWNLOADS", onBack = model::showList) {
         row?.findId?.let { id -> QuietButton(FIND_SONGS) { model.find(id, row.title, key) } }
+        keep?.let { QuietButton(it, enabled = keepState?.sending != true) { model.keepAnyway(key) } }
         if (row?.finished == true) QuietButton("Clear") {
             model.clear(row.key)
             model.showList()
@@ -350,6 +362,7 @@ private fun ColumnScope.DownloadLog(model: ServerDownloads, key: String) {
     // The song and where it is stay put; only the steps scroll.
     if (row != null) LogHead(row, events, model.artwork(row.coverArt))
     problem?.let { Text(it, style = OctoType.caption, color = OctoColors.SignalOrange, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) }
+    if (keep != null) keepState?.error?.let { KeepRefusal(it, Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) }
     Rule(Modifier.padding(top = 14.dp))
     Box(Modifier.weight(1f, fill = false)) {
         LazyColumn(state = list, contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 16.dp)) {
@@ -798,21 +811,50 @@ private fun Badge(text: String, lossless: Boolean) {
 const val LOG_TITLE = "Download log"
 
 // The sheet's top line inside a log or Find songs: back, the view's name,
-// then its actions at the end.
+// then its actions at the end. The name never gives way: when the actions
+// do not fit beside it, they go on a line of their own under it, their
+// words lined up with the name's.
 @Composable
 private fun Bar(title: String, back: String, onBack: () -> Unit, actions: @Composable () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.size(44.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onBack).semantics { contentDescription = back },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(painterResource(OctoIcons.ChevronBack), contentDescription = null, tint = OctoColors.TextSecondary, modifier = Modifier.size(22.dp))
+    Layout(
+        content = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(BackSize).clip(CircleShape).clickable(role = Role.Button, onClick = onBack).semantics { contentDescription = back },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(painterResource(OctoIcons.ChevronBack), contentDescription = null, tint = OctoColors.TextSecondary, modifier = Modifier.size(22.dp))
+                }
+                Text(title, style = OctoType.section, color = OctoColors.TextPrimary, maxLines = 1, softWrap = false, modifier = Modifier.semantics { heading() })
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) { actions() }
+        },
+        modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 10.dp),
+    ) { (name, tools), constraints ->
+        val width = constraints.maxWidth
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val head = name.measure(loose)
+        val beside = head.width + tools.maxIntrinsicWidth(constraints.maxHeight) <= width
+        if (beside) {
+            val line = tools.measure(loose.copy(maxWidth = (width - head.width).coerceAtLeast(0)))
+            val height = maxOf(head.height, line.height)
+            layout(width, height) {
+                head.place(0, (height - head.height) / 2)
+                line.place(width - line.width, (height - line.height) / 2)
+            }
+        } else {
+            val indent = (BackSize - QuietInset).roundToPx()
+            val line = tools.measure(loose.copy(maxWidth = (width - indent).coerceAtLeast(0)))
+            layout(width, head.height + line.height) {
+                head.place(0, 0)
+                line.place(indent, head.height)
+            }
         }
-        Text(title, style = OctoType.section, color = OctoColors.TextPrimary, maxLines = 1, modifier = Modifier.semantics { heading() })
-        Spacer(Modifier.weight(1f))
-        actions()
     }
 }
+
+// The sheet bar's back button.
+private val BackSize = 44.dp
 
 @Composable
 private fun Rule(modifier: Modifier = Modifier.padding(vertical = 12.dp)) {
