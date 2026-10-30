@@ -128,14 +128,25 @@ class SubsonicClient(
 
     // The downloads Octo is doing for the signed-in user, and the ones it
     // finished lately. Only for servers that list the octoAcquisitions
-    // extension; others answer with an error.
-    suspend fun acquisitions(): List<Acquisition> =
-        get("getAcquisitions", key = "acquisitions", serializer = Acquisitions.serializer(), default = Acquisitions()).acquisition
+    // extension; others answer with an error. `keepsAnyway` is whether the
+    // server lists OCTO_KEEP_ANYWAY_VERSION; only then is a row's
+    // `keepAnyway` read.
+    suspend fun acquisitions(keepsAnyway: Boolean = false): List<Acquisition> =
+        get("getAcquisitions", key = "acquisitions", serializer = Acquisitions.serializer(), default = Acquisitions())
+            .acquisition.map { it.listedBy(keepsAnyway) }
 
     // One download with its whole log, by the key the list gives it. Only
-    // for servers that list octoAcquisitions at version 2.
-    suspend fun acquisition(key: String): Acquisition =
-        get("getAcquisition", mapOf("key" to key), "acquisition", Acquisition.serializer())
+    // for servers that list octoAcquisitions at version 2. `keepsAnyway` as
+    // for acquisitions.
+    suspend fun acquisition(key: String, keepsAnyway: Boolean = false): Acquisition =
+        get("getAcquisition", mapOf("key" to key), "acquisition", Acquisition.serializer()).listedBy(keepsAnyway)
+
+    // Keeps a held download anyway, by the key the list gives it: the
+    // version the signed-in user heard, or an album's held tracks, though
+    // Octo could not prove them. Answers ok, or an error in the server's
+    // words. Only for servers that list octoAcquisitions at
+    // OCTO_KEEP_ANYWAY_VERSION.
+    suspend fun keepAcquisitionAnyway(key: String) = send("keepAcquisitionAnyway", listOf("key" to key))
 
     // Takes the finished downloads off the signed-in user's list, or only
     // the one with this key, and answers how many left it.

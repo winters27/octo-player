@@ -161,6 +161,95 @@ class AcquisitionsTest {
         }
     }
 
+    private fun ok(payload: String = "") =
+        server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"ok","version":"1.16.1","type":"octo"${if (payload.isEmpty()) "" else ",$payload"}}}""").build())
+
+    private fun failed(code: Int, message: String) =
+        server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":$code,"message":"$message"}}}""").build())
+
+    // A held song the server offers to keep anyway, a held album that says
+    // nothing of it, and a song still on its way.
+    private val heldRows = """"acquisitions":{"acquisition":[
+        {"id":"dz-1","title":"Help!","state":"searching","key":"deezer:1","kind":"download","keepAnyway":true},
+        {"id":"dz-2","title":"Help!","state":"searching","key":"deezer:2","kind":"download"},
+        {"id":"dz-3","title":"Yesterday","state":"downloading","key":"deezer:3","kind":"download","keepAnyway":false}]}"""
+
+    @Test
+    fun keepAnywayIsReadFromAServerListingVersion4() = runTest {
+        ok(heldRows)
+        val byKey = client().acquisitions(keepsAnyway = true).associateBy { it.key }
+        assertTrue(byKey.getValue("deezer:1").keepAnyway)
+        assertFalse("Left out is no", byKey.getValue("deezer:2").keepAnyway)
+        assertFalse(byKey.getValue("deezer:3").keepAnyway)
+    }
+
+    @Test
+    fun keepAnywayIsNeverReadBelowVersion4_EvenWhenSent() = runTest {
+        ok(heldRows)
+        val list = client().acquisitions()
+        assertEquals(3, list.size)
+        assertTrue(list.none { it.keepAnyway })
+
+        ok(heldRows)
+        assertTrue(client().acquisitions(keepsAnyway = false).none { it.keepAnyway })
+    }
+
+    @Test
+    fun oneDownloadReadsKeepAnywayTheSameWay() = runTest {
+        val one = """"acquisition":{"id":"dz-1","title":"Help!","state":"searching","key":"deezer:1","keepAnyway":true}"""
+        ok(one)
+        assertTrue(client().acquisition("deezer:1", keepsAnyway = true).keepAnyway)
+        ok(one)
+        assertFalse(client().acquisition("deezer:1").keepAnyway)
+    }
+
+    @Test
+    fun aServerListingVersion4SaysSo() = runTest {
+        ok(""""openSubsonicExtensions":[{"name":"octoAcquisitions","versions":[1,2,3,4]}]""")
+        assertTrue(client().supports(OCTO_ACQUISITIONS, OCTO_KEEP_ANYWAY_VERSION))
+        answer("getOpenSubsonicExtensionsOcto")
+        assertFalse(client().supports(OCTO_ACQUISITIONS, OCTO_KEEP_ANYWAY_VERSION))
+    }
+
+    @Test
+    fun keepAnywaySendsTheRowsKey() = runTest {
+        ok()
+        client().keepAcquisitionAnyway("Track:deezer:1")
+
+        val request = server.takeRequest()
+        assertEquals("/rest/keepAcquisitionAnyway", request.url.encodedPath)
+        assertEquals("Track:deezer:1", request.url.queryParameter("key"))
+        assertEquals("json", request.url.queryParameter("f"))
+        assertEquals("winters", request.url.queryParameter("u"))
+        assertNull("The app keeps its own copy, never names a user", request.url.queryParameter("user"))
+    }
+
+    @Test
+    fun keepAnywaysRefusalsCarryTheServersWords() = runTest {
+        failed(70, "Nothing is waiting to be kept")
+        try {
+            client().keepAcquisitionAnyway("deezer:1")
+            fail("a refusal must not look like ok")
+        } catch (e: SubsonicException.NotFound) {
+            assertEquals("Nothing is waiting to be kept", e.message)
+        }
+        failed(10, "Name the person whose copy to keep")
+        try {
+            client().keepAcquisitionAnyway("deezer:1")
+            fail("a refusal must not look like ok")
+        } catch (e: SubsonicException.Server) {
+            assertEquals(10, e.code)
+            assertEquals("Name the person whose copy to keep", e.message)
+        }
+        failed(50, "Not allowed")
+        try {
+            client().keepAcquisitionAnyway("deezer:1")
+            fail("a refusal must not look like ok")
+        } catch (e: SubsonicException.Server) {
+            assertEquals(50, e.code)
+        }
+    }
+
     @Test
     fun readsOneSong() = runTest {
         answer("getSong")
