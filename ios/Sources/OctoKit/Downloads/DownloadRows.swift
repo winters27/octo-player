@@ -54,6 +54,8 @@ public struct DownloadRow: Sendable, Equatable, Identifiable {
     public var findId: String?
     /// The id the download was asked for with, when it is one.
     public var askedId: String?
+    /// Whether the server offers to keep this held download anyway, by `logKey`.
+    public var keepAnyway = false
 
     public var id: String { key }
     public var finished: Bool { phase.finished }
@@ -142,7 +144,8 @@ public func rowOf(_ acquisition: Acquisition, upgrade: Upgrade? = nil) -> Downlo
         updatedAt: updated.isEmpty ? nil : updated,
         logKey: acquisition.key,
         findId: upgrade?.id ?? acquisition.libraryId ?? (isBlank(acquisition.id) ? nil : acquisition.id),
-        askedId: isBlank(acquisition.id) ? nil : acquisition.id)
+        askedId: isBlank(acquisition.id) ? nil : acquisition.id,
+        keepAnyway: acquisition.keepAnyway && acquisition.key != nil)
 }
 
 /// A higher quality copy that has no download of its own yet, or whose download is gone from the
@@ -208,6 +211,24 @@ public func statusOf(_ acquisition: Acquisition) -> String {
     case .done: return "In your library"
     case .failed: return acquisition.error.flatMap(serverSentence) ?? "Could not get it"
     }
+}
+
+/// A held download's own way out, as a quiet button under its row's words: keeps the version the
+/// person heard, or an album's held tracks, though Octo could not prove them.
+public let keepAnywayText = "Keep anyway"
+
+/// What a row's Keep anyway says when the server could not be asked.
+public let keepAnywayUnreachable = "Could not reach the server"
+
+/// The words on a row's Keep anyway button, or nil when the row offers none.
+public func keepAnywayLabel(_ row: DownloadRow) -> String? {
+    row.keepAnyway && row.logKey != nil ? keepAnywayText : nil
+}
+
+/// What a row's Keep anyway says when the call failed: the server's own words when it gave a
+/// reason, otherwise that it could not be asked.
+public func keepAnywayError(_ error: Error) -> String {
+    serverWords(error).flatMap(serverSentence) ?? keepAnywayUnreachable
 }
 
 /// What a row is for, as a small word beside the title, or nil for a plain download.

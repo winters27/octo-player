@@ -463,9 +463,10 @@ struct ClearedBody: Decodable {
 
 extension SubsonicClient {
     /// One download with its whole log, by the key the list gives it. Only for servers that list
-    /// octoAcquisitions at version 2.
-    public func acquisition(key: String) async throws -> Acquisition {
-        try await get("getAcquisition", [("key", key)], key: "acquisition")
+    /// octoAcquisitions at version 2. `keepsAnyway` as for `acquisitions(keepsAnyway:)`.
+    public func acquisition(key: String, keepsAnyway: Bool = false) async throws -> Acquisition {
+        let one: Acquisition = try await get("getAcquisition", [("key", key)], key: "acquisition")
+        return one.listed(by: keepsAnyway)
     }
 
     /// Takes the finished downloads off the signed-in user's list, or only the one with this key,

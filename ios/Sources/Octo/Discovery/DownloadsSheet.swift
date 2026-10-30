@@ -102,13 +102,19 @@ private struct DownloadListPage: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(rows) { row in
-                        DownloadLine(row: row) {
-                            // A higher quality copy still waiting its turn has no log yet; a finished
-                            // one without its log can still be looked for again.
-                            if let key = row.logKey {
-                                model.showLog(key)
-                            } else if row.finished, let id = row.findId {
-                                model.find(id, title: row.title)
+                        let keep = keepAnywayLabel(row)
+                        VStack(alignment: .leading, spacing: 0) {
+                            DownloadLine(row: row, keepBelow: keep != nil) {
+                                // A higher quality copy still waiting its turn has no log yet; a
+                                // finished one without its log can still be looked for again.
+                                if let key = row.logKey {
+                                    model.showLog(key)
+                                } else if row.finished, let id = row.findId {
+                                    model.find(id, title: row.title)
+                                }
+                            }
+                            if let keep, let key = row.logKey {
+                                KeepAnywayLine(label: keep, keeping: model.watch.keeping[key]) { model.keepAnyway(key) }
                             }
                         }
                     }
@@ -121,12 +127,14 @@ private struct DownloadListPage: View {
 
 private struct DownloadLine: View {
     let row: DownloadRow
+    /// A Keep anyway line follows, so the row's own bottom edge sits close above it.
+    var keepBelow = false
     let open: () -> Void
 
     var body: some View {
         Button(action: open) {
-            HStack(spacing: 14) {
-                Cover(id: row.coverArt, size: 48, radius: 8)
+            HStack(spacing: lineGap) {
+                Cover(id: row.coverArt, size: lineCover, radius: 8)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
                         Text(row.title)
@@ -152,8 +160,9 @@ private struct DownloadLine: View {
                     Image(systemName: "info.circle").font(.system(size: 18)).foregroundStyle(DiscoveryStyle.orange)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 8)
+            .padding(.horizontal, lineEdge)
+            .padding(.top, 8)
+            .padding(.bottom, keepBelow ? 2 : 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(SqueezeStyle())
@@ -161,6 +170,44 @@ private struct DownloadLine: View {
         .accessibilityLabel("\(row.title), \(row.artist)")
         .accessibilityValue(row.status)
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// A list row's edge, its cover, and the gap before its words.
+private let lineEdge: CGFloat = 20
+private let lineCover: CGFloat = 48
+private let lineGap: CGFloat = 14
+
+/// How far a QuietButton's words sit inside its edge.
+private let quietInset: CGFloat = 10
+
+/// A held download's Keep anyway, under its row's words and lined up with them: faint while it is
+/// sent, and the server's words under it when it said no. The row above never moves for it.
+private struct KeepAnywayLine: View {
+    let label: String
+    let keeping: Keeping?
+    let keep: () -> Void
+
+    var body: some View {
+        let sending = keeping?.sending == true
+        VStack(alignment: .leading, spacing: 0) {
+            QuietButton(label, action: keep)
+                .disabled(sending)
+                .opacity(sending ? OctoInkColor.disabled : 1)
+                // The button's own inset pulled back, so its words start where the row's do.
+                .padding(.leading, -quietInset)
+            if let error = keeping?.error {
+                Text(error)
+                    .font(.octoCaption)
+                    .foregroundStyle(DiscoveryStyle.orange)
+                    .lineLimit(2)
+                    .padding(.bottom, 6)
+            }
+        }
+        .padding(.leading, lineEdge + lineCover + lineGap)
+        .padding(.trailing, lineEdge)
+        .padding(.bottom, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
