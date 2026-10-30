@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -221,6 +222,7 @@ private val PillShape = RoundedCornerShape(50)
 private fun ColumnScope.DownloadList(model: ServerDownloads) {
     val rows by model.rows.collectAsStateWithLifecycle()
     val loaded by model.loaded.collectAsStateWithLifecycle()
+    val keeping by model.keeping.collectAsStateWithLifecycle()
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(SERVER_DOWNLOADS, style = OctoType.section, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() })
@@ -236,15 +238,21 @@ private fun ColumnScope.DownloadList(model: ServerDownloads) {
         items(rows, key = { it.key }) { row ->
             // A higher quality copy still waiting its turn has no log yet; a
             // finished one without its log can still be looked for again.
-            DownloadLine(row, model.artwork(row.coverArt)) {
-                row.logKey?.let(model::showLog) ?: if (row.finished) row.findId?.let { model.find(it, row.title) } else Unit
+            Column {
+                val keep = keepAnywayLabel(row)
+                DownloadLine(row, model.artwork(row.coverArt), keepBelow = keep != null) {
+                    row.logKey?.let(model::showLog) ?: if (row.finished) row.findId?.let { model.find(it, row.title) } else Unit
+                }
+                if (keep != null) row.logKey?.let { key -> KeepAnywayLine(keep, keeping[key]) { model.keepAnyway(key) } }
             }
         }
     }
 }
 
+// `keepBelow`: a Keep anyway line follows, so the row's own bottom edge
+// sits close above it.
 @Composable
-private fun DownloadLine(row: DownloadRow, art: String?, onOpen: () -> Unit) {
+private fun DownloadLine(row: DownloadRow, art: String?, keepBelow: Boolean = false, onOpen: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -253,11 +261,11 @@ private fun DownloadLine(row: DownloadRow, art: String?, onOpen: () -> Unit) {
                 contentDescription = "${row.title}, ${row.artist}"
                 stateDescription = row.status
             }
-            .padding(horizontal = 20.dp, vertical = 8.dp),
+            .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = if (keepBelow) 2.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Artwork(art, 48.dp, shape = RoundedCornerShape(8.dp))
+        Artwork(art, LineArt, shape = RoundedCornerShape(8.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(row.title, style = OctoType.body, color = OctoColors.TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
@@ -270,6 +278,26 @@ private fun DownloadLine(row: DownloadRow, art: String?, onOpen: () -> Unit) {
             !row.finished -> Ring(row.fraction, 22.dp)
             row.phase == RowPhase.Done -> Mark(OctoIcons.Downloaded, OctoColors.TextSecondary)
             else -> Mark(OctoIcons.Info, OctoColors.SignalOrange)
+        }
+    }
+}
+
+// A held download's Keep anyway, under its row's words and lined up with
+// them: dimmed while it is sent, and the server's words under it when it
+// said no. The row above never moves for it.
+@Composable
+private fun KeepAnywayLine(label: String, keeping: Keeping?, onKeep: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(start = LineText, end = 20.dp, bottom = 2.dp)) {
+        // The button's own inset pulled back, so its words start where the row's do.
+        Box(Modifier.offset(x = -QuietInset)) { QuietButton(label, enabled = keeping?.sending != true, onClick = onKeep) }
+        keeping?.error?.let {
+            Text(
+                it,
+                style = OctoType.caption,
+                color = OctoColors.SignalOrange,
+                maxLines = 2,
+                modifier = Modifier.padding(bottom = 6.dp).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+            )
         }
     }
 }
@@ -826,3 +854,11 @@ private val Track = Color.White.copy(alpha = 0.14f)
 private val LosslessChip = Color.White.copy(alpha = 0.16f)
 private val Card = Color.White.copy(alpha = 0.05f)
 private val LiveFill = Color.White.copy(alpha = 0.14f)
+
+// A list row's cover, and where its words start: past the row's edge, the
+// cover and the gap.
+private val LineArt = 48.dp
+private val LineText = 20.dp + LineArt + 14.dp
+
+// How far a QuietButton's words sit inside its edge.
+private val QuietInset = 10.dp
