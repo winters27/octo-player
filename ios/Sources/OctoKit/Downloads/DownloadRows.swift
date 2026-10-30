@@ -54,8 +54,10 @@ public struct DownloadRow: Sendable, Equatable, Identifiable {
     public var findId: String?
     /// The id the download was asked for with, when it is one.
     public var askedId: String?
-    /// Whether the server offers to keep this held download anyway, by `logKey`.
+    /// Whether the server offers to keep this held download anyway, by `logKey`, and on an album's
+    /// row how many of its tracks are held.
     public var keepAnyway = false
+    public var heldTracks: Int?
 
     public var id: String { key }
     public var finished: Bool { phase.finished }
@@ -145,7 +147,8 @@ public func rowOf(_ acquisition: Acquisition, upgrade: Upgrade? = nil) -> Downlo
         logKey: acquisition.key,
         findId: upgrade?.id ?? acquisition.libraryId ?? (isBlank(acquisition.id) ? nil : acquisition.id),
         askedId: isBlank(acquisition.id) ? nil : acquisition.id,
-        keepAnyway: acquisition.keepAnyway && acquisition.key != nil)
+        keepAnyway: acquisition.keepAnyway && acquisition.key != nil,
+        heldTracks: acquisition.heldTracks)
 }
 
 /// A higher quality copy that has no download of its own yet, or whose download is gone from the
@@ -213,16 +216,23 @@ public func statusOf(_ acquisition: Acquisition) -> String {
     }
 }
 
-/// A held download's own way out, as a quiet button under its row's words: keeps the version the
-/// person heard, or an album's held tracks, though Octo could not prove them.
+/// A held download's own way out, as a quiet button under its row's words and in its log's bar:
+/// keeps the version the person heard, or an album's held tracks, though Octo could not prove
+/// them. An album holding two tracks or more says "these".
 public let keepAnywayText = "Keep anyway"
+public let keepTheseAnywayText = "Keep these anyway"
 
 /// What a row's Keep anyway says when the server could not be asked.
 public let keepAnywayUnreachable = "Could not reach the server"
 
+/// The words on a Keep anyway button for a download holding `heldTracks` tracks: none for a song.
+public func keepAnywayWords(heldTracks: Int?) -> String {
+    (heldTracks ?? 0) >= 2 ? keepTheseAnywayText : keepAnywayText
+}
+
 /// The words on a row's Keep anyway button, or nil when the row offers none.
 public func keepAnywayLabel(_ row: DownloadRow) -> String? {
-    row.keepAnyway && row.logKey != nil ? keepAnywayText : nil
+    row.keepAnyway && row.logKey != nil ? keepAnywayWords(heldTracks: row.heldTracks) : nil
 }
 
 /// What a row's Keep anyway says when the call failed: the server's own words when it gave a

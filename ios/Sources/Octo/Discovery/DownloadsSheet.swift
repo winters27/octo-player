@@ -181,8 +181,9 @@ private let lineGap: CGFloat = 14
 /// How far a QuietButton's words sit inside its edge.
 private let quietInset: CGFloat = 10
 
-/// A held download's Keep anyway, under its row's words and lined up with them: faint while it is
-/// sent, and the server's words under it when it said no. The row above never moves for it.
+/// A held download's Keep anyway, under its row's words and lined up with them, set like the
+/// artist line above it: faint while it is sent, and the server's words under it when it said no.
+/// The row above never moves for it.
 private struct KeepAnywayLine: View {
     let label: String
     let keeping: Keeping?
@@ -191,7 +192,7 @@ private struct KeepAnywayLine: View {
     var body: some View {
         let sending = keeping?.sending == true
         VStack(alignment: .leading, spacing: 0) {
-            QuietButton(label, action: keep)
+            QuietButton(label, font: .octoBodySmall, action: keep)
                 .disabled(sending)
                 .opacity(sending ? OctoInkColor.disabled : 1)
                 // The button's own inset pulled back, so its words start where the row's do.
@@ -264,11 +265,20 @@ private struct DownloadLogPage: View {
     var body: some View {
         let log = model.logWatch.row
         let row = model.watch.rows.first { $0.logKey == key } ?? log.map { rowOf($0) }
+        // Offered while the log's own reading of the download says so.
+        let keep = log.flatMap { keepAnywayLabel(rowOf($0)) }
+        let keeping = model.watch.keeping[key]
         let events = log?.event ?? []
         let running = row?.finished == false
         SheetBar(back: "Back to \(serverDownloadsTitle)", onBack: model.showList, title: "Download") {
             if let row, let id = row.findId {
                 QuietButton(findSongsTitle) { model.find(id, title: row.title, from: key) }
+            }
+            if let keep {
+                let sending = keeping?.sending == true
+                QuietButton(keep) { model.keepAnyway(key) }
+                    .disabled(sending)
+                    .opacity(sending ? OctoInkColor.disabled : 1)
             }
             if let row, row.finished {
                 QuietButton("Clear") {
@@ -283,6 +293,14 @@ private struct DownloadLogPage: View {
             Text(problem)
                 .font(.octoCaption)
                 .foregroundStyle(DiscoveryStyle.orange)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 6)
+        }
+        if keep != nil, let refusal = keeping?.error {
+            Text(refusal)
+                .font(.octoCaption)
+                .foregroundStyle(DiscoveryStyle.orange)
+                .lineLimit(2)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 6)
         }
@@ -796,6 +814,9 @@ private struct ReplaceItCard: View {
 }
 
 /// The sheet's top line inside a log or Find songs: back, the view's title, then its actions.
+/// The sheet's top line inside a log or Find songs: back, the page's name and its actions. The
+/// name never gives way: when the actions do not fit beside it, they go on a line of their own
+/// under it, their words lined up with the name's.
 private struct SheetBar<Actions: View>: View {
     let back: String
     let onBack: () -> Void
@@ -803,25 +824,48 @@ private struct SheetBar<Actions: View>: View {
     @ViewBuilder let actions: Actions
 
     var body: some View {
-        HStack(spacing: 0) {
-            Button(action: onBack) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(OctoColor.textSecondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Circle())
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 0) {
+                backButton
+                name
+                Spacer(minLength: 8)
+                actions.fixedSize()
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(back)
-            Text(title ?? "")
-                .font(.octoSection)
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityAddTraits(.isHeader)
-            actions.fixedSize()
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 0) {
+                    backButton
+                    name
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 0) { actions }
+                    .fixedSize()
+                    .padding(.leading, backSize - quietInset)
+            }
         }
         .padding(.leading, 8)
         .padding(.trailing, 10)
     }
+
+    private var backButton: some View {
+        Button(action: onBack) {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(OctoColor.textSecondary)
+                .frame(width: backSize, height: backSize)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(back)
+    }
+
+    private var name: some View {
+        Text(title ?? "")
+            .font(.octoSection)
+            .foregroundStyle(.white)
+            .fixedSize()
+            .accessibilityAddTraits(.isHeader)
+    }
 }
+
+/// The sheet bar's back button.
+private let backSize: CGFloat = 44

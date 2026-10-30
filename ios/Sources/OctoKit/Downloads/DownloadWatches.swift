@@ -169,15 +169,21 @@ public final class DownloadsWatch {
     private func show() {
         let next = drawerRows(lastAcquisitions, lastUpgrades, now: clock(), hidden: hidden)
         if next != rows { rows = next }
-        let kept = keeping.filter { $0.value.sending || offers($0.key) }
+        let kept = keeping.filter { $0.value.sending || stillOffered($0.key) }
         if kept != keeping { keeping = kept }
     }
 
-    private func offers(_ key: String) -> Bool { rows.contains { $0.logKey == key && keepAnywayLabel($0) != nil } }
+    /// Whether a refusal for `key` still has a button to sit under: its row offers Keep anyway, or
+    /// the list does not show it and only its log can.
+    private func stillOffered(_ key: String) -> Bool {
+        guard let row = rows.first(where: { $0.logKey == key }) else { return true }
+        return keepAnywayLabel(row) != nil
+    }
 
-    /// Sends a row's Keep anyway, by its log key, then asks for the list again so the row shows
-    /// what came of it. A second tap while one is out sends nothing.
-    public func keepAnyway(_ key: String) async {
+    /// Sends Keep anyway for a download, by its log key, then asks for the list again, and does
+    /// `also` (reading an open log again), so the row and the log show what came of it before the
+    /// button comes back. A second tap while one is out sends nothing.
+    public func keepAnyway(_ key: String, also: () async -> Void = {}) async {
         if keeping[key]?.sending == true { return }
         keeping[key] = Keeping(sending: true)
         var refusal: String?
@@ -187,7 +193,8 @@ public final class DownloadsWatch {
             refusal = keepAnywayError(error)
         }
         await poll()
-        if let refusal, offers(key) {
+        await also()
+        if let refusal, stillOffered(key) {
             keeping[key] = Keeping(error: refusal)
         } else {
             keeping[key] = nil
@@ -245,6 +252,12 @@ public final class DownloadLogWatch {
     @ObservationIgnored private var round = 0
     /// Whether the log is still being asked for.
     @ObservationIgnored public private(set) var following = false
+    /// The download followed, or nil once the log closes.
+    @ObservationIgnored private var followed: String?
+    /// The reads begun, and the newest whose answer was shown, so an older answer never lands after
+    /// a newer one.
+    @ObservationIgnored private var readsBegun = 0
+    @ObservationIgnored private var readsShown = 0
 
     public init(load: @escaping @Sendable (String) async throws -> Acquisition, pollMs: Int64 = logPollMs, graceMs: Int64 = logFinishedGraceMs,
                 clock: @escaping @Sendable () -> Int64 = { msSince1970() }, sleep: @escaping Sleeper = realSleep) {
@@ -263,6 +276,8 @@ public final class DownloadLogWatch {
         row = nil
         problem = nil
         following = true
+        followed = key
+        readsShown = readsBegun
         round += 1
         let mine = round
         task = Task { [weak self] in
@@ -274,9 +289,14 @@ public final class DownloadLogWatch {
                 while !self.foreground && !Task.isCancelled { await self.front.wait(ms: 60_000) }
                 if Task.isCancelled { return }
                 do {
+                    self.readsBegun += 1
+                    let read = self.readsBegun
                     let now = try await self.load(key)
                     if Task.isCancelled { return }
-                    self.row = now
+                    if read > self.readsShown {
+                        self.readsShown = read
+                        self.row = now
+                    }
                     self.problem = nil
                     if now.stage == .done || now.stage == .failed {
                         let age = serverAgeMs(now.updatedAt, now: self.clock()) ?? 0
@@ -298,6 +318,19 @@ public final class DownloadLogWatch {
 
     private func ended(_ which: Int) { if which == round { following = false } }
 
+    /// Reads the download again now when it is the one followed, as after an action on it, so the
+    /// log shows what came of it at once. A read that fails changes nothing; the log's own reads
+    /// say what is wrong.
+    public func readAgain(_ key: String) async {
+        guard followed == key else { return }
+        readsBegun += 1
+        let read = readsBegun
+        guard let now = try? await load(key), followed == key, read > readsShown else { return }
+        readsShown = read
+        row = now
+        problem = nil
+    }
+
     /// Waits for the log to stop being asked for, for tests.
     public func settle() async { await task?.value }
 
@@ -305,6 +338,8 @@ public final class DownloadLogWatch {
         task?.cancel()
         task = nil
         following = false
+        followed = nil
+        readsShown = readsBegun
         row = nil
         problem = nil
         front.signal()

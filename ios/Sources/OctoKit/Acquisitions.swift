@@ -10,7 +10,7 @@ public let octoAcquisitions = "octoAcquisitions"
 /// question to ask.
 public let octoReplaceAnywayVersion = 3
 
-/// The version of octoAcquisitions whose rows carry `keepAnyway` and which takes
+/// The version of octoAcquisitions whose rows carry `keepAnyway` and `heldTracks`, and which takes
 /// keepAcquisitionAnyway.
 public let octoKeepAnywayVersion = 4
 
@@ -62,17 +62,20 @@ public struct Acquisition: Decodable, Sendable, Equatable {
     /// keepAcquisitionAnyway and `key`. Read only as `listed(by:)` leaves it, so an older server's
     /// never counts.
     public var keepAnyway = false
+    /// From version 4 on, on an album's row: how many of its tracks are held. Read only as
+    /// `listed(by:)` leaves it.
+    public var heldTracks: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, artist, title, album, state, progress, bytesDone, bytesTotal, source, startedAt, updatedAt, error
-        case libraryId, ahead, note, key, kind, quality, coverArt, peer, logLines, event, keepAnyway
+        case libraryId, ahead, note, key, kind, quality, coverArt, peer, logLines, event, keepAnyway, heldTracks
     }
 
     public init(id: String = "", artist: String = "", title: String = "", album: String? = nil, state: String = "",
                 progress: Double? = nil, bytesDone: Int? = nil, bytesTotal: Int? = nil, source: String? = nil,
                 startedAt: String? = nil, updatedAt: String? = nil, error: String? = nil, libraryId: String? = nil,
                 ahead: Int? = nil, note: String? = nil, key: String? = nil, kind: String? = nil, quality: String? = nil,
-                coverArt: String? = nil, keepAnyway: Bool = false) {
+                coverArt: String? = nil, keepAnyway: Bool = false, heldTracks: Int? = nil) {
         self.id = id
         self.artist = artist
         self.title = title
@@ -93,6 +96,7 @@ public struct Acquisition: Decodable, Sendable, Equatable {
         self.quality = quality
         self.coverArt = coverArt
         self.keepAnyway = keepAnyway
+        self.heldTracks = heldTracks
     }
 
     public init(from decoder: Decoder) throws {
@@ -120,16 +124,18 @@ public struct Acquisition: Decodable, Sendable, Equatable {
         logLines = c.int(.logLines) ?? 0
         event = (try? c.decodeIfPresent([AcquisitionEvent].self, forKey: .event)) ?? []
         keepAnyway = c.bool(.keepAnyway) ?? false
+        heldTracks = c.int(.heldTracks)
     }
 
     public var stage: AcquisitionStage { .of(state) }
 
-    /// The row as a server means it: `keepAnyway` only from one that lists octoAcquisitions at
-    /// `octoKeepAnywayVersion` (`keepsAnyway`).
+    /// The row as a server means it: `keepAnyway` and `heldTracks` only from one that lists
+    /// octoAcquisitions at `octoKeepAnywayVersion` (`keepsAnyway`).
     public func listed(by keepsAnyway: Bool) -> Acquisition {
-        guard !keepsAnyway && keepAnyway else { return self }
+        guard !keepsAnyway && (keepAnyway || heldTracks != nil) else { return self }
         var older = self
         older.keepAnyway = false
+        older.heldTracks = nil
         return older
     }
 
@@ -151,7 +157,8 @@ struct AcquisitionsBody: Decodable {
 
 extension SubsonicClient {
     /// Every download the server is doing for this person, or did lately. `keepsAnyway` is whether
-    /// the server lists `octoKeepAnywayVersion`; only then is a row's `keepAnyway` read.
+    /// the server lists `octoKeepAnywayVersion`; only then are a row's `keepAnyway` and
+    /// `heldTracks` read.
     public func acquisitions(keepsAnyway: Bool = false) async throws -> [Acquisition] {
         let body: AcquisitionsBody = try await get("getAcquisitions", key: "acquisitions")
         return body.acquisition.map { $0.listed(by: keepsAnyway) }

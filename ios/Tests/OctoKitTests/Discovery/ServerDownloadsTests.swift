@@ -29,16 +29,17 @@ private func held(_ key: String, keepAnyway: Bool = true) -> Acquisition {
 
 /// How Octo's held downloads read, and the call that keeps one anyway, against a server for tests.
 @Suite struct KeepAnywayCallTests {
-    /// A held song the server offers to keep anyway, a held album that says nothing of it, and a
-    /// song still on its way.
-    private let heldRows = #""acquisitions":{"acquisition":[{"id":"dz-1","title":"Help!","state":"searching","key":"deezer:1","kind":"download","keepAnyway":true},{"id":"dz-2","title":"Help!","state":"searching","key":"deezer:2","kind":"download"},{"id":"dz-3","title":"Yesterday","state":"downloading","key":"deezer:3","kind":"download","keepAnyway":false}]}"#
+    /// A held song the server offers to keep anyway, a held album that says nothing of it, a song
+    /// still on its way, and an album holding two tracks.
+    private let heldRows = #""acquisitions":{"acquisition":[{"id":"dz-1","title":"Help!","state":"searching","key":"deezer:1","kind":"download","keepAnyway":true},{"id":"dz-2","title":"Help!","state":"searching","key":"deezer:2","kind":"download"},{"id":"dz-3","title":"Yesterday","state":"downloading","key":"deezer:3","kind":"download","keepAnyway":false},{"id":"dz-4","title":"Rubber Soul","state":"searching","key":"deezer:4","kind":"download","keepAnyway":true,"heldTracks":2}]}"#
 
     @Test func keepAnywayIsReadFromAServerListingVersion4() async throws {
         let server = FakeServer()
         server.ok(heldRows)
         let rows = try await server.client().acquisitions(keepsAnyway: true)
-        // Left out is no.
-        #expect(rows.map(\.keepAnyway) == [true, false, false])
+        // Left out is no, and a song's row holds no tracks.
+        #expect(rows.map(\.keepAnyway) == [true, false, false, true])
+        #expect(rows.map(\.heldTracks) == [nil, nil, nil, 2])
     }
 
     @Test func keepAnywayIsNeverReadBelowVersion4EvenWhenSent() async throws {
@@ -47,22 +48,24 @@ private func held(_ key: String, keepAnyway: Bool = true) -> Acquisition {
         server.ok(heldRows)
         let client = server.client()
         let plain = try await client.acquisitions()
-        #expect(plain.count == 3)
-        #expect(plain.allSatisfy { !$0.keepAnyway })
+        #expect(plain.count == 4)
+        #expect(plain.allSatisfy { !$0.keepAnyway && $0.heldTracks == nil })
         let older = try await client.acquisitions(keepsAnyway: false)
-        #expect(older.allSatisfy { !$0.keepAnyway })
+        #expect(older.allSatisfy { !$0.keepAnyway && $0.heldTracks == nil })
     }
 
     @Test func oneDownloadReadsKeepAnywayTheSameWay() async throws {
         let server = FakeServer()
-        let one = #""acquisition":{"id":"dz-1","title":"Help!","state":"searching","key":"deezer:1","keepAnyway":true}"#
+        let one = #""acquisition":{"id":"dz-4","title":"Rubber Soul","state":"searching","key":"deezer:4","keepAnyway":true,"heldTracks":3}"#
         server.ok(one)
         server.ok(one)
         let client = server.client()
-        let fromVersion4 = try await client.acquisition(key: "deezer:1", keepsAnyway: true)
-        let fromOlder = try await client.acquisition(key: "deezer:1")
+        let fromVersion4 = try await client.acquisition(key: "deezer:4", keepsAnyway: true)
+        let fromOlder = try await client.acquisition(key: "deezer:4")
         #expect(fromVersion4.keepAnyway)
+        #expect(fromVersion4.heldTracks == 3)
         #expect(!fromOlder.keepAnyway)
+        #expect(fromOlder.heldTracks == nil)
     }
 
     @Test func keepAnywaySendsTheRowsKey() async throws {
@@ -116,6 +119,21 @@ private func held(_ key: String, keepAnyway: Bool = true) -> Acquisition {
         keyless.key = nil
         #expect(keepAnywayLabel(rowOf(keyless)) == nil)
         #expect(keepAnywayLabel(rowOf(upgrade("nd-1", "queued"))) == nil)
+    }
+
+    @Test func anAlbumHoldingTwoOrMoreSaysKeepTheseAnyway() {
+        #expect(keepAnywayWords(heldTracks: nil) == "Keep anyway")
+        #expect(keepAnywayWords(heldTracks: 1) == "Keep anyway")
+        #expect(keepAnywayWords(heldTracks: 2) == "Keep these anyway")
+        #expect(keepAnywayWords(heldTracks: 12) == "Keep these anyway")
+        var album = held("s:a")
+        album.heldTracks = 1
+        #expect(keepAnywayLabel(rowOf(album)) == keepAnywayText)
+        album.heldTracks = 2
+        #expect(keepAnywayLabel(rowOf(album)) == keepTheseAnywayText)
+        // Tracks held, but nothing to keep anyway.
+        album.keepAnyway = false
+        #expect(keepAnywayLabel(rowOf(album)) == nil)
     }
 
     @Test func eachStageReadsAsOneLine() {
@@ -725,6 +743,59 @@ private let instant: Sleeper = { _ in await Task.yield() }
         #expect(!watch.keeping.isEmpty)
         watch.reset()
         #expect(watch.keeping.isEmpty)
+    }
+
+    @Test func keepAnywayReadsAnOpenLogAgainBeforeTheButtonComesBack() async {
+        let source = FakeDownloads()
+        source.list = [held("s:a")]
+        let watch = DownloadsWatch(source: source, clock: { now })
+        await watch.poll()
+        var also = 0
+        await watch.keepAnyway("s:a") {
+            also += 1
+            // After the list came back, and still sending meanwhile.
+            #expect(source.calls == 2)
+            #expect(watch.keeping["s:a"] == Keeping(sending: true))
+        }
+        #expect(also == 1)
+        #expect(watch.keeping["s:a"] == nil)
+    }
+
+    @Test func aRefusalForADownloadTheListDoesNotShowStaysForItsLog() async {
+        let source = FakeDownloads()
+        source.list = [held("s:b")]
+        source.keepAnswer = { _ in throw OctoError.notFound("Nothing is waiting to be kept") }
+        let watch = DownloadsWatch(source: source, clock: { now })
+        await watch.poll()
+        await watch.keepAnyway("s:x")
+        #expect(watch.keeping["s:x"]?.error == "Nothing is waiting to be kept")
+        await watch.poll()
+        #expect(watch.keeping["s:x"]?.error == "Nothing is waiting to be kept")
+    }
+
+    @Test func aLogIsReadAgainAtOnceOnlyWhileItIsTheOneFollowed() async {
+        let loads = Counter()
+        let state = WatchClock()
+        let watch = DownloadLogWatch(load: { key in
+            _ = loads.next()
+            return download(key, state.now == 0 ? "searching" : "done")
+        }, pollMs: 60_000, clock: { now }, sleep: { _ in try? await Task.sleep(nanoseconds: 60_000_000_000) })
+        watch.follow("s:a")
+        while watch.row == nil { await Task.yield() }
+        #expect(loads.value == 1)
+        #expect(watch.row?.state == "searching")
+
+        state.now = 1
+        await watch.readAgain("s:a")
+        #expect(loads.value == 2)
+        #expect(watch.row?.state == "done")
+
+        // Another download's log, and a closed one, are not read.
+        await watch.readAgain("s:b")
+        #expect(loads.value == 2)
+        watch.close()
+        await watch.readAgain("s:a")
+        #expect(loads.value == 2)
     }
 
     @Test func anOlderAnswerNeverLandsAfterANewerOne() async {
