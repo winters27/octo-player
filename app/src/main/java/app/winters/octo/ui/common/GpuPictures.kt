@@ -35,7 +35,7 @@ private const val PictureUsage = HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or Hardw
 // `onPicture` runs. Only one drawing is on its way at a time.
 @RequiresApi(Build.VERSION_CODES.Q)
 class GpuPictureStream(val width: Int, val height: Int) : AutoCloseable {
-    private val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, MaxImages, PictureUsage.toLong())
+    private val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, PictureStreamImages, PictureUsage.toLong())
     private val root = RenderNode("gpu picture").apply { setPosition(0, 0, this@GpuPictureStream.width, this@GpuPictureStream.height) }
     private val renderer = HardwareRenderer().apply {
         isOpaque = false
@@ -62,6 +62,8 @@ class GpuPictureStream(val width: Int, val height: Int) : AutoCloseable {
     // each image up once rather than taking up a new bitmap every picture.
     // The images are only ever drawn into while no bitmap of theirs is
     // shown (`held`), so a bitmap reused shows its image's newest drawing.
+    // Only Android 14 and newer name an image's buffer (`HardwareBuffer.id`);
+    // older phones get a new bitmap with each picture.
     private val bitmaps = HashMap<Long, Bitmap>()
 
     var onPicture: (() -> Unit)? = null
@@ -97,11 +99,13 @@ class GpuPictureStream(val width: Int, val height: Int) : AutoCloseable {
             return
         }
         val bitmap = image.hardwareBuffer?.use { buffer ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                bitmaps[buffer.id] ?: Bitmap.wrapHardwareBuffer(buffer, Srgb)?.also { bitmaps[buffer.id] = it }
-            } else {
-                Bitmap.wrapHardwareBuffer(buffer, Srgb)
-            }
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    bitmaps[buffer.id] ?: Bitmap.wrapHardwareBuffer(buffer, Srgb)?.also { bitmaps[buffer.id] = it }
+                } else {
+                    Bitmap.wrapHardwareBuffer(buffer, Srgb)
+                }
+            }.getOrNull()
         }
         if (bitmap == null) {
             image.close()
@@ -130,10 +134,13 @@ class GpuPictureStream(val width: Int, val height: Int) : AutoCloseable {
         // Two held, one being drawn into, and one to spare, so the drawing
         // never waits for a free image.
         const val HeldImages = 2
-        const val MaxImages = 4
         const val OverdueMs = 250L
     }
 }
+
+// How many images a picture stream draws into in turn, and so how many
+// different bitmaps it hands round on phones that reuse them.
+const val PictureStreamImages = 4
 
 // One finished picture: its bitmap, and the reader it came from, which
 // `release` lets go. Nothing draws into the bitmap again, so it stays

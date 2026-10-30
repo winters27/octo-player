@@ -12,6 +12,7 @@ import android.graphics.Shader
 import android.os.Build
 import androidx.annotation.RequiresApi
 import app.winters.octo.ui.common.GpuPictureStream
+import app.winters.octo.ui.common.PictureStreamImages
 import kotlin.random.Random
 
 // Draws the moving background, one frame at a time, in three steps:
@@ -56,7 +57,12 @@ class WashRenderer {
     private val pictureMatrix = Matrix()
     private var shownPicture: Bitmap? = null
     private var pictureShader: BitmapShader? = null
-    private val pictureShaders = HashMap<Bitmap, BitmapShader>()
+    // A shader for each of the stream's last few bitmaps, the most recently
+    // shown last; an older one goes as a new one comes.
+    private val pictureShaders = object : LinkedHashMap<Bitmap, BitmapShader>(PictureStreamImages, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Bitmap, BitmapShader>): Boolean = size > PictureStreamImages
+    }
+    internal val pictureShaderCount: Int get() = pictureShaders.size
     private var pictureZoom = 1f
     private var pendingZoom = 1f
 
@@ -134,7 +140,9 @@ class WashRenderer {
         if (bitmap === shownPicture) return
         shownPicture = bitmap
         pictureZoom = pendingZoom
-        // The stream hands its few bitmaps round again; each keeps its shader.
+        // On Android 14 and newer the stream hands its few bitmaps round
+        // again, so each keeps its shader; older phones send a new bitmap
+        // with each picture, whose shader is kept only while it is recent.
         pictureShader = pictureShaders.getOrPut(bitmap) {
             BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { filterMode = BitmapShader.FILTER_MODE_LINEAR }
         }
