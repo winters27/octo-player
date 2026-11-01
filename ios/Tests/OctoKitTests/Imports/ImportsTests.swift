@@ -183,7 +183,7 @@ final class Opened: @unchecked Sendable {
         let held = TrickleStatus(state: "waitingForMornyeCheck", perHour: 20, queued: 3)
         #expect(held.stage == .waitingForMornyeCheck)
         #expect(held.title == "Waiting for Mornye's check")
-        #expect(held.line(zone: utc) == "It goes on once Mornye passes its check. Up to 20\u{00A0}songs an hour. 3\u{00A0}waiting.")
+        #expect(held.line(zone: utc) == "It goes on when Mornye may try its check again, or once it is passed on the dashboard. Up to 20\u{00A0}songs an hour. 3\u{00A0}waiting.")
     }
 
     @Test func aStateThisAppDoesNotKnowNeverSaysNothingToFetch() throws {
