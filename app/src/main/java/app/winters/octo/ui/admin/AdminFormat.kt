@@ -32,8 +32,19 @@ fun serviceName(key: String): String = when (key) {
     "lidarr" -> "Lidarr"
     "ytDlpShim" -> "Streaming helper"
     "lastfm" -> "Last.fm"
+    "mornye" -> "Mornye (SpotiFLAC)"
+    "sonic" -> "octo-sonic"
     else -> key
 }
+
+// The button under a service whose fix waits on the full admin pages.
+const val PASS_ON_DASHBOARD = "Pass on the dashboard"
+
+// The card on the full admin pages a service's row leads to, or null when
+// it leads nowhere: Mornye's row, while Octo offers to pass its check there.
+// An action this app does not know, or on another row, is left out.
+fun dashboardSection(key: String, health: Health): String? =
+    if (key == "mornye" && health.action == "pass") "spotiflac" else null
 
 // A time from Octo. One written without a zone is taken as UTC.
 fun parseTime(text: String?): Instant? {

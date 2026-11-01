@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListScope
@@ -57,6 +58,7 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.ui.common.PageHeader
 import app.winters.octo.ui.common.LoadState
+import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.common.songs
@@ -71,6 +73,9 @@ private val DotOk = Color(0xFF8FBFA0)
 private val DotWarning = Color(0xFFE3B35B)
 private val DotNotSetUp: Color get() = OctoColors.Accent.copy(alpha = 0.3f)
 
+// QuietButton's own side padding.
+private val QuietInset = 10.dp
+
 // What Octo is doing: its services, stations, recent downloads and where
 // they land. Only reachable on the home network.
 @OptIn(ExperimentalMaterial3Api::class)
@@ -78,6 +83,10 @@ private val DotNotSetUp: Color get() = OctoColors.Accent.copy(alpha = 0.3f)
 fun OctoAdminScreen(onBack: () -> Unit, vm: OctoAdminViewModel = hiltViewModel()) {
     val context = LocalContext.current
     var showAll by rememberSaveable { mutableStateOf(false) }
+    // Opens the full admin pages in the browser, at one card when named.
+    val openPage: (String?) -> Unit = { section ->
+        vm.pageUrl(section)?.let { url -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) } }
+    }
 
     Box(Modifier.fillMaxSize()) {
         PullToRefreshBox(
@@ -91,15 +100,12 @@ fun OctoAdminScreen(onBack: () -> Unit, vm: OctoAdminViewModel = hiltViewModel()
                     AdminPlace.Looking -> item(key = "looking") { Spinner(Modifier.padding(top = 24.dp)) }
                     AdminPlace.Away -> item(key = "away") { AwayMessage(vm::tryAgain) }
                     is AdminPlace.Found -> {
-                        health(vm.status)
+                        health(vm.status, openPage)
                         stations(vm.radio, vm.refreshingStations, vm.stationsProblem, vm::refreshStations)
                         downloads(vm.downloads, showAll) { showAll = !showAll }
                         library(vm.library)
                         item(key = "open") {
-                            OpenRow("Open full admin", Modifier.padding(top = 18.dp)) {
-                                val url = vm.pageUrl() ?: return@OpenRow
-                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
-                            }
+                            OpenRow("Open full admin", Modifier.padding(top = 18.dp)) { openPage(null) }
                         }
                     }
                 }
@@ -108,12 +114,14 @@ fun OctoAdminScreen(onBack: () -> Unit, vm: OctoAdminViewModel = hiltViewModel()
     }
 }
 
-private fun LazyListScope.health(state: LoadState<AdminStatus>) {
+// `openPage` opens the full admin pages at the card a row leads to.
+private fun LazyListScope.health(state: LoadState<AdminStatus>, openPage: (String?) -> Unit) {
     item(key = "title:health") { SectionTitle("Health", Modifier.padding(top = 8.dp)) }
     section(state, "health") { status ->
         item(key = "service:octo") { HealthRow("Octo", status.octo) }
         items(status.services.entries.toList(), key = { "service:${it.key}" }) { (key, health) ->
-            HealthRow(serviceName(key), health)
+            val section = dashboardSection(key, health)
+            HealthRow(serviceName(key), health, onPass = section?.let { card -> { openPage(card) } })
         }
     }
 }
@@ -244,8 +252,10 @@ private fun AwayMessage(onRetry: () -> Unit) {
 }
 
 // A service line: a small dot for how it is, the name, and what Octo says.
+// With `onPass`, a quiet "Pass on the dashboard" under the words, lined up
+// with them, opens the full admin pages where the fix is.
 @Composable
-private fun HealthRow(name: String, health: Health) {
+private fun HealthRow(name: String, health: Health, onPass: (() -> Unit)? = null) {
     val dot = healthDot(health)
     val (color, said) = when (dot) {
         HealthDot.Ok -> DotOk to "Working"
@@ -276,6 +286,10 @@ private fun HealthRow(name: String, health: Health) {
             val detail = if (dot == HealthDot.NotSetUp) "Not set up" else health.detail
             if (detail.isNotBlank()) {
                 Text(detail, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            }
+            if (onPass != null) {
+                // The button's own inset pulled back, so its words start where the row's do.
+                Box(Modifier.offset(x = -QuietInset)) { QuietButton(PASS_ON_DASHBOARD, onClick = onPass) }
             }
         }
     }
