@@ -145,12 +145,22 @@ public func rowOf(_ acquisition: Acquisition, upgrade: Upgrade? = nil) -> Downlo
         askedId: isBlank(acquisition.id) ? nil : acquisition.id)
 }
 
+/// What a held higher quality copy says while the server holds on without words of its own: the
+/// server's own outage state, so it names Soulseek.
+public let waitingForSoulseekText = "Waiting for Soulseek"
+
+/// What a held higher quality copy says: the server's own words for its wait when it gave them,
+/// as while Mornye's check is paused, else that Soulseek is out.
+public func waitingWords(_ upgrade: Upgrade) -> String {
+    upgrade.detail.flatMap(serverSentence) ?? waitingForSoulseekText
+}
+
 /// A higher quality copy that has no download of its own yet, or whose download is gone from the
 /// server's list.
 public func rowOf(_ upgrade: Upgrade) -> DownloadRow {
     let (phase, status): (RowPhase, String) = switch upgrade.stage {
     case .queued: (.waiting, "Waiting its turn")
-    case .waiting: (.waiting, "Waiting for Soulseek")
+    case .waiting: (.waiting, waitingWords(upgrade))
     case .working: (.searching, "Looking for a higher quality copy")
     case .upgraded: (.done, upgrade.detail.flatMap(serverSentence) ?? "Upgraded")
     case .notFound: (.failed, "No higher quality copy found")

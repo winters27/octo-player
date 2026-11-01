@@ -81,6 +81,11 @@ public final class OctoAdminModel {
         if case .found(let base) = place { OctoAdmin.pageUrl(base) } else { nil }
     }
 
+    /// The full admin pages at the card `section` names.
+    public func cardUrl(_ section: String) -> URL? {
+        if case .found(let base) = place { OctoAdmin.pageUrl(base, section: section) } else { nil }
+    }
+
     public func refreshStations() {
         guard case .found(let base) = place, !refreshingStations else { return }
         refreshingStations = true

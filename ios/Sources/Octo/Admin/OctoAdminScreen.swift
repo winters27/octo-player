@@ -80,8 +80,16 @@ struct OctoAdminScreen: View {
         sectionTitle("Health", extra: 8)
         section(model.status) { status in
             HealthRow(name: "Octo", health: status.octo)
-            ForEach(status.services, id: \.key) { service in HealthRow(name: serviceName(service.key), health: service.health) }
+            ForEach(status.services, id: \.key) { service in
+                HealthRow(name: serviceName(service.key), health: service.health, onPass: passAction(model, service))
+            }
         }
+    }
+
+    /// Opens the full admin pages at the card a service's row leads to, or nil when it leads nowhere.
+    private func passAction(_ model: OctoAdminModel, _ service: AdminService) -> (() -> Void)? {
+        guard let card = dashboardSection(service.key, service.health) else { return nil }
+        return { if let url = model.cardUrl(card) { openURL(url) } }
     }
 
     // MARK: Stations
@@ -192,31 +200,45 @@ struct OctoAdminScreen: View {
     }
 }
 
-/// One service's health: its dot, its name and what it says.
+/// One service's health: its dot, its name and what it says. With `onPass`, a quiet "Pass on
+/// the dashboard" under the words, lined up with them, opens the full admin pages where the fix is.
 private struct HealthRow: View {
     let name: String
     let health: AdminHealth
+    var onPass: (() -> Void)?
+
+    private static let dotSize: CGFloat = 8
+    private static let dotGap: CGFloat = 14
+    /// How far a QuietButton's words sit inside its edge.
+    private static let quietInset: CGFloat = 10
 
     var body: some View {
         let dot = healthDot(health)
-        HStack(alignment: .top, spacing: 14) {
-            Circle()
-                .fill(color(dot))
-                .frame(width: 8, height: 8)
-                .padding(.top, 6)
-                .accessibilityLabel(word(dot))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name).font(.octoBodySmall).foregroundStyle(dot == .notSetUp ? OctoColor.textMuted : OctoColor.textPrimary)
-                let detail = dot == .notSetUp ? "Not set up" : health.detail
-                if !detail.trimmingCharacters(in: .whitespaces).isEmpty {
-                    Text(detail).font(.octoCaption).foregroundStyle(OctoColor.textMuted).lineLimit(3)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: Self.dotGap) {
+                Circle()
+                    .fill(color(dot))
+                    .frame(width: Self.dotSize, height: Self.dotSize)
+                    .padding(.top, 6)
+                    .accessibilityLabel(word(dot))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name).font(.octoBodySmall).foregroundStyle(dot == .notSetUp ? OctoColor.textMuted : OctoColor.textPrimary)
+                    let detail = dot == .notSetUp ? "Not set up" : health.detail
+                    if !detail.trimmingCharacters(in: .whitespaces).isEmpty {
+                        Text(detail).font(.octoCaption).foregroundStyle(OctoColor.textMuted).lineLimit(3)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            if let onPass {
+                // Its own element, so the row's words stay one and the button stays a button.
+                QuietButton(passOnDashboardText, action: onPass)
+                    .padding(.leading, Self.dotSize + Self.dotGap - Self.quietInset)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 8)
-        .accessibilityElement(children: .combine)
     }
 
     private func color(_ dot: HealthDot) -> Color {

@@ -5,18 +5,21 @@ import FoundationNetworking
 
 // MARK: What Octo's admin pages answer
 
-/// What Octo says about itself or one service it works with.
+/// What Octo says about itself or one service it works with. `action` is what Octo offers to do
+/// about it on its full admin pages, such as "pass" for Mornye's check.
 public struct AdminHealth: Sendable, Equatable {
     public var ok = false
     public var detail = ""
     public var warning = false
     public var configured = true
+    public var action: String?
 
-    public init(ok: Bool = false, detail: String = "", warning: Bool = false, configured: Bool = true) {
+    public init(ok: Bool = false, detail: String = "", warning: Bool = false, configured: Bool = true, action: String? = nil) {
         self.ok = ok
         self.detail = detail
         self.warning = warning
         self.configured = configured
+        self.action = action
     }
 
     init(_ json: Any?) {
@@ -25,6 +28,7 @@ public struct AdminHealth: Sendable, Equatable {
         detail = AdminJSON.string(object["detail"]) ?? ""
         warning = AdminJSON.bool(object["warning"]) ?? false
         configured = AdminJSON.bool(object["configured"]) ?? true
+        action = AdminJSON.string(object["action"])
     }
 }
 
@@ -502,10 +506,12 @@ public final class OctoAdmin: @unchecked Sendable {
         }
     }
 
-    /// The full admin pages, for everything the app does not show.
-    public static func pageUrl(_ base: URL) -> URL? {
+    /// The full admin pages, for everything the app does not show, opened at the card `section`
+    /// names, as in "/admin/#spotiflac", or at the top with none.
+    public static func pageUrl(_ base: URL, section: String? = nil) -> URL? {
         guard var parts = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
         parts.percentEncodedPath = "/admin/"
+        parts.fragment = section
         return parts.url
     }
 
@@ -599,8 +605,20 @@ public func serviceName(_ key: String) -> String {
     case "lidarr": "Lidarr"
     case "ytDlpShim": "Streaming helper"
     case "lastfm": "Last.fm"
+    case "mornye": "Mornye (SpotiFLAC)"
+    case "sonic": "octo-sonic"
     default: key
     }
+}
+
+/// The button under a service whose fix waits on the full admin pages.
+public let passOnDashboardText = "Pass on the dashboard"
+
+/// The card on the full admin pages a service's row leads to, or nil when it leads nowhere:
+/// Mornye's row, while Octo offers to pass its check there. An action this app does not know,
+/// or on another row, is left out.
+public func dashboardSection(_ key: String, _ health: AdminHealth) -> String? {
+    key == "mornye" && health.action == "pass" ? "spotiflac" : nil
 }
 
 /// How long ago, the way a person says it: "Just now", "5 min ago", "Yesterday", then the date.
