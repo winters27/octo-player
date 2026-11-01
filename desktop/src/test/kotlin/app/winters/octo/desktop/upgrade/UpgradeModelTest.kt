@@ -1,7 +1,9 @@
 package app.winters.octo.desktop.upgrade
 
 import app.winters.octo.desktop.FakeServer
+import app.winters.octo.desktop.ui.upgradeHint
 import app.winters.octo.subsonic.Song
+import app.winters.octo.subsonic.Upgrade
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -48,8 +50,8 @@ class UpgradeModelTest {
 
     private fun upgrades(vararg rows: String) = server.answer("getUpgrades", """"upgrades":[${rows.joinToString(",")}]""", type = "octo")
 
-    private fun row(id: String, state: String, title: String = "Song $id") =
-        """{"id":"$id","title":"$title","artist":"Bon Iver","album":"Bon Iver","state":"$state","detail":null,"progress":null,"updatedAt":"2026-10-03T12:00:00Z"}"""
+    private fun row(id: String, state: String, title: String = "Song $id", detail: String? = null) =
+        """{"id":"$id","title":"$title","artist":"Bon Iver","album":"Bon Iver","state":"$state","detail":${detail?.let { "\"$it\"" } ?: "null"},"progress":null,"updatedAt":"2026-10-03T12:00:00Z"}"""
 
     private fun queueEverything() = server.answerBy("libraryAction") { request ->
         val id = request.url.queryParameter("id")
@@ -189,6 +191,26 @@ class UpgradeModelTest {
         model.request(listOf(song("a")))
         until("the line was said") { "Waiting for Soulseek" in notices }
         assertTrue("a" in model.pending)
+    }
+
+    @Test
+    fun waitingForMornyesCheckSaysTheServersWords() = runBlocking {
+        val words = "Waiting for Mornye's check, which it could not pass for example-ext; it allows its next try at 14:05 UTC."
+        val model = ready()
+        queueEverything()
+        upgrades(row("a", "waiting", detail = words))
+        model.request(listOf(song("a")))
+        until("the line was said") { words.removeSuffix(".") in notices }
+        assertFalse("Waiting for Soulseek" in notices)
+        assertEquals(words, model.pending.getValue("a").detail)
+    }
+
+    @Test
+    fun aHeldSongsRingSaysItsWaitWhenHovered() {
+        val words = "Waiting for Mornye's check, which it could not pass for example-ext; it allows its next try at 14:05 UTC."
+        assertEquals(words.removeSuffix("."), upgradeHint(Upgrade(id = "a", state = "waiting", detail = words)))
+        assertEquals("Waiting for Soulseek", upgradeHint(Upgrade(id = "b", state = "waiting")))
+        assertEquals("Looking for higher quality", upgradeHint(Upgrade(id = "c", state = "working")))
     }
 
     @Test

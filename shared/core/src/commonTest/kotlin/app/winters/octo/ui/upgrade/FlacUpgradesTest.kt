@@ -141,6 +141,16 @@ class FlacUpgradesTest {
     }
 
     @Test
+    fun aWaitSaysTheServersOwnWordsOnceEach() {
+        val mornye = "Waiting for Mornye's check, which it could not pass for example-ext; it allows its next try at 14:05 UTC."
+        follow("a", "b", "c")
+        val news = follower.seen(listOf(up("a", "waiting", detail = mornye), up("b", "waiting", detail = mornye), up("c", "waiting", detail = " ")))
+        assertEquals("${mornye.removeSuffix(".")}. $WAITING_FOR_SOULSEEK", news.notice)
+        assertEquals(mornye.removeSuffix("."), waitingWords(up("a", "waiting", detail = mornye)))
+        assertEquals(WAITING_FOR_SOULSEEK, waitingWords(up("a", "waiting")))
+    }
+
+    @Test
     fun theLibraryIsReadAgainAtMostOnceAGapAndOnceAtTheEnd() {
         follow("a", "b", "c")
         // The first landing reads it again at once.

@@ -184,6 +184,9 @@ enum class TrickleState(val wire: String) {
 
     // MusicBrainz is not answering and every waiting song has an ISRC it has to check.
     WaitingForMusicDatabase("waitingForMusicDatabase"),
+
+    // Every lossless source is out, and Mornye's check is paused.
+    WaitingForMornyeCheck("waitingForMornyeCheck"),
     Unknown(""),
     ;
 
