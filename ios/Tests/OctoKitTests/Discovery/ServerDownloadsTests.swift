@@ -271,6 +271,39 @@ private func held(_ key: String, keepAnyway: Bool = true) -> Acquisition {
         #expect(markOf(LogKind.of("something new")) == .note)
     }
 
+    @Test func aRowThatAsksThePersonToPlayOrKeepWaitsForThemAndOneWaitingOnAServiceDoesNot() {
+        var album = rowOf(download("s:a", "searching", note: "2 tracks wait: play them once, or keep them anyway"))
+        album.keepAnyway = true
+        album.heldTracks = 2
+        #expect(waitsForYou(album))
+        album.keepAnyway = false
+        #expect(waitsForYou(album), "An album seen by someone it does not offer Keep anyway")
+        #expect(waitsForYou(rowOf(download("s:a", "searching", note: "1 track waits: play it once, or keep it anyway"))))
+        var off = rowOf(download("s:a", "searching", note: "AcoustID is off, so Octo cannot check what played"))
+        off.keepAnyway = true
+        #expect(waitsForYou(off))
+        off.keepAnyway = false
+        #expect(!waitsForYou(off), "The same line without Keep anyway waits for a key")
+        #expect(waitsForYou(rowOf(download("s:a", "searching", note: "Play it once so Octo can keep the version you hear"))))
+        #expect(waitsForYou(rowOf(download("s:a", "searching", note: "Octo played another song for this one. Play it once more so Octo can keep the version you hear"))))
+        for line in ["Waiting for AcoustID", "Waiting for MusicBrainz", "Waiting for Lidarr's indexers", "Keeping the version you heard once YouTube answers"] {
+            #expect(!waitsForYou(rowOf(download("s:a", "searching", note: line))), "\(line)")
+        }
+        #expect(!waitsForYou(rowOf(download("s:a", "searching"))))
+        var running = rowOf(download("s:a", "downloading"))
+        running.keepAnyway = true
+        #expect(!waitsForYou(running))
+        #expect(!waitsForYou(rowOf(download("s:a", "done"))))
+    }
+
+    @Test func anAlbumsLogOffersNoFindSongsASongsDoes() {
+        let song = rowOf(download("s:a", "searching", note: "AcoustID is off, so Octo cannot check what played"))
+        #expect(logFindId(song) == "a")
+        var album = rowOf(download("s:b", "searching", note: "2 tracks wait: play them once, or keep them anyway"))
+        album.heldTracks = 2
+        #expect(logFindId(album) == nil)
+    }
+
     @Test func aHeldDownloadWaitsOnTheStepItsLogReachedAndASearchBegunAgainIsBackOnFind() {
         let held = rowOf(download("s:a", "searching", note: "Waiting for AcoustID"))
         let log = [

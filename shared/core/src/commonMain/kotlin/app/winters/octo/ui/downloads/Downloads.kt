@@ -234,6 +234,21 @@ fun keepAnywayError(e: SubsonicException): String = when (e) {
     else -> e.message?.let(::sentence) ?: KEEP_ANYWAY_UNREACHABLE
 }
 
+// Whether a held download waits for the person rather than for Octo or a
+// service it asked: it offers Keep anyway, it is an album holding tracks
+// until they are played or kept, or its line asks for a play. Nothing runs
+// until the person acts, so it is drawn still, with no spinner.
+fun waitsForYou(row: DownloadRow): Boolean =
+    row.phase == RowPhase.Searching &&
+        (row.keepAnyway || (row.heldTracks ?: 0) > 0 || ASKS_THE_PERSON.any { row.status.endsWith(it) })
+
+// How the server's lines that ask the person to play or keep end.
+private val ASKS_THE_PERSON = listOf("so Octo can keep the version you hear", "or keep them anyway", "or keep it anyway")
+
+// The song Find songs looks for from a download's log, or null: an album's
+// row holds tracks, not one song.
+fun logFindId(row: DownloadRow): String? = row.findId.takeIf { row.heldTracks == null }
+
 // "What it is for", as a small word beside the title, or null for a plain
 // download.
 fun kindLabel(kind: RowKind): String? = when (kind) {

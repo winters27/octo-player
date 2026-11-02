@@ -757,6 +757,35 @@ class DownloadsTest {
     }
 
     @Test
+    fun aRowThatAsksThePersonToPlayOrKeepWaitsForThem_AndOneWaitingOnAServiceDoesNot() {
+        val album = rowOf(download("s:a", "searching", note = "2 tracks wait: play them once, or keep them anyway").copy(keepAnyway = true, heldTracks = 2))
+        assertTrue("An album holding tracks", waitsForYou(album))
+        assertTrue("An album seen by someone it does not offer Keep anyway", waitsForYou(album.copy(keepAnyway = false)))
+        assertTrue("Its line alone", waitsForYou(rowOf(download("s:a", "searching", note = "1 track waits: play it once, or keep it anyway"))))
+        val off = rowOf(download("s:a", "searching", note = "AcoustID is off, so Octo cannot check what played").copy(keepAnyway = true))
+        assertTrue("A song held while AcoustID is off, with Keep anyway", waitsForYou(off))
+        assertFalse("The same line without it waits for a key", waitsForYou(off.copy(keepAnyway = false)))
+        assertTrue("A heart never played", waitsForYou(rowOf(download("s:a", "searching", note = "Play it once so Octo can keep the version you hear"))))
+        assertTrue(
+            "Another song stood in",
+            waitsForYou(rowOf(download("s:a", "searching", note = "Octo played another song for this one. Play it once more so Octo can keep the version you hear"))),
+        )
+        listOf("Waiting for AcoustID", "Waiting for MusicBrainz", "Waiting for Lidarr's indexers", "Keeping the version you heard once YouTube answers").forEach { line ->
+            assertFalse(line, waitsForYou(rowOf(download("s:a", "searching", note = line))))
+        }
+        assertFalse("A plain search", waitsForYou(rowOf(download("s:a", "searching"))))
+        assertFalse("A download on its way", waitsForYou(rowOf(download("s:a", "downloading")).copy(keepAnyway = true)))
+        assertFalse("Done", waitsForYou(rowOf(download("s:a", "done"))))
+    }
+
+    @Test
+    fun anAlbumsLogOffersNoFindSongs_ASongsDoes() {
+        val song = rowOf(download("s:a", "searching", note = "AcoustID is off, so Octo cannot check what played"))
+        assertEquals("a", logFindId(song))
+        assertNull(logFindId(rowOf(download("s:b", "searching", note = "2 tracks wait: play them once, or keep them anyway")).copy(heldTracks = 2)))
+    }
+
+    @Test
     fun aHeldDownloadWaitsOnTheStepItsLogReached_AndASearchBegunAgainIsBackOnFind() {
         val held = rowOf(download("s:a", "searching", note = "Waiting for AcoustID"))
         val log = listOf(

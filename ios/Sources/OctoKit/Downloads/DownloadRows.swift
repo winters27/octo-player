@@ -241,6 +241,23 @@ public func keepAnywayError(_ error: Error) -> String {
     serverWords(error).flatMap(serverSentence) ?? keepAnywayUnreachable
 }
 
+/// Whether a held download waits for the person rather than for Octo or a service it asked: it
+/// offers Keep anyway, it is an album holding tracks until they are played or kept, or its line
+/// asks for a play. Nothing runs until the person acts, so it is drawn still, with no spinner.
+public func waitsForYou(_ row: DownloadRow) -> Bool {
+    row.phase == .searching
+        && (row.keepAnyway || (row.heldTracks ?? 0) > 0 || asksThePerson.contains { row.status.hasSuffix($0) })
+}
+
+/// How the server's lines that ask the person to play or keep end.
+private let asksThePerson = ["so Octo can keep the version you hear", "or keep them anyway", "or keep it anyway"]
+
+/// The song Find songs looks for from a download's log, or nil: an album's row holds tracks, not
+/// one song.
+public func logFindId(_ row: DownloadRow) -> String? {
+    row.heldTracks == nil ? row.findId : nil
+}
+
 /// What a row is for, as a small word beside the title, or nil for a plain download.
 public func kindLabel(_ kind: RowKind) -> String? {
     switch kind {
