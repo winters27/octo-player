@@ -6,6 +6,7 @@ import android.media.AudioManager
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.media3.common.DeviceInfo
+import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -204,13 +205,12 @@ class PlaybackConnection @Inject constructor(
         }
     }
 
-    // Plays what was asked for out loud, like "Drake". The service works out
-    // what that means; saying nothing in particular shuffles everything.
-    fun playFromSearch(query: String) = withController { c ->
-        val request = MediaItem.RequestMetadata.Builder().setSearchQuery(query).build()
-        c.setMediaItem(MediaItem.Builder().setRequestMetadata(request).build())
-        c.prepare()
-        c.play()
+    // Plays what was asked for out loud, like "Drake", with what the
+    // assistant picked out of it (`extras`: an artist, an album, a song).
+    // The service works out what that means and plays it only when it finds
+    // something; saying nothing in particular shuffles everything.
+    fun playFromSearch(query: String, extras: Bundle? = null) = withController { c ->
+        c.sendCustomCommand(PLAY_FROM_SEARCH, playFromSearchArgs(query, extras))
     }
 
     fun seekTo(positionMs: Long) = withController { it.seekTo(positionMs.coerceAtLeast(0)) }
