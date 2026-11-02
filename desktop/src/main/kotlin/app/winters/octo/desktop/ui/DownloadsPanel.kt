@@ -140,6 +140,8 @@ import kotlinx.coroutines.launch
 import app.winters.octo.ui.downloads.FIND_SONGS
 import app.winters.octo.ui.downloads.Keeping
 import app.winters.octo.ui.downloads.keepAnywayLabel
+import app.winters.octo.ui.downloads.logFindId
+import app.winters.octo.ui.downloads.waitsForYou
 import app.winters.octo.ui.downloads.LogMark
 import app.winters.octo.ui.downloads.RowPhase
 import app.winters.octo.ui.downloads.candidateTitle
@@ -204,7 +206,7 @@ fun DownloadsHeading(app: AppState, modifier: Modifier = Modifier) {
                 val log by model.log.collectAsState()
                 val row = rows.firstOrNull { it.logKey == view.key } ?: log?.let { rowOf(it) }
                 if (row?.finished == true) TextAction("Clear", { model.clear(row.key); model.showList() })
-                row?.findId?.let { id ->
+                row?.let(::logFindId)?.let { id ->
                     IconAction(OctoIcons.Search, FIND_SONGS, { model.find(id, row.title, view.key) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, tint = OctoColors.TextSecondary)
                 }
             }
@@ -256,11 +258,12 @@ private fun DownloadList(model: DownloadsModel, modifier: Modifier) {
 }
 
 // One download: its cover, its names, the line saying where it is, and a
-// ring while it runs. Hovered, a finished one offers to leave the list, and
-// any can be looked for again. A held one the server offers to keep anyway
-// has Keep anyway under its words, part of the row; the cover and the ring
-// stay centered on the words alone, so nothing moves as it is sent or
-// refused.
+// ring while it runs, or a still pause mark in the ring's place while it
+// waits for the person. Hovered, a finished one offers to leave the list,
+// and any can be looked for again. A held one the server offers to keep
+// anyway has Keep anyway under its words, part of the row; the cover and
+// the ring stay centered on the words alone, so nothing moves as it is sent
+// or refused.
 @Composable
 private fun DownloadLine(
     row: DownloadRow,
@@ -301,6 +304,9 @@ private fun DownloadLine(
                     IconAction(OctoIcons.Search, FIND_SONGS, onFind, size = ControlHeight.S, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
                     IconAction(OctoIcons.Close, "Clear this one", onClear, size = ControlHeight.S, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
                 }
+                // The pause glyph is drawn small in its box: at the ring's
+                // size it stands as tall as the done mark.
+                waitsForYou(row) -> Glyph(OctoIcons.Pause, size = IconSize.Transport, tint = OctoColors.TextSecondary)
                 !row.finished -> ProgressRing(row.fraction, size = IconSize.Transport)
                 row.phase == RowPhase.Done -> Glyph(OctoIcons.Downloaded, size = IconSize.Table, tint = OctoColors.TextSecondary)
                 else -> Glyph(OctoIcons.Info, size = IconSize.Table, tint = OctoColors.SignalOrange)
@@ -383,6 +389,8 @@ private fun DownloadLog(app: AppState, model: DownloadsModel, key: String, modif
     val keepState = keeping[key]
     val events = log?.event.orEmpty()
     val running = row?.finished == false
+    // Waiting for the person, its newest line is still.
+    val busy = running && row?.let(::waitsForYou) != true
     val list = rememberLazyListState()
     // A running download opens on its newest step and keeps it in view; a
     // finished one opens at its start. Scrolling up lets go; back at the
@@ -423,7 +431,7 @@ private fun DownloadLog(app: AppState, model: DownloadsModel, key: String, modif
             LazyColumn(Modifier.fillMaxSize().topFade(Space.Xl).scrollbar(list), state = list, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.L, bottom = Space.Xl)) {
                 if (log == null && problem == null) item(key = "wait") { ProgressRing(null, size = IconSize.Transport) }
                 itemsIndexed(events, key = { index, _ -> index }) { index, line ->
-                    LogLine(line, last = index == events.lastIndex, live = running && index == events.lastIndex)
+                    LogLine(line, last = index == events.lastIndex, live = busy && index == events.lastIndex)
                 }
             }
             if (follow == false && running && list.canScrollForward) {
@@ -457,11 +465,12 @@ private fun LogHead(row: DownloadRow, events: List<AcquisitionEvent>, modifier: 
 
 // The four steps as a strip: done ones filled, the one it is on filling
 // with the file while it downloads (breathing while nobody can tell how
-// far), and the ones still to come faint.
+// far, still while it waits for the person), and the ones still to come
+// faint.
 @Composable
 private fun Steps(row: DownloadRow, at: Int) {
     val failed = row.phase == RowPhase.Failed
-    val pulse = if (row.finished || row.fraction != null) 1f else rememberPulse()
+    val pulse = if (row.finished || row.fraction != null || waitsForYou(row)) 1f else rememberPulse()
     Row(
         Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
             contentDescription = if (at >= DownloadStep.entries.size) "Every step done" else "Step ${at + 1} of ${DownloadStep.entries.size}, ${DownloadStep.entries[at].label}"
