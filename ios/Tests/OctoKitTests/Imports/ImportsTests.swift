@@ -186,6 +186,14 @@ final class Opened: @unchecked Sendable {
         #expect(held.line(zone: utc) == "It goes on when Mornye may try its check again, or once it is passed on the dashboard. Up to 20\u{00A0}songs an hour. 3\u{00A0}waiting.")
     }
 
+    @Test func theTrickleSaysItWaitsForAMornyeThatDoesNotAnswer() {
+        let utc = TimeZone(identifier: "UTC")!
+        let held = TrickleStatus(state: "waitingForMornye", perHour: 20, queued: 3)
+        #expect(held.stage == .waitingForMornye)
+        #expect(held.title == "Waiting for Mornye to answer")
+        #expect(held.line(zone: utc) == "It goes on once Mornye answers again. Up to 20\u{00A0}songs an hour. 3\u{00A0}waiting.")
+    }
+
     @Test func aStateThisAppDoesNotKnowNeverSaysNothingToFetch() throws {
         #expect(TrickleStatus(state: "somethingNew", queued: 2).title == "Working on it")
         #expect(TrickleStatus(state: "somethingNew").title == "Nothing to fetch")

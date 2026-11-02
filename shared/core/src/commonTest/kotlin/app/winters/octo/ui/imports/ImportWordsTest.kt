@@ -71,6 +71,13 @@ class ImportWordsTest {
     }
 
     @Test
+    fun theTrickleSaysItWaitsForAMornyeThatDoesNotAnswer() {
+        val held = TrickleStatus(state = "waitingForMornye", perHour = 20, queued = 3)
+        assertEquals("Waiting for Mornye to answer", held.title())
+        assertEquals(nb("It goes on once Mornye answers again. Up to 20~songs an hour. 3~waiting."), held.line(ZoneOffset.UTC))
+    }
+
+    @Test
     fun aStateThisAppDoesNotKnowNeverSaysNothingToFetch() {
         assertEquals("Working on it", TrickleStatus(state = "somethingNew", queued = 2).title())
         assertEquals("Working on it", TrickleStatus(state = "somethingNew", downloading = 1).title())
