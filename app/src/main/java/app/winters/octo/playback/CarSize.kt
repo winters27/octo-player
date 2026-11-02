@@ -87,33 +87,47 @@ fun partTitle(range: IntRange): String = "${range.first + 1} to ${range.last + 1
 fun carLetters(sortKeys: List<String>?): List<String>? = sortKeys?.map { indexLetter(it).toString() }
 
 // A list a car may open: how many items it holds, the letter each files
-// under when it is sorted by name, how its items show, and each item, built
+// under when it is sorted by name, how its items show, how a number of them
+// is said ("12 albums"), each item's cover reference, and each item, built
 // only when an answer needs it.
 class CarListing(
     val count: Int,
     val letters: List<String>? = null,
     val style: CarStyle? = null,
+    val countLine: ((Int) -> String)? = null,
+    private val coverOf: (Int) -> String? = { null },
     private val build: (Int) -> MediaItem,
 ) {
     fun item(index: Int): MediaItem = build(index)
 
-    // The items under `letter`, in list order.
-    fun under(letter: String): List<MediaItem> {
+    // Where the items under `letter` sit in the list, in list order.
+    fun indicesUnder(letter: String): List<Int> {
         val letters = letters ?: return emptyList()
-        return letters.indices.filter { letters[it] == letter }.map(::item)
+        return letters.indices.filter { letters[it] == letter }
     }
 
+    fun under(letter: String): List<MediaItem> = indicesUnder(letter).map(::item)
+
     fun all(): List<MediaItem> = List(count, ::item)
+
+    // The first covers among the items at `indices`, each once, for a row's
+    // picture.
+    fun coversAt(indices: List<Int>): List<String> = indices.asSequence().mapNotNull(coverOf).distinct().take(SPLIT_COVERS).toList()
 
     companion object {
         fun of(items: List<MediaItem>, style: CarStyle? = null) = CarListing(items.size, style = style, build = items::get)
     }
 }
 
-// How the rows that open a long list's letters and parts look.
+// How many covers a letter's or a part's picture takes its colors from.
+const val SPLIT_COVERS = 4
+
+// How the rows that open a long list's letters and parts look: each with the
+// style of what it opens, and the covers its picture is drawn from; a letter
+// also says how many it holds.
 class CarSplitRows(
-    val letter: (CarNode.Heading, CarStyle?) -> MediaItem,
-    val part: (CarNode.Part, IntRange, String?) -> MediaItem,
+    val letter: (CarNode.Heading, CarStyle?, List<String>, String?) -> MediaItem,
+    val part: (CarNode.Part, IntRange, String?, CarStyle?, List<String>) -> MediaItem,
 )
 
 // The answer for a list a car opened: whole when it fits one answer;
@@ -131,21 +145,38 @@ fun carListAnswer(node: CarNode, list: CarListing, rows: CarSplitRows, budget: I
     }
     if (used <= budget) return built
     val letters = list.letters?.distinct()
-    if (letters != null && letters.size > 1) return letters.map { rows.letter(CarNode.Heading(it, node), list.style) }
+    if (letters != null && letters.size > 1) {
+        return letters.map { letter ->
+            val under = list.indicesUnder(letter)
+            rows.letter(CarNode.Heading(letter, node), list.style, list.coversAt(under), list.countLine?.invoke(under.size))
+        }
+    }
     while (built.size < list.count) built += list.item(built.size)
-    return carFitOrParts(node, built, rows, budget)
+    return carFitOrParts(node, built, rows, budget, list.style) { range -> list.coversAt(range.toList()) }
 }
 
 // The items under one letter of a list: whole when they fit one answer,
 // otherwise a row for each part.
-fun carLetterAnswer(node: CarNode.Heading, list: CarListing, rows: CarSplitRows, budget: Int = CAR_ANSWER_BUDGET): List<MediaItem> =
-    carFitOrParts(node, list.under(node.heading), rows, budget)
+fun carLetterAnswer(node: CarNode.Heading, list: CarListing, rows: CarSplitRows, budget: Int = CAR_ANSWER_BUDGET): List<MediaItem> {
+    val under = list.indicesUnder(node.heading)
+    return carFitOrParts(node, under.map(list::item), rows, budget, list.style) { range -> list.coversAt(range.map(under::get)) }
+}
 
-// `items` whole when they fit one answer, otherwise a row for each part.
-fun carFitOrParts(node: CarNode, items: List<MediaItem>, rows: CarSplitRows, budget: Int = CAR_ANSWER_BUDGET): List<MediaItem> {
+// `items` whole when they fit one answer, otherwise a row for each part,
+// opening its items in `style`, its picture drawn from `covers` of its range.
+fun carFitOrParts(
+    node: CarNode,
+    items: List<MediaItem>,
+    rows: CarSplitRows,
+    budget: Int = CAR_ANSWER_BUDGET,
+    style: CarStyle? = null,
+    covers: (IntRange) -> List<String> = { emptyList() },
+): List<MediaItem> {
     val sizes = items.map(::carBytes)
     if (fitsOneAnswer(sizes, budget)) return items
-    return carParts(sizes, budget).mapIndexed { index, range -> rows.part(CarNode.Part(index, node), range, items[range.first].mediaMetadata.title?.toString()) }
+    return carParts(sizes, budget).mapIndexed { index, range ->
+        rows.part(CarNode.Part(index, node), range, items[range.first].mediaMetadata.title?.toString(), style, covers(range))
+    }
 }
 
 // The items of part `index` of `items`, as carFitOrParts cut them.

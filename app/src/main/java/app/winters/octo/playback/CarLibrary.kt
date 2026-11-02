@@ -29,6 +29,7 @@ import app.winters.octo.discovery.ChartLists
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.SearchTopSongs
+import app.winters.octo.discovery.Station
 import app.winters.octo.discovery.wholeAlbum
 import app.winters.octo.favourites.PinStore
 import app.winters.octo.favourites.PinnedItem
@@ -66,6 +67,7 @@ import app.winters.octo.ui.common.adoptedFinds
 import app.winters.octo.ui.common.isOutsideLibrary
 import app.winters.octo.ui.home.HomePrefs
 import app.winters.octo.ui.home.homeRediscovery
+import app.winters.octo.ui.home.songCountLine
 import app.winters.octo.ui.liveradio.LIVE_NEAR_TITLE
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -181,9 +183,9 @@ class CarLibrary @Inject constructor(
             CarNode.Root -> carTabs(limit).let { tabs -> tabs.tabs.map { tab(it, tabs) } }
             CarNode.More -> carTabs(limit).more.map { tab(it, null) }
             CarNode.Home -> home()
-            is CarNode.Shelf -> shelfWhole(node)
-            CarNode.Radio -> carFitOrParts(node, radio(), splitRows)
-            CarNode.Playlists -> carFitOrParts(node, playlistsTab(), splitRows)
+            is CarNode.Shelf -> carFitOrParts(node, shelfItems(node), splitRows, style = shelfStyles(node.section).first)
+            CarNode.Radio -> carHomeAnswer(null, radioShelves(), homeParts)
+            CarNode.Playlists -> carFitOrParts(node, playlistsTab(), splitRows, style = CarStyle.List)
             CarNode.Library -> libraryRows()
             CarNode.Favorites -> favoriteRows()
             CarNode.Charts -> shelves.current().charts.map(look::chart)
@@ -194,15 +196,16 @@ class CarLibrary @Inject constructor(
     }
 
     private val splitRows = CarSplitRows(
-        letter = { node, style -> look.heading(node, style) },
-        part = { node, range, firstTitle -> look.part(node, range, firstTitle) },
+        letter = { node, style, covers, count -> look.heading(node, style, covers, count) },
+        part = { node, range, firstTitle, style, covers -> look.part(node, range, firstTitle, style, covers) },
     )
 
+    // A part opens what its row was cut from, built the same way, so it
+    // holds exactly the items its row names.
     private suspend fun partOf(node: CarNode.Part): List<MediaItem> {
         val items = when (val parent = node.parent) {
             CarNode.Playlists -> playlistsTab()
-            CarNode.Radio -> radio()
-            is CarNode.Shelf -> HomeSection.ofId(parent.section)?.let { homeShelves(setOf(it))[it] }.orEmpty()
+            is CarNode.Shelf -> shelfItems(parent)
             is CarNode.Heading -> listed(parent.parent, ownAccord = false)?.under(parent.heading).orEmpty()
             else -> listed(parent, ownAccord = false)?.all().orEmpty()
         }
@@ -217,9 +220,15 @@ class CarLibrary @Inject constructor(
         fun song(track: TrackEntity, list: CarNode) = look.song(track, list, isOutsideLibrary(track.id, adopted), track.id in done)
         fun of(items: List<MediaItem>, style: CarStyle? = null) = CarListing.of(items, style)
         return when (node) {
-            CarNode.Albums -> sorted.albums(SortList.Albums).first().let { s -> CarListing(s.items.size, carLetters(s.headings), CarStyle.Grid) { look.album(s.items[it]) } }
-            CarNode.Artists -> sorted.artists().first().let { s -> CarListing(s.items.size, carLetters(s.headings)) { look.artist(s.items[it]) } }
-            CarNode.Songs -> sorted.songs(SortList.Songs, SongScope.All).first().let { s -> CarListing(s.items.size, carLetters(s.headings)) { song(s.items[it], node) } }
+            CarNode.Albums -> sorted.albums(SortList.Albums).first().let { s ->
+                CarListing(s.items.size, carLetters(s.headings), CarStyle.Grid, ::albumCountLine, { s.items[it].artwork }) { look.album(s.items[it]) }
+            }
+            CarNode.Artists -> sorted.artists().first().let { s ->
+                CarListing(s.items.size, carLetters(s.headings), countLine = ::artistCountLine, coverOf = { s.items[it].artwork }) { look.artist(s.items[it]) }
+            }
+            CarNode.Songs -> sorted.songs(SortList.Songs, SongScope.All).first().let { s ->
+                CarListing(s.items.size, carLetters(s.headings), countLine = ::songCountLine, coverOf = { s.items[it].artwork }) { song(s.items[it], node) }
+            }
             CarNode.Genres -> of(catalog.genres().first().map(look::genre))
             is CarNode.Genre -> {
                 val albums = catalog.genreAlbums(node.name).first().map { look.grouped(look.album(it), "Albums") }
@@ -264,10 +273,10 @@ class CarLibrary @Inject constructor(
             is CarNode.LiveList -> liveLists.lists.first().firstOrNull { it.id == node.id }?.let { look.liveList(it, liveCovers(it)) }
             is CarNode.Song -> trackOf(node.trackId)?.let { look.song(it, node.list, isOutsideLibrary(it.id, adoptedFinds(downloads.phases.value)), it.id in offline.done.value) }
             is CarNode.OctoList -> look.folder(node, node.name)
-            is CarNode.Station -> look.folder(node, node.name)
+            is CarNode.Station -> look.radio(node)
             is CarNode.ChartList -> look.folder(node, node.name)
             is CarNode.Genre -> look.folder(node, node.name)
-            is CarNode.Shelf -> look.folder(node, HomeSection.ofId(node.section)?.title.orEmpty())
+            is CarNode.Shelf -> shelfRow(node.section)
             is CarNode.Heading -> look.folder(node, node.heading)
             CarNode.Charts -> look.folder(node, HomeSection.Charts.title)
             else -> if (node.isBrowsable) look.folder(node, "") else null
@@ -320,7 +329,8 @@ class CarLibrary @Inject constructor(
                     is SearchEntry.LibraryAlbum -> look.album(entry.album)
                     is SearchEntry.OutsideAlbum -> look.onlineAlbum(entry.album)
                     is SearchEntry.Playlist -> look.playlist(entry.playlist)
-                    is SearchEntry.SeeAll -> look.seeAll(entry.node, amongRows = true)
+                    // A kind's whole list shows as the Library shows it: albums as tiles, the rest as rows.
+                    is SearchEntry.SeeAll -> look.seeAll(entry.node, browsable = CarStyle.Grid.takeIf { (entry.node as? CarNode.Found)?.kind == FoundKind.Albums })
                     is SearchEntry.Retry -> look.retry(entry.token)
                 }
             }
@@ -509,15 +519,33 @@ class CarLibrary @Inject constructor(
     private val homeParts = CarHomeParts(
         grouped = { item, title -> look.grouped(item, title) },
         seeAll = { shelf ->
-            val target = if (shelf.section == HomeSection.Charts) CarNode.Charts else CarNode.Shelf(shelf.section.id)
-            look.seeAll(target, amongRows = shelf.section.songs)
+            val (browsable, playable) = shelfStyles(shelf.id)
+            look.seeAll(if (shelf.id == HomeSection.Charts.id) CarNode.Charts else CarNode.Shelf(shelf.id), browsable, playable)
         },
-        row = { shelf -> look.folder(CarNode.Shelf(shelf.section.id), shelf.section.title, browsable = CarStyle.Grid) },
+        row = { shelf -> shelfRow(shelf.id) },
     )
 
-    private suspend fun shelfWhole(node: CarNode.Shelf): List<MediaItem> {
+    // A shelf as one row that opens it whole, in the styles its items show in.
+    private fun shelfRow(id: String): MediaItem {
+        val (browsable, playable) = shelfStyles(id)
+        val title = if (id == NEAR_SHELF) LIVE_NEAR_TITLE else HomeSection.ofId(id)?.title.orEmpty()
+        return look.folder(CarNode.Shelf(id), title, browsable = browsable, playable = playable)
+    }
+
+    // How a shelf's items show when it opens whole, as on Home: covers as
+    // tiles, songs as rows; the charts, which have no covers, as rows.
+    private fun shelfStyles(id: String): Pair<CarStyle, CarStyle> = when (id) {
+        HomeSection.Charts.id -> CarStyle.List to CarStyle.List
+        HomeSection.MostPlayed.id -> CarStyle.Grid to CarStyle.List
+        else -> CarStyle.Grid to CarStyle.Grid
+    }
+
+    // A shelf's items as Home or the Radio tab shows them, for the shelf
+    // opened whole and for its parts alike.
+    private suspend fun shelfItems(node: CarNode.Shelf): List<MediaItem> {
+        if (node.section == NEAR_SHELF) return nearItems(shelves.current())
         val section = HomeSection.ofId(node.section) ?: return emptyList()
-        return carFitOrParts(node, homeShelves(setOf(section))[section].orEmpty(), splitRows)
+        return homeShelves(setOf(section))[section].orEmpty()
     }
 
     // Each of `wanted` of Home's shelves as the phone's Home fills it.
@@ -539,11 +567,11 @@ class CarLibrary @Inject constructor(
                     }
                 }
                 HomeSection.RecentlyPlayed -> byLatestPlay(history.albums.first(), HISTORY_SHELF).map(look::album)
-                HomeSection.MadeForYou -> server.madeForYou.map(look::station)
-                HomeSection.Stations -> server.stations.filter { it.streamUrl == null }.map(look::station)
+                HomeSection.MadeForYou -> server.madeForYou.map(::homeStation)
+                HomeSection.Stations -> radioStations(server).map(::homeStation)
                 HomeSection.InternetRadio -> liveEntries(server).map { look.live(it, sourceIdNow()) }
                 HomeSection.YearMixes, HomeSection.GenreMixes, HomeSection.ArtistMixes, HomeSection.CountryMixes ->
-                    server.groups.firstOrNull { it.first == section.mixGroup }?.second.orEmpty().map(look::station)
+                    server.groups.firstOrNull { it.first == section.mixGroup }?.second.orEmpty().map(::homeStation)
                 HomeSection.RecentlyAdded -> catalog.recentAlbums(HISTORY_SHELF).first().map(look::album)
                 HomeSection.MostPlayed -> byPlayCount(history.tracks.first(), HISTORY_SHELF).map { song(it, CarNode.MostPlayed) }
                 HomeSection.FavoriteAlbums -> favourites.likedAlbums().first().sortedByDescending { it.likedAt }.take(FAVORITES_SHELF).map { look.album(it.album) }
@@ -567,15 +595,20 @@ class CarLibrary @Inject constructor(
 
     private suspend fun picks() = picker.forKey(catalog.libraryTrackCount().first() to serverSync.last.first()?.at)
 
-    // Radio: Octo's stations, the Live radio shelf, and stations near the
-    // listener's saved place.
-    private suspend fun radio(): List<MediaItem> {
-        val server = shelves.current()
+    private fun homeStation(station: Station): MediaItem = look.homeStation(station)
+
+    private fun radioStations(server: CarServerShelves): List<Station> = carRadioStations(server.stations, server.groups.flatMap { it.second })
+
+    // Radio: Octo's stations, the Live radio shelf, and the stations near the
+    // listener's saved place, grouped as on the phone (see carHomeAnswer).
+    private suspend fun radioShelves(): List<CarShelf> {
+        val home = homeShelves(setOf(HomeSection.Stations, HomeSection.InternetRadio))
+        return carRadioShelves(home[HomeSection.Stations].orEmpty(), home[HomeSection.InternetRadio].orEmpty(), nearItems(shelves.current()))
+    }
+
+    private suspend fun nearItems(server: CarServerShelves): List<MediaItem> {
         val miles = usesMiles(places.localeCountry())
-        val source = sourceIdNow()
-        return server.stations.filter { it.streamUrl == null }.map { look.grouped(look.station(it), HomeSection.Stations.title) } +
-            liveEntries(server).map { look.grouped(look.live(it, source), HomeSection.InternetRadio.title) } +
-            server.near.map { look.grouped(look.near(it, miles), LIVE_NEAR_TITLE) }
+        return server.near.map { look.near(it, miles) }
     }
 
     private suspend fun liveEntries(server: CarServerShelves): List<LiveShelfEntry> =
@@ -617,7 +650,7 @@ class CarLibrary @Inject constructor(
         listOf(CarNode.Favorites, CarNode.Artists, CarNode.Albums, CarNode.Songs, CarNode.Genres, CarNode.Downloads).map(::libraryRow)
 
     private fun libraryRow(node: CarNode): MediaItem = when (node) {
-        CarNode.Favorites -> look.folder(node, "Favorites", OctoIcons.Liked, browsable = CarStyle.Category)
+        CarNode.Favorites -> look.folder(node, "Favorites", OctoIcons.Like, browsable = CarStyle.Category)
         CarNode.Artists -> look.folder(node, "Artists", OctoIcons.Artist)
         CarNode.Albums -> look.folder(node, "Albums", OctoIcons.Album, browsable = CarStyle.Grid, playable = CarStyle.Grid)
         CarNode.Songs -> look.folder(node, "Songs", OctoIcons.Songs)
@@ -637,7 +670,7 @@ class CarLibrary @Inject constructor(
     private fun tab(node: CarNode, tabs: CarTabs?): MediaItem = when (node) {
         CarNode.Home -> look.folder(node, "Home", OctoIcons.Home, browsable = CarStyle.Grid, playable = CarStyle.List)
         CarNode.Radio -> look.folder(node, "Radio", OctoIcons.Radio, browsable = CarStyle.Grid, playable = CarStyle.Grid)
-        CarNode.Playlists -> look.folder(node, "Playlists", OctoIcons.Playlists)
+        CarNode.Playlists -> look.folder(node, "Playlists", OctoIcons.Playlists, browsable = CarStyle.List)
         CarNode.Library -> look.folder(node, "Library", OctoIcons.Library, browsable = CarStyle.Category)
         else -> look.folder(CarNode.More, tabs?.let(::moreTitle) ?: "More", OctoIcons.More, browsable = CarStyle.Category)
     }
@@ -716,9 +749,13 @@ internal fun carLibraryInput(ready: Flow<Any?>, lastCopy: Flow<Any?>, songs: Flo
 internal fun resumeOfferKey(offer: ResumeOffer?): List<Any?>? =
     offer?.let { listOf(it.device, it.title, it.artist, it.remote.changedAt) }
 
+// Octo's stations (those with no stream), each with the song count the
+// server's lists give it, so a station reads alike on Home, Radio and
+// Playlists.
+internal fun carRadioStations(stations: List<Station>, lists: List<Station>): List<Station> {
+    val counts = lists.associate { it.id to it.songCount }
+    return stations.filter { it.streamUrl == null }.map { it.copy(songCount = it.songCount ?: counts[it.id]) }
+}
+
 // Home's shelves that read the albums to come back to.
 private val REDISCOVERY = setOf(HomeSection.NotPlayedLately, HomeSection.NeverFinished, HomeSection.NeverPlayed)
-
-// Whether a Home shelf holds songs, which show as rows.
-private val HomeSection.songs: Boolean
-    get() = this == HomeSection.MostPlayed || this == HomeSection.Charts

@@ -55,20 +55,11 @@ fun playlistArtOf(ref: String?): PlaylistArtRef? {
 // The picture, about `px` across: the covers in a square for Mosaic (the
 // first cover alone when there are fewer than four), otherwise the designed
 // cover on colors from the covers, as the phone's Playlists page draws it.
-// Blocks, so never on the main thread.
+// A mosaic missing any of its covers is drawn designed instead, never with a
+// hole. Blocks, so never on the main thread.
 fun playlistArtBitmap(context: Context, art: PlaylistArtRef, px: Int): Bitmap? {
     if (art.style == PlaylistCoverStyle.Mosaic && art.covers.isNotEmpty()) {
-        if (art.covers.size < 4) return artworkBitmap(context, art.covers.first(), px)
-        val square = createBitmap(px, px)
-        val canvas = Canvas(square)
-        val half = px / 2
-        art.covers.take(4).forEachIndexed { i, cover ->
-            val picture = artworkBitmap(context, cover, half) ?: return@forEachIndexed
-            val left = (i % 2) * half
-            val top = (i / 2) * half
-            canvas.drawBitmap(picture, null, Rect(left, top, left + half, top + half), null)
-        }
-        return square
+        mosaicBitmap(art.covers, px) { cover, side -> artworkBitmap(context, cover, side) }?.let { return it }
     }
     return runCatching {
         val playlistArt = EntryPointAccessors.fromApplication(context.applicationContext, PlaylistArtEntry::class.java).playlistArt()
@@ -77,6 +68,22 @@ fun playlistArtBitmap(context: Context, art: PlaylistArtRef, px: Int): Bitmap? {
             playlistArt.art(CoverSpec(art.id, art.name, art.line, art.footer, palette, glyph = art.glyph), coverSide(px))
         }.asAndroidBitmap()
     }.getOrNull()
+}
+
+// The covers in a square `px` across (the first alone when there are fewer
+// than four), or null when any of them cannot be had.
+internal fun mosaicBitmap(covers: List<String>, px: Int, load: (String, Int) -> Bitmap?): Bitmap? {
+    if (covers.size < 4) return load(covers.first(), px)
+    val half = px / 2
+    val pictures = covers.take(4).map { load(it, half) ?: return null }
+    val square = createBitmap(px, px)
+    val canvas = Canvas(square)
+    pictures.forEachIndexed { i, picture ->
+        val left = (i % 2) * half
+        val top = (i / 2) * half
+        canvas.drawBitmap(picture, null, Rect(left, top, left + half, top + half), null)
+    }
+    return square
 }
 
 private fun encode(text: String): String = URLEncoder.encode(text, Charsets.UTF_8.name())

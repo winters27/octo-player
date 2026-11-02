@@ -19,9 +19,43 @@ class CarSizeTest {
         .build()
 
     private val rows = CarSplitRows(
-        letter = { node, _ -> item(carId(node)) },
-        part = { node, _, _ -> item(carId(node)) },
+        letter = { node, _, _, _ -> item(carId(node)) },
+        part = { node, _, _, _, _ -> item(carId(node)) },
     )
+
+    @Test
+    fun aLetterSaysHowManyItHoldsAndTakesItsColorsFromItsFirstCovers() {
+        val keys = (1..400).map { n -> (if (n <= 300) "a" else "b") + "name %04d".format(n) }
+        val got = mutableMapOf<String, Pair<List<String>, String?>>()
+        val asked = CarSplitRows(
+            letter = { node, _, covers, count -> got[node.heading] = covers to count; item(carId(node)) },
+            part = { node, _, _, _, _ -> item(carId(node)) },
+        )
+        // Two albums share each cover, and the first has none.
+        val list = CarListing(keys.size, carLetters(keys), CarStyle.Grid, { "$it albums" }, { i -> if (i == 0) null else "cover-${i / 2}" }) {
+            item("album:${keys[it]}", "x".repeat(60))
+        }
+        carListAnswer(CarNode.Albums, list, asked, budget = 20_000)
+        assertEquals(listOf("cover-0", "cover-1", "cover-2", "cover-3") to "300 albums", got["A"])
+        assertEquals(listOf("cover-150", "cover-151", "cover-152", "cover-153") to "100 albums", got["B"])
+    }
+
+    @Test
+    fun aPartOpensItsItemsInTheListsStyleWithItsOwnCovers() {
+        val keys = (1..2_000).map { "album %04d".format(it) }
+        val got = mutableListOf<Triple<IntRange, CarStyle?, List<String>>>()
+        val asked = CarSplitRows(
+            letter = { node, _, _, _ -> item(carId(node)) },
+            part = { node, range, _, style, covers -> got += Triple(range, style, covers); item(carId(node)) },
+        )
+        val list = CarListing(keys.size, carLetters(keys), CarStyle.Grid, coverOf = { "cover-$it" }) { item("album:${keys[it]}") }
+        carListAnswer(CarNode.Albums, list, asked, budget = 20_000)
+        assertTrue(got.size > 1)
+        got.forEach { (range, style, covers) ->
+            assertEquals(CarStyle.Grid, style)
+            assertEquals(range.take(SPLIT_COVERS).map { "cover-$it" }, covers)
+        }
+    }
 
     @Test
     fun namesFileUnderTheirFirstLetterOrHash() {

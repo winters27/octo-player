@@ -119,15 +119,15 @@ class CarItemSizeTest {
                 HomeSection.MostPlayed, HomeSection.Charts -> look.song(track, CarNode.MostPlayed, outside = true, downloaded = true)
                 HomeSection.MadeForYou, HomeSection.Stations, HomeSection.YearMixes, HomeSection.GenreMixes,
                 HomeSection.ArtistMixes, HomeSection.CountryMixes, HomeSection.InternetRadio,
-                -> look.station(station)
+                -> look.homeStation(station)
                 HomeSection.Artists -> look.artist(artist)
                 else -> look.album(album)
             }
         }
         val parts = CarHomeParts(
             grouped = look::grouped,
-            seeAll = { shelf -> look.seeAll(CarNode.Shelf(shelf.section.id), amongRows = shelf.section == HomeSection.MostPlayed) },
-            row = { shelf -> look.folder(CarNode.Shelf(shelf.section.id), shelf.section.title, browsable = CarStyle.Grid) },
+            seeAll = { shelf -> look.seeAll(CarNode.Shelf(shelf.id), CarStyle.Grid, CarStyle.Grid) },
+            row = { shelf -> look.folder(CarNode.Shelf(shelf.id), shelf.title, browsable = CarStyle.Grid, playable = CarStyle.Grid) },
         )
         val resume = look.resume(ResumeOffer(long(400), long(400), long(400), RemoteQueue(emptyList(), 0, 0, 1, null)))
         val answer = carHomeAnswer(resume, HomeSection.entries.map { CarShelf(it, itemsFor(it)) }, parts)

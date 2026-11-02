@@ -48,14 +48,14 @@ class CarSubscribeTest {
 
     @Test
     fun everyListACarOpensCanBeKept() {
-        listOf("lib:songs", "shelf:recentlyPlayed", "list:a:B", "station:a:B", "az:A:tab:albums", "tab:home").forEach { id ->
+        listOf("lib:songs", "shelf:recentlyPlayed", "shelf:nearYou", "list:a:B", "az:A:tab:albums", "tab:home").forEach { id ->
             assertEquals(id, LibraryResult.RESULT_SUCCESS, ask { subscribe(id, null) }.resultCode)
         }
     }
 
     @Test
-    fun aSongOrAnUnknownIdCannotBeKept() {
-        listOf("nothing:here", "song:device:1").forEach { id ->
+    fun aSongAStationOrAnUnknownIdCannotBeKept() {
+        listOf("nothing:here", "song:device:1", "station:a:B").forEach { id ->
             assertNotEquals(id, LibraryResult.RESULT_SUCCESS, ask { subscribe(id, null) }.resultCode)
         }
     }

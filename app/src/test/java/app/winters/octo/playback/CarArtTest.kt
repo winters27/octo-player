@@ -21,9 +21,9 @@ class CarArtTest {
     private fun cover() = IntArray(side * side) { gray }
 
     // Where the mark's disc sits, worked out as the mark does.
-    private fun disc(round: Boolean): Triple<Float, Float, Float> {
-        val mark = side * 0.125f
-        val margin = maxOf(side * 0.04f, 3f)
+    private fun disc(round: Boolean, side: Int = this.side): Triple<Float, Float, Float> {
+        val mark = side * MARK_SHARE
+        val margin = maxOf(side * MARK_MARGIN, 3f)
         val inset = if (round) {
             val radius = side / 2f
             radius - (radius - margin - mark / 2) / kotlin.math.sqrt(2f) - mark / 2
@@ -59,6 +59,33 @@ class CarArtTest {
     @Test
     fun aRoundPictureHasItsMarkFurtherIn() {
         assertTrue(disc(round = true).first < disc(round = false).first)
+    }
+
+    @Test
+    fun theMarkStillShowsItsPlusOnceACarShrinksTheCoverToARow() {
+        // A car is sent 512 px and shows a row's cover at 56 px.
+        val big = 512
+        val row = 56
+        val pixels = IntArray(big * big) { gray }
+        drawOutsideMark(pixels, big, big, round = false)
+        val shrunk = shrink(pixels, big, row)
+        val (cx, cy, r) = disc(round = false, side = big)
+        val scale = row.toFloat() / big
+        val middle = shrunk[(cy * scale).toInt() * row + (cx * scale).toInt()] and 0xFF
+        val film = shrunk[((cy + r * 0.6f) * scale).toInt() * row + ((cx + r * 0.6f) * scale).toInt()] and 0xFF
+        assertTrue("disc only ${2 * r * scale} px across", 2 * r * scale >= 10f)
+        assertTrue("plus $middle over film $film", middle - film >= 0x40)
+    }
+
+    // The blue channel of `pixels` (`from` square) averaged down to `to` square.
+    private fun shrink(pixels: IntArray, from: Int, to: Int): IntArray = IntArray(to * to) { i ->
+        val x0 = (i % to) * from / to
+        val y0 = (i / to) * from / to
+        val x1 = ((i % to) + 1) * from / to
+        val y1 = ((i / to) + 1) * from / to
+        var sum = 0
+        for (y in y0 until y1) for (x in x0 until x1) sum += pixels[y * from + x] and 0xFF
+        sum / ((x1 - x0) * (y1 - y0))
     }
 
     @Test

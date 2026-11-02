@@ -18,9 +18,10 @@ const val INLINE_REF_MAX = 200
 // ones least recently handed out go first.
 const val CAR_REFS_KEPT = 4_000
 
-// How a cover address is marked: `o` for the "Not in your library" mark, `h`
-// for a handle in place of the reference.
-const val MARK_FLAG = 'o'
+// How a cover address is marked: `m` for the "Not in your library" mark, `h`
+// for a handle in place of the reference. A car keeps pictures by address, so
+// the mark's letter changes whenever the mark is drawn anew.
+const val MARK_FLAG = 'm'
 const val HANDLE_FLAG = 'h'
 
 // Long cover references by their handles (the SHA-1 of the reference), in
@@ -95,11 +96,13 @@ fun writeWhole(file: File, bytes: ByteArray) {
 }
 
 // The phone's "Not in your library" mark, drawn into a cover's pixels
-// (ARGB, row by row): a small disc in the bottom right, an eighth of the
-// cover's side, under a dark film with a faint light edge, holding a thin
-// white plus at 68% of the disc. On a round picture (an artist's) it sits
-// along the diagonal, far enough in that the whole disc stays inside the
-// circle, as notInLibraryMarkInset places it.
+// (ARGB, row by row): a small disc in the bottom right, a fifth of the
+// cover's side, under a dark film with a faint light edge, holding a white
+// plus at 68% of the disc. A car shows covers far smaller than it is sent
+// them, so the mark is about the phone's smallest (12 dp on a 56 dp row)
+// and its plus thick enough to last the shrinking. On a round picture
+// (an artist's) it sits along the diagonal, far enough in that the whole
+// disc stays inside the circle, as notInLibraryMarkInset places it.
 fun drawOutsideMark(pixels: IntArray, width: Int, height: Int, round: Boolean) {
     val side = min(width, height).toFloat()
     val mark = side * MARK_SHARE
@@ -164,13 +167,14 @@ private fun blend(under: Int, over: Int, alpha: Float): Int {
 }
 
 // The mark's measures, as shares of the cover's side or of the mark. The
-// plus is the phone's (Phosphor's light plus: arms 176 of 256, stroke 12 of
-// 256) drawn at 68% of the disc.
-private const val MARK_SHARE = 0.125f
-private const val MARK_MARGIN = 0.04f
+// plus has the phone's arms (Phosphor's plus: 176 of 256) at 68% of the
+// disc, with a stroke of an eighth of the disc, which keeps over a pixel
+// once a 512 px cover shows at 56 px.
+internal const val MARK_SHARE = 0.2f
+internal const val MARK_MARGIN = 0.04f
 private const val EDGE_SHARE = 0.04f
 private const val PLUS_SPAN = 0.68f * 176f / 256f
-private const val PLUS_STROKE = 0.68f * 12f / 256f
+private const val PLUS_STROKE = 0.125f
 private const val FILM_ALPHA = 0.42f
 private const val EDGE_ALPHA = 0.22f
 private const val PLUS_ALPHA = 0.9f

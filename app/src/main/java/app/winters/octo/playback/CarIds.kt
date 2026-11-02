@@ -170,10 +170,10 @@ fun parseCarId(id: String): CarNode? = when {
     else -> null
 }
 
-// Whether the car can open it as a list.
+// Whether the car can open it as a list. One of Octo's stations only plays.
 val CarNode.isBrowsable: Boolean
     get() = when (this) {
-        is CarNode.Song, CarNode.Resume, is CarNode.Live, is CarNode.Near -> false
+        is CarNode.Song, CarNode.Resume, is CarNode.Live, is CarNode.Near, is CarNode.Station -> false
         else -> true
     }
 

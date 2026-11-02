@@ -92,9 +92,13 @@ class CarIdsTest {
     }
 
     @Test
-    fun onlyListsOpen() {
-        assertTrue(CarNode.Station("or1", "x").isBrowsable)
+    fun onlyListsOpenAndAStationOnlyPlays() {
+        assertFalse(CarNode.Station("or1", "x").isBrowsable)
+        assertTrue(CarNode.OctoList("og1", "x").isBrowsable)
         assertTrue(CarNode.Shelf("pinned").isBrowsable)
+        roundTrip(CarNode.Shelf(NEAR_SHELF))
+        assertTrue(CarNode.Shelf(NEAR_SHELF).isBrowsable)
+        assertTrue(CarInput.Kept in carInputsOf(CarNode.Shelf(NEAR_SHELF)) && CarInput.Shelves in carInputsOf(CarNode.Shelf(NEAR_SHELF)))
         assertTrue(CarNode.Part(0, CarNode.Songs).isBrowsable)
         assertFalse(CarNode.Song("device:1", null).isBrowsable)
         assertFalse(CarNode.Resume.isBrowsable)

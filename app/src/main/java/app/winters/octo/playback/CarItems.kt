@@ -48,6 +48,8 @@ const val CAR_LIKED = "Liked songs"
 const val CAR_FAVORITE_ALBUMS = "Favorite albums"
 const val CAR_FAVORITE_ARTISTS = "Favorite artists"
 fun carResumeLine(device: String): String = "Pick up where you left off on $device"
+fun albumCountLine(count: Int): String = if (count == 1) "1 album" else "$count albums"
+fun artistCountLine(count: Int): String = if (count == 1) "1 artist" else "$count artists"
 
 // A song's actions in a car that shows them: Start radio and Play next.
 const val START_RADIO_ACTION = "app.winters.octo.START_RADIO"
@@ -81,8 +83,16 @@ class CarLook(private val context: Context, private val coverStyle: () -> Playli
         else -> null
     }
 
-    // A place to open: a tab, a row of the Library, "See all". `children`
-    // and `playable` set how what it holds shows.
+    // A cover, or `glyph`'s tile when there is none: what can show as a tile
+    // always has a picture, as a tile with none shows the car's broken-picture
+    // sign.
+    fun coverOr(ref: String?, glyph: CarGlyph): Uri = cover(ref) ?: glyph(glyph)
+
+    fun glyph(glyph: CarGlyph): Uri = ArtworkProvider.carGlyphUri(glyph)
+
+    // A place to open: a tab, a row of the Library, "See all". `browsable`
+    // and `playable` set how what it holds shows; `art` is its picture, or
+    // else `icon`.
     fun folder(
         node: CarNode,
         title: String,
@@ -90,26 +100,30 @@ class CarLook(private val context: Context, private val coverStyle: () -> Playli
         subtitle: String? = null,
         browsable: CarStyle? = null,
         playable: CarStyle? = null,
+        art: Uri? = null,
     ): MediaItem = item(
         node,
         MediaMetadata.Builder()
             .setTitle(carText(title))
             .setSubtitle(carText(subtitle))
-            .setArtworkUri(icon?.let(::icon))
+            .setArtworkUri(art ?: icon?.let(::icon))
             .setIsBrowsable(true)
             .setIsPlayable(false)
             .setExtras(styles(browsable, playable)),
     )
 
+    // An album opens to its songs; a song chosen there plays the album from
+    // it. A car plays anything it can also open on a tap, so an album only
+    // opens.
     fun album(album: AlbumEntity): MediaItem = item(
         CarNode.Album(album.id),
         MediaMetadata.Builder()
             .setTitle(carText(album.title))
             .setArtist(carText(album.artist))
             .setSubtitle(carText(album.artist))
-            .setArtworkUri(cover(album.artwork))
+            .setArtworkUri(coverOr(album.artwork, CarGlyph.Album))
             .setIsBrowsable(true)
-            .setIsPlayable(true)
+            .setIsPlayable(false)
             .setMediaType(MediaMetadata.MEDIA_TYPE_ALBUM),
     )
 
@@ -123,7 +137,7 @@ class CarLook(private val context: Context, private val coverStyle: () -> Playli
             .setSubtitle(carText(albumShareLine(album.ownedCount, album.songCount) ?: album.artist))
             .setArtworkUri(cover(album.artwork, outside = true))
             .setIsBrowsable(true)
-            .setIsPlayable(true)
+            .setIsPlayable(false)
             .setMediaType(MediaMetadata.MEDIA_TYPE_ALBUM),
     )
 
@@ -132,7 +146,7 @@ class CarLook(private val context: Context, private val coverStyle: () -> Playli
         CarNode.Artist(artist.id),
         MediaMetadata.Builder()
             .setTitle(carText(artist.name))
-            .setArtworkUri(cover(artist.artwork))
+            .setArtworkUri(coverOr(artist.artwork, CarGlyph.Artist))
             .setIsBrowsable(true)
             .setIsPlayable(false)
             .setMediaType(MediaMetadata.MEDIA_TYPE_ARTIST)
@@ -202,21 +216,39 @@ class CarLook(private val context: Context, private val coverStyle: () -> Playli
         cover(PlaylistArtRef(coverStyle(), list.id, list.name, LIVE_LIST_COVER_LINE, null, null, covers).encode()),
     )
 
-    // One of Octo's stations, which keeps going, or a list Octo made, which
-    // ends: both open to their songs and play from a tap.
+    // One of Octo's stations, which keeps going and plays from a tap, or a
+    // list Octo made, which ends and opens to its songs.
     fun station(station: Station): MediaItem {
-        val node = if (station.isRadio) CarNode.Station(station.id, station.name) else CarNode.OctoList(station.id, station.name)
+        if (station.isRadio) return radio(CarNode.Station(station.id, station.name), station.songCount, station.artwork)
         return item(
-            node,
+            CarNode.OctoList(station.id, station.name),
             MediaMetadata.Builder()
                 .setTitle(carText(station.name))
                 .setSubtitle(carText(station.songCount?.let(::songCountLine)))
-                .setArtworkUri(cover(station.artwork))
+                .setArtworkUri(coverOr(station.artwork, CarGlyph.Playlist))
                 .setIsBrowsable(true)
-                .setIsPlayable(true)
-                .setMediaType(if (station.isRadio) MediaMetadata.MEDIA_TYPE_RADIO_STATION else MediaMetadata.MEDIA_TYPE_PLAYLIST),
+                .setIsPlayable(false)
+                .setMediaType(MediaMetadata.MEDIA_TYPE_PLAYLIST),
         )
     }
+
+    // One of the server's lists or stations on Home. A station, which only
+    // plays, shows as a tile among the covers, as Home's lists do.
+    fun homeStation(station: Station): MediaItem = station(station).let { if (station.isRadio) shownAs(it, CarStyle.Grid) else it }
+
+    // One of Octo's stations: it plays from a tap, in every car, so it is
+    // never one to open. A car looking one up by id gets it without its
+    // count and cover.
+    fun radio(node: CarNode.Station, songCount: Int? = null, artwork: String? = null): MediaItem = item(
+        node,
+        MediaMetadata.Builder()
+            .setTitle(carText(node.name))
+            .setSubtitle(carText(songCount?.let(::songCountLine)))
+            .setArtworkUri(coverOr(artwork, CarGlyph.Radio))
+            .setIsBrowsable(false)
+            .setIsPlayable(true)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION),
+    )
 
     // A station on the Live radio shelf: it plays the shelf from itself.
     fun live(entry: LiveShelfEntry, sourceId: String?): MediaItem {
@@ -244,24 +276,36 @@ class CarLook(private val context: Context, private val coverStyle: () -> Playli
             .setExtras(styles(CarStyle.Grid, CarStyle.List)),
     )
 
-    // "See all" at the end of a shelf or a search's kind: a tile among
-    // covers, a row among rows.
-    fun seeAll(node: CarNode, amongRows: Boolean): MediaItem = item(
+    // "See all" at the end of a shelf or a search's kind: always a row, after
+    // tiles or rows alike, on a quiet tile of its own (the car draws the
+    // row's chevron). It opens what it names in the styles that list shows in.
+    fun seeAll(node: CarNode, browsable: CarStyle? = null, playable: CarStyle? = null): MediaItem = item(
         node,
         MediaMetadata.Builder()
             .setTitle(CAR_SEE_ALL)
-            .setArtworkUri(icon(OctoIcons.Chevron))
+            .setArtworkUri(glyph(CarGlyph.More))
             .setIsBrowsable(true)
             .setIsPlayable(false)
-            .setExtras(single(if (amongRows) CarStyle.List else CarStyle.Grid)),
+            .setExtras((styles(browsable, playable) ?: Bundle()).apply { putInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM, CarStyle.List.value) }),
     )
 
-    // A part of a long list: where it runs, and what it starts with.
-    fun part(node: CarNode.Part, range: IntRange, firstTitle: String?): MediaItem =
-        folder(node, partTitle(range), subtitle = firstTitle)
+    // A part of a long list: where it runs, and what it starts with, opening
+    // its items as the list shows them.
+    fun part(node: CarNode.Part, range: IntRange, firstTitle: String?, browsable: CarStyle?, covers: List<String>): MediaItem {
+        val title = partTitle(range)
+        return folder(node, title, subtitle = firstTitle, browsable = browsable, art = splitArt(node, title, covers))
+    }
 
-    // One of the phone's headings of a long list sorted by name.
-    fun heading(node: CarNode.Heading, browsable: CarStyle?): MediaItem = folder(node, node.heading, browsable = browsable)
+    // One of the phone's headings of a long list sorted by name, saying how
+    // many it holds.
+    fun heading(node: CarNode.Heading, browsable: CarStyle?, covers: List<String>, count: String?): MediaItem =
+        folder(node, node.heading, subtitle = count, browsable = browsable, art = splitArt(node, node.heading, covers))
+
+    // A letter's or a part's picture: the designed cover with its title
+    // written on it, on colors from its covers, so it never passes for one
+    // album's.
+    private fun splitArt(node: CarNode, title: String, covers: List<String>): Uri? =
+        cover(PlaylistArtRef(PlaylistCoverStyle.Designed, carId(node), title, null, null, null, covers.take(SPLIT_COVERS)).encode())
 
     // The other device's queue, to carry on from in the car. Like an album
     // beyond the library, it sets no artist, so the subtitle shows.
@@ -300,14 +344,15 @@ class CarLook(private val context: Context, private val coverStyle: () -> Playli
             .setExtras(single(CarStyle.Grid)),
     )
 
+    // A list opens to its songs, as an album does.
     private fun list(node: CarNode, title: String, subtitle: String?, cover: Uri?): MediaItem = item(
         node,
         MediaMetadata.Builder()
             .setTitle(carText(title))
             .setSubtitle(carText(subtitle))
-            .setArtworkUri(cover)
+            .setArtworkUri(cover ?: glyph(CarGlyph.Playlist))
             .setIsBrowsable(true)
-            .setIsPlayable(true)
+            .setIsPlayable(false)
             .setMediaType(MediaMetadata.MEDIA_TYPE_PLAYLIST),
     )
 
