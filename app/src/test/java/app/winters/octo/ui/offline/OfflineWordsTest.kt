@@ -43,6 +43,15 @@ class OfflineWordsTest {
     }
 
     @Test
+    fun anAlbumWithSongsOutsideTheLibraryCountsWhatItSaves() {
+        assertEquals("Download 1 song to this phone", albumDownloadLabel(songs = 1, held = 0, done = 0, outside = 29))
+        assertEquals("Download 3 songs to this phone", albumDownloadLabel(songs = 3, held = 1, done = 1, outside = 9))
+        assertEquals("Downloading", albumDownloadLabel(songs = 3, held = 3, done = 1, outside = 9))
+        assertEquals("1 song downloaded", albumDownloadLabel(songs = 1, held = 1, done = 1, outside = 29))
+        assertEquals("3 songs downloaded", albumDownloadLabel(songs = 3, held = 3, done = 3, outside = 9))
+    }
+
+    @Test
     fun aKeptListSaysHowFarItHasGot() {
         assertEquals("3 of 12 downloaded", keptSummary(serverOnly = 12, done = 3))
         assertEquals("All 12 downloaded", keptSummary(serverOnly = 12, done = 12))

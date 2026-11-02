@@ -230,10 +230,12 @@ struct AlbumView: View {
         if !serverOnly.isEmpty {
             let held = serverOnly.filter { state.kept($0.id) != nil }.count
             let done = serverOnly.filter { state.kept($0.id)?.status == .done }.count
+            // The page's songs outside the library, as its library note counts them.
+            let outside = finds.isEmpty ? 0 : max(0, (whole ?? tracks).count - tracks.count)
             Button {
                 state.offline.download(serverOnly.map(\.id))
             } label: {
-                Label(albumDownloadLabel(songs: serverOnly.count, held: held, done: done),
+                Label(albumDownloadLabel(songs: serverOnly.count, held: held, done: done, outside: outside),
                       systemImage: (held < serverOnly.count ? OctoIcon.download : (done < serverOnly.count ? .downloading : .downloaded)).symbol)
             }
             .disabled(held >= serverOnly.count)

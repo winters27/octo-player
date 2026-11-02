@@ -23,24 +23,37 @@ class AlbumDownloadViewModel @Inject constructor(private val offline: OfflineDow
 }
 
 // What the album's download button says: what is left to do, if anything.
-fun albumDownloadLabel(songs: Int, held: Int, done: Int): String = when {
-    held < songs -> "Download album"
+// On a page that also lists songs outside the library (`outside`), it
+// counts the songs it saves, so it never says the whole album is on the
+// phone.
+fun albumDownloadLabel(songs: Int, held: Int, done: Int, outside: Int = 0): String = when {
+    outside <= 0 && held < songs -> "Download album"
+    outside <= 0 && done < songs -> "Downloading"
+    outside <= 0 -> "Downloaded"
+    held < songs -> "Download ${songCount(songs)} to this phone"
     done < songs -> "Downloading"
-    else -> "Downloaded"
+    else -> "${songCount(songs)} downloaded"
 }
+
+private fun songCount(songs: Int): String = if (songs == 1) "1 song" else "$songs songs"
 
 // "Download album" in an album's More menu, for an album with songs only
 // on a server: each such song is downloaded to the phone. Nothing when
-// every song is already on it.
+// every song is already on it. `outside`: the page's songs outside the
+// library, as the page's library note counts them.
 @Composable
-fun albumDownloadItem(tracks: List<TrackEntity>, vm: AlbumDownloadViewModel = hiltViewModel()): MoreItem? {
+fun albumDownloadItem(
+    tracks: List<TrackEntity>,
+    outside: Int = 0,
+    vm: AlbumDownloadViewModel = hiltViewModel(),
+): MoreItem? {
     val kept by vm.kept.collectAsStateWithLifecycle()
     val serverOnly = tracks.filter { !it.onPhone }
     if (serverOnly.isEmpty()) return null
     val held = serverOnly.count { it.id in kept }
     val done = serverOnly.count { kept[it.id]?.state == DownloadStatus.Done }
     return MoreItem(
-        albumDownloadLabel(serverOnly.size, held, done),
+        albumDownloadLabel(serverOnly.size, held, done, outside),
         when {
             held < serverOnly.size -> OctoIcons.Download
             done < serverOnly.size -> OctoIcons.Downloading
