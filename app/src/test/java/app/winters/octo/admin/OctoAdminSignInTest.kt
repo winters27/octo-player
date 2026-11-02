@@ -24,6 +24,32 @@ class OctoAdminSignInTest {
     }
 
     @Test
+    fun aDownloadsCoverComesFromOctoSigned() {
+        val base = "http://192.168.50.21:5274/".toHttpUrl()
+        val sign = { url: okhttp3.HttpUrl -> url.newBuilder().addQueryParameter("u", "me").build() }
+        val record = DownloadRecord(
+            title = "Glass",
+            coverArtUrl = "https://cdn-images.dzcdn.net/images/cover/x/1000x1000.jpg",
+            cover = "/api/admin/downloads/cover?at=2026-10-30T01%3A30%3A00.9766532Z",
+        )
+        assertEquals(
+            "http://192.168.50.21:5274/api/admin/downloads/cover?at=2026-10-30T01%3A30%3A00.9766532Z&u=me",
+            withServedCover(record, base, sign).coverArtUrl,
+        )
+    }
+
+    @Test
+    fun anOlderServerOrAnotherHostKeepsTheSavedCover() {
+        val base = "http://192.168.50.21:5274/".toHttpUrl()
+        val sign = { url: okhttp3.HttpUrl -> url.newBuilder().addQueryParameter("u", "me").build() }
+        val saved = "https://cdn-images.dzcdn.net/images/cover/x/1000x1000.jpg"
+        for (cover in listOf(null, "https://elsewhere.example/c.jpg", "//elsewhere.example/c.jpg")) {
+            val record = DownloadRecord(title = "Glass", coverArtUrl = saved, cover = cover)
+            assertEquals(cover.toString(), saved, withServedCover(record, base, sign).coverArtUrl)
+        }
+    }
+
+    @Test
     fun theFullPagesOpenAtTheCardNamed() {
         val base = "http://192.168.50.21:5274/".toHttpUrl()
         assertEquals("http://192.168.50.21:5274/admin/#spotiflac", adminPageUrl(base, "spotiflac").toString())
