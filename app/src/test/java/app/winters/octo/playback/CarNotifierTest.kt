@@ -31,13 +31,15 @@ class CarNotifierTest {
         notifier.changed(CarInput.Library)
         notifier.changed(CarInput.Sorts)
         assertEquals(listOf(albums), told)
-        assertFalse(notifier.readStarted(albums))
-        notifier.readEnded(albums)
+        val first = notifier.readStarted(albums)
+        assertFalse(first.ownAccord)
+        notifier.readEnded(first)
         assertEquals(listOf(albums, albums), told)
-        assertFalse(notifier.readStarted(albums))
-        notifier.readEnded(albums)
+        val second = notifier.readStarted(albums)
+        assertFalse(second.ownAccord)
+        notifier.readEnded(second)
         assertEquals(2, told.size)
-        assertTrue(notifier.readStarted(albums))
+        assertTrue(notifier.readStarted(albums).ownAccord)
     }
 
     @Test
@@ -45,9 +47,9 @@ class CarNotifierTest {
         notifier.opened(albums)
         notifier.changed(CarInput.Library)
         notifier.changed(CarInput.Library)
-        notifier.readStarted(albums)
+        val read = notifier.readStarted(albums)
         // The read ended in an error: readEnded runs in its finally.
-        notifier.readEnded(albums)
+        notifier.readEnded(read)
         assertEquals(2, told.size)
     }
 
@@ -87,9 +89,34 @@ class CarNotifierTest {
     @Test
     fun aReadOfItsOwnAccordIsKnown() {
         notifier.opened(home)
-        assertTrue(notifier.readStarted(home))
-        notifier.readEnded(home)
+        val read = notifier.readStarted(home)
+        assertTrue(read.ownAccord)
+        notifier.readEnded(read)
         notifier.changed(CarInput.Pins)
-        assertFalse(notifier.readStarted(home))
+        assertFalse(notifier.readStarted(home).ownAccord)
+    }
+
+    @Test
+    fun aTellDuringTheCarsOwnReadStillMakesTheNextReadOneItWasTold() {
+        notifier.opened(home)
+        val own = notifier.readStarted(home)
+        assertTrue(own.ownAccord)
+        notifier.changed(CarInput.Pins)
+        notifier.readEnded(own)
+        // The read the tell brings comes after the car's own read ended.
+        val brought = notifier.readStarted(home)
+        assertFalse(brought.ownAccord)
+        notifier.readEnded(brought)
+        assertEquals(listOf(home), told)
+        assertTrue(notifier.readStarted(home).ownAccord)
+    }
+
+    @Test
+    fun everythingChangingTellsEachOpenListOnce() {
+        notifier.opened(home)
+        notifier.opened(radio)
+        notifier.opened(albums)
+        notifier.changedAll()
+        assertEquals(listOf(home, radio, albums), told)
     }
 }

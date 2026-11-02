@@ -47,16 +47,17 @@ class CarPlays(
     private val signedIn: () -> Boolean,
     private val gone: (String) -> Unit,
 ) {
-    // Null for an id that is not a car's (the app's own requests), or for a
-    // place that does not play.
+    // Null only for an id that is not a car's (the app's own requests). A
+    // car's choice that holds nothing to play (a place that does not play,
+    // a list gone or empty) is refused, so the queue stays as it is.
     suspend fun playFor(id: String): CarPlayAnswer? {
         val node = parseCarId(id) ?: return null
         if (node is CarNode.Song) return song(node)
         return when (val got = load(node, fresh = true)) {
             is Got.Refused -> CarPlayAnswer.Refused(got.words)
-            Got.Nothing -> null
+            Got.Nothing -> CarPlayAnswer.Refused(emptyWords(node) ?: CAR_NOTHING_TO_PLAY)
             is Got.Songs -> if (got.list.ids.isEmpty()) {
-                emptyWords(node)?.let { CarPlayAnswer.Refused(it) }
+                CarPlayAnswer.Refused(emptyWords(node) ?: CAR_NOTHING_TO_PLAY)
             } else {
                 CarPlayAnswer.Play(CarPlay(got.list.ids, got.list.start.coerceIn(got.list.ids.indices), got.list.source, got.list.network, got.list.positionMs))
             }

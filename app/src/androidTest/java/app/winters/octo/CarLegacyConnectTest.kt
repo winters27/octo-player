@@ -50,7 +50,7 @@ class CarLegacyConnectTest {
 
     @Test
     fun connectsAndListsTheTabs() {
-        assertEquals(listOf("Home", "Radio", "Playlists", "Library"), titlesOf(browser.root))
+        assertEquals(listOf("Home", "Radio", "Playlists", "Library"), titlesOf(root()))
     }
 
     @Test
@@ -73,8 +73,15 @@ class CarLegacyConnectTest {
         assertNull(lookUp("nothing:here"))
     }
 
+    // The browser's root, read once it has connected: the first test of a
+    // run waits for the service to start.
+    private fun root(): String {
+        assertTrue("never connected", connected.await(10, TimeUnit.SECONDS))
+        return browser.root
+    }
+
     private fun titlesOf(parentId: String): List<String> {
-        assertTrue("never connected", connected.await(5, TimeUnit.SECONDS))
+        assertTrue("never connected", connected.await(10, TimeUnit.SECONDS))
         val loaded = CountDownLatch(1)
         val children = AtomicReference<List<MediaBrowser.MediaItem>>()
         instrumentation.runOnMainSync {
@@ -94,7 +101,7 @@ class CarLegacyConnectTest {
 
     // The item a car gets for an id, or null when the service says there is none.
     private fun lookUp(id: String): MediaBrowser.MediaItem? {
-        assertTrue("never connected", connected.await(5, TimeUnit.SECONDS))
+        assertTrue("never connected", connected.await(10, TimeUnit.SECONDS))
         val loaded = CountDownLatch(1)
         val found = AtomicReference<MediaBrowser.MediaItem?>()
         instrumentation.runOnMainSync {

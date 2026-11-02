@@ -3,6 +3,8 @@ package app.winters.octo.playback
 import androidx.media3.common.MediaItem
 import app.winters.octo.home.HomeSection
 import app.winters.octo.home.HomeSectionEntry
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 // How many of a shelf's items Home shows in a car before "See all", from the
 // most down to the fewest it tries before showing each shelf as one row.
@@ -15,6 +17,27 @@ data class CarShelf(val section: HomeSection, val items: List<MediaItem>)
 // listener shows, in their order, leaving out any that are empty. With no
 // songs in the library, only the chart (even when hidden, as the phone
 // shows it under its empty card) and Live radio (when shown).
+// What `pick` chose, kept until `key` changes, so a car's Home does not
+// reshuffle while it shows.
+class CarPicks<T>(private val pick: suspend () -> T) {
+    private val lock = Mutex()
+    private var kept: Pair<Any?, T>? = null
+
+    suspend fun forKey(key: Any?): T = lock.withLock {
+        kept?.takeIf { it.first == key }?.second ?: pick().also { kept = key to it }
+    }
+}
+
+// The shelves Home can show, so only those are filled: the listener's shown
+// shelves, or with an empty library the charts and Live radio unless hidden.
+fun carHomeWanted(order: List<HomeSectionEntry>, libraryEmpty: Boolean): Set<HomeSection> {
+    if (libraryEmpty) {
+        val live = order.firstOrNull { it.section == HomeSection.InternetRadio }?.shown != false
+        return setOfNotNull(HomeSection.Charts, HomeSection.InternetRadio.takeIf { live })
+    }
+    return order.filter { it.shown }.mapTo(LinkedHashSet()) { it.section }
+}
+
 fun carHomeShelves(order: List<HomeSectionEntry>, shelves: Map<HomeSection, List<MediaItem>>, libraryEmpty: Boolean): List<CarShelf> {
     fun of(section: HomeSection) = shelves[section]?.takeIf { it.isNotEmpty() }?.let { CarShelf(section, it) }
     if (libraryEmpty) {

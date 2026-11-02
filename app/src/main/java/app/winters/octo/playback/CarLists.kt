@@ -47,8 +47,13 @@ class CarLists internal constructor(
     private val asking = HashMap<Key, Deferred<Result<Any>>>()
 
     // For a part fetched behind a list: the answer the list was last built
-    // with, to tell whether a new one changes it.
-    private val built = HashMap<Key, Any>()
+    // with, to tell whether a new one changes it. As many as answers kept.
+    private val built = object : LinkedHashMap<Key, Any>(KEPT, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Any>?): Boolean = size > KEPT
+    }
+
+    // How many lists' built answers are held, for tests.
+    internal suspend fun builtCount(): Int = lock.withLock { built.size }
 
     private fun keyOf(node: CarNode) = Key(account() ?: NO_ACCOUNT, node)
 

@@ -6,6 +6,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaConstants
+import app.winters.octo.ui.common.indexLetter
 import java.text.BreakIterator
 
 // How much one answer to a car may take. Media3 cuts an answer at 256 KB of
@@ -76,24 +77,82 @@ fun carParts(sizes: List<Int>, budget: Int = CAR_ANSWER_BUDGET): List<IntRange> 
 // Whether every item of an answer fits in one.
 fun fitsOneAnswer(sizes: List<Int>, budget: Int = CAR_ANSWER_BUDGET): Boolean = sizes.sum() <= budget
 
-// The runs of a list under its headings, in order, as the phone files a list
-// sorted by name (a letter, or "#").
-fun headingRuns(headings: List<String>): List<Pair<String, IntRange>> {
-    if (headings.isEmpty()) return emptyList()
-    val runs = mutableListOf<Pair<String, IntRange>>()
-    var start = 0
-    for (index in 1..headings.size) {
-        if (index == headings.size || headings[index] != headings[start]) {
-            runs += headings[start] to (start until index)
-            start = index
-        }
-    }
-    return runs
-}
-
 // The words of a part's row: where it starts and ends in the list, counting
 // from one.
 fun partTitle(range: IntRange): String = "${range.first + 1} to ${range.last + 1}"
+
+// The letter each item of a list sorted by name files under, as the phone's
+// headings and letter rail file it (a letter, or "#"), from the items' sort
+// keys; null for a list in another order.
+fun carLetters(sortKeys: List<String>?): List<String>? = sortKeys?.map { indexLetter(it).toString() }
+
+// A list a car may open: how many items it holds, the letter each files
+// under when it is sorted by name, how its items show, and each item, built
+// only when an answer needs it.
+class CarListing(
+    val count: Int,
+    val letters: List<String>? = null,
+    val style: CarStyle? = null,
+    private val build: (Int) -> MediaItem,
+) {
+    fun item(index: Int): MediaItem = build(index)
+
+    // The items under `letter`, in list order.
+    fun under(letter: String): List<MediaItem> {
+        val letters = letters ?: return emptyList()
+        return letters.indices.filter { letters[it] == letter }.map(::item)
+    }
+
+    fun all(): List<MediaItem> = List(count, ::item)
+
+    companion object {
+        fun of(items: List<MediaItem>, style: CarStyle? = null) = CarListing(items.size, style = style, build = items::get)
+    }
+}
+
+// How the rows that open a long list's letters and parts look.
+class CarSplitRows(
+    val letter: (CarNode.Heading, CarStyle?) -> MediaItem,
+    val part: (CarNode.Part, IntRange, String?) -> MediaItem,
+)
+
+// The answer for a list a car opened: whole when it fits one answer;
+// otherwise a row for each letter it files under, in list order, when it
+// files under more than one, or a row for each part. Items are built while
+// their sizes are added up, which stops as soon as the list is too big to
+// send whole.
+fun carListAnswer(node: CarNode, list: CarListing, rows: CarSplitRows, budget: Int = CAR_ANSWER_BUDGET): List<MediaItem> {
+    val built = ArrayList<MediaItem>()
+    var used = 0
+    while (built.size < list.count && used <= budget) {
+        val item = list.item(built.size)
+        used += carBytes(item)
+        built += item
+    }
+    if (used <= budget) return built
+    val letters = list.letters?.distinct()
+    if (letters != null && letters.size > 1) return letters.map { rows.letter(CarNode.Heading(it, node), list.style) }
+    while (built.size < list.count) built += list.item(built.size)
+    return carFitOrParts(node, built, rows, budget)
+}
+
+// The items under one letter of a list: whole when they fit one answer,
+// otherwise a row for each part.
+fun carLetterAnswer(node: CarNode.Heading, list: CarListing, rows: CarSplitRows, budget: Int = CAR_ANSWER_BUDGET): List<MediaItem> =
+    carFitOrParts(node, list.under(node.heading), rows, budget)
+
+// `items` whole when they fit one answer, otherwise a row for each part.
+fun carFitOrParts(node: CarNode, items: List<MediaItem>, rows: CarSplitRows, budget: Int = CAR_ANSWER_BUDGET): List<MediaItem> {
+    val sizes = items.map(::carBytes)
+    if (fitsOneAnswer(sizes, budget)) return items
+    return carParts(sizes, budget).mapIndexed { index, range -> rows.part(CarNode.Part(index, node), range, items[range.first].mediaMetadata.title?.toString()) }
+}
+
+// The items of part `index` of `items`, as carFitOrParts cut them.
+fun carPartItems(index: Int, items: List<MediaItem>, budget: Int = CAR_ANSWER_BUDGET): List<MediaItem> {
+    val range = carParts(items.map(::carBytes), budget).getOrNull(index) ?: return emptyList()
+    return items.subList(range.first, range.last + 1)
+}
 
 // The page of an answer a browser asked for. A car asks for none (page 0,
 // as many as there are); a Media3 browser may ask for pages, and gets no

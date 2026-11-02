@@ -7,9 +7,26 @@ import androidx.media3.common.MediaItem
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.winters.octo.catalog.AlbumEntity
+import app.winters.octo.catalog.ArtistEntity
+import app.winters.octo.catalog.PlaylistSummary
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.discovery.Discovered
+import app.winters.octo.discovery.OnlineAlbum
+import app.winters.octo.discovery.OnlineArtist
+import app.winters.octo.discovery.RankedTrack
+import app.winters.octo.discovery.RankedTracks
 import app.winters.octo.discovery.Station
 import app.winters.octo.playback.CAR_ANSWER_BUDGET
+import app.winters.octo.home.HomeSection
+import app.winters.octo.playback.CarHomeParts
+import app.winters.octo.playback.CarSearchAnswer
+import app.winters.octo.playback.CarShelf
+import app.winters.octo.playback.CarStyle
+import app.winters.octo.playback.LibraryFound
+import app.winters.octo.playback.carHomeAnswer
+import app.winters.octo.server.RemoteQueue
+import app.winters.octo.server.ResumeOffer
+import dagger.hilt.android.EntryPointAccessors
 import app.winters.octo.playback.CarLook
 import app.winters.octo.playback.CarNode
 import app.winters.octo.playback.carBytes
@@ -79,6 +96,92 @@ class CarItemSizeTest {
             val estimate = carBytes(item)
             assertTrue("estimate $estimate under $real for ${item.mediaId.take(20)}", estimate >= real)
         }
+    }
+
+    // Home with every shelf full of the longest real items, and the resume
+    // row, fits one answer and Media3 keeps all of it.
+    @Test
+    fun homeOfTheLongestRealItemsFitsOneAnswerAndIsNeverCut() {
+        val ref = "s:server:" + long(199)
+        val album = AlbumEntity(
+            id = "server:x:album:" + long(120), sourceId = "", nativeId = "", title = long(400), searchKey = "", sortKey = "",
+            artist = long(400), artistId = "", year = 1, songCount = 1, durationMs = 1, addedAt = 0, artwork = "station-art:" + long(900),
+        )
+        val track = TrackEntity(
+            id = "find:" + long(120), sourceId = "server:x", nativeId = long(120), title = long(400), searchKey = "", sortKey = "",
+            artist = long(400), artistId = "", album = long(400), albumId = "", trackNo = 1, discNo = 1, year = 2020, durationMs = 1,
+            addedAt = 0, mimeType = null, sizeBytes = null, artwork = ref, uri = null, explicit = true,
+        )
+        val artist = ArtistEntity("server:x:artist:" + long(120), "server:x", long(400), "", "", 1, 1, ref)
+        val station = Station("or" + long(120), long(400), ref, songCount = 99)
+        fun itemsFor(section: HomeSection): List<MediaItem> = List(20) {
+            when (section) {
+                HomeSection.MostPlayed, HomeSection.Charts -> look.song(track, CarNode.MostPlayed, outside = true, downloaded = true)
+                HomeSection.MadeForYou, HomeSection.Stations, HomeSection.YearMixes, HomeSection.GenreMixes,
+                HomeSection.ArtistMixes, HomeSection.CountryMixes, HomeSection.InternetRadio,
+                -> look.station(station)
+                HomeSection.Artists -> look.artist(artist)
+                else -> look.album(album)
+            }
+        }
+        val parts = CarHomeParts(
+            grouped = look::grouped,
+            seeAll = { shelf -> look.seeAll(CarNode.Shelf(shelf.section.id), amongRows = shelf.section == HomeSection.MostPlayed) },
+            row = { shelf -> look.folder(CarNode.Shelf(shelf.section.id), shelf.section.title, browsable = CarStyle.Grid) },
+        )
+        val resume = look.resume(ResumeOffer(long(400), long(400), long(400), RemoteQueue(emptyList(), 0, 0, 1, null)))
+        val answer = carHomeAnswer(resume, HomeSection.entries.map { CarShelf(it, itemsFor(it)) }, parts)
+        assertEquals(resume.mediaId, answer.first().mediaId)
+        assertTrue(answer.sumOf(::carBytes) <= CAR_ANSWER_BUDGET)
+        val truncate = Class.forName("androidx.media3.session.MediaUtils")
+            .getDeclaredMethod("truncateListBySize", List::class.java, Int::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        val sent = answer.map { convert.invoke(null, it, null) as Parcelable }
+        assertEquals(sent.size, (truncate.invoke(null, sent, 256 * 1024) as List<*>).size)
+    }
+
+    // A search has no parts: its answer at its biggest, every kind full and
+    // every item at its longest, fits one answer and Media3 keeps all of it.
+    @Test
+    fun theBiggestSearchAnswerFitsOneAnswerAndIsNeverCut() {
+        val car = EntryPointAccessors.fromApplication(context.applicationContext, CarTestEntry::class.java).car()
+        val ref = "s:server:" + long(199)
+        fun song(id: String) = TrackEntity(
+            id = id + long(120), sourceId = "server:x", nativeId = long(120), title = long(400), searchKey = "", sortKey = "",
+            artist = long(400), artistId = "", album = long(400), albumId = "", trackNo = 1, discNo = 1, year = 2020, durationMs = 1,
+            addedAt = 0, mimeType = null, sizeBytes = null, artwork = ref, uri = null, explicit = true,
+        )
+        fun album(n: Int) = AlbumEntity(
+            id = "server:x:album:$n" + long(120), sourceId = "", nativeId = "", title = long(400), searchKey = "", sortKey = "",
+            artist = long(400), artistId = "", year = 1, songCount = 1, durationMs = 1, addedAt = 0, artwork = "station-art:" + long(900),
+        )
+        fun outsideAlbum(n: Int) = OnlineAlbum("ext$n" + long(120), long(400), long(400), null, 2020, 12, "station-art:" + long(900), ownedCount = 3)
+        val answer = CarSearchAnswer(
+            token = "t0k3n",
+            query = long(400),
+            account = "a1",
+            library = LibraryFound(
+                artists = List(10) { ArtistEntity("server:x:artist:$it" + long(120), "server:x", long(400), "", "", 1, 1, ref) },
+                albums = List(20, ::album),
+                songs = List(50) { song("server:x:track:$it") },
+                playlists = List(10) { PlaylistSummary("pl$it" + long(120), long(400), 99, 1, listOf(ref), family = true) },
+            ),
+            outside = Discovered(
+                songs = List(50) { song("find:$it") },
+                albums = List(20) { outsideAlbum(it) },
+                artists = List(10) { OnlineArtist("ext-r$it" + long(120), long(400), 1, ref) },
+                partAlbums = List(10) { outsideAlbum(100 + it) },
+            ),
+            outsideFailed = false,
+            top = RankedTracks(long(400), "lastfm", List(20) { RankedTrack(it + 1, song("find:top$it"), 1) }),
+        )
+        val items = car.searchItems(answer)
+        assertTrue(items.sumOf(::carBytes) <= CAR_ANSWER_BUDGET)
+        val truncate = Class.forName("androidx.media3.session.MediaUtils")
+            .getDeclaredMethod("truncateListBySize", List::class.java, Int::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        val sent = items.map { convert.invoke(null, it, null) as Parcelable }
+        assertEquals(sent.size, (truncate.invoke(null, sent, 256 * 1024) as List<*>).size)
     }
 
     @Test

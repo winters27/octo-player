@@ -40,12 +40,15 @@ class ArtworkProvider : ContentProvider() {
         val dir = File(ctx.cacheDir, "car-art-$ART_SIZE").apply { mkdirs() }
         val file = File(dir, asked.fileName)
         if (file.exists()) return file
-        val loaded = artworkBitmap(ctx, asked.ref, ART_SIZE)
+        val noCover = asked.ref == NO_COVER
+        val loaded = if (noCover) null else loadCover(ctx, asked.ref, ART_SIZE)
         val bitmap = when {
             loaded != null && asked.marked -> marked(shrink(loaded), asked.round)
             loaded != null -> shrink(loaded)
-            // A cover with the mark and no picture is the phone's plain tile.
-            asked.marked -> marked(plainTile(), asked.round)
+            // The mark for something with no cover sits on the phone's plain
+            // tile. A cover that could not be loaded is not kept, so the next
+            // ask tries it again.
+            noCover && asked.marked -> marked(plainTile(), asked.round)
             else -> return null
         }
         val bytes = ByteArrayOutputStream().use { out ->
@@ -104,6 +107,9 @@ class ArtworkProvider : ContentProvider() {
 
         @Volatile private var kept: CarArtRefs? = null
 
+        // Loads a cover's picture at a size; tests put in their own.
+        @Volatile internal var loadCover: (Context, String, Int) -> Bitmap? = { ctx, ref, size -> artworkBitmap(ctx, ref, size) }
+
         // Where long references are kept for their handles: out of the cache,
         // which Android may clear, and out of backups.
         fun refs(context: Context): CarArtRefs =
@@ -121,7 +127,7 @@ class ArtworkProvider : ContentProvider() {
         // library" mark when `outside`, placed for a round picture when
         // `round`.
         fun carUriFor(context: Context, ref: String, outside: Boolean = false, round: Boolean = false): Uri {
-            val long = ref.length > INLINE_REF_MAX
+            val long = Uri.encode(ref).length > INLINE_REF_MAX
             if (!long && !outside) return uriFor(ref)
             val flags = buildString {
                 if (outside) append(MARK_FLAG)

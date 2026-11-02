@@ -24,9 +24,9 @@ class CarPlaysTest {
         gone = { gone += it },
     )
 
-    private fun play(answer: CarPlayAnswer?) = (answer as CarPlayAnswer.Play).play
+    private fun play(answer: CarPlayAnswer?) = (answer as? CarPlayAnswer.Play)?.play ?: throw AssertionError("expected a play, got $answer")
 
-    private fun refused(answer: CarPlayAnswer?) = (answer as CarPlayAnswer.Refused).words
+    private fun refused(answer: CarPlayAnswer?) = (answer as? CarPlayAnswer.Refused)?.words ?: throw AssertionError("expected a refusal, got $answer")
 
     @Test
     fun aStationPlaysItsSongsUnderItsNameFreshFromTheServer() = runTest {
@@ -99,5 +99,16 @@ class CarPlaysTest {
     @Test
     fun theAppsOwnIdsAreNotACarsChoice() = runTest {
         assertEquals(null, plays.playFor("device:4054"))
+    }
+
+    @Test
+    fun aChoiceThatHoldsNothingKeepsTheQueueAndSaysSo() = runTest {
+        // A station that left the Live radio shelf, and a tab, which does not play.
+        lists = { null }
+        assertEquals(CAR_NOTHING_TO_PLAY, refused(plays.playFor(carId(CarNode.Live("kept:gone")))))
+        assertEquals(CAR_NOTHING_TO_PLAY, refused(plays.playFor(carId(CarNode.Home))))
+        // A list of the phone's that is empty now.
+        lists = { CarList(emptyList(), QueueSource.Played(CAR_LIKED)) }
+        assertEquals(CAR_NOTHING_TO_PLAY, refused(plays.playFor(carId(CarNode.Liked))))
     }
 }

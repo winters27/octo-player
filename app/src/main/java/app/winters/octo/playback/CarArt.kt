@@ -9,8 +9,9 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 
-// A cover reference longer than this goes to a car by a short handle, so no
-// item it is on grows past what one answer can carry.
+// A cover reference longer than this, as written in an address (encoded),
+// goes to a car by a short handle, so no item it is on grows past what one
+// answer can carry.
 const val INLINE_REF_MAX = 200
 
 // How many long references are kept on the phone for their handles; the
@@ -34,10 +35,12 @@ class CarArtRefs(private val dir: File, private val kept: Int = CAR_REFS_KEPT) {
     // looked over once for every fortieth of `kept` new ones.
     private val sincePrune = java.util.concurrent.atomic.AtomicInteger()
 
-    // The handle a car is given for `ref`, kept for it.
+    // The handle a car is given for `ref`, kept for it. A reference already
+    // handed out since the app started is on file and touched then, so it
+    // costs no reading or writing again.
     fun handleFor(ref: String): String {
         val handle = carSha1(ref)
-        known[handle] = ref
+        if (known.put(handle, ref) == ref) return handle
         dir.mkdirs()
         val file = File(dir, "$handle.ref")
         if (!file.isFile || runCatching { file.readText() }.getOrNull() != ref) {
@@ -103,8 +106,8 @@ fun drawOutsideMark(pixels: IntArray, width: Int, height: Int, round: Boolean) {
     val margin = max(side * MARK_MARGIN, 3f)
     val inset = if (round) {
         val radius = side / 2
-        val centre = radius - (radius - margin - mark / 2) / sqrt(2f)
-        centre - mark / 2
+        val center = radius - (radius - margin - mark / 2) / sqrt(2f)
+        center - mark / 2
     } else {
         margin
     }

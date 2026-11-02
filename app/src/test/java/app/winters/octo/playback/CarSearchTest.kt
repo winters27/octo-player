@@ -97,6 +97,16 @@ class CarSearchTest {
     }
 
     @Test
+    fun aSearchThatFailedLeavesNoOlderAnswerForItsWords() = runTest {
+        val source = FakeSearch()
+        val search = search(source)
+        search.answer("Love")
+        source.libraryFails = true
+        assertTrue(runCatching { search.answer("Love") }.isFailure)
+        assertNull(search.latest("Love"))
+    }
+
+    @Test
     fun songsTakenInShowAmongTheLibrarys() = runTest {
         val source = FakeSearch().apply { tookIn = true }
         search(source).answer("Love")

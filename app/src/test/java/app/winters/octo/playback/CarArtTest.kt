@@ -86,6 +86,20 @@ class CarArtTest {
     }
 
     @Test
+    fun manyWritersOfOnePictureLeaveOneOfThemWhole() {
+        val dir = File(folder.root, "art").apply { mkdirs() }
+        val file = File(dir, "cover.jpg")
+        val pictures = List(8) { n -> ByteArray(200_000) { (n + 1).toByte() } }
+        val pool = Executors.newFixedThreadPool(8)
+        repeat(32) { i -> pool.execute { writeWhole(file, pictures[i % 8]) } }
+        pool.shutdown()
+        assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS))
+        val got = file.readBytes()
+        assertTrue(pictures.any { it.contentEquals(got) })
+        assertEquals(listOf("cover.jpg"), dir.listFiles()!!.map { it.name })
+    }
+
+    @Test
     fun theLeastRecentlyHandedOutGoFirst() {
         val dir = File(folder.root, "refs")
         val refs = CarArtRefs(dir, kept = 3)

@@ -6,6 +6,7 @@ import androidx.media3.common.MediaMetadata
 import app.winters.octo.home.HomeSection
 import app.winters.octo.home.HomeSectionEntry
 import app.winters.octo.home.homeSectionOrder
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -73,6 +74,25 @@ class CarHomeTest {
         assertTrue(answer.sumOf(::carBytes) <= budget)
         assertTrue(answer.none { it.mediaId.startsWith("row:") })
         assertTrue(answer.size < shelves.size * 9)
+    }
+
+    @Test
+    fun onlyTheShelvesHomeShowsAreFilled() {
+        val wanted = carHomeWanted(homeSectionOrder("mostPlayed,-madeForYou,recentlyPlayed"), libraryEmpty = false)
+        assertTrue(HomeSection.MostPlayed in wanted && HomeSection.RecentlyPlayed in wanted)
+        assertTrue(HomeSection.MadeForYou !in wanted)
+        assertEquals(setOf(HomeSection.Charts, HomeSection.InternetRadio), carHomeWanted(homeSectionOrder("-charts"), libraryEmpty = true))
+        assertEquals(setOf(HomeSection.Charts), carHomeWanted(homeSectionOrder("-internetRadio"), libraryEmpty = true))
+    }
+
+    @Test
+    fun randomPicksStayUntilTheLibraryChanges() = runTest {
+        var picks = 0
+        val picker = CarPicks { ++picks }
+        assertEquals(1, picker.forKey(100 to 1L))
+        assertEquals(1, picker.forKey(100 to 1L))
+        assertEquals(2, picker.forKey(101 to 1L))
+        assertEquals(3, picker.forKey(101 to 2L))
     }
 
     @Test

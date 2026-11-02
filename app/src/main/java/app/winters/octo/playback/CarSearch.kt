@@ -139,6 +139,8 @@ class CarSearch internal constructor(
                     }
                     Result.success(found)
                 } catch (e: Throwable) {
+                    // An older answer for the same words is not this one.
+                    lock.withLock { latest.remove(key) }
                     Result.failure(e)
                 } finally {
                     lock.withLock { running.remove(key) }

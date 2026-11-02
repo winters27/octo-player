@@ -54,9 +54,12 @@ class CarShelvesTest {
         val stationAnswers = mutableMapOf<String, CompletableDeferred<List<Station>>>()
         var listsFail = false
         var listsAnswer: () -> ServerLists = { ServerLists() }
+        var stationsChange = false
+        var nearAsks = 0
 
         override suspend fun stations(session: Session): List<Station> {
             stationAsks += session.id
+            if (stationsChange) return listOf(station("st-${session.id}-${stationAsks.size}"))
             return stationAnswers.getOrPut(session.id) { CompletableDeferred(listOf(station("st-${session.id}"))) }.await()
         }
 
@@ -68,7 +71,10 @@ class CarShelvesTest {
 
         override suspend fun chart(): Pair<List<TrackEntity>, List<ChartChoice>> = emptyList<TrackEntity>() to emptyList()
 
-        override suspend fun near(): List<LiveStation> = emptyList()
+        override suspend fun near(): List<LiveStation> {
+            nearAsks++
+            return emptyList()
+        }
 
         override suspend fun seed(keptUnder: String): CarServerShelves? = seeds[keptUnder]
     }
@@ -150,7 +156,10 @@ class CarShelvesTest {
 
     @Test
     fun aFailedPartIsAskedAgainOnlyWhenTheCarOpensAListOrTheNetworkChanges() = runTest {
-        val source = FakeSource().apply { listsFail = true }
+        val source = FakeSource().apply {
+            listsFail = true
+            stationsChange = true
+        }
         var count = 0
         source.listsAnswer = { ServerLists(madeForYou = listOf(station("m${count++}"))) }
         val shelves = shelves(source)
@@ -159,8 +168,10 @@ class CarShelvesTest {
         val asked = source.listAsks.size
         // Stations answering differently each time never brings the lists back.
         repeat(3) {
+            val version = shelves.version.value
             syncEnds.emit(it)
             runCurrent()
+            assertTrue(shelves.version.value > version)
         }
         assertEquals(asked + 3, source.listAsks.size)
         source.listsFail = false
@@ -189,6 +200,18 @@ class CarShelvesTest {
         gone.emit("og1")
         runCurrent()
         assertEquals(listOf("og2"), shelves.current().madeForYou.map { it.id })
+    }
+
+    @Test
+    fun aNewPlaceForStationsNearYouAsksForThemAgain() = runTest {
+        val source = FakeSource()
+        val shelves = shelves(source)
+        shelves.carConnected()
+        runCurrent()
+        val before = source.nearAsks
+        nearChanges.emit(1)
+        runCurrent()
+        assertEquals(before + 1, source.nearAsks)
     }
 
     @Test

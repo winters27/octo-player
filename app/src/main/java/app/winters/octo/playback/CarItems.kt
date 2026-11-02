@@ -103,12 +103,12 @@ class CarLook(private val context: Context) {
     )
 
     // An album the server has beyond the library, with the mark; one the
-    // library holds some of says how much.
+    // library holds some of says how much. It sets no artist: a car's
+    // second line shows the artist ahead of the subtitle when one is set.
     fun onlineAlbum(album: OnlineAlbum): MediaItem = item(
         CarNode.OnlineAlbum(album.id),
         MediaMetadata.Builder()
             .setTitle(carText(album.title))
-            .setArtist(carText(album.artist))
             .setSubtitle(carText(albumShareLine(album.ownedCount, album.songCount) ?: album.artist))
             .setArtworkUri(cover(album.artwork, outside = true))
             .setIsBrowsable(true)
@@ -234,12 +234,12 @@ class CarLook(private val context: Context) {
     // One of the phone's headings of a long list sorted by name.
     fun heading(node: CarNode.Heading, browsable: CarStyle?): MediaItem = folder(node, node.heading, browsable = browsable)
 
-    // The other device's queue, to carry on from in the car.
+    // The other device's queue, to carry on from in the car. Like an album
+    // beyond the library, it sets no artist, so the subtitle shows.
     fun resume(offer: ResumeOffer): MediaItem = item(
         CarNode.Resume,
         MediaMetadata.Builder()
             .setTitle(carText(offer.title))
-            .setArtist(carText(offer.artist))
             .setSubtitle(carText(carResumeLine(offer.device)))
             .setArtworkUri(icon(OctoIcons.History))
             .setIsBrowsable(false)

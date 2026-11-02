@@ -54,6 +54,14 @@ class CarListsTest {
     }
 
     @Test
+    fun partsBehindManyListsHoldNoMoreThanTheAnswersKept() = runTest {
+        val lists = lists()
+        repeat(40) { n -> lists.behind(CarNode.Album("a$n"), { listOf("s$n") }) {} }
+        runCurrent()
+        assertTrue(lists.builtCount() <= 16)
+    }
+
+    @Test
     fun aPartBehindAListTellsOnceWhenItChangesWhatWasShown() = runTest {
         val lists = lists()
         var server = listOf("whole-1")
