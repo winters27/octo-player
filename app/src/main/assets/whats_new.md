@@ -6,7 +6,7 @@
 
 ## Library
 
-- **A heart gets the version you heard.** When you heart a song, your Octo server downloads the same recording you were listening to, checked by its sound, not just its name. A song from a soundtrack or a live album no longer turns into a different version.
+- **A heart gets the version you heard.** When you heart a song, your Octo server downloads the best copy of the take you were listening to, checked by its sound, not just its name. A lossless remaster of it counts, but a live take, a cover or an edit doesn't.
 - **Downloads that need you say so.** When the server can't prove a version yet, the song waits and says why, like "Play it once so Octo can keep the version you hear". Keep anyway keeps the copy as it is.
 - **Albums too.** A hearted album keeps the tracks it can prove and holds the rest, each one proven by a play or kept with Keep these anyway.
 - A download that waits for you carries the small accent dot instead of a busy ring, and Server downloads under Library says how many are on their way and how many wait for you.
