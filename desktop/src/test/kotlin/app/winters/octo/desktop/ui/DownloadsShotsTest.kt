@@ -134,9 +134,10 @@ class DownloadsShotsTest {
     }
 
     // A held download's row as a server listing octoAcquisitions 4 sends it:
-    // still searching, its line in `note`, drawn with its album's cover.
-    private fun held(key: String, title: String, album: String, cover: String, at: String, note: String, extra: String = "") =
-        """{"id":"${key.substringAfter(':')}","artist":"The Beatles","title":"$title","album":"$album","coverArt":"$cover","state":"searching","source":"Soulseek","quality":"FLAC 16-bit 44.1 kHz","note":"$note","startedAt":"2026-10-04T$at:00Z","updatedAt":"2026-10-04T$at:40Z","key":"$key","kind":"download"$extra}"""
+    // still searching, its line in `note`, drawn with its album's cover; a
+    // hearted album's row is of kind "album".
+    private fun held(key: String, title: String, album: String, cover: String, at: String, note: String, extra: String = "", kind: String = "download") =
+        """{"id":"${key.substringAfter(':')}","artist":"The Beatles","title":"$title","album":"$album","coverArt":"$cover","state":"searching","source":"Soulseek","quality":"FLAC 16-bit 44.1 kHz","note":"$note","startedAt":"2026-10-04T$at:00Z","updatedAt":"2026-10-04T$at:40Z","key":"$key","kind":"$kind"$extra}"""
 
     // Yesterday's log: fetched from Soulseek, its file waiting for AcoustID.
     private val yesterdayLog = listOf(
@@ -184,15 +185,16 @@ class DownloadsShotsTest {
     // way to keep it, and the album Rubber Soul holds two tracks with Keep
     // these anyway, beside a download on its way. Then Keep these anyway
     // while it is sent, refused with the server's words, the album's log
-    // with the refusal under its control line, and Yesterday's log, which
-    // has no control line. Saved as downloads/keep-anyway-1 to -5.
+    // with the refusal under its control line, Yesterday's log, which has
+    // no control line, and the window with the drawer closed. Saved as
+    // downloads/keep-anyway-1 to -5 and -10.
     @Test
     fun drawHeldWhileAcoustIdIsBusy() {
         assumeTrue(System.getenv("OCTO_SHOTS") == "1")
         val yesterday = held(YESTERDAY, "Yesterday", "Help!", HELP_COVER, "18:12", "Waiting for AcoustID")
         val rubberSoul = held(
             RUBBER_SOUL, "Rubber Soul", "Rubber Soul", RUBBER_SOUL_COVER, "18:20",
-            "2 tracks wait: play them once, or keep them anyway", ""","keepAnyway":true,"heldTracks":2""",
+            "2 tracks wait: play them once, or keep them anyway", ""","keepAnyway":true,"heldTracks":2""", kind = "album",
         )
         val answer = CountDownLatch(1)
         drawHeld(
@@ -228,15 +230,19 @@ class DownloadsShotsTest {
 
             SwingUtilities.invokeAndWait { app.downloads!!.showLog(YESTERDAY) }
             shot(scene, "downloads/keep-anyway-5-log-waiting-for-acoustid", 2_000)
+
+            // Closed: the pill speaks for the two on their way, the sidebar's ring turns.
+            SwingUtilities.invokeAndWait { app.showSidePanel(null) }
+            shot(scene, "downloads/keep-anyway-10-busy-panel-closed", 1_500)
         }
     }
 
     // Held downloads while AcoustID is off: Ticket to Ride from Help! with
     // Keep anyway and the album Rubber Soul with Keep these anyway, above a
-    // song in the library. Then Ticket to Ride's log with Keep anyway on its
-    // control line, and the log and the list once the keep is asked for and
-    // waits for YouTube, with no button left. Saved as
-    // downloads/keep-anyway-6 to -9.
+    // song in the library. First the window with the drawer closed, then
+    // Ticket to Ride's log with Keep anyway on its control line, and the log
+    // and the list once the keep is asked for and waits for YouTube, with no
+    // button left. Saved as downloads/keep-anyway-11 and -6 to -9.
     @Test
     fun drawHeldWhileAcoustIdIsOff() {
         assumeTrue(System.getenv("OCTO_SHOTS") == "1")
@@ -253,7 +259,7 @@ class DownloadsShotsTest {
         }
         val rubberSoul = held(
             RUBBER_SOUL, "Rubber Soul", "Rubber Soul", RUBBER_SOUL_COVER, "18:20",
-            "2 tracks wait: play them once, or keep them anyway", ""","keepAnyway":true,"heldTracks":2""",
+            "2 tracks wait: play them once, or keep them anyway", ""","keepAnyway":true,"heldTracks":2""", kind = "album",
         )
         drawHeld(
             rows = 3,
@@ -275,6 +281,11 @@ class DownloadsShotsTest {
                 }
             },
         ) { scene ->
+            // Closed, with only rows waiting for the person: no pill, a still mark in the sidebar.
+            SwingUtilities.invokeAndWait { app.showSidePanel(null) }
+            shot(scene, "downloads/keep-anyway-11-off-panel-closed", 1_500)
+            SwingUtilities.invokeAndWait { app.showSidePanel(SidePanel.Downloads) }
+
             shot(scene, "downloads/keep-anyway-6-acoustid-off", 1_500)
 
             SwingUtilities.invokeAndWait { app.downloads!!.showLog(TICKET_TO_RIDE) }

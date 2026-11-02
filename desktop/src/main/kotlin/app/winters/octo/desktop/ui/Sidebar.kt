@@ -72,8 +72,10 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.design.ProgressRing
 import app.winters.octo.ui.downloads.DOWNLOADS
+import app.winters.octo.ui.downloads.DrawerMark
+import app.winters.octo.ui.downloads.drawerMark
+import app.winters.octo.ui.downloads.drawerState
 import app.winters.octo.ui.downloads.overallFraction
-import app.winters.octo.ui.downloads.runningCount
 import app.winters.octo.desktop.importPlaylistFile
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.nav.Page
@@ -254,20 +256,25 @@ private fun LazyListScope.group(
 }
 
 // The downloads drawer's way in, on a server that keeps a log of its
-// downloads: it opens and closes the side panel's Downloads tab, and a
-// ring beside it fills while anything is on its way.
+// downloads: it opens and closes the side panel's Downloads tab. A ring
+// beside it fills while anything is on its way, and a still pause mark
+// stands there when only downloads waiting for the person are left.
 @Composable
 private fun DownloadsRow(app: AppState, rail: Boolean) {
     val drawer = app.downloads?.takeIf { it.supported == true } ?: return
     val rows by drawer.rows.collectAsState()
-    val running = runningCount(rows)
     NavRow(
         DOWNLOADS,
         OctoIcons.Download,
         app.sidePanel == SidePanel.Downloads,
         rail,
-        state = if (running > 0) "$running on the way" else null,
-        trailing = if (running > 0) ({ ProgressRing(overallFraction(rows), size = IconSize.Table) }) else null,
+        state = drawerState(rows),
+        trailing = when (drawerMark(rows)) {
+            DrawerMark.Ring -> ({ ProgressRing(overallFraction(rows), size = IconSize.Table) })
+            // The pause glyph is drawn small in its box: a step up stands it as tall as the name's capitals.
+            DrawerMark.Still -> ({ Glyph(OctoIcons.Pause, size = IconSize.Toolbar, tint = OctoColors.TextSecondary) })
+            DrawerMark.None -> null
+        },
     ) { app.toggleSidePanel(SidePanel.Downloads) }
 }
 
