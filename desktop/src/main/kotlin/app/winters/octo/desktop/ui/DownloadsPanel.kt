@@ -312,10 +312,11 @@ private fun DownloadLine(
 
 // A held download's Keep anyway, lined up with its row's words and set like
 // the artist line above it: dimmed while it is sent, and the server's words
-// under it when it said no. Its edge below is the rows' usual gap.
+// under it when it said no, wrapping where the row's words do, short of the
+// ring. Its edge below is the rows' usual gap.
 @Composable
 private fun KeepAnywayLine(label: String, keeping: Keeping?, onKeep: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(start = LineCover + Space.L)) {
+    Column(Modifier.fillMaxWidth().padding(start = LineCover + Space.L, end = IconSize.Transport + Space.L)) {
         // The action's own inset pulled back, so its words start where the
         // row's do, and its inset below taken down to a row's edge.
         TextAction(
@@ -345,6 +346,13 @@ private fun KeepRefusal(words: String, modifier: Modifier = Modifier) {
 private fun Modifier.trimBottom(by: Dp) = layout { measurable, constraints ->
     val placeable = measurable.measure(constraints)
     layout(placeable.width, (placeable.height - by.roundToPx()).coerceAtLeast(0)) { placeable.place(0, 0) }
+}
+
+// Lays out `by` shorter at the top, drawing the same that much higher.
+private fun Modifier.trimTop(by: Dp) = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    val trim = by.roundToPx().coerceAtMost(placeable.height)
+    layout(placeable.width, placeable.height - trim) { placeable.place(0, -trim) }
 }
 
 // "Higher quality" or "Picked", small beside a title.
@@ -392,19 +400,24 @@ private fun DownloadLog(app: AppState, model: DownloadsModel, key: String, modif
     }
     Column(modifier) {
         // The heading's line has no room for it beside the page's name, so
-        // Keep anyway is the log's control line, under the heading.
+        // Keep anyway is the log's control line, under the heading, with the
+        // server's words right under it when it said no. Like the list's
+        // summary line it sits nearer the heading than the song below it.
         if (keep != null) {
-            TextAction(
-                keep,
-                { model.keepAnyway(key) },
-                Modifier.padding(start = Space.L - TextActionInset),
-                enabled = keepState?.sending != true,
-            )
+            Column(Modifier.trimTop(ControlLineLift)) {
+                TextAction(
+                    keep,
+                    { model.keepAnyway(key) },
+                    Modifier.padding(start = Space.L - TextActionInset),
+                    enabled = keepState?.sending != true,
+                )
+                // The button's own inset below, so the song keeps its gap.
+                keepState?.error?.let { KeepRefusal(it, Modifier.padding(start = Space.L, end = Space.L, bottom = TextActionInsetY)) }
+            }
         }
         // The song and where it is stay put; only the steps scroll.
-        if (row != null) LogHead(row, events, Modifier.padding(horizontal = Space.L))
+        if (row != null) LogHead(row, events, Modifier.padding(horizontal = Space.L).padding(top = if (keep != null) Space.L else 0.dp))
         problem?.let { Txt(it, DesktopType.meta, OctoColors.SignalOrange, Modifier.padding(horizontal = Space.L, vertical = Space.S), maxLines = 2) }
-        if (keep != null) keepState?.error?.let { KeepRefusal(it, Modifier.padding(horizontal = Space.L, vertical = Space.S)) }
         Separator(Modifier.padding(top = Space.L))
         Box(Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(Modifier.fillMaxSize().topFade(Space.Xl).scrollbar(list), state = list, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.L, bottom = Space.Xl)) {
@@ -927,6 +940,11 @@ private val HeadCover = FrameSize.PlayerCover + Space.Xs
 // How far a TextAction's words sit inside its edge, beside and below.
 private val TextActionInset = 12.dp
 private val TextActionInsetY = 8.dp
+
+// How far a log's control line is drawn up into its action's own inset,
+// toward the heading.
+private val ControlLineLift = Space.Xs
+
 private val MarkSize = IconSize.Transport + Space.Xxs
 private val StepLine = Space.Xs
 private val Chip = Color.White.copy(alpha = 0.08f)
