@@ -152,8 +152,14 @@ private struct DownloadLine: View {
                         .lineLimit(2)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if !row.finished {
-                    DownloadProgressRing(fraction: row.fraction, size: 22)
+                if waitsForYou(row) {
+                    // Waiting for the person, a still mark in the ring's place.
+                    Image(systemName: "pause.circle")
+                        .font(.system(size: 18))
+                        .foregroundStyle(OctoColor.textSecondary)
+                        .frame(width: lineMark, height: lineMark)
+                } else if !row.finished {
+                    DownloadProgressRing(fraction: row.fraction, size: lineMark)
                 } else if row.phase == .done {
                     Image(systemName: "arrow.down.circle.fill").font(.system(size: 18)).foregroundStyle(OctoColor.textSecondary)
                 } else {
@@ -173,17 +179,18 @@ private struct DownloadLine: View {
     }
 }
 
-/// A list row's edge, its cover, and the gap before its words.
+/// A list row's edge, its cover, the gap before its words, and the ring or mark at its end.
 private let lineEdge: CGFloat = 20
 private let lineCover: CGFloat = 48
 private let lineGap: CGFloat = 14
+private let lineMark: CGFloat = 22
 
 /// How far a QuietButton's words sit inside its edge.
 private let quietInset: CGFloat = 10
 
 /// A held download's Keep anyway, under its row's words and lined up with them, set like the
-/// artist line above it: faint while it is sent, and the server's words under it when it said no.
-/// The row above never moves for it.
+/// artist line above it: faint while it is sent, and the server's words under it when it said no,
+/// wrapping where the row's words do, short of the ring. The row above never moves for it.
 private struct KeepAnywayLine: View {
     let label: String
     let keeping: Keeping?
@@ -206,7 +213,7 @@ private struct KeepAnywayLine: View {
             }
         }
         .padding(.leading, lineEdge + lineCover + lineGap)
-        .padding(.trailing, lineEdge)
+        .padding(.trailing, lineGap + lineMark + lineEdge)
         .padding(.bottom, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -270,8 +277,10 @@ private struct DownloadLogPage: View {
         let keeping = model.watch.keeping[key]
         let events = log?.event ?? []
         let running = row?.finished == false
+        // Waiting for the person, its newest line is still.
+        let busy = running && !(row.map(waitsForYou) ?? false)
         SheetBar(back: "Back to \(serverDownloadsTitle)", onBack: model.showList, title: "Download") {
-            if let row, let id = row.findId {
+            if let row, let id = logFindId(row) {
                 QuietButton(findSongsTitle) { model.find(id, title: row.title, from: key) }
             }
             if let keep {
@@ -287,20 +296,22 @@ private struct DownloadLogPage: View {
                 }
             }
         }
+        // The server's words right under the bar whose Keep anyway it said no to.
+        if keep != nil, let refusal = keeping?.error {
+            Text(refusal)
+                .font(.octoCaption)
+                .foregroundStyle(DiscoveryStyle.orange)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 10)
+        }
         // The song and where it is stay put; only the steps scroll.
         if let row { LogHead(row: row, events: events) }
         if let problem = model.logWatch.problem {
             Text(problem)
                 .font(.octoCaption)
                 .foregroundStyle(DiscoveryStyle.orange)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 6)
-        }
-        if keep != nil, let refusal = keeping?.error {
-            Text(refusal)
-                .font(.octoCaption)
-                .foregroundStyle(DiscoveryStyle.orange)
-                .lineLimit(2)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 6)
         }
@@ -313,7 +324,7 @@ private struct DownloadLogPage: View {
                             DownloadProgressRing(fraction: nil, size: 22)
                         }
                         ForEach(Array(events.enumerated()), id: \.offset) { index, line in
-                            LogLine(line: line, last: index == events.count - 1, live: running && index == events.count - 1)
+                            LogLine(line: line, last: index == events.count - 1, live: busy && index == events.count - 1)
                                 .id(index)
                         }
                     }
@@ -396,7 +407,8 @@ private struct LogHead: View {
 }
 
 /// The four steps as a strip: done ones filled, the one it is on filling with the file while it
-/// downloads (breathing while nobody can tell how far), and the ones still to come faint.
+/// downloads (breathing while nobody can tell how far, still while it waits for the person), and
+/// the ones still to come faint.
 private struct StepsStrip: View {
     let row: DownloadRow
     let at: Int
@@ -404,7 +416,7 @@ private struct StepsStrip: View {
 
     var body: some View {
         let failed = row.phase == .failed
-        let breathes = !row.finished && row.fraction == nil && !(calm)
+        let breathes = !row.finished && row.fraction == nil && !waitsForYou(row) && !(calm)
         TimelineView(.animation(paused: !breathes)) { context in
             let t = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.8) / 0.9
             let pulse = breathes ? 0.45 + 0.55 * (t <= 1 ? t : 2 - t) : 1
