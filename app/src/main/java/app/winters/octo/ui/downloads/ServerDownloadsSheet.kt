@@ -276,7 +276,11 @@ private fun DownloadLine(row: DownloadRow, art: String?, keepBelow: Boolean = fa
             Text(row.status, style = OctoType.caption, color = if (row.phase == RowPhase.Failed) OctoColors.SignalOrange else OctoColors.TextMuted, maxLines = 2)
         }
         when {
-            !row.finished -> Ring(row.fraction, 22.dp)
+            // Waiting for the person, a still mark in the ring's place; the
+            // pause glyph is drawn small in its box, so at the ring's size it
+            // stands as tall as the done mark.
+            waitsForYou(row) -> Mark(OctoIcons.Pause, OctoColors.TextSecondary, size = LineMark)
+            !row.finished -> Ring(row.fraction, LineMark)
             row.phase == RowPhase.Done -> Mark(OctoIcons.Downloaded, OctoColors.TextSecondary)
             else -> Mark(OctoIcons.Info, OctoColors.SignalOrange)
         }
@@ -285,10 +289,11 @@ private fun DownloadLine(row: DownloadRow, art: String?, keepBelow: Boolean = fa
 
 // A held download's Keep anyway, under its row's words and lined up with
 // them, set like the artist line above it: dimmed while it is sent, and the
-// server's words under it when it said no. The row above never moves for it.
+// server's words under it when it said no, wrapping where the row's words
+// do, short of the ring. The row above never moves for it.
 @Composable
 private fun KeepAnywayLine(label: String, keeping: Keeping?, onKeep: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(start = LineText, end = 20.dp, bottom = 2.dp)) {
+    Column(Modifier.fillMaxWidth().padding(start = LineText, end = LineTextEnd, bottom = 2.dp)) {
         // The button's own inset pulled back, so its words start where the row's do.
         Box(Modifier.offset(x = -QuietInset)) {
             QuietButton(label, enabled = keeping?.sending != true, style = OctoType.bodySmall, onClick = onKeep)
@@ -336,6 +341,8 @@ private fun ColumnScope.DownloadLog(model: ServerDownloads, key: String) {
     val keepState = keeping[key]
     val events = log?.event.orEmpty()
     val running = row?.finished == false
+    // Waiting for the person, its newest line is still.
+    val busy = running && row?.let(::waitsForYou) != true
     val list = rememberLazyListState()
     // A running download opens on its newest step and keeps it in view; a
     // finished one opens at its start. Scrolling up lets go; back at the
@@ -352,23 +359,24 @@ private fun ColumnScope.DownloadLog(model: ServerDownloads, key: String) {
         if (follow == true && events.isNotEmpty()) list.animateScrollToItem(events.lastIndex)
     }
     Bar(LOG_TITLE, back = "Back to $SERVER_DOWNLOADS", onBack = model::showList) {
-        row?.findId?.let { id -> QuietButton(FIND_SONGS) { model.find(id, row.title, key) } }
+        row?.let(::logFindId)?.let { id -> QuietButton(FIND_SONGS) { model.find(id, row.title, key) } }
         keep?.let { QuietButton(it, enabled = keepState?.sending != true) { model.keepAnyway(key) } }
         if (row?.finished == true) QuietButton("Clear") {
             model.clear(row.key)
             model.showList()
         }
     }
+    // The server's words right under the bar whose Keep anyway it said no to.
+    if (keep != null) keepState?.error?.let { KeepRefusal(it, Modifier.padding(start = 20.dp, end = 20.dp, bottom = 10.dp)) }
     // The song and where it is stay put; only the steps scroll.
     if (row != null) LogHead(row, events, model.artwork(row.coverArt))
     problem?.let { Text(it, style = OctoType.caption, color = OctoColors.SignalOrange, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) }
-    if (keep != null) keepState?.error?.let { KeepRefusal(it, Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) }
     Rule(Modifier.padding(top = 14.dp))
     Box(Modifier.weight(1f, fill = false)) {
         LazyColumn(state = list, contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 16.dp)) {
             if (log == null && problem == null) item(key = "wait") { Ring(null, 22.dp) }
             itemsIndexed(events, key = { index, _ -> index }) { index, line ->
-                LogLine(line, last = index == events.lastIndex, live = running && index == events.lastIndex)
+                LogLine(line, last = index == events.lastIndex, live = busy && index == events.lastIndex)
             }
         }
         if (follow == false && running && list.canScrollForward) {
@@ -407,12 +415,13 @@ private fun LogHead(row: DownloadRow, events: List<AcquisitionEvent>, art: Strin
 
 // The four steps as a strip: done ones filled, the one it is on filling
 // with the file while it downloads (breathing while nobody can tell how
-// far), and the ones still to come faint.
+// far, still while it waits for the person), and the ones still to come
+// faint.
 @Composable
 private fun Steps(row: DownloadRow, at: Int) {
     val failed = row.phase == RowPhase.Failed
     val motion = motionScale()
-    val pulse = if (row.finished || row.fraction != null || motion.distance == 0f) 1f else rememberPulse()
+    val pulse = if (row.finished || row.fraction != null || waitsForYou(row) || motion.distance == 0f) 1f else rememberPulse()
     Row(
         Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
             contentDescription = if (at >= DownloadStep.entries.size) "Every step done" else "Step ${at + 1} of ${DownloadStep.entries.size}, ${DownloadStep.entries[at].label}"
@@ -901,6 +910,11 @@ private val LiveFill = Color.White.copy(alpha = 0.14f)
 // cover and the gap.
 private val LineArt = 48.dp
 private val LineText = 20.dp + LineArt + 14.dp
+
+// The ring or mark at a list row's end, and where the row's words stop
+// short of it.
+private val LineMark = 22.dp
+private val LineTextEnd = 14.dp + LineMark + 20.dp
 
 // How far a QuietButton's words sit inside its edge.
 private val QuietInset = 10.dp
