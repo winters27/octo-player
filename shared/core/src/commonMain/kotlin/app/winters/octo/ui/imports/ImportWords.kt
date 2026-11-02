@@ -87,7 +87,7 @@ fun TrickleStatus.title(): String = when (stage) {
     TrickleState.WaitingForSoulseek -> "Waiting for Soulseek"
     TrickleState.WaitingForMusicDatabase -> "Waiting for MusicBrainz"
     TrickleState.WaitingForMornyeCheck -> "Waiting for Mornye's check"
-    TrickleState.WaitingForMornye -> "Waiting for Mornye to answer"
+    TrickleState.WaitingForMornye -> "Waiting for Mornye"
 }
 
 // The trickle's line under it: why it waits (when it does), the pace, when the next song starts, and the counts, each count held to its word and the counts kept together as one group.
@@ -96,7 +96,7 @@ fun TrickleStatus.line(zone: ZoneId = ZoneId.systemDefault()): String {
     if (stage == TrickleState.Yielding) parts += "Someone's own downloads come first."
     if (stage == TrickleState.WaitingForSoulseek) parts += "It goes on once Soulseek is back."
     if (stage == TrickleState.WaitingForMornyeCheck) parts += "It goes on when Mornye may try its check again, or once it is passed on the dashboard."
-    if (stage == TrickleState.WaitingForMornye) parts += "It goes on once Mornye answers again."
+    if (stage == TrickleState.WaitingForMornye) parts += "It goes on once Mornye can download again."
     if (stage == TrickleState.WaitingForMusicDatabase) parts += "It goes on once MusicBrainz is back."
     if (stage == TrickleState.Off) parts += "Songs an hour is 0 on the server, so nothing starts."
     else parts += "Up to ${songsText(perHour).replace(' ', '\u00A0')} an hour."

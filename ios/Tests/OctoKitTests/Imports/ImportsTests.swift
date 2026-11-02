@@ -190,8 +190,8 @@ final class Opened: @unchecked Sendable {
         let utc = TimeZone(identifier: "UTC")!
         let held = TrickleStatus(state: "waitingForMornye", perHour: 20, queued: 3)
         #expect(held.stage == .waitingForMornye)
-        #expect(held.title == "Waiting for Mornye to answer")
-        #expect(held.line(zone: utc) == "It goes on once Mornye answers again. Up to 20\u{00A0}songs an hour. 3\u{00A0}waiting.")
+        #expect(held.title == "Waiting for Mornye")
+        #expect(held.line(zone: utc) == "It goes on once Mornye can download again. Up to 20\u{00A0}songs an hour. 3\u{00A0}waiting.")
     }
 
     @Test func aStateThisAppDoesNotKnowNeverSaysNothingToFetch() throws {

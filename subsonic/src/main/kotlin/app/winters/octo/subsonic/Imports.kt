@@ -188,7 +188,7 @@ enum class TrickleState(val wire: String) {
     // Every lossless source is out, and Mornye's check is paused.
     WaitingForMornyeCheck("waitingForMornyeCheck"),
 
-    // Mornye is the only lossless source and it is not answering.
+    // Mornye is the only lossless source and it is not answering or cannot download.
     WaitingForMornye("waitingForMornye"),
     Unknown(""),
     ;
