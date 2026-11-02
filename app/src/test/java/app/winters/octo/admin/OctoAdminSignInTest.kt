@@ -1,6 +1,7 @@
 package app.winters.octo.admin
 
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,5 +21,12 @@ class OctoAdminSignInTest {
         assertFalse(mayCarrySignIn("http://192.168.50.21:5275/api/admin/status".toHttpUrl(), home))
         assertFalse(mayCarrySignIn("https://192.168.50.21:5274/api/admin/status".toHttpUrl(), home))
         assertFalse(mayCarrySignIn("http://192.168.50.21:5274/api/admin/status".toHttpUrl(), emptySet()))
+    }
+
+    @Test
+    fun theFullPagesOpenAtTheCardNamed() {
+        val base = "http://192.168.50.21:5274/".toHttpUrl()
+        assertEquals("http://192.168.50.21:5274/admin/#spotiflac", adminPageUrl(base, "spotiflac").toString())
+        assertEquals("http://192.168.50.21:5274/admin/", adminPageUrl(base).toString())
     }
 }

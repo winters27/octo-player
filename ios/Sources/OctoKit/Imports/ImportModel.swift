@@ -197,6 +197,8 @@ extension TrickleStatus {
         case .yielding: "Waiting for other downloads"
         case .waitingForSoulseek: "Waiting for Soulseek"
         case .waitingForMusicDatabase: "Waiting for MusicBrainz"
+        case .waitingForMornyeCheck: "Waiting for Mornye's check"
+        case .waitingForMornye: "Waiting for Mornye"
         }
     }
 
@@ -205,6 +207,8 @@ extension TrickleStatus {
         var parts: [String] = []
         if stage == .yielding { parts.append("Someone's own downloads come first.") }
         if stage == .waitingForSoulseek { parts.append("It goes on once Soulseek is back.") }
+        if stage == .waitingForMornyeCheck { parts.append("It goes on when Mornye may try its check again, or once it is passed on the dashboard.") }
+        if stage == .waitingForMornye { parts.append("It goes on once Mornye can download.") }
         if stage == .waitingForMusicDatabase { parts.append("It goes on once MusicBrainz is back.") }
         if stage == .off {
             parts.append("Songs an hour is 0 on the server, so nothing starts.")

@@ -79,8 +79,9 @@ class OctoAdminViewModel @Inject constructor(private val admin: OctoAdmin) : Vie
         if (!refreshing) open(fresh = false)
     }
 
-    // The full admin pages, for everything the app does not show.
-    fun pageUrl(): String? = (place as? AdminPlace.Found)?.let { admin.pageUrl(it.base).toString() }
+    // The full admin pages, for everything the app does not show, at one
+    // card when `section` names it.
+    fun pageUrl(section: String? = null): String? = (place as? AdminPlace.Found)?.let { admin.pageUrl(it.base, section).toString() }
 
     fun refreshStations() {
         val base = (place as? AdminPlace.Found)?.base ?: return

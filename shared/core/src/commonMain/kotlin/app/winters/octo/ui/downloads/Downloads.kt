@@ -10,6 +10,7 @@ import app.winters.octo.subsonic.LogKind
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.Upgrade
 import app.winters.octo.subsonic.UpgradeStage
+import app.winters.octo.ui.upgrade.waitingWords
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -158,7 +159,7 @@ fun rowOf(acquisition: Acquisition, upgrade: Upgrade? = null): DownloadRow {
 fun rowOf(upgrade: Upgrade): DownloadRow {
     val (phase, status) = when (upgrade.stage) {
         UpgradeStage.Queued -> RowPhase.Waiting to "Waiting its turn"
-        UpgradeStage.Waiting -> RowPhase.Waiting to "Waiting for Soulseek"
+        UpgradeStage.Waiting -> RowPhase.Waiting to waitingWords(upgrade)
         UpgradeStage.Working -> RowPhase.Searching to "Looking for a higher quality copy"
         UpgradeStage.Upgraded -> RowPhase.Done to (upgrade.detail?.let(::sentence) ?: "Upgraded")
         UpgradeStage.NotFound -> RowPhase.Failed to "No higher quality copy found"

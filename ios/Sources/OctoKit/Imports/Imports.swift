@@ -313,7 +313,7 @@ public struct ImportListDetail: Decodable, Sendable, Equatable {
 
 /// What the trickle is doing for the signed-in user.
 public enum TrickleState: String, Sendable {
-    case idle, running, paused, off, yielding, waitingForSoulseek, waitingForMusicDatabase, unknown = ""
+    case idle, running, paused, off, yielding, waitingForSoulseek, waitingForMusicDatabase, waitingForMornyeCheck, waitingForMornye, unknown = ""
 
     public static func of(_ text: String?) -> TrickleState {
         guard let text, let found = TrickleState(rawValue: text), found != .unknown else { return .unknown }

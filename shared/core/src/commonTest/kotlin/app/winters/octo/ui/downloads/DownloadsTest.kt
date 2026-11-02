@@ -120,6 +120,20 @@ class DownloadsTest {
     }
 
     @Test
+    fun aWaitingUpgradeSaysTheServersOwnWordsForItsWait() {
+        val mornye = "Waiting for Mornye's check, which it could not pass for example-ext; it allows its next try at 14:05 UTC."
+        val rows = drawerRows(
+            emptyList(),
+            listOf(upgrade("nd-1", "waiting", detail = mornye), upgrade("nd-2", "waiting", detail = "  ")),
+            now,
+        )
+        assertEquals(RowPhase.Waiting, rows.first { it.key == "upgrade:nd-1" }.phase)
+        assertEquals(mornye.removeSuffix("."), rows.first { it.key == "upgrade:nd-1" }.status)
+        // Blank words are no words: the old line stays.
+        assertEquals("Waiting for Soulseek", rows.first { it.key == "upgrade:nd-2" }.status)
+    }
+
+    @Test
     fun aClearedRowStaysHidden() {
         val rows = drawerRows(listOf(download("s:a", "done")), listOf(upgrade("nd-2", "notFound")), now, hidden = setOf("upgrade:nd-2", "s:a"))
         assertTrue(rows.isEmpty())

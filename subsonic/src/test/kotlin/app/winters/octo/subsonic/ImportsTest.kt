@@ -68,6 +68,23 @@ class ImportsTest {
     }
 
     @Test
+    fun readsTheWaitForMornyesCheck() = runBlocking {
+        answer(ok(""""imports":{"lists":[],"trickle":{"state":"waitingForMornyeCheck","perHour":20,"queued":3}}"""))
+        val trickle = client().imports().trickle
+        server.takeRequest()
+        assertEquals(TrickleState.WaitingForMornyeCheck, trickle.stage)
+        assertEquals(3, trickle.queued)
+    }
+
+    @Test
+    fun readsTheWaitForAMornyeThatDoesNotAnswer() = runBlocking {
+        answer(ok(""""imports":{"lists":[],"trickle":{"state":"waitingForMornye","perHour":20,"queued":3}}"""))
+        val trickle = client().imports().trickle
+        server.takeRequest()
+        assertEquals(TrickleState.WaitingForMornye, trickle.stage)
+    }
+
+    @Test
     fun readsOneListsSongs() = runBlocking {
         answer(ok(""""import":{"list":{"id":"file-1","name":"Gym","source":"file"},"tracks":[
             {"key":"song:a","title":"A","artist":"B","state":"notFound","detail":"No source had it"},

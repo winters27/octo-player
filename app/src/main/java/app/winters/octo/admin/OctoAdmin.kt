@@ -42,9 +42,22 @@ import javax.inject.Singleton
 internal fun mayCarrySignIn(target: HttpUrl, trusted: Set<HttpUrl>): Boolean =
     target.newBuilder().encodedPath("/").query(null).build() in trusted
 
-// What Octo says about itself and the services it works with.
+// Octo's full admin pages at `base`, at the card `section` names, as in
+// "/admin/#spotiflac", or at the top with none.
+internal fun adminPageUrl(base: HttpUrl, section: String? = null): HttpUrl =
+    base.newBuilder().encodedPath("/admin/").fragment(section).build()
+
+// What Octo says about itself and the services it works with. `action` is
+// what Octo offers to do about it on its full admin pages, such as "pass"
+// for Mornye's check.
 @Serializable
-data class Health(val ok: Boolean = false, val detail: String = "", val warning: Boolean = false, val configured: Boolean = true)
+data class Health(
+    val ok: Boolean = false,
+    val detail: String = "",
+    val warning: Boolean = false,
+    val configured: Boolean = true,
+    val action: String? = null,
+)
 
 @Serializable
 data class AdminStatus(val octo: Health = Health(), val services: Map<String, Health> = emptyMap())
@@ -195,8 +208,9 @@ class OctoAdmin @Inject constructor(
         send(base, "lastfm/radio/refresh", JsonObject(mapOf("user" to JsonPrimitive(user))).toString())
     }
 
-    // The full admin pages, for everything the app does not show.
-    fun pageUrl(base: HttpUrl): HttpUrl = base.newBuilder().encodedPath("/admin/").build()
+    // The full admin pages, for everything the app does not show, opened at
+    // one card when `section` names it.
+    fun pageUrl(base: HttpUrl, section: String? = null): HttpUrl = adminPageUrl(base, section)
 
     private suspend fun answers(base: HttpUrl): Boolean = withContext(Dispatchers.IO) {
         runCatching {

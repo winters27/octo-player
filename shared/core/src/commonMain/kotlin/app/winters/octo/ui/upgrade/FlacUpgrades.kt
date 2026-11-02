@@ -27,9 +27,13 @@ const val UPGRADE_MISSES = 10
 // The song menu's row.
 const val FIND_HIGHER_QUALITY = "Find higher quality"
 
-// What the line says while Soulseek is out and the server holds on: the
-// server's own outage state, so it names Soulseek.
+// What the line says while Soulseek is out and the server holds on without
+// words of its own: the server's own outage state, so it names Soulseek.
 const val WAITING_FOR_SOULSEEK = "Waiting for Soulseek"
+
+// What a held song says: the server's own words for its wait when it gave
+// them, as while Mornye's check is paused, else that Soulseek is out.
+fun waitingWords(upgrade: Upgrade): String = upgrade.detail?.let(::sentence) ?: WAITING_FOR_SOULSEEK
 
 // "1 song", "12 songs".
 fun songsText(count: Int): String = if (count == 1) "1 song" else "$count songs"
@@ -180,9 +184,9 @@ class UpgradeFollower(
                 done += if (entry.title.isBlank()) entry.copy(title = asked?.title.orEmpty()) else entry
             }
         }
-        val waitingNow = following.values.any { it.stage == UpgradeStage.Waiting }
-        val startsWaiting = waitingNow && !waiting
-        waiting = waitingNow
+        val held = following.values.filter { it.stage == UpgradeStage.Waiting }
+        val startsWaiting = held.isNotEmpty() && !waiting
+        waiting = held.isNotEmpty()
 
         if (done.any { it.stage == UpgradeStage.Upgraded }) landed = true
         val reload = landed && (!isPending() || clock() - lastReload >= reloadGapMs)
@@ -190,7 +194,8 @@ class UpgradeFollower(
             landed = false
             lastReload = clock()
         }
-        return UpgradeNews(doneNotice(done, startsWaiting), reload)
+        val waits = if (startsWaiting) held.map(::waitingWords).distinct() else emptyList()
+        return UpgradeNews(doneNotice(done, waits), reload)
     }
 
     // A different account, or the app's view of the server going away.
@@ -218,8 +223,9 @@ private fun latest(list: List<Upgrade>): Map<String, Upgrade> =
     }
 
 // The one line for songs just done, in the order the listener most wants
-// to hear it: what landed, what was not found, then what went wrong.
-internal fun doneNotice(done: List<Upgrade>, startsWaiting: Boolean = false): String? {
+// to hear it: what landed, what was not found, then what went wrong, and
+// last what a wait that just began is waiting for (`waits`).
+internal fun doneNotice(done: List<Upgrade>, waits: List<String> = emptyList()): String? {
     fun of(stage: UpgradeStage) = done.filter { it.stage == stage }
     val upgraded = of(UpgradeStage.Upgraded)
     val missing = of(UpgradeStage.NotFound)
@@ -240,7 +246,7 @@ internal fun doneNotice(done: List<Upgrade>, startsWaiting: Boolean = false): St
             else -> add("Skipped ${songsText(skipped.size)}: ${why(skipped[0])}")
         }
         if (rehearsed.isNotEmpty()) add("The server only rehearsed, so nothing changed")
-        if (startsWaiting) add(WAITING_FOR_SOULSEEK)
+        addAll(waits)
     }
     return parts.joinToString(". ").ifEmpty { null }
 }

@@ -1,9 +1,11 @@
 package app.winters.octo.ui.admin
 
+import app.winters.octo.admin.AdminStatus
 import app.winters.octo.admin.DownloadRecord
 import app.winters.octo.admin.Health
 import app.winters.octo.admin.LibraryStatus
 import app.winters.octo.admin.RadioLearning
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -92,7 +94,31 @@ class AdminFormatTest {
         assertEquals("Soulseek", serviceName("slskd"))
         assertEquals("Streaming helper", serviceName("ytDlpShim"))
         assertEquals("Last.fm", serviceName("lastfm"))
+        assertEquals("Mornye (SpotiFLAC)", serviceName("mornye"))
+        assertEquals("octo-sonic", serviceName("sonic"))
         assertEquals("somethingNew", serviceName("somethingNew"))
+    }
+
+    @Test
+    fun onlyMornyesPassLeadsToItsCard() {
+        val paused = Health(ok = true, detail = "Check paused; next try 14:05 UTC", warning = true, action = "pass")
+        assertEquals("spotiflac", dashboardSection("mornye", paused))
+        // No action, one this app does not know, or one on another row: nothing to open.
+        assertNull(dashboardSection("mornye", paused.copy(action = null)))
+        assertNull(dashboardSection("mornye", paused.copy(action = "restart")))
+        assertNull(dashboardSection("slskd", paused))
+        assertEquals("Pass on the dashboard", PASS_ON_DASHBOARD)
+    }
+
+    @Test
+    fun readsAServicesAction() {
+        val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; explicitNulls = false }
+        val status = json.decodeFromString(
+            AdminStatus.serializer(),
+            """{"octo":{"ok":true},"services":{"mornye":{"ok":true,"detail":"Check paused","warning":true,"configured":true,"action":"pass"},"slskd":{"ok":true,"detail":"Connected"}}}""",
+        )
+        assertEquals("pass", status.services.getValue("mornye").action)
+        assertNull(status.services.getValue("slskd").action)
     }
 
     @Test

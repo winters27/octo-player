@@ -189,6 +189,16 @@ private func held(_ key: String, keepAnyway: Bool = true) -> Acquisition {
         #expect(rows[0].logKey == nil)
     }
 
+    @Test func aWaitingUpgradeSaysTheServersOwnWordsForItsWait() {
+        let mornye = "Waiting for Mornye's check, which it could not pass for example-ext; it allows its next try at 14:05 UTC."
+        let rows = drawerRows([], [upgrade("nd-1", "waiting", detail: mornye), upgrade("nd-2", "waiting", detail: "  ")], now: now)
+        let held = rows.first { $0.key == "upgrade:nd-1" }
+        #expect(held?.phase == .waiting)
+        #expect(held?.status == "Waiting for Mornye's check, which it could not pass for example-ext; it allows its next try at 14:05 UTC")
+        // Blank words are no words: the old line stays.
+        #expect(rows.first { $0.key == "upgrade:nd-2" }?.status == "Waiting for Soulseek")
+    }
+
     @Test func aClearedRowStaysHidden() {
         #expect(drawerRows([download("s:a", "done")], [upgrade("nd-2", "notFound")], now: now, hidden: ["upgrade:nd-2", "s:a"]).isEmpty)
     }

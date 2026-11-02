@@ -97,7 +97,26 @@ import Testing
         #expect(serviceName("slskd") == "Soulseek")
         #expect(serviceName("ytDlpShim") == "Streaming helper")
         #expect(serviceName("lastfm") == "Last.fm")
+        #expect(serviceName("mornye") == "Mornye (SpotiFLAC)")
+        #expect(serviceName("sonic") == "octo-sonic")
         #expect(serviceName("somethingNew") == "somethingNew")
+    }
+
+    @Test func onlyMornyesPassLeadsToItsCard() throws {
+        let body = #"{"octo":{"ok":true},"services":{"mornye":{"ok":true,"detail":"Check paused","warning":true,"configured":true,"action":"pass"},"slskd":{"ok":true,"detail":"Connected"}}}"#
+        let status = try AdminStatus.read(Data(body.utf8))
+        let mornye = status.services[0].health
+        #expect(mornye.action == "pass")
+        #expect(status.services[1].health.action == nil)
+        #expect(dashboardSection("mornye", mornye) == "spotiflac")
+        // No action, one this app does not know, or one on another row: nothing to open.
+        #expect(dashboardSection("slskd", status.services[1].health) == nil)
+        #expect(dashboardSection("mornye", AdminHealth(ok: true, warning: true, action: "restart")) == nil)
+        #expect(dashboardSection("slskd", mornye) == nil)
+        #expect(passOnDashboardText == "Pass on the dashboard")
+        let base = URL(string: "http://192.168.50.21:5274/")!
+        #expect(OctoAdmin.pageUrl(base, section: "spotiflac")?.absoluteString == "http://192.168.50.21:5274/admin/#spotiflac")
+        #expect(OctoAdmin.pageUrl(base)?.absoluteString == "http://192.168.50.21:5274/admin/")
     }
 
     @Test func refreshErrorsStayReadable() {
@@ -197,6 +216,7 @@ func adminRoutes(_ server: FakeServer, statusOk: Bool = true, refreshing: @escap
         #expect(radio?.query["t"] != nil)
         #expect(radio?.query["f"] == nil)
         #expect(model.pageUrl?.absoluteString == "https://\(server.host)/admin/")
+        #expect(model.cardUrl("spotiflac")?.absoluteString == "https://\(server.host)/admin/#spotiflac")
     }
 
     @Test func awayWhenNothingAnswers() async {
@@ -206,6 +226,7 @@ func adminRoutes(_ server: FakeServer, statusOk: Bool = true, refreshing: @escap
         model.open()
         #expect(await until("away") { model.place == .away })
         #expect(model.pageUrl == nil)
+        #expect(model.cardUrl("spotiflac") == nil)
         let notSignedIn = OctoAdminModel(admin: OctoAdmin(store: AdminStore()), signIn: { nil })
         notSignedIn.open()
         #expect(await until("away") { notSignedIn.place == .away })
