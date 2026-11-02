@@ -16,6 +16,9 @@ object AcquisitionKind {
 
     // The one copy someone picked from Find songs.
     const val PICK = "pick"
+
+    // A hearted album's own row, from octoAcquisitions 4 on.
+    const val ALBUM = "album"
 }
 
 // What one line of a download's log is about. A kind this app does not

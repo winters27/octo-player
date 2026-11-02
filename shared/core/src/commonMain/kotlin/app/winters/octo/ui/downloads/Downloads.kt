@@ -7,6 +7,7 @@ import app.winters.octo.subsonic.AcquisitionStage
 import app.winters.octo.subsonic.FoundCandidate
 import app.winters.octo.subsonic.FoundSongs
 import app.winters.octo.subsonic.LogKind
+import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.Upgrade
 import app.winters.octo.subsonic.UpgradeStage
 import java.time.Instant
@@ -29,8 +30,8 @@ const val FIND_SONGS = "Find songs"
 // drawer, as a finished download does.
 const val FINISHED_SHOWN_MS = 3 * 60 * 60_000L
 
-// What a row is for.
-enum class RowKind { Download, Upgrade, Pick }
+// What a row is for. An album is a hearted album's own row.
+enum class RowKind { Download, Upgrade, Pick, Album }
 
 // Where a row has got to, as the drawer draws it.
 enum class RowPhase {
@@ -74,6 +75,10 @@ data class DownloadRow(
     val findId: String?,
     // The id the download was asked for with, when it is one.
     val askedId: String? = null,
+    // Whether the server offers to keep this held download anyway, by
+    // `logKey`, and on an album's row how many of its tracks are held.
+    val keepAnyway: Boolean = false,
+    val heldTracks: Int? = null,
 ) {
     val finished: Boolean get() = phase.finished
 }
@@ -108,6 +113,7 @@ fun rowOf(acquisition: Acquisition, upgrade: Upgrade? = null): DownloadRow {
     val kind = when (acquisition.kind) {
         AcquisitionKind.UPGRADE -> RowKind.Upgrade
         AcquisitionKind.PICK -> RowKind.Pick
+        AcquisitionKind.ALBUM -> RowKind.Album
         else -> if (upgrade != null) RowKind.Upgrade else RowKind.Download
     }
     var phase = phaseOf(acquisition.stage)
@@ -142,6 +148,8 @@ fun rowOf(acquisition: Acquisition, upgrade: Upgrade? = null): DownloadRow {
         logKey = acquisition.key,
         findId = upgrade?.id ?: acquisition.libraryId ?: acquisition.id.takeIf(String::isNotBlank),
         askedId = acquisition.id.takeIf(String::isNotBlank),
+        keepAnyway = acquisition.keepAnyway && acquisition.key != null,
+        heldTracks = acquisition.heldTracks,
     )
 }
 
@@ -203,22 +211,85 @@ fun statusOf(acquisition: Acquisition): String = when (acquisition.stage) {
     AcquisitionStage.Failed -> acquisition.error?.let(::sentence) ?: "Could not get it"
 }
 
+// A held download's own way out, as a quiet button under its row's words
+// and in its log's header: keeps the version the person heard, or an
+// album's held tracks, though Octo could not prove them. An album holding
+// two tracks or more says "these".
+const val KEEP_ANYWAY = "Keep anyway"
+const val KEEP_THESE_ANYWAY = "Keep these anyway"
+
+// What a row's Keep anyway says when the server could not be asked.
+const val KEEP_ANYWAY_UNREACHABLE = "Could not reach the server"
+
+// The words on a Keep anyway button for a download holding `heldTracks`
+// tracks: none for a song.
+fun keepAnywayWords(heldTracks: Int?): String = if ((heldTracks ?: 0) >= 2) KEEP_THESE_ANYWAY else KEEP_ANYWAY
+
+// The words on a row's Keep anyway button, or null when the row offers none.
+fun keepAnywayLabel(row: DownloadRow): String? = if (row.keepAnyway && row.logKey != null) keepAnywayWords(row.heldTracks) else null
+
+// What a row's Keep anyway says when the call failed: the server's own words
+// when it gave a reason, otherwise that it could not be asked.
+fun keepAnywayError(e: SubsonicException): String = when (e) {
+    is SubsonicException.Unreachable, is SubsonicException.NotSubsonic -> KEEP_ANYWAY_UNREACHABLE
+    else -> e.message?.let(::sentence) ?: KEEP_ANYWAY_UNREACHABLE
+}
+
+// Whether a held download waits for the person rather than for Octo or a
+// service it asked: it offers Keep anyway, it is an album holding tracks
+// until they are played or kept, or its line asks for a play. Nothing runs
+// until the person acts, so it is drawn still, with no spinner.
+fun waitsForYou(row: DownloadRow): Boolean =
+    row.phase == RowPhase.Searching &&
+        (row.keepAnyway || (row.heldTracks ?: 0) > 0 || ASKS_THE_PERSON.any { row.status.endsWith(it) })
+
+// How the server's lines that ask the person to play or keep end.
+private val ASKS_THE_PERSON = listOf("so Octo can keep the version you hear", "or keep them anyway", "or keep it anyway")
+
+// The song Find songs looks for from a download's log, or null: an album's
+// row is no one song. A server older than the album kind marks an album's
+// row only while it holds tracks.
+fun logFindId(row: DownloadRow): String? = row.findId.takeIf { row.kind != RowKind.Album && row.heldTracks == null }
+
 // "What it is for", as a small word beside the title, or null for a plain
 // download.
 fun kindLabel(kind: RowKind): String? = when (kind) {
-    RowKind.Download -> null
+    RowKind.Download, RowKind.Album -> null
     RowKind.Upgrade -> "Higher quality"
     RowKind.Pick -> "Picked"
 }
 
-// The line over the list: "2 on the way, 5 finished".
-fun drawerSummary(rows: List<DownloadRow>): String {
-    val running = runningCount(rows)
-    val finished = rows.size - running
-    return listOfNotNull(
-        running.takeIf { it > 0 }?.let { "$it on the way" },
-        finished.takeIf { it > 0 }?.let { "$it finished" },
-    ).joinToString(", ")
+// How many rows Octo is working on: open, and not waiting for the person.
+fun onTheWayCount(rows: List<DownloadRow>): Int = rows.count { !it.finished && !waitsForYou(it) }
+
+// How many rows wait for the person (waitsForYou).
+fun waitingCount(rows: List<DownloadRow>): Int = rows.count(::waitsForYou)
+
+// "1 waits for you", "2 wait for you".
+fun waitsForYouWords(count: Int): String = if (count == 1) "1 waits for you" else "$count wait for you"
+
+// What the drawer's way in says beside its name: "2 on the way, 1 waits
+// for you", or null when neither.
+fun drawerState(rows: List<DownloadRow>): String? = listOfNotNull(
+    onTheWayCount(rows).takeIf { it > 0 }?.let { "$it on the way" },
+    waitingCount(rows).takeIf { it > 0 }?.let(::waitsForYouWords),
+).joinToString(", ").ifEmpty { null }
+
+// The line over the list: "2 on the way, 1 waits for you, 5 finished".
+fun drawerSummary(rows: List<DownloadRow>): String = listOfNotNull(
+    drawerState(rows),
+    rows.count { it.finished }.takeIf { it > 0 }?.let { "$it finished" },
+).joinToString(", ")
+
+// What the drawer's way in draws beside its name: a ring while a row is on
+// its way, the accent dot that says something needs you when only rows
+// waiting for the person are left, or nothing.
+enum class DrawerMark { None, Ring, Waits }
+
+fun drawerMark(rows: List<DownloadRow>): DrawerMark = when {
+    onTheWayCount(rows) > 0 -> DrawerMark.Ring
+    waitingCount(rows) > 0 -> DrawerMark.Waits
+    else -> DrawerMark.None
 }
 
 // What the drawer says with nothing in it.
@@ -253,7 +324,8 @@ fun ownedCopyText(quality: String?, size: Long?, locale: Locale = Locale.getDefa
     return if (what.isEmpty()) null else "Your copy: ${what.joinToString(", ")}"
 }
 
-// How many rows are still running, for the drawer's button.
+// How many rows are still open, on their way or waiting for the person:
+// the list is asked for more often while any is.
 fun runningCount(rows: List<DownloadRow>): Int = rows.count { !it.finished }
 
 // The overall progress the drawer's button shows: the mean of the rows
@@ -265,11 +337,11 @@ fun overallFraction(rows: List<DownloadRow>): Float? =
 // The pill
 // ---------------------------------------------------------------------------
 
-// The running row the pill speaks for: the one furthest along, and of
+// The row on its way the pill speaks for: the one furthest along, and of
 // those the one that started first, so the pill does not hop between two
-// songs at the same step.
+// songs at the same step. A row waiting for the person is not on its way.
 fun pillLead(rows: List<DownloadRow>): DownloadRow? =
-    rows.filter { !it.finished }
+    rows.filter { !it.finished && !waitsForYou(it) }
         .sortedWith(compareByDescending<DownloadRow> { it.phase.ordinal }.thenBy { it.startedAt.orEmpty() })
         .firstOrNull()
 
@@ -318,11 +390,11 @@ fun stillAskedForMs(ask: AskedSong, listedSince: Long?, now: Long): Long? =
     if (!stillAsked(ask, listedSince, now)) null
     else ask.askedAt + (if (ask.album) ASKED_ALBUM_UNLISTED_MS else ASKED_UNLISTED_MS) - now
 
-// How many songs the pill counts: the drawer's running rows, and songs
-// asked for here that no list shows but that are still taken as on their
-// way (stillAsked).
+// How many songs the pill counts: the drawer's rows on their way, and
+// songs asked for here that no list shows but that are still taken as on
+// their way (stillAsked).
 fun pillCount(rows: List<DownloadRow>, asked: List<AskedSong>, listedSince: Long?, now: Long): Int =
-    runningCount(rows) + unlisted(rows, asked, listedSince, now).size
+    onTheWayCount(rows) + unlisted(rows, asked, listedSince, now).size
 
 // How long until pillCount may change with no new list or ask: when the
 // first ask it counts runs out, or null when it counts none.
@@ -339,7 +411,7 @@ private fun unlisted(rows: List<DownloadRow>, asked: List<AskedSong>, listedSinc
 // What the pill says aloud: "Downloading 42%, Da Funk. 2 more on the way".
 fun pillSpoken(rows: List<DownloadRow>): String {
     val lead = pillLead(rows) ?: return ""
-    val more = runningCount(rows) - 1
+    val more = onTheWayCount(rows) - 1
     return "${stepWords(lead)}, ${lead.title}" + if (more > 0) ". $more more on the way" else ""
 }
 
@@ -356,15 +428,22 @@ enum class DownloadStep(val label: String) {
 }
 
 // Where a row is on those steps: the step it is on, or DownloadStep.entries.size
-// once it is in. A failed row stops on the step its log last reached.
+// once it is in. A failed row stops on the step its log last reached, and a
+// searching one waits on it: a held download's file was already fetched and
+// checked, while a search begun again is back on Find.
 fun stepOf(row: DownloadRow, events: List<AcquisitionEvent> = emptyList()): Int = when (row.phase) {
-    RowPhase.Waiting, RowPhase.Searching -> DownloadStep.Find.ordinal
+    RowPhase.Waiting -> DownloadStep.Find.ordinal
+    RowPhase.Searching -> lastStep(events) ?: DownloadStep.Find.ordinal
     RowPhase.Downloading -> DownloadStep.Download.ordinal
     RowPhase.Checking -> DownloadStep.Check.ordinal
     RowPhase.Adding -> DownloadStep.Add.ordinal
     RowPhase.Done -> DownloadStep.entries.size
-    RowPhase.Failed -> events.lastOrNull { markOf(it.logKind) !in AFTERWORDS }?.let { stepOfMark(markOf(it.logKind)) } ?: DownloadStep.Find.ordinal
+    RowPhase.Failed -> lastStep(events) ?: DownloadStep.Find.ordinal
 }
+
+// The step of a log's last line that says which step it reached, or null.
+private fun lastStep(events: List<AcquisitionEvent>): Int? =
+    events.lastOrNull { markOf(it.logKind) !in AFTERWORDS }?.let { stepOfMark(markOf(it.logKind)) }
 
 // The step a log line belongs to.
 fun stepOfMark(mark: LogMark): Int = when (mark) {

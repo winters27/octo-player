@@ -40,12 +40,16 @@ final class ServerDownloads {
         self.session = session
         self.router = router
         let client: @Sendable () async -> SubsonicClient? = { await MainActor.run { session.client } }
+        let keepsAnyway: @Sendable () async -> Bool = {
+            await MainActor.run { session.profile?.lists(octoAcquisitions, version: octoKeepAnywayVersion) ?? false }
+        }
         watch = DownloadsWatch(source: ClientDownloads(client: client, upgradesListed: {
             await MainActor.run { session.profile?.lists(octoLibraryActions, version: 2) ?? false }
-        }))
+        }, keepsAnyway: keepsAnyway))
         logWatch = DownloadLogWatch(load: { key in
             guard let client = await client() else { throw OctoError.notFound("Not signed in") }
-            return try await client.acquisition(key: key)
+            let keeps = await keepsAnyway()
+            return try await client.acquisition(key: key, keepsAnyway: keeps)
         })
         findWatch = FindSongsWatch(source: ClientFind(client: client))
         watch.upgradesRead = { [weak self] upgrades in
@@ -189,6 +193,12 @@ final class ServerDownloads {
 
     func clear(_ key: String? = nil) { Task { await watch.clear(key) } }
 
+    /// Keeps a held download anyway, by its log key, from its row or its open log; both show how it
+    /// went.
+    func keepAnyway(_ key: String) {
+        Task { await watch.keepAnyway(key) { await self.logWatch.readAgain(key) } }
+    }
+
     private func picked(_ search: String, _ result: PickResult) {
         guard result.queued else { return }
         watch.wake()
@@ -232,8 +242,14 @@ final class ServerDownloads {
 private struct ClientDownloads: DownloadsSource {
     let client: @Sendable () async -> SubsonicClient?
     let upgradesListed: @Sendable () async -> Bool
+    /// Whether the server lists octoAcquisitions at `octoKeepAnywayVersion`.
+    let keepsAnyway: @Sendable () async -> Bool
 
-    func acquisitions() async throws -> [Acquisition] { try await client()?.acquisitions() ?? [] }
+    func acquisitions() async throws -> [Acquisition] {
+        guard let client = await client() else { return [] }
+        let keeps = await keepsAnyway()
+        return try await client.acquisitions(keepsAnyway: keeps)
+    }
 
     func upgrades() async throws -> [Upgrade] {
         guard await upgradesListed(), let client = await client() else { return [] }
@@ -241,6 +257,11 @@ private struct ClientDownloads: DownloadsSource {
     }
 
     func clear(_ key: String?) async throws { try await client()?.clearAcquisitions(key: key) }
+
+    func keepAnyway(_ key: String) async throws {
+        guard let client = await client() else { throw OctoError.notFound("Not signed in") }
+        try await client.keepAcquisitionAnyway(key: key)
+    }
 }
 
 /// Find songs' three calls, from the signed-in client.

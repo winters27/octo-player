@@ -5,12 +5,17 @@ import kotlinx.serialization.Serializable
 // The OpenSubsonic extension an Octo server lists when it can say how the
 // downloads it was asked for are going. Version 2 adds each download's log,
 // clearing finished ones, and Find songs. Version 3 lets a picked copy that
-// is not better than the library's ask first and replace it anyway.
+// is not better than the library's ask first and replace it anyway. Version
+// 4 marks the held downloads a person may keep anyway.
 const val OCTO_ACQUISITIONS = "octoAcquisitions"
 
 // The version of octoAcquisitions whose pickFoundSong takes `anyway` and may
 // answer PICK_CONFIRM with the question to ask.
 const val OCTO_REPLACE_ANYWAY_VERSION = 3
+
+// The version of octoAcquisitions whose rows carry `keepAnyway` and
+// `heldTracks`, and which takes keepAcquisitionAnyway.
+const val OCTO_KEEP_ANYWAY_VERSION = 4
 
 // Where one download on the server has got to.
 enum class AcquisitionStage(val wire: String) {
@@ -71,8 +76,21 @@ data class Acquisition(
     val logLines: Int = 0,
     // The log, oldest first; only getAcquisition sends it.
     val event: List<AcquisitionEvent> = emptyList(),
+    // From version 4 on: the download is held, and the person may keep it
+    // anyway with keepAcquisitionAnyway and `key`. Read only as `listedBy`
+    // leaves it, so an older server's never counts.
+    val keepAnyway: Boolean = false,
+    // From version 4 on, on an album's row: how many of its tracks are held.
+    // Read only as `listedBy` leaves it.
+    val heldTracks: Int? = null,
 ) {
     val stage: AcquisitionStage get() = AcquisitionStage.of(state)
+
+    // The row as a server means it: `keepAnyway` and `heldTracks` only from
+    // one that lists octoAcquisitions at OCTO_KEEP_ANYWAY_VERSION
+    // (`keepsAnyway`).
+    fun listedBy(keepsAnyway: Boolean): Acquisition =
+        if (keepsAnyway || (!keepAnyway && heldTracks == null)) this else copy(keepAnyway = false, heldTracks = null)
 
     // How far along, kept between 0 and 1, or null when unknown.
     val fraction: Float?

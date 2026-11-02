@@ -13,6 +13,7 @@ import app.winters.octo.subsonic.FoundCandidate
 import app.winters.octo.subsonic.FoundSongs
 import app.winters.octo.subsonic.OCTO_ACQUISITIONS
 import app.winters.octo.subsonic.OCTO_DOWNLOAD_LOG_VERSION
+import app.winters.octo.subsonic.OCTO_KEEP_ANYWAY_VERSION
 import app.winters.octo.subsonic.OCTO_LIBRARY_ACTIONS
 import app.winters.octo.subsonic.OCTO_REPLACE_ANYWAY_VERSION
 import app.winters.octo.subsonic.PickResult
@@ -24,6 +25,7 @@ import app.winters.octo.ui.downloads.DownloadsSource
 import app.winters.octo.ui.downloads.DownloadsWatch
 import app.winters.octo.ui.downloads.FindSongsWatch
 import app.winters.octo.ui.downloads.FindSource
+import app.winters.octo.ui.downloads.Keeping
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.downloads.PickQuestion
 import app.winters.octo.ui.downloads.ReplaceEnd
@@ -96,7 +98,10 @@ class ServerDownloads @Inject constructor(
 
     private val watch = DownloadsWatch(
         object : DownloadsSource {
-            override suspend fun acquisitions(): List<Acquisition> = client()?.acquisitions() ?: emptyList()
+            override suspend fun acquisitions(): List<Acquisition> {
+                val session = session() ?: return emptyList()
+                return session.client.acquisitions(keepsAnyway = KEEPS_ANYWAY in session.extensions)
+            }
 
             override suspend fun upgrades(): List<Upgrade> {
                 val session = session() ?: return emptyList()
@@ -106,11 +111,18 @@ class ServerDownloads @Inject constructor(
             override suspend fun clear(key: String?) {
                 client()?.clearAcquisitions(key)
             }
+
+            override suspend fun keepAnyway(key: String) {
+                client()?.keepAcquisitionAnyway(key) ?: throw SubsonicException.NotFound("Not signed in")
+            }
         },
         scope,
     )
 
-    private val logWatch = DownloadLogWatch({ key -> client()?.acquisition(key) ?: throw SubsonicException.NotFound("Not signed in") }, scope)
+    private val logWatch = DownloadLogWatch({ key ->
+        val session = session() ?: throw SubsonicException.NotFound("Not signed in")
+        session.client.acquisition(key, keepsAnyway = KEEPS_ANYWAY in session.extensions)
+    }, scope)
 
     private val findWatch = FindSongsWatch(
         object : FindSource {
@@ -125,6 +137,7 @@ class ServerDownloads @Inject constructor(
     )
 
     val rows: StateFlow<List<DownloadRow>> get() = watch.rows
+    val keeping: StateFlow<Map<String, Keeping>> get() = watch.keeping
     val loaded: StateFlow<Boolean> get() = watch.loaded
     val listedSince: StateFlow<Long?> get() = watch.listedSince
     val log: StateFlow<Acquisition?> get() = logWatch.row
@@ -300,6 +313,12 @@ class ServerDownloads @Inject constructor(
         scope.launch { watch.clear(key) }
     }
 
+    // Keeps a held download anyway, by its log key, from its row or its
+    // open log; both show how it went.
+    fun keepAnyway(key: String) {
+        scope.launch { watch.keepAnyway(key) { logWatch.readAgain(key) } }
+    }
+
     // Whether any of the app's screens is in front: the list is asked for
     // only at the slow pace while none is, and an open log not at all.
     private inner class ForegroundCallbacks : Application.ActivityLifecycleCallbacks {
@@ -328,3 +347,7 @@ class ServerDownloads @Inject constructor(
         override fun onActivityDestroyed(activity: Activity) = Unit
     }
 }
+
+// How a server lists octoAcquisitions when its held downloads may be kept
+// anyway.
+private val KEEPS_ANYWAY = "$OCTO_ACQUISITIONS:$OCTO_KEEP_ANYWAY_VERSION"

@@ -39,6 +39,20 @@ public protocol DownloadsSource: Sendable {
     func upgrades() async throws -> [Upgrade]
     /// Takes finished downloads off the list on the server, or one by key.
     func clear(_ key: String?) async throws
+    /// Keeps the held download with this key anyway, or throws with the server's reason.
+    func keepAnyway(_ key: String) async throws
+}
+
+/// A row's Keep anyway once tapped: `sending` until the server answered and the list was asked for
+/// again, then the server's words if it said no.
+public struct Keeping: Sendable, Equatable {
+    public var sending = false
+    public var error: String?
+
+    public init(sending: Bool = false, error: String? = nil) {
+        self.sending = sending
+        self.error = error
+    }
 }
 
 /// Follows the sheet's rows for one server, for as long as it is started.
@@ -54,6 +68,9 @@ public final class DownloadsWatch {
     /// When the newest list that came back was asked for, or nil before any did: songs asked for
     /// before then are on it if they are on their way.
     public private(set) var listedSince: Int64?
+    /// Each tapped Keep anyway by its row's log key, while it is sent and after the server said no.
+    /// A refusal stays until the row is tapped again or no longer offers Keep anyway.
+    public private(set) var keeping: [String: Keeping] = [:]
 
     /// Whether the sheet is open: it is then asked for every two seconds.
     public var open = false {
@@ -74,6 +91,10 @@ public final class DownloadsWatch {
     @ObservationIgnored private var lastUpgrades: [Upgrade] = []
     /// Rows cleared here that the server still lists: upgrades, which it keeps a week.
     @ObservationIgnored private var hidden = Set<String>()
+    /// The looks at the server begun, and the newest whose answer came back, so an older answer
+    /// never lands after a newer one.
+    @ObservationIgnored private var looksBegun = 0
+    @ObservationIgnored private var looksShown = 0
 
     public init(source: DownloadsSource, clock: @escaping @Sendable () -> Int64 = { msSince1970() }, sleep: @escaping Sleeper = realSleep) {
         self.source = source
@@ -109,6 +130,8 @@ public final class DownloadsWatch {
         listedSince = nil
         rows = []
         upgrades = []
+        keeping = [:]
+        looksShown = looksBegun
     }
 
     /// Asks again now, as after a song was asked for.
@@ -120,12 +143,19 @@ public final class DownloadsWatch {
         return downloadsIdlePollMs
     }
 
-    /// One look at the server. A moment without the server changes nothing.
+    /// One look at the server. A moment without the server changes nothing, and an answer older
+    /// than one already shown is let go.
     public func poll() async {
         let askedAt = clock()
+        looksBegun += 1
+        let look = looksBegun
         do {
-            lastAcquisitions = try await source.acquisitions()
-            if let fresh = try? await source.upgrades() { lastUpgrades = fresh }
+            let acquisitions = try await source.acquisitions()
+            let fresh = try? await source.upgrades()
+            guard look > looksShown else { return }
+            looksShown = look
+            lastAcquisitions = acquisitions
+            if let fresh { lastUpgrades = fresh }
             loaded = true
             if upgrades != lastUpgrades { upgrades = lastUpgrades }
             show()
@@ -139,6 +169,36 @@ public final class DownloadsWatch {
     private func show() {
         let next = drawerRows(lastAcquisitions, lastUpgrades, now: clock(), hidden: hidden)
         if next != rows { rows = next }
+        let kept = keeping.filter { $0.value.sending || stillOffered($0.key) }
+        if kept != keeping { keeping = kept }
+    }
+
+    /// Whether a refusal for `key` still has a button to sit under: its row offers Keep anyway, or
+    /// the list does not show it and only its log can.
+    private func stillOffered(_ key: String) -> Bool {
+        guard let row = rows.first(where: { $0.logKey == key }) else { return true }
+        return keepAnywayLabel(row) != nil
+    }
+
+    /// Sends Keep anyway for a download, by its log key, then asks for the list again, and does
+    /// `also` (reading an open log again), so the row and the log show what came of it before the
+    /// button comes back. A second tap while one is out sends nothing.
+    public func keepAnyway(_ key: String, also: () async -> Void = {}) async {
+        if keeping[key]?.sending == true { return }
+        keeping[key] = Keeping(sending: true)
+        var refusal: String?
+        do {
+            try await source.keepAnyway(key)
+        } catch {
+            refusal = keepAnywayError(error)
+        }
+        await poll()
+        await also()
+        if let refusal, stillOffered(key) {
+            keeping[key] = Keeping(error: refusal)
+        } else {
+            keeping[key] = nil
+        }
     }
 
     /// The key of the newest download of a song by the id it was asked for with, so a song's own
@@ -192,6 +252,12 @@ public final class DownloadLogWatch {
     @ObservationIgnored private var round = 0
     /// Whether the log is still being asked for.
     @ObservationIgnored public private(set) var following = false
+    /// The download followed, or nil once the log closes.
+    @ObservationIgnored private var followed: String?
+    /// The reads begun, and the newest whose answer was shown, so an older answer never lands after
+    /// a newer one.
+    @ObservationIgnored private var readsBegun = 0
+    @ObservationIgnored private var readsShown = 0
 
     public init(load: @escaping @Sendable (String) async throws -> Acquisition, pollMs: Int64 = logPollMs, graceMs: Int64 = logFinishedGraceMs,
                 clock: @escaping @Sendable () -> Int64 = { msSince1970() }, sleep: @escaping Sleeper = realSleep) {
@@ -210,6 +276,8 @@ public final class DownloadLogWatch {
         row = nil
         problem = nil
         following = true
+        followed = key
+        readsShown = readsBegun
         round += 1
         let mine = round
         task = Task { [weak self] in
@@ -221,9 +289,14 @@ public final class DownloadLogWatch {
                 while !self.foreground && !Task.isCancelled { await self.front.wait(ms: 60_000) }
                 if Task.isCancelled { return }
                 do {
+                    self.readsBegun += 1
+                    let read = self.readsBegun
                     let now = try await self.load(key)
                     if Task.isCancelled { return }
-                    self.row = now
+                    if read > self.readsShown {
+                        self.readsShown = read
+                        self.row = now
+                    }
                     self.problem = nil
                     if now.stage == .done || now.stage == .failed {
                         let age = serverAgeMs(now.updatedAt, now: self.clock()) ?? 0
@@ -245,6 +318,19 @@ public final class DownloadLogWatch {
 
     private func ended(_ which: Int) { if which == round { following = false } }
 
+    /// Reads the download again now when it is the one followed, as after an action on it, so the
+    /// log shows what came of it at once. A read that fails changes nothing; the log's own reads
+    /// say what is wrong.
+    public func readAgain(_ key: String) async {
+        guard followed == key else { return }
+        readsBegun += 1
+        let read = readsBegun
+        guard let now = try? await load(key), followed == key, read > readsShown else { return }
+        readsShown = read
+        row = now
+        problem = nil
+    }
+
     /// Waits for the log to stop being asked for, for tests.
     public func settle() async { await task?.value }
 
@@ -252,6 +338,8 @@ public final class DownloadLogWatch {
         task?.cancel()
         task = nil
         following = false
+        followed = nil
+        readsShown = readsBegun
         row = nil
         problem = nil
         front.signal()

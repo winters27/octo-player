@@ -48,6 +48,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.awtRole
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.TextStyle
 import javax.accessibility.AccessibleRole
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -208,9 +209,18 @@ fun GlazeRound(
 }
 
 // A quiet action in words: accent text that lifts under the pointer, with
-// no border and no fill.
+// no border and no fill. `style` sets it in the words beside it instead, as
+// under a list row's own lines.
 @Composable
-fun TextAction(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, icon: ImageVector? = null, checked: Boolean? = null) {
+fun TextAction(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    icon: ImageVector? = null,
+    checked: Boolean? = null,
+    style: TextStyle = OctoType.label,
+) {
     // With `checked` it is a switch, in white while on.
     val press = if (checked == null) {
         Modifier.clickable(interactionSource = null, indication = FocusRing(CircleShape), enabled = enabled, role = Role.Button, onClick = onClick)
@@ -229,7 +239,7 @@ fun TextAction(text: String, onClick: () -> Unit, modifier: Modifier = Modifier,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (icon != null) Glyph(icon, size = 16.dp, tint = tint)
-        Txt(text, OctoType.label, tint)
+        Txt(text, style, tint)
     }
 }
 

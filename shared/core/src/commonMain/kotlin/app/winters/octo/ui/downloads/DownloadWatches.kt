@@ -14,8 +14,12 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.getAndUpdate
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 
 // How often the drawer's list is asked for: while it is open, while
@@ -44,7 +48,15 @@ interface DownloadsSource {
 
     // Takes finished downloads off the list on the server, or one by key.
     suspend fun clear(key: String?)
+
+    // Keeps the held download with this key anyway, or throws with the
+    // server's reason.
+    suspend fun keepAnyway(key: String)
 }
+
+// A row's Keep anyway once tapped: `sending` until the server answered and
+// the list was asked for again, then the server's words if it said no.
+data class Keeping(val sending: Boolean = false, val error: String? = null)
 
 // Follows the drawer's rows for one server, for as long as it is started.
 // Not tied to any thread: the rows are a StateFlow and every change goes
@@ -82,6 +94,17 @@ class DownloadsWatch(
     // Rows cleared here that the server still lists: upgrades, which it
     // keeps a week for the apps to read.
     private val hidden = HashSet<String>()
+
+    private val _keeping = MutableStateFlow<Map<String, Keeping>>(emptyMap())
+
+    // Each tapped Keep anyway by its row's log key, while it is sent and
+    // after the server said no. A refusal stays until the row is tapped
+    // again or no longer offers Keep anyway.
+    val keeping: StateFlow<Map<String, Keeping>> = _keeping
+
+    // One look at the server at a time, so an older answer never lands
+    // after a newer one.
+    private val looking = Mutex()
 
     // Whether the drawer is open: it is then asked for every two seconds.
     @Volatile
@@ -121,6 +144,7 @@ class DownloadsWatch(
         _listedSince.value = null
         _rows.value = emptyList()
         _upgrades.value = emptyList()
+        _keeping.value = emptyMap()
     }
 
     // Asks again now, as after a song was asked for.
@@ -136,6 +160,10 @@ class DownloadsWatch(
 
     // One look at the server.
     suspend fun poll() {
+        looking.withLock { look() }
+    }
+
+    private suspend fun look() {
         val askedAt = clock()
         try {
             lastAcquisitions = source.acquisitions()
@@ -154,7 +182,36 @@ class DownloadsWatch(
     }
 
     private fun show() {
-        _rows.value = synchronized(hidden) { drawerRows(lastAcquisitions, lastUpgrades, clock(), hidden.toSet()) }
+        val rows = synchronized(hidden) { drawerRows(lastAcquisitions, lastUpgrades, clock(), hidden.toSet()) }
+        _rows.value = rows
+        _keeping.update { now -> now.filter { (key, state) -> state.sending || stillOffered(rows, key) } }
+    }
+
+    // Whether a refusal for `key` still has a button to sit under: its row
+    // offers Keep anyway, or the list does not show it and only its log can.
+    private fun stillOffered(rows: List<DownloadRow>, key: String): Boolean {
+        val row = rows.firstOrNull { it.logKey == key } ?: return true
+        return keepAnywayLabel(row) != null
+    }
+
+    // Sends Keep anyway for a download, by its log key, then asks for the
+    // list again, and does `also` (reading an open log again), so the row
+    // and the log show what came of it before the button comes back. A
+    // second tap while one is out sends nothing.
+    suspend fun keepAnyway(key: String, also: suspend () -> Unit = {}) {
+        val before = _keeping.getAndUpdate { if (it[key]?.sending == true) it else it + (key to Keeping(sending = true)) }
+        if (before[key]?.sending == true) return
+        val error = try {
+            source.keepAnyway(key)
+            null
+        } catch (e: SubsonicException) {
+            keepAnywayError(e)
+        }
+        poll()
+        also()
+        _keeping.update { now ->
+            if (error != null && stillOffered(_rows.value, key)) now + (key to Keeping(error = error)) else now - key
+        }
     }
 
     // The key of the newest download of a song by the id it was asked for
@@ -208,6 +265,13 @@ class DownloadLogWatch(
 
     private var job: Job? = null
 
+    // The download followed, or null once the log closes.
+    @Volatile
+    private var followed: String? = null
+
+    // One read at a time, so an older answer never lands after a newer one.
+    private val reading = Mutex()
+
     // Whether the log is still being asked for.
     val following: Boolean get() = job?.isActive == true
 
@@ -217,14 +281,14 @@ class DownloadLogWatch(
         job?.cancel()
         _row.value = null
         _problem.value = null
+        followed = key
         job = scope.launch {
             // How long it has been seen finished here.
             var finishedFor = 0L
             while (isActive) {
                 front.first { it }
                 try {
-                    val now = load(key)
-                    _row.value = now
+                    val now = reading.withLock { load(key).also { _row.value = it } }
                     _problem.value = null
                     if (now.stage == AcquisitionStage.Done || now.stage == AcquisitionStage.Failed) {
                         val age = ageMs(now.updatedAt, clock()) ?: 0L
@@ -240,9 +304,28 @@ class DownloadLogWatch(
         }
     }
 
+    // Reads the download again now when it is the one followed, as after an
+    // action on it, so the log shows what came of it at once. A read that
+    // fails changes nothing; the log's own reads say what is wrong.
+    suspend fun readAgain(key: String) {
+        if (followed != key) return
+        try {
+            reading.withLock {
+                val now = load(key)
+                if (followed == key) {
+                    _row.value = now
+                    _problem.value = null
+                }
+            }
+        } catch (e: SubsonicException) {
+            // Kept as it was.
+        }
+    }
+
     fun close() {
         job?.cancel()
         job = null
+        followed = null
         _row.value = null
         _problem.value = null
     }

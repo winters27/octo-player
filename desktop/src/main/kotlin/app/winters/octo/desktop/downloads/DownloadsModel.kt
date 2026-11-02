@@ -9,6 +9,7 @@ import app.winters.octo.subsonic.FoundCandidate
 import app.winters.octo.subsonic.FoundSongs
 import app.winters.octo.subsonic.OCTO_ACQUISITIONS
 import app.winters.octo.subsonic.OCTO_DOWNLOAD_LOG_VERSION
+import app.winters.octo.subsonic.OCTO_KEEP_ANYWAY_VERSION
 import app.winters.octo.subsonic.OCTO_REPLACE_ANYWAY_VERSION
 import app.winters.octo.subsonic.PickResult
 import app.winters.octo.subsonic.SubsonicClient
@@ -19,6 +20,7 @@ import app.winters.octo.ui.downloads.DownloadsSource
 import app.winters.octo.ui.downloads.DownloadsWatch
 import app.winters.octo.ui.downloads.FindSongsWatch
 import app.winters.octo.ui.downloads.FindSource
+import app.winters.octo.ui.downloads.Keeping
 import app.winters.octo.ui.downloads.PickQuestion
 import app.winters.octo.ui.downloads.ReplaceEnd
 import app.winters.octo.ui.downloads.Replacements
@@ -66,7 +68,7 @@ class DownloadsModel(
 
     private val watch = DownloadsWatch(
         object : DownloadsSource {
-            override suspend fun acquisitions(): List<Acquisition> = client.acquisitions()
+            override suspend fun acquisitions(): List<Acquisition> = client.acquisitions(keepsAnyway)
 
             override suspend fun upgrades(): List<Upgrade> =
                 if (upgradesToo) client.upgrades() else emptyList()
@@ -74,11 +76,13 @@ class DownloadsModel(
             override suspend fun clear(key: String?) {
                 client.clearAcquisitions(key)
             }
+
+            override suspend fun keepAnyway(key: String) = client.keepAcquisitionAnyway(key)
         },
         scope,
     )
 
-    private val logWatch = DownloadLogWatch({ client.acquisition(it) }, scope)
+    private val logWatch = DownloadLogWatch({ client.acquisition(it, keepsAnyway) }, scope)
 
     private val findWatch = FindSongsWatch(
         object : FindSource {
@@ -96,6 +100,10 @@ class DownloadsModel(
     @Volatile
     private var upgradesToo = false
 
+    // Whether the server offers Keep anyway on held rows (octoAcquisitions 4).
+    @Volatile
+    private var keepsAnyway = false
+
     // Whether this server keeps a log of its downloads. Null until it said.
     var supported by mutableStateOf<Boolean?>(null)
         private set
@@ -104,6 +112,7 @@ class DownloadsModel(
         private set
 
     val rows: StateFlow<List<DownloadRow>> get() = watch.rows
+    val keeping: StateFlow<Map<String, Keeping>> get() = watch.keeping
     val loaded: StateFlow<Boolean> get() = watch.loaded
     val log: StateFlow<Acquisition?> get() = logWatch.row
     val logProblem: StateFlow<String?> get() = logWatch.problem
@@ -134,8 +143,10 @@ class DownloadsModel(
                 val logs = client.supportsIfKnown(OCTO_ACQUISITIONS, OCTO_DOWNLOAD_LOG_VERSION)
                 val upgrades = logs?.let { client.supportsIfKnown(OCTO_LIBRARY_ACTIONS, 2) }
                 val asks = if (logs == true && upgrades != null) client.supportsIfKnown(OCTO_ACQUISITIONS, OCTO_REPLACE_ANYWAY_VERSION) else false
-                if (logs != null && upgrades != null && asks != null) {
+                val keeps = if (logs == true && upgrades != null && asks != null) client.supportsIfKnown(OCTO_ACQUISITIONS, OCTO_KEEP_ANYWAY_VERSION) else false
+                if (logs != null && upgrades != null && asks != null && keeps != null) {
                     upgradesToo = upgrades
+                    keepsAnyway = keeps
                     findWatch.asksFirst = asks
                     asksFirst = asks
                     supported = logs
@@ -236,6 +247,12 @@ class DownloadsModel(
 
     fun clear(key: String? = null) {
         scope.launch { watch.clear(key) }
+    }
+
+    // Keeps a held download anyway, by its log key, from its row or its
+    // open log; both show how it went.
+    fun keepAnyway(key: String) {
+        scope.launch { watch.keepAnyway(key) { logWatch.readAgain(key) } }
     }
 
     // The server is left: nothing more is asked of it.

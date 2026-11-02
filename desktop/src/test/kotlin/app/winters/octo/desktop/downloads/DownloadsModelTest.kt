@@ -3,8 +3,13 @@ package app.winters.octo.desktop.downloads
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.health.FixStep
 import app.winters.octo.ui.downloads.AskKind
+import app.winters.octo.subsonic.AcquisitionStage
+import app.winters.octo.ui.downloads.KEEP_THESE_ANYWAY
 import app.winters.octo.ui.downloads.ReplaceEnd
+import app.winters.octo.ui.downloads.RowPhase
 import app.winters.octo.ui.downloads.compareLines
+import app.winters.octo.ui.downloads.keepAnywayLabel
+import app.winters.octo.ui.downloads.rowOf
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -277,6 +282,135 @@ class DownloadsModelTest {
         assertEquals("Only the first pick was sent", 1, picks().size)
         assertEquals(DrawerView.Find("nd-1", "Holocene"), model.view)
         assertEquals(1, model.found.value!!.candidate.size)
+        model.close()
+    }
+
+    // A held song the server offers to keep anyway; once kept, the list
+    // shows it in the library.
+    private fun heldSong(kept: () -> Boolean = { false }) {
+        server.answerBy("getAcquisitions") {
+            val row = if (kept()) """"state":"done"""" else """"state":"searching","note":"AcoustID is off, so Octo cannot check what played","keepAnyway":true"""
+            server.ok(""""acquisitions":{"acquisition":[{"id":"dz-1","artist":"The Beatles","title":"Help!","startedAt":"2026-10-04T18:00:00Z","key":"deezer:1","kind":"download",$row}]}""", type = "octo")
+        }
+        server.answer("getUpgrades", """"upgrades":[]""", type = "octo")
+    }
+
+    private fun keeps() = server.calls.filter { it.url.pathSegments.last() == "keepAcquisitionAnyway" }
+
+    @Test
+    fun keepAnywaySendsTheRowsKey_ThenTheListIsAskedAgain() = runBlocking {
+        extensions("[1,2,3,4]")
+        val kept = java.util.concurrent.atomic.AtomicBoolean(false)
+        heldSong { kept.get() }
+        server.answerBy("keepAcquisitionAnyway") {
+            kept.set(true)
+            server.ok(type = "octo")
+        }
+        val model = DownloadsModel(server.client(), scope)
+        model.start()
+        until("the held row was read") { model.rows.value.singleOrNull()?.keepAnyway == true }
+
+        model.keepAnyway("deezer:1")
+        until("the row shows it kept") { model.rows.value.single().phase == RowPhase.Done }
+        val keep = keeps().single()
+        assertEquals("/rest/keepAcquisitionAnyway", keep.url.encodedPath)
+        assertEquals("deezer:1", keep.url.queryParameter("key"))
+        assertEquals("winters", keep.url.queryParameter("u"))
+        assertNull(keep.url.queryParameter("user"))
+        val after = server.calls.drop(server.calls.indexOf(keep) + 1).map { it.url.pathSegments.last() }
+        assertTrue("Asked again after the answer", "getAcquisitions" in after)
+        until("nothing is left on the row") { model.keeping.value.isEmpty() }
+        model.close()
+    }
+
+    @Test
+    fun aRefusalShowsTheServersWordsOnTheRow() = runBlocking {
+        extensions("[1,2,3,4]")
+        heldSong()
+        server.fail("keepAcquisitionAnyway", 70, "Nothing is waiting to be kept")
+        val model = DownloadsModel(server.client(), scope)
+        model.start()
+        until("the held row was read") { model.rows.value.singleOrNull()?.keepAnyway == true }
+
+        model.keepAnyway("deezer:1")
+        until("the refusal is on the row") { model.keeping.value["deezer:1"]?.error != null }
+        assertEquals("Nothing is waiting to be kept", model.keeping.value["deezer:1"]?.error)
+        assertEquals(false, model.keeping.value["deezer:1"]?.sending)
+        model.close()
+    }
+
+    @Test
+    fun anOlderServersKeepAnywayIsNeverRead() = runBlocking {
+        extensions("[1,2,3]")
+        heldSong()
+        heldAlbumLog()
+        val model = DownloadsModel(server.client(), scope)
+        model.start()
+        until("the held row was read") { model.rows.value.size == 1 }
+        assertFalse(model.rows.value.single().keepAnyway)
+        model.showLog("deezer:1")
+        until("the log was read") { model.log.value != null }
+        assertFalse(model.log.value!!.keepAnyway)
+        assertNull(model.log.value!!.heldTracks)
+        assertNull(keepAnywayLabel(rowOf(model.log.value!!)))
+        model.close()
+    }
+
+    // The held download's log: an album holding two tracks, offered Keep
+    // anyway until `kept` says it was kept.
+    private fun heldAlbumLog(kept: () -> Boolean = { false }) {
+        server.answerBy("getAcquisition") {
+            val row = if (kept()) """"state":"done"""" else """"state":"searching","note":"2 tracks wait: play them once, or keep them anyway","keepAnyway":true,"heldTracks":2"""
+            server.ok(
+                """"acquisition":{"id":"dz-1","artist":"The Beatles","title":"Rubber Soul","startedAt":"2026-10-04T18:00:00Z","key":"deezer:1","kind":"download",$row,"event":[{"at":"2026-10-04T18:00:00Z","kind":"queued","text":"Asked for"}]}""",
+                type = "octo",
+            )
+        }
+    }
+
+    @Test
+    fun theLogOffersKeepTheseAnyway_AndIsReadAgainBeforeTheButtonComesBack() = runBlocking {
+        extensions("[1,2,3,4]")
+        val kept = java.util.concurrent.atomic.AtomicBoolean(false)
+        heldSong { kept.get() }
+        heldAlbumLog { kept.get() }
+        server.answerBy("keepAcquisitionAnyway") {
+            kept.set(true)
+            server.ok(type = "octo")
+        }
+        val model = DownloadsModel(server.client(), scope)
+        model.start()
+        until("the server said") { model.supported == true }
+        model.showLog("deezer:1")
+        until("the log offers it") { model.log.value?.let { keepAnywayLabel(rowOf(it)) } == KEEP_THESE_ANYWAY }
+
+        model.keepAnyway("deezer:1")
+        until("the keep was sent") { keeps().isNotEmpty() }
+        until("the keep settled") { model.keeping.value.isEmpty() }
+        assertEquals("Read again before the button came back", AcquisitionStage.Done, model.log.value?.stage)
+        assertNull(keepAnywayLabel(rowOf(model.log.value!!)))
+        val after = server.calls.drop(server.calls.indexOf(keeps().single()) + 1).map { it.url.pathSegments.last() }
+        assertTrue("getAcquisition" in after)
+        assertTrue("getAcquisitions" in after)
+        model.close()
+    }
+
+    @Test
+    fun aRefusalFromTheLogShowsTheServersWords() = runBlocking {
+        extensions("[1,2,3,4]")
+        heldSong()
+        heldAlbumLog()
+        server.fail("keepAcquisitionAnyway", 70, "Nothing is waiting to be kept")
+        val model = DownloadsModel(server.client(), scope)
+        model.start()
+        until("the server said") { model.supported == true }
+        model.showLog("deezer:1")
+        until("the log offers it") { model.log.value?.keepAnyway == true }
+
+        model.keepAnyway("deezer:1")
+        until("the refusal is kept") { model.keeping.value["deezer:1"]?.error != null }
+        assertEquals("Nothing is waiting to be kept", model.keeping.value["deezer:1"]?.error)
+        assertEquals("Still offered on the log", KEEP_THESE_ANYWAY, keepAnywayLabel(rowOf(model.log.value!!)))
         model.close()
     }
 

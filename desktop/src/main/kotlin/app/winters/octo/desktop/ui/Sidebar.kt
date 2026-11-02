@@ -72,8 +72,10 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.design.ProgressRing
 import app.winters.octo.ui.downloads.DOWNLOADS
+import app.winters.octo.ui.downloads.DrawerMark
+import app.winters.octo.ui.downloads.drawerMark
+import app.winters.octo.ui.downloads.drawerState
 import app.winters.octo.ui.downloads.overallFraction
-import app.winters.octo.ui.downloads.runningCount
 import app.winters.octo.desktop.importPlaylistFile
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.nav.Page
@@ -254,20 +256,23 @@ private fun LazyListScope.group(
 }
 
 // The downloads drawer's way in, on a server that keeps a log of its
-// downloads: it opens and closes the side panel's Downloads tab, and a
-// ring beside it fills while anything is on its way.
+// downloads: it opens and closes the side panel's Downloads tab. A ring
+// beside it fills while anything is on its way; when only downloads waiting
+// for the person are left, it carries the dot Settings carries when
+// something waits there.
 @Composable
 private fun DownloadsRow(app: AppState, rail: Boolean) {
     val drawer = app.downloads?.takeIf { it.supported == true } ?: return
     val rows by drawer.rows.collectAsState()
-    val running = runningCount(rows)
+    val mark = drawerMark(rows)
     NavRow(
         DOWNLOADS,
         OctoIcons.Download,
         app.sidePanel == SidePanel.Downloads,
         rail,
-        state = if (running > 0) "$running on the way" else null,
-        trailing = if (running > 0) ({ ProgressRing(overallFraction(rows), size = IconSize.Table) }) else null,
+        mark = drawerState(rows).takeIf { mark == DrawerMark.Waits },
+        state = drawerState(rows).takeIf { mark != DrawerMark.Waits },
+        trailing = if (mark == DrawerMark.Ring) ({ ProgressRing(overallFraction(rows), size = IconSize.Table) }) else null,
     ) { app.toggleSidePanel(SidePanel.Downloads) }
 }
 

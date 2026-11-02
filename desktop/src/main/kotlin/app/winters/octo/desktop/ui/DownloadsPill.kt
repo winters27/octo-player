@@ -44,7 +44,7 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.ui.downloads.pillLead
 import app.winters.octo.ui.downloads.pillSpoken
-import app.winters.octo.ui.downloads.runningCount
+import app.winters.octo.ui.downloads.onTheWayCount
 import app.winters.octo.ui.downloads.stepWords
 import dev.chrisbanes.haze.HazeState
 
@@ -68,7 +68,8 @@ val DownloadsPillRoom = DownloadsPillMax + Space.Page
 fun DownloadsPill(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
     val drawer = app.downloads?.takeIf { it.supported == true } ?: return
     val rows by drawer.rows.collectAsState()
-    val running = runningCount(rows)
+    // A download waiting for the person is not on its way.
+    val running = onTheWayCount(rows)
     if (running <= 0 || app.sidePanel == SidePanel.Downloads) return
     val lead = pillLead(rows) ?: return
     val more = running - 1

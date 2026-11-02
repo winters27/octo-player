@@ -136,20 +136,23 @@ struct GlazeButton: View {
 }
 
 /// A small text button for a lesser action beside a title, like "See all" or "Clear all": no
-/// border and no fill.
+/// border and no fill. `font` sets it in the words beside it instead, as under a list row's own
+/// lines.
 struct QuietButton: View {
     let text: String
+    var font: Font = .octoLabel
     let action: () -> Void
 
-    init(_ text: String, action: @escaping () -> Void) {
+    init(_ text: String, font: Font = .octoLabel, action: @escaping () -> Void) {
         self.text = text
+        self.font = font
         self.action = action
     }
 
     var body: some View {
         Button(action: action) {
             Text(text)
-                .font(.octoLabel)
+                .font(font)
                 .foregroundStyle(OctoColor.textSecondary)
                 .lineLimit(1)
                 .padding(.horizontal, 10)

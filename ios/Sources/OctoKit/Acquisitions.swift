@@ -3,12 +3,16 @@ import Foundation
 /// The OpenSubsonic extension an Octo server lists when it can say how the downloads it was
 /// asked for are going. Version 2 adds each download's log, clearing finished ones, and Find
 /// songs. Version 3 lets a picked copy that is not better than the library's ask first and
-/// replace it anyway.
+/// replace it anyway. Version 4 marks the held downloads a person may keep anyway.
 public let octoAcquisitions = "octoAcquisitions"
 
 /// The version of octoAcquisitions whose pickFoundSong takes `anyway` and may answer with the
 /// question to ask.
 public let octoReplaceAnywayVersion = 3
+
+/// The version of octoAcquisitions whose rows carry `keepAnyway` and `heldTracks`, and which takes
+/// keepAcquisitionAnyway.
+public let octoKeepAnywayVersion = 4
 
 /// Where one download on the server has got to.
 public enum AcquisitionStage: String, Sendable {
@@ -54,17 +58,24 @@ public struct Acquisition: Decodable, Sendable, Equatable {
     public var logLines: Int = 0
     /// The log, oldest first; only getAcquisition sends it.
     public var event: [AcquisitionEvent] = []
+    /// From version 4 on: the download is held, and the person may keep it anyway with
+    /// keepAcquisitionAnyway and `key`. Read only as `listed(by:)` leaves it, so an older server's
+    /// never counts.
+    public var keepAnyway = false
+    /// From version 4 on, on an album's row: how many of its tracks are held. Read only as
+    /// `listed(by:)` leaves it.
+    public var heldTracks: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, artist, title, album, state, progress, bytesDone, bytesTotal, source, startedAt, updatedAt, error
-        case libraryId, ahead, note, key, kind, quality, coverArt, peer, logLines, event
+        case libraryId, ahead, note, key, kind, quality, coverArt, peer, logLines, event, keepAnyway, heldTracks
     }
 
     public init(id: String = "", artist: String = "", title: String = "", album: String? = nil, state: String = "",
                 progress: Double? = nil, bytesDone: Int? = nil, bytesTotal: Int? = nil, source: String? = nil,
                 startedAt: String? = nil, updatedAt: String? = nil, error: String? = nil, libraryId: String? = nil,
                 ahead: Int? = nil, note: String? = nil, key: String? = nil, kind: String? = nil, quality: String? = nil,
-                coverArt: String? = nil) {
+                coverArt: String? = nil, keepAnyway: Bool = false, heldTracks: Int? = nil) {
         self.id = id
         self.artist = artist
         self.title = title
@@ -84,6 +95,8 @@ public struct Acquisition: Decodable, Sendable, Equatable {
         self.kind = kind
         self.quality = quality
         self.coverArt = coverArt
+        self.keepAnyway = keepAnyway
+        self.heldTracks = heldTracks
     }
 
     public init(from decoder: Decoder) throws {
@@ -110,9 +123,21 @@ public struct Acquisition: Decodable, Sendable, Equatable {
         peer = c.string(.peer)
         logLines = c.int(.logLines) ?? 0
         event = (try? c.decodeIfPresent([AcquisitionEvent].self, forKey: .event)) ?? []
+        keepAnyway = c.bool(.keepAnyway) ?? false
+        heldTracks = c.int(.heldTracks)
     }
 
     public var stage: AcquisitionStage { .of(state) }
+
+    /// The row as a server means it: `keepAnyway` and `heldTracks` only from one that lists
+    /// octoAcquisitions at `octoKeepAnywayVersion` (`keepsAnyway`).
+    public func listed(by keepsAnyway: Bool) -> Acquisition {
+        guard !keepsAnyway && (keepAnyway || heldTracks != nil) else { return self }
+        var older = self
+        older.keepAnyway = false
+        older.heldTracks = nil
+        return older
+    }
 
     /// How far along, kept between 0 and 1, or nil when unknown.
     public var fraction: Double? {
@@ -131,9 +156,19 @@ struct AcquisitionsBody: Decodable {
 }
 
 extension SubsonicClient {
-    /// Every download the server is doing for this person, or did lately.
-    public func acquisitions() async throws -> [Acquisition] {
+    /// Every download the server is doing for this person, or did lately. `keepsAnyway` is whether
+    /// the server lists `octoKeepAnywayVersion`; only then are a row's `keepAnyway` and
+    /// `heldTracks` read.
+    public func acquisitions(keepsAnyway: Bool = false) async throws -> [Acquisition] {
         let body: AcquisitionsBody = try await get("getAcquisitions", key: "acquisitions")
-        return body.acquisition
+        return body.acquisition.map { $0.listed(by: keepsAnyway) }
+    }
+
+    /// Keeps a held download anyway, by the key the list gives it: the version the signed-in user
+    /// heard, or an album's held tracks, though Octo could not prove them. Throws with the server's
+    /// words when it says no. Only for servers that list octoAcquisitions at
+    /// `octoKeepAnywayVersion`.
+    public func keepAcquisitionAnyway(key: String) async throws {
+        try await call("keepAcquisitionAnyway", [("key", key)])
     }
 }

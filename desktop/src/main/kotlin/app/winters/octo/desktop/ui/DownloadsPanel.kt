@@ -71,6 +71,8 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
@@ -136,6 +138,10 @@ import app.winters.octo.ui.downloads.findReplaces
 import app.winters.octo.ui.family.MORE_BELOW
 import kotlinx.coroutines.launch
 import app.winters.octo.ui.downloads.FIND_SONGS
+import app.winters.octo.ui.downloads.Keeping
+import app.winters.octo.ui.downloads.keepAnywayLabel
+import app.winters.octo.ui.downloads.logFindId
+import app.winters.octo.ui.downloads.waitsForYou
 import app.winters.octo.ui.downloads.LogMark
 import app.winters.octo.ui.downloads.RowPhase
 import app.winters.octo.ui.downloads.candidateTitle
@@ -200,7 +206,7 @@ fun DownloadsHeading(app: AppState, modifier: Modifier = Modifier) {
                 val log by model.log.collectAsState()
                 val row = rows.firstOrNull { it.logKey == view.key } ?: log?.let { rowOf(it) }
                 if (row?.finished == true) TextAction("Clear", { model.clear(row.key); model.showList() })
-                row?.findId?.let { id ->
+                row?.let(::logFindId)?.let { id ->
                     IconAction(OctoIcons.Search, FIND_SONGS, { model.find(id, row.title, view.key) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, tint = OctoColors.TextSecondary)
                 }
             }
@@ -227,6 +233,7 @@ private fun BackTo(words: String, go: () -> Unit) {
 private fun DownloadList(model: DownloadsModel, modifier: Modifier) {
     val rows by model.rows.collectAsState()
     val loaded by model.loaded.collectAsState()
+    val keeping by model.keeping.collectAsState()
     Column(modifier) {
         Txt(drawerSummary(rows), DesktopType.meta, OctoColors.TextMuted, Modifier.fillMaxWidth().padding(start = Space.L, end = Space.S, top = Space.S))
         if (rows.isEmpty()) {
@@ -242,6 +249,8 @@ private fun DownloadList(model: DownloadsModel, modifier: Modifier) {
                     onOpen = row.logKey?.let { key -> { model.showLog(key) } },
                     onFind = row.findId?.let { id -> { model.find(id, row.title, row.logKey) } },
                     onClear = { model.clear(row.key) },
+                    keeping = row.logKey?.let { keeping[it] },
+                    onKeep = { row.logKey?.let(model::keepAnyway) },
                 )
             }
         }
@@ -249,13 +258,25 @@ private fun DownloadList(model: DownloadsModel, modifier: Modifier) {
 }
 
 // One download: its cover, its names, the line saying where it is, and a
-// ring while it runs. Hovered, a finished one offers to leave the list, and
-// any can be looked for again.
+// ring while it runs, or the accent dot that says something needs you in
+// the ring's place while it waits for the person. Hovered, a finished one offers to leave the list,
+// and any can be looked for again. A held one the server offers to keep
+// anyway has Keep anyway under its words, part of the row; the cover and
+// the ring stay centered on the words alone, so nothing moves as it is sent
+// or refused.
 @Composable
-private fun DownloadLine(row: DownloadRow, onOpen: (() -> Unit)?, onFind: (() -> Unit)?, onClear: () -> Unit) {
+private fun DownloadLine(
+    row: DownloadRow,
+    onOpen: (() -> Unit)?,
+    onFind: (() -> Unit)?,
+    onClear: () -> Unit,
+    keeping: Keeping? = null,
+    onKeep: () -> Unit = {},
+) {
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
-    Row(
+    val keep = keepAnywayLabel(row)
+    Column(
         Modifier
             .fillMaxWidth()
             .hoverable(hover)
@@ -265,29 +286,80 @@ private fun DownloadLine(row: DownloadRow, onOpen: (() -> Unit)?, onFind: (() ->
                 contentDescription = "${row.title}, ${row.artist}"
                 stateDescription = row.status
             }
-            .padding(horizontal = Space.S, vertical = Space.S),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.L),
+            // The Keep anyway line's own inset is the row's bottom edge.
+            .padding(start = Space.S, end = Space.S, top = Space.S, bottom = if (keep != null) 0.dp else Space.S),
     ) {
-        Cover(row.coverArt, Modifier.size(LineCover), shape = Corner.ArtSShape, placeholder = OctoIcons.Songs)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
-                CutTxt(row.title, DesktopType.tableTitle, OctoColors.TextPrimary, Modifier.weight(1f, fill = false))
-                kindLabel(row.kind)?.let { KindMark(it) }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
+            Cover(row.coverArt, Modifier.size(LineCover), shape = Corner.ArtSShape, placeholder = OctoIcons.Songs)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
+                    CutTxt(row.title, DesktopType.tableTitle, OctoColors.TextPrimary, Modifier.weight(1f, fill = false))
+                    kindLabel(row.kind)?.let { KindMark(it) }
+                }
+                if (row.artist.isNotBlank()) Txt(row.artist, DesktopType.meta, OctoColors.TextSecondary)
+                Txt(row.status, DesktopType.meta, if (row.phase == RowPhase.Failed) OctoColors.SignalOrange else OctoColors.TextMuted, maxLines = 2)
             }
-            if (row.artist.isNotBlank()) Txt(row.artist, DesktopType.meta, OctoColors.TextSecondary)
-            Txt(row.status, DesktopType.meta, if (row.phase == RowPhase.Failed) OctoColors.SignalOrange else OctoColors.TextMuted, maxLines = 2)
-        }
-        when {
-            hovered && onFind != null && row.finished -> Row {
-                IconAction(OctoIcons.Search, FIND_SONGS, onFind, size = ControlHeight.S, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
-                IconAction(OctoIcons.Close, "Clear this one", onClear, size = ControlHeight.S, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
+            when {
+                hovered && onFind != null && row.finished -> Row {
+                    IconAction(OctoIcons.Search, FIND_SONGS, onFind, size = ControlHeight.S, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
+                    IconAction(OctoIcons.Close, "Clear this one", onClear, size = ControlHeight.S, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
+                }
+                // Centered in the ring's box, so the column of marks stays lined up.
+                waitsForYou(row) -> Box(Modifier.size(IconSize.Transport), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(FrameSize.NavMark).background(OctoColors.Accent, CircleShape))
+                }
+                !row.finished -> ProgressRing(row.fraction, size = IconSize.Transport)
+                row.phase == RowPhase.Done -> Glyph(OctoIcons.Downloaded, size = IconSize.Table, tint = OctoColors.TextSecondary)
+                else -> Glyph(OctoIcons.Info, size = IconSize.Table, tint = OctoColors.SignalOrange)
             }
-            !row.finished -> ProgressRing(row.fraction, size = IconSize.Transport)
-            row.phase == RowPhase.Done -> Glyph(OctoIcons.Downloaded, size = IconSize.Table, tint = OctoColors.TextSecondary)
-            else -> Glyph(OctoIcons.Info, size = IconSize.Table, tint = OctoColors.SignalOrange)
         }
+        if (keep != null) KeepAnywayLine(keep, keeping, onKeep)
     }
+}
+
+// A held download's Keep anyway, lined up with its row's words and set like
+// the artist line above it: dimmed while it is sent, and the server's words
+// under it when it said no, wrapping where the row's words do, short of the
+// ring. Its edge below is the rows' usual gap.
+@Composable
+private fun KeepAnywayLine(label: String, keeping: Keeping?, onKeep: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(start = LineCover + Space.L, end = IconSize.Transport + Space.L)) {
+        // The action's own inset pulled back, so its words start where the
+        // row's do, and its inset below taken down to a row's edge.
+        TextAction(
+            label,
+            onKeep,
+            Modifier.offset(x = -TextActionInset).trimBottom(TextActionInsetY - Space.S),
+            enabled = keeping?.sending != true,
+            style = DesktopType.meta,
+        )
+        keeping?.error?.let { KeepRefusal(it, Modifier.padding(bottom = Space.S)) }
+    }
+}
+
+// The server's words when it would not keep a download anyway.
+@Composable
+private fun KeepRefusal(words: String, modifier: Modifier = Modifier) {
+    Txt(
+        words,
+        DesktopType.meta,
+        OctoColors.SignalOrange,
+        modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+        maxLines = 2,
+    )
+}
+
+// Lays out `by` shorter at the bottom, drawing the same.
+private fun Modifier.trimBottom(by: Dp) = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    layout(placeable.width, (placeable.height - by.roundToPx()).coerceAtLeast(0)) { placeable.place(0, 0) }
+}
+
+// Lays out `by` shorter at the top, drawing the same that much higher.
+private fun Modifier.trimTop(by: Dp) = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    val trim = by.roundToPx().coerceAtMost(placeable.height)
+    layout(placeable.width, placeable.height - trim) { placeable.place(0, -trim) }
 }
 
 // "Higher quality" or "Picked", small beside a title.
@@ -310,10 +382,16 @@ private fun DownloadLog(app: AppState, model: DownloadsModel, key: String, modif
     val rows by model.rows.collectAsState()
     val log by model.log.collectAsState()
     val problem by model.logProblem.collectAsState()
+    val keeping by model.keeping.collectAsState()
     // The list's row knows how an upgrade ended; the log's own row is the download.
     val row = rows.firstOrNull { it.logKey == key } ?: log?.let { rowOf(it) }
+    // Offered while the log's own reading of the download says so.
+    val keep = log?.let { keepAnywayLabel(rowOf(it)) }
+    val keepState = keeping[key]
     val events = log?.event.orEmpty()
     val running = row?.finished == false
+    // Waiting for the person, its newest line is still.
+    val busy = running && row?.let(::waitsForYou) != true
     val list = rememberLazyListState()
     // A running download opens on its newest step and keeps it in view; a
     // finished one opens at its start. Scrolling up lets go; back at the
@@ -330,15 +408,31 @@ private fun DownloadLog(app: AppState, model: DownloadsModel, key: String, modif
         if (follow == true && events.isNotEmpty()) list.animateScrollToItem(events.lastIndex)
     }
     Column(modifier) {
+        // The heading's line has no room for it beside the page's name, so
+        // Keep anyway is the log's control line, under the heading, with the
+        // server's words right under it when it said no. Like the list's
+        // summary line it sits nearer the heading than the song below it.
+        if (keep != null) {
+            Column(Modifier.trimTop(ControlLineLift)) {
+                TextAction(
+                    keep,
+                    { model.keepAnyway(key) },
+                    Modifier.padding(start = Space.L - TextActionInset),
+                    enabled = keepState?.sending != true,
+                )
+                // The button's own inset below, so the song keeps its gap.
+                keepState?.error?.let { KeepRefusal(it, Modifier.padding(start = Space.L, end = Space.L, bottom = TextActionInsetY)) }
+            }
+        }
         // The song and where it is stay put; only the steps scroll.
-        if (row != null) LogHead(row, events, Modifier.padding(horizontal = Space.L))
+        if (row != null) LogHead(row, events, Modifier.padding(horizontal = Space.L).padding(top = if (keep != null) Space.L else 0.dp))
         problem?.let { Txt(it, DesktopType.meta, OctoColors.SignalOrange, Modifier.padding(horizontal = Space.L, vertical = Space.S), maxLines = 2) }
         Separator(Modifier.padding(top = Space.L))
         Box(Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(Modifier.fillMaxSize().topFade(Space.Xl).scrollbar(list), state = list, contentPadding = PaddingValues(start = Space.L, end = Space.L, top = Space.L, bottom = Space.Xl)) {
                 if (log == null && problem == null) item(key = "wait") { ProgressRing(null, size = IconSize.Transport) }
                 itemsIndexed(events, key = { index, _ -> index }) { index, line ->
-                    LogLine(line, last = index == events.lastIndex, live = running && index == events.lastIndex)
+                    LogLine(line, last = index == events.lastIndex, live = busy && index == events.lastIndex)
                 }
             }
             if (follow == false && running && list.canScrollForward) {
@@ -372,11 +466,12 @@ private fun LogHead(row: DownloadRow, events: List<AcquisitionEvent>, modifier: 
 
 // The four steps as a strip: done ones filled, the one it is on filling
 // with the file while it downloads (breathing while nobody can tell how
-// far), and the ones still to come faint.
+// far, still while it waits for the person), and the ones still to come
+// faint.
 @Composable
 private fun Steps(row: DownloadRow, at: Int) {
     val failed = row.phase == RowPhase.Failed
-    val pulse = if (row.finished || row.fraction != null) 1f else rememberPulse()
+    val pulse = if (row.finished || row.fraction != null || waitsForYou(row)) 1f else rememberPulse()
     Row(
         Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
             contentDescription = if (at >= DownloadStep.entries.size) "Every step done" else "Step ${at + 1} of ${DownloadStep.entries.size}, ${DownloadStep.entries[at].label}"
@@ -851,6 +946,15 @@ private val PillShape = RoundedCornerShape(50)
 private val MoreBelowFade = Color(0xF0141416)
 private val LineCover = RowHeight.Regular
 private val HeadCover = FrameSize.PlayerCover + Space.Xs
+
+// How far a TextAction's words sit inside its edge, beside and below.
+private val TextActionInset = 12.dp
+private val TextActionInsetY = 8.dp
+
+// How far a log's control line is drawn up into its action's own inset,
+// toward the heading.
+private val ControlLineLift = Space.Xs
+
 private val MarkSize = IconSize.Transport + Space.Xxs
 private val StepLine = Space.Xs
 private val Chip = Color.White.copy(alpha = 0.08f)
