@@ -41,10 +41,10 @@ struct LibraryView: View {
                 }
                 // What the server is downloading, on a server that keeps a log of it.
                 if serverDownloads.supported {
-                    let running = runningCount(serverDownloads.watch.rows)
                     LibraryHairline()
                     Button { router.showServerDownloads() } label: {
-                        SectionRow(icon: .cloud, label: "Server downloads", detail: running > 0 ? "\(running) on the way" : nil)
+                        // "2 on the way, 1 waits for you".
+                        SectionRow(icon: .cloud, label: "Server downloads", detail: drawerState(serverDownloads.watch.rows))
                     }
                     .buttonStyle(SqueezeStyle())
                 }
