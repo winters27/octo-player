@@ -278,11 +278,14 @@ class CarLook(private val context: Context, private val coverStyle: () -> Playli
 
     // "See all" at the end of a shelf or a search's kind: always a row, after
     // tiles or rows alike, on a quiet tile of its own (the car draws the
-    // row's chevron). It opens what it names in the styles that list shows in.
-    fun seeAll(node: CarNode, browsable: CarStyle? = null, playable: CarStyle? = null): MediaItem = item(
+    // row's chevron). A car heads the page it opens with the row's title, so
+    // the row is titled with what it opens, `title`, over "See all". It opens
+    // that list in the styles the list shows in.
+    fun seeAll(node: CarNode, title: String, browsable: CarStyle? = null, playable: CarStyle? = null): MediaItem = item(
         node,
         MediaMetadata.Builder()
-            .setTitle(CAR_SEE_ALL)
+            .setTitle(carText(title))
+            .setSubtitle(CAR_SEE_ALL)
             .setArtworkUri(glyph(CarGlyph.More))
             .setIsBrowsable(true)
             .setIsPlayable(false)

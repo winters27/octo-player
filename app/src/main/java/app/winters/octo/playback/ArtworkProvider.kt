@@ -12,11 +12,13 @@ import android.os.ParcelFileDescriptor
 import androidx.annotation.DrawableRes
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 import app.winters.octo.BuildConfig
 import app.winters.octo.design.OctoIcons
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileNotFoundException
+import kotlin.math.roundToInt
 
 // Serves cover pictures to other apps that are allowed to see them, like a
 // car's screen, which cannot read the app's own artwork references. Each
@@ -30,6 +32,7 @@ import java.io.FileNotFoundException
 //                              round picture, the artist glyph for no cover,
 //                            h a handle in place of the reference,
 //                            g a glyph tile, the value naming its glyph
+//                              and the size it is drawn at
 class ArtworkProvider : ContentProvider() {
     override fun onCreate() = true
 
@@ -39,7 +42,7 @@ class ArtworkProvider : ContentProvider() {
         val ctx = context ?: throw FileNotFoundException("Not ready")
         val segments = uri.pathSegments
         if (segments.size == 4 && segments[1] == "x" && segments[2] == GLYPH_FLAG.toString()) {
-            val glyph = CarGlyph.ofKey(segments[3]) ?: throw FileNotFoundException("No such glyph")
+            val glyph = CarGlyph.ofAddress(segments[3]) ?: throw FileNotFoundException("No such glyph")
             return ParcelFileDescriptor.open(glyphFile(ctx, glyph), ParcelFileDescriptor.MODE_READ_ONLY)
         }
         val asked = coverOf(ctx, segments) ?: throw FileNotFoundException("No artwork")
@@ -55,16 +58,18 @@ class ArtworkProvider : ContentProvider() {
         val drawn = playlistArtOf(asked.ref) != null
         val dir = File(ctx.cacheDir, if (drawn) "car-drawn-$ART_SIZE" else "car-art-$ART_SIZE").apply { mkdirs() }
         val file = File(dir, asked.fileName)
-        if (!drawn && file.exists()) return file
+        if (!drawn && isWhole(file)) return file
         val noCover = asked.ref == NO_COVER
         val loaded = if (noCover) null else loadCover(ctx, asked.ref, ART_SIZE)
         val bitmap = when {
             loaded != null && asked.marked -> marked(shrink(loaded), asked.artist)
             loaded != null -> shrink(loaded)
-            // The mark for something with no cover sits on its kind's tile.
-            noCover && asked.marked -> marked(glyphTile(ctx, asked.glyph), asked.artist)
+            // The mark for something with no cover sits on its kind's tile,
+            // its glyph drawn smaller to stay clear of the mark.
+            noCover && asked.marked -> marked(glyphTile(ctx, asked.glyph, MARKED_GLYPH_SHARE), asked.artist)
             else -> return glyphFile(ctx, asked.glyph)
         }
+        if (!isWhole(file)) file.delete()
         writeWhole(file, jpeg(bitmap))
         if (!file.isFile) throw FileNotFoundException("No artwork")
         return file
@@ -74,7 +79,7 @@ class ArtworkProvider : ContentProvider() {
         val longest = maxOf(bitmap.width, bitmap.height)
         if (longest <= ART_SIZE) return bitmap
         val scale = ART_SIZE.toFloat() / longest
-        return Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
+        return bitmap.scale((bitmap.width * scale).toInt(), (bitmap.height * scale).toInt())
     }
 
     private fun marked(bitmap: Bitmap, round: Boolean): Bitmap {
@@ -88,16 +93,24 @@ class ArtworkProvider : ContentProvider() {
 
     // A glyph tile's file, made once.
     private fun glyphFile(ctx: Context, glyph: CarGlyph): File {
-        val file = File(File(ctx.cacheDir, "car-glyph-$ART_SIZE").apply { mkdirs() }, "${glyph.key}.jpg")
-        if (!file.exists()) writeWhole(file, jpeg(glyphTile(ctx, glyph)))
+        val file = File(File(ctx.cacheDir, "car-glyph-$ART_SIZE").apply { mkdirs() }, "${glyph.address}.jpg")
+        if (!isWhole(file)) {
+            file.delete()
+            writeWhole(file, jpeg(glyphTile(ctx, glyph)))
+        }
         if (!file.isFile) throw FileNotFoundException("No artwork")
         return file
     }
 
-    // A tile lighter than a car's list behind it, with a glyph in its middle.
-    private fun glyphTile(ctx: Context, glyph: CarGlyph): Bitmap {
+    // A kept picture that can be served: an empty one, as a sudden stop can
+    // leave, is made again.
+    private fun isWhole(file: File): Boolean = file.length() > 0
+
+    // A tile lighter than a car's list behind it, with a glyph in its middle,
+    // `share` of the tile across.
+    private fun glyphTile(ctx: Context, glyph: CarGlyph, share: Float = glyph.share): Bitmap {
         val tile = createBitmap(ART_SIZE, ART_SIZE).apply { eraseColor(TILE_COLOR) }
-        val side = (ART_SIZE * GLYPH_SHARE).toInt()
+        val side = (ART_SIZE * share).toInt()
         val inset = (ART_SIZE - side) / 2
         drawGlyph(ctx, glyph.drawable, Canvas(tile), Rect(inset, inset, inset + side, inset + side))
         return tile
@@ -145,10 +158,12 @@ class ArtworkProvider : ContentProvider() {
         private const val GLYPH_FLAG = 'g'
 
         // A glyph tile: lighter than a car's list (#242529), its glyph white
-        // at 60% across 40% of the tile.
+        // at 60%. Under the mark, which an artist's picture places in from
+        // the corner for a round picture, the glyph is 30% of the tile, so
+        // the two never touch.
         private const val TILE_COLOR = 0xFF34363B.toInt()
         private const val GLYPH_COLOR = 0x99FFFFFF.toInt()
-        private const val GLYPH_SHARE = 0.4f
+        private const val MARKED_GLYPH_SHARE = 0.3f
 
         @Volatile private var kept: CarArtRefs? = null
 
@@ -199,29 +214,35 @@ class ArtworkProvider : ContentProvider() {
             marked(if (round) "$MARK_FLAG$ARTIST_FLAG" else MARK_FLAG.toString(), NO_COVER)
 
         // The address of a glyph tile.
-        fun carGlyphUri(glyph: CarGlyph): Uri = marked(GLYPH_FLAG.toString(), glyph.key)
+        fun carGlyphUri(glyph: CarGlyph): Uri = marked(GLYPH_FLAG.toString(), glyph.address)
 
         private fun marked(flags: String, value: String): Uri =
             Uri.Builder().scheme("content").authority(AUTHORITY).appendPath(ART_SIZE.toString())
                 .appendPath("x").appendPath(flags).appendPath(value).build()
 
-        // Stands for "no cover" in a marked address.
-        const val NO_COVER = "-"
+        // Stands for "no cover" in a marked address, with the size its glyph
+        // is drawn at, so a car asks again when that changes.
+        val NO_COVER = "-" + (MARKED_GLYPH_SHARE * 100).roundToInt()
     }
 }
 
-// The glyphs a car's tiles carry, by the name in their address: "See all",
-// and what stands in for an album's, an artist's, a list's or a station's
-// missing picture.
-enum class CarGlyph(val key: String, @DrawableRes val drawable: Int) {
-    More("more", OctoIcons.More),
+// The glyphs a car's tiles carry: "See all", and what stands in for an
+// album's, an artist's, a list's or a station's missing picture; each `share`
+// of its tile across. The dots of "See all" are drawn larger, as their ink
+// is a thin line across the glyph.
+enum class CarGlyph(val key: String, @DrawableRes val drawable: Int, val share: Float = 0.4f) {
+    More("more", OctoIcons.More, share = 0.56f),
     Album("album", OctoIcons.Album),
     Artist("artist", OctoIcons.Artist),
     Playlist("playlist", OctoIcons.Playlists),
     Radio("radio", OctoIcons.Radio),
     ;
 
+    // Its name in an address, with the size it is drawn at: a car keeps
+    // pictures by address, so it asks again when the size changes.
+    val address: String get() = "$key-${(share * 100).roundToInt()}"
+
     companion object {
-        fun ofKey(key: String): CarGlyph? = entries.firstOrNull { it.key == key }
+        fun ofAddress(address: String): CarGlyph? = entries.firstOrNull { it.address == address }
     }
 }

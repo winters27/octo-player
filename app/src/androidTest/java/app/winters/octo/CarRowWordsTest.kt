@@ -123,9 +123,12 @@ class CarRowWordsTest {
         assertNotNull(look.part(CarNode.Part(0, CarNode.Albums), 0..95, "Album 0001", CarStyle.Grid, emptyList()).mediaMetadata.artworkUri)
     }
 
+    // A car heads the page a row opens with the row's title: "See all" is
+    // titled with what it opens.
     @Test
-    fun seeAllIsARowOnAQuietTileOpeningAsItsListShows() {
-        val item = look.seeAll(CarNode.Shelf("recentlyAdded"), CarStyle.Grid, CarStyle.List)
+    fun seeAllIsARowOnAQuietTileNamedForWhatItOpens() {
+        val item = look.seeAll(CarNode.Shelf("recentlyAdded"), "Recently added", CarStyle.Grid, CarStyle.List)
+        assertEquals("Recently added" to "See all", shown(item))
         assertEquals(CarStyle.List.value, extra(item, MediaConstants.EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM))
         assertEquals(CarStyle.Grid.value, extra(item, MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE))
         assertEquals(CarStyle.List.value, extra(item, MediaConstants.EXTRAS_KEY_CONTENT_STYLE_PLAYABLE))

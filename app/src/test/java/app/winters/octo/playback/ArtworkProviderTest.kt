@@ -71,11 +71,15 @@ class ArtworkProviderTest {
 
     @Test
     fun aGlyphTileIsServedOnlyForAGlyphOfItsOwn() {
-        assertEquals(listOf("512", "x", "g", "more"), ArtworkProvider.carGlyphUri(CarGlyph.More).pathSegments)
+        // The size the glyph is drawn at is part of the address, so a car that
+        // kept an older drawing asks for this one.
+        assertEquals(listOf("512", "x", "g", "more-56"), ArtworkProvider.carGlyphUri(CarGlyph.More).pathSegments)
         provider.openFile(ArtworkProvider.carGlyphUri(CarGlyph.More), "r").use { assertTrue(it.statSize > 0) }
         assertEquals(listOf(CarGlyph.More.drawable), drawn)
-        val unknown = ArtworkProvider.carGlyphUri(CarGlyph.More).buildUpon().path("/512/x/g/sym_lock").build()
-        assertThrows(FileNotFoundException::class.java) { provider.openFile(unknown, "r") }
+        listOf("/512/x/g/sym_lock", "/512/x/g/more").forEach { path ->
+            val unknown = ArtworkProvider.carGlyphUri(CarGlyph.More).buildUpon().path(path).build()
+            assertThrows(FileNotFoundException::class.java) { provider.openFile(unknown, "r") }
+        }
     }
 
     @Test
@@ -87,6 +91,21 @@ class ArtworkProviderTest {
         provider.openFile(uri, "r").close()
         assertEquals(2, draws)
         assertTrue(kept().isEmpty())
+    }
+
+    // A sudden stop can leave a kept picture empty; it is made again rather
+    // than served empty forever.
+    @Test
+    fun aPictureLeftEmptyIsMadeAgain() {
+        var loads = 0
+        ArtworkProvider.loadCover = { _, _, _ -> loads++; Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888) }
+        val cover = File(context.cacheDir, "car-art-512").apply { mkdirs() }.resolve("${carSha1("s:server:c1")}.jpg").apply { writeBytes(ByteArray(0)) }
+        provider.openFile(ArtworkProvider.uriFor("s:server:c1"), "r").use { assertTrue(it.statSize > 0) }
+        assertEquals(1, loads)
+        assertTrue(cover.length() > 0)
+        File(context.cacheDir, "car-glyph-512").apply { mkdirs() }.resolve("${CarGlyph.More.address}.jpg").writeBytes(ByteArray(0))
+        provider.openFile(ArtworkProvider.carGlyphUri(CarGlyph.More), "r").use { assertTrue(it.statSize > 0) }
+        assertEquals(listOf(CarGlyph.More.drawable), drawn)
     }
 
     @Test

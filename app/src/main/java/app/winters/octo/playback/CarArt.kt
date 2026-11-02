@@ -1,6 +1,7 @@
 package app.winters.octo.playback
 
 import java.io.File
+import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -83,12 +84,16 @@ fun carSha1(text: String): String =
     MessageDigest.getInstance("SHA-1").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 
 // Writes `bytes` to `file` whole: beside it under a name no other writer
-// uses, then moved into place, so a reader never sees half of it. When
+// uses, on the disk before it is moved into place, so a reader never sees
+// half of it, nor an empty file after the phone stops suddenly. When
 // another writer got there first, theirs is kept.
 fun writeWhole(file: File, bytes: ByteArray) {
     val part = File(file.parentFile, "${file.name}.${UUID.randomUUID()}.part")
     try {
-        part.writeBytes(bytes)
+        FileOutputStream(part).use { out ->
+            out.write(bytes)
+            out.fd.sync()
+        }
         if (!part.renameTo(file) && !file.isFile) part.copyTo(file, overwrite = true)
     } finally {
         part.delete()

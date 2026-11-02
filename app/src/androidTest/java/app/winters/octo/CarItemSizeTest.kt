@@ -126,7 +126,7 @@ class CarItemSizeTest {
         }
         val parts = CarHomeParts(
             grouped = look::grouped,
-            seeAll = { shelf -> look.seeAll(CarNode.Shelf(shelf.id), CarStyle.Grid, CarStyle.Grid) },
+            seeAll = { shelf -> look.seeAll(CarNode.Shelf(shelf.id), long(400), CarStyle.Grid, CarStyle.Grid) },
             row = { shelf -> look.folder(CarNode.Shelf(shelf.id), shelf.title, browsable = CarStyle.Grid, playable = CarStyle.Grid) },
         )
         val resume = look.resume(ResumeOffer(long(400), long(400), long(400), RemoteQueue(emptyList(), 0, 0, 1, null)))

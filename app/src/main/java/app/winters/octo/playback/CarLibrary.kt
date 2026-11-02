@@ -330,7 +330,7 @@ class CarLibrary @Inject constructor(
                     is SearchEntry.OutsideAlbum -> look.onlineAlbum(entry.album)
                     is SearchEntry.Playlist -> look.playlist(entry.playlist)
                     // A kind's whole list shows as the Library shows it: albums as tiles, the rest as rows.
-                    is SearchEntry.SeeAll -> look.seeAll(entry.node, browsable = CarStyle.Grid.takeIf { (entry.node as? CarNode.Found)?.kind == FoundKind.Albums })
+                    is SearchEntry.SeeAll -> look.seeAll(entry.node, row.title, browsable = CarStyle.Grid.takeIf { (entry.node as? CarNode.Found)?.kind == FoundKind.Albums })
                     is SearchEntry.Retry -> look.retry(entry.token)
                 }
             }
@@ -520,7 +520,7 @@ class CarLibrary @Inject constructor(
         grouped = { item, title -> look.grouped(item, title) },
         seeAll = { shelf ->
             val (browsable, playable) = shelfStyles(shelf.id)
-            look.seeAll(if (shelf.id == HomeSection.Charts.id) CarNode.Charts else CarNode.Shelf(shelf.id), browsable, playable)
+            look.seeAll(if (shelf.id == HomeSection.Charts.id) CarNode.Charts else CarNode.Shelf(shelf.id), shelf.title, browsable, playable)
         },
         row = { shelf -> shelfRow(shelf.id) },
     )
