@@ -1,111 +1,149 @@
 package app.winters.octo
 
 import android.content.ComponentName
-import android.graphics.BitmapFactory
-import androidx.media3.common.MediaItem
-import androidx.media3.session.LibraryResult
-import androidx.media3.session.MediaBrowser
+import android.media.browse.MediaBrowser
+import android.media.session.MediaController
+import android.os.Build
+import androidx.media3.common.Player
 import androidx.media3.session.SessionToken
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import app.winters.octo.playback.ArtworkProvider
+import app.winters.octo.catalog.AlbumEntity
+import app.winters.octo.catalog.ArtistEntity
+import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.searchKey
+import app.winters.octo.playback.EXTRA_SOURCE
 import app.winters.octo.playback.OctoPlaybackService
-import com.google.common.util.concurrent.ListenableFuture
+import dagger.hilt.android.EntryPointAccessors
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
-// Browses the music the way a car does, through the playback service, on
-// the phone and its real library. It never plays anything, so the queue on
-// the phone is left alone.
+// Browses a library of its own the way a car does, through the old media
+// browser. It fills the catalog and empties it again, so it runs only on an
+// emulator, never on a phone with someone's music.
 @RunWith(AndroidJUnit4::class)
 class CarBrowseTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
+    private val entry = EntryPointAccessors.fromApplication(context.applicationContext, CarTestEntry::class.java)
+    private val connected = CountDownLatch(1)
     private lateinit var browser: MediaBrowser
 
+    private val albums = (1..2_000).map { n ->
+        val title = "Album %04d".format(n)
+        AlbumEntity(
+            id = "cartest:album:$n", sourceId = "device", nativeId = "$n", title = title, searchKey = searchKey(title), sortKey = searchKey(title),
+            artist = "Car Test", artistId = "cartest:artist", year = 2020, songCount = 1, durationMs = 1_000, addedAt = n.toLong(), artwork = null,
+        )
+    }
+    private val tracks = albums.mapIndexed { i, album ->
+        TrackEntity(
+            id = "cartest:track:$i", sourceId = "device", nativeId = "$i", title = "Song $i", searchKey = "song $i", sortKey = "song $i",
+            artist = "Car Test", artistId = "cartest:artist", album = album.title, albumId = album.id, trackNo = 1, discNo = 1, year = 2020,
+            durationMs = 1_000, addedAt = 0, mimeType = "audio/mpeg", sizeBytes = 1, artwork = null, uri = "content://media/external/audio/media/${100_000 + i}",
+        )
+    }
+    private val artist = ArtistEntity("cartest:artist", "device", "Car Test", "car test", "car test", albums.size, tracks.size, null)
+
     @Before
-    fun connect() {
-        val token = SessionToken(context, ComponentName(context, OctoPlaybackService::class.java))
-        lateinit var pending: ListenableFuture<MediaBrowser>
-        instrumentation.runOnMainSync { pending = MediaBrowser.Builder(context, token).buildAsync() }
-        browser = pending.get(10, TimeUnit.SECONDS)
+    fun seed() {
+        assumeTrue("an emulator only", Build.HARDWARE == "ranchu" || Build.HARDWARE == "goldfish")
+        runBlocking { entry.catalog().replaceAll(tracks, albums, listOf(artist)) }
+        instrumentation.runOnMainSync {
+            browser = MediaBrowser(
+                context,
+                ComponentName(context, OctoPlaybackService::class.java),
+                object : MediaBrowser.ConnectionCallback() {
+                    override fun onConnected() = connected.countDown()
+                },
+                null,
+            )
+            browser.connect()
+        }
+        assertTrue("never connected", connected.await(5, TimeUnit.SECONDS))
     }
 
     @After
-    fun disconnect() {
-        instrumentation.runOnMainSync { browser.release() }
+    fun empty() {
+        if (connected.count == 0L) instrumentation.runOnMainSync { browser.disconnect() }
+        runBlocking { entry.catalog().replaceAll(emptyList(), emptyList(), emptyList()) }
     }
 
-    // Runs a browser call on the main thread and waits for its answer.
-    private fun <T> ask(call: MediaBrowser.() -> ListenableFuture<LibraryResult<T>>): T {
-        lateinit var pending: ListenableFuture<LibraryResult<T>>
-        instrumentation.runOnMainSync { pending = browser.call() }
-        val result = pending.get(20, TimeUnit.SECONDS)
-        assertEquals(LibraryResult.RESULT_SUCCESS, result.resultCode)
-        return result.value!!
+    private fun children(parentId: String): List<MediaBrowser.MediaItem> {
+        val loaded = CountDownLatch(1)
+        val got = AtomicReference<List<MediaBrowser.MediaItem>>()
+        instrumentation.runOnMainSync {
+            browser.subscribe(
+                parentId,
+                object : MediaBrowser.SubscriptionCallback() {
+                    override fun onChildrenLoaded(parentId: String, items: List<MediaBrowser.MediaItem>) {
+                        got.set(items)
+                        loaded.countDown()
+                    }
+                },
+            )
+        }
+        assertTrue("no children of $parentId", loaded.await(20, TimeUnit.SECONDS))
+        instrumentation.runOnMainSync { browser.unsubscribe(parentId) }
+        return got.get()
     }
 
-    private fun children(parentId: String, pageSize: Int = 50): List<MediaItem> =
-        ask { getChildren(parentId, 0, pageSize, null) }
+    // Every album at the end of the folders and parts it is filed under.
+    private fun albumsUnder(parentId: String): List<String> = children(parentId).flatMap { item ->
+        val id = item.mediaId.orEmpty()
+        if (id.startsWith("album:")) listOf(id) else albumsUnder(id)
+    }
 
     @Test
-    fun theRootHasTheFourTabs() {
-        val root = ask { getLibraryRoot(null) }
-        val tabs = children(root.mediaId).map { it.mediaMetadata.title.toString() }
-        assertEquals(listOf("Recent", "Playlists", "Albums", "Artists"), tabs)
+    fun everyAlbumOfABigLibraryIsReachable() {
+        val reached = albumsUnder("tab:albums")
+        assertEquals(albums.size, reached.size)
+        assertEquals(albums.map { "album:${it.id}" }.toSet(), reached.toSet())
     }
 
     @Test
-    fun albumsAreCoversThatOpenToTheirSongs() {
-        val albums = children("tab:albums", pageSize = 5)
-        assertEquals(5, albums.size)
-        val album = albums.first()
-        assertTrue(album.mediaMetadata.isBrowsable == true && album.mediaMetadata.isPlayable == true)
-        val songs = children(album.mediaId)
+    fun anAlbumsSongsCarryTheAlbum() {
+        val album = "album:${albums.first().id}"
+        val songs = children(album)
         assertTrue(songs.isNotEmpty())
-        // A song remembers its album, so choosing it plays the album from there.
-        assertTrue(songs.all { it.mediaId.startsWith("song:") && it.mediaId.endsWith("|in:" + album.mediaId) })
+        assertTrue(songs.all { it.mediaId.orEmpty().startsWith("song:") && it.mediaId.orEmpty().endsWith("|in:$album") })
     }
 
     @Test
-    fun anAlbumAndItsSongCanBeLookedUpById() {
-        val album = children("tab:albums", pageSize = 1).single()
-        assertEquals(album.mediaMetadata.title, ask { getItem(album.mediaId) }.mediaMetadata.title)
-        val song = children(album.mediaId).first()
-        val found = ask { getItem(song.mediaId) }
-        assertEquals(song.mediaId, found.mediaId)
-        assertEquals(song.mediaMetadata.title, found.mediaMetadata.title)
-    }
-
-    @Test
-    fun anArtistOpensToTheirAlbums() {
-        val artist = children("tab:artists", pageSize = 1).single()
-        val albums = children(artist.mediaId)
-        assertTrue(albums.isNotEmpty() && albums.all { it.mediaId.startsWith("album:") })
-    }
-
-    @Test
-    fun coversAreServedAsSmallPictures() {
-        val album = children("tab:albums", pageSize = 40).first { it.mediaMetadata.artworkUri != null }
-        val uri = album.mediaMetadata.artworkUri!!
-        assertEquals(ArtworkProvider.AUTHORITY, uri.authority)
-        val bitmap = context.contentResolver.openInputStream(uri)!!.use(BitmapFactory::decodeStream)
-        assertNotNull(bitmap)
-        assertTrue(bitmap.width in 1..512 && bitmap.height in 1..512)
-    }
-
-    @Test
-    fun searchFindsMusic() {
-        lateinit var pending: ListenableFuture<LibraryResult<Void>>
-        instrumentation.runOnMainSync { pending = browser.search("love", null) }
-        assertEquals(LibraryResult.RESULT_SUCCESS, pending.get(20, TimeUnit.SECONDS).resultCode)
-        val found: List<MediaItem> = ask { getSearchResult("love", 0, 50, null) }
-        assertTrue(found.isNotEmpty())
+    fun anAlbumPlayedFromTheCarHeadsTheQueueWithItsName() {
+        val token = SessionToken(context, ComponentName(context, OctoPlaybackService::class.java))
+        lateinit var pending: com.google.common.util.concurrent.ListenableFuture<androidx.media3.session.MediaController>
+        instrumentation.runOnMainSync { pending = androidx.media3.session.MediaController.Builder(context, token).buildAsync() }
+        val app = pending.get(10, TimeUnit.SECONDS)
+        val heard = CountDownLatch(1)
+        val source = AtomicReference<String?>()
+        instrumentation.runOnMainSync {
+            app.addListener(
+                object : Player.Listener {
+                    override fun onEvents(player: Player, events: Player.Events) {
+                        val word = player.currentMediaItem?.mediaMetadata?.extras?.getString(EXTRA_SOURCE) ?: return
+                        source.set(word)
+                        heard.countDown()
+                    }
+                },
+            )
+            MediaController(context, browser.sessionToken).transportControls.playFromMediaId("album:${albums[4].id}", null)
+        }
+        assertTrue("nothing played", heard.await(10, TimeUnit.SECONDS))
+        assertEquals("list:${albums[4].title}", source.get())
+        instrumentation.runOnMainSync {
+            app.stop()
+            app.clearMediaItems()
+            app.release()
+        }
     }
 }

@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 // Connects the way Android Auto does, through the platform's old media
 // browser rather than Media3's: the service answers it while its own main
-// thread waits. Needs no library, so it runs on a fresh phone or emulator.
+// thread waits. Needs no library, so it runs on a fresh emulator.
 @RunWith(AndroidJUnit4::class)
 class CarLegacyConnectTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -50,13 +50,36 @@ class CarLegacyConnectTest {
 
     @Test
     fun connectsAndListsTheTabs() {
+        assertEquals(listOf("Home", "Radio", "Playlists", "Library"), titlesOf(browser.root))
+    }
+
+    @Test
+    fun theLibraryListsThePhonesMusicPages() {
+        assertEquals(listOf("Favorites", "Artists", "Albums", "Songs", "Genres", "Downloads"), titlesOf("tab:library"))
+    }
+
+    @Test
+    fun aTabAndALibraryRowCanBeLookedUpById() {
+        val home = lookUp("tab:home")
+        assertNotNull(home)
+        assertEquals("Home", home!!.description.title.toString())
+        assertTrue(home.isBrowsable)
+        assertEquals("Songs", lookUp("lib:songs")!!.description.title.toString())
+        assertEquals("Home", lookUp("tab:recent")!!.description.title.toString())
+    }
+
+    @Test
+    fun anUnknownIdFindsNothing() {
+        assertNull(lookUp("nothing:here"))
+    }
+
+    private fun titlesOf(parentId: String): List<String> {
         assertTrue("never connected", connected.await(5, TimeUnit.SECONDS))
-        assertEquals("root", browser.root)
         val loaded = CountDownLatch(1)
         val children = AtomicReference<List<MediaBrowser.MediaItem>>()
         instrumentation.runOnMainSync {
             browser.subscribe(
-                browser.root,
+                parentId,
                 object : MediaBrowser.SubscriptionCallback() {
                     override fun onChildrenLoaded(parentId: String, items: List<MediaBrowser.MediaItem>) {
                         children.set(items)
@@ -66,21 +89,7 @@ class CarLegacyConnectTest {
             )
         }
         assertTrue("no children", loaded.await(10, TimeUnit.SECONDS))
-        val tabs = children.get().map { it.description.title.toString() }
-        assertEquals(listOf("Recent", "Playlists", "Albums", "Artists"), tabs)
-    }
-
-    @Test
-    fun aTabCanBeLookedUpById() {
-        val item = lookUp("tab:albums")
-        assertNotNull(item)
-        assertEquals("Albums", item!!.description.title.toString())
-        assertTrue(item.isBrowsable)
-    }
-
-    @Test
-    fun anUnknownIdFindsNothing() {
-        assertNull(lookUp("nothing:here"))
+        return children.get().map { it.description.title.toString() }
     }
 
     // The item a car gets for an id, or null when the service says there is none.
