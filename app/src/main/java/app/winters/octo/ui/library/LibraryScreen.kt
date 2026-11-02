@@ -153,10 +153,10 @@ fun LibraryScreen(
                 item(key = "server-downloads") {
                     Column {
                         Separator()
-                        val running = app.winters.octo.ui.downloads.runningCount(serverRows)
+                        // "2 on the way, 1 waits for you".
                         SectionRow(
                             Section(OctoIcons.Cloud, app.winters.octo.ui.downloads.SERVER_DOWNLOADS, LibraryRoute),
-                            detail = if (running > 0) "$running on the way" else null,
+                            detail = app.winters.octo.ui.downloads.drawerState(serverRows),
                         ) { server.downloads.open() }
                     }
                 }
