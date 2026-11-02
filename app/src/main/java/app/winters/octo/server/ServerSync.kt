@@ -280,6 +280,18 @@ class ServerSync @Inject constructor(
         }.await()
     }
 
+    // Takes in the server's songs a search found, as takeInArriving does,
+    // without waiting on a full copy of the library: when one is running, or
+    // starts before the take-in ends, this answers null at once and the
+    // take-in carries on behind it. A copy never takes takeInLock, so the
+    // race is with the copy's start.
+    suspend fun takeInIfFree(arriving: Arriving): Boolean? {
+        if (arriving.isEmpty) return false
+        val work = scope.async { takeInArriving(arriving) }
+        val copying = synchronized(this) { job?.isActive == true }
+        return unlessCopying(work, copying, _syncing)
+    }
+
     // Puts server songs and albums into the library ahead of the next full
     // copy: each album in `albumIds` read as the server has it now, with
     // all its songs, and each of `songs` too (alone when its album could

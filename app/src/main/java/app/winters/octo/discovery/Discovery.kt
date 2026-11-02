@@ -11,6 +11,7 @@ import app.winters.octo.catalog.isFind
 import app.winters.octo.catalog.matchKey
 import app.winters.octo.catalog.onlineArtwork
 import app.winters.octo.catalog.searchKey
+import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.data.accountId
@@ -112,6 +113,13 @@ class Discovered(
     val notInLibraryEmpty get() = songs.isEmpty() && albums.isEmpty() && artists.isEmpty()
 }
 
+// Made for you, and every list Octo made for the listener by group, as one
+// read of the server's playlists gives them.
+data class ServerLists(
+    val madeForYou: List<Station> = emptyList(),
+    val groups: List<Pair<OctoListGroup, List<Station>>> = emptyList(),
+)
+
 class OnlineAlbumPage(val album: OnlineAlbum, val songs: List<TrackEntity>)
 
 class OnlineArtistPage(val artist: OnlineArtist, val albums: List<OnlineAlbum>)
@@ -211,6 +219,28 @@ class Discovery @Inject constructor(
         if (!session.runsOcto) return emptyList()
         val (client, sourceId) = server() ?: return emptyList()
         return homeStations(client.radioStations(), sourceId)
+    }
+
+    // The same for the session given rather than the one in use now, so a
+    // car's shelves never mix two servers' answers. Only Octo runs stations.
+    suspend fun stationsOn(session: Session): List<Station> {
+        if (!session.runsOcto) return emptyList()
+        return homeStations(session.client.radioStations(), serverSourceId(session.client.primaryUrl))
+    }
+
+    // Made for you and every list Octo made for the listener, by group, from
+    // one read of the session's playlists; none on another server.
+    suspend fun serverListsOn(session: Session): ServerLists {
+        if (!session.runsOcto) return ServerLists()
+        val client = session.client
+        val sourceId = serverSourceId(client.primaryUrl)
+        val lists = client.playlists()
+        return ServerLists(
+            madeForYouLists(lists, sourceId),
+            octoListGroups(lists, client.username).map { (group, items) ->
+                group to items.map { Station(it.id, it.name, ArtworkRef.Server(sourceId, it.coverArt ?: it.id).encode(), it.songCount) }
+            },
+        )
     }
 
     // Every list Octo made for the listener, by group, each shown as a card

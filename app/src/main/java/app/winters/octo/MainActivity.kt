@@ -115,7 +115,7 @@ class MainActivity : ComponentActivity() {
     // "Play Drake on Octo": the assistant sends what was said.
     private fun playIfAsked(intent: Intent) {
         if (intent.action != MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH) return
-        playback.playFromSearch(intent.getStringExtra(SearchManager.QUERY).orEmpty())
+        playback.playFromSearch(intent.getStringExtra(SearchManager.QUERY).orEmpty(), intent.extras)
     }
 
     // While casting, the volume buttons turn the TV or speaker up and down.

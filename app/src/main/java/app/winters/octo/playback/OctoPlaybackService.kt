@@ -3,6 +3,7 @@ package app.winters.octo.playback
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
+import android.provider.MediaStore
 import android.util.Log
 import android.view.KeyEvent
 import androidx.core.content.IntentCompat
@@ -18,6 +19,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.ConnectionResult
@@ -30,6 +32,7 @@ import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.isFind
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
+import app.winters.octo.data.accountId
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.FindLengths
@@ -43,6 +46,7 @@ import app.winters.octo.output.Outputs
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.server.QueueSync
+import app.winters.octo.server.ServerSync
 import app.winters.octo.sound.AlbumRun
 import app.winters.octo.sound.AudioSession
 import app.winters.octo.sound.DeckSound
@@ -68,17 +72,18 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 
 // The like toggle offered in the notification and on the lock screen, the
@@ -88,11 +93,29 @@ private val DOWNLOAD = SessionCommand("app.winters.octo.DOWNLOAD", Bundle.EMPTY)
 private val CLOSE = SessionCommand("app.winters.octo.CLOSE", Bundle.EMPTY)
 private val STOP = SessionCommand("app.winters.octo.STOP", Bundle.EMPTY)
 
+// A song's actions in a car: Start radio and Play next, by the song's id.
+private val START_RADIO = SessionCommand(START_RADIO_ACTION, Bundle.EMPTY)
+private val PLAY_NEXT_ITEM = SessionCommand(PLAY_NEXT_ITEM_ACTION, Bundle.EMPTY)
+
+// Where a car's browse action reads the words it shows for its result.
+private const val ACTION_MESSAGE = "androidx.media.utils.extras.KEY_CUSTOM_BROWSER_ACTION_RESULT_MESSAGE"
+
 // "Play next" from the app, with the song ids to play.
 internal val PLAY_NEXT = SessionCommand("app.winters.octo.PLAY_NEXT", Bundle.EMPTY)
 private const val ARG_IDS = "ids"
 
 internal fun playNextArgs(trackIds: List<String>) = Bundle().apply { putStringArrayList(ARG_IDS, ArrayList(trackIds)) }
+
+// "Play X on Octo" from the app, with the words said and what the
+// assistant picked out of them.
+internal val PLAY_FROM_SEARCH = SessionCommand("app.winters.octo.PLAY_FROM_SEARCH", Bundle.EMPTY)
+private const val ARG_QUERY = "query"
+private const val ARG_EXTRAS = "extras"
+
+internal fun playFromSearchArgs(query: String, extras: Bundle?) = Bundle().apply {
+    putString(ARG_QUERY, query)
+    extras?.let { putBundle(ARG_EXTRAS, Bundle(it)) }
+}
 
 // Apps that drive playback from a car or by voice: Android Auto and the
 // assistant. They get full control even when not system apps.
@@ -101,6 +124,12 @@ private val carApps = setOf(
     "com.google.android.carassistant",
     "com.google.android.googlequicksearchbox",
 )
+
+// Apps that browse the music to show it in a car, and so ask the server for
+// its shelves when they connect: the car apps and Bluetooth (a car stereo
+// that browses over Bluetooth). Bluetooth gets no more control than Media3
+// gives it.
+private val carPackages = carApps + "com.android.bluetooth"
 
 // Plays music with the screen off, and answers the lock screen, the
 // notification, headphone buttons and the app.
@@ -134,8 +163,27 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var switcher: ServerSwitch
     @Inject lateinit var sessions: SessionRepository
     @Inject lateinit var liveLookup: LiveLookup
+    @Inject lateinit var carShelves: CarShelves
+    @Inject lateinit var carSearch: CarSearch
+    @Inject lateinit var carVoice: CarVoice
+    @Inject lateinit var carResume: CarResume
+    @Inject lateinit var serverSync: ServerSync
 
     private val scope = MainScope()
+    // What each car said it can show as tabs, kept from its root call.
+    private val rootLimits = ConcurrentHashMap<MediaSession.ControllerInfo, Int>()
+
+    // Tells cars of changes to the lists they have open; on the main thread.
+    private val notifier = CarNotifier { id ->
+        val open = session ?: return@CarNotifier false
+        if (open.getSubscribedControllers(id).isEmpty()) return@CarNotifier false
+        open.notifyChildrenChanged(id, Int.MAX_VALUE, null)
+        true
+    }
+
+    // Drops a play that waited on the server once something newer replaced
+    // the queue, or another account is in use.
+    private val guard = PlayGuard({ player.replacements }, { sessions.state.value.accountId })
     // While the server in use changes, the emptied player is not saved over
     // the queue handed over.
     private var holding = false
@@ -207,6 +255,7 @@ class OctoPlaybackService : MediaLibraryService() {
 
         session = MediaLibrarySession.Builder(this, player, Callback())
             .setBitmapLoader(CacheBitmapLoader(OctoArtLoader(this, DataSourceBitmapLoader.Builder(this).build())))
+            .setCommandButtonsForMediaItems(carSongButtons())
             .setSessionActivity(
                 PendingIntent.getActivity(
                     this,
@@ -267,9 +316,11 @@ class OctoPlaybackService : MediaLibraryService() {
         }
         // Editing the queue saves it once things settle.
         scope.launch { queueChanged.debounce(500).collect { saveQueue() } }
-        // A car reads its tabs again once the library under them settles,
-        // like after signing in or while a sync brings songs in.
-        scope.launch { car.changes.drop(1).debounce(2_000).collect { refreshCarTabs() } }
+        // A car hears of changes to the lists it has open, each list of what
+        // it reads; a change to the library alone waits for a copy to end.
+        scope.launch { car.inputs.collect { notifier.changed(it) } }
+        scope.launch { serverSync.syncing.collect { notifier.syncing(it) } }
+        car.listChanged = { id -> scope.launch { notifier.changedNode(id) } }
         // A switch of server stops the music and brings the other's queue.
         switcher.attach(side)
     }
@@ -371,8 +422,50 @@ class OctoPlaybackService : MediaLibraryService() {
         session.setAvailableCommands(controller, sessionCommands(), Player.Commands.Builder().addAll(*kept.toIntArray()).build())
     }
 
+    // A song's actions in a car that shows them, with the app's own icons.
+    private fun carSongButtons(): List<CommandButton> {
+        val look = CarLook(this)
+        return listOf(
+            CommandButton.Builder(CommandButton.ICON_RADIO).setDisplayName("Start radio").setSessionCommand(START_RADIO)
+                .setIconUri(look.icon(OctoIcons.Radio)).build(),
+            CommandButton.Builder(CommandButton.ICON_QUEUE_NEXT).setDisplayName("Play next").setSessionCommand(PLAY_NEXT_ITEM)
+                .setIconUri(look.icon(OctoIcons.PlayNext)).build(),
+        )
+    }
+
+    // "Start radio" on a song in a car: played only when songs like it are
+    // found and nothing newer was chosen meanwhile. The words of a refusal
+    // go back to the car to show.
+    private suspend fun startRadio(id: String?): SessionResult {
+        restored.await()
+        val mark = guard.mark()
+        val answer = id?.let { withContext(Dispatchers.Default) { car.radioFor(it) } } ?: CarPlayAnswer.Refused(CAR_NOTHING_TO_PLAY)
+        val play = when (answer) {
+            is CarPlayAnswer.Refused -> return actionWords(answer.words)
+            is CarPlayAnswer.Play -> answer.play
+        }
+        val items = withContext(Dispatchers.IO) { playable.items(play.ids) }.map { it.withSource(play.source) }
+        if (items.isEmpty()) return actionWords(CAR_NOTHING_TO_PLAY)
+        if (!guard.stillWanted(mark)) return SessionResult(SessionResult.RESULT_SUCCESS)
+        player.setMediaItems(items, 0, 0)
+        player.prepare()
+        player.play()
+        return SessionResult(SessionResult.RESULT_SUCCESS)
+    }
+
+    // "Play next" on a song in a car: it goes right after the one playing.
+    private suspend fun playNextFromCar(id: String?): SessionResult {
+        val song = id?.let(::parseCarId) as? CarNode.Song ?: return actionWords(CAR_NOTHING_TO_PLAY)
+        val items = withContext(Dispatchers.IO) { playable.items(listOf(song.trackId)) }.map { it.withSource(QueueSource.You) }
+        if (items.isEmpty()) return actionWords(CAR_NOTHING_TO_PLAY)
+        player.addNext(items)
+        return SessionResult(SessionResult.RESULT_SUCCESS)
+    }
+
+    private fun actionWords(words: String) = SessionResult(SessionResult.RESULT_SUCCESS, Bundle().apply { putString(ACTION_MESSAGE, words) })
+
     private fun sessionCommands() = ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
-        .add(LIKE).add(DOWNLOAD).add(CLOSE).add(PLAY_NEXT).add(STOP)
+        .add(LIKE).add(DOWNLOAD).add(CLOSE).add(PLAY_NEXT).add(STOP).add(PLAY_FROM_SEARCH).add(START_RADIO).add(PLAY_NEXT_ITEM)
         .build()
 
     private fun updateStationOnAir() {
@@ -382,6 +475,8 @@ class OctoPlaybackService : MediaLibraryService() {
     // Close: the music stops, the queue is kept for next time, the
     // notification goes, and the service stops once the app lets go of it.
     private fun close() {
+        // A play still on its way from the server no longer starts.
+        player.markReplaced()
         saveQueue()
         sleep.cancel()
         // Casting ends too, with the music stopped.
@@ -445,14 +540,6 @@ class OctoPlaybackService : MediaLibraryService() {
         serverQueue.restored(snapshot())
     }
 
-    private suspend fun refreshCarTabs() {
-        val library = session ?: return
-        for (node in listOf(CarNode.Root, CarNode.Recent, CarNode.Playlists, CarNode.Albums, CarNode.Artists)) {
-            val id = carId(node)
-            library.notifyChildrenChanged(id, car.children(id, 0, Int.MAX_VALUE).size, null)
-        }
-    }
-
     private fun saveQueue() {
         if (!::player.isInitialized || holding) return
         queue.save(snapshot())
@@ -482,9 +569,9 @@ class OctoPlaybackService : MediaLibraryService() {
             holding = false
         }
 
-        // A car reads its tabs again, since the library under them changed.
+        // A car's open lists all changed with the library under them.
         override fun libraryChanged() {
-            scope.launch { refreshCarTabs() }
+            scope.launch { notifier.changedAll() }
         }
 
         // What plays stops and counts, casting ends, and the player is empty.
@@ -646,6 +733,57 @@ class OctoPlaybackService : MediaLibraryService() {
         }
     }
 
+    // What a car or the app is told when a choice does not play, in the
+    // phone's words: the app shows them itself; a car shows the session's
+    // passing error, while the music goes on.
+    private fun tell(controller: MediaSession.ControllerInfo, words: String) {
+        if (controller.packageName == packageName) {
+            feedback.show(words)
+        } else {
+            session?.sendError(SessionError(SessionError.ERROR_UNKNOWN, words))
+        }
+    }
+
+    private fun refuse(controller: MediaSession.ControllerInfo, words: String): Nothing {
+        tell(controller, words)
+        throw CarPlayRefused(words)
+    }
+
+    // A spoken request from the app's own "play X on Octo": looked up, and
+    // played only when something was found and nothing newer was chosen
+    // meanwhile; otherwise the queue stays as it is. Answers whether it
+    // played.
+    private suspend fun playSpoken(controller: MediaSession.ControllerInfo, ask: VoiceAsk): Boolean {
+        restored.await()
+        val mark = guard.mark()
+        val play = withContext(Dispatchers.Default) { carVoice.play(ask) }
+        val songs = play?.let { found -> withContext(Dispatchers.IO) { playable.items(found.ids) }.map { it.withSource(found.source) } }
+        if (play == null || songs.isNullOrEmpty()) {
+            tell(controller, nothingFoundLine(ask.words))
+            return false
+        }
+        if (!guard.stillWanted(mark)) return false
+        player.shuffleModeEnabled = play.shuffle
+        player.setMediaItems(songs, if (play.shuffle) songs.indices.random() else 0, 0)
+        player.prepare()
+        player.play()
+        return true
+    }
+
+    // A car opened a list of its own accord: parts of the server's shelves
+    // that failed are asked for again, and Home looks for a queue to pick
+    // up.
+    private fun carOpened(parentId: String) {
+        when (parseCarId(parentId)) {
+            CarNode.Home -> {
+                carShelves.carOpened()
+                carResume.homeOpened()
+            }
+            CarNode.Radio, CarNode.Playlists -> carShelves.carOpened()
+            else -> Unit
+        }
+    }
+
     private inner class Callback : MediaLibrarySession.Callback {
         override fun onConnectAsync(
             session: MediaSession,
@@ -703,6 +841,15 @@ class OctoPlaybackService : MediaLibraryService() {
                 PLAY_NEXT -> args.getStringArrayList(ARG_IDS)?.let { ids ->
                     scope.launch { player.addNext(playable.items(ids).map { it.withSource(QueueSource.You) }) }
                 }
+                START_RADIO -> return scope.future { startRadio(args.getString(MediaConstants.EXTRA_KEY_MEDIA_ID)) }
+                PLAY_NEXT_ITEM -> return scope.future { playNextFromCar(args.getString(MediaConstants.EXTRA_KEY_MEDIA_ID)) }
+                // Answered once it is known whether something plays.
+                PLAY_FROM_SEARCH -> {
+                    val ask = voiceAskOf(args.getString(ARG_QUERY), args.getBundle(ARG_EXTRAS))
+                    return scope.future {
+                        SessionResult(if (playSpoken(controller, ask)) SessionResult.RESULT_SUCCESS else SessionError.ERROR_BAD_VALUE)
+                    }
+                }
                 else -> return super.onCustomCommand(session, controller, customCommand, args)
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -713,12 +860,28 @@ class OctoPlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
             mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> = scope.future {
-            // An album or playlist chosen in a car adds all its songs. Songs
-            // added are the listener's own, for the queue's headings.
-            val ids = mediaItems.flatMap { car.playFor(it.mediaId)?.first ?: listOf(it.mediaId) }
-            playable.items(ids).map { it.withSource(QueueSource.You) }.toMutableList()
+            restored.await()
+            // A list chosen in a car adds all its songs, a song chosen in one
+            // only itself. Songs added are the listener's own, for the
+            // queue's headings.
+            val ids = mediaItems.flatMap { item ->
+                val node = parseCarId(item.mediaId) ?: return@flatMap listOf(item.mediaId)
+                if (node is CarNode.Song) return@flatMap listOf(node.trackId)
+                when (val answer = withContext(Dispatchers.Default) { car.plays.playFor(item.mediaId) }) {
+                    is CarPlayAnswer.Play -> answer.play.ids
+                    is CarPlayAnswer.Refused -> {
+                        tell(controller, answer.words)
+                        emptyList()
+                    }
+                    null -> listOf(item.mediaId)
+                }
+            }
+            withContext(Dispatchers.IO) { playable.items(ids) }.map { it.withSource(QueueSource.You) }.toMutableList()
         }
 
+        // The futures of plays run on the main thread and end there, with
+        // nothing waiting between the check of a play that waited on the
+        // server and Media3 setting its songs.
         override fun onSetMediaItems(
             mediaSession: MediaSession,
             controller: MediaSession.ControllerInfo,
@@ -726,19 +889,31 @@ class OctoPlaybackService : MediaLibraryService() {
             startIndex: Int,
             startPositionMs: Long,
         ): ListenableFuture<MediaItemsWithStartPosition> = scope.future {
+            restored.await()
+            val mark = guard.mark()
             val single = mediaItems.singleOrNull()
-            // Something said out loud, like "play Drake on Octo".
+            // Something said out loud in a car, like "play Drake on Octo".
             single?.requestMetadata?.searchQuery?.let { query ->
-                val (ids, shuffle) = car.forVoice(query)
-                val songs = playable.items(ids)
-                player.shuffleModeEnabled = shuffle
-                val first = if (shuffle && songs.isNotEmpty()) songs.indices.random() else 0
-                return@future MediaItemsWithStartPosition(songs, first, 0)
+                val ask = voiceAskOf(query, single.requestMetadata.extras)
+                val play = withContext(Dispatchers.Default) { carVoice.play(ask) } ?: refuse(controller, nothingFoundLine(ask.words))
+                val songs = withContext(Dispatchers.IO) { playable.items(play.ids) }.map { it.withSource(play.source) }
+                if (songs.isEmpty()) refuse(controller, nothingFoundLine(ask.words))
+                if (!guard.stillWanted(mark)) throw CarPlayRefused("superseded")
+                player.shuffleModeEnabled = play.shuffle
+                return@future MediaItemsWithStartPosition(songs, if (play.shuffle) songs.indices.random() else 0, 0)
             }
-            // An album, playlist, or a song inside one, chosen in a car.
-            single?.let { car.playFor(it.mediaId) }?.let { (ids, start) ->
-                val each = playable.itemsEach(ids)
-                return@future MediaItemsWithStartPosition(each.filterNotNull(), chosenStart(each, start), 0)
+            // A place or a song chosen in a car.
+            when (val answer = single?.let { withContext(Dispatchers.Default) { car.plays.playFor(it.mediaId) } }) {
+                is CarPlayAnswer.Refused -> refuse(controller, answer.words)
+                is CarPlayAnswer.Play -> {
+                    val play = answer.play
+                    val each = withContext(Dispatchers.IO) { playable.itemsEach(play.ids) }
+                    val items = each.mapNotNull { it?.withSource(play.source) }
+                    if (items.isEmpty()) refuse(controller, CAR_NOTHING_TO_PLAY)
+                    if (play.network && !guard.stillWanted(mark)) throw CarPlayRefused("superseded")
+                    return@future MediaItemsWithStartPosition(items, chosenStart(each, play.start), play.positionMs)
+                }
+                null -> Unit
             }
             val each = playable.itemsEach(mediaItems.map { it.mediaId })
             // The list's name, when the app gave one, goes on every song.
@@ -768,14 +943,29 @@ class OctoPlaybackService : MediaLibraryService() {
             }
         }
 
-        // Answered at once: the old browser waits for the root on the main thread too.
+        // Answered at once: the old browser waits for the root on the main
+        // thread too. What the car says it can show is kept for its tabs, and
+        // a car connecting asks the server for its shelves and for a queue to
+        // pick up, without waiting.
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
             params: LibraryParams?,
-        ): ListenableFuture<LibraryResult<MediaItem>> = Futures.immediateFuture(LibraryResult.ofItem(car.root(), params))
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            rootLimits[browser] = params?.extras?.getInt(MediaConstants.EXTRAS_KEY_ROOT_CHILDREN_LIMIT, 0) ?: 0
+            if (browser.packageName in carPackages) {
+                carShelves.carConnected()
+                carResume.carConnected()
+            }
+            return Futures.immediateFuture(LibraryResult.ofItem(car.root(), params))
+        }
 
-        // Browsing from a car: its tabs, and the albums, songs and playlists in them.
+        override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            rootLimits.remove(controller)
+        }
+
+        // Browsing from a car: its tabs and every list under them. A list the
+        // server could not give says why, in the phone's words.
         override fun onGetChildren(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
@@ -784,9 +974,28 @@ class OctoPlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
-            val items = car.children(parentId, page, pageSize)
-            car.grantArtwork(browser.packageName, items)
-            LibraryResult.ofItemList(items, params)
+            val read = notifier.readStarted(parentId)
+            if (read.ownAccord && browser.packageName in carPackages) carOpened(parentId)
+            try {
+                val (none, shown) = withContext(Dispatchers.Default) {
+                    val items = car.children(parentId, rootLimits[browser]?.takeIf { it > 0 }, read.ownAccord)
+                    val shown = pageOf(items, page, pageSize)
+                    car.grantArtwork(browser.packageName, shown)
+                    items.isEmpty() to shown
+                }
+                if (read.ownAccord && none && parseCarId(parentId) == CarNode.Radio && browser.packageName in carPackages) {
+                    tell(browser, CAR_EMPTY_RADIO)
+                }
+                LibraryResult.ofItemList(shown, params)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val words = car.browseWords(parentId, e)
+                tell(browser, words)
+                LibraryResult.ofError(SessionError(SessionError.ERROR_IO, words))
+            } finally {
+                notifier.readEnded(read)
+            }
         }
 
         override fun onGetItem(
@@ -794,18 +1003,59 @@ class OctoPlaybackService : MediaLibraryService() {
             browser: MediaSession.ControllerInfo,
             mediaId: String,
         ): ListenableFuture<LibraryResult<MediaItem>> = scope.future {
-            val item = car.lookup(mediaId) ?: return@future LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
-            car.grantArtwork(browser.packageName, listOf(item))
+            val item = withContext(Dispatchers.Default) {
+                car.lookup(mediaId, rootLimits[browser]?.takeIf { it > 0 })?.also { car.grantArtwork(browser.packageName, listOf(it)) }
+            } ?: return@future LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
             LibraryResult.ofItem(item, null)
         }
 
+        // Any list a car can open is taken at once, without asking anything
+        // about it, so it hears of changes while open.
+        override fun onSubscribe(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            parentId: String,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<Void>> {
+            val node = parseCarId(parentId)
+            if (node == null || !node.isBrowsable) return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_BAD_VALUE))
+            notifier.opened(parentId)
+            // The old browser loads what it subscribed to by itself; a Media3
+            // browser is told to.
+            if (browser.controllerVersion != MediaSession.ControllerInfo.LEGACY_CONTROLLER_VERSION) {
+                session.notifyChildrenChanged(browser, parentId, Int.MAX_VALUE, params)
+            }
+            return Futures.immediateFuture(LibraryResult.ofVoid())
+        }
+
+        override fun onUnsubscribe(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            parentId: String,
+        ): ListenableFuture<LibraryResult<Void>> {
+            if (session.getSubscribedControllers(parentId).none { it != browser }) notifier.closed(parentId)
+            return Futures.immediateFuture(LibraryResult.ofVoid())
+        }
+
+        // A car gets one answer for each search, sent when it is told the
+        // search ended, so it is always told, whatever happened.
         override fun onSearch(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
             query: String,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<Void>> = scope.future {
-            session.notifySearchResultChanged(browser, query, car.search(query).size, params)
+            var count = 0
+            try {
+                val answer = carSearch.answer(query)
+                count = withContext(Dispatchers.Default) { car.searchItems(answer).size }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("Octo", "car search failed: ${e.javaClass.simpleName}")
+            } finally {
+                if (isActive) session.notifySearchResultChanged(browser, query, count, params)
+            }
             LibraryResult.ofVoid()
         }
 
@@ -817,9 +1067,29 @@ class OctoPlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
-            val items = car.search(query).drop(page * pageSize).take(pageSize)
-            car.grantArtwork(browser.packageName, items)
-            LibraryResult.ofItemList(items, params)
+            val items = try {
+                val answer = carSearch.latest(query) ?: carSearch.answer(query)
+                withContext(Dispatchers.Default) { car.searchItems(answer) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("Octo", "car search answer failed: ${e.javaClass.simpleName}")
+                emptyList()
+            }
+            val shown = withContext(Dispatchers.Default) { pageOf(items, page, pageSize).also { car.grantArtwork(browser.packageName, it) } }
+            LibraryResult.ofItemList(shown, params)
         }
     }
 }
+
+// A choice that does not play: its future fails, so nothing changes.
+private class CarPlayRefused(words: String) : Exception(words)
+
+// A spoken request as the assistant sends it: the words, and its extras.
+private fun voiceAskOf(query: String?, extras: Bundle?): VoiceAsk = voiceAsk(
+    query,
+    extras?.getString(MediaStore.EXTRA_MEDIA_FOCUS),
+    extras?.getString(MediaStore.EXTRA_MEDIA_ARTIST),
+    extras?.getString(MediaStore.EXTRA_MEDIA_ALBUM),
+    extras?.getString(MediaStore.EXTRA_MEDIA_TITLE),
+)

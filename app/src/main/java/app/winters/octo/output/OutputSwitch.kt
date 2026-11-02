@@ -1,7 +1,6 @@
 package app.winters.octo.output
 
 import androidx.annotation.OptIn
-import androidx.media3.common.ForwardingSimpleBasePlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -25,7 +24,7 @@ import com.google.common.util.concurrent.ListenableFuture
 // the app and a car keep one player throughout. The sleep timer and the
 // queue edits the app offers work on whichever is in use.
 @OptIn(UnstableApi::class)
-class OutputSwitch(private val local: OctoPlayer) : ForwardingSimpleBasePlayer(local), SleepTarget, EditableQueue {
+class OutputSwitch(private val local: OctoPlayer) : CountingForwardingPlayer(local), SleepTarget, EditableQueue {
     var remote: RemotePlayer? = null
         private set
 
