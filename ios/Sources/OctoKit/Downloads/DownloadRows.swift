@@ -386,18 +386,23 @@ public enum DownloadStep: Int, CaseIterable, Sendable {
 }
 
 /// Where a row is on those steps: the step it is on, or the number of steps once it is in. A
-/// failed row stops on the step its log last reached.
+/// failed row stops on the step its log last reached, and a searching one waits on it: a held
+/// download's file was already fetched and checked, while a search begun again is back on Find.
 public func stepOf(_ row: DownloadRow, events: [AcquisitionEvent] = []) -> Int {
     switch row.phase {
-    case .waiting, .searching: return DownloadStep.find.rawValue
+    case .waiting: return DownloadStep.find.rawValue
+    case .searching, .failed: return lastStep(events) ?? DownloadStep.find.rawValue
     case .downloading: return DownloadStep.download.rawValue
     case .checking: return DownloadStep.check.rawValue
     case .adding: return DownloadStep.add.rawValue
     case .done: return DownloadStep.allCases.count
-    case .failed:
-        if let last = events.last(where: { !afterwords.contains(markOf($0.logKind)) }) { return stepOfMark(markOf(last.logKind)) }
-        return DownloadStep.find.rawValue
     }
+}
+
+/// The step of a log's last line that says which step it reached, or nil.
+private func lastStep(_ events: [AcquisitionEvent]) -> Int? {
+    guard let last = events.last(where: { !afterwords.contains(markOf($0.logKind)) }) else { return nil }
+    return stepOfMark(markOf(last.logKind))
 }
 
 /// The step a log line belongs to.

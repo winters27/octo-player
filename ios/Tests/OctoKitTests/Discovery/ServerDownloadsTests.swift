@@ -271,6 +271,25 @@ private func held(_ key: String, keepAnyway: Bool = true) -> Acquisition {
         #expect(markOf(LogKind.of("something new")) == .note)
     }
 
+    @Test func aHeldDownloadWaitsOnTheStepItsLogReachedAndASearchBegunAgainIsBackOnFind() {
+        let held = rowOf(download("s:a", "searching", note: "Waiting for AcoustID"))
+        let log = [
+            AcquisitionEvent(kind: "search", text: "Looking on Soulseek"),
+            AcquisitionEvent(kind: "transfer", text: "Downloading from Soulseek"),
+            AcquisitionEvent(kind: "check", text: "Checking the file"),
+            AcquisitionEvent(kind: "note", text: "Waiting for AcoustID"),
+        ]
+        #expect(stepOf(held, events: log) == DownloadStep.check.rawValue)
+        let album = log + [
+            AcquisitionEvent(kind: "library", text: "In the library folder"),
+            AcquisitionEvent(kind: "note", text: "2 tracks wait: play them once, or keep them anyway"),
+        ]
+        #expect(stepOf(held, events: album) == DownloadStep.add.rawValue)
+        #expect(stepOf(held, events: log + [AcquisitionEvent(kind: "search", text: "Looking on YouTube")]) == DownloadStep.find.rawValue)
+        #expect(stepOf(held) == DownloadStep.find.rawValue)
+        #expect(stepOf(rowOf(download("s:a", "queued")), events: log) == DownloadStep.find.rawValue)
+    }
+
     @Test func aCopysBadgeTakesItsKindAndTheFactsKeepTheRest() {
         let flac = FoundCandidate(source: "Soulseek", format: "flac", quality: "FLAC 16-bit 44.1 kHz", size: 36_100_000, length: 329, freeSlot: true)
         #expect(copyBadge(flac) == "FLAC")

@@ -387,15 +387,22 @@ enum class DownloadStep(val label: String) {
 }
 
 // Where a row is on those steps: the step it is on, or DownloadStep.entries.size
-// once it is in. A failed row stops on the step its log last reached.
+// once it is in. A failed row stops on the step its log last reached, and a
+// searching one waits on it: a held download's file was already fetched and
+// checked, while a search begun again is back on Find.
 fun stepOf(row: DownloadRow, events: List<AcquisitionEvent> = emptyList()): Int = when (row.phase) {
-    RowPhase.Waiting, RowPhase.Searching -> DownloadStep.Find.ordinal
+    RowPhase.Waiting -> DownloadStep.Find.ordinal
+    RowPhase.Searching -> lastStep(events) ?: DownloadStep.Find.ordinal
     RowPhase.Downloading -> DownloadStep.Download.ordinal
     RowPhase.Checking -> DownloadStep.Check.ordinal
     RowPhase.Adding -> DownloadStep.Add.ordinal
     RowPhase.Done -> DownloadStep.entries.size
-    RowPhase.Failed -> events.lastOrNull { markOf(it.logKind) !in AFTERWORDS }?.let { stepOfMark(markOf(it.logKind)) } ?: DownloadStep.Find.ordinal
+    RowPhase.Failed -> lastStep(events) ?: DownloadStep.Find.ordinal
 }
+
+// The step of a log's last line that says which step it reached, or null.
+private fun lastStep(events: List<AcquisitionEvent>): Int? =
+    events.lastOrNull { markOf(it.logKind) !in AFTERWORDS }?.let { stepOfMark(markOf(it.logKind)) }
 
 // The step a log line belongs to.
 fun stepOfMark(mark: LogMark): Int = when (mark) {

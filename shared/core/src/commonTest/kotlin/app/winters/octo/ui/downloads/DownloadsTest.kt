@@ -757,6 +757,24 @@ class DownloadsTest {
     }
 
     @Test
+    fun aHeldDownloadWaitsOnTheStepItsLogReached_AndASearchBegunAgainIsBackOnFind() {
+        val held = rowOf(download("s:a", "searching", note = "Waiting for AcoustID"))
+        val log = listOf(
+            AcquisitionEvent(kind = "search", text = "Looking on Soulseek"),
+            AcquisitionEvent(kind = "transfer", text = "Downloading from Soulseek"),
+            AcquisitionEvent(kind = "check", text = "Checking the file"),
+            AcquisitionEvent(kind = "note", text = "Waiting for AcoustID"),
+        )
+        assertEquals(DownloadStep.Check.ordinal, stepOf(held, log))
+        val album = log + AcquisitionEvent(kind = "library", text = "In the library folder") +
+            AcquisitionEvent(kind = "note", text = "2 tracks wait: play them once, or keep them anyway")
+        assertEquals("Some of an album in", DownloadStep.Add.ordinal, stepOf(held, album))
+        assertEquals("Looking again", DownloadStep.Find.ordinal, stepOf(held, log + AcquisitionEvent(kind = "search", text = "Looking on YouTube")))
+        assertEquals("No log yet", DownloadStep.Find.ordinal, stepOf(held))
+        assertEquals("Waiting its turn", DownloadStep.Find.ordinal, stepOf(rowOf(download("s:a", "queued")), log))
+    }
+
+    @Test
     fun aCopysBadgeTakesItsKind_AndTheFactsKeepTheRest() {
         val flac = FoundCandidate(source = "Soulseek", format = "flac", quality = "FLAC 16-bit 44.1 kHz", size = 36_100_000, length = 329, freeSlot = true)
         assertEquals("FLAC", copyBadge(flac))
