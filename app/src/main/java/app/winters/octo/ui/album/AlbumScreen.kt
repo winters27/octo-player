@@ -276,9 +276,10 @@ fun AlbumScreen(
                     item(key = "header") {
                         val genre = albumGenre(library)
                         val adopted = LocalAdoptedFinds.current
-                        val note = if (missing) albumLibraryNote(whole.size, whole.count { isOutsideLibrary(it.id, adopted) }) else null
+                        val outside = if (missing) whole.count { isOutsideLibrary(it.id, adopted) } else 0
+                        val note = if (missing) albumLibraryNote(whole.size, outside) else null
                         val share = albumShareItem(id, a.title)
-                        val download = albumDownloadItem(library)
+                        val download = albumDownloadItem(library, outside)
                         val canFollow by vm.canFollow.collectAsStateWithLifecycle()
                         val askable = whole.count { isFind(it.id) && (states[it.id] ?: DownloadState.None) == DownloadState.None }
                         val coming = whole.count { isFind(it.id) && states[it.id] == DownloadState.Requested }

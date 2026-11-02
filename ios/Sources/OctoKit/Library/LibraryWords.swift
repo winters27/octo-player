@@ -155,11 +155,19 @@ public func averageRatingSpoken(_ average: Double) -> String {
     return "Songs rated \(stars) \(stars == "1" ? "star" : "stars") on average"
 }
 
-/// What the album's download button says: what is left to do, if anything.
-public func albumDownloadLabel(songs: Int, held: Int, done: Int) -> String {
-    if held < songs { return "Download album" }
+/// What the album's download button says: what is left to do, if anything. On a page that also
+/// lists songs outside the library (`outside`), it counts the songs it saves, so it never says the
+/// whole album is on the phone.
+public func albumDownloadLabel(songs: Int, held: Int, done: Int, outside: Int = 0) -> String {
+    let count = songs == 1 ? "1 song" : "\(songs) songs"
+    if outside <= 0 {
+        if held < songs { return "Download album" }
+        if done < songs { return "Downloading" }
+        return "Downloaded"
+    }
+    if held < songs { return "Download \(count) to this phone" }
     if done < songs { return "Downloading" }
-    return "Downloaded"
+    return "\(count) downloaded"
 }
 
 /// "<in library> of <songs> in your library", when some but not all songs are in it.

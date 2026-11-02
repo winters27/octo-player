@@ -99,6 +99,7 @@ import Testing
         #expect(serviceName("lastfm") == "Last.fm")
         #expect(serviceName("mornye") == "Mornye (SpotiFLAC)")
         #expect(serviceName("sonic") == "octo-sonic")
+        #expect(serviceName("catalog") == "Music catalog")
         #expect(serviceName("somethingNew") == "somethingNew")
     }
 
