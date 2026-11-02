@@ -152,6 +152,38 @@ class DownloadsTest {
     }
 
     @Test
+    fun aRowWaitingForThePersonIsNotOnTheWay_ButTheListIsStillAskedForOften() {
+        val album = download("s:w", "searching", note = "2 tracks wait: play them once, or keep them anyway").copy(keepAnyway = true, heldTracks = 2)
+        val off = download("s:x", "searching", note = "AcoustID is off, so Octo cannot check what played").copy(keepAnyway = true)
+        val rows = drawerRows(listOf(download("s:a", "done"), download("s:b", "downloading", progress = 0.4f), album), emptyList(), now)
+        assertEquals("1 on the way, 1 waits for you, 1 finished", drawerSummary(rows))
+        assertEquals("1 on the way, 1 waits for you", drawerState(rows))
+        assertEquals(DrawerMark.Ring, drawerMark(rows))
+        val waiting = drawerRows(listOf(album, off), emptyList(), now)
+        assertEquals("2 wait for you", drawerSummary(waiting))
+        assertEquals("1 waits for you", drawerState(waiting.take(1)))
+        assertEquals("Only rows waiting for the person: a still mark", DrawerMark.Still, drawerMark(waiting))
+        assertEquals(DrawerMark.None, drawerMark(drawerRows(listOf(download("s:a", "done")), emptyList(), now)))
+        assertNull(drawerState(drawerRows(listOf(download("s:a", "done")), emptyList(), now)))
+        assertEquals(0, onTheWayCount(waiting))
+        assertEquals("Still asked for at the open rows' pace", 2, runningCount(waiting))
+        assertNull("The pill speaks for no waiting row", pillLead(waiting))
+        assertEquals(0, pillCount(waiting, listOf(AskedSong("w", askedAt = now)), listedSince = now + 1, now = now + 2))
+        assertEquals("s:b", pillLead(rows)?.key)
+        assertEquals("Downloading 40%, Song s:b", pillSpoken(rows))
+    }
+
+    @Test
+    fun anAlbumsRowIsAnAlbumInEveryState_AndItsLogLooksForNoSong() {
+        val kept = rowOf(download("s:a", "done", kind = "album"))
+        assertEquals(RowKind.Album, kept.kind)
+        assertNull("No mark beside the title", kindLabel(kept.kind))
+        assertNull("Kept and done, still an album", logFindId(kept))
+        assertNull(logFindId(rowOf(download("s:a", "searching", kind = "album"))))
+        assertEquals("a", logFindId(rowOf(download("s:a", "done"))))
+    }
+
+    @Test
     fun logLinesShowTheClockTime() {
         assertEquals("18:04:31", logTime("2026-10-04T18:04:31Z", ZoneOffset.UTC))
         assertEquals("", logTime(null))

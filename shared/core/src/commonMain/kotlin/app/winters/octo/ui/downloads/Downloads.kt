@@ -30,8 +30,8 @@ const val FIND_SONGS = "Find songs"
 // drawer, as a finished download does.
 const val FINISHED_SHOWN_MS = 3 * 60 * 60_000L
 
-// What a row is for.
-enum class RowKind { Download, Upgrade, Pick }
+// What a row is for. An album is a hearted album's own row.
+enum class RowKind { Download, Upgrade, Pick, Album }
 
 // Where a row has got to, as the drawer draws it.
 enum class RowPhase {
@@ -113,6 +113,7 @@ fun rowOf(acquisition: Acquisition, upgrade: Upgrade? = null): DownloadRow {
     val kind = when (acquisition.kind) {
         AcquisitionKind.UPGRADE -> RowKind.Upgrade
         AcquisitionKind.PICK -> RowKind.Pick
+        AcquisitionKind.ALBUM -> RowKind.Album
         else -> if (upgrade != null) RowKind.Upgrade else RowKind.Download
     }
     var phase = phaseOf(acquisition.stage)
@@ -246,25 +247,49 @@ fun waitsForYou(row: DownloadRow): Boolean =
 private val ASKS_THE_PERSON = listOf("so Octo can keep the version you hear", "or keep them anyway", "or keep it anyway")
 
 // The song Find songs looks for from a download's log, or null: an album's
-// row holds tracks, not one song.
-fun logFindId(row: DownloadRow): String? = row.findId.takeIf { row.heldTracks == null }
+// row is no one song. A server older than the album kind marks an album's
+// row only while it holds tracks.
+fun logFindId(row: DownloadRow): String? = row.findId.takeIf { row.kind != RowKind.Album && row.heldTracks == null }
 
 // "What it is for", as a small word beside the title, or null for a plain
 // download.
 fun kindLabel(kind: RowKind): String? = when (kind) {
-    RowKind.Download -> null
+    RowKind.Download, RowKind.Album -> null
     RowKind.Upgrade -> "Higher quality"
     RowKind.Pick -> "Picked"
 }
 
-// The line over the list: "2 on the way, 5 finished".
-fun drawerSummary(rows: List<DownloadRow>): String {
-    val running = runningCount(rows)
-    val finished = rows.size - running
-    return listOfNotNull(
-        running.takeIf { it > 0 }?.let { "$it on the way" },
-        finished.takeIf { it > 0 }?.let { "$it finished" },
-    ).joinToString(", ")
+// How many rows Octo is working on: open, and not waiting for the person.
+fun onTheWayCount(rows: List<DownloadRow>): Int = rows.count { !it.finished && !waitsForYou(it) }
+
+// How many rows wait for the person (waitsForYou).
+fun waitingCount(rows: List<DownloadRow>): Int = rows.count(::waitsForYou)
+
+// "1 waits for you", "2 wait for you".
+fun waitsForYouWords(count: Int): String = if (count == 1) "1 waits for you" else "$count wait for you"
+
+// What the drawer's way in says beside its name: "2 on the way, 1 waits
+// for you", or null when neither.
+fun drawerState(rows: List<DownloadRow>): String? = listOfNotNull(
+    onTheWayCount(rows).takeIf { it > 0 }?.let { "$it on the way" },
+    waitingCount(rows).takeIf { it > 0 }?.let(::waitsForYouWords),
+).joinToString(", ").ifEmpty { null }
+
+// The line over the list: "2 on the way, 1 waits for you, 5 finished".
+fun drawerSummary(rows: List<DownloadRow>): String = listOfNotNull(
+    drawerState(rows),
+    rows.count { it.finished }.takeIf { it > 0 }?.let { "$it finished" },
+).joinToString(", ")
+
+// What the drawer's way in draws beside its name: a ring while a row is on
+// its way, a still mark when only rows waiting for the person are left, or
+// nothing.
+enum class DrawerMark { None, Ring, Still }
+
+fun drawerMark(rows: List<DownloadRow>): DrawerMark = when {
+    onTheWayCount(rows) > 0 -> DrawerMark.Ring
+    waitingCount(rows) > 0 -> DrawerMark.Still
+    else -> DrawerMark.None
 }
 
 // What the drawer says with nothing in it.
@@ -299,7 +324,8 @@ fun ownedCopyText(quality: String?, size: Long?, locale: Locale = Locale.getDefa
     return if (what.isEmpty()) null else "Your copy: ${what.joinToString(", ")}"
 }
 
-// How many rows are still running, for the drawer's button.
+// How many rows are still open, on their way or waiting for the person:
+// the list is asked for more often while any is.
 fun runningCount(rows: List<DownloadRow>): Int = rows.count { !it.finished }
 
 // The overall progress the drawer's button shows: the mean of the rows
@@ -311,11 +337,11 @@ fun overallFraction(rows: List<DownloadRow>): Float? =
 // The pill
 // ---------------------------------------------------------------------------
 
-// The running row the pill speaks for: the one furthest along, and of
+// The row on its way the pill speaks for: the one furthest along, and of
 // those the one that started first, so the pill does not hop between two
-// songs at the same step.
+// songs at the same step. A row waiting for the person is not on its way.
 fun pillLead(rows: List<DownloadRow>): DownloadRow? =
-    rows.filter { !it.finished }
+    rows.filter { !it.finished && !waitsForYou(it) }
         .sortedWith(compareByDescending<DownloadRow> { it.phase.ordinal }.thenBy { it.startedAt.orEmpty() })
         .firstOrNull()
 
@@ -364,11 +390,11 @@ fun stillAskedForMs(ask: AskedSong, listedSince: Long?, now: Long): Long? =
     if (!stillAsked(ask, listedSince, now)) null
     else ask.askedAt + (if (ask.album) ASKED_ALBUM_UNLISTED_MS else ASKED_UNLISTED_MS) - now
 
-// How many songs the pill counts: the drawer's running rows, and songs
-// asked for here that no list shows but that are still taken as on their
-// way (stillAsked).
+// How many songs the pill counts: the drawer's rows on their way, and
+// songs asked for here that no list shows but that are still taken as on
+// their way (stillAsked).
 fun pillCount(rows: List<DownloadRow>, asked: List<AskedSong>, listedSince: Long?, now: Long): Int =
-    runningCount(rows) + unlisted(rows, asked, listedSince, now).size
+    onTheWayCount(rows) + unlisted(rows, asked, listedSince, now).size
 
 // How long until pillCount may change with no new list or ask: when the
 // first ask it counts runs out, or null when it counts none.
@@ -385,7 +411,7 @@ private fun unlisted(rows: List<DownloadRow>, asked: List<AskedSong>, listedSinc
 // What the pill says aloud: "Downloading 42%, Da Funk. 2 more on the way".
 fun pillSpoken(rows: List<DownloadRow>): String {
     val lead = pillLead(rows) ?: return ""
-    val more = runningCount(rows) - 1
+    val more = onTheWayCount(rows) - 1
     return "${stepWords(lead)}, ${lead.title}" + if (more > 0) ". $more more on the way" else ""
 }
 

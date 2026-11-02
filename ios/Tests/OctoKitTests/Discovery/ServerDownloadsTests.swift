@@ -223,6 +223,40 @@ private func held(_ key: String, keepAnyway: Bool = true) -> Acquisition {
         #expect(ownedCopyText(quality: nil, size: nil) == nil)
     }
 
+    @Test func aRowWaitingForThePersonIsNotOnTheWayButTheListIsStillAskedForOften() {
+        var album = download("s:w", "searching", note: "2 tracks wait: play them once, or keep them anyway")
+        album.keepAnyway = true
+        album.heldTracks = 2
+        var off = download("s:x", "searching", note: "AcoustID is off, so Octo cannot check what played")
+        off.keepAnyway = true
+        let rows = drawerRows([download("s:a", "done"), download("s:b", "downloading", progress: 0.4), album], [], now: now)
+        #expect(drawerSummary(rows) == "1 on the way, 1 waits for you, 1 finished")
+        #expect(drawerState(rows) == "1 on the way, 1 waits for you")
+        #expect(drawerMark(rows) == .ring)
+        let waiting = drawerRows([album, off], [], now: now)
+        #expect(drawerSummary(waiting) == "2 wait for you")
+        #expect(drawerState(Array(waiting.prefix(1))) == "1 waits for you")
+        #expect(drawerMark(waiting) == .still)
+        let done = drawerRows([download("s:a", "done")], [], now: now)
+        #expect(drawerMark(done) == .nothing)
+        #expect(drawerState(done) == nil)
+        #expect(onTheWayCount(waiting) == 0)
+        #expect(runningCount(waiting) == 2, "Still asked for at the open rows' pace")
+        #expect(pillLead(waiting) == nil)
+        #expect(pillCount(waiting, [], listedSince: nil, now: now) == 0)
+        #expect(pillLead(rows)?.key == "s:b")
+        #expect(pillSpoken(rows) == "Downloading 40%, Song s:b")
+    }
+
+    @Test func anAlbumsRowIsAnAlbumInEveryStateAndItsLogLooksForNoSong() {
+        let kept = rowOf(download("s:a", "done", kind: "album"))
+        #expect(kept.kind == .album)
+        #expect(kindLabel(kept.kind) == nil)
+        #expect(logFindId(kept) == nil)
+        #expect(logFindId(rowOf(download("s:a", "searching", kind: "album"))) == nil)
+        #expect(logFindId(rowOf(download("s:a", "done"))) == "a")
+    }
+
     @Test func logLinesShowTheClockTime() {
         #expect(logTime("2026-10-04T18:04:31Z", zone: TimeZone(identifier: "UTC")!) == "18:04:31")
         #expect(logTime(nil) == "")

@@ -16,6 +16,8 @@ public enum AcquisitionKind {
     public static let upgrade = "upgrade"
     /// The one copy someone picked from Find songs.
     public static let pick = "pick"
+    /// A hearted album's own row, from octoAcquisitions 4 on.
+    public static let album = "album"
 }
 
 /// What one line of a download's log is about. A kind this app does not know yet is drawn as a

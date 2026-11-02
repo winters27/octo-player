@@ -14,8 +14,8 @@ public let findSongsTitle = "Find songs"
 /// A finished upgrade the server keeps for a week shows this long, as a finished download does.
 public let finishedShownMs: Int64 = 3 * 60 * 60_000
 
-/// What a row is for.
-public enum RowKind: Sendable, Equatable { case download, upgrade, pick }
+/// What a row is for. An album is a hearted album's own row.
+public enum RowKind: Sendable, Equatable { case download, upgrade, pick, album }
 
 /// Where a row has got to, in the order a download walks.
 public enum RowPhase: Int, Sendable, Equatable, Comparable {
@@ -100,6 +100,7 @@ public func rowOf(_ acquisition: Acquisition, upgrade: Upgrade? = nil) -> Downlo
     let kind: RowKind = switch acquisition.kind {
     case AcquisitionKind.upgrade: .upgrade
     case AcquisitionKind.pick: .pick
+    case AcquisitionKind.album: .album
     default: upgrade != nil ? .upgrade : .download
     }
     var phase = rowPhase(of: acquisition.stage)
@@ -252,27 +253,53 @@ public func waitsForYou(_ row: DownloadRow) -> Bool {
 /// How the server's lines that ask the person to play or keep end.
 private let asksThePerson = ["so Octo can keep the version you hear", "or keep them anyway", "or keep it anyway"]
 
-/// The song Find songs looks for from a download's log, or nil: an album's row holds tracks, not
-/// one song.
+/// The song Find songs looks for from a download's log, or nil: an album's row is no one song. A
+/// server older than the album kind marks an album's row only while it holds tracks.
 public func logFindId(_ row: DownloadRow) -> String? {
-    row.heldTracks == nil ? row.findId : nil
+    row.kind != .album && row.heldTracks == nil ? row.findId : nil
 }
 
 /// What a row is for, as a small word beside the title, or nil for a plain download.
 public func kindLabel(_ kind: RowKind) -> String? {
     switch kind {
-    case .download: nil
+    case .download, .album: nil
     case .upgrade: "Higher quality"
     case .pick: "Picked"
     }
 }
 
-/// The line over the list: "2 on the way, 5 finished".
+/// How many rows Octo is working on: open, and not waiting for the person.
+public func onTheWayCount(_ rows: [DownloadRow]) -> Int { rows.filter { !$0.finished && !waitsForYou($0) }.count }
+
+/// How many rows wait for the person (`waitsForYou`).
+public func waitingCount(_ rows: [DownloadRow]) -> Int { rows.filter(waitsForYou).count }
+
+/// "1 waits for you", "2 wait for you".
+public func waitsForYouWords(_ count: Int) -> String { count == 1 ? "1 waits for you" : "\(count) wait for you" }
+
+/// What the sheet's way in says beside its name: "2 on the way, 1 waits for you", or nil when
+/// neither.
+public func drawerState(_ rows: [DownloadRow]) -> String? {
+    let onTheWay = onTheWayCount(rows)
+    let waiting = waitingCount(rows)
+    let parts = [onTheWay > 0 ? "\(onTheWay) on the way" : nil, waiting > 0 ? waitsForYouWords(waiting) : nil].compactMap { $0 }
+    return parts.isEmpty ? nil : parts.joined(separator: ", ")
+}
+
+/// The line over the list: "2 on the way, 1 waits for you, 5 finished".
 public func drawerSummary(_ rows: [DownloadRow]) -> String {
-    let running = runningCount(rows)
-    let finished = rows.count - running
-    return [running > 0 ? "\(running) on the way" : nil, finished > 0 ? "\(finished) finished" : nil]
-        .compactMap { $0 }.joined(separator: ", ")
+    let finished = rows.filter(\.finished).count
+    return [drawerState(rows), finished > 0 ? "\(finished) finished" : nil].compactMap { $0 }.joined(separator: ", ")
+}
+
+/// What the sheet's way in draws beside its name: a ring while a row is on its way, a still mark
+/// when only rows waiting for the person are left, or nothing.
+public enum DrawerMark: Sendable, Equatable { case nothing, ring, still }
+
+public func drawerMark(_ rows: [DownloadRow]) -> DrawerMark {
+    if onTheWayCount(rows) > 0 { return .ring }
+    if waitingCount(rows) > 0 { return .still }
+    return .nothing
 }
 
 /// What the sheet says with nothing in it.
@@ -311,7 +338,8 @@ public func ownedCopyText(quality: String?, size: Int64?, locale: Locale = .curr
     return what.isEmpty ? nil : "Your copy: \(what.joined(separator: ", "))"
 }
 
-/// How many rows are still running.
+/// How many rows are still open, on their way or waiting for the person: the list is asked for
+/// more often while any is.
 public func runningCount(_ rows: [DownloadRow]) -> Int { rows.filter { !$0.finished }.count }
 
 /// The mean progress of the rows downloading, or nil when none says how far it is.
@@ -322,10 +350,11 @@ public func overallFraction(_ rows: [DownloadRow]) -> Double? {
 
 // MARK: The pill
 
-/// The running row the pill speaks for: the one furthest along, and of those the one that started
-/// first, so the pill does not hop between two songs at the same step.
+/// The row on its way the pill speaks for: the one furthest along, and of those the one that
+/// started first, so the pill does not hop between two songs at the same step. A row waiting for
+/// the person is not on its way.
 public func pillLead(_ rows: [DownloadRow]) -> DownloadRow? {
-    stableSorted(rows.filter { !$0.finished }) { a, b in
+    stableSorted(rows.filter { !$0.finished && !waitsForYou($0) }) { a, b in
         if a.phase != b.phase { return a.phase > b.phase }
         return (a.startedAt ?? "") < (b.startedAt ?? "")
     }.first
@@ -344,10 +373,10 @@ public func stepWords(_ row: DownloadRow) -> String {
     }
 }
 
-/// How many songs the pill counts: the sheet's running rows, and songs asked for here that no list
-/// shows but that are still taken as on their way.
+/// How many songs the pill counts: the sheet's rows on their way, and songs asked for here that no
+/// list shows but that are still taken as on their way.
 public func pillCount(_ rows: [DownloadRow], _ asked: [AskedSong], listedSince: Int64?, now: Int64) -> Int {
-    runningCount(rows) + unlisted(rows, asked, listedSince: listedSince, now: now).count
+    onTheWayCount(rows) + unlisted(rows, asked, listedSince: listedSince, now: now).count
 }
 
 /// How long until `pillCount` may change with no new list or ask: when the first ask it counts runs
@@ -368,7 +397,7 @@ private func unlisted(_ rows: [DownloadRow], _ asked: [AskedSong], listedSince: 
 /// What the pill says aloud: "Downloading 42%, Da Funk. 2 more on the way".
 public func pillSpoken(_ rows: [DownloadRow]) -> String {
     guard let lead = pillLead(rows) else { return "" }
-    let more = runningCount(rows) - 1
+    let more = onTheWayCount(rows) - 1
     return "\(stepWords(lead)), \(lead.title)" + (more > 0 ? ". \(more) more on the way" : "")
 }
 
