@@ -11,6 +11,8 @@
 - **Albums too.** A hearted album keeps the tracks it can prove and holds the rest, each one proven by a play or kept with Keep these anyway.
 - A download that waits for you carries the small accent dot instead of a busy ring, and Server downloads under Library says how many are on their way and how many wait for you.
 - A song kept while Lidarr is still downloading its artist plays right away and joins your library once Lidarr's download is done.
+- **Album search works where it used to come back empty.** In countries where the music catalog hides albums from searches, like movie soundtracks, Octo finds them through Apple's catalog instead, and a whole album downloads.
+- On a partly held album, saving it to your phone counts only the songs it saves.
 
 ## Playback
 
@@ -25,6 +27,7 @@
 - Hearts that get the version you heard need an Octo server from this update.
 - Imports waiting for Mornye's check say so, and say when they will go on. Health names Mornye and octo-sonic, and Mornye's row offers Pass on the dashboard while its check is paused.
 - A higher quality copy that waits says the server's own words for why.
+- On the Octo admin screen, recent downloads show their covers, served by your Octo server, and the server's music catalog check shows by name.
 
 ## Lyrics
 
