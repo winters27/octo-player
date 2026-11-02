@@ -96,6 +96,7 @@ class AdminFormatTest {
         assertEquals("Last.fm", serviceName("lastfm"))
         assertEquals("Mornye (SpotiFLAC)", serviceName("mornye"))
         assertEquals("octo-sonic", serviceName("sonic"))
+        assertEquals("Music catalog", serviceName("catalog"))
         assertEquals("somethingNew", serviceName("somethingNew"))
     }
 

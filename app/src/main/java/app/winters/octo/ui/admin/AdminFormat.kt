@@ -34,6 +34,7 @@ fun serviceName(key: String): String = when (key) {
     "lastfm" -> "Last.fm"
     "mornye" -> "Mornye (SpotiFLAC)"
     "sonic" -> "octo-sonic"
+    "catalog" -> "Music catalog"
     else -> key
 }
 

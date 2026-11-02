@@ -607,6 +607,7 @@ public func serviceName(_ key: String) -> String {
     case "lastfm": "Last.fm"
     case "mornye": "Mornye (SpotiFLAC)"
     case "sonic": "octo-sonic"
+    case "catalog": "Music catalog"
     default: key
     }
 }
