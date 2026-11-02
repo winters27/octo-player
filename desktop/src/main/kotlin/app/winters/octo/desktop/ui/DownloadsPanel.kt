@@ -258,8 +258,8 @@ private fun DownloadList(model: DownloadsModel, modifier: Modifier) {
 }
 
 // One download: its cover, its names, the line saying where it is, and a
-// ring while it runs, or a still pause mark in the ring's place while it
-// waits for the person. Hovered, a finished one offers to leave the list,
+// ring while it runs, or the accent dot that says something needs you in
+// the ring's place while it waits for the person. Hovered, a finished one offers to leave the list,
 // and any can be looked for again. A held one the server offers to keep
 // anyway has Keep anyway under its words, part of the row; the cover and
 // the ring stay centered on the words alone, so nothing moves as it is sent
@@ -304,9 +304,10 @@ private fun DownloadLine(
                     IconAction(OctoIcons.Search, FIND_SONGS, onFind, size = ControlHeight.S, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
                     IconAction(OctoIcons.Close, "Clear this one", onClear, size = ControlHeight.S, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
                 }
-                // The pause glyph is drawn small in its box: at the ring's
-                // size it stands as tall as the done mark.
-                waitsForYou(row) -> Glyph(OctoIcons.Pause, size = IconSize.Transport, tint = OctoColors.TextSecondary)
+                // Centered in the ring's box, so the column of marks stays lined up.
+                waitsForYou(row) -> Box(Modifier.size(IconSize.Transport), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(FrameSize.NavMark).background(OctoColors.Accent, CircleShape))
+                }
                 !row.finished -> ProgressRing(row.fraction, size = IconSize.Transport)
                 row.phase == RowPhase.Done -> Glyph(OctoIcons.Downloaded, size = IconSize.Table, tint = OctoColors.TextSecondary)
                 else -> Glyph(OctoIcons.Info, size = IconSize.Table, tint = OctoColors.SignalOrange)

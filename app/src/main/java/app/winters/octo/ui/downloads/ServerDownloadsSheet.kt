@@ -276,10 +276,11 @@ private fun DownloadLine(row: DownloadRow, art: String?, keepBelow: Boolean = fa
             Text(row.status, style = OctoType.caption, color = if (row.phase == RowPhase.Failed) OctoColors.SignalOrange else OctoColors.TextMuted, maxLines = 2)
         }
         when {
-            // Waiting for the person, a still mark in the ring's place; the
-            // pause glyph is drawn small in its box, so at the ring's size it
-            // stands as tall as the done mark.
-            waitsForYou(row) -> Mark(OctoIcons.Pause, OctoColors.TextSecondary, size = LineMark)
+            // Waiting for the person: the accent dot that says something
+            // needs you, centered in the ring's place.
+            waitsForYou(row) -> Box(Modifier.size(LineMark), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(8.dp).background(OctoColors.Accent, CircleShape))
+            }
             !row.finished -> Ring(row.fraction, LineMark)
             row.phase == RowPhase.Done -> Mark(OctoIcons.Downloaded, OctoColors.TextSecondary)
             else -> Mark(OctoIcons.Info, OctoColors.SignalOrange)

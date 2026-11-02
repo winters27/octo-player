@@ -281,7 +281,7 @@ class DownloadsShotsTest {
                 }
             },
         ) { scene ->
-            // Closed, with only rows waiting for the person: no pill, a still mark in the sidebar.
+            // Closed, with only rows waiting for the person: no pill, the dot in the sidebar.
             SwingUtilities.invokeAndWait { app.showSidePanel(null) }
             shot(scene, "downloads/keep-anyway-11-off-panel-closed", 1_500)
             SwingUtilities.invokeAndWait { app.showSidePanel(SidePanel.Downloads) }

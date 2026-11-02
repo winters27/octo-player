@@ -292,13 +292,13 @@ public func drawerSummary(_ rows: [DownloadRow]) -> String {
     return [drawerState(rows), finished > 0 ? "\(finished) finished" : nil].compactMap { $0 }.joined(separator: ", ")
 }
 
-/// What the sheet's way in draws beside its name: a ring while a row is on its way, a still mark
-/// when only rows waiting for the person are left, or nothing.
-public enum DrawerMark: Sendable, Equatable { case nothing, ring, still }
+/// What the sheet's way in draws beside its name: a ring while a row is on its way, the accent
+/// dot that says something needs you when only rows waiting for the person are left, or nothing.
+public enum DrawerMark: Sendable, Equatable { case nothing, ring, waits }
 
 public func drawerMark(_ rows: [DownloadRow]) -> DrawerMark {
     if onTheWayCount(rows) > 0 { return .ring }
-    if waitingCount(rows) > 0 { return .still }
+    if waitingCount(rows) > 0 { return .waits }
     return .nothing
 }
 

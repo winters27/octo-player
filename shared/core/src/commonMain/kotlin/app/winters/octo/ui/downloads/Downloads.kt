@@ -282,13 +282,13 @@ fun drawerSummary(rows: List<DownloadRow>): String = listOfNotNull(
 ).joinToString(", ")
 
 // What the drawer's way in draws beside its name: a ring while a row is on
-// its way, a still mark when only rows waiting for the person are left, or
-// nothing.
-enum class DrawerMark { None, Ring, Still }
+// its way, the accent dot that says something needs you when only rows
+// waiting for the person are left, or nothing.
+enum class DrawerMark { None, Ring, Waits }
 
 fun drawerMark(rows: List<DownloadRow>): DrawerMark = when {
     onTheWayCount(rows) > 0 -> DrawerMark.Ring
-    waitingCount(rows) > 0 -> DrawerMark.Still
+    waitingCount(rows) > 0 -> DrawerMark.Waits
     else -> DrawerMark.None
 }
 

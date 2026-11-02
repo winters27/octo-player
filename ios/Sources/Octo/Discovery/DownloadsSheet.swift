@@ -153,10 +153,11 @@ private struct DownloadLine: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if waitsForYou(row) {
-                    // Waiting for the person, a still mark in the ring's place.
-                    Image(systemName: "pause.circle")
-                        .font(.system(size: 18))
-                        .foregroundStyle(OctoColor.textSecondary)
+                    // Waiting for the person: the accent dot that says something needs you, centered
+                    // in the ring's place.
+                    Circle()
+                        .fill(OctoColor.accent)
+                        .frame(width: 8, height: 8)
                         .frame(width: lineMark, height: lineMark)
                 } else if !row.finished {
                     DownloadProgressRing(fraction: row.fraction, size: lineMark)

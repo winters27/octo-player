@@ -236,7 +236,7 @@ private func held(_ key: String, keepAnyway: Bool = true) -> Acquisition {
         let waiting = drawerRows([album, off], [], now: now)
         #expect(drawerSummary(waiting) == "2 wait for you")
         #expect(drawerState(Array(waiting.prefix(1))) == "1 waits for you")
-        #expect(drawerMark(waiting) == .still)
+        #expect(drawerMark(waiting) == .waits)
         let done = drawerRows([download("s:a", "done")], [], now: now)
         #expect(drawerMark(done) == .nothing)
         #expect(drawerState(done) == nil)

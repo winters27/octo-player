@@ -162,7 +162,7 @@ class DownloadsTest {
         val waiting = drawerRows(listOf(album, off), emptyList(), now)
         assertEquals("2 wait for you", drawerSummary(waiting))
         assertEquals("1 waits for you", drawerState(waiting.take(1)))
-        assertEquals("Only rows waiting for the person: a still mark", DrawerMark.Still, drawerMark(waiting))
+        assertEquals("Only rows waiting for the person: the dot", DrawerMark.Waits, drawerMark(waiting))
         assertEquals(DrawerMark.None, drawerMark(drawerRows(listOf(download("s:a", "done")), emptyList(), now)))
         assertNull(drawerState(drawerRows(listOf(download("s:a", "done")), emptyList(), now)))
         assertEquals(0, onTheWayCount(waiting))
