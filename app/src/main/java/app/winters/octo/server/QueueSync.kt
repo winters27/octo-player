@@ -189,6 +189,19 @@ class QueueSync @Inject constructor(
         }
     }
 
+    // Looks for a queue saved elsewhere now, however recently it last
+    // looked: a car's driver cannot ask again by coming back to the app.
+    suspend fun checkNow() {
+        lastCheck = System.currentTimeMillis()
+        try {
+            lookForOffer()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w("Octo", "queue check failed: ${e.javaClass.simpleName}")
+        }
+    }
+
     // The songs to load for an offer taken up, and the offer is put away.
     suspend fun take(offer: ResumeOffer): ResumeQueue? {
         answered(offer)
