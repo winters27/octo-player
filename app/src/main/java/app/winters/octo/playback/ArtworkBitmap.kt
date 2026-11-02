@@ -24,6 +24,7 @@ import kotlinx.coroutines.runBlocking
 // logo, or the cover drawn from its name.
 fun artworkBitmap(context: Context, ref: String?, px: Int): Bitmap? {
     stationArtOf(ref)?.let { return stationBitmap(context, it, px) }
+    playlistArtOf(ref)?.let { return playlistArtBitmap(context, it, px) }
     return when (val art = ArtworkRef.decode(ref)) {
         is ArtworkRef.Device -> runCatching {
             context.contentResolver.loadThumbnail(art.uri.toUri(), Size(px, px), null)

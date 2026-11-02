@@ -17,6 +17,12 @@ import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.GenreSummary
 import app.winters.octo.catalog.PlaylistSummary
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.covers.LIVE_LIST_COVER_LINE
+import app.winters.octo.covers.OCTO_LIST_LIKED
+import app.winters.octo.covers.PLAYLIST_COVER_LINE
+import app.winters.octo.covers.PlaylistCoverStyle
+import app.winters.octo.covers.playlistGlyph
+import app.winters.octo.ui.common.phonePlaylistFooter
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.discovery.OnlineAlbum
 import app.winters.octo.discovery.OnlineArtist
@@ -43,6 +49,11 @@ const val CAR_FAVORITE_ALBUMS = "Favorite albums"
 const val CAR_FAVORITE_ARTISTS = "Favorite artists"
 fun carResumeLine(device: String): String = "Pick up where you left off on $device"
 
+// A song's actions in a car that shows them: Start radio and Play next.
+const val START_RADIO_ACTION = "app.winters.octo.START_RADIO"
+const val PLAY_NEXT_ITEM_ACTION = "app.winters.octo.PLAY_NEXT_ITEM"
+val CarSongActions = listOf(START_RADIO_ACTION, PLAY_NEXT_ITEM_ACTION)
+
 // How a list's children show: as rows, as a grid of covers, or as rows with
 // an icon each (the Library's own rows).
 enum class CarStyle(val value: Int) {
@@ -55,7 +66,7 @@ enum class CarStyle(val value: Int) {
 // the "Not in your library" mark on what the library lacks), lists as rows
 // or grids, and the explicit and downloaded marks. Every text is cut to what
 // a car shows (carText).
-class CarLook(private val context: Context) {
+class CarLook(private val context: Context, private val coverStyle: () -> PlaylistCoverStyle = { PlaylistCoverStyle.Designed }) {
     // One of the app's own drawables, at an address a car can read.
     fun icon(@DrawableRes id: Int): Uri = Uri.Builder()
         .scheme(ContentResolver.SCHEME_ANDROID_RESOURCE)
@@ -154,6 +165,7 @@ class CarLook(private val context: Context) {
             .setIsBrowsable(false)
             .setIsPlayable(true)
             .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+            .setSupportedCommands(CarSongActions)
             .setExtras(
                 Bundle().apply {
                     if (track.explicit == true) putLong(MediaConstants.EXTRAS_KEY_IS_EXPLICIT, MediaConstants.EXTRAS_VALUE_ATTRIBUTE_PRESENT)
@@ -162,16 +174,33 @@ class CarLook(private val context: Context) {
             ),
     )
 
+    // A playlist, its picture drawn as the phone's Playlists page draws it.
     fun playlist(playlist: PlaylistSummary): MediaItem = list(
         CarNode.Playlist(playlist.id),
         playlist.name,
         if (playlist.family) "By Family · ${songCountLine(playlist.songCount)}" else songCountLine(playlist.songCount),
-        cover(playlist.covers.firstOrNull()),
+        cover(
+            PlaylistArtRef(
+                coverStyle(), playlist.id, playlist.name, PLAYLIST_COVER_LINE, phonePlaylistFooter(playlist.songCount),
+                playlistGlyph(playlist.octoNotice, null), playlist.covers.take(4),
+            ).encode(),
+        ),
     )
 
-    fun liked(count: Int): MediaItem = list(CarNode.Liked, CAR_LIKED, songCountLine(count), null)
+    // Liked songs, its picture drawn from the covers of the latest liked.
+    fun liked(count: Int, covers: List<String>): MediaItem = list(
+        CarNode.Liked,
+        CAR_LIKED,
+        songCountLine(count),
+        cover(PlaylistArtRef(coverStyle(), OCTO_LIST_LIKED, CAR_LIKED, PLAYLIST_COVER_LINE, phonePlaylistFooter(count), playlistGlyph(null, OCTO_LIST_LIKED), covers).encode()),
+    )
 
-    fun liveList(list: LiveList, coverRef: String?): MediaItem = list(CarNode.LiveList(list.id), list.name, LIVE_LIST, cover(coverRef))
+    fun liveList(list: LiveList, covers: List<String>): MediaItem = list(
+        CarNode.LiveList(list.id),
+        list.name,
+        LIVE_LIST,
+        cover(PlaylistArtRef(coverStyle(), list.id, list.name, LIVE_LIST_COVER_LINE, null, null, covers).encode()),
+    )
 
     // One of Octo's stations, which keeps going, or a list Octo made, which
     // ends: both open to their songs and play from a tap.

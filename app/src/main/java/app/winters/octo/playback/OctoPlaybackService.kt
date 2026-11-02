@@ -93,6 +93,13 @@ private val DOWNLOAD = SessionCommand("app.winters.octo.DOWNLOAD", Bundle.EMPTY)
 private val CLOSE = SessionCommand("app.winters.octo.CLOSE", Bundle.EMPTY)
 private val STOP = SessionCommand("app.winters.octo.STOP", Bundle.EMPTY)
 
+// A song's actions in a car: Start radio and Play next, by the song's id.
+private val START_RADIO = SessionCommand(START_RADIO_ACTION, Bundle.EMPTY)
+private val PLAY_NEXT_ITEM = SessionCommand(PLAY_NEXT_ITEM_ACTION, Bundle.EMPTY)
+
+// Where a car's browse action reads the words it shows for its result.
+private const val ACTION_MESSAGE = "androidx.media.utils.extras.KEY_CUSTOM_BROWSER_ACTION_RESULT_MESSAGE"
+
 // "Play next" from the app, with the song ids to play.
 internal val PLAY_NEXT = SessionCommand("app.winters.octo.PLAY_NEXT", Bundle.EMPTY)
 private const val ARG_IDS = "ids"
@@ -248,6 +255,7 @@ class OctoPlaybackService : MediaLibraryService() {
 
         session = MediaLibrarySession.Builder(this, player, Callback())
             .setBitmapLoader(CacheBitmapLoader(OctoArtLoader(this, DataSourceBitmapLoader.Builder(this).build())))
+            .setCommandButtonsForMediaItems(carSongButtons())
             .setSessionActivity(
                 PendingIntent.getActivity(
                     this,
@@ -414,8 +422,50 @@ class OctoPlaybackService : MediaLibraryService() {
         session.setAvailableCommands(controller, sessionCommands(), Player.Commands.Builder().addAll(*kept.toIntArray()).build())
     }
 
+    // A song's actions in a car that shows them, with the app's own icons.
+    private fun carSongButtons(): List<CommandButton> {
+        val look = CarLook(this)
+        return listOf(
+            CommandButton.Builder(CommandButton.ICON_RADIO).setDisplayName("Start radio").setSessionCommand(START_RADIO)
+                .setIconUri(look.icon(OctoIcons.Radio)).build(),
+            CommandButton.Builder(CommandButton.ICON_QUEUE_NEXT).setDisplayName("Play next").setSessionCommand(PLAY_NEXT_ITEM)
+                .setIconUri(look.icon(OctoIcons.PlayNext)).build(),
+        )
+    }
+
+    // "Start radio" on a song in a car: played only when songs like it are
+    // found and nothing newer was chosen meanwhile. The words of a refusal
+    // go back to the car to show.
+    private suspend fun startRadio(id: String?): SessionResult {
+        restored.await()
+        val mark = guard.mark()
+        val answer = id?.let { withContext(Dispatchers.Default) { car.radioFor(it) } } ?: CarPlayAnswer.Refused(CAR_NOTHING_TO_PLAY)
+        val play = when (answer) {
+            is CarPlayAnswer.Refused -> return actionWords(answer.words)
+            is CarPlayAnswer.Play -> answer.play
+        }
+        val items = withContext(Dispatchers.IO) { playable.items(play.ids) }.map { it.withSource(play.source) }
+        if (items.isEmpty()) return actionWords(CAR_NOTHING_TO_PLAY)
+        if (!guard.stillWanted(mark)) return SessionResult(SessionResult.RESULT_SUCCESS)
+        player.setMediaItems(items, 0, 0)
+        player.prepare()
+        player.play()
+        return SessionResult(SessionResult.RESULT_SUCCESS)
+    }
+
+    // "Play next" on a song in a car: it goes right after the one playing.
+    private suspend fun playNextFromCar(id: String?): SessionResult {
+        val song = id?.let(::parseCarId) as? CarNode.Song ?: return actionWords(CAR_NOTHING_TO_PLAY)
+        val items = withContext(Dispatchers.IO) { playable.items(listOf(song.trackId)) }.map { it.withSource(QueueSource.You) }
+        if (items.isEmpty()) return actionWords(CAR_NOTHING_TO_PLAY)
+        player.addNext(items)
+        return SessionResult(SessionResult.RESULT_SUCCESS)
+    }
+
+    private fun actionWords(words: String) = SessionResult(SessionResult.RESULT_SUCCESS, Bundle().apply { putString(ACTION_MESSAGE, words) })
+
     private fun sessionCommands() = ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
-        .add(LIKE).add(DOWNLOAD).add(CLOSE).add(PLAY_NEXT).add(STOP).add(PLAY_FROM_SEARCH)
+        .add(LIKE).add(DOWNLOAD).add(CLOSE).add(PLAY_NEXT).add(STOP).add(PLAY_FROM_SEARCH).add(START_RADIO).add(PLAY_NEXT_ITEM)
         .build()
 
     private fun updateStationOnAir() {
@@ -791,6 +841,8 @@ class OctoPlaybackService : MediaLibraryService() {
                 PLAY_NEXT -> args.getStringArrayList(ARG_IDS)?.let { ids ->
                     scope.launch { player.addNext(playable.items(ids).map { it.withSource(QueueSource.You) }) }
                 }
+                START_RADIO -> return scope.future { startRadio(args.getString(MediaConstants.EXTRA_KEY_MEDIA_ID)) }
+                PLAY_NEXT_ITEM -> return scope.future { playNextFromCar(args.getString(MediaConstants.EXTRA_KEY_MEDIA_ID)) }
                 // Answered once it is known whether something plays.
                 PLAY_FROM_SEARCH -> {
                     val ask = voiceAskOf(args.getString(ARG_QUERY), args.getBundle(ARG_EXTRAS))

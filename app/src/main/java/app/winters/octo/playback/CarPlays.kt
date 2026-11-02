@@ -1,6 +1,7 @@
 package app.winters.octo.playback
 
 import app.winters.octo.data.userMessage
+import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.CancellationException
 
@@ -29,6 +30,17 @@ fun nothingFoundLine(words: String): String = if (words.isBlank()) CAR_NOTHING_T
 
 // A list the server holds, opened with no server signed in.
 class CarNotSignedIn : Exception()
+
+// "Start radio" on a song in a car: the song, then songs like it (`like`,
+// as the phone's song radio picks them), under "<title> radio".
+const val NO_SIMILAR_SONGS = "No similar songs found"
+
+suspend fun carRadio(seed: TrackEntity?, like: suspend (TrackEntity) -> List<String>): CarPlayAnswer {
+    if (seed == null) return CarPlayAnswer.Refused(CAR_NOTHING_TO_PLAY)
+    val songs = like(seed)
+    if (songs.isEmpty()) return CarPlayAnswer.Refused(NO_SIMILAR_SONGS)
+    return CarPlayAnswer.Play(CarPlay(listOf(seed.id) + songs, 0, QueueSource.Played("${seed.title} radio"), network = true))
+}
 
 fun nothingOnLine(name: String): String = "Nothing is playing on $name right now"
 

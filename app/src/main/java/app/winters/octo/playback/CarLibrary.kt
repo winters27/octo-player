@@ -47,6 +47,9 @@ import app.winters.octo.livelists.LiveListStore
 import app.winters.octo.offline.DownloadStatus
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.player.PlayerSettings
+import app.winters.octo.catalog.mosaicCovers
+import app.winters.octo.covers.PlaylistCoverStyle
+import app.winters.octo.playlists.PlaylistArtSettings
 import app.winters.octo.server.QueueSync
 import app.winters.octo.server.ResumeOffer
 import app.winters.octo.server.ServerSync
@@ -120,8 +123,12 @@ class CarLibrary @Inject constructor(
     private val shelves: CarShelves,
     private val lists: CarLists,
     private val search: CarSearch,
+    private val artSettings: PlaylistArtSettings,
+    private val libraryRadio: LibraryRadio,
 ) {
-    private val look = CarLook(context)
+    // The cover style the listener chose for playlists, as the phone draws them.
+    @Volatile private var coverStyle = PlaylistCoverStyle.Designed
+    private val look = CarLook(context) { coverStyle }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     // Told when a list fetched behind another (a whole album, top songs)
@@ -130,6 +137,10 @@ class CarLibrary @Inject constructor(
 
     // What the car's lists play, for a choice made in the car.
     val plays = CarPlays(::playList, ::signedIn) { discovery.listGone(it) }
+
+    init {
+        scope.launch { artSettings.style.collect { coverStyle = it } }
+    }
 
     fun root(): MediaItem = look.folder(CarNode.Root, "Octo")
 
@@ -155,6 +166,7 @@ class CarLibrary @Inject constructor(
             CarInput.Downloads to offline.done,
             CarInput.LibraryOnly to player.prefs.map { it.libraryOnly },
             CarInput.Offer to serverQueue.offer.map(::resumeOfferKey),
+            CarInput.CoverStyle to artSettings.style,
         ),
     )
 
@@ -249,7 +261,7 @@ class CarLibrary @Inject constructor(
             is CarNode.Album -> catalog.album(node.id).first()?.let(look::album)
             is CarNode.Artist -> catalog.artist(node.id).first()?.let(look::artist)
             is CarNode.Playlist -> playlists.playlists.first().firstOrNull { it.id == node.id }?.let(look::playlist)
-            is CarNode.LiveList -> liveLists.lists.first().firstOrNull { it.id == node.id }?.let { look.liveList(it, null) }
+            is CarNode.LiveList -> liveLists.lists.first().firstOrNull { it.id == node.id }?.let { look.liveList(it, liveCovers(it)) }
             is CarNode.Song -> trackOf(node.trackId)?.let { look.song(it, node.list, isOutsideLibrary(it.id, adoptedFinds(downloads.phases.value)), it.id in offline.done.value) }
             is CarNode.OctoList -> look.folder(node, node.name)
             is CarNode.Station -> look.folder(node, node.name)
@@ -593,11 +605,12 @@ class CarLibrary @Inject constructor(
     // added), then the lists Octo made, under each kind's heading.
     private suspend fun playlistsTab(): List<MediaItem> {
         val liked = user.likedCount().first()
-        val live = liveLists.lists.first().map { list -> look.liveList(list, liveSongs.now(list).firstOrNull()?.artwork) }
+        val live = liveLists.lists.first().map { list -> look.liveList(list, liveCovers(list)) }
         val order = sorting.order(SortList.Playlists).first()
         val own = sortPlaylists(playlists.playlists.first().filterNot { isToolPlaylist(it.name) }, order).map(look::playlist)
         val octo = shelves.current().groups.flatMap { (group, items) -> items.map { look.grouped(look.station(it), group.title) } }
-        return listOfNotNull(liked.takeIf { it > 0 }?.let(look::liked)) + live + own + octo
+        val likedCovers = mosaicCovers(user.likedTracks().first().map { it.albumId to it.artwork })
+        return listOfNotNull(liked.takeIf { it > 0 }?.let { look.liked(it, likedCovers) }) + live + own + octo
     }
 
     private fun libraryRows(): List<MediaItem> =
@@ -644,11 +657,21 @@ class CarLibrary @Inject constructor(
     private suspend fun liveListSongs(id: String): List<TrackEntity> =
         liveLists.lists.first().firstOrNull { it.id == id }?.let { liveSongs.now(it) }.orEmpty()
 
+    // The covers of a live list's first albums, for its picture.
+    private suspend fun liveCovers(list: app.winters.octo.livelists.LiveList): List<String> =
+        mosaicCovers(liveSongs.now(list).map { it.albumId to it.artwork })
+
     // The phone's downloads that are ready, in the Downloads page's order.
     private suspend fun downloadedSongs(): List<TrackEntity> {
         val rows = sortDownloads(offline.rows.first(), sorting.order(SortList.Downloads).first()).filter { it.state == DownloadStatus.Done }
         val tracks = catalog.tracksByIds(rows.map { it.trackId }).associateBy { it.id }
         return rows.mapNotNull { tracks[it.trackId] }
+    }
+
+    // "Start radio" on a song a car shows, by the song's car id.
+    suspend fun radioFor(id: String): CarPlayAnswer {
+        val song = parseCarId(id) as? CarNode.Song
+        return carRadio(song?.let { trackOf(it.trackId) }) { seed -> libraryRadio.songsLike(listOf(seed), RADIO_LENGTH, before = listOf(seed.id)) }
     }
 
     // A song by id: one in the library, or one found beyond it.
