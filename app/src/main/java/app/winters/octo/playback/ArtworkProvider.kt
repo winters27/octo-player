@@ -7,15 +7,23 @@ import android.database.Cursor
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import androidx.compose.ui.graphics.toArgb
+import androidx.core.graphics.createBitmap
 import app.winters.octo.BuildConfig
+import app.winters.octo.design.OctoColors
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileNotFoundException
-import java.security.MessageDigest
 
 // Serves cover pictures to other apps that are allowed to see them, like a
 // car's screen, which cannot read the app's own artwork references. Each
 // cover is made once as a small JPEG and kept in the cache. Nothing is
 // readable without a grant for its address (see `grantArtwork`).
+//
+//   /512/<ref>               a cover, its reference written out
+//   /512/x/<flags>/<value>   flags: o the "Not in your library" mark,
+//                            r the mark placed for a round picture,
+//                            h a handle in place of the reference
 class ArtworkProvider : ContentProvider() {
     override fun onCreate() = true
 
@@ -23,23 +31,29 @@ class ArtworkProvider : ContentProvider() {
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
         val ctx = context ?: throw FileNotFoundException("Not ready")
-        val ref = uri.lastPathSegment ?: throw FileNotFoundException("No artwork")
-        val file = cached(ctx, ref) ?: throw FileNotFoundException("No artwork")
+        val asked = coverOf(ctx, uri.pathSegments) ?: throw FileNotFoundException("No artwork")
+        val file = cached(ctx, asked) ?: throw FileNotFoundException("No artwork")
         return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
     }
 
-    private fun cached(ctx: Context, ref: String): File? {
+    private fun cached(ctx: Context, asked: AskedCover): File? {
         val dir = File(ctx.cacheDir, "car-art-$ART_SIZE").apply { mkdirs() }
-        val file = File(dir, sha1(ref) + ".jpg")
+        val file = File(dir, asked.fileName)
         if (file.exists()) return file
-        val loaded = artworkBitmap(ctx, ref, ART_SIZE) ?: return null
-        // The size asked for is only a hint, so bring it down to size here.
-        val bitmap = shrink(loaded)
-        // Written aside first, so a half-written file is never served.
-        val part = File(dir, file.name + ".part")
-        part.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 88, it) }
-        part.renameTo(file)
-        return file
+        val loaded = artworkBitmap(ctx, asked.ref, ART_SIZE)
+        val bitmap = when {
+            loaded != null && asked.marked -> marked(shrink(loaded), asked.round)
+            loaded != null -> shrink(loaded)
+            // A cover with the mark and no picture is the phone's plain tile.
+            asked.marked -> marked(plainTile(), asked.round)
+            else -> return null
+        }
+        val bytes = ByteArrayOutputStream().use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 88, out)
+            out.toByteArray()
+        }
+        writeWhole(file, bytes)
+        return file.takeIf { it.isFile }
     }
 
     private fun shrink(bitmap: Bitmap): Bitmap {
@@ -49,21 +63,83 @@ class ArtworkProvider : ContentProvider() {
         return Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
     }
 
+    private fun marked(bitmap: Bitmap, round: Boolean): Bitmap {
+        val copy = bitmap.copy(Bitmap.Config.ARGB_8888, true)
+        val pixels = IntArray(copy.width * copy.height)
+        copy.getPixels(pixels, 0, copy.width, 0, 0, copy.width, copy.height)
+        drawOutsideMark(pixels, copy.width, copy.height, round)
+        copy.setPixels(pixels, 0, copy.width, 0, 0, copy.width, copy.height)
+        return copy
+    }
+
+    private fun plainTile(): Bitmap =
+        createBitmap(ART_SIZE, ART_SIZE).apply { eraseColor(OctoColors.BackgroundTertiary.toArgb()) }
+
     override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? = null
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = 0
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?) = 0
 
+    // A cover asked for: its reference, whether it carries the mark and
+    // where, and the cache file it is kept in. A plain cover keeps the file
+    // name it always had.
+    private class AskedCover(val ref: String, val marked: Boolean, val round: Boolean) {
+        val fileName: String
+            get() = if (!marked) carSha1(ref) + ".jpg" else carSha1((if (round) "or|" else "o|") + ref) + ".jpg"
+    }
+
+    private fun coverOf(ctx: Context, segments: List<String>): AskedCover? {
+        if (segments.size == 2) return AskedCover(segments[1], marked = false, round = false)
+        if (segments.size != 4 || segments[1] != "x") return null
+        val flags = segments[2]
+        val value = segments[3]
+        val ref = if (HANDLE_FLAG in flags) refs(ctx).refFor(value) ?: return null else value
+        return AskedCover(ref, marked = MARK_FLAG in flags, round = ROUND_FLAG in flags)
+    }
+
     companion object {
         const val AUTHORITY = BuildConfig.APPLICATION_ID + ".art"
         private const val ART_SIZE = 512
+        private const val ROUND_FLAG = 'r'
+
+        @Volatile private var kept: CarArtRefs? = null
+
+        // Where long references are kept for their handles: out of the cache,
+        // which Android may clear, and out of backups.
+        fun refs(context: Context): CarArtRefs =
+            kept ?: synchronized(this) {
+                kept ?: CarArtRefs(File(context.noBackupFilesDir, "car-art-refs")).also { kept = it }
+            }
 
         // The address of a cover for other apps. The size is part of it, so a
         // car that keeps pictures by address asks again when the size changes.
         fun uriFor(ref: String): Uri =
             Uri.Builder().scheme("content").authority(AUTHORITY).appendPath(ART_SIZE.toString()).appendPath(ref).build()
 
-        private fun sha1(text: String): String =
-            MessageDigest.getInstance("SHA-1").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+        // The address of a cover a car is sent: a short reference written
+        // out, a long one by its handle, and either with the "Not in your
+        // library" mark when `outside`, placed for a round picture when
+        // `round`.
+        fun carUriFor(context: Context, ref: String, outside: Boolean = false, round: Boolean = false): Uri {
+            val long = ref.length > INLINE_REF_MAX
+            if (!long && !outside) return uriFor(ref)
+            val flags = buildString {
+                if (outside) append(MARK_FLAG)
+                if (outside && round) append(ROUND_FLAG)
+                if (long) append(HANDLE_FLAG)
+            }
+            val value = if (long) refs(context).handleFor(ref) else ref
+            return Uri.Builder().scheme("content").authority(AUTHORITY).appendPath(ART_SIZE.toString())
+                .appendPath("x").appendPath(flags).appendPath(value).build()
+        }
+
+        // The address of the mark alone on the plain tile, for something
+        // outside the library with no cover.
+        fun carMarkOnlyUri(round: Boolean = false): Uri =
+            Uri.Builder().scheme("content").authority(AUTHORITY).appendPath(ART_SIZE.toString())
+                .appendPath("x").appendPath(if (round) "or" else "o").appendPath(NO_COVER).build()
+
+        // Stands for "no cover" in a marked address.
+        const val NO_COVER = "-"
     }
 }
