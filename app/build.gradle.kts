@@ -72,6 +72,13 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    // A call to an Android API newer than the phone running it stops the app
+    // there, so one anywhere fails the release build (lintVitalRelease runs
+    // with every assembleRelease).
+    lint {
+        fatal += "NewApi"
+    }
 }
 
 // Room writes each database version's schema here, so migrations can be checked.

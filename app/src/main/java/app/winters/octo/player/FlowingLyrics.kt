@@ -222,7 +222,7 @@ fun FlowingLyrics(
         val copies = remember(shown, textColor, calm, look, density.density) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) LyricCopies(density.density) else null
         }
-        DisposableEffect(copies) { onDispose { copies?.close() } }
+        DisposableEffect(copies) { onDispose { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) copies?.close() } }
         val currentCopies by rememberUpdatedState(copies)
         val rests = remember(shown, textColor, calm, look) { LineRests() }
         val drawDensity by rememberUpdatedState(density)
@@ -350,7 +350,7 @@ private fun LineNode(
     val line = st.line
     val box = shown.lines[index]
     val nodeHeight = lineNodeHeight(line, box, shown)
-    val copy = remember(copies, index) { copies?.line(index)?.copy }
+    val copy = remember(copies, index) { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) copies?.line(index)?.copy else null }
     val tap by rememberUpdatedState(onTap)
     val hold by rememberUpdatedState(onLongPress)
     val stampLabel = remember(line) { "Play from ${clockText((line.start * 1000).roundToLong())}" }
