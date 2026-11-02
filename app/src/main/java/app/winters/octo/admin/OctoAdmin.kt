@@ -74,7 +74,19 @@ data class DownloadRecord(
     val sizeBytes: Long = 0,
     val downloadedAt: String = "",
     val requestedBy: List<String> = emptyList(),
+    // Where Octo serves the cover (from the song's file, else the address
+    // saved with it). Older servers name none.
+    val cover: String? = null,
 )
+
+// A download as the app shows it: its cover from the address Octo serves it
+// at, on the admin pages' own address and signed by `sign`. A server that
+// names none, or names another host, keeps the cover address the log saved.
+internal fun withServedCover(record: DownloadRecord, base: HttpUrl, sign: (HttpUrl) -> HttpUrl): DownloadRecord {
+    val path = record.cover?.takeIf { it.startsWith("/") && !it.startsWith("//") } ?: return record
+    val served = base.resolve(path) ?: return record
+    return record.copy(coverArtUrl = sign(served).toString())
+}
 
 @Serializable
 private data class Downloads(val downloads: List<DownloadRecord> = emptyList())
@@ -195,7 +207,8 @@ class OctoAdmin @Inject constructor(
 
     suspend fun status(base: HttpUrl): AdminStatus = get(base, "status", AdminStatus.serializer())
 
-    suspend fun downloads(base: HttpUrl): List<DownloadRecord> = get(base, "downloads", Downloads.serializer()).downloads
+    suspend fun downloads(base: HttpUrl): List<DownloadRecord> =
+        get(base, "downloads", Downloads.serializer()).downloads.map { withServedCover(it, base, ::sign) }
 
     suspend fun radio(base: HttpUrl): RadioState =
         get(base, "lastfm/radio", RadioState.serializer(), listOfNotNull(client()?.username?.let { "user" to it }))
