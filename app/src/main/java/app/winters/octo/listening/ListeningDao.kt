@@ -147,9 +147,6 @@ class RatingChunk(
     val copies: List<RatingCopy>,
     val local: Map<String, Int>,
     val synced: Map<String, Int>,
-    // Server songs the phone set a rating on after the last copy began
-    // reading: their copies' ratings are older than the server's.
-    val stale: Set<String> = emptySet(),
 )
 
 // What an older version kept in its preferences file, as rows.
@@ -217,18 +214,12 @@ interface ListeningDao {
     suspend fun ratingChunk(sourceId: String, account: String, after: String): RatingChunk {
         val copies = ratingPage(sourceId, after, AFTER_SYNC_CHUNK)
         if (copies.isEmpty()) return RatingChunk(copies, emptyMap(), emptyMap())
-        val synced = syncedRatingsAmong(account, copies.map { it.serverId })
-        val readFrom = readFrom(sourceId) ?: 0
         return RatingChunk(
             copies,
             phoneRatingsAmong(copies.map { it.trackId }.distinct()).associate { it.trackId to cleanRating(it.rating) },
-            synced.associate { it.serverId to it.rating },
-            synced.filter { it.sentAt > 0 && it.sentAt >= readFrom }.mapTo(HashSet()) { it.serverId },
+            syncedRatingsAmong(account, copies.map { it.serverId }).associate { it.serverId to it.rating },
         )
     }
-
-    @Query("SELECT readFrom FROM source_meta WHERE sourceId = :sourceId")
-    suspend fun readFrom(sourceId: String): Long?
 
     // The server's stars, as getStarred2 last listed them
 

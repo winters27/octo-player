@@ -6,6 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteDiskIOException
 import android.database.sqlite.SQLiteException
 import android.database.sqlite.SQLiteFullException
+import android.util.Log
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
@@ -48,6 +49,24 @@ class UpgradeGuard internal constructor(
     // back, so no open reads the file's header again.
     @Volatile private var upgraded = false
 
+    // At least what an upgrade that filled the disk showed it needs, and
+    // whether a write error was already taken for a full disk. Kept in a file
+    // beside the database until the upgrade lands, so a restart does not run
+    // an upgrade already known not to fit.
+    private val kept = File(file.path + "-upgrade-floor")
+    private var floor = 0L
+    private var writeErrorCounted = false
+
+    init {
+        val saved = try {
+            if (kept.exists()) kept.readText().split(' ') else emptyList()
+        } catch (e: IOException) {
+            emptyList()
+        }
+        floor = saved.firstOrNull()?.toLongOrNull() ?: 0L
+        writeErrorCounted = saved.getOrNull(1) == WRITE_ERROR
+    }
+
     // Checks once, on the thread that asks first, and answers whether the
     // library can open. Quick on every launch but an upgrading one: the
     // version is read from the file's header.
@@ -73,33 +92,51 @@ class UpgradeGuard internal constructor(
     // Whether the file still waits for its upgrade. The header can lag a
     // committed upgrade still in the log, so a header that says it is due
     // is checked against the version the database itself reports.
+    // A file whose header cannot be read counts as due, and is read again
+    // next time.
     fun upgradeDue(): Boolean {
         if (upgraded) return false
         val due = try {
             file.exists() && headerVersion(file) < CATALOG_VERSION && reportedVersion() < CATALOG_VERSION
         } catch (e: IOException) {
-            false
+            return true
         }
-        if (!due) upgraded = true
+        if (!due) {
+            upgraded = true
+            kept.delete()
+        }
         return due
     }
 
     // The upgrade failed writing: nothing opens until there is room. A full
     // disk always counts, and from then on asks for more than was free when
-    // it filled; a write error counts only while the space is short, and
-    // otherwise (answering false) is the caller's to pass on.
+    // it filled. A write error counts while the space is short; with room
+    // for the usual ask it counts as a full disk once (a disk that fills can
+    // be reported so), and after that (answering false) is the caller's to
+    // pass on.
     fun ranOutOfSpace(full: Boolean): Boolean = synchronized(lock) {
-        if (full) {
+        val raise = when {
+            full -> true
+            freeSpace.bytes() < wholeFileNeed() -> false
+            writeErrorCounted -> return false
+            else -> true.also { writeErrorCounted = true }
+        }
+        if (raise) {
             floor = maxOf(floor, wholeFileNeed(), freeSpace.bytes() + file.length())
-        } else if (freeSpace.bytes() >= wholeFileNeed()) {
-            return false
+            keep()
         }
         _state.value = UpgradeState.NeedsSpace(maxOf(floor, wholeFileNeed()))
         true
     }
 
-    // At least what an upgrade that filled the disk showed it needs.
-    private var floor = 0L
+    // A file that cannot be written leaves the floor for this run only.
+    private fun keep() {
+        try {
+            kept.writeText(if (writeErrorCounted) "$floor $WRITE_ERROR" else "$floor")
+        } catch (e: IOException) {
+            Log.w("Octo", "upgrade floor not kept: ${e.javaClass.simpleName}")
+        }
+    }
 
     private fun measure(): UpgradeState {
         if (!upgradeDue()) return UpgradeState.Clear
@@ -119,6 +156,8 @@ class UpgradeGuard internal constructor(
 
     private fun wholeFileNeed(): Long = (file.length() + File(file.path + "-wal").length()) * 2
 }
+
+private const val WRITE_ERROR = "write-error"
 
 // The schema version SQLite keeps at byte 60 of the file, or 0 when the
 // file is too short to have one.

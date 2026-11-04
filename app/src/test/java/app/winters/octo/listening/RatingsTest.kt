@@ -92,6 +92,16 @@ class RatingsTest {
         assertEquals(setOf("t1", "t2"), again.send.keys)
     }
 
+    // A tap wrote 5 into the server copy, but the server never took it: the
+    // record still says 3, so 5 is sent, not settled unsent.
+    @Test
+    fun aTapTheServerNeverTookIsSentEvenWhenTheCopyShowsIt() {
+        val plan = reconcileRatings(listOf(copy("t1", "s1", 5)), local = mapOf("t1" to 5), synced = mapOf("s1" to 3))
+        assertEquals(mapOf("t1" to RatingSend(listOf("s1"), 5)), plan.send)
+        assertTrue(plan.adopt.isEmpty())
+        assertEquals(mapOf("s1" to 3), plan.settled(failed = setOf("t1"), before = mapOf("s1" to 3)))
+    }
+
     @Test
     fun theRecordSurvivesStorage() {
         val record = mapOf("s1" to 5, "a b" to 1)
@@ -106,23 +116,5 @@ class RatingsTest {
         assertEquals(0, cleanRating(-1))
         assertEquals(0, cleanRating(6))
         assertEquals(3, cleanRating(3))
-    }
-
-    // The phone set 5 on the server after the copy began reading, so the
-    // copy's 3 is older than the server's rating: the phone keeps 5 and the
-    // server copy is set to it again, never the other way round.
-    @Test
-    fun aCopyReadBeforeThePhonesSendIsNotTheServersNews() {
-        val plan = reconcileRatings(listOf(RatingCopy("t1", "s1", 3)), mapOf("t1" to 5), mapOf("s1" to 5), stale = setOf("s1"))
-        assertTrue(plan.adopt.isEmpty())
-        assertEquals(RatingSend(listOf("s1"), 5), plan.send["t1"])
-        assertEquals(5, plan.synced["s1"])
-    }
-
-    // A copy read after the send is the server's news as before.
-    @Test
-    fun aCopyReadAfterThePhonesSendStillCounts() {
-        val plan = reconcileRatings(listOf(RatingCopy("t1", "s1", 3)), mapOf("t1" to 5), mapOf("s1" to 5))
-        assertEquals(mapOf("t1" to 3), plan.adopt)
     }
 }

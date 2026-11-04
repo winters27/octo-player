@@ -82,6 +82,51 @@ class UpgradeGuardTest {
         assertEquals(size, file.length())
     }
 
+    // A header that cannot be read is no proof of an upgrade: the file stays
+    // due and is read again, instead of the guard standing down for good.
+    @Test
+    fun anUnreadableHeaderStaysDue() {
+        val notAFile = File(Files.createTempDirectory("u").toFile(), CATALOG_FILE).apply { mkdirs() }
+        val guard = UpgradeGuard(notAFile) { Long.MAX_VALUE }
+        assertTrue(guard.upgradeDue())
+        assertTrue(guard.upgradeDue())
+    }
+
+    // What a full disk showed the upgrade needs outlives a restart, so the
+    // next launch asks for it before trying again, and is forgotten once the
+    // upgrade lands.
+    @Test
+    fun theRaisedAskSurvivesARestart() {
+        val file = version18(rows = 100)
+        val size = file.length()
+        var free = size * 3
+        assertTrue(UpgradeGuard(file) { free }.ranOutOfSpace(full = true))
+        val next = UpgradeGuard(file) { free }
+        assertFalse(next.check())
+        assertEquals(UpgradeState.NeedsSpace(size * 4), next.state.value)
+        SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READWRITE).use { it.version = CATALOG_VERSION }
+        free = 0L
+        assertTrue(UpgradeGuard(file) { free }.check())
+        assertFalse(File(file.path + "-upgrade-floor").exists())
+    }
+
+    // A write error with room for the usual ask counts as a full disk once,
+    // across a restart too; once its raised ask is met, it is passed on.
+    @Test
+    fun aWriteErrorWithRoomCountsAsFullOnce() {
+        val file = version18(rows = 100)
+        val size = file.length()
+        var free = size * 3
+        val guard = UpgradeGuard(file) { free }
+        assertTrue(guard.ranOutOfSpace(full = false))
+        assertEquals(UpgradeState.NeedsSpace(size * 4), guard.state.value)
+        free = size * 4
+        assertFalse(UpgradeGuard(file) { free }.ranOutOfSpace(full = false))
+        // While the space is short it still counts.
+        free = 10L
+        assertTrue(UpgradeGuard(file) { free }.ranOutOfSpace(full = false))
+    }
+
     // An upgrade that runs out of disk anyway leaves the open waiting, with
     // the most it could take asked for, instead of failing the open.
     @Test

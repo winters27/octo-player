@@ -186,7 +186,7 @@ class AfterSyncTest {
             db.copy(source, "s1", "device:1", rating = 2)
             val dao = db.listeningDao()
             val store = store(dao)
-            store.setSyncedRatings("home", listOf("s1"), 2, sentAt = 0)
+            store.setSyncedRatings("home", listOf("s1"), 2)
             db.userDao().rate(TrackRatingEntity("device:1", "rk-device:1", 4, 1))
             server.refuseRatings = true
             val sync = listeningSync(server, dao, store)
@@ -202,23 +202,22 @@ class AfterSyncTest {
         }
     }
 
-    // The phone set 4 on the server after the copy began reading, so the
-    // copy still says 2: the phone keeps 4, never takes the 2.
+    // A tap made offline wrote 4 into the server copy too, and no copy came
+    // since: the record still says 2, so the sync sends the 4.
     @Test
-    fun aRatingSentWhileTheCopyReadIsNotTakenBack() = runBlocking {
+    fun aTapTheServerNeverTookIsSentWithNoCopyBetween() = runBlocking {
         AfterSyncServer().use { server ->
             val source = server.session.sourceId
             db.song("device:1")
-            db.copy(source, "s1", "device:1", rating = 2)
-            db.exec("INSERT OR REPLACE INTO source_meta VALUES (?, 'home', NULL, 1, 'none', 0, 0, 0, 0, 1000)", source)
+            db.copy(source, "s1", "device:1", rating = 4)
             val dao = db.listeningDao()
             val store = store(dao)
+            store.setSyncedRatings("home", listOf("s1"), 2)
             db.userDao().rate(TrackRatingEntity("device:1", "rk-device:1", 4, 1))
-            store.setSyncedRatings("home", listOf("s1"), 4, sentAt = 2000)
             listeningSync(server, dao, store).afterSync()
-            assertEquals(4, db.userDao().rating("device:1"))
             assertEquals(listOf("setRating s1 rating=4"), server.calls("setRating"))
-            assertEquals(4, db.dao().track("device:1")!!.rating)
+            assertEquals(4, dao.syncedRatingsAmong("home", listOf("s1")).single().rating)
+            assertEquals(4, db.userDao().rating("device:1"))
         }
     }
 

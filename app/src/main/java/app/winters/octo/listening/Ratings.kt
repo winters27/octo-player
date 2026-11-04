@@ -23,9 +23,7 @@ data class RatingPlan(
     val synced: Map<String, Int> = emptyMap(),
 )
 
-// `stale` holds server songs whose copies were read before the phone last
-// set their rating there: what such a copy says is not the server's news.
-fun reconcileRatings(copies: List<RatingCopy>, local: Map<String, Int>, synced: Map<String, Int>, stale: Set<String> = emptySet()): RatingPlan {
+fun reconcileRatings(copies: List<RatingCopy>, local: Map<String, Int>, synced: Map<String, Int>): RatingPlan {
     val known = copies.mapTo(HashSet()) { it.serverId }
     // A song that lost its server copy keeps its record, in case it returns.
     val record = HashMap(synced.filterKeys { it !in known })
@@ -37,9 +35,11 @@ fun reconcileRatings(copies: List<RatingCopy>, local: Map<String, Int>, synced: 
         val here = local[song] ?: 0
         val before = ids.firstNotNullOfOrNull { synced[it] } ?: 0
         // The server's rating: a copy that moved from the record, if any.
-        val there = ordered.firstOrNull { it.serverId !in stale && it.rating != before }?.rating ?: before
+        val there = ordered.firstOrNull { it.rating != before }?.rating ?: before
         val target = if (here != before) here else there
-        if (ordered.any { it.rating != target }) send[song] = RatingSend(ids, target)
+        // A phone change is sent even when the server copies already show
+        // it: a tap writes them before the server has confirmed it.
+        if (here != before || ordered.any { it.rating != target }) send[song] = RatingSend(ids, target)
         if (here != target) adopt[song] = target
         if (target > 0) ids.forEach { record[it] = target }
     }

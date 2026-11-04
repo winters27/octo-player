@@ -94,7 +94,28 @@ internal suspend fun switchLibrary(want: String, mergedFor: suspend () -> String
 
 // Said while the library still holds another server's music because its
 // switch could not be merged.
-private const val SWITCH_PROBLEM = "Couldn't finish switching the library. Octo tries again with the next copy."
+internal const val SWITCH_PROBLEM = "Couldn't finish switching the library. Octo keeps trying while it's open."
+
+// Makes the library the wanted server's (switchLibrary) and says so in
+// `problem`: the switch's words show while it fails and go once the library
+// is the wanted one's, whichever try got it there. Any other problem stays.
+internal class LibrarySwitch(
+    private val mergedFor: suspend () -> String?,
+    private val merge: suspend () -> Unit,
+    private val mark: suspend (String) -> Unit,
+    private val problem: MutableStateFlow<String?>,
+) {
+    // Answers whether the library is `want`'s now ("" for none).
+    suspend fun finish(want: String): Boolean {
+        val done = switchLibrary(want, mergedFor, merge, mark)
+        if (done) problem.compareAndSet(SWITCH_PROBLEM, null) else problem.value = SWITCH_PROBLEM
+        return done
+    }
+}
+
+// Whether a server's arrival starts a copy: unless its copy is fresh and
+// its library in place, since sync() finishes a failed switch first.
+internal fun copyOnArrival(needed: CopyNeed, switched: Boolean): Boolean = needed != CopyNeed.Fresh || !switched
 
 // A copy older than this is made again when the app starts or comes to the
 // front.
@@ -168,6 +189,8 @@ class ServerSync @Inject constructor(
     private val _problem = MutableStateFlow<String?>(null)
     val problem: StateFlow<String?> = _problem
 
+    private val switch = LibrarySwitch(::mergedFor, { merge.rebuild() }, ::markMerged, _problem)
+
     // Whose library the screens show now: the id of the server in use once
     // its music has joined, or PHONE_LIBRARY. Null until the first is in place.
     private val _ready = MutableStateFlow<String?>(null)
@@ -203,17 +226,17 @@ class ServerSync @Inject constructor(
     // library becomes the new one's, and its copy is made again when old.
     // A database error (a full disk, say) is noted and said, the change
     // still finishes, and this keeps listening for changes; the library mark
-    // is written only once a merge worked, so the next copy (or the next
-    // change) merges again.
+    // is written only once a merge worked, so a failed switch is merged
+    // again by the copy this starts and on every freshen.
     private suspend fun arrived(session: Session?) {
         synchronized(this) { job }?.cancelAndJoin()
         _problem.value = null
         orNoted { dropUnkept() }
-        if (!switchLibrary(session?.sourceId.orEmpty(), ::mergedFor, { merge.rebuild() }, ::markMerged)) _problem.value = SWITCH_PROBLEM
+        val switched = switch.finish(session?.sourceId.orEmpty())
         _ready.value = session?.id ?: PHONE_LIBRARY
         if (session == null) return
         val needed = orNoted { need(session) } ?: CopyNeed.Copy
-        if (needed != CopyNeed.Fresh) {
+        if (copyOnArrival(needed, switched)) {
             syncNow()
         } else if (foreground) {
             scope.launch { quietly { look(session) } }
@@ -227,10 +250,14 @@ class ServerSync @Inject constructor(
         copyNeed(copies.accountSync(session.id), copies.copyOf(session.sourceId), session.id, session.sourceId, System.currentTimeMillis())
 
     // Starts a copy unless one is already running.
-    fun syncNow() {
+    fun syncNow() = startSync(copyAll = false)
+
+    // `copyAll` copies the whole library even when only the steps after a
+    // copy are owed.
+    private fun startSync(copyAll: Boolean) {
         synchronized(this) {
             if (job?.isActive == true) return
-            job = scope.launch { sync() }
+            job = scope.launch { sync(copyAll) }
         }
     }
 
@@ -247,7 +274,7 @@ class ServerSync @Inject constructor(
     fun syncAgain() {
         scope.launch {
             synchronized(this@ServerSync) { job }?.cancelAndJoin()
-            syncNow()
+            startSync(copyAll = true)
         }
     }
 
@@ -366,9 +393,11 @@ class ServerSync @Inject constructor(
     // otherwise looks for new music. Either at most once a
     // NEW_MUSIC_LOOK_MS, so a copy that keeps failing is not tried on and on.
     private suspend fun freshen() {
-        val session = signedIn() ?: return
+        val session = signedIn()
         // Until the server's music is in place, arrived() decides.
-        if (_ready.value != session.id) return
+        if (_ready.value != (session?.id ?: PHONE_LIBRARY)) return
+        // A switch whose merge failed is merged again, signed out too.
+        if (!switch.finish(session?.sourceId.orEmpty()) || session == null) return
         if (need(session) == CopyNeed.Fresh) return look(session)
         val now = SystemClock.elapsedRealtime()
         if (!newMusicLookDue(lookedAt[session.id], now)) return
@@ -440,18 +469,16 @@ class ServerSync @Inject constructor(
         }
     }
 
-    private suspend fun sync() {
+    private suspend fun sync(copyAllAnyway: Boolean) {
         val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return
         _syncing.value = true
         try {
             val started = SystemClock.elapsedRealtime()
-            // A switch to this server whose merge failed is finished first.
-            if (mergedFor() != session.sourceId) {
-                merge.rebuild()
-                markMerged(session.sourceId)
-            }
+            // A switch to this server whose merge failed is finished first;
+            // while it still fails, its words show and nothing is copied.
+            if (!switch.finish(session.sourceId)) return
             // A copy swapped in whose steps afterwards were cut off needs only those.
-            val copyAll = need(session) != CopyNeed.AfterSync
+            val copyAll = copyAllAnyway || need(session) != CopyNeed.AfterSync
             val done = CopyRun(copy, copies, afterSyncSteps()).run(session.id, session.sourceId, session.client, copyAll)
             lookedAt[session.id] = SystemClock.elapsedRealtime()
             _problem.value = null

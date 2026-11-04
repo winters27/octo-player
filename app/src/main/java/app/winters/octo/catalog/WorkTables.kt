@@ -139,8 +139,6 @@ data class SourceMetaEntity(
     val stagedTracks: Int,
     val stagedAlbums: Int,
     val stagedArtists: Int,
-    // When the last copy of the source began reading it.
-    val readFrom: Long = 0,
 )
 
 // Each kept account's last copy: of which source, when, how much came,

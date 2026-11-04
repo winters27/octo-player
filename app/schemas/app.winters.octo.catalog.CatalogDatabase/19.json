@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 19,
-    "identityHash": "a37255c7aced0c1df6abfdd50f5e5e8f",
+    "identityHash": "3bf1733fce421cd8e455181b4bfec1e7",
     "entities": [
       {
         "tableName": "track",
@@ -3223,7 +3223,7 @@
       },
       {
         "tableName": "source_meta",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`sourceId` TEXT NOT NULL, `copyOf` TEXT, `stageOwner` TEXT, `stamp` INTEGER NOT NULL, `stage` TEXT NOT NULL, `generation` INTEGER NOT NULL, `stagedTracks` INTEGER NOT NULL, `stagedAlbums` INTEGER NOT NULL, `stagedArtists` INTEGER NOT NULL, `readFrom` INTEGER NOT NULL, PRIMARY KEY(`sourceId`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`sourceId` TEXT NOT NULL, `copyOf` TEXT, `stageOwner` TEXT, `stamp` INTEGER NOT NULL, `stage` TEXT NOT NULL, `generation` INTEGER NOT NULL, `stagedTracks` INTEGER NOT NULL, `stagedAlbums` INTEGER NOT NULL, `stagedArtists` INTEGER NOT NULL, PRIMARY KEY(`sourceId`))",
         "fields": [
           {
             "fieldPath": "sourceId",
@@ -3274,12 +3274,6 @@
           {
             "fieldPath": "stagedArtists",
             "columnName": "stagedArtists",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "readFrom",
-            "columnName": "readFrom",
             "affinity": "INTEGER",
             "notNull": true
           }
@@ -3406,7 +3400,7 @@
       },
       {
         "tableName": "synced_rating",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account` TEXT NOT NULL, `serverId` TEXT NOT NULL, `rating` INTEGER NOT NULL, `sentAt` INTEGER NOT NULL, PRIMARY KEY(`account`, `serverId`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account` TEXT NOT NULL, `serverId` TEXT NOT NULL, `rating` INTEGER NOT NULL, PRIMARY KEY(`account`, `serverId`))",
         "fields": [
           {
             "fieldPath": "account",
@@ -3423,12 +3417,6 @@
           {
             "fieldPath": "rating",
             "columnName": "rating",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "sentAt",
-            "columnName": "sentAt",
             "affinity": "INTEGER",
             "notNull": true
           }
@@ -3576,7 +3564,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a37255c7aced0c1df6abfdd50f5e5e8f')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '3bf1733fce421cd8e455181b4bfec1e7')"
     ]
   }
 }

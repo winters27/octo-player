@@ -2,6 +2,7 @@ package app.winters.octo.server
 
 import android.database.sqlite.SQLiteFullException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -35,6 +36,52 @@ class ServerChangeTest {
         // Nothing to do once it is the wanted one's.
         assertTrue(switchLibrary("server:new", { mergedFor }, { merges++ }) { mergedFor = it })
         assertEquals(2, merges)
+    }
+
+    @Test
+    fun aFailedSwitchIsSaidUntilATryWorks() = runBlocking {
+        val problem = MutableStateFlow<String?>(null)
+        var full = true
+        val switch = LibrarySwitch({ mergedFor }, { if (full) throw SQLiteFullException("database or disk is full") }, { mergedFor = it }, problem)
+        assertFalse(switch.finish("server:new"))
+        assertEquals(SWITCH_PROBLEM, problem.value)
+        // A later try (the copy, a freshen, signed out too) that works ends it.
+        full = false
+        assertTrue(switch.finish("server:new"))
+        assertNull(problem.value)
+        assertEquals("server:new", mergedFor)
+    }
+
+    @Test
+    fun signedOutTheSwitchIsToNoServer() = runBlocking {
+        val problem = MutableStateFlow<String?>(SWITCH_PROBLEM)
+        val switch = LibrarySwitch({ mergedFor }, {}, { mergedFor = it }, problem)
+        assertTrue(switch.finish(""))
+        assertEquals("", mergedFor)
+        assertNull(problem.value)
+    }
+
+    // The switch's words go once the library is the wanted one's, but a
+    // copy's own problem is not the switch's to clear.
+    @Test
+    fun onlyTheSwitchsOwnWordsAreCleared() = runBlocking {
+        mergedFor = "server:new"
+        val stale = MutableStateFlow<String?>(SWITCH_PROBLEM)
+        assertTrue(LibrarySwitch({ mergedFor }, { fail("no merge needed") }, { mergedFor = it }, stale).finish("server:new"))
+        assertNull(stale.value)
+        val other = MutableStateFlow<String?>("Couldn't reach the server.")
+        assertTrue(LibrarySwitch({ mergedFor }, {}, { mergedFor = it }, other).finish("server:new"))
+        assertEquals("Couldn't reach the server.", other.value)
+    }
+
+    // A fresh copy starts nothing, unless its switch failed: then the copy
+    // (which finishes the switch first) starts anyway.
+    @Test
+    fun aFailedSwitchStartsACopyEvenWhenTheCopyIsFresh() {
+        assertFalse(copyOnArrival(CopyNeed.Fresh, switched = true))
+        assertTrue(copyOnArrival(CopyNeed.Fresh, switched = false))
+        assertTrue(copyOnArrival(CopyNeed.Copy, switched = true))
+        assertTrue(copyOnArrival(CopyNeed.AfterSync, switched = true))
     }
 
     @Test
