@@ -13,6 +13,7 @@
 - A song kept while Lidarr is still downloading its artist plays right away and joins your library once Lidarr's download is done.
 - **Album search works where it used to come back empty.** In countries where the music catalog hides albums from searches, like movie soundtracks, Octo finds them through Apple's catalog instead, and a whole album downloads.
 - On a partly held album, saving it to your phone counts only the songs it saves.
+- **A song you delete can come back.** Search drops its check mark once your library no longer has it, and hearting it again downloads it again.
 
 ## Playback
 
