@@ -89,10 +89,24 @@ ksp {
 // Tests build old databases from these schemas and read the new one's SQL.
 tasks.withType<Test>().configureEach {
     systemProperty("octo.schemas", file("schemas/app.winters.octo.catalog.CatalogDatabase").absolutePath)
-    // The desktop JVM's optimizing compiler (JDK 17.0.19) crashes compiling
-    // this one method, killing the test run; it runs uncompiled in tests.
-    // Phones compile it with their own runtime.
-    jvmArgs("-XX:CompileCommand=quiet", "-XX:CompileCommand=exclude,app.winters.octo.catalog.CatalogMerger::place")
+    // The desktop JVM's optimizing compiler (C2, JDK 17.0.19) crashes now
+    // and then on Robolectric's rewritten classes, killing the test run, so
+    // tests stop at the quick compiler. Phones compile with their own runtime.
+    jvmArgs("-XX:TieredStopAtLevel=1")
+}
+
+// The heap proof: -PoctoHeapProof runs it with a small, fixed heap, the
+// way a phone gives an app one. Without the switch it is skipped.
+tasks.withType<Test>().configureEach {
+    if (project.hasProperty("octoHeapProof")) {
+        maxHeapSize = (project.findProperty("octoHeapProof") as String).ifEmpty { "256m" }
+        systemProperty("octo.heapProof", "true")
+    }
+    if (project.hasProperty("octoProofServer")) systemProperty("octo.proofServer", "true")
+    // The grep gate reads the app's own sources.
+    systemProperty("octo.mainSources", file("src/main/java").absolutePath)
+    // Each proof class gets a fresh JVM, so one's peak heap never counts in another's.
+    if (project.hasProperty("octoHeapProof")) forkEvery = 1
 }
 
 dependencies {
