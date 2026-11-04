@@ -37,14 +37,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -58,7 +54,6 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -157,92 +152,6 @@ internal suspend fun copyPlan(sourceId: String, copyAllAnyway: Boolean, finish: 
     return copyAllAnyway || need() != CopyNeed.AfterSync
 }
 
-// The one copy running at a time. `run` copies; its flag copies the whole
-// library even when only the steps after a copy are owed. A server change
-// (a switch, signing out, removing a server) runs inside stopFor: the copy
-// running stops first, no copy runs during the change, and the copies
-// asked for meanwhile run once it ends, as one.
-internal class CopyJobs(private val scope: CoroutineScope, private val run: suspend (copyAll: Boolean) -> Unit) {
-    private var job: Job? = null
-
-    // How many server changes are under way, and the copy asked for during
-    // them: null for none, true when a whole one was asked for.
-    private val changing = MutableStateFlow(0)
-    private var asked: Boolean? = null
-
-    // The copy running now, or the last one.
-    fun current(): Job? = synchronized(this) { job }
-
-    fun isActive(): Boolean = synchronized(this) { job?.isActive == true }
-
-    // Starts a copy unless one is already running. Answers the copy that
-    // runs, or null during a change, after which it runs.
-    fun start(): Job? = synchronized(this) {
-        if (changing.value > 0) {
-            if (asked == null) asked = false
-            return null
-        }
-        val old = job
-        if (old?.isActive == true) return old
-        after(old, copyAll = false).also { job = it }
-    }
-
-    // Starts a copy, after any change under way, and waits for it to end.
-    suspend fun startAndJoin() {
-        while (true) {
-            changing.first { it == 0 }
-            val started = start() ?: continue
-            started.join()
-            return
-        }
-    }
-
-    // Stops the copy running and starts a whole one in its place, in one
-    // step, so no other start slips in between; during a change, the whole
-    // copy runs once it ends.
-    fun restart() {
-        synchronized(this) {
-            val old = job
-            old?.cancel()
-            if (changing.value > 0) {
-                asked = true
-                return
-            }
-            job = after(old, copyAll = true)
-        }
-    }
-
-    // Runs a server change: stops the copy running and waits until it has
-    // cleaned up, then runs `change` with no copy running, and then the
-    // copy asked for meanwhile, if any.
-    suspend fun <T> stopFor(change: suspend () -> T): T {
-        synchronized(this) { changing.value++ }
-        try {
-            synchronized(this) { job }?.cancelAndJoin()
-            return change()
-        } finally {
-            synchronized(this) {
-                changing.value--
-                val wanted = asked
-                if (changing.value == 0 && wanted != null) {
-                    asked = null
-                    job = after(job, wanted)
-                }
-            }
-        }
-    }
-
-    // A copy that first waits out `old` whatever stops it, and always
-    // starts, so stopping it (current()) also waits until `old` has cleaned
-    // up, and two copies never overlap.
-    @OptIn(DelicateCoroutinesApi::class)
-    private fun after(old: Job?, copyAll: Boolean): Job = scope.launch(start = CoroutineStart.ATOMIC) {
-        withContext(NonCancellable) { old?.join() }
-        ensureActive()
-        run(copyAll)
-    }
-}
-
 // A copy older than this is made again when the app starts or comes to the
 // front.
 internal const val STALE_MS =6 * 60 * 60 * 1000L
@@ -293,7 +202,7 @@ class ServerSync @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val dropLock = Mutex()
-    private val jobs = CopyJobs(scope) { copyAll -> sync(copyAll) }
+    private var job: Job? = null
     private var started = false
 
     // One take-in or look at a time, so two never put in the same rows.
@@ -353,9 +262,9 @@ class ServerSync @Inject constructor(
     // A database error (a full disk, say) is noted and said, the change
     // still finishes, and this keeps listening for changes; the library mark
     // is written only once a merge worked, so a failed switch is merged
-    // again by the copy this starts and on every freshen. Copies asked for
-    // during the change run once it is done.
-    private suspend fun arrived(session: Session?) = jobs.stopFor {
+    // again by the copy this starts and on every freshen.
+    private suspend fun arrived(session: Session?) {
+        synchronized(this) { job }?.cancelAndJoin()
         _problem.value = null
         orNoted { dropUnkept() }
         arrive(
@@ -376,39 +285,51 @@ class ServerSync @Inject constructor(
         copyNeed(copies.accountSync(session.id), copies.copyOf(session.sourceId), session.id, session.sourceId, System.currentTimeMillis())
 
     // Starts a copy unless one is already running.
-    fun syncNow() {
-        jobs.start()
+    fun syncNow() = startSync(copyAll = false)
+
+    // `copyAll` copies the whole library even when only the steps after a
+    // copy are owed.
+    private fun startSync(copyAll: Boolean) {
+        synchronized(this) {
+            if (job?.isActive == true) return
+            job = scope.launch { sync(copyAll) }
+        }
     }
 
-    // Starts a copy unless one is already running (after a server change
-    // under way), and waits for it to end. Answers why it failed, in words,
-    // or null when it worked.
+    // Starts a copy unless one is already running, and waits for it to end.
+    // Answers why it failed, in words, or null when it worked.
     suspend fun syncNowAndWait(): String? {
-        jobs.startAndJoin()
+        syncNow()
+        synchronized(this) { job }?.join()
         return _problem.value
     }
 
-    // Copies the library afresh, stopping a copy already running: for when
-    // what the copy should hold has changed, like the chosen music folder.
-    fun syncAgain() = jobs.restart()
+    // Copies the whole library afresh, stopping a copy already running: for
+    // when what the copy should hold has changed, like the chosen music
+    // folder.
+    fun syncAgain() {
+        scope.launch {
+            synchronized(this@ServerSync) { job }?.cancelAndJoin()
+            startSync(copyAll = true)
+        }
+    }
 
     // Signs out of the server in use. Its music leaves the library; its copy
     // stays for signing in again. Nothing on the server changes.
     fun disconnect() {
-        scope.launch { jobs.stopFor { sessions.signOut() } }
+        scope.launch {
+            synchronized(this@ServerSync) { job }?.cancelAndJoin()
+            sessions.signOut()
+        }
     }
 
     // Takes a kept server off the list, and its copy of the library with it
     // (unless another kept account shares the address). Nothing on the
-    // server changes. No copy runs while the server in use is taken away.
-    suspend fun remove(id: String): StoredServer? =
+    // server changes.
+    suspend fun remove(id: String): StoredServer? {
         if (sessions.state.value.let { it is SessionState.SignedIn && it.session.id == id }) {
-            jobs.stopFor { removeNow(id) }
-        } else {
-            removeNow(id)
+            synchronized(this) { job }?.cancelAndJoin()
         }
-
-    private suspend fun removeNow(id: String): StoredServer? {
         val gone = sessions.remove(id) ?: return null
         dropUnkept()
         copies.forgetAccount(id)
@@ -443,7 +364,7 @@ class ServerSync @Inject constructor(
         val session = signedIn() ?: return false
         return scope.async {
             takeInLock.withLock {
-                jobs.current()?.join()
+                synchronized(this@ServerSync) { job }?.join()
                 if (signedIn()?.sourceId != session.sourceId) return@withLock false
                 takeIn(session, arriving.songs, arriving.albumIds())
                 val songIds = arriving.songs.map { it.id }
@@ -462,7 +383,7 @@ class ServerSync @Inject constructor(
     suspend fun takeInIfFree(arriving: Arriving): Boolean? {
         if (arriving.isEmpty) return false
         val work = scope.async { takeInArriving(arriving) }
-        val copying = jobs.isActive()
+        val copying = synchronized(this) { job?.isActive == true }
         return unlessCopying(work, copying, _syncing)
     }
 
@@ -522,7 +443,7 @@ class ServerSync @Inject constructor(
     // in; too many at once copies the whole library instead. Never while a
     // copy runs, and never twice within NEW_MUSIC_LOOK_MS.
     private suspend fun look(session: Session) {
-        if (jobs.isActive()) return
+        if (synchronized(this) { job }?.isActive == true) return
         val now = SystemClock.elapsedRealtime()
         if (!newMusicLookDue(lookedAt[session.id], now)) return
         lookedAt[session.id] = now

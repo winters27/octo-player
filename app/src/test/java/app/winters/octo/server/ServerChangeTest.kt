@@ -4,16 +4,12 @@ import android.database.sqlite.SQLiteFullException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -189,162 +185,6 @@ class ServerChangeTest {
         assertEquals(false, copyPlan("server:new", copyAllAnyway = false, { true }) { CopyNeed.AfterSync })
         assertEquals(true, copyPlan("server:new", copyAllAnyway = true, { true }) { CopyNeed.AfterSync })
         assertEquals(true, copyPlan("server:new", copyAllAnyway = false, { true }) { CopyNeed.Copy })
-    }
-
-    // Copying afresh replaces the running copy in one step: a start asked
-    // meanwhile joins the fresh whole copy instead of running a part one.
-    @Test
-    fun copyingAfreshIsNeverOvertakenByAStart() = runTest {
-        val runs = mutableListOf<Boolean>()
-        val jobs = CopyJobs(this) { copyAll ->
-            runs += copyAll
-            if (runs.size == 1) awaitCancellation()
-        }
-        jobs.start()
-        runCurrent()
-        jobs.restart()
-        jobs.start()
-        advanceUntilIdle()
-        assertEquals(listOf(false, true), runs)
-    }
-
-    // A copy stopped by copying afresh still cleans up; stopping the fresh
-    // one waits for that cleanup, and a copy asked for meanwhile runs only
-    // after it, never beside it.
-    @Test
-    fun stoppingAFreshCopyWaitsForTheOldOneToCleanUp() = runTest {
-        val runs = mutableListOf<Boolean>()
-        val order = mutableListOf<String>()
-        val cleanup = CompletableDeferred<Unit>()
-        val jobs = CopyJobs(this) { copyAll ->
-            runs += copyAll
-            if (runs.size == 1) {
-                try {
-                    awaitCancellation()
-                } finally {
-                    withContext(NonCancellable) {
-                        cleanup.await()
-                        order += "cleaned"
-                    }
-                }
-            }
-        }
-        jobs.start()
-        runCurrent()
-        jobs.restart()
-        // Stopped at once, before it ever ran.
-        val fresh = jobs.current()!!
-        fresh.cancel()
-        val stopper = launch {
-            fresh.join()
-            order += "stopped"
-        }
-        runCurrent()
-        // The cleanup is let go even when a check fails, so a failure never
-        // leaves the test waiting on it.
-        try {
-            assertFalse(stopper.isCompleted)
-            jobs.start()
-            runCurrent()
-            assertEquals(listOf(false), runs)
-        } finally {
-            cleanup.complete(Unit)
-        }
-        advanceUntilIdle()
-        assertEquals(listOf("cleaned", "stopped"), order)
-        // The fresh copy was stopped, so it never ran; the one asked for
-        // during the cleanup ran after it.
-        assertEquals(listOf(false, false), runs)
-    }
-
-    // A server change (a switch, signing out, removing a server) waits out
-    // the running copy's cleanup and runs with no copy running; the copies
-    // asked for during it (a pull, a freshen, the arrival's own) run once it
-    // ends, as one.
-    @Test
-    fun copiesAskedForDuringAChangeRunAfterIt() = runTest {
-        val order = mutableListOf<String>()
-        val cleanup = CompletableDeferred<Unit>()
-        val changed = CompletableDeferred<Unit>()
-        var runs = 0
-        val jobs = CopyJobs(this) { copyAll ->
-            runs++
-            order += "run $copyAll"
-            if (runs == 1) {
-                try {
-                    awaitCancellation()
-                } finally {
-                    withContext(NonCancellable) {
-                        cleanup.await()
-                        order += "cleaned"
-                    }
-                }
-            }
-        }
-        jobs.start()
-        runCurrent()
-        val change = launch {
-            jobs.stopFor {
-                order += "change"
-                jobs.start()
-                changed.await()
-                order += "changed"
-            }
-        }
-        runCurrent()
-        // The waits are let go even when a check fails, so a failure never
-        // leaves the test waiting on them.
-        try {
-            jobs.start()
-            runCurrent()
-            assertEquals(listOf("run false"), order)
-            cleanup.complete(Unit)
-            runCurrent()
-            assertEquals(listOf("run false", "cleaned", "change"), order)
-        } finally {
-            cleanup.complete(Unit)
-            changed.complete(Unit)
-        }
-        advanceUntilIdle()
-        assertTrue(change.isCompleted)
-        assertEquals(listOf("run false", "cleaned", "change", "changed", "run false"), order)
-    }
-
-    // Copying afresh asked for during a change (a new music folder) runs
-    // whole once the change ends, once.
-    @Test
-    fun aWholeCopyAskedForDuringAChangeStaysWhole() = runTest {
-        val runs = mutableListOf<Boolean>()
-        val jobs = CopyJobs(this) { runs += it }
-        jobs.stopFor {
-            jobs.start()
-            jobs.restart()
-            jobs.start()
-            assertTrue(runs.isEmpty())
-        }
-        advanceUntilIdle()
-        assertEquals(listOf(true), runs)
-    }
-
-    // Sync now during a change waits for it, then answers for the copy that
-    // ran, never for one that did not.
-    @Test
-    fun syncNowDuringAChangeWaitsForTheCopyAfterIt() = runTest {
-        val runs = mutableListOf<Boolean>()
-        val letGo = CompletableDeferred<Unit>()
-        val jobs = CopyJobs(this) { runs += it }
-        val change = launch { jobs.stopFor { letGo.await() } }
-        runCurrent()
-        val waiter = async {
-            jobs.startAndJoin()
-            runs.toList()
-        }
-        runCurrent()
-        assertFalse(waiter.isCompleted)
-        letGo.complete(Unit)
-        advanceUntilIdle()
-        assertEquals(listOf(false), waiter.await())
-        assertTrue(change.isCompleted)
     }
 
     @Test
