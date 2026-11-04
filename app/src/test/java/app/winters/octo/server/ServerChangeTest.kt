@@ -250,11 +250,16 @@ class ServerChangeTest {
             order += "stopped"
         }
         runCurrent()
-        assertFalse(stopper.isCompleted)
-        jobs.start()
-        runCurrent()
-        assertEquals(listOf(false), runs)
-        cleanup.complete(Unit)
+        // The cleanup is let go even when a check fails, so a failure never
+        // leaves the test waiting on it.
+        try {
+            assertFalse(stopper.isCompleted)
+            jobs.start()
+            runCurrent()
+            assertEquals(listOf(false), runs)
+        } finally {
+            cleanup.complete(Unit)
+        }
         advanceUntilIdle()
         assertEquals(listOf("cleaned", "stopped"), order)
         // The fresh copy was stopped, so it never ran.
