@@ -246,19 +246,23 @@ class AfterSyncTest {
         }
     }
 
-    // With no rating both sides agreed on, a copy that already shows the
-    // phone's rating is taken as agreed: nothing is sent.
+    // An unrated song tapped to 4 while the server could not take it: the
+    // copy shows 4 and there is no record, so the sync sends it, once.
     @Test
-    fun withNoAgreedRatingMatchingCopiesSendNothing() = runBlocking {
+    fun aTapOnAnUnratedSongTheServerNeverTookIsSentOnce() = runBlocking {
         AfterSyncServer().use { server ->
             val source = server.session.sourceId
             db.song("device:1")
-            db.copy(source, "s1", "device:1", rating = 4)
+            db.copy(source, "s1", "device:1", rating = 0)
             val dao = db.listeningDao()
-            db.userDao().rate(TrackRatingEntity("device:1", "rk-device:1", 4, 1))
-            listeningSync(server, dao, store(dao)).afterSync()
-            assertEquals(emptyList<String>(), server.calls("setRating"))
+            val store = store(dao)
+            db.userDao().noteRating("device:1", 4, "rk-device:1", 1, copies = true)
+            val sync = listeningSync(server, dao, store)
+            sync.afterSync()
+            assertEquals(listOf("setRating s1 rating=4"), server.calls("setRating"))
             assertEquals(4, dao.syncedRatingsAmong("home", listOf("s1")).single().rating)
+            sync.afterSync()
+            assertEquals(listOf("setRating s1 rating=4"), server.calls("setRating"))
         }
     }
 

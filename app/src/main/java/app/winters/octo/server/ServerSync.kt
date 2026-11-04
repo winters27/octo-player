@@ -41,7 +41,9 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -90,12 +92,12 @@ internal const val SWITCH_PROBLEM = "Couldn't finish switching the library. Octo
 // last merge was for another, and says so in `problem`: the switch's words
 // show while it fails and go once the library is the wanted one's,
 // whichever try got it there. Any other problem stays. One try at a time; a
-// try marks the library only once its merge worked and only while its
-// server is still the one in use, so an older try never names the library
-// for a server it was not merged for.
+// try marks the library only for the server its merge put in (`merge`
+// answers it) and only while that is still the server in use, so no try
+// names the library for a server it was not merged for.
 internal class LibrarySwitch(
     private val mergedFor: suspend () -> String?,
-    private val merge: suspend () -> Unit,
+    private val merge: suspend () -> String,
     private val mark: suspend (String) -> Unit,
     private val problem: MutableStateFlow<String?>,
     private val wanted: () -> String,
@@ -106,9 +108,9 @@ internal class LibrarySwitch(
     suspend fun finish(want: String): Boolean = lock.withLock {
         val done = orNoted {
             if (mergedFor() != want) {
-                merge()
+                val merged = merge()
                 // The merge is done whatever stops the caller now.
-                withContext(NonCancellable) { if (wanted() == want) mark(want) }
+                withContext(NonCancellable) { if (merged == want && wanted() == want) mark(want) }
             }
             mergedFor() == want
         } == true
@@ -170,21 +172,27 @@ internal class CopyJobs(private val scope: CoroutineScope, private val run: susp
 
     fun isActive(): Boolean = synchronized(this) { job?.isActive == true }
 
-    // Starts a copy unless one is already running.
+    // Starts a copy unless one is already running, or still cleaning up
+    // after it was stopped (two copies never overlap).
     fun start() {
         synchronized(this) {
-            if (job?.isActive == true) return
+            if (job?.isCompleted == false) return
             job = scope.launch { run(false) }
         }
     }
 
     // Stops the copy running and starts a whole one in its place, in one
-    // step, so no other start slips in between.
+    // step, so no other start slips in between. The new one always starts,
+    // and first waits out the old one whatever stops it, so stopping it
+    // (current()) also waits until the old copy has cleaned up.
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun restart() {
         synchronized(this) {
             val old = job
-            job = scope.launch {
-                old?.cancelAndJoin()
+            old?.cancel()
+            job = scope.launch(start = CoroutineStart.ATOMIC) {
+                withContext(NonCancellable) { old?.join() }
+                ensureActive()
                 run(true)
             }
         }
@@ -263,7 +271,7 @@ class ServerSync @Inject constructor(
     private val _problem = MutableStateFlow<String?>(null)
     val problem: StateFlow<String?> = _problem
 
-    private val switch = LibrarySwitch(::mergedFor, { merge.rebuild() }, ::markMerged, _problem) { signedIn()?.sourceId.orEmpty() }
+    private val switch = LibrarySwitch(::mergedFor, { merge.rebuild().server }, ::markMerged, _problem) { signedIn()?.sourceId.orEmpty() }
 
     // Whose library the screens show now: the id of the server in use once
     // its music has joined, or PHONE_LIBRARY. Null until the first is in place.

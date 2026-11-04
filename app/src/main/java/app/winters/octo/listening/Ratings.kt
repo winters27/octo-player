@@ -37,12 +37,11 @@ fun reconcileRatings(copies: List<RatingCopy>, local: Map<String, Int>, synced: 
         // The server's rating: a copy that moved from the record, if any.
         val there = ordered.firstOrNull { it.rating != before }?.rating ?: before
         val target = if (here != before) here else there
-        // A phone change since a rating both sides agreed on is sent even
-        // when the server copies already show it: a tap writes them before
-        // the server has confirmed it. With no such rating, copies that agree
-        // with the phone are taken as agreed.
-        val changedSinceAgreed = here != before && ids.any { it in synced }
-        if (changedSinceAgreed || ordered.any { it.rating != target }) send[song] = RatingSend(ids, target)
+        // A phone change is sent even when the server copies already show
+        // it: a tap writes them before the server has confirmed it. With no
+        // record ("none agreed" and "never agreed" look alike) that sends a
+        // rating the server may already have, once.
+        if (here != before || ordered.any { it.rating != target }) send[song] = RatingSend(ids, target)
         if (here != target) adopt[song] = target
         if (target > 0) ids.forEach { record[it] = target }
     }

@@ -4,15 +4,19 @@ import android.database.sqlite.SQLiteFullException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -22,10 +26,10 @@ import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import java.util.Collections
 
 // A server change survives a database error in its steps: it is noted, the
 // change finishes, and the switch is merged again until it works.
+@OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class ServerChangeTest {
     // The library merged for a server, as ServerSync keeps it, and the
@@ -34,7 +38,8 @@ class ServerChangeTest {
     private var wanted = "server:new"
     private val problem = MutableStateFlow<String?>(null)
 
-    private fun switch(merge: suspend () -> Unit = {}) = LibrarySwitch({ mergedFor }, merge, { mergedFor = it }, problem) { wanted }
+    // A merge answers the server it put in: the one in use as it starts.
+    private fun switch(merge: suspend () -> String = { wanted }) = LibrarySwitch({ mergedFor }, merge, { mergedFor = it }, problem) { wanted }
 
     @Test
     fun aSwitchWhoseMergeFillsTheDiskIsMarkedOnlyOnceAMergeWorks() = runBlocking {
@@ -43,6 +48,7 @@ class ServerChangeTest {
         val switch = switch {
             merges++
             if (full) throw SQLiteFullException("database or disk is full")
+            wanted
         }
         assertFalse(switch.finish("server:new"))
         assertEquals("server:old", mergedFor)
@@ -73,7 +79,7 @@ class ServerChangeTest {
     fun onlyTheSwitchsOwnWordsAreCleared() = runBlocking {
         mergedFor = "server:new"
         problem.value = SWITCH_PROBLEM
-        assertTrue(switch { fail("no merge needed") }.finish("server:new"))
+        assertTrue(switch { throw AssertionError("no merge needed") }.finish("server:new"))
         assertNull(problem.value)
         problem.value = "Couldn't reach the server."
         assertTrue(switch().finish("server:new"))
@@ -84,7 +90,11 @@ class ServerChangeTest {
     // marks the library for it, so the newer server's mark stands.
     @Test
     fun anOlderTryNeverNamesTheLibraryForItsServer() = runBlocking {
-        val switch = switch { if (wanted == "server:b") wanted = "server:c" }
+        val switch = switch {
+            val inUse = wanted
+            if (inUse == "server:b") wanted = "server:c"
+            inUse
+        }
         wanted = "server:b"
         assertFalse(switch.finish("server:b"))
         assertEquals("server:old", mergedFor)
@@ -94,26 +104,39 @@ class ServerChangeTest {
         assertEquals("server:c", mergedFor)
     }
 
+    // A switch away and back during one merge: the merge put in the other
+    // server, so the library is not named for the one in use again.
+    @Test
+    fun aMergeOfAnotherServerNeverNamesTheLibrary() = runBlocking {
+        wanted = "server:a"
+        assertFalse(switch { "server:b" }.finish("server:a"))
+        assertEquals("server:old", mergedFor)
+        assertTrue(switch().finish("server:a"))
+        assertEquals("server:a", mergedFor)
+    }
+
     // Tries run one at a time: a second waits for the first, so their marks
     // never cross.
     @Test
-    fun triesRunOneAtATime() = runBlocking {
-        val merging = CompletableDeferred<Unit>()
+    fun triesRunOneAtATime() = runTest {
         val letGo = CompletableDeferred<Unit>()
-        val order = Collections.synchronizedList(mutableListOf<String>())
+        val order = mutableListOf<String>()
         val switch = switch {
             order += "merge"
-            merging.complete(Unit)
             letGo.await()
+            wanted
         }
-        val first = async(Dispatchers.Default) { switch.finish("server:new") }
-        merging.await()
-        val second = async(Dispatchers.Default) { order += "second asks"; switch.finish("server:new") }
-        // Long enough for a second try that did not wait to start merging.
-        delay(200)
+        val first = async { switch.finish("server:new") }
+        runCurrent()
+        val second = async { order += "second asks"; switch.finish("server:new") }
+        // Everything that can run has run: a second try that did not wait
+        // would be merging now.
+        runCurrent()
+        assertEquals(listOf("merge", "second asks"), order)
         letGo.complete(Unit)
-        assertTrue(withTimeout(5_000) { first.await() })
-        assertTrue(withTimeout(5_000) { second.await() })
+        advanceUntilIdle()
+        assertTrue(first.await())
+        assertTrue(second.await())
         // The second found the library already the wanted one's: one merge.
         assertEquals(listOf("merge", "second asks"), order)
     }
@@ -123,7 +146,7 @@ class ServerChangeTest {
     @Test
     fun aTryStoppedAfterItsMergeStillMarks() = runBlocking {
         val scope = CoroutineScope(SupervisorJob())
-        val switch = LibrarySwitch({ mergedFor }, { scope.cancel() }, { yield(); mergedFor = it }, problem) { wanted }
+        val switch = LibrarySwitch({ mergedFor }, { scope.cancel(); wanted }, { yield(); mergedFor = it }, problem) { wanted }
         scope.launch { switch.finish("server:new") }.join()
         assertEquals("server:new", mergedFor)
     }
@@ -182,24 +205,60 @@ class ServerChangeTest {
     // Copying afresh replaces the running copy in one step: a start asked
     // meanwhile joins the fresh whole copy instead of running a part one.
     @Test
-    fun copyingAfreshIsNeverOvertakenByAStart() = runBlocking {
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val runs = Collections.synchronizedList(mutableListOf<Boolean>())
-        val firstRunning = CompletableDeferred<Unit>()
-        val jobs = CopyJobs(scope) { copyAll ->
+    fun copyingAfreshIsNeverOvertakenByAStart() = runTest {
+        val runs = mutableListOf<Boolean>()
+        val jobs = CopyJobs(this) { copyAll ->
             runs += copyAll
-            if (runs.size == 1) {
-                firstRunning.complete(Unit)
-                CompletableDeferred<Unit>().await()
+            if (runs.size == 1) awaitCancellation()
+        }
+        jobs.start()
+        runCurrent()
+        jobs.restart()
+        jobs.start()
+        advanceUntilIdle()
+        assertEquals(listOf(false, true), runs)
+    }
+
+    // A copy stopped by copying afresh still cleans up; stopping the fresh
+    // one waits for that cleanup, and no copy starts beside it meanwhile.
+    @Test
+    fun stoppingAFreshCopyWaitsForTheOldOneToCleanUp() = runTest {
+        val runs = mutableListOf<Boolean>()
+        val order = mutableListOf<String>()
+        val cleanup = CompletableDeferred<Unit>()
+        val jobs = CopyJobs(this) { copyAll ->
+            runs += copyAll
+            if (!copyAll) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    withContext(NonCancellable) {
+                        cleanup.await()
+                        order += "cleaned"
+                    }
+                }
             }
         }
         jobs.start()
-        firstRunning.await()
+        runCurrent()
         jobs.restart()
+        // Stopped at once, before it ever ran.
+        val fresh = jobs.current()!!
+        fresh.cancel()
+        val stopper = launch {
+            fresh.join()
+            order += "stopped"
+        }
+        runCurrent()
+        assertFalse(stopper.isCompleted)
         jobs.start()
-        withTimeout(5_000) { jobs.current()!!.join() }
-        assertEquals(listOf(false, true), runs)
-        scope.cancel()
+        runCurrent()
+        assertEquals(listOf(false), runs)
+        cleanup.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(listOf("cleaned", "stopped"), order)
+        // The fresh copy was stopped, so it never ran.
+        assertEquals(listOf(false), runs)
     }
 
     @Test

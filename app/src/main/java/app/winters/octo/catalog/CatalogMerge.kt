@@ -24,7 +24,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 // How big the library is after a merge.
-data class MergeCounts(val tracks: Int, val albums: Int, val artists: Int)
+// `server` is the server the merge put in the library ("" for none).
+data class MergeCounts(val tracks: Int, val albums: Int, val artists: Int, val server: String = "")
 
 // A copy of a source's library that was not swapped in, and why, in words.
 class StageAborted(val reason: String) : Exception(reason)
@@ -224,7 +225,7 @@ class CatalogMerge internal constructor(
                 }
             }
             if (again) continue
-            return counts ?: skipped()
+            return (counts ?: skipped()).copy(server = server.orEmpty())
         }
     }
 
