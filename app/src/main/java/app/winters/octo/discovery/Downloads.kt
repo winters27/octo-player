@@ -8,9 +8,11 @@ import app.winters.octo.admin.AdminUnavailable
 import app.winters.octo.admin.DownloadRecord
 import app.winters.octo.admin.OctoAdmin
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.CatalogMerge
 import app.winters.octo.catalog.FIND_PREFIX
 import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.OnlineSongEntity
+import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
 import app.winters.octo.data.Session
@@ -88,6 +90,8 @@ class Downloads @Inject constructor(
     private val online: OnlineDao,
     private val catalog: CatalogDao,
     private val sync: Lazy<ServerSync>,
+    // For reading songs and adopting finds between rebuilds.
+    private val merge: Lazy<CatalogMerge>,
     private val admin: OctoAdmin,
     private val feedback: Feedback,
     private val hint: AddHint,
@@ -264,9 +268,12 @@ class Downloads @Inject constructor(
         val kept = sessions.servers.value.servers.mapNotNull { it.sourceId }
         online.prune(serverSourceId(client.primaryUrl), kept + serverSourceId(client.primaryUrl), now - FORGET_MS)
         val waiting = online.waiting().ifEmpty { return }
-        val candidates = waiting.flatMap { titleKeys(it.title) }.distinct().chunked(900).flatMap { catalog.tracksWithKeys(it) }
-        val adopted = adoptions(waiting, candidates.filter { !isFind(it.id) })
-        for (find in waiting) adopted[find.id]?.let { adoptAs(find.id, it) }
+        adoptWaiting(
+            waiting,
+            page = { key, after -> catalog.tracksWithKeyPage(key, after, FIND_PAGE) },
+            locked = { block -> merge.get().betweenRebuilds(block) },
+            adopt = { find, track -> adoptAs(find.id, track) },
+        )
     }
 
     // A find became this library song: the two are linked. Downloading is
@@ -432,6 +439,51 @@ fun adoptions(waiting: List<OnlineSongEntity>, library: List<TrackEntity>): Map<
     return waiting.mapNotNull { find ->
         byTitle.candidates(find.title, find.artist).firstOrNull { sameSong(find.title, find.artist, find.durationMs, it) }?.let { find.id to it }
     }.toMap()
+}
+
+// How many library songs one read of the finds' walk takes.
+internal const val FIND_PAGE = 50
+
+// Adopts what adoptions would over every song filed under the waiting
+// finds' title keys, sorted by search key and then id, without reading
+// them all at once: the keys are walked in order, each a page at a time,
+// and each song is offered to every find still waiting that a title lookup
+// reaches; a find takes the first that is the same song. The walk stops
+// once every find has its song. Each page is read and its finds adopted
+// inside `locked`, so a rebuild never lands in between.
+internal suspend fun adoptWaiting(
+    waiting: List<OnlineSongEntity>,
+    page: suspend (key: String, after: String) -> List<TrackEntity>,
+    locked: suspend (suspend () -> Unit) -> Unit,
+    adopt: suspend (OnlineSongEntity, TrackEntity) -> Unit,
+) {
+    val open = LinkedHashMap<String, OnlineSongEntity>()
+    waiting.forEach { open[it.id] = it }
+    val lookups = waiting.associate { it.id to SongIdentity.titleLookupKeys(it.title, it.artist) }
+    for (key in waiting.flatMap { titleKeys(it.title) }.distinct().sorted()) {
+        var after = ""
+        while (open.isNotEmpty()) {
+            var read = 0
+            locked {
+                val tracks = page(key, after)
+                read = tracks.size
+                tracks.lastOrNull()?.let { after = it.id }
+                for (track in tracks) {
+                    if (isFind(track.id)) continue
+                    val keys = SongIdentity.titleLookupKeys(track.title, track.artist)
+                    val found = open.values.filter { find ->
+                        keys.any { it in lookups.getValue(find.id) } && sameSong(find.title, find.artist, find.durationMs, track)
+                    }
+                    for (find in found) {
+                        adopt(find, track)
+                        open.remove(find.id)
+                    }
+                }
+            }
+            if (read < FIND_PAGE) break
+        }
+        if (open.isEmpty()) return
+    }
 }
 
 // Whether a song Octo finished downloading is the one asked for: the same

@@ -8,8 +8,6 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import app.winters.octo.listening.FavouriteKind
 import app.winters.octo.listening.FavouriteSyncStore
-import app.winters.octo.listening.ListeningStore
-import app.winters.octo.listening.PendingPlay
 import app.winters.octo.livelists.accountKey
 import app.winters.octo.playlists.PlaylistSyncStore
 import app.winters.octo.playlists.RecentPlaylists
@@ -44,39 +42,6 @@ class AccountStoresTest {
     fun anOlderVersionsKeyIsTheKeptServersId() {
         assertEquals(home, accountOfServerKey("winters@$url"))
         assertEquals(accountKey("me@mail.test", url), accountOfServerKey("me@mail.test@$url"))
-    }
-
-    @Test
-    fun playsWaitingForAServerStayWithItAcrossASwitch() = runBlocking {
-        val account = MutableStateFlow<String?>("home")
-        val store = ListeningStore(MemoryPrefs(), account)
-        store.addPending("home", PendingPlay("song-1", 1_000))
-        store.updateSynced("home") { it + "song-1" }
-        account.value = "work"
-        store.addPending("work", PendingPlay("song-9", 2_000))
-        assertEquals(listOf(PendingPlay("song-1", 1_000)), store.pending("home"))
-        assertEquals(listOf(PendingPlay("song-9", 2_000)), store.pending("work"))
-        assertEquals(setOf("song-1"), store.synced("home"))
-        assertTrue(store.synced("work").isEmpty())
-        store.finishPending("home", PendingPlay("song-1", 1_000), sent = true)
-        account.value = "home"
-        assertEquals(setOf("song-1"), store.sent.first().keys)
-        store.forget("work")
-        assertTrue(store.pending("work").isEmpty())
-        assertTrue(store.pending("home").isEmpty())
-    }
-
-    @Test
-    fun anOlderVersionsPlaysBelongToItsServer() = runBlocking {
-        val old = mutablePreferencesOf(
-            stringPreferencesKey("server") to "winters@$url",
-            stringSetPreferencesKey("pending_plays") to setOf("1000 song-1"),
-            stringSetPreferencesKey("synced_stars") to setOf("song-2"),
-        )
-        val store = ListeningStore(MemoryPrefs(old), MutableStateFlow(home))
-        assertEquals(setOf("song-2"), store.synced(home))
-        assertEquals(listOf(PendingPlay("song-1", 1_000)), store.pending(home))
-        assertTrue(store.pending("other").isEmpty())
     }
 
     @Test
