@@ -306,10 +306,14 @@ interface SourceDao {
         rows.groupBy { it.sourceId }.forEach { (source, group) -> takeInRows(source, emptyList(), emptyList(), emptySet(), group) }
     }
 
-    // Takes a source away: its rows, any copy of it being built, and what
-    // was known of it.
+    @Query("DELETE FROM rating_tap WHERE sourceRowId IN (SELECT id FROM source_track WHERE sourceId = :sourceId)")
+    suspend fun deleteTaps(sourceId: String)
+
+    // Takes a source away: its rows, its taps, any copy of it being built,
+    // and what was known of it.
     @Transaction
     suspend fun deleteSource(sourceId: String) {
+        deleteTaps(sourceId)
         deleteTracks(sourceId)
         deleteAlbums(sourceId)
         deleteArtists(sourceId)

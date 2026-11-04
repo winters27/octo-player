@@ -167,13 +167,34 @@ internal class CopyJobs(private val scope: CoroutineScope, private val run: susp
 
     fun isActive(): Boolean = synchronized(this) { job?.isActive == true }
 
-    // Starts a copy unless one is already running. One asked while a
-    // stopped copy still cleans up runs once that is done.
+    // How many stops are waiting for their copy to end.
+    private var stopping = 0
+
+    // Starts a copy unless one is already running or being stopped (the
+    // one stopping it decides what runs next). One asked while a copy
+    // stopped earlier still cleans up runs once that is done.
     fun start() {
         synchronized(this) {
+            if (stopping > 0) return
             val old = job
             if (old?.isActive == true) return
             job = after(old, copyAll = false)
+        }
+    }
+
+    // Stops the copy running and waits until it has cleaned up. No copy
+    // starts meanwhile, and one started afresh meanwhile is stopped too, so
+    // none runs once this returns until the next start.
+    suspend fun stop() {
+        synchronized(this) { stopping++ }
+        try {
+            while (true) {
+                val running = synchronized(this) { job } ?: return
+                running.cancelAndJoin()
+                if (synchronized(this) { job } === running) return
+            }
+        } finally {
+            synchronized(this) { stopping-- }
         }
     }
 
@@ -310,7 +331,7 @@ class ServerSync @Inject constructor(
     // is written only once a merge worked, so a failed switch is merged
     // again by the copy this starts and on every freshen.
     private suspend fun arrived(session: Session?) {
-        jobs.current()?.cancelAndJoin()
+        jobs.stop()
         _problem.value = null
         orNoted { dropUnkept() }
         arrive(
@@ -349,7 +370,7 @@ class ServerSync @Inject constructor(
     // stays for signing in again. Nothing on the server changes.
     fun disconnect() {
         scope.launch {
-            jobs.current()?.cancelAndJoin()
+            jobs.stop()
             sessions.signOut()
         }
     }
@@ -359,7 +380,7 @@ class ServerSync @Inject constructor(
     // server changes.
     suspend fun remove(id: String): StoredServer? {
         if (sessions.state.value.let { it is SessionState.SignedIn && it.session.id == id }) {
-            jobs.current()?.cancelAndJoin()
+            jobs.stop()
         }
         val gone = sessions.remove(id) ?: return null
         dropUnkept()
@@ -586,6 +607,9 @@ class ServerSync @Inject constructor(
     private suspend fun takeInOneServersRecord() {
         val kept = sessions.servers.value
         context.syncData.edit { p ->
+            // Older versions kept which server the library was merged for
+            // here; the merge keeps that itself now.
+            p.remove(OLD_LIBRARY)
             val source = p[SOURCE_ID] ?: return@edit
             val owner = (listOfNotNull(kept.inUse) + kept.servers).firstOrNull { it.sourceId == source }
             if (owner != null && p[syncedAtKey(owner.id)] == null) {
@@ -695,6 +719,8 @@ class ServerSync @Inject constructor(
 
         // Which account's copy an address's rows are.
         fun copyOfKey(sourceId: String) = stringPreferencesKey("copy_of@$sourceId")
+
+        val OLD_LIBRARY = stringPreferencesKey("library_server")
 
         // Where an older version kept its one server's record.
         val SOURCE_ID = stringPreferencesKey("source_id")

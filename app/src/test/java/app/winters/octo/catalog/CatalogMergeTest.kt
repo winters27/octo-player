@@ -70,6 +70,27 @@ class CatalogMergeTest {
         assertEquals(10, db.longOf("SELECT COUNT(*) FROM track").toInt())
     }
 
+    // The server in use changes while a merge runs: the merge records the
+    // server it read and put in, never the one in use when it ends.
+    @Test
+    fun aMergeRecordsItsServerWhenTheServerChangesMidway() = run {
+        db.put(library(DEVICE, 10))
+        db.put(library(server, 20, msShift = 100))
+        var inUse: String? = server
+        val merge = db.testMerge(null, inUse = { inUse }, hooks = object : MergeHooks() {
+            override suspend fun claimed() {
+                inUse = "server:other.test"
+            }
+        })
+        merge.rebuild()
+        assertEquals(server, merge.mergedFor())
+        assertTrue(db.longOf("SELECT COUNT(*) FROM track") > 10)
+        // The next merge is for the server in use now, which has no music.
+        merge.rebuild()
+        assertEquals("server:other.test", merge.mergedFor())
+        assertEquals(10, db.longOf("SELECT COUNT(*) FROM track").toInt())
+    }
+
     @Test
     fun theMergeReadsSourcesAPageAtATime() = run {
         db.put(library(DEVICE, 300))

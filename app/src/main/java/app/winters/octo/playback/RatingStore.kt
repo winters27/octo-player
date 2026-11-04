@@ -32,4 +32,16 @@ class RatingStore @Inject constructor(
             listening.ratingChanged(trackId)
         }
     }
+
+    // A rating brought back from a backup. The phone keeps it as a tap
+    // would, but one the song's server copies already show is not sent,
+    // so restoring a big library sends only the ratings that differ.
+    fun restore(trackId: String, rating: Int) {
+        if (isFind(trackId)) return
+        val stars = cleanRating(rating)
+        scope.launch {
+            val relinkKey = user.relinkKeyOf(trackId) ?: return@launch
+            if (user.noteRestored(trackId, stars, relinkKey, System.currentTimeMillis())) listening.ratingChanged(trackId)
+        }
+    }
 }

@@ -177,6 +177,10 @@ interface WorkDao {
         writeClaimActive(active)
     }
 
+    // Taps on server copies the swap took away (gone from the server).
+    @Query("DELETE FROM rating_tap WHERE sourceRowId NOT IN (SELECT id FROM source_track)")
+    suspend fun forgetGoneTaps()
+
     @Query("SELECT server FROM merge_state WHERE id = 0")
     suspend fun mergedServer(): String?
 

@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -282,6 +283,41 @@ class AfterSyncTest {
             listeningSync(server, dao, store(dao)).afterSync()
             assertEquals(emptyList<String>(), server.calls("setRating"))
             assertEquals(4, dao.syncedRatingsAmong("home", listOf("s1")).single().rating)
+        }
+    }
+
+    // A restored rating the server copy already shows is the phone's own
+    // and nothing to send; one that differs is a tap, sent like one.
+    @Test
+    fun aRestoreTapsOnlyWhatTheServerLacks() = runBlocking {
+        AfterSyncServer().use { server ->
+            val source = server.session.sourceId
+            db.song("device:1")
+            db.song("device:2")
+            db.copy(source, "s1", "device:1", rating = 4)
+            db.copy(source, "s2", "device:2", rating = 1)
+            val user = db.userDao()
+            assertFalse(user.noteRestored("device:1", 4, "rk-device:1", 1))
+            assertTrue(user.noteRestored("device:2", 5, "rk-device:2", 1))
+            assertEquals(4, user.rating("device:1"))
+            assertEquals(5, user.rating("device:2"))
+            assertEquals(listOf(5L), listOf(db.longOf("SELECT rating FROM rating_tap")))
+            listeningSync(server, db.listeningDao(), store(db.listeningDao())).afterSync()
+            assertEquals(listOf("setRating s2 rating=5"), server.calls("setRating"))
+        }
+    }
+
+    // Removing a server takes its taps with its copies.
+    @Test
+    fun aServerTakenAwayTakesItsTaps() = runBlocking {
+        AfterSyncServer().use { server ->
+            val source = server.session.sourceId
+            db.song("device:1")
+            db.copy(source, "s1", "device:1", rating = 0)
+            db.userDao().noteTap("device:1", 4, "rk-device:1", 1)
+            assertEquals(1L, db.longOf("SELECT COUNT(*) FROM rating_tap"))
+            db.sourceDao().deleteSource(source)
+            assertEquals(0L, db.longOf("SELECT COUNT(*) FROM rating_tap"))
         }
     }
 

@@ -118,6 +118,22 @@ interface UserDao {
         noteTapOnCopies(trackId, rating)
     }
 
+    @Query("SELECT COUNT(*) FROM source_track WHERE mergedId = :trackId AND sourceId LIKE 'server:%' AND COALESCE(rating, 0) != :rating")
+    suspend fun copiesNotShowing(trackId: String, rating: Int): Int
+
+    // A rating restored from a backup: a tap when a server copy differs from
+    // it, otherwise only the phone's own (the server already has it).
+    // Answers whether it is a tap, to be sent.
+    @Transaction
+    suspend fun noteRestored(trackId: String, rating: Int, relinkKey: String, now: Long): Boolean {
+        if (copiesNotShowing(trackId, rating) > 0) {
+            noteTap(trackId, rating, relinkKey, now)
+            return true
+        }
+        noteRating(trackId, rating, relinkKey, now, copies = false)
+        return false
+    }
+
     // For a backup: likes, ratings and the songs of playlists only on the
     // phone, each with what is known of the song, in order.
 

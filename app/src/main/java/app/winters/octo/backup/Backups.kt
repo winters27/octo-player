@@ -195,7 +195,7 @@ class Backups @Inject constructor(
             playlistIds[it.name.trim().lowercase()] = playlists.create(it.name, it.trackIds)
         }
         plan.likes.forEach { id -> if (!userDao.isLiked(id)) likes.toggle(id) }
-        plan.ratings.forEach { (id, stars) -> ratings.rate(id, stars) }
+        plan.ratings.forEach { (id, stars) -> ratings.restore(id, stars) }
         val likedAlbums = favouritesDao.likedAlbumRows().mapTo(HashSet()) { it.albumId }
         plan.favouriteAlbums.filterNot { it in likedAlbums }.forEach { favourites.set(FavouriteKind.Album, it, true) }
         val likedArtists = favouritesDao.likedArtistRows().mapTo(HashSet()) { it.artistId }

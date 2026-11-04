@@ -364,6 +364,7 @@ class CatalogMerge internal constructor(
                 work.clearStage(stage.sourceId)
                 work.clearTakeInLog(stage.generation)
             }
+            if (claim.claimed.isNotEmpty()) work.forgetGoneTaps()
             work.setClaimActive(false)
             endRatingNotes()
             val stamps = work.metas().associate { it.sourceId to it.stamp }

@@ -257,6 +257,44 @@ class ServerChangeTest {
         assertEquals(listOf(false, false), runs)
     }
 
+    // A stop (a switch, signing out, removing a server) waits out the
+    // copy's cleanup, and a copy asked for meanwhile is stopped too: none
+    // runs once the stop returns.
+    @Test
+    fun aStopAlsoStopsACopyAskedForDuringIt() = runTest {
+        val runs = mutableListOf<Boolean>()
+        val order = mutableListOf<String>()
+        val cleanup = CompletableDeferred<Unit>()
+        val jobs = CopyJobs(this) { copyAll ->
+            runs += copyAll
+            try {
+                awaitCancellation()
+            } finally {
+                if (runs.size == 1) withContext(NonCancellable) { cleanup.await() }
+                order += "cleaned"
+            }
+        }
+        jobs.start()
+        runCurrent()
+        val stopper = launch {
+            jobs.stop()
+            order += "stopped"
+        }
+        runCurrent()
+        try {
+            assertFalse(stopper.isCompleted)
+            jobs.start()
+            runCurrent()
+        } finally {
+            cleanup.complete(Unit)
+        }
+        advanceUntilIdle()
+        assertTrue(stopper.isCompleted)
+        assertEquals(listOf(false), runs)
+        assertEquals("stopped", order.last())
+        assertFalse(jobs.isActive())
+    }
+
     @Test
     fun aFullDiskDuringAServerChangeIsNotedNotThrown() = runBlocking {
         assertNull(orNoted<Unit> { throw SQLiteFullException("database or disk is full") })
