@@ -123,6 +123,26 @@ import Testing
         #expect(try await store.find(findId("x")) == nil)
     }
 
+    @Test func aFindWhoseLibrarySongIsGoneIsForgotten() async throws {
+        let store = try store()
+        let finds = ["kept", "deleted", "waiting"].map {
+            OnlineSong(id: findId($0), sourceId: server, nativeId: $0, title: "Found", artist: "Someone", durationMs: 90_000,
+                       seenAt: 1, requestedAt: 5, adoptedId: $0 == "waiting" ? "" : "t-\($0)")
+        }
+        try await store.insertFinds(finds)
+        let adopted = try await store.findsAdopted(sourceId: server)
+        #expect(Set(adopted.map(\.id)) == [findId("kept"), findId("deleted")])
+        #expect(try await store.findsAdopted(sourceId: "server:other").isEmpty)
+
+        try await store.forgetFinds(goneFinds(adopted, present: ["t-kept"]))
+
+        let deleted = try await store.find(findId("deleted"))
+        #expect(deleted?.adoptedId == "")
+        #expect(deleted?.requestedAt == 0)
+        #expect(try await store.find(findId("kept"))?.adoptedId == "t-kept")
+        #expect(try await store.find(findId("waiting"))?.requestedAt == 5)
+    }
+
     @Test func oldFindsGoUnlessTheSavedQueueHoldsThem() async throws {
         let store = try store()
         let old = [findId("q"), findId("gone")].map {

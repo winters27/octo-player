@@ -14,6 +14,11 @@ public func adoptions(_ waiting: [OnlineSong], _ library: [LibraryTrack]) -> [St
     return found
 }
 
+/// The finds whose library song is not among `present`, the library songs still there.
+public func goneFinds(_ adopted: [OnlineSong], present: Set<String>) -> [String] {
+    adopted.filter { !$0.adoptedId.isEmpty && !present.contains($0.adoptedId) }.map(\.id)
+}
+
 /// Whether a song Octo finished downloading (its record's `title` and `artist`) is the one asked
 /// for: the same recording by the same artist.
 public func downloadMatches(_ find: OnlineSong, title: String, artist: String) -> Bool {

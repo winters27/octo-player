@@ -248,6 +248,7 @@ final class Downloads {
         // Finds in the saved queue stay, so the queue comes back whole.
         let queued = await QueueFile.standard.read()?.trackIds ?? []
         try? await store.pruneFinds(sourceId: source, kept: kept, before: epochNowMs() - forgetMs, queued: queued)
+        await forgetDeleted(source)
         let waiting = (try? await store.waitingFinds()) ?? []
         guard !waiting.isEmpty else { return }
         let keys = Array(Set(waiting.flatMap { titleKeys($0.title) }))
@@ -256,6 +257,19 @@ final class Downloads {
         for find in waiting {
             if let track = adopted[find.id] { try? await store.adopt(find.id, trackId: track.id) }
         }
+    }
+
+    /// A find whose library song this server's library no longer holds, as when it was deleted
+    /// there, is neither asked for nor arrived: it offers its add again, not a check for a song
+    /// that is gone. Not after a copy that found no songs at all, nor when the library can't be
+    /// read.
+    private func forgetDeleted(_ source: String) async {
+        let store = library.store
+        guard let adopted = try? await store.findsAdopted(sourceId: source), !adopted.isEmpty,
+              let count = try? await store.trackCount(sourceId: source), count > 0,
+              let present = try? await store.tracksByIdsUnordered(Array(Set(adopted.map(\.adoptedId))))
+        else { return }
+        try? await store.forgetFinds(goneFinds(adopted, present: Set(present.map(\.id))))
     }
 
     // MARK: Following

@@ -54,6 +54,20 @@ extension CatalogStore {
         changed(.finds)
     }
 
+    /// The finds of one server that arrived as a library song.
+    public func findsAdopted(sourceId: String) throws -> [OnlineSong] {
+        try db.rows(OnlineSong.self, "SELECT * FROM online_song WHERE sourceId = ? AND adoptedId != ''", [sourceId])
+    }
+
+    /// Finds whose library song is gone: neither asked for nor arrived any more.
+    public func forgetFinds(_ ids: [String]) throws {
+        if ids.isEmpty { return }
+        for chunk in ids.catalogChunks(lookupChunk) {
+            try db.run("UPDATE online_song SET requestedAt = 0, adoptedId = '' WHERE id IN (\(marks(chunk.count)))", Array(chunk))
+        }
+        changed(.finds)
+    }
+
     /// Gives a find the length the player measured. Answers how many rows took it.
     @discardableResult
     public func setFindLength(_ id: String, durationMs: Int64) throws -> Int {
