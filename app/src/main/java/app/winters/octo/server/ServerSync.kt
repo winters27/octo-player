@@ -13,7 +13,9 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import app.winters.octo.catalog.AccountSyncEntity
 import app.winters.octo.catalog.CatalogMerge
+import app.winters.octo.catalog.StageAborted
 import app.winters.octo.listening.FavouriteSync
 import app.winters.octo.listening.ListeningSync
 import app.winters.octo.catalog.SourceDao
@@ -29,11 +31,11 @@ import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.Library
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicException
-import app.winters.octo.subsonic.readLibrary
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -45,10 +47,11 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -66,7 +69,7 @@ private val Context.syncData by preferencesDataStore("server_sync")
 
 // A copy older than this is made again when the app starts or comes to the
 // front.
-private const val STALE_MS = 6 * 60 * 60 * 1000L
+internal const val STALE_MS =6 * 60 * 60 * 1000L
 
 // Raised whenever a copy learns to keep something new from the server, so
 // the next start copies the library again whatever its age. Copies made
@@ -79,7 +82,7 @@ private const val STALE_MS = 6 * 60 * 60 * 1000L
 // and marks only songs the server calls explicit, not every song of an
 // album holding one; version 6 keeps which songs are in a family member's
 // own library.
-private const val ROWS_VERSION = 6
+internal const val ROWS_VERSION = 6
 
 // Whose library is in place: a kept server's id, or this for the phone's
 // music alone.
@@ -97,12 +100,15 @@ val StoredServer.sourceId: String? get() = serverUrl.toHttpUrlOrNull()?.let(::se
 // others' copies wait for a switch, which then needs no new copy unless it
 // is old. Removing a server takes its copy away. Two accounts on one
 // address share one copy, made again when the other one is in use.
+@OptIn(ExperimentalCoroutinesApi::class)
 @Singleton
 class ServerSync @Inject constructor(
     @ApplicationContext private val context: Context,
     private val sessions: SessionRepository,
     private val sources: SourceDao,
     private val merge: CatalogMerge,
+    private val copy: StagedCopy,
+    private val copies: CopyDao,
     private val listening: ListeningSync,
     private val favourites: FavouriteSync,
     private val downloads: Downloads,
@@ -138,16 +144,14 @@ class ServerSync @Inject constructor(
     private val _ready = MutableStateFlow<String?>(null)
     val ready: StateFlow<String?> = _ready
 
-    // The last copy of the server in use.
-    val last: Flow<LastSync?> = combine(sessions.state, context.syncData.data) { state, p ->
-        val session = (state as? SessionState.SignedIn)?.session ?: return@combine null
-        LastSync(
-            sourceId = p[sourceKey(session.id)] ?: return@combine null,
-            at = p[syncedAtKey(session.id)] ?: return@combine null,
-            songs = p[songsKey(session.id)] ?: 0,
-            albums = p[albumsKey(session.id)] ?: 0,
-        )
-    }.distinctUntilChanged()
+    // The last copy of the server in use whose steps afterwards were all
+    // done. It changes only when a copy's steps are done.
+    val last: Flow<LastSync?> = sessions.state
+        .map { (it as? SessionState.SignedIn)?.session?.id }
+        .distinctUntilChanged()
+        .flatMapLatest { account -> if (account == null) flowOf(null) else copies.accountSyncFlow(account) }
+        .map { row -> row?.takeIf { it.syncedAt > 0 }?.let { LastSync(it.sourceId, it.syncedAt, it.songs, it.albums) } }
+        .distinctUntilChanged()
 
     fun start() {
         if (started) return
@@ -157,6 +161,7 @@ class ServerSync @Inject constructor(
             // The kept servers are known once the saved sign-in is read.
             sessions.state.first { it !is SessionState.Loading }
             takeInOneServersRecord()
+            moveCopyRecords()
             sessions.state
                 .filter { it !is SessionState.Loading }
                 .map { (it as? SessionState.SignedIn)?.session }
@@ -178,22 +183,18 @@ class ServerSync @Inject constructor(
         }
         _ready.value = session?.id ?: PHONE_LIBRARY
         if (session == null) return
-        if (stale(session)) {
+        if (need(session) != CopyNeed.Fresh) {
             syncNow()
         } else if (foreground) {
             scope.launch { quietly { look(session) } }
         }
     }
 
-    // Whether the server's copy should be made again: never made, made by an
-    // older version, old, or made for another account on the same address.
-    private suspend fun stale(session: Session): Boolean {
-        val p = context.syncData.data.first()
-        val at = p[syncedAtKey(session.id)] ?: return true
-        return p[rowsKey(session.id)] != ROWS_VERSION ||
-            p[copyOfKey(session.sourceId)] != session.id ||
-            System.currentTimeMillis() - at > STALE_MS
-    }
+    // What the server's copy needs (copyNeed): made again when never made,
+    // made by an older version, old, or made for another account on the
+    // same address; only its steps afterwards when those were cut off.
+    private suspend fun need(session: Session): CopyNeed =
+        copyNeed(copies.accountSync(session.id), copies.copyOf(session.sourceId), session.id, session.sourceId, System.currentTimeMillis())
 
     // Starts a copy unless one is already running.
     fun syncNow() {
@@ -238,6 +239,7 @@ class ServerSync @Inject constructor(
         }
         val gone = sessions.remove(id) ?: return null
         dropUnkept()
+        copies.forgetAccount(id)
         context.syncData.edit { p -> listOf(syncedAtKey(id), songsKey(id), albumsKey(id), rowsKey(id), sourceKey(id), scanKey(id)).forEach { p.remove(it) } }
         lookedAt.remove(id)
         return gone
@@ -322,17 +324,9 @@ class ServerSync @Inject constructor(
         val all = (read.flatMap { it.song } + songs).filterNot { it.isExternal }.distinctBy { it.id }
         if (all.isEmpty()) return false
         val rows = buildServerCatalog(sourceId, Library(all, read.map { listed[it.id] ?: it.asListed() }, emptyList()))
-        val wanted = rowsToTakeIn(
-            rows,
-            haveSongs = all.map { it.id }.chunked(900).flatMap { sources.libraryLinks(sourceId, it) }.mapTo(HashSet()) { it.serverId },
-            haveAlbums = sources.knownAlbums(sourceId, rows.albums.map { it.nativeId }).toSet(),
-            readAlbums = read.mapTo(HashSet()) { it.id },
-            haveArtists = sources.knownArtists(rows.artists.map { it.id }).toSet(),
-        )
-        if (wanted.tracks.isEmpty() && wanted.albums.isEmpty()) return false
-        sources.insertArtists(wanted.artists)
-        sources.insertAlbums(wanted.albums)
-        sources.insertTracks(wanted.tracks)
+        // What the library lacks is worked out again under the merge's gate
+        // (StagedCopy.takeIn), which is let go before the merge.
+        if (!copy.takeIn(sourceId, rows, readAlbums = read.mapTo(HashSet()) { it.id })) return false
         merge.rebuild()
         return true
     }
@@ -345,7 +339,7 @@ class ServerSync @Inject constructor(
         val session = signedIn() ?: return
         // Until the server's music is in place, arrived() decides.
         if (_ready.value != session.id) return
-        if (!stale(session)) return look(session)
+        if (need(session) == CopyNeed.Fresh) return look(session)
         val now = SystemClock.elapsedRealtime()
         if (!newMusicLookDue(lookedAt[session.id], now)) return
         lookedAt[session.id] = now
@@ -363,7 +357,7 @@ class ServerSync @Inject constructor(
         lookedAt[session.id] = now
         takeInLock.withLock {
             if (signedIn()?.id != session.id) return
-            val seen = context.syncData.data.first()[scanKey(session.id)]
+            val seen = copies.accountSync(session.id)?.lastScan
             val look = try {
                 lookForNewMusic(session.client, seen) { ids ->
                     ids.chunked(900).flatMap { sources.albumSongCounts(session.sourceId, it) }.associate { it.serverId to it.songCount }
@@ -392,7 +386,7 @@ class ServerSync @Inject constructor(
                 }
             }
             val scan = look.scan
-            if (scan != null && scan != seen) context.syncData.edit { it[scanKey(session.id)] = scan }
+            if (scan != null && scan != seen) copies.setLastScan(session.id, scan)
         }
     }
 
@@ -411,47 +405,25 @@ class ServerSync @Inject constructor(
 
     private suspend fun sync() {
         val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return
-        val client = session.client
-        val sourceId = session.sourceId
         _syncing.value = true
         try {
             val started = SystemClock.elapsedRealtime()
-            // When the server last read its folders, before the copy, so a
-            // look afterwards reads on only once it has read them again.
-            val scan = lastScanOf(client)
-            val catalog = buildServerCatalog(sourceId, client.readLibrary())
-            sources.replaceSource(sourceId, catalog.tracks, catalog.albums, catalog.artists)
-            val library = merge.rebuild()
-            // Brings likes and stars together, and sends any plays still waiting.
-            listening.afterSync()
-            // The same for favourite albums and artists.
-            favourites.afterSync()
-            // Songs downloaded since the last copy join the library as liked.
-            downloads.afterSync()
-            // Brings the server's playlists and the phone's copies together.
-            playlists.afterSync()
-            // Downloads follow their songs, and songs kept downloaded that just arrived start.
-            offline.afterSync()
-            context.syncData.edit { p ->
-                p[sourceKey(session.id)] = sourceId
-                p[syncedAtKey(session.id)] = System.currentTimeMillis()
-                p[songsKey(session.id)] = catalog.tracks.size
-                p[albumsKey(session.id)] = catalog.albums.size
-                p[rowsKey(session.id)] = ROWS_VERSION
-                p[copyOfKey(sourceId)] = session.id
-                if (scan != null) p[scanKey(session.id)] = scan else p.remove(scanKey(session.id))
-            }
+            // A copy swapped in whose steps afterwards were cut off needs only those.
+            val copyAll = need(session) != CopyNeed.AfterSync
+            val done = CopyRun(copy, copies, afterSyncSteps()).run(session.id, session.sourceId, session.client, copyAll)
             lookedAt[session.id] = SystemClock.elapsedRealtime()
             _problem.value = null
             // Counts only, like the phone scan's line.
             Log.i(
                 "Octo",
-                "server sync: ${catalog.tracks.size} tracks, ${catalog.albums.size} albums, " +
-                    "${catalog.artists.size} artists, ${SystemClock.elapsedRealtime() - started} ms; " +
-                    "library ${library.tracks} tracks, ${library.albums} albums, ${library.artists} artists",
+                "server sync: ${if (copyAll) "copy" else "steps after a copy"}, ${done.songs} tracks, ${done.albums} albums, " +
+                    "${SystemClock.elapsedRealtime() - started} ms",
             )
         } catch (e: CancellationException) {
             throw e
+        } catch (e: StageAborted) {
+            _problem.value = e.reason
+            Log.w("Octo", "server sync failed: the merge could not swap the copy in")
         } catch (e: Exception) {
             _problem.value = e.userMessage()
             Log.w("Octo", "server sync failed: ${e.javaClass.simpleName}")
@@ -460,13 +432,27 @@ class ServerSync @Inject constructor(
         }
     }
 
+    // What follows every copy, in order: likes and stars brought together
+    // and plays still waiting sent; the same for favorite albums and artists;
+    // songs downloaded since the last copy join the library as liked; the
+    // server's playlists and the phone's copies brought together; downloads
+    // follow their songs, and songs kept downloaded that just arrived start.
+    private fun afterSyncSteps(): List<suspend () -> Unit> = listOf(
+        { listening.afterSync() },
+        { favourites.afterSync() },
+        { downloads.afterSync() },
+        { playlists.afterSync() },
+        { offline.afterSync() },
+    )
+
     // Removes the music of every server no longer kept. A signed-out server
     // is still kept, so signing in again needs no new copy.
     private suspend fun dropUnkept() = dropLock.withLock {
         val kept = sessions.servers.value.servers.mapNotNullTo(HashSet()) { it.sourceId }
         val gone = sources.sourceIds().filter { isServerSource(it) && it !in kept }
-        // Their songs are no library songs already; the rows just go.
-        gone.forEach { sources.deleteSource(it) }
+        // Their songs are no library songs already; the rows just go, never
+        // while a merge reads the sources.
+        if (gone.isNotEmpty()) merge.sourceWrite { gone.forEach { sources.deleteSource(it) } }
         if (gone.isNotEmpty()) context.syncData.edit { p -> gone.forEach { p.remove(copyOfKey(it)) } }
         // Playlists kept with a server that is gone stay, only on the phone.
         playlists.keepOnly(kept)
@@ -495,6 +481,38 @@ class ServerSync @Inject constructor(
 
     private fun MutablePreferences.forgetOneServersRecord() {
         listOf<Preferences.Key<*>>(SOURCE_ID, SYNCED_AT, SONGS, ALBUMS, ROWS).forEach { remove(it) }
+    }
+
+    // An older version kept each account's last copy, and which account each
+    // address's rows are, as keys here. They move into the database once,
+    // and the keys go once the rows are in.
+    private suspend fun moveCopyRecords() {
+        val p = context.syncData.data.first()
+        val names = p.asMap().keys.map { it.name }
+        val accountPrefix = syncedAtKey("").name
+        val ownerPrefix = copyOfKey("").name
+        val accounts = names.filter { it.startsWith(accountPrefix) }.map { it.removePrefix(accountPrefix) }
+        val addresses = names.filter { it.startsWith(ownerPrefix) }.map { it.removePrefix(ownerPrefix) }
+        if (accounts.isEmpty() && addresses.isEmpty()) return
+        val rows = accounts.mapNotNull { id ->
+            AccountSyncEntity(
+                account = id,
+                sourceId = p[sourceKey(id)] ?: return@mapNotNull null,
+                syncedAt = p[syncedAtKey(id)] ?: return@mapNotNull null,
+                songs = p[songsKey(id)] ?: 0,
+                albums = p[albumsKey(id)] ?: 0,
+                rowsVersion = p[rowsKey(id)] ?: 0,
+                lastScan = p[scanKey(id)],
+                // An older version wrote these only once every step after a copy was done.
+                afterSyncDone = true,
+            )
+        }
+        val owners = addresses.mapNotNull { source -> p[copyOfKey(source)]?.let { source to it } }
+        copies.moveRecords(rows, owners)
+        context.syncData.edit { e ->
+            accounts.forEach { id -> listOf(syncedAtKey(id), songsKey(id), albumsKey(id), rowsKey(id), sourceKey(id), scanKey(id)).forEach { e.remove(it) } }
+            addresses.forEach { e.remove(copyOfKey(it)) }
+        }
     }
 
     // The app came to the front: the server in use is brought up to date

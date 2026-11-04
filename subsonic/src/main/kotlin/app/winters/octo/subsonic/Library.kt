@@ -3,6 +3,7 @@ package app.winters.octo.subsonic
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.serialization.json.Json
 
 // How many songs or albums each request asks for when reading everything.
 const val LIBRARY_PAGE = 500
@@ -30,6 +31,93 @@ suspend fun SubsonicClient.readLibrary(page: Int = LIBRARY_PAGE): Library = coro
         .filterNot { it.isExternal }
         .distinctBy { it.id }
     Library(songs, albums, artistsRead.await())
+}
+
+// Where readLibraryInto puts what it reads, a page at a time as each one
+// arrives: albums in list order with where their page starts, every artist
+// at once, and songs, without the ones outside the library. A page can
+// repeat what an earlier one listed; the first one counts.
+interface LibrarySink {
+    suspend fun albums(page: List<Album>, offset: Int)
+
+    suspend fun artists(artists: List<Artist>)
+
+    suspend fun songs(page: List<Song>)
+}
+
+// Reads the whole library as readLibrary does, handing each page on as it
+// comes instead of keeping it, so nothing the size of the library is held:
+// albums, artists and songs side by side, and songs album by album when the
+// empty search answers nothing.
+suspend fun SubsonicClient.readLibraryInto(sink: LibrarySink, page: Int = LIBRARY_PAGE) = coroutineScope {
+    val albumIds = async {
+        val ids = LinkedHashSet<String>()
+        eachPage(page, { offset -> albumList(AlbumListType.ALPHABETICAL, page, offset) }) { offset, albums ->
+            sink.albums(albums, offset)
+            albums.forEach { ids += it.id }
+        }
+        ids.toList()
+    }
+    val artistsRead = async { sink.artists(artists().flatMap { it.artist }.distinctBy { it.id }) }
+    var listed = 0
+    eachPage(page, { offset -> songPage(page, offset) }) { _, songs ->
+        listed += songs.size
+        if (songs.isNotEmpty()) sink.songs(songs.filterNot { it.isExternal })
+    }
+    if (listed == 0) songsByAlbumInto(albumIds.await(), sink)
+    albumIds.await()
+    artistsRead.await()
+}
+
+// Asks for page after page until one comes back short, handing each on
+// with the offset it was asked at.
+private suspend fun <T> eachPage(size: Int, fetch: suspend (offset: Int) -> List<T>, take: suspend (offset: Int, items: List<T>) -> Unit) {
+    var offset = 0
+    while (true) {
+        val items = fetch(offset)
+        take(offset, items)
+        offset += items.size
+        if (items.size < size) return
+    }
+}
+
+private suspend fun SubsonicClient.songsByAlbumInto(albumIds: List<String>, sink: LibrarySink) = coroutineScope {
+    albumIds.chunked(ALBUMS_AT_ONCE).forEach { batch ->
+        val songs = batch.map { id ->
+            // An album removed since the list was read is simply skipped.
+            async {
+                try {
+                    album(id).song
+                } catch (e: SubsonicException.NotFound) {
+                    emptyList()
+                }
+            }
+        }.awaitAll().flatten()
+        sink.songs(songs.filterNot { it.isExternal })
+    }
+}
+
+// Library items as text and back, exactly as they were read, for keeping a
+// copy's pages on disk until they are built.
+object LibraryJson {
+    private val json = Json {
+        ignoreUnknownKeys = true
+        coerceInputValues = true
+        explicitNulls = false
+        allowSpecialFloatingPointValues = true
+    }
+
+    fun encodeSong(song: Song): String = json.encodeToString(Song.serializer(), song)
+
+    fun decodeSong(text: String): Song = json.decodeFromString(Song.serializer(), text)
+
+    fun encodeAlbum(album: Album): String = json.encodeToString(Album.serializer(), album)
+
+    fun decodeAlbum(text: String): Album = json.decodeFromString(Album.serializer(), text)
+
+    fun encodeArtist(artist: Artist): String = json.encodeToString(Artist.serializer(), artist)
+
+    fun decodeArtist(text: String): Artist = json.decodeFromString(Artist.serializer(), text)
 }
 
 // Asks for page after page until one comes back short.
