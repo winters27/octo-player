@@ -29,6 +29,8 @@ import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import app.winters.octo.MainActivity
 import app.winters.octo.catalog.OnlineDao
+import app.winters.octo.catalog.UpgradeGuard
+import app.winters.octo.catalog.UpgradeState
 import app.winters.octo.catalog.isFind
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
@@ -166,6 +168,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var carShelves: CarShelves
     @Inject lateinit var carSearch: CarSearch
     @Inject lateinit var carVoice: CarVoice
+    @Inject lateinit var upgradeGuard: UpgradeGuard
     @Inject lateinit var carResume: CarResume
     @Inject lateinit var serverSync: ServerSync
 
@@ -929,6 +932,8 @@ class OctoPlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
             isForPlayback: Boolean,
         ): ListenableFuture<MediaItemsWithStartPosition> = scope.future {
+            // The library cannot open until its upgrade has room on disk.
+            if (upgradeGuard.state.value != UpgradeState.Clear) throw UnsupportedOperationException("Nothing to resume")
             val saved = queue.load() ?: throw UnsupportedOperationException("Nothing to resume")
             val each = playable.itemsEach(saved.trackIds)
             val items = each.filterNotNull()

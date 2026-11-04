@@ -11,7 +11,13 @@ import androidx.room.PrimaryKey
 // on a server shows once. The columns match the library's, plus what only
 // a source knows.
 
-@Entity(tableName = "source_track", indices = [Index("sourceId"), Index("mergedId")])
+@Entity(
+    tableName = "source_track",
+    indices = [
+        Index("mergedId"), Index("sourceId", "albumOrder", "seq", "id"), Index("sourceId", "seq"),
+        Index("sourceId", "nativeId"), Index("albumId"), Index("artistId"), Index("keysVersion", "id"),
+    ],
+)
 data class SourceTrackEntity(
     @PrimaryKey val id: String,
     val sourceId: String,
@@ -81,9 +87,17 @@ data class SourceTrackEntity(
     // A server copy in the signed-in family member's own library rather
     // than the shared one, as the server marks it.
     @ColumnInfo(defaultValue = "0") val personal: Boolean = false,
+    // Where this row comes in its source's order: the order the source
+    // listed it, with rows taken in later after the last.
+    @ColumnInfo(defaultValue = "0") val seq: Long = 0,
+    // The song keys the merge matches on (SongIdentity.songKeys of artist
+    // and title), and which way of reading keys made them.
+    @ColumnInfo(defaultValue = "") val titleKey: String = "",
+    @ColumnInfo(defaultValue = "") val matchKey: String = "",
+    @ColumnInfo(defaultValue = "0") val keysVersion: Int = 0,
 )
 
-@Entity(tableName = "source_album", indices = [Index("sourceId")])
+@Entity(tableName = "source_album", indices = [Index("sourceId", "seq")])
 data class SourceAlbumEntity(
     @PrimaryKey val id: String,
     val sourceId: String,
@@ -100,9 +114,11 @@ data class SourceAlbumEntity(
     val artwork: String?,
     // What kind of release it is, one word a line, as the server tags it.
     @ColumnInfo(defaultValue = "") val releaseTypes: String = "",
+    // Where this row comes in its source's order.
+    @ColumnInfo(defaultValue = "0") val seq: Long = 0,
 )
 
-@Entity(tableName = "source_artist", indices = [Index("sourceId")])
+@Entity(tableName = "source_artist", indices = [Index("sourceId", "seq")])
 data class SourceArtistEntity(
     @PrimaryKey val id: String,
     val sourceId: String,
@@ -112,6 +128,8 @@ data class SourceArtistEntity(
     val albumCount: Int,
     val songCount: Int,
     val artwork: String?,
+    // Where this row comes in its source's order.
+    @ColumnInfo(defaultValue = "0") val seq: Long = 0,
 )
 
 fun AlbumEntity.toSource() = SourceAlbumEntity(

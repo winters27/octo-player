@@ -86,6 +86,11 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+// Tests build old databases from these schemas and read the new one's SQL.
+tasks.withType<Test>().configureEach {
+    systemProperty("octo.schemas", file("schemas/app.winters.octo.catalog.CatalogDatabase").absolutePath)
+}
+
 dependencies {
     implementation(project(":design"))
     implementation(project(":subsonic"))
@@ -140,6 +145,8 @@ dependencies {
     testImplementation(libs.mockwebserver)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    // The SQLite of the oldest phones Octo runs on, for checking queries there.
+    testImplementation(libs.sqlite.jdbc)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(platform(libs.compose.bom))

@@ -16,9 +16,19 @@ import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.lifecycleScope
+import app.winters.octo.catalog.UpgradeGuard
+import app.winters.octo.catalog.UpgradeState
+import app.winters.octo.ui.common.UpgradeSpaceScreen
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.update.AppUpdates
 import app.winters.octo.design.OctoTheme
@@ -48,6 +58,8 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var family: FamilyHub
     // Lists shared to Octo, for Import.
     @Inject lateinit var imports: ImportInbox
+    // Whether the library can open, and the space an upgrade still needs.
+    @Inject lateinit var upgradeGuard: UpgradeGuard
 
     // Counts up each time a home screen widget asks for the full player.
     private var openPlayer by mutableIntStateOf(0)
@@ -56,7 +68,30 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // The app opens on the library; servers are an optional add-on.
-        setContent { OctoTheme { KeepAccent(); ProvideOfflineMarks { ProvideAdoptedFinds { ProvideLearnedLengths { MainShell(library, playback, feedback, openPlayer) } } } } }
+        setContent {
+            OctoTheme {
+                when (val state = upgradeGuard.state.collectAsState().value) {
+                    is UpgradeState.NeedsSpace -> {
+                        var checking by remember { mutableStateOf(false) }
+                        UpgradeSpaceScreen(state.bytes, checking) {
+                            checking = true
+                            lifecycleScope.launch {
+                                val clear = withContext(Dispatchers.IO) { upgradeGuard.retry() }
+                                checking = false
+                                if (clear) {
+                                    (application as OctoApp).startAll()
+                                    recreate()
+                                }
+                            }
+                        }
+                    }
+                    UpgradeState.Clear -> {
+                        KeepAccent(); ProvideOfflineMarks { ProvideAdoptedFinds { ProvideLearnedLengths { MainShell(library, playback, feedback, openPlayer) } } }
+                    }
+                    UpgradeState.Checking -> Unit
+                }
+            }
+        }
         publishShortcuts(this)
         // Opened by a voice request or a widget; not again when the screen turns.
         if (savedInstanceState == null) {

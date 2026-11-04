@@ -3,6 +3,7 @@ package app.winters.octo
 import android.app.Application
 import app.winters.octo.admin.ServerUpdates
 import app.winters.octo.animated.AnimatedArts
+import app.winters.octo.catalog.UpgradeGuard
 import app.winters.octo.data.ServerDownloads
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.LibraryFiles
@@ -50,9 +51,22 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var family: FamilyHub
     @Inject lateinit var serverUpdates: ServerUpdates
     @Inject lateinit var animatedArts: AnimatedArts
+    @Inject lateinit var upgradeGuard: UpgradeGuard
+    private var allStarted = false
 
     override fun onCreate() {
         super.onCreate()
+        // An upgrade with no room on disk waits for the listener to free
+        // some (MainActivity asks); nothing that reads the library starts
+        // until then.
+        if (upgradeGuard.check()) startAll()
+    }
+
+    // Starts everything that keeps the library and the app up to date.
+    // Once, at launch, or after an upgrade waiting for space could run.
+    fun startAll() {
+        if (allStarted) return
+        allStarted = true
         // Keep the library in step with the music on the phone.
         deviceLibrary.start()
         // And with the server's, when one is connected.

@@ -11,7 +11,7 @@ import kotlinx.serialization.Serializable
 
 @Entity(
     tableName = "track",
-    indices = [Index("albumId"), Index("artistId"), Index("sourceId"), Index("sortKey"), Index("searchKey"), Index("relinkKey")],
+    indices = [Index("albumId"), Index("artistId"), Index("sourceId"), Index("sortKey"), Index("searchKey", "id"), Index("relinkKey", "id")],
 )
 // Serializable too, so Home can keep the chart songs it showed.
 @Serializable

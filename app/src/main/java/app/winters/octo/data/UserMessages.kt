@@ -1,5 +1,8 @@
 package app.winters.octo.data
 
+import android.database.sqlite.SQLiteFullException
+import app.winters.octo.catalog.NotEnoughSpace
+import app.winters.octo.catalog.megabytes
 import app.winters.octo.subsonic.SubsonicException
 
 // What to tell someone when a request fails.
@@ -15,6 +18,8 @@ fun Throwable.userMessage(): String = when (this) {
         else "The server doesn't take this way of signing in."
     is SubsonicException.NotFound -> "That isn't on the server any more."
     is SubsonicException.Server -> "The server said: $message"
+    is NotEnoughSpace -> "Not enough space to copy the library. Free up ${megabytes(neededBytes)} MB, then try again."
+    is SQLiteFullException -> "Not enough space to copy the library. Free up some space, then try again."
     else -> "Something went wrong."
 }
 
