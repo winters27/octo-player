@@ -379,7 +379,7 @@ class Discovery @Inject constructor(
             .flatMap { sources.libraryLinks(sourceId, it) }
             .associate { it.serverId to it.trackId }
         val unlinked = songs.filter { it.id !in links }
-        val candidates = unlinked.flatMap { titleKeys(it.title) }.distinct().chunked(900).flatMap { catalog.tracksWithKeys(it) }
+        val candidates = unlinked.flatMap { titleKeys(it.title) }.distinct().sorted().chunked(900).flatMap { catalog.tracksWithKeys(it) }
         val resolved = resolveSongs(songs, sourceId, links, candidates, System.currentTimeMillis())
         // Finds as stored, so a length learned from playing one shows.
         val kept = online.keep(resolved.filterIsInstance<Resolved.Found>().map { it.song }.distinctBy { it.id }).associateBy { it.id }

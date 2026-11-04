@@ -1,5 +1,7 @@
 package app.winters.octo.subsonic
 
+import com.squareup.moshi.JsonDataException
+import com.squareup.moshi.JsonEncodingException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -540,6 +542,31 @@ class SubsonicClient(
     suspend fun starred(): Starred =
         get("getStarred2", key = "starred2", serializer = Starred.serializer(), default = Starred())
 
+    // The same stars, handed to `page` a page at a time as the answer
+    // arrives (see readStarred), so a big library's are never held whole.
+    // Returns only once the answer was read to its end and the server said
+    // it went well; a cut-off answer throws Unreachable.
+    suspend fun starredInto(page: suspend (List<StarredItem>) -> Unit) {
+        val request = Request.Builder().url(url("getStarred2")).build()
+        val response = try {
+            http.newCall(request).await()
+        } catch (e: IOException) {
+            throw SubsonicException.Unreachable(e)
+        }
+        response.use {
+            if (!it.isSuccessful) throw SubsonicException.NotSubsonic("HTTP ${it.code} from getStarred2", it.code)
+            try {
+                withContext(Dispatchers.IO) { readStarred(it.body.source(), page) }
+            } catch (e: JsonDataException) {
+                throw SubsonicException.NotSubsonic("The server did not answer like a Subsonic server")
+            } catch (e: JsonEncodingException) {
+                throw SubsonicException.NotSubsonic("The server did not answer like a Subsonic server")
+            } catch (e: IOException) {
+                throw SubsonicException.Unreachable(e)
+            }
+        }
+    }
+
     // Marks songs as starred for the signed-in user. Several go in one call.
     suspend fun star(ids: List<String>) = send("star", ids.map { "id" to it })
 
@@ -775,12 +802,7 @@ class SubsonicClient(
             val error = root["error"]?.jsonObject
             val code = error?.get("code")?.jsonPrimitive?.intOrNull ?: 0
             val message = error?.get("message")?.jsonPrimitive?.contentOrNull ?: "Request failed"
-            throw when (code) {
-                40, 44 -> SubsonicException.WrongCredentials(message)
-                41, 42 -> SubsonicException.AuthNotSupported(code, message)
-                70 -> SubsonicException.NotFound(message)
-                else -> SubsonicException.Server(code, message)
-            }
+            throw subsonicError(code, message)
         }
         val payload = if (key == null) root else root[key]
         return when {

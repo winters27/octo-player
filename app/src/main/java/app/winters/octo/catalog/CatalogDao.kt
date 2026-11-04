@@ -9,6 +9,9 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
+// A constant so the query plan test reads the same text Room runs.
+internal const val TRACKS_WITH_KEY_PAGE_SQL = "SELECT * FROM track WHERE searchKey = :key AND id > :after ORDER BY id LIMIT :limit"
+
 @Dao
 interface CatalogDao {
     @Query("SELECT * FROM album ORDER BY addedAt DESC LIMIT :limit")
@@ -119,9 +122,15 @@ interface CatalogDao {
     suspend fun searchAlbums(q: String, limit: Int): List<AlbumEntity>
 
     // Exact title, album and artist lookups, for telling whether something
-    // the server found is already in the library.
-    @Query("SELECT * FROM track WHERE searchKey IN (:keys)")
+    // the server found is already in the library. Songs come by key, then
+    // by id, so the first of several alike is the same every time.
+    @Query("SELECT * FROM track WHERE searchKey IN (:keys) ORDER BY searchKey, id")
     suspend fun tracksWithKeys(keys: List<String>): List<TrackEntity>
+
+    // One page of the songs filed under one search key after id `after`,
+    // in id order.
+    @Query(TRACKS_WITH_KEY_PAGE_SQL)
+    suspend fun tracksWithKeyPage(key: String, after: String, limit: Int): List<TrackEntity>
 
     @Query("SELECT * FROM album WHERE searchKey IN (:keys)")
     suspend fun albumsWithKeys(keys: List<String>): List<AlbumEntity>
