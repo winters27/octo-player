@@ -18,14 +18,25 @@ import java.nio.file.Files
 
 @RunWith(RobolectricTestRunner::class)
 class MigrationSpaceTest {
-    // The most disk the upgrade takes per song row, on a generated
-    // library: measured as it ends, before its one transaction commits,
-    // with Android's settings (auto-vacuum, secure delete) and a small page
-    // cache, so everything it wrote is on disk in the file and its log.
+    // The most disk the upgrade takes is within what UpgradeGuard asks for,
+    // twice the file, for short and long ids alike (a server's ids carry
+    // its whole address).
     @Test
-    fun constantMatchesWhatTheUpgradeWrites() {
+    fun theUpgradeTakesLessThanTwiceTheFile() {
+        for (source in listOf("server:h", "server:music.home-server.example.net:4533")) {
+            val (before, peak) = upgradePeak(source)
+            println("MEASURED $source file=$before peak=$peak ratio=${peak * 100 / before}%")
+            assertTrue("$source: the upgrade took $peak bytes over a $before-byte file", peak <= 2 * before)
+        }
+    }
+
+    // The file's size and the most the upgrade took on top of it, measured
+    // as it ends, before its one transaction commits, with Android's
+    // settings (auto-vacuum, secure delete) and a small page cache, so
+    // everything it wrote is on disk in the file and its log.
+    private fun upgradePeak(source: String): Pair<Long, Long> {
         val file = File(Files.createTempDirectory("s").toFile(), CATALOG_FILE)
-        val rows = buildServerCatalog("server:h", LibraryGen.server(7, GenShape(songs = 5_000, albums = 500, artists = 200)))
+        val rows = buildServerCatalog(source, LibraryGen.server(7, GenShape(songs = 5_000, albums = 500, artists = 200)))
         SQLiteDatabase.openOrCreateDatabase(file, null).use { db ->
             db.execSQL("PRAGMA auto_vacuum = FULL")
             OldSqlite.schemaStatements(18).forEach(db::execSQL)
@@ -69,9 +80,6 @@ class MigrationSpaceTest {
         )
         helper.writableDatabase
         helper.close()
-        val perRow = peak / (rows.tracks.size * 2)
-        println("MEASURED bytesPerRow=$perRow")
-        assertTrue("UPGRADE_BYTES_PER_ROW $UPGRADE_BYTES_PER_ROW below measured $perRow", UPGRADE_BYTES_PER_ROW >= perRow)
-        assertTrue("UPGRADE_BYTES_PER_ROW $UPGRADE_BYTES_PER_ROW over 10% above measured $perRow", UPGRADE_BYTES_PER_ROW <= perRow * 11 / 10)
+        return before to peak
     }
 }

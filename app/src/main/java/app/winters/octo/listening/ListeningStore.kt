@@ -86,9 +86,10 @@ class ListeningStore internal constructor(
         rows.settleStars(account, chunk, synced.map { SyncedStarEntity(account, it) })
     }
 
-    suspend fun setSyncedRatings(account: String, serverIds: List<String>, rating: Int) {
+    // The phone just set this rating (0 for none) on the server itself.
+    suspend fun setSyncedRatings(account: String, serverIds: List<String>, rating: Int, sentAt: Long) {
         ready()
-        rows.putSyncedRatings(serverIds.map { SyncedRatingEntity(account, it, rating) })
+        rows.putSyncedRatings(serverIds.map { SyncedRatingEntity(account, it, rating, sentAt) })
     }
 
     suspend fun clearSyncedRatings(account: String, serverIds: List<String>) {

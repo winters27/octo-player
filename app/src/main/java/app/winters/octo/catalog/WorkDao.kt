@@ -183,9 +183,6 @@ interface WorkDao {
     @Query("DELETE FROM rating_note")
     suspend fun clearRatingNotes()
 
-    @Query("UPDATE source_track SET rating = :rating WHERE id = :sourceRowId")
-    suspend fun setCopyRating(sourceRowId: String, rating: Int)
-
     @Query("UPDATE track SET rating = :rating WHERE id = (SELECT mergedId FROM source_track WHERE id = :sourceRowId)")
     suspend fun showCopyRating(sourceRowId: String, rating: Int)
 

@@ -145,9 +145,9 @@ class StagedCopy @Inject constructor(
             endRatingNotes(sourceId)
             val generation = maxOf(dao.lastGeneration() ?: 0L, issued.get()) + 1
             issued.set(generation)
-            dao.markBuilding(sourceId, generation, account)
+            dao.markBuilding(sourceId, generation, account, System.currentTimeMillis())
             generation
-        }
+        }.also { generation -> merge.forgetStagesBefore(sourceId, generation) }
     }
 
     // Reads the server into the stage and marks it ready for the merge.

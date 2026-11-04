@@ -80,6 +80,22 @@ internal suspend fun <T> orNoted(step: suspend () -> T): T? =
         null
     }
 
+// Merges the library for the server now in use (`want`, "" for none) when
+// the last merge was for another, and marks it done only once it worked.
+// Answers whether the library is the wanted one's.
+internal suspend fun switchLibrary(want: String, mergedFor: suspend () -> String?, merge: suspend () -> Unit, mark: suspend (String) -> Unit): Boolean =
+    orNoted {
+        if (mergedFor() != want) {
+            merge()
+            mark(want)
+        }
+        true
+    } == true
+
+// Said while the library still holds another server's music because its
+// switch could not be merged.
+private const val SWITCH_PROBLEM = "Couldn't finish switching the library. Octo tries again with the next copy."
+
 // A copy older than this is made again when the app starts or comes to the
 // front.
 internal const val STALE_MS =6 * 60 * 60 * 1000L
@@ -185,20 +201,15 @@ class ServerSync @Inject constructor(
 
     // Another server (or none) is in use: a copy of the last one stops, the
     // library becomes the new one's, and its copy is made again when old.
-    // A database error (a full disk, say) is noted and the next server
-    // change tries again: the merge's library mark is written only once the
-    // merge worked, and this keeps listening for changes.
+    // A database error (a full disk, say) is noted and said, the change
+    // still finishes, and this keeps listening for changes; the library mark
+    // is written only once a merge worked, so the next copy (or the next
+    // change) merges again.
     private suspend fun arrived(session: Session?) {
         synchronized(this) { job }?.cancelAndJoin()
         _problem.value = null
-        orNoted {
-            dropUnkept()
-            val want = session?.sourceId.orEmpty()
-            if (context.syncData.data.first()[LIBRARY] != want) {
-                merge.rebuild()
-                context.syncData.edit { it[LIBRARY] = want }
-            }
-        }
+        orNoted { dropUnkept() }
+        if (!switchLibrary(session?.sourceId.orEmpty(), ::mergedFor, { merge.rebuild() }, ::markMerged)) _problem.value = SWITCH_PROBLEM
         _ready.value = session?.id ?: PHONE_LIBRARY
         if (session == null) return
         val needed = orNoted { need(session) } ?: CopyNeed.Copy
@@ -411,6 +422,13 @@ class ServerSync @Inject constructor(
 
     private fun signedIn(): Session? = (sessions.state.value as? SessionState.SignedIn)?.session
 
+    // The server the library was last merged for, "" for none.
+    private suspend fun mergedFor(): String? = context.syncData.data.first()[LIBRARY]
+
+    private suspend fun markMerged(sourceId: String) {
+        context.syncData.edit { it[LIBRARY] = sourceId }
+    }
+
     // A look that goes wrong is only noted; the next one tries again.
     private suspend fun quietly(block: suspend () -> Unit) {
         try {
@@ -427,6 +445,11 @@ class ServerSync @Inject constructor(
         _syncing.value = true
         try {
             val started = SystemClock.elapsedRealtime()
+            // A switch to this server whose merge failed is finished first.
+            if (mergedFor() != session.sourceId) {
+                merge.rebuild()
+                markMerged(session.sourceId)
+            }
             // A copy swapped in whose steps afterwards were cut off needs only those.
             val copyAll = need(session) != CopyNeed.AfterSync
             val done = CopyRun(copy, copies, afterSyncSteps()).run(session.id, session.sourceId, session.client, copyAll)

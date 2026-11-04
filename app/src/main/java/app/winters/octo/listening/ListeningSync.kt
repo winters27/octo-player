@@ -129,9 +129,9 @@ class ListeningSync internal constructor(
                 // The rating as it is now, so quick changes end on the last one.
                 val rating = cleanRating(user.rating(trackId))
                 val sent = ids.all { failureOf { server.client.setRating(it, rating) } == null }
-                if (sent) {
-                    if (rating > 0) store.setSyncedRatings(server.account, ids, rating) else store.clearSyncedRatings(server.account, ids)
-                }
+                // Kept with when it was sent, none included, so a copy read
+                // before then is not taken for a change made on the server.
+                if (sent) store.setSyncedRatings(server.account, ids, rating, System.currentTimeMillis())
             }
         }
     }
@@ -228,7 +228,7 @@ class ListeningSync internal constructor(
     }
 
     private suspend fun syncRatingChunk(server: Server, chunk: RatingChunk) {
-        val plan = reconcileRatings(chunk.copies, chunk.local, chunk.synced)
+        val plan = reconcileRatings(chunk.copies, chunk.local, chunk.synced, chunk.stale)
         val failed = plan.send.filter { (_, send) ->
             send.serverIds.any { failureOf { server.client.setRating(it, send.rating) } != null }
         }.keys

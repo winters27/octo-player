@@ -49,7 +49,7 @@ class SchemaGuardTest {
             w.execSQL("INSERT INTO take_in_log VALUES (1, 'track', 'x')")
             w.execSQL("INSERT INTO rating_note VALUES ('x', 3)")
             w.execSQL("INSERT INTO sync_song (songId, albumKey, json) VALUES ('s', 'a', '{}')")
-            w.execSQL("INSERT INTO source_meta VALUES ('server:h', 'acct', 'acct', 5, '$STAGE_READY', 7, 1, 1, 1)")
+            w.execSQL("INSERT INTO source_meta VALUES ('server:h', 'acct', 'acct', 5, '$STAGE_READY', 7, 1, 1, 1, 0)")
             w.execSQL("INSERT INTO merge_state VALUES (0, 'key', 1)")
             close()
         }

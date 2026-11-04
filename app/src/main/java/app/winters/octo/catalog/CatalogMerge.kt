@@ -139,6 +139,12 @@ class CatalogMerge internal constructor(
         synchronized(stages) { stages.remove(sourceId to generation) }
     }
 
+    // A new copy of the source starts: outcomes of its earlier ones that no
+    // copy waits for any more (one cancelled while its swap ran) go.
+    fun forgetStagesBefore(sourceId: String, generation: Long) {
+        synchronized(stages) { stages.keys.removeAll { it.first == sourceId && it.second < generation } }
+    }
+
     // At launch: a source row no merge has placed (the app stopped between
     // a write and its merge) gets its merge now.
     suspend fun repair() {
@@ -185,6 +191,7 @@ class CatalogMerge internal constructor(
             val counts = gate.withLock {
                 val step = decide(server)
                 failStages(step.dropped, ELSEWHERE)
+                failStages(step.leftover, CHANGED)
                 val claim = step.claim ?: return@withLock null
                 hooks.claimed()
                 try {
@@ -239,8 +246,9 @@ class CatalogMerge internal constructor(
     private class Claim(val sources: List<MergeSource>, val claimed: List<ClaimedStage>)
 
     // What a merge does: nothing (claim null) or merge what it claimed.
-    // Copies of sources out of the library are dropped either way.
-    private class Step(val claim: Claim?, val dropped: List<ClaimedStage>)
+    // Copies of sources out of the library are dropped either way, and so
+    // are copies a failed abort left claimed.
+    private class Step(val claim: Claim?, val dropped: List<ClaimedStage>, val leftover: List<ClaimedStage>)
 
     private class StageAbort(val reason: String) : Exception(reason)
 
@@ -248,6 +256,14 @@ class CatalogMerge internal constructor(
     // copy waiting for a source in the library, adding in what was taken in
     // while it was built, and starts noting rating taps.
     private suspend fun decide(server: String?): Step = db.withTransaction {
+        // A claim left by a merge whose abort could not write (a full disk)
+        // is over: under the gate no merge holds one.
+        val leftover = work.metas().filter { it.stage == STAGE_CLAIMED }.map { ClaimedStage(it.sourceId, it.generation, 0) }
+        leftover.forEach { dropStageRows(it) }
+        if (leftover.isNotEmpty() || work.mergeState()?.claimActive == true) {
+            work.setClaimActive(false)
+            endRatingNotes()
+        }
         val metas = work.metas().associateBy { it.sourceId }
         val ready = metas.values.filter { it.stage == STAGE_READY }
         val (inUse, elsewhere) = ready.partition { inLibrary(it.sourceId, server) }
@@ -258,14 +274,14 @@ class CatalogMerge internal constructor(
             .distinct()
             .sortedBy { if (it == DEVICE) "" else it }
         val key = skipKey(ids, metas.mapValues { it.value.stamp }, inUse.associate { it.sourceId to it.generation })
-        if (work.skipKey() == key) return@withTransaction Step(null, dropped)
+        if (work.skipKey() == key) return@withTransaction Step(null, dropped, leftover)
         val claimed = inUse.map { meta ->
             work.setStage(meta.sourceId, STAGE_CLAIMED)
             ClaimedStage(meta.sourceId, meta.generation, meta.stagedTracks + carryTakeIns(meta))
         }
         work.setClaimActive(true)
         val staged = claimed.mapTo(HashSet()) { it.sourceId }
-        Step(Claim(ids.mapIndexed { rank, id -> MergeSource(id, rank, id in staged) }, claimed), dropped)
+        Step(Claim(ids.mapIndexed { rank, id -> MergeSource(id, rank, id in staged) }, claimed), dropped, leftover)
     }
 
     // Songs, albums and artists taken in while a copy was built join it,
@@ -329,12 +345,10 @@ class CatalogMerge internal constructor(
             favourites.relinkAll()
             // Songs with no rating on a server show the one made on the phone.
             user.showPhoneRatings()
-            // Ratings tapped while a copy was built or since the claim go
-            // back over what the copy or the merge read.
-            for (note in work.ratingNotes()) {
-                work.setCopyRating(note.sourceRowId, note.rating)
-                work.showCopyRating(note.sourceRowId, note.rating)
-            }
+            // Ratings tapped while a copy was built or since the claim show
+            // over what the copy or the merge read. The copies keep what the
+            // server said: the steps after the copy settle the two.
+            for (note in work.ratingNotes()) work.showCopyRating(note.sourceRowId, note.rating)
             for (stage in claim.claimed) {
                 work.owedSteps(stage.sourceId)
                 work.takeStageOwner(stage.sourceId)
@@ -350,13 +364,18 @@ class CatalogMerge internal constructor(
     }
 
     // A claimed copy is not swapped in: it goes, and its copy is told why.
+    // When the abort's own writes fail (a full disk), the copy is still told,
+    // and the next merge clears the claim it left (decide).
     private suspend fun abort(claim: Claim, reason: String) {
-        db.withTransaction {
-            claim.claimed.forEach { dropStageRows(it) }
-            work.setClaimActive(false)
-            endRatingNotes()
+        try {
+            db.withTransaction {
+                claim.claimed.forEach { dropStageRows(it) }
+                work.setClaimActive(false)
+                endRatingNotes()
+            }
+        } finally {
+            failStages(claim.claimed, reason)
         }
-        failStages(claim.claimed, reason)
     }
 
     // Rating notes last while any copy is being built or waits to be

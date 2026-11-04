@@ -2,7 +2,6 @@ package app.winters.octo.catalog
 
 import android.content.Context
 import android.database.DatabaseErrorHandler
-import android.database.DatabaseUtils
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteDiskIOException
 import android.database.sqlite.SQLiteException
@@ -19,11 +18,6 @@ import java.io.RandomAccessFile
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// The most disk the 18 to 19 upgrade takes per song row (source_track or
-// track), new tables and log together, measured on generated libraries by
-// MigrationSpaceTest. UpgradeGuard asks for half as much again on top.
-const val UPGRADE_BYTES_PER_ROW = 670L
-
 // Whether the library can open now.
 sealed interface UpgradeState {
     data object Checking : UpgradeState
@@ -33,9 +27,11 @@ sealed interface UpgradeState {
 }
 
 // Keeps the library from opening while the upgrade it needs would run out
-// of disk partway: the upgrade copies the song tables, so it needs room for
-// a second copy of them. Until there is room, every open of the database
-// waits (GuardedOpenHelperFactory) and the app says how much to free.
+// of disk partway. The 18 to 19 upgrade copies the song tables before it
+// drops the old ones, all in one transaction: at its most it takes about
+// 1.6 times the database file on top of it (MigrationSpaceTest), so it asks
+// for twice the file and its log. Until there is room, every open of the
+// database waits (GuardedOpenHelperFactory) and the app says how much to free.
 @Singleton
 class UpgradeGuard internal constructor(
     private val file: File,
@@ -47,6 +43,10 @@ class UpgradeGuard internal constructor(
     private val lock = Object()
     private val _state = MutableStateFlow<UpgradeState>(UpgradeState.Checking)
     val state: StateFlow<UpgradeState> = _state
+
+    // Set once the file is known to be upgraded (or absent): it never goes
+    // back, so no open reads the file's header again.
+    @Volatile private var upgraded = false
 
     // Checks once, on the thread that asks first, and answers whether the
     // library can open. Quick on every launch but an upgrading one: the
@@ -70,49 +70,54 @@ class UpgradeGuard internal constructor(
         while (_state.value != UpgradeState.Clear) lock.wait()
     }
 
-    // Whether the file still waits for its upgrade.
-    fun upgradeDue(): Boolean = try {
-        file.exists() && headerVersion(file) < CATALOG_VERSION
-    } catch (e: IOException) {
-        false
+    // Whether the file still waits for its upgrade. The header can lag a
+    // committed upgrade still in the log, so a header that says it is due
+    // is checked against the version the database itself reports.
+    fun upgradeDue(): Boolean {
+        if (upgraded) return false
+        val due = try {
+            file.exists() && headerVersion(file) < CATALOG_VERSION && reportedVersion() < CATALOG_VERSION
+        } catch (e: IOException) {
+            false
+        }
+        if (!due) upgraded = true
+        return due
     }
 
-    // The upgrade ran out of disk after all: nothing opens until there is
-    // room for the most it could take, the whole file over twice.
-    fun ranOutOfSpace() = synchronized(lock) {
-        floor = wholeFileNeed()
-        _state.value = UpgradeState.NeedsSpace(floor)
+    // The upgrade failed writing: nothing opens until there is room. A full
+    // disk always counts, and from then on asks for more than was free when
+    // it filled; a write error counts only while the space is short, and
+    // otherwise (answering false) is the caller's to pass on.
+    fun ranOutOfSpace(full: Boolean): Boolean = synchronized(lock) {
+        if (full) {
+            floor = maxOf(floor, wholeFileNeed(), freeSpace.bytes() + file.length())
+        } else if (freeSpace.bytes() >= wholeFileNeed()) {
+            return false
+        }
+        _state.value = UpgradeState.NeedsSpace(maxOf(floor, wholeFileNeed()))
+        true
     }
 
-    // At least what an upgrade that ran out of disk showed it needs.
+    // At least what an upgrade that filled the disk showed it needs.
     private var floor = 0L
 
     private fun measure(): UpgradeState {
         if (!upgradeDue()) return UpgradeState.Clear
-        val needed = try {
-            // A file SQLite finds damaged is left as it is (Android's default
-            // handler would delete it); the open that follows decides.
-            SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY, DatabaseErrorHandler { }).use { db ->
-                // The header can lag the file by what the log holds; the
-                // version the database itself reports is the real one.
-                if (db.version >= CATALOG_VERSION) return UpgradeState.Clear
-                songRows(db) * UPGRADE_BYTES_PER_ROW * 3 / 2
-            }
-        } catch (e: SQLiteException) {
-            // The file could not be read as it is: ask for room for the most
-            // the upgrade could take.
-            wholeFileNeed()
-        }.coerceAtLeast(floor)
+        val needed = maxOf(floor, wholeFileNeed())
         return if (needed <= freeSpace.bytes()) UpgradeState.Clear else UpgradeState.NeedsSpace(needed)
     }
 
-    private fun wholeFileNeed(): Long = file.length() * 2
-}
+    // The version the database reports, read without changing the file: a
+    // file SQLite finds damaged is left as it is (Android's default handler
+    // would delete it) and counts as not yet upgraded, so the open that
+    // follows decides.
+    private fun reportedVersion(): Int = try {
+        SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY, DatabaseErrorHandler { }).use { it.version }
+    } catch (e: SQLiteException) {
+        0
+    }
 
-// The rows the upgrade copies. A table an old version never made counts nothing.
-private fun songRows(db: SQLiteDatabase): Long = listOf("source_track", "track").sumOf { table ->
-    val exists = DatabaseUtils.longForQuery(db, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", arrayOf(table)) > 0
-    if (exists) DatabaseUtils.longForQuery(db, "SELECT COUNT(*) FROM `$table`", null) else 0L
+    private fun wholeFileNeed(): Long = (file.length() + File(file.path + "-wal").length()) * 2
 }
 
 // The schema version SQLite keeps at byte 60 of the file, or 0 when the
@@ -126,11 +131,14 @@ internal fun headerVersion(file: File): Int = RandomAccessFile(file, "r").use { 
 // Opens the library through UpgradeGuard: every open waits until the guard
 // is clear, so no open can start an upgrade the disk has no room for. An
 // upgrade that runs out of disk anyway is rolled back by SQLite, and the
-// open waits again, for room for the most it could take.
+// open waits again for room. While the upgrade is due, one open runs at a
+// time, so two never fill the disk side by side.
 class GuardedOpenHelperFactory(
     private val guard: UpgradeGuard,
     private val inner: SupportSQLiteOpenHelper.Factory = FrameworkSQLiteOpenHelperFactory(),
 ) : SupportSQLiteOpenHelper.Factory {
+    private val upgrading = Any()
+
     override fun create(configuration: SupportSQLiteOpenHelper.Configuration): SupportSQLiteOpenHelper {
         val helper = inner.create(configuration)
         return object : SupportSQLiteOpenHelper by helper {
@@ -142,17 +150,20 @@ class GuardedOpenHelperFactory(
     }
 
     private fun opened(open: () -> SupportSQLiteDatabase): SupportSQLiteDatabase {
-        while (true) {
-            guard.awaitClear()
-            val due = guard.upgradeDue()
-            try {
-                return open()
-            } catch (e: SQLiteFullException) {
-                if (!due) throw e
-            } catch (e: SQLiteDiskIOException) {
-                if (!due) throw e
+        guard.awaitClear()
+        if (!guard.upgradeDue()) return open()
+        synchronized(upgrading) {
+            while (true) {
+                guard.awaitClear()
+                if (!guard.upgradeDue()) return open()
+                try {
+                    return open()
+                } catch (e: SQLiteFullException) {
+                    guard.ranOutOfSpace(full = true)
+                } catch (e: SQLiteDiskIOException) {
+                    if (!guard.ranOutOfSpace(full = false)) throw e
+                }
             }
-            guard.ranOutOfSpace()
         }
     }
 }

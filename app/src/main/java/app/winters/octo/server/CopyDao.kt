@@ -158,8 +158,8 @@ interface CopyDao {
     @Query(
         """
         INSERT OR IGNORE INTO source_meta
-            (sourceId, copyOf, stamp, stage, generation, stagedTracks, stagedAlbums, stagedArtists, stageOwner)
-        VALUES (:sourceId, NULL, 0, 'none', 0, 0, 0, 0, NULL)
+            (sourceId, copyOf, stamp, stage, generation, stagedTracks, stagedAlbums, stagedArtists, stageOwner, readFrom)
+        VALUES (:sourceId, NULL, 0, 'none', 0, 0, 0, 0, NULL, 0)
         """,
     )
     suspend fun ensureMeta(sourceId: String)
@@ -170,11 +170,11 @@ interface CopyDao {
     @Query(
         """
         UPDATE source_meta SET stage = 'building', generation = :generation, stageOwner = :owner,
-            stagedTracks = 0, stagedAlbums = 0, stagedArtists = 0
+            stagedTracks = 0, stagedAlbums = 0, stagedArtists = 0, readFrom = :readFrom
         WHERE sourceId = :sourceId
         """,
     )
-    suspend fun markBuilding(sourceId: String, generation: Long, owner: String)
+    suspend fun markBuilding(sourceId: String, generation: Long, owner: String, readFrom: Long)
 
     // Answers how many rows changed: 1, unless the stage is no longer this
     // generation's and being built.

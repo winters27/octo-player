@@ -107,4 +107,22 @@ class RatingsTest {
         assertEquals(0, cleanRating(6))
         assertEquals(3, cleanRating(3))
     }
+
+    // The phone set 5 on the server after the copy began reading, so the
+    // copy's 3 is older than the server's rating: the phone keeps 5 and the
+    // server copy is set to it again, never the other way round.
+    @Test
+    fun aCopyReadBeforeThePhonesSendIsNotTheServersNews() {
+        val plan = reconcileRatings(listOf(RatingCopy("t1", "s1", 3)), mapOf("t1" to 5), mapOf("s1" to 5), stale = setOf("s1"))
+        assertTrue(plan.adopt.isEmpty())
+        assertEquals(RatingSend(listOf("s1"), 5), plan.send["t1"])
+        assertEquals(5, plan.synced["s1"])
+    }
+
+    // A copy read after the send is the server's news as before.
+    @Test
+    fun aCopyReadAfterThePhonesSendStillCounts() {
+        val plan = reconcileRatings(listOf(RatingCopy("t1", "s1", 3)), mapOf("t1" to 5), mapOf("s1" to 5))
+        assertEquals(mapOf("t1" to 3), plan.adopt)
+    }
 }

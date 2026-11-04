@@ -11,8 +11,11 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "synced_star", primaryKeys = ["account", "serverId"])
 data class SyncedStarEntity(val account: String, val serverId: String)
 
+// `sentAt` is when the phone last set this rating on the server itself, 0
+// when it was not the one that did: a copy read before then is older than
+// the server's rating.
 @Entity(tableName = "synced_rating", primaryKeys = ["account", "serverId"])
-data class SyncedRatingEntity(val account: String, val serverId: String, val rating: Int)
+data class SyncedRatingEntity(val account: String, val serverId: String, val rating: Int, val sentAt: Long = 0)
 
 @Entity(
     tableName = "pending_play",

@@ -179,7 +179,8 @@ class CatalogMergeTest {
         merging.join()
         (0 until 10).forEach { i ->
             assertEquals(5 - i % 5, ratingOf("device:s$i"))
-            assertEquals((5 - i % 5).toLong(), db.longOf("SELECT rating FROM source_track WHERE id = ?", "$server:s$i"))
+            // The copies keep what the server said; the steps after the copy settle the two.
+            assertEquals(2L, db.longOf("SELECT rating FROM source_track WHERE id = ?", "$server:s$i"))
         }
         assertEquals(0L, db.longOf("SELECT COUNT(*) FROM rating_note"))
     }
@@ -196,8 +197,62 @@ class CatalogMergeTest {
         db.userDao().noteRating("device:s1", 5, "k", 1, copies = true)
         merge.rebuild()
         assertEquals(5, ratingOf("device:s1"))
-        assertEquals(5L, db.longOf("SELECT rating FROM source_track WHERE id = ?", "$server:s1"))
+        // The copy keeps what the server said; the steps after it settle the two.
+        assertEquals(2L, db.longOf("SELECT rating FROM source_track WHERE id = ?", "$server:s1"))
         assertEquals(0L, db.longOf("SELECT COUNT(*) FROM rating_note"))
+    }
+
+    // A merge while the copy is still being built (a phone scan) keeps the
+    // copy's notes, and the copy's swap later still shows the tap.
+    @Test
+    fun aNoteOutlivesAMergeWhileItsCopyIsStillBuilding() = run {
+        db.put(library(DEVICE, 4))
+        db.put(library(server, 4))
+        val merge = db.testMerge(server, TestHooks())
+        merge.rebuild()
+        db.stage(library(server, 4).let { s -> s.copy(tracks = s.tracks.map { it.copy(rating = 2) }) }, generation = 6)
+        db.exec("UPDATE source_meta SET stage = '$STAGE_BUILDING' WHERE sourceId = ?", server)
+        db.userDao().noteRating("device:s1", 5, "k", 1, copies = true)
+        db.put(library(DEVICE, 5))
+        merge.rebuild()
+        assertEquals(1L, db.longOf("SELECT COUNT(*) FROM rating_note"))
+        db.exec("UPDATE source_meta SET stage = '$STAGE_READY' WHERE sourceId = ?", server)
+        merge.rebuild()
+        assertEquals(5, ratingOf("device:s1"))
+        assertEquals(0L, db.longOf("SELECT COUNT(*) FROM rating_note"))
+    }
+
+    // An abort whose own writes fail (a full disk) still tells its copy, and
+    // the next merge clears the claim it left.
+    @Test
+    fun anAbortThatCannotWriteStillEndsItsCopy() = run {
+        db.put(library(DEVICE, 3))
+        val inner = db.workDao()
+        var failClear = false
+        val work = object : WorkDao by inner {
+            override suspend fun clearStage(sourceId: String) {
+                if (failClear) {
+                    failClear = false
+                    throw android.database.sqlite.SQLiteFullException("database or disk is full")
+                }
+                inner.clearStage(sourceId)
+            }
+        }
+        var free = 0L
+        val merge = CatalogMerge(db, { free }, { server }, work)
+        db.stage(library(server, 3), generation = 2)
+        failClear = true
+        runCatching { merge.rebuild() }
+        try {
+            merge.awaitStage(server, 2)
+            fail("the copy was not told its abort")
+        } catch (e: StageAborted) {
+            // told, though the abort could not write
+        }
+        free = Long.MAX_VALUE
+        merge.rebuild()
+        assertEquals(0L, db.longOf("SELECT COUNT(*) FROM source_meta WHERE stage != 'none'"))
+        assertEquals(0L, db.longOf("SELECT COUNT(*) FROM merge_state WHERE claimActive = 1"))
     }
 
     // A copy's outcome is its own: a later copy of the same source under

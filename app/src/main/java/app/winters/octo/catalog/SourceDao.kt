@@ -139,8 +139,8 @@ interface SourceDao {
 
     @Query(
         """
-        INSERT OR IGNORE INTO source_meta (sourceId, copyOf, stageOwner, stamp, stage, generation, stagedTracks, stagedAlbums, stagedArtists)
-        VALUES (:sourceId, NULL, NULL, 0, 'none', 0, 0, 0, 0)
+        INSERT OR IGNORE INTO source_meta (sourceId, copyOf, stageOwner, stamp, stage, generation, stagedTracks, stagedAlbums, stagedArtists, readFrom)
+        VALUES (:sourceId, NULL, NULL, 0, 'none', 0, 0, 0, 0, 0)
         """,
     )
     suspend fun ensureMeta(sourceId: String)

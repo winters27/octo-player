@@ -3,6 +3,7 @@ package app.winters.octo.catalog
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteFullException
 import androidx.room.Room
+import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import app.winters.octo.testing.OldSqlite
@@ -38,7 +39,7 @@ class UpgradeGuardTest {
         val file = version18(rows = 100)
         val guard = UpgradeGuard(file) { 1_000L }
         assertFalse(guard.check())
-        assertEquals(UpgradeState.NeedsSpace(100 * UPGRADE_BYTES_PER_ROW * 3 / 2), guard.state.value)
+        assertEquals(UpgradeState.NeedsSpace(file.length() * 2), guard.state.value)
         // Nothing was opened for writing beyond the check: still version 18.
         SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { assertEquals(18, it.version) }
     }
@@ -138,6 +139,44 @@ class UpgradeGuardTest {
         val read = CountDownLatch(1)
         thread { db.openHelper.writableDatabase.query("SELECT COUNT(*) FROM track").close(); read.countDown() }
         assertFalse(read.await(200, TimeUnit.MILLISECONDS))
+        free = Long.MAX_VALUE
+        assertTrue(guard.retry())
+        assertTrue(read.await(10, TimeUnit.SECONDS))
+        db.openHelper.writableDatabase.query("SELECT COUNT(*) FROM track").use { it.moveToFirst(); assertEquals(100, it.getInt(0)) }
+        db.close()
+    }
+
+    // The real open path (Room, the framework helper) when the upgrade fills
+    // the disk partway: SQLite rolls it back, the open waits for room, and
+    // once there is room the upgrade runs whole.
+    @Test
+    fun aFullDiskDuringTheRealUpgradeWaitsThenUpgrades() {
+        val file = version18(rows = 100)
+        var free = Long.MAX_VALUE
+        val guard = UpgradeGuard(file) { free }
+        var attempts = 0
+        val fillsOnce = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // The framework helper tries an upgrade twice before it
+                // gives up, so the disk is full for both.
+                if (attempts++ < 2) {
+                    free = 1_000L
+                    throw SQLiteFullException("database or disk is full")
+                }
+                MIGRATION_18_19.migrate(db)
+            }
+        }
+        val db = Room.databaseBuilder(testContext(), CatalogDatabase::class.java, file.path)
+            .openHelperFactory(GuardedOpenHelperFactory(guard))
+            .catalogSetup()
+            .addMigrations(fillsOnce)
+            .allowMainThreadQueries()
+            .build()
+        val read = CountDownLatch(1)
+        thread { db.openHelper.writableDatabase.query("SELECT COUNT(*) FROM track").close(); read.countDown() }
+        assertFalse(read.await(2, TimeUnit.SECONDS))
+        assertTrue(guard.state.value is UpgradeState.NeedsSpace)
+        SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { assertEquals(18, it.version) }
         free = Long.MAX_VALUE
         assertTrue(guard.retry())
         assertTrue(read.await(10, TimeUnit.SECONDS))
