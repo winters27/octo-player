@@ -187,8 +187,6 @@ class ServerChangeTest {
         assertEquals(true, copyPlan("server:new", copyAllAnyway = false, { true }) { CopyNeed.Copy })
     }
 
-    // A whole copy asked for (a folder change, Sync now) is made whole and
-    // then settled.
     // A copy as CopyRun runs it: a whole one says when it is in the library,
     // then the steps after it run; it answers whether it copied whole.
     private suspend fun copied(whole: Boolean, swapped: suspend () -> Unit, steps: () -> Unit = {}): Boolean {
@@ -197,6 +195,8 @@ class ServerChangeTest {
         return whole
     }
 
+    // A whole copy asked for (a folder change, Sync now) is made whole and
+    // then settled.
     @Test
     fun anAskedWholeCopyIsMadeWholeThenSettled() = runBlocking {
         val owed = WholeCopyOwed()
@@ -311,6 +311,8 @@ class ServerChangeTest {
         assertTrue(text.contains("private fun resume() = startSync(whole = false)"))
         assertEquals(listOf("copy = ::resume", "resume()"), Regex("""copy = ::resume|(?<!fun )resume\(\)""").findAll(text).map { it.value }.toList())
         assertEquals(1, Regex("""startSync\(whole = false\)""").findAll(text).count())
+        // The copy settles what it was asked for with the run's own swap.
+        assertTrue(text.contains("session.client, copyAll, swapped)"))
     }
 
     @Test

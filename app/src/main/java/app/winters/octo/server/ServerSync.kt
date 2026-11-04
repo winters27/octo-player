@@ -145,8 +145,9 @@ internal suspend fun freshenSwitch(ready: String?, account: String?, sourceId: S
 
 // The account a whole copy was asked for (Sync now, a folder change, a
 // download, anything wanting the server read again) and not yet made. It
-// stays owed until a whole copy for it ends well, so a lighter copy that
-// runs meanwhile, or a whole one that fails, never settles it.
+// stays owed until a whole copy for it is in the library, so a lighter copy
+// that runs meanwhile, or a whole one that fails before that, never settles
+// it.
 internal class WholeCopyOwed {
     private var account: String? = null
     private var asks = 0
@@ -162,8 +163,8 @@ internal class WholeCopyOwed {
     @Synchronized
     fun owed(forAccount: String): Int? = if (account == forAccount) asks else null
 
-    // A whole copy that began owing `asks` ended well. One asked for since
-    // stays owed.
+    // A whole copy that began owing `asks` is in the library. One asked for
+    // since stays owed.
     @Synchronized
     fun made(forAccount: String, asks: Int) {
         if (account == forAccount && this.asks == asks) account = null

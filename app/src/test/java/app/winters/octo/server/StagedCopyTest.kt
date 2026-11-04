@@ -186,7 +186,7 @@ class StagedCopyTest {
                 order += n
             }
         }
-        val done = CopyRun(copy, dao, steps, clock = { 42L }).run(ACCOUNT, SOURCE, fakeServer.client(), copyAll = true)
+        val done = CopyRun(copy, dao, steps, clock = { 42L }).run(ACCOUNT, SOURCE, fakeServer.client(), copyAll = true) {}
         assertEquals(listOf(1, 2, 3, 4, 5), order)
         val row = dao.accountSync(ACCOUNT)!!
         assertTrue(row.afterSyncDone)
@@ -196,31 +196,43 @@ class StagedCopyTest {
         assertEquals(ACCOUNT, dao.copyOf(SOURCE))
     }
 
+    // Also: a whole copy says it is in the library once it is swapped in,
+    // before the steps after it, so a step that fails cannot take that back;
+    // a run of the steps alone never says it.
     @Test
     fun stepsCutOffAfterASwapRunAgainWithoutACopy() = runBlocking {
         val fakeServer = fake(LibraryGen.server(9, GenShape(songs = 600, albums = 30, artists = 10)))
         var cut = true
+        var swaps = 0
         val ran = mutableListOf<Int>()
         val steps = (1..5).map { n ->
             suspend {
+                if (cut) assertEquals("step $n ran before the copy said it was in", 1, swaps)
                 if (n == 3 && cut) error("the app closed")
                 ran += n
             }
         }
+        val swapped: suspend () -> Unit = {
+            swaps++
+            assertEquals(ACCOUNT, dao.copyOf(SOURCE))
+            assertFalse(dao.accountSync(ACCOUNT)!!.afterSyncDone)
+        }
         try {
-            CopyRun(copy, dao, steps).run(ACCOUNT, SOURCE, fakeServer.client(), copyAll = true)
+            CopyRun(copy, dao, steps).run(ACCOUNT, SOURCE, fakeServer.client(), copyAll = true, swapped)
             fail("the third step should have stopped the run")
         } catch (e: IllegalStateException) {
             assertEquals("the app closed", e.message)
         }
+        assertEquals(1, swaps)
         val row = dao.accountSync(ACCOUNT)!!
         assertFalse(row.afterSyncDone)
         assertEquals(CopyNeed.AfterSync, copyNeed(row, dao.copyOf(SOURCE), ACCOUNT, SOURCE, System.currentTimeMillis()))
         cut = false
         ran.clear()
         val asked = fakeServer.requests.size
-        CopyRun(copy, dao, steps).run(ACCOUNT, SOURCE, fakeServer.client(), copyAll = false)
+        CopyRun(copy, dao, steps).run(ACCOUNT, SOURCE, fakeServer.client(), copyAll = false, swapped)
         assertEquals(listOf(1, 2, 3, 4, 5), ran)
+        assertEquals(1, swaps)
         assertTrue(fakeServer.requests.drop(asked).none { "search3" in it || "getAlbumList2" in it })
         assertTrue(dao.accountSync(ACCOUNT)!!.afterSyncDone)
     }
