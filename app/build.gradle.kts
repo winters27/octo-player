@@ -89,6 +89,10 @@ ksp {
 // Tests build old databases from these schemas and read the new one's SQL.
 tasks.withType<Test>().configureEach {
     systemProperty("octo.schemas", file("schemas/app.winters.octo.catalog.CatalogDatabase").absolutePath)
+    // The desktop JVM's optimizing compiler (JDK 17.0.19) crashes compiling
+    // this one method, killing the test run; it runs uncompiled in tests.
+    // Phones compile it with their own runtime.
+    jvmArgs("-XX:CompileCommand=quiet", "-XX:CompileCommand=exclude,app.winters.octo.catalog.CatalogMerger::place")
 }
 
 dependencies {
