@@ -187,6 +187,74 @@ class ServerChangeTest {
         assertEquals(true, copyPlan("server:new", copyAllAnyway = false, { true }) { CopyNeed.Copy })
     }
 
+    // A whole copy asked for (a folder change, Sync now) is made whole and
+    // then settled.
+    @Test
+    fun anAskedWholeCopyIsMadeWholeThenSettled() = runBlocking {
+        val owed = WholeCopyOwed()
+        val copies = mutableListOf<Boolean>()
+        owed.ask("home")
+        copyUntilWhole(owed, "home") { whole -> copies += whole; true }
+        assertEquals(listOf(true), copies)
+        assertNull(owed.owed("home"))
+        // Nothing owed: a start only resumes.
+        copyUntilWhole(owed, "home") { whole -> copies += whole; false }
+        assertEquals(listOf(true, false), copies)
+    }
+
+    // A lighter copy already running when the whole one is asked for (it
+    // slipped in while the last copy stopped) copies whole before it ends,
+    // so whoever waits on it gets what was asked.
+    @Test
+    fun aLighterCopyRunningWhenAWholeOneIsAskedCopiesWholeToo() = runBlocking {
+        val owed = WholeCopyOwed()
+        val copies = mutableListOf<Boolean>()
+        copyUntilWhole(owed, "home") { whole ->
+            copies += whole
+            if (copies.size == 1) owed.ask("home")
+            whole
+        }
+        assertEquals(listOf(false, true), copies)
+        assertNull(owed.owed("home"))
+    }
+
+    // A whole copy that fails leaves it owed, so the next start (a freshen)
+    // copies whole instead of only resuming.
+    @Test
+    fun aWholeCopyThatFailsStaysOwed() = runBlocking {
+        val owed = WholeCopyOwed()
+        owed.ask("home")
+        try {
+            copyUntilWhole(owed, "home") { throw IllegalStateException("unreachable") }
+            fail("the failure was swallowed")
+        } catch (e: IllegalStateException) {
+            // passed on to sync(), which says it
+        }
+        assertEquals(1, owed.owed("home"))
+        val copies = mutableListOf<Boolean>()
+        copyUntilWhole(owed, "home") { whole -> copies += whole; true }
+        assertEquals(listOf(true), copies)
+        assertNull(owed.owed("home"))
+    }
+
+    // A whole copy asked for again while one runs stays owed; one asked for
+    // another account, or a copy that copied nothing (a failed switch),
+    // settles nothing.
+    @Test
+    fun onlyTheAskAWholeCopyAnsweredIsSettled() = runBlocking {
+        val owed = WholeCopyOwed()
+        owed.ask("home")
+        copyUntilWhole(owed, "home") { owed.ask("home"); true }
+        assertEquals(2, owed.owed("home"))
+        owed.ask("other")
+        val copies = mutableListOf<Boolean>()
+        copyUntilWhole(owed, "home") { whole -> copies += whole; false }
+        assertEquals(listOf(false), copies)
+        assertEquals(3, owed.owed("other"))
+        copyUntilWhole(owed, "other") { null }
+        assertEquals(3, owed.owed("other"))
+    }
+
     @Test
     fun aFullDiskDuringAServerChangeIsNotedNotThrown() = runBlocking {
         assertNull(orNoted<Unit> { throw SQLiteFullException("database or disk is full") })

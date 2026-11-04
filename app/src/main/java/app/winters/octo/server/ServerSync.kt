@@ -143,6 +143,46 @@ internal suspend fun freshenSwitch(ready: String?, account: String?, sourceId: S
     return finish(sourceId.orEmpty()) && account != null
 }
 
+// The account a whole copy was asked for (Sync now, a folder change, a
+// download, anything wanting the server read again) and not yet made. It
+// stays owed until a whole copy for it ends well, so a lighter copy that
+// runs meanwhile, or a whole one that fails, never settles it.
+internal class WholeCopyOwed {
+    private var account: String? = null
+    private var asks = 0
+
+    @Synchronized
+    fun ask(forAccount: String?) {
+        account = forAccount
+        asks++
+    }
+
+    // Before a copy: the ask it settles when it copies whole, or null when
+    // `forAccount` is owed none.
+    @Synchronized
+    fun owed(forAccount: String): Int? = if (account == forAccount) asks else null
+
+    // A whole copy that began owing `asks` ended well. One asked for since
+    // stays owed.
+    @Synchronized
+    fun made(forAccount: String, asks: Int) {
+        if (account == forAccount && this.asks == asks) account = null
+    }
+}
+
+// Runs `copy` (answering whether it copied the whole library, or null when
+// it copied nothing) whole when `account` is owed a whole copy, and again
+// whole when one was asked for while a lighter one ran, so the job a caller
+// waits on ends only once what it asked for is made.
+internal suspend fun copyUntilWhole(owed: WholeCopyOwed, account: String, copy: suspend (whole: Boolean) -> Boolean?) {
+    while (true) {
+        val asks = owed.owed(account)
+        val copiedAll = copy(asks != null) ?: return
+        if (copiedAll && asks != null) owed.made(account, asks)
+        if (copiedAll || owed.owed(account) == null) return
+    }
+}
+
 // Before a copy: a switch to its server whose merge failed is finished
 // first, and while it fails nothing is copied (null). Otherwise answers
 // whether to copy the whole library (true) or only the steps owed after a
@@ -203,6 +243,7 @@ class ServerSync @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val dropLock = Mutex()
     private var job: Job? = null
+    private val wholeOwed = WholeCopyOwed()
     private var started = false
 
     // One take-in or look at a time, so two never put in the same rows.
@@ -273,7 +314,7 @@ class ServerSync @Inject constructor(
             switch::finish,
             ready = { _ready.value = it },
             need = { session?.let { orNoted { need(it) } } ?: CopyNeed.Copy },
-            copy = ::syncNow,
+            copy = ::resume,
             look = { if (foreground && session != null) scope.launch { quietly { look(session) } } },
         )
     }
@@ -284,19 +325,24 @@ class ServerSync @Inject constructor(
     private suspend fun need(session: Session): CopyNeed =
         copyNeed(copies.accountSync(session.id), copies.copyOf(session.sourceId), session.id, session.sourceId, System.currentTimeMillis())
 
-    // Starts a copy unless one is already running.
-    fun syncNow() = startSync(copyAll = false)
+    // Copies the whole library unless a copy is already running; that one
+    // then copies whole before it ends (WholeCopyOwed).
+    fun syncNow() = startSync(whole = true)
 
-    // `copyAll` copies the whole library even when only the steps after a
-    // copy are owed.
-    private fun startSync(copyAll: Boolean) {
+    // What an automatic start needs (arrival, freshen): only the steps after
+    // a copy when those are all that is owed.
+    private fun resume() = startSync(whole = false)
+
+    // `whole` asks for the whole library read again.
+    private fun startSync(whole: Boolean) {
         synchronized(this) {
+            if (whole) wholeOwed.ask(signedIn()?.id)
             if (job?.isActive == true) return
-            job = scope.launch { sync(copyAll) }
+            job = scope.launch { sync() }
         }
     }
 
-    // Starts a copy unless one is already running, and waits for it to end.
+    // Copies the whole library (as syncNow) and waits for it to end.
     // Answers why it failed, in words, or null when it worked.
     suspend fun syncNowAndWait(): String? {
         syncNow()
@@ -310,7 +356,7 @@ class ServerSync @Inject constructor(
     fun syncAgain() {
         scope.launch {
             synchronized(this@ServerSync) { job }?.cancelAndJoin()
-            startSync(copyAll = true)
+            syncNow()
         }
     }
 
@@ -431,11 +477,12 @@ class ServerSync @Inject constructor(
     private suspend fun freshen() {
         val session = signedIn()
         if (!freshenSwitch(_ready.value, session?.id, session?.sourceId, switch::finish) || session == null) return
-        if (need(session) == CopyNeed.Fresh) return look(session)
+        // A whole copy asked for and not yet made is tried again, fresh or not.
+        if (need(session) == CopyNeed.Fresh && wholeOwed.owed(session.id) == null) return look(session)
         val now = SystemClock.elapsedRealtime()
         if (!newMusicLookDue(lookedAt[session.id], now)) return
         lookedAt[session.id] = now
-        syncNow()
+        resume()
     }
 
     // One look at the server for music the copy lacks (see
@@ -495,22 +542,25 @@ class ServerSync @Inject constructor(
         }
     }
 
-    private suspend fun sync(copyAllAnyway: Boolean) {
+    private suspend fun sync() {
         val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return
         _syncing.value = true
         try {
-            val started = SystemClock.elapsedRealtime()
-            // While a failed switch still fails, its words show and nothing is copied.
-            val copyAll = copyPlan(session.sourceId, copyAllAnyway, switch::finish) { need(session) } ?: return
-            val done = CopyRun(copy, copies, afterSyncSteps()).run(session.id, session.sourceId, session.client, copyAll)
-            lookedAt[session.id] = SystemClock.elapsedRealtime()
-            _problem.value = null
-            // Counts only, like the phone scan's line.
-            Log.i(
-                "Octo",
-                "server sync: ${if (copyAll) "copy" else "steps after a copy"}, ${done.songs} tracks, ${done.albums} albums, " +
-                    "${SystemClock.elapsedRealtime() - started} ms",
-            )
+            copyUntilWhole(wholeOwed, session.id) { whole ->
+                val started = SystemClock.elapsedRealtime()
+                // While a failed switch still fails, its words show and nothing is copied.
+                val copyAll = copyPlan(session.sourceId, whole, switch::finish) { need(session) } ?: return@copyUntilWhole null
+                val done = CopyRun(copy, copies, afterSyncSteps()).run(session.id, session.sourceId, session.client, copyAll)
+                lookedAt[session.id] = SystemClock.elapsedRealtime()
+                _problem.value = null
+                // Counts only, like the phone scan's line.
+                Log.i(
+                    "Octo",
+                    "server sync: ${if (copyAll) "copy" else "steps after a copy"}, ${done.songs} tracks, ${done.albums} albums, " +
+                        "${SystemClock.elapsedRealtime() - started} ms",
+                )
+                copyAll
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: StageAborted) {
