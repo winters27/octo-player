@@ -131,8 +131,14 @@ interface UserDao {
             return true
         }
         noteRating(trackId, rating, relinkKey, now, copies = false)
+        // An older tap of another rating is overruled; one of this rating
+        // still waits to be sent.
+        forgetOtherTaps(trackId, rating)
         return false
     }
+
+    @Query("DELETE FROM rating_tap WHERE rating != :rating AND sourceRowId IN (SELECT id FROM source_track WHERE mergedId = :trackId)")
+    suspend fun forgetOtherTaps(trackId: String, rating: Int)
 
     // For a backup: likes, ratings and the songs of playlists only on the
     // phone, each with what is known of the song, in order.

@@ -6,6 +6,7 @@ import app.winters.octo.catalog.LikedTrackEntity
 import app.winters.octo.catalog.TrackRatingEntity
 import app.winters.octo.catalog.longOf
 import app.winters.octo.data.SessionState
+import app.winters.octo.playback.RatingStore
 import app.winters.octo.testing.openTestCatalog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -19,6 +20,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.File
 
 // The steps after a copy walk the server's copies a chunk at a time by
 // server id, and decide nothing from a partial answer.
@@ -286,25 +288,65 @@ class AfterSyncTest {
         }
     }
 
-    // A restored rating the server copy already shows is the phone's own
-    // and nothing to send; one that differs is a tap, sent like one.
+    // A restored rating every server copy already shows is the phone's own
+    // and nothing to send; one any copy lacks (a second copy, none) is a
+    // tap, sent like one; a song only on the phone is only the phone's.
     @Test
     fun aRestoreTapsOnlyWhatTheServerLacks() = runBlocking {
         AfterSyncServer().use { server ->
             val source = server.session.sourceId
-            db.song("device:1")
-            db.song("device:2")
+            (1..5).forEach { db.song("device:$it") }
             db.copy(source, "s1", "device:1", rating = 4)
             db.copy(source, "s2", "device:2", rating = 1)
-            val user = db.userDao()
-            assertFalse(user.noteRestored("device:1", 4, "rk-device:1", 1))
-            assertTrue(user.noteRestored("device:2", 5, "rk-device:2", 1))
-            assertEquals(4, user.rating("device:1"))
-            assertEquals(5, user.rating("device:2"))
-            assertEquals(listOf(5L), listOf(db.longOf("SELECT rating FROM rating_tap")))
-            listeningSync(server, db.listeningDao(), store(db.listeningDao())).afterSync()
-            assertEquals(listOf("setRating s2 rating=5"), server.calls("setRating"))
+            db.copy(source, "s3a", "device:3", rating = 3)
+            db.copy(source, "s3b", "device:3", rating = 2)
+            db.copy(source, "s4", "device:4", rating = 2)
+            val dao = db.listeningDao()
+            // Signed out for the sends, so only what is kept is looked at.
+            val ratings = RatingStore(db.userDao(), ListeningSync({ null }, db.sourceDao(), db.userDao(), db.dao(), dao, store(dao), rebuilds))
+            assertFalse(ratings.restoreNow("device:1", 4))
+            assertTrue(ratings.restoreNow("device:2", 5))
+            assertTrue(ratings.restoreNow("device:3", 3))
+            assertTrue(ratings.restoreNow("device:4", 0))
+            assertFalse(ratings.restoreNow("device:5", 5))
+            assertEquals(4, db.userDao().rating("device:1"))
+            assertEquals(5, db.userDao().rating("device:5"))
+            assertEquals(
+                listOf("$source:s2" to 5L, "$source:s3a" to 3L, "$source:s3b" to 3L, "$source:s4" to 0L),
+                listOf("s2", "s3a", "s3b", "s4").map { "$source:$it" to db.longOf("SELECT rating FROM rating_tap WHERE sourceRowId = ?", "$source:$it") },
+            )
+            assertEquals(4L, db.longOf("SELECT COUNT(*) FROM rating_tap"))
         }
+    }
+
+    // A restore the copies already show keeps a pending tap of the same
+    // rating (still to be sent) and overrules one of another rating.
+    @Test
+    fun aRestoreKeepsATapOfItsRatingAndOverrulesAnother() = runBlocking {
+        AfterSyncServer().use { server ->
+            val source = server.session.sourceId
+            db.song("device:1")
+            db.song("device:2")
+            db.copy(source, "s1", "device:1", rating = 0)
+            db.copy(source, "s2", "device:2", rating = 0)
+            val user = db.userDao()
+            user.noteTap("device:1", 4, "rk-device:1", 1)
+            user.noteTap("device:2", 4, "rk-device:2", 1)
+            // A copy since put the server's 2 back on the second song.
+            db.exec("UPDATE source_track SET rating = 2 WHERE nativeId = 's2'")
+            assertFalse(user.noteRestored("device:1", 4, "rk-device:1", 2))
+            assertFalse(user.noteRestored("device:2", 2, "rk-device:2", 2))
+            assertEquals(4L, db.longOf("SELECT rating FROM rating_tap WHERE sourceRowId = ?", "$source:s1"))
+            assertEquals(1L, db.longOf("SELECT COUNT(*) FROM rating_tap"))
+        }
+    }
+
+    // A backup restores ratings as restores, never as taps.
+    @Test
+    fun aBackupRestoresRatingsAsRestores() {
+        val text = File(System.getProperty("octo.mainSources")!!, "app/winters/octo/backup/Backups.kt").readText()
+        assertTrue(text.contains("ratings.restore("))
+        assertFalse(text.contains("ratings.rate("))
     }
 
     // Removing a server takes its taps with its copies.

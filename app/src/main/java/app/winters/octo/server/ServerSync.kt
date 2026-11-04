@@ -158,53 +158,77 @@ internal suspend fun copyPlan(sourceId: String, copyAllAnyway: Boolean, finish: 
 }
 
 // The one copy running at a time. `run` copies; its flag copies the whole
-// library even when only the steps after a copy are owed.
+// library even when only the steps after a copy are owed. A server change
+// (a switch, signing out, removing a server) runs inside stopFor: the copy
+// running stops first, no copy runs during the change, and the copies
+// asked for meanwhile run once it ends, as one.
 internal class CopyJobs(private val scope: CoroutineScope, private val run: suspend (copyAll: Boolean) -> Unit) {
     private var job: Job? = null
+
+    // How many server changes are under way, and the copy asked for during
+    // them: null for none, true when a whole one was asked for.
+    private val changing = MutableStateFlow(0)
+    private var asked: Boolean? = null
 
     // The copy running now, or the last one.
     fun current(): Job? = synchronized(this) { job }
 
     fun isActive(): Boolean = synchronized(this) { job?.isActive == true }
 
-    // How many stops are waiting for their copy to end.
-    private var stopping = 0
-
-    // Starts a copy unless one is already running or being stopped (the
-    // one stopping it decides what runs next). One asked while a copy
-    // stopped earlier still cleans up runs once that is done.
-    fun start() {
-        synchronized(this) {
-            if (stopping > 0) return
-            val old = job
-            if (old?.isActive == true) return
-            job = after(old, copyAll = false)
+    // Starts a copy unless one is already running. Answers the copy that
+    // runs, or null during a change, after which it runs.
+    fun start(): Job? = synchronized(this) {
+        if (changing.value > 0) {
+            if (asked == null) asked = false
+            return null
         }
+        val old = job
+        if (old?.isActive == true) return old
+        after(old, copyAll = false).also { job = it }
     }
 
-    // Stops the copy running and waits until it has cleaned up. No copy
-    // starts meanwhile, and one started afresh meanwhile is stopped too, so
-    // none runs once this returns until the next start.
-    suspend fun stop() {
-        synchronized(this) { stopping++ }
-        try {
-            while (true) {
-                val running = synchronized(this) { job } ?: return
-                running.cancelAndJoin()
-                if (synchronized(this) { job } === running) return
-            }
-        } finally {
-            synchronized(this) { stopping-- }
+    // Starts a copy, after any change under way, and waits for it to end.
+    suspend fun startAndJoin() {
+        while (true) {
+            changing.first { it == 0 }
+            val started = start() ?: continue
+            started.join()
+            return
         }
     }
 
     // Stops the copy running and starts a whole one in its place, in one
-    // step, so no other start slips in between.
+    // step, so no other start slips in between; during a change, the whole
+    // copy runs once it ends.
     fun restart() {
         synchronized(this) {
             val old = job
             old?.cancel()
+            if (changing.value > 0) {
+                asked = true
+                return
+            }
             job = after(old, copyAll = true)
+        }
+    }
+
+    // Runs a server change: stops the copy running and waits until it has
+    // cleaned up, then runs `change` with no copy running, and then the
+    // copy asked for meanwhile, if any.
+    suspend fun <T> stopFor(change: suspend () -> T): T {
+        synchronized(this) { changing.value++ }
+        try {
+            synchronized(this) { job }?.cancelAndJoin()
+            return change()
+        } finally {
+            synchronized(this) {
+                changing.value--
+                val wanted = asked
+                if (changing.value == 0 && wanted != null) {
+                    asked = null
+                    job = after(job, wanted)
+                }
+            }
         }
     }
 
@@ -329,9 +353,9 @@ class ServerSync @Inject constructor(
     // A database error (a full disk, say) is noted and said, the change
     // still finishes, and this keeps listening for changes; the library mark
     // is written only once a merge worked, so a failed switch is merged
-    // again by the copy this starts and on every freshen.
-    private suspend fun arrived(session: Session?) {
-        jobs.stop()
+    // again by the copy this starts and on every freshen. Copies asked for
+    // during the change run once it is done.
+    private suspend fun arrived(session: Session?) = jobs.stopFor {
         _problem.value = null
         orNoted { dropUnkept() }
         arrive(
@@ -352,13 +376,15 @@ class ServerSync @Inject constructor(
         copyNeed(copies.accountSync(session.id), copies.copyOf(session.sourceId), session.id, session.sourceId, System.currentTimeMillis())
 
     // Starts a copy unless one is already running.
-    fun syncNow() = jobs.start()
+    fun syncNow() {
+        jobs.start()
+    }
 
-    // Starts a copy unless one is already running, and waits for it to end.
-    // Answers why it failed, in words, or null when it worked.
+    // Starts a copy unless one is already running (after a server change
+    // under way), and waits for it to end. Answers why it failed, in words,
+    // or null when it worked.
     suspend fun syncNowAndWait(): String? {
-        syncNow()
-        jobs.current()?.join()
+        jobs.startAndJoin()
         return _problem.value
     }
 
@@ -369,19 +395,20 @@ class ServerSync @Inject constructor(
     // Signs out of the server in use. Its music leaves the library; its copy
     // stays for signing in again. Nothing on the server changes.
     fun disconnect() {
-        scope.launch {
-            jobs.stop()
-            sessions.signOut()
-        }
+        scope.launch { jobs.stopFor { sessions.signOut() } }
     }
 
     // Takes a kept server off the list, and its copy of the library with it
     // (unless another kept account shares the address). Nothing on the
-    // server changes.
-    suspend fun remove(id: String): StoredServer? {
+    // server changes. No copy runs while the server in use is taken away.
+    suspend fun remove(id: String): StoredServer? =
         if (sessions.state.value.let { it is SessionState.SignedIn && it.session.id == id }) {
-            jobs.stop()
+            jobs.stopFor { removeNow(id) }
+        } else {
+            removeNow(id)
         }
+
+    private suspend fun removeNow(id: String): StoredServer? {
         val gone = sessions.remove(id) ?: return null
         dropUnkept()
         copies.forgetAccount(id)

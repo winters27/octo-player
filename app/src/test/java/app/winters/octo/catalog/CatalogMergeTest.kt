@@ -245,6 +245,23 @@ class CatalogMergeTest {
         assertEquals(0L, db.longOf("SELECT COUNT(*) FROM rating_note"))
     }
 
+    // A copy that no longer has a song takes its tap with it; a tap on a
+    // song the copy still has stays to be sent.
+    @Test
+    fun aSwapForgetsTapsOnSongsTheServerLost() = run {
+        db.put(library(DEVICE, 4))
+        db.put(library(server, 4))
+        val merge = db.testMerge(server, TestHooks())
+        merge.rebuild()
+        db.userDao().noteTap("device:s1", 5, "k", 1)
+        db.userDao().noteTap("device:s2", 3, "k", 1)
+        assertEquals(2L, db.longOf("SELECT COUNT(*) FROM rating_tap"))
+        db.stage(library(server, 4).let { s -> s.copy(tracks = s.tracks.filter { it.nativeId != "s2" }) }, generation = 5)
+        merge.rebuild()
+        assertEquals(1L, db.longOf("SELECT COUNT(*) FROM rating_tap"))
+        assertEquals(5L, db.longOf("SELECT rating FROM rating_tap WHERE sourceRowId = ?", "$server:s1"))
+    }
+
     // A merge while the copy is still being built (a phone scan) keeps the
     // copy's notes, and the copy's swap later still shows the tap.
     @Test

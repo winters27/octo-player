@@ -1,5 +1,6 @@
 package app.winters.octo.playback
 
+import androidx.annotation.VisibleForTesting
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.isFind
 import app.winters.octo.listening.ListeningSync
@@ -37,11 +38,16 @@ class RatingStore @Inject constructor(
     // would, but one the song's server copies already show is not sent,
     // so restoring a big library sends only the ratings that differ.
     fun restore(trackId: String, rating: Int) {
-        if (isFind(trackId)) return
-        val stars = cleanRating(rating)
-        scope.launch {
-            val relinkKey = user.relinkKeyOf(trackId) ?: return@launch
-            if (user.noteRestored(trackId, stars, relinkKey, System.currentTimeMillis())) listening.ratingChanged(trackId)
-        }
+        scope.launch { restoreNow(trackId, rating) }
+    }
+
+    // Answers whether the restored rating goes to the server.
+    @VisibleForTesting
+    internal suspend fun restoreNow(trackId: String, rating: Int): Boolean {
+        if (isFind(trackId)) return false
+        val relinkKey = user.relinkKeyOf(trackId) ?: return false
+        val sent = user.noteRestored(trackId, cleanRating(rating), relinkKey, System.currentTimeMillis())
+        if (sent) listening.ratingChanged(trackId)
+        return sent
     }
 }
