@@ -13,10 +13,13 @@ import java.io.File
 import java.nio.file.Files
 
 // A library database in a file of its own, opened the way the app opens
-// one (write-ahead logging, the migration, the open cleanup). Robolectric.
+// one (write-ahead logging, the migration, the open cleanup). Robolectric
+// runs tests on the main thread, where Room refuses reads that block, so
+// tests may read directly.
 fun openTestCatalog(dir: File = Files.createTempDirectory("catalog").toFile()): CatalogDatabase =
     Room.databaseBuilder(testContext(), CatalogDatabase::class.java, File(dir, CATALOG_FILE).path)
         .catalogSetup()
+        .allowMainThreadQueries()
         .build()
 
 // The test app's context, taking an absolute path as a database's name as
