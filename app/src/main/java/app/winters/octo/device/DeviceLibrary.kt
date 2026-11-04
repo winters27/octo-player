@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.database.sqlite.SQLiteException
 import android.util.Log
 import androidx.core.content.ContextCompat
 import android.os.SystemClock
@@ -112,6 +113,8 @@ class DeviceLibrary @Inject constructor(
             },
         )
         scope.launch { rescan() }
+        // A merge cut off by the app closing is finished, phone access or not.
+        scope.launch { merge.repair() }
     }
 
     // Called with the answer to the permission request.
@@ -155,15 +158,24 @@ class DeviceLibrary @Inject constructor(
                 _folders.value = files.folders(excluded)
                 val included = files.withoutFolders(excluded)
                 val catalog = buildDeviceCatalog(included.map { it.toRow(tags[it.id]) })
-                // The phone's own copy, then the library rebuilt with any
-                // server's music merged in.
-                sources.replaceSource(
-                    DEVICE,
-                    catalog.tracks,
-                    catalog.albums.map { it.toSource() },
-                    catalog.artists.map { it.toSource() },
-                )
-                val library = merge.rebuild()
+                // The phone's own copy, written while no merge is reading
+                // the sources, then the library rebuilt with any server's
+                // music merged in. A write that fails (a full disk) is
+                // tried again by the next scan.
+                val library = try {
+                    merge.sourceWrite {
+                        sources.replaceSource(
+                            DEVICE,
+                            catalog.tracks,
+                            catalog.albums.map { it.toSource() },
+                            catalog.artists.map { it.toSource() },
+                        )
+                    }
+                    merge.rebuild()
+                } catch (e: SQLiteException) {
+                    Log.w("Octo", "phone scan not saved: ${e.javaClass.simpleName}")
+                    null
+                }
                 _paths.value = included.folderPaths()
                 _files.value = included.associate { it.id to relativeFile(it.folder, it.fileName) }
                 // Counts only, so the library can be checked against the phone.
@@ -171,8 +183,8 @@ class DeviceLibrary @Inject constructor(
                     "Octo",
                     "phone scan: ${catalog.tracks.size} tracks, ${catalog.albums.size} albums, " +
                         "${catalog.artists.size} artists, $lastReread files read, " +
-                        "${SystemClock.elapsedRealtime() - started} ms; library ${library.tracks.size} tracks, " +
-                        "${library.albums.size} albums, ${library.artists.size} artists",
+                        "${SystemClock.elapsedRealtime() - started} ms; library ${library?.tracks ?: 0} tracks, " +
+                        "${library?.albums ?: 0} albums, ${library?.artists ?: 0} artists",
                 )
             } finally {
                 _scanning.value = false

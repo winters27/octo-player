@@ -1,8 +1,5 @@
 package app.winters.octo.playback
 
-import app.winters.octo.catalog.CatalogDao
-import app.winters.octo.catalog.SourceDao
-import app.winters.octo.catalog.TrackRatingEntity
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.isFind
 import app.winters.octo.listening.ListeningSync
@@ -20,8 +17,6 @@ import javax.inject.Singleton
 @Singleton
 class RatingStore @Inject constructor(
     private val user: UserDao,
-    private val catalog: CatalogDao,
-    private val sources: SourceDao,
     private val listening: ListeningSync,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -30,12 +25,10 @@ class RatingStore @Inject constructor(
         if (isFind(trackId)) return
         val stars = cleanRating(rating)
         scope.launch {
-            val track = catalog.track(trackId) ?: return@launch
-            if (stars == 0) user.unrate(trackId) else user.rate(TrackRatingEntity(trackId, track.relinkKey, stars, System.currentTimeMillis()))
-            user.showRating(trackId, stars)
-            // The server copies are noted as rated too, so a rebuild before
+            // The server copies are noted as rated too, so a merge before
             // the next sync still shows this rating.
-            sources.setServerRating(trackId, stars)
+            val relinkKey = user.relinkKeyOf(trackId) ?: return@launch
+            user.noteRating(trackId, stars, relinkKey, System.currentTimeMillis(), copies = true)
             listening.ratingChanged(trackId)
         }
     }

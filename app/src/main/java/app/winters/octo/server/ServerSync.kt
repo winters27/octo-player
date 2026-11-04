@@ -448,7 +448,7 @@ class ServerSync @Inject constructor(
                 "Octo",
                 "server sync: ${catalog.tracks.size} tracks, ${catalog.albums.size} albums, " +
                     "${catalog.artists.size} artists, ${SystemClock.elapsedRealtime() - started} ms; " +
-                    "library ${library.tracks.size} tracks, ${library.albums.size} albums, ${library.artists.size} artists",
+                    "library ${library.tracks} tracks, ${library.albums} albums, ${library.artists} artists",
             )
         } catch (e: CancellationException) {
             throw e

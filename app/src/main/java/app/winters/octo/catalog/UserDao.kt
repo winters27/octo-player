@@ -65,6 +65,41 @@ interface UserDao {
     )
     suspend fun showPhoneRatings()
 
+    @Query("SELECT relinkKey FROM track WHERE id = :trackId")
+    suspend fun relinkKeyOf(trackId: String): String?
+
+    @Query("UPDATE source_track SET rating = :rating WHERE mergedId = :trackId AND sourceId LIKE 'server:%'")
+    suspend fun setCopiesRating(trackId: String, rating: Int)
+
+    // While a merge is between its claim and its swap, a song's server
+    // copies note their new rating, so the swap puts it back over the one
+    // it read before.
+    @Query(
+        """
+        INSERT OR REPLACE INTO rating_note (sourceRowId, rating)
+        SELECT id, :rating FROM source_track
+        WHERE mergedId = :trackId AND sourceId LIKE 'server:%'
+          AND (SELECT claimActive FROM merge_state WHERE id = 0) = 1
+        """,
+    )
+    suspend fun noteCopiesRating(trackId: String, rating: Int)
+
+    // One change to a library song's rating: the library shows it; with a
+    // relink key the phone keeps it as its own (0 takes the phone's away);
+    // with `copies` the song's server copies are noted as rated too, so a
+    // merge before the next sync still shows it.
+    @Transaction
+    suspend fun noteRating(trackId: String, rating: Int, relinkKey: String?, now: Long, copies: Boolean) {
+        if (relinkKey != null) {
+            if (rating == 0) unrate(trackId) else rate(TrackRatingEntity(trackId, relinkKey, rating, now))
+        }
+        showRating(trackId, rating)
+        if (copies) {
+            setCopiesRating(trackId, rating)
+            noteCopiesRating(trackId, rating)
+        }
+    }
+
     // For a backup: likes, ratings and the songs of playlists only on the
     // phone, each with what is known of the song, in order.
 
@@ -458,11 +493,12 @@ interface UserDao {
     }
 
     // After a scan, points rows whose song id vanished at the song that now
-    // has the same relink key. OR IGNORE skips a like that would duplicate one.
+    // has the same relink key, the lowest id when several do, so the phone's
+    // copy wins. OR IGNORE skips a like that would duplicate one.
     @Query(
         """
         UPDATE OR IGNORE liked_track
-        SET trackId = (SELECT t.id FROM track t WHERE t.relinkKey = liked_track.relinkKey LIMIT 1)
+        SET trackId = (SELECT t.id FROM track t WHERE t.relinkKey = liked_track.relinkKey ORDER BY t.id LIMIT 1)
         WHERE trackId NOT IN (SELECT id FROM track)
           AND EXISTS (SELECT 1 FROM track t WHERE t.relinkKey = liked_track.relinkKey AND t.relinkKey != '')
         """,
@@ -472,7 +508,7 @@ interface UserDao {
     @Query(
         """
         UPDATE play_event
-        SET trackId = (SELECT t.id FROM track t WHERE t.relinkKey = play_event.relinkKey LIMIT 1)
+        SET trackId = (SELECT t.id FROM track t WHERE t.relinkKey = play_event.relinkKey ORDER BY t.id LIMIT 1)
         WHERE trackId NOT IN (SELECT id FROM track)
           AND EXISTS (SELECT 1 FROM track t WHERE t.relinkKey = play_event.relinkKey AND t.relinkKey != '')
         """,
@@ -482,7 +518,7 @@ interface UserDao {
     @Query(
         """
         UPDATE playlist_item
-        SET trackId = (SELECT t.id FROM track t WHERE t.relinkKey = playlist_item.relinkKey LIMIT 1)
+        SET trackId = (SELECT t.id FROM track t WHERE t.relinkKey = playlist_item.relinkKey ORDER BY t.id LIMIT 1)
         WHERE trackId NOT IN (SELECT id FROM track)
           AND EXISTS (SELECT 1 FROM track t WHERE t.relinkKey = playlist_item.relinkKey AND t.relinkKey != '')
         """,
@@ -492,7 +528,7 @@ interface UserDao {
     @Query(
         """
         UPDATE OR IGNORE track_rating
-        SET trackId = (SELECT t.id FROM track t WHERE t.relinkKey = track_rating.relinkKey LIMIT 1)
+        SET trackId = (SELECT t.id FROM track t WHERE t.relinkKey = track_rating.relinkKey ORDER BY t.id LIMIT 1)
         WHERE trackId NOT IN (SELECT id FROM track)
           AND EXISTS (SELECT 1 FROM track t WHERE t.relinkKey = track_rating.relinkKey AND t.relinkKey != '')
         """,

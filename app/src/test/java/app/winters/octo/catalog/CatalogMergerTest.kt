@@ -4,7 +4,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class CatalogMergerTest {
     private fun track(
         id: String,
@@ -47,7 +50,7 @@ class CatalogMergerTest {
 
     @Test
     fun oneSourcePassesThroughUnchanged() {
-        val merged = mergeCatalogs(listOf(phoneOnly))
+        val merged = mergeThroughDatabase(listOf(phoneOnly))
         val before = phoneOnly.tracks.associateBy { it.id }
         assertEquals(2, merged.tracks.size)
         merged.tracks.forEach { t ->
@@ -72,7 +75,7 @@ class CatalogMergerTest {
             albums = listOf(album("server:album", "server", songs = 2)),
             artists = listOf(artist("server:artist", "server")),
         )
-        val merged = mergeCatalogs(listOf(phoneOnly, serverSide)).tracks.associateBy { it.id }
+        val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide)).tracks.associateBy { it.id }
         // The phone's songs keep their ids and take the server's rating; none is none.
         assertEquals(4, merged.getValue("p1").rating)
         assertEquals(0, merged.getValue("p2").rating)
@@ -89,14 +92,14 @@ class CatalogMergerTest {
             artists = listOf(artist("server:artist", "server")),
         )
         // The phone's files say nothing, so the server's marks reach them.
-        val merged = mergeCatalogs(listOf(phoneOnly, serverSide)).tracks.associateBy { it.id }
+        val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide)).tracks.associateBy { it.id }
         assertEquals(true, merged.getValue("p1").explicit)
         assertEquals(false, merged.getValue("p2").explicit)
         // A phone file's own mark goes first.
         val tagged = phoneOnly.copy(tracks = phoneOnly.tracks.map { if (it.id == "p1") it.copy(explicit = false) else it })
-        assertEquals(false, mergeCatalogs(listOf(tagged, serverSide)).tracks.single { it.id == "p1" }.explicit)
+        assertEquals(false, mergeThroughDatabase(listOf(tagged, serverSide)).tracks.single { it.id == "p1" }.explicit)
         // A song only one source has keeps its mark, or none.
-        assertEquals(null, mergeCatalogs(listOf(phoneOnly)).tracks.first().explicit)
+        assertEquals(null, mergeThroughDatabase(listOf(phoneOnly)).tracks.first().explicit)
     }
 
     @Test
@@ -106,7 +109,7 @@ class CatalogMergerTest {
             albums = listOf(album("device:a", "device"), album("device:b", "device")),
             artists = listOf(artist("device:artist", "device"), artist("device:other", "device", name = "DRAKE")),
         )
-        val merged = mergeCatalogs(listOf(twin))
+        val merged = mergeThroughDatabase(listOf(twin))
         assertEquals(2, merged.albums.size)
         assertEquals(2, merged.tracks.size)
         assertEquals(2, merged.artists.size)
@@ -123,7 +126,7 @@ class CatalogMergerTest {
             albums = listOf(album("server:album", "server", songs = 3, art = "server:art")),
             artists = listOf(artist("server:artist", "server")),
         )
-        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide))
 
         // One album, keeping the phone's id, with the server's cover filling in.
         val album = merged.albums.single()
@@ -165,7 +168,7 @@ class CatalogMergerTest {
             albums = listOf(album("server:album", "server", songs = 2).copy(releaseTypes = joinLines(listOf("Album", "Compilation")))),
             artists = listOf(artist("server:artist", "server")),
         )
-        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide))
         assertEquals("device:album", merged.albums.single().id)
         assertEquals(joinLines(listOf("Album", "Compilation")), merged.albums.single().releaseTypes)
     }
@@ -177,7 +180,7 @@ class CatalogMergerTest {
             albums = listOf(album("server:album", "server")),
             artists = listOf(artist("server:artist", "server")),
         )
-        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide))
         assertEquals(3, merged.tracks.size)
         assertEquals(2, merged.tracks.count { it.title == "One Dance" })
     }
@@ -189,7 +192,7 @@ class CatalogMergerTest {
             albums = listOf(album("server:scorpion", "server", title = "Scorpion", songs = 1)),
             artists = listOf(artist("server:artist", "server")),
         )
-        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide))
         val scorpion = merged.albums.single { it.title == "Scorpion" }
         assertEquals("server:scorpion", scorpion.id)
         assertEquals("device:artist", scorpion.artistId)
@@ -215,7 +218,7 @@ class CatalogMergerTest {
             albums = listOf(album("server:deluxe", "server", title = "Views (Deluxe)", artist = "server:ovo", songs = 2).copy(artist = "OVO Sound")),
             artists = listOf(artist("server:ovo", "server", name = "OVO Sound")),
         )
-        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide))
         assertEquals(listOf("device:album"), merged.albums.map { it.id })
         assertEquals(2, merged.tracks.size)
         assertEquals("p1", merged.mergedIds["s1"])
@@ -234,7 +237,7 @@ class CatalogMergerTest {
             albums = listOf(album("server:deluxe", "server", title = "Views (Deluxe)", artist = "server:ovo", songs = 2).copy(artist = "OVO Sound")),
             artists = listOf(artist("server:ovo", "server", name = "OVO Sound")),
         )
-        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide))
         val deluxe = merged.albums.single { it.id == "server:deluxe" }
         assertEquals(1, deluxe.songCount)
         assertEquals(listOf("Bonus Track"), merged.tracks.filter { it.albumId == "server:deluxe" }.map { it.title })
@@ -249,7 +252,7 @@ class CatalogMergerTest {
             albums = listOf(album("server:covers", "server", title = "Covers", artist = "server:someone")),
             artists = listOf(artist("server:someone", "server", name = "Someone Else")),
         )
-        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide))
         assertEquals("s1", merged.mergedIds["s1"])
         assertEquals(3, merged.tracks.size)
     }
@@ -264,7 +267,7 @@ class CatalogMergerTest {
             albums = listOf(album("server:album", "server", songs = 2)),
             artists = listOf(artist("server:artist", "server")),
         )
-        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide))
         // A remaster is the same recording; a live take of the same length
         // is not, and keeps its own id.
         assertEquals("p1", merged.mergedIds["s1"])
@@ -282,7 +285,7 @@ class CatalogMergerTest {
             albums = listOf(album("server:album", "server", songs = 2)),
             artists = listOf(artist("server:artist", "server")),
         )
-        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide))
         // An anniversary edition packages the same recording again; a
         // drumless one of the same length is another recording.
         assertEquals("p1", merged.mergedIds["s1"])
@@ -302,7 +305,7 @@ class CatalogMergerTest {
             albums = listOf(album("server:album", "server")),
             artists = listOf(artist("server:artist", "server")),
         )
-        val merged = mergeCatalogs(listOf(phone, serverSide))
+        val merged = mergeThroughDatabase(listOf(phone, serverSide))
         assertEquals("p1", merged.mergedIds["s1"])
         assertEquals("p2", merged.mergedIds["s2"])
     }
@@ -317,7 +320,7 @@ class CatalogMergerTest {
             albums = listOf(album("server:single", "server", title = "One Dance - Single", songs = 1)),
             artists = listOf(artist("server:artist", "server")),
         )
-        val merged = mergeCatalogs(listOf(phoneOnly, serverSide))
+        val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide))
         assertEquals("p2", merged.mergedIds["s1"])
     }
 

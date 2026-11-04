@@ -13,3 +13,14 @@ data class SongKeyRow(
     val durationMs: Long?,
     val rating: Int?,
 )
+
+// Raised whenever SongIdentity reads songs differently, so keys stored with
+// source rows are worked out again before the next merge.
+const val SONG_KEYS_VERSION = 1
+
+// A source row with the keys the merge matches it by: its title as
+// SongIdentity reads it, and that title with its main artist.
+fun SourceTrackEntity.withKeys(): SourceTrackEntity {
+    val keys = SongIdentity.songKeys(artist, title)
+    return copy(titleKey = keys.title, matchKey = keys.matchKey, keysVersion = SONG_KEYS_VERSION)
+}
