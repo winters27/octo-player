@@ -83,6 +83,19 @@ class Fetches(
     // The library copy of a song asked for here, if it has landed.
     fun landedId(id: String): String? = landed[id]
 
+    // Lets go of each song brought in here whose library copy the library
+    // no longer has (`has` answers by library id), as when it was deleted,
+    // so its "+" asks for it again.
+    fun forgetGone(has: (String) -> Boolean) {
+        val gone = landed.filterValues { !has(it) }.keys
+        if (gone.isEmpty()) return
+        gone.forEach {
+            landed.remove(it)
+            askedAt.remove(it)
+        }
+        _phases.update { phases -> phases.filterKeys { it !in gone } }
+    }
+
     // Asks the server to fetch a song. A failed one can be asked again.
     fun request(id: String) {
         val now = phase(id)

@@ -686,10 +686,14 @@ class AppState(
     private fun startReading(views: ServerViews) {
         views.library.load()
         // Kept songs are checked against each read of the library, such as
-        // the one after a song's file is swapped for a better copy.
+        // the one after a song's file is swapped for a better copy, and a
+        // song brought in here that has since been deleted offers its "+".
         libraryWatch?.cancel()
         libraryWatch = scope.launch {
-            views.library.state.filterIsInstance<LibraryState.Ready>().collect { offline.poke() }
+            views.library.state.filterIsInstance<LibraryState.Ready>().collect { ready ->
+                offline.poke()
+                views.fetches?.forgetGone(ready.index::hasSong)
+            }
         }
         views.upgrades?.start()
         views.downloads?.start()

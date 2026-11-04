@@ -372,6 +372,22 @@ class FetchesTest {
     }
 
     @Test
+    fun aSongDeletedSinceItArrivedCanBeAskedForAgain() = runBlocking {
+        server.answer("star")
+        server.answer("getAcquisitions", """"acquisitions":{"acquisition":[{"id":"ext1","state":"done","libraryId":"lib1","startedAt":"2026-09-27T10:00:00Z"}]}""")
+        val scope = CoroutineScope(Dispatchers.Default + Job())
+        val fetches = Fetches(server.client(), scope, pollMs = 50, clock = ticking())
+        fetches.request("ext1")
+        withTimeout(5_000) { fetches.phases.first { it["ext1"] == FetchPhase.Done } }
+        fetches.forgetGone { it == "lib1" }
+        assertEquals(FetchPhase.Done, fetches.phase("ext1"))
+        fetches.forgetGone { false }
+        assertEquals(FetchPhase.None, fetches.phase("ext1"))
+        assertEquals(null, fetches.landedId("ext1"))
+        scope.cancel()
+    }
+
+    @Test
     fun withNoListComingBack_ASongJustAskedStaysQueued() = runBlocking {
         server.answer("star")
         val scope = CoroutineScope(Dispatchers.Default + Job())
