@@ -189,16 +189,24 @@ class ServerChangeTest {
 
     // A whole copy asked for (a folder change, Sync now) is made whole and
     // then settled.
+    // A copy as CopyRun runs it: a whole one says when it is in the library,
+    // then the steps after it run; it answers whether it copied whole.
+    private suspend fun copied(whole: Boolean, swapped: suspend () -> Unit, steps: () -> Unit = {}): Boolean {
+        if (whole) swapped()
+        steps()
+        return whole
+    }
+
     @Test
     fun anAskedWholeCopyIsMadeWholeThenSettled() = runBlocking {
         val owed = WholeCopyOwed()
         val copies = mutableListOf<Boolean>()
         owed.ask("home")
-        copyUntilWhole(owed, "home") { whole -> copies += whole; true }
+        copyUntilWhole(owed, "home") { whole, swapped -> copies += whole; copied(whole, swapped) }
         assertEquals(listOf(true), copies)
         assertNull(owed.owed("home"))
         // Nothing owed: a start only resumes.
-        copyUntilWhole(owed, "home") { whole -> copies += whole; false }
+        copyUntilWhole(owed, "home") { whole, swapped -> copies += whole; copied(whole, swapped) }
         assertEquals(listOf(true, false), copies)
     }
 
@@ -209,32 +217,49 @@ class ServerChangeTest {
     fun aLighterCopyRunningWhenAWholeOneIsAskedCopiesWholeToo() = runBlocking {
         val owed = WholeCopyOwed()
         val copies = mutableListOf<Boolean>()
-        copyUntilWhole(owed, "home") { whole ->
+        copyUntilWhole(owed, "home") { whole, swapped ->
             copies += whole
-            if (copies.size == 1) owed.ask("home")
-            whole
+            copied(whole, swapped) { if (copies.size == 1) owed.ask("home") }
         }
         assertEquals(listOf(false, true), copies)
         assertNull(owed.owed("home"))
     }
 
-    // A whole copy that fails leaves it owed, so the next start (a freshen)
-    // copies whole instead of only resuming.
+    // A whole copy that fails before it is in the library leaves it owed,
+    // so the next start (a freshen) copies whole instead of only resuming.
     @Test
     fun aWholeCopyThatFailsStaysOwed() = runBlocking {
         val owed = WholeCopyOwed()
         owed.ask("home")
         try {
-            copyUntilWhole(owed, "home") { throw IllegalStateException("unreachable") }
+            copyUntilWhole(owed, "home") { _, _ -> throw IllegalStateException("unreachable") }
             fail("the failure was swallowed")
         } catch (e: IllegalStateException) {
             // passed on to sync(), which says it
         }
         assertEquals(1, owed.owed("home"))
         val copies = mutableListOf<Boolean>()
-        copyUntilWhole(owed, "home") { whole -> copies += whole; true }
+        copyUntilWhole(owed, "home") { whole, swapped -> copies += whole; copied(whole, swapped) }
         assertEquals(listOf(true), copies)
         assertNull(owed.owed("home"))
+    }
+
+    // A whole copy in the library whose steps after it fail has made what
+    // was asked: the next start re-runs only the steps, never the whole copy.
+    @Test
+    fun stepsThatFailAfterAWholeCopyAreTriedAgainAlone() = runBlocking {
+        val owed = WholeCopyOwed()
+        owed.ask("home")
+        try {
+            copyUntilWhole(owed, "home") { whole, swapped -> copied(whole, swapped) { throw IllegalStateException("playlists") } }
+            fail("the failure was swallowed")
+        } catch (e: IllegalStateException) {
+            // passed on to sync(), which says it
+        }
+        assertNull(owed.owed("home"))
+        val copies = mutableListOf<Boolean>()
+        copyUntilWhole(owed, "home") { whole, swapped -> copies += whole; copied(whole, swapped) }
+        assertEquals(listOf(false), copies)
     }
 
     // A whole copy asked for again while one runs stays owed; one asked for
@@ -244,15 +269,48 @@ class ServerChangeTest {
     fun onlyTheAskAWholeCopyAnsweredIsSettled() = runBlocking {
         val owed = WholeCopyOwed()
         owed.ask("home")
-        copyUntilWhole(owed, "home") { owed.ask("home"); true }
+        copyUntilWhole(owed, "home") { whole, swapped -> copied(whole, swapped) { owed.ask("home") } }
         assertEquals(2, owed.owed("home"))
         owed.ask("other")
         val copies = mutableListOf<Boolean>()
-        copyUntilWhole(owed, "home") { whole -> copies += whole; false }
+        copyUntilWhole(owed, "home") { whole, swapped -> copies += whole; copied(whole, swapped) }
         assertEquals(listOf(false), copies)
         assertEquals(3, owed.owed("other"))
-        copyUntilWhole(owed, "other") { null }
+        copyUntilWhole(owed, "other") { _, _ -> null }
         assertEquals(3, owed.owed("other"))
+    }
+
+    // A start notes a whole ask before it looks at the copy running, so the
+    // running copy copies whole too; a lighter start or one signed out notes
+    // none.
+    @Test
+    fun aWholeAskIsNotedEvenWhileACopyRuns() {
+        val owed = WholeCopyOwed()
+        assertFalse(startWanted(owed, whole = true, account = "home", running = true))
+        assertEquals(1, owed.owed("home"))
+        val none = WholeCopyOwed()
+        assertTrue(startWanted(none, whole = false, account = "home", running = false))
+        assertTrue(startWanted(none, whole = true, account = null, running = false))
+        assertNull(none.owed("home"))
+    }
+
+    // A freshen of a fresh copy only looks, unless a whole copy is owed.
+    @Test
+    fun aFreshenCopiesWhileAWholeCopyIsOwed() {
+        assertTrue(freshenLooks(CopyNeed.Fresh, owed = null))
+        assertFalse(freshenLooks(CopyNeed.Fresh, owed = 1))
+        assertFalse(freshenLooks(CopyNeed.AfterSync, owed = null))
+    }
+
+    // Every ask (Sync now, a folder change, downloads, upgrades) copies
+    // whole; only the automatic starts (arrival, freshen) resume.
+    @Test
+    fun onlyAutomaticStartsResume() {
+        val text = java.io.File(System.getProperty("octo.mainSources")!!, "app/winters/octo/server/ServerSync.kt").readText()
+        assertTrue(text.contains("fun syncNow() = startSync(whole = true)"))
+        assertTrue(text.contains("private fun resume() = startSync(whole = false)"))
+        assertEquals(listOf("copy = ::resume", "resume()"), Regex("""copy = ::resume|(?<!fun )resume\(\)""").findAll(text).map { it.value }.toList())
+        assertEquals(1, Regex("""startSync\(whole = false\)""").findAll(text).count())
     }
 
     @Test

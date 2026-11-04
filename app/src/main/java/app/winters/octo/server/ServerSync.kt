@@ -152,7 +152,7 @@ internal class WholeCopyOwed {
     private var asks = 0
 
     @Synchronized
-    fun ask(forAccount: String?) {
+    fun ask(forAccount: String) {
         account = forAccount
         asks++
     }
@@ -173,15 +173,28 @@ internal class WholeCopyOwed {
 // Runs `copy` (answering whether it copied the whole library, or null when
 // it copied nothing) whole when `account` is owed a whole copy, and again
 // whole when one was asked for while a lighter one ran, so the job a caller
-// waits on ends only once what it asked for is made.
-internal suspend fun copyUntilWhole(owed: WholeCopyOwed, account: String, copy: suspend (whole: Boolean) -> Boolean?) {
+// waits on ends only once what it asked for is made. The owed copy is made
+// once a whole copy is in the library (`copy` calls its second argument
+// then): steps after it that fail are tried again on their own.
+internal suspend fun copyUntilWhole(owed: WholeCopyOwed, account: String, copy: suspend (whole: Boolean, swapped: suspend () -> Unit) -> Boolean?) {
     while (true) {
         val asks = owed.owed(account)
-        val copiedAll = copy(asks != null) ?: return
-        if (copiedAll && asks != null) owed.made(account, asks)
+        val copiedAll = copy(asks != null) { if (asks != null) owed.made(account, asks) } ?: return
         if (copiedAll || owed.owed(account) == null) return
     }
 }
+
+// A start notes a whole ask for the account in use (none when signed out)
+// before it looks at the copy running, so a copy already running copies
+// whole too. Answers whether a new copy is to start.
+internal fun startWanted(owed: WholeCopyOwed, whole: Boolean, account: String?, running: Boolean): Boolean {
+    if (whole && account != null) owed.ask(account)
+    return !running
+}
+
+// Whether a freshen of a fresh copy only looks for new music: not while a
+// whole copy is owed (`owed` its ask), which it copies instead.
+internal fun freshenLooks(need: CopyNeed, owed: Int?): Boolean = need == CopyNeed.Fresh && owed == null
 
 // Before a copy: a switch to its server whose merge failed is finished
 // first, and while it fails nothing is copied (null). Otherwise answers
@@ -336,8 +349,7 @@ class ServerSync @Inject constructor(
     // `whole` asks for the whole library read again.
     private fun startSync(whole: Boolean) {
         synchronized(this) {
-            if (whole) wholeOwed.ask(signedIn()?.id)
-            if (job?.isActive == true) return
+            if (!startWanted(wholeOwed, whole, signedIn()?.id, running = job?.isActive == true)) return
             job = scope.launch { sync() }
         }
     }
@@ -478,7 +490,7 @@ class ServerSync @Inject constructor(
         val session = signedIn()
         if (!freshenSwitch(_ready.value, session?.id, session?.sourceId, switch::finish) || session == null) return
         // A whole copy asked for and not yet made is tried again, fresh or not.
-        if (need(session) == CopyNeed.Fresh && wholeOwed.owed(session.id) == null) return look(session)
+        if (freshenLooks(need(session), wholeOwed.owed(session.id))) return look(session)
         val now = SystemClock.elapsedRealtime()
         if (!newMusicLookDue(lookedAt[session.id], now)) return
         lookedAt[session.id] = now
@@ -546,11 +558,11 @@ class ServerSync @Inject constructor(
         val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return
         _syncing.value = true
         try {
-            copyUntilWhole(wholeOwed, session.id) { whole ->
+            copyUntilWhole(wholeOwed, session.id) { whole, swapped ->
                 val started = SystemClock.elapsedRealtime()
                 // While a failed switch still fails, its words show and nothing is copied.
                 val copyAll = copyPlan(session.sourceId, whole, switch::finish) { need(session) } ?: return@copyUntilWhole null
-                val done = CopyRun(copy, copies, afterSyncSteps()).run(session.id, session.sourceId, session.client, copyAll)
+                val done = CopyRun(copy, copies, afterSyncSteps()).run(session.id, session.sourceId, session.client, copyAll, swapped)
                 lookedAt[session.id] = SystemClock.elapsedRealtime()
                 _problem.value = null
                 // Counts only, like the phone scan's line.

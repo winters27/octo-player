@@ -514,13 +514,16 @@ class CopyRun(
     private val afterSync: List<suspend () -> Unit>,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    suspend fun run(account: String, sourceId: String, client: SubsonicClient, copyAll: Boolean): CopyDone {
+    // `swapped` runs once a whole copy is in the library, before the steps
+    // after it.
+    suspend fun run(account: String, sourceId: String, client: SubsonicClient, copyAll: Boolean, swapped: suspend () -> Unit = {}): CopyDone {
         // When the server last read its folders, before the copy, so a look
         // afterwards reads on only once it has read them again.
         val scan = if (copyAll) lastScanOf(client) else null
         if (copyAll) {
             copy.copy(account, sourceId, client)
             records.markSwapped(account, ROWS_VERSION)
+            swapped()
         }
         afterSync.forEach { it() }
         val songs = records.liveTrackCount(sourceId)
