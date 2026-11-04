@@ -28,7 +28,7 @@ class RatingStore @Inject constructor(
             // The server copies are noted as rated too, so a merge before
             // the next sync still shows this rating.
             val relinkKey = user.relinkKeyOf(trackId) ?: return@launch
-            user.noteRating(trackId, stars, relinkKey, System.currentTimeMillis(), copies = true)
+            user.noteTap(trackId, stars, relinkKey, System.currentTimeMillis())
             listening.ratingChanged(trackId)
         }
     }

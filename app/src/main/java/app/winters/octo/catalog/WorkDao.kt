@@ -177,6 +177,18 @@ interface WorkDao {
         writeClaimActive(active)
     }
 
+    @Query("SELECT server FROM merge_state WHERE id = 0")
+    suspend fun mergedServer(): String?
+
+    @Query("UPDATE merge_state SET server = :server WHERE id = 0")
+    suspend fun writeMergedServer(server: String)
+
+    @Transaction
+    suspend fun setMergedServer(server: String) {
+        ensureMergeState()
+        writeMergedServer(server)
+    }
+
     @Query("SELECT * FROM rating_note")
     suspend fun ratingNotes(): List<RatingNoteEntity>
 

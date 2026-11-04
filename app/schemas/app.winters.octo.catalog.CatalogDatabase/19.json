@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 19,
-    "identityHash": "3bf1733fce421cd8e455181b4bfec1e7",
+    "identityHash": "49a396f5fe9db4afc54f97f9b88113e3",
     "entities": [
       {
         "tableName": "track",
@@ -3222,6 +3222,30 @@
         }
       },
       {
+        "tableName": "rating_tap",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`sourceRowId` TEXT NOT NULL, `rating` INTEGER NOT NULL, PRIMARY KEY(`sourceRowId`))",
+        "fields": [
+          {
+            "fieldPath": "sourceRowId",
+            "columnName": "sourceRowId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rating",
+            "columnName": "rating",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "sourceRowId"
+          ]
+        }
+      },
+      {
         "tableName": "source_meta",
         "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`sourceId` TEXT NOT NULL, `copyOf` TEXT, `stageOwner` TEXT, `stamp` INTEGER NOT NULL, `stage` TEXT NOT NULL, `generation` INTEGER NOT NULL, `stagedTracks` INTEGER NOT NULL, `stagedAlbums` INTEGER NOT NULL, `stagedArtists` INTEGER NOT NULL, PRIMARY KEY(`sourceId`))",
         "fields": [
@@ -3346,7 +3370,7 @@
       },
       {
         "tableName": "merge_state",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `skipKey` TEXT, `claimActive` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `skipKey` TEXT, `claimActive` INTEGER NOT NULL, `server` TEXT, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -3364,6 +3388,11 @@
             "columnName": "claimActive",
             "affinity": "INTEGER",
             "notNull": true
+          },
+          {
+            "fieldPath": "server",
+            "columnName": "server",
+            "affinity": "TEXT"
           }
         ],
         "primaryKey": {
@@ -3564,7 +3593,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '3bf1733fce421cd8e455181b4bfec1e7')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '49a396f5fe9db4afc54f97f9b88113e3')"
     ]
   }
 }

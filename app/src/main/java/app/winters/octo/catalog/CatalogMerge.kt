@@ -24,8 +24,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 // How big the library is after a merge.
-// `server` is the server the merge put in the library ("" for none).
-data class MergeCounts(val tracks: Int, val albums: Int, val artists: Int, val server: String = "")
+data class MergeCounts(val tracks: Int, val albums: Int, val artists: Int)
 
 // A copy of a source's library that was not swapped in, and why, in words.
 class StageAborted(val reason: String) : Exception(reason)
@@ -116,6 +115,10 @@ class CatalogMerge internal constructor(
         if (start) scope.launch { runMerges() }
         return done.await()
     }
+
+    // The server the library was last merged for ("" for none), as the
+    // merge itself wrote it with its result; null before any merge did.
+    suspend fun mergedFor(): String? = work.mergedServer()
 
     // Runs `block` between rebuilds, never during a swap, so it sees song
     // ids and everything that follows them already in step.
@@ -225,7 +228,7 @@ class CatalogMerge internal constructor(
                 }
             }
             if (again) continue
-            return (counts ?: skipped()).copy(server = server.orEmpty())
+            return counts ?: skipped()
         }
     }
 
@@ -244,7 +247,7 @@ class CatalogMerge internal constructor(
     // A source's copy that waits to be swapped in, as claimed.
     private class ClaimedStage(val sourceId: String, val generation: Long, val tracks: Int)
 
-    private class Claim(val sources: List<MergeSource>, val claimed: List<ClaimedStage>)
+    private class Claim(val sources: List<MergeSource>, val claimed: List<ClaimedStage>, val server: String)
 
     // What a merge does: nothing (claim null) or merge what it claimed.
     // Copies of sources out of the library are dropped either way, and so
@@ -275,14 +278,18 @@ class CatalogMerge internal constructor(
             .distinct()
             .sortedBy { if (it == DEVICE) "" else it }
         val key = skipKey(ids, metas.mapValues { it.value.stamp }, inUse.associate { it.sourceId to it.generation })
-        if (work.skipKey() == key) return@withTransaction Step(null, dropped, leftover)
+        if (work.skipKey() == key) {
+            // The same inputs make the same library, now this server's.
+            work.setMergedServer(server.orEmpty())
+            return@withTransaction Step(null, dropped, leftover)
+        }
         val claimed = inUse.map { meta ->
             work.setStage(meta.sourceId, STAGE_CLAIMED)
             ClaimedStage(meta.sourceId, meta.generation, meta.stagedTracks + carryTakeIns(meta))
         }
         work.setClaimActive(true)
         val staged = claimed.mapTo(HashSet()) { it.sourceId }
-        Step(Claim(ids.mapIndexed { rank, id -> MergeSource(id, rank, id in staged) }, claimed), dropped, leftover)
+        Step(Claim(ids.mapIndexed { rank, id -> MergeSource(id, rank, id in staged) }, claimed, server.orEmpty()), dropped, leftover)
     }
 
     // Songs, albums and artists taken in while a copy was built join it,
@@ -361,6 +368,7 @@ class CatalogMerge internal constructor(
             endRatingNotes()
             val stamps = work.metas().associate { it.sourceId to it.stamp }
             work.setSkipKey(skipKey(claim.sources.map { it.sourceId }, stamps, emptyMap()))
+            work.setMergedServer(claim.server)
         }
     }
 

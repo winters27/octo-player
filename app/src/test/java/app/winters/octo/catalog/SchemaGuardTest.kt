@@ -50,7 +50,8 @@ class SchemaGuardTest {
             w.execSQL("INSERT INTO rating_note VALUES ('x', 3)")
             w.execSQL("INSERT INTO sync_song (songId, albumKey, json) VALUES ('s', 'a', '{}')")
             w.execSQL("INSERT INTO source_meta VALUES ('server:h', 'acct', 'acct', 5, '$STAGE_READY', 7, 1, 1, 1)")
-            w.execSQL("INSERT INTO merge_state VALUES (0, 'key', 1)")
+            w.execSQL("INSERT INTO merge_state VALUES (0, 'key', 1, 'server:h')")
+            w.execSQL("INSERT INTO rating_tap VALUES ('x', 4)")
             close()
         }
         val db = openTestCatalog(dir)
@@ -63,10 +64,17 @@ class SchemaGuardTest {
             // The stamp and the skip key are kept: they are not working rows.
             assertEquals(5L, it.getLong(2))
         }
-        w.query("SELECT skipKey, claimActive FROM merge_state").use {
+        w.query("SELECT skipKey, claimActive, server FROM merge_state").use {
             it.moveToFirst()
             assertEquals("key", it.getString(0))
             assertEquals(0, it.getInt(1))
+            // Which server the library holds is kept too.
+            assertEquals("server:h", it.getString(2))
+        }
+        // A tap the server has yet to confirm outlives a restart.
+        w.query("SELECT rating FROM rating_tap WHERE sourceRowId = 'x'").use {
+            assertTrue(it.moveToFirst())
+            assertEquals(4, it.getInt(0))
         }
         db.close()
     }

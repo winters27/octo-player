@@ -4,6 +4,7 @@ import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.LikedAlbumEntity
 import app.winters.octo.catalog.LikedTrackEntity
 import app.winters.octo.catalog.TrackRatingEntity
+import app.winters.octo.catalog.longOf
 import app.winters.octo.data.SessionState
 import app.winters.octo.testing.openTestCatalog
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -256,13 +257,57 @@ class AfterSyncTest {
             db.copy(source, "s1", "device:1", rating = 0)
             val dao = db.listeningDao()
             val store = store(dao)
-            db.userDao().noteRating("device:1", 4, "rk-device:1", 1, copies = true)
+            db.userDao().noteTap("device:1", 4, "rk-device:1", 1)
             val sync = listeningSync(server, dao, store)
             sync.afterSync()
             assertEquals(listOf("setRating s1 rating=4"), server.calls("setRating"))
             assertEquals(4, dao.syncedRatingsAmong("home", listOf("s1")).single().rating)
+            // Its tap is answered, so nothing is sent again.
+            assertEquals(0L, db.longOf("SELECT COUNT(*) FROM rating_tap"))
             sync.afterSync()
             assertEquals(listOf("setRating s1 rating=4"), server.calls("setRating"))
+        }
+    }
+
+    // A rating restored from a backup that the server copy already shows,
+    // never agreed on and never tapped: taken as agreed, nothing sent.
+    @Test
+    fun aRestoredRatingTheCopyShowsSendsNothing() = runBlocking {
+        AfterSyncServer().use { server ->
+            val source = server.session.sourceId
+            db.song("device:1")
+            db.copy(source, "s1", "device:1", rating = 4)
+            val dao = db.listeningDao()
+            db.userDao().rate(TrackRatingEntity("device:1", "rk-device:1", 4, 1))
+            listeningSync(server, dao, store(dao)).afterSync()
+            assertEquals(emptyList<String>(), server.calls("setRating"))
+            assertEquals(4, dao.syncedRatingsAmong("home", listOf("s1")).single().rating)
+        }
+    }
+
+    // A tap made while the sync sends an earlier one outlives that send,
+    // and the next sync sends it.
+    @Test
+    fun aTapMadeWhileAnotherIsSentIsSentNext() = runBlocking {
+        AfterSyncServer().use { server ->
+            val source = server.session.sourceId
+            db.song("device:1")
+            db.copy(source, "s1", "device:1", rating = 0)
+            val dao = db.listeningDao()
+            val store = store(dao)
+            db.userDao().noteTap("device:1", 4, "rk-device:1", 1)
+            server.whileRating = {
+                server.whileRating = null
+                runBlocking { db.userDao().noteTap("device:1", 2, "rk-device:1", 2) }
+            }
+            val sync = listeningSync(server, dao, store)
+            sync.afterSync()
+            assertEquals(listOf("setRating s1 rating=4"), server.calls("setRating"))
+            assertEquals(1L, db.longOf("SELECT COUNT(*) FROM rating_tap WHERE rating = 2"))
+            sync.afterSync()
+            assertEquals(listOf("setRating s1 rating=4", "setRating s1 rating=2"), server.calls("setRating"))
+            assertEquals(2, db.dao().track("device:1")!!.rating)
+            assertEquals(0L, db.longOf("SELECT COUNT(*) FROM rating_tap"))
         }
     }
 

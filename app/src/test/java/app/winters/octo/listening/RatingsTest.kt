@@ -102,17 +102,26 @@ class RatingsTest {
         assertEquals(mapOf("s1" to 3), plan.settled(failed = setOf("t1"), before = mapOf("s1" to 3)))
     }
 
-    // An unrated song tapped to 5, the copy written, the send lost: with no
-    // record the copy's 5 may be the unsent tap, so it is sent, and once it
-    // lands it is agreed and never sent again.
+    // An unrated song tapped to 5, the copy written, the send lost: the tap
+    // is still unconfirmed, so it is sent, and once it lands it is agreed
+    // and never sent again.
     @Test
     fun withNoRecordATapShownOnTheCopyIsStillSent() {
-        val plan = reconcileRatings(listOf(copy("t1", "s1", 5)), local = mapOf("t1" to 5), synced = emptyMap())
+        val plan = reconcileRatings(listOf(copy("t1", "s1", 5)), local = mapOf("t1" to 5), synced = emptyMap(), tapped = setOf("s1"))
         assertEquals(mapOf("t1" to RatingSend(listOf("s1"), 5)), plan.send)
         assertTrue(plan.adopt.isEmpty())
         assertEquals(mapOf("s1" to 5), plan.synced)
         val next = reconcileRatings(listOf(copy("t1", "s1", 5)), local = mapOf("t1" to 5), synced = plan.settled(emptySet(), emptyMap()))
         assertTrue(next.send.isEmpty())
+    }
+
+    // Never agreed on and never tapped (a restored backup), with the copy
+    // already showing the phone's rating: taken as agreed, nothing sent.
+    @Test
+    fun anUntappedRatingTheCopyShowsIsTakenAsAgreed() {
+        val plan = reconcileRatings(listOf(copy("t1", "s1", 5)), local = mapOf("t1" to 5), synced = emptyMap())
+        assertTrue(plan.send.isEmpty())
+        assertEquals(mapOf("s1" to 5), plan.synced)
     }
 
     @Test

@@ -141,12 +141,13 @@ class StarChunk(
 )
 
 // One step of the ratings walk: server copies with their rating there, the
-// ratings made on the phone for their songs, and the ratings both sides
-// last agreed on.
+// ratings made on the phone for their songs, the ratings both sides last
+// agreed on, and the server songs with a tap the server has yet to confirm.
 class RatingChunk(
     val copies: List<RatingCopy>,
     val local: Map<String, Int>,
     val synced: Map<String, Int>,
+    val tapped: Set<String> = emptySet(),
 )
 
 // What an older version kept in its preferences file, as rows.
@@ -218,8 +219,27 @@ interface ListeningDao {
             copies,
             phoneRatingsAmong(copies.map { it.trackId }.distinct()).associate { it.trackId to cleanRating(it.rating) },
             syncedRatingsAmong(account, copies.map { it.serverId }).associate { it.serverId to it.rating },
+            tappedAmong(sourceId, copies.map { it.serverId }).toSet(),
         )
     }
+
+    @Query(
+        """
+        SELECT s.nativeId FROM rating_tap t JOIN source_track s ON s.id = t.sourceRowId
+        WHERE s.sourceId = :sourceId AND s.nativeId IN (:serverIds)
+        """,
+    )
+    suspend fun tappedAmong(sourceId: String, serverIds: List<String>): List<String>
+
+    // A send of `rating` landed: the taps it answers go. A tap made since,
+    // with another rating, stays to be sent.
+    @Query(
+        """
+        DELETE FROM rating_tap WHERE rating = :rating AND sourceRowId IN
+            (SELECT id FROM source_track WHERE sourceId = :sourceId AND nativeId IN (:serverIds))
+        """,
+    )
+    suspend fun clearTaps(sourceId: String, serverIds: List<String>, rating: Int)
 
     // The server's stars, as getStarred2 last listed them
 

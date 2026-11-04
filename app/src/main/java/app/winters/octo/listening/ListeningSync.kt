@@ -131,6 +131,7 @@ class ListeningSync internal constructor(
                 val sent = ids.all { failureOf { server.client.setRating(it, rating) } == null }
                 if (sent) {
                     if (rating > 0) store.setSyncedRatings(server.account, ids, rating) else store.clearSyncedRatings(server.account, ids)
+                    listening.clearTaps(server.sourceId, ids, rating)
                 }
             }
         }
@@ -228,7 +229,7 @@ class ListeningSync internal constructor(
     }
 
     private suspend fun syncRatingChunk(server: Server, chunk: RatingChunk) {
-        val plan = reconcileRatings(chunk.copies, chunk.local, chunk.synced)
+        val plan = reconcileRatings(chunk.copies, chunk.local, chunk.synced, chunk.tapped)
         val failed = plan.send.filter { (_, send) ->
             send.serverIds.any { failureOf { server.client.setRating(it, send.rating) } != null }
         }.keys
@@ -263,6 +264,13 @@ class ListeningSync internal constructor(
             }
         }
         store.settleRatings(server.account, chunk.copies.map { it.serverId }, plan.settled(failed, chunk.synced))
+        // Both sides now agree on every song but the failed ones: their taps
+        // of the agreed rating are answered.
+        if (chunk.tapped.isNotEmpty()) {
+            chunk.copies.filter { it.serverId in chunk.tapped && it.trackId !in failed }
+                .groupBy { plan.send[it.trackId]?.rating ?: plan.adopt[it.trackId] ?: chunk.local[it.trackId] ?: 0 }
+                .forEach { (rating, copies) -> listening.clearTaps(server.sourceId, copies.map { it.serverId }, rating) }
+        }
     }
 
     // Sends the waiting plays oldest first, and stops at the first one the

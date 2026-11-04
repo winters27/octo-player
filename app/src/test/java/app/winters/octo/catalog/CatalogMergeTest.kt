@@ -48,6 +48,28 @@ class CatalogMergeTest {
 
     private suspend fun ratingOf(trackId: String) = db.longOf("SELECT rating FROM track WHERE id = ?", trackId).toInt()
 
+    // Each merge, and each one skipped because nothing changed, records the
+    // server it put in the library with its result, so whoever asks which
+    // server the library holds is never told another.
+    @Test
+    fun aMergeRecordsTheServerItPutIn() = run {
+        db.put(library(DEVICE, 10))
+        db.put(library(server, 20, msShift = 100))
+        var inUse: String? = server
+        val merge = db.testMerge(null, inUse = { inUse })
+        assertEquals(null, merge.mergedFor())
+        merge.rebuild()
+        assertEquals(server, merge.mergedFor())
+        // A skipped merge writes it too, whatever the record said.
+        db.exec("UPDATE merge_state SET server = 'server:other'")
+        merge.rebuild()
+        assertEquals(server, merge.mergedFor())
+        inUse = null
+        merge.rebuild()
+        assertEquals("", merge.mergedFor())
+        assertEquals(10, db.longOf("SELECT COUNT(*) FROM track").toInt())
+    }
+
     @Test
     fun theMergeReadsSourcesAPageAtATime() = run {
         db.put(library(DEVICE, 300))

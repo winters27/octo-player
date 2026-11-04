@@ -85,6 +85,14 @@ interface UserDao {
     )
     suspend fun noteCopiesRating(trackId: String, rating: Int)
 
+    @Query(
+        """
+        INSERT OR REPLACE INTO rating_tap (sourceRowId, rating)
+        SELECT id, :rating FROM source_track WHERE mergedId = :trackId AND sourceId LIKE 'server:%'
+        """,
+    )
+    suspend fun noteTapOnCopies(trackId: String, rating: Int)
+
     // One change to a library song's rating: the library shows it; with a
     // relink key the phone keeps it as its own (0 takes the phone's away);
     // with `copies` the song's server copies are noted as rated too, so a
@@ -99,6 +107,15 @@ interface UserDao {
             setCopiesRating(trackId, rating)
             noteCopiesRating(trackId, rating)
         }
+    }
+
+    // A rating tapped on the phone: noted as noteRating does, and with it,
+    // in the same step, kept as a tap the server has yet to confirm, so a
+    // sync that reads the copies showing it still sends it.
+    @Transaction
+    suspend fun noteTap(trackId: String, rating: Int, relinkKey: String, now: Long) {
+        noteRating(trackId, rating, relinkKey, now, copies = true)
+        noteTapOnCopies(trackId, rating)
     }
 
     // For a backup: likes, ratings and the songs of playlists only on the

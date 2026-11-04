@@ -32,7 +32,7 @@ const val CATALOG_FILE = "catalog.db"
         StageTrackEntity::class, StageAlbumEntity::class, StageArtistEntity::class,
         SyncSongEntity::class, SyncAlbumEntity::class, SyncArtistEntity::class, SyncOrderEntity::class,
         SyncStarredEntity::class, MergeCandidateEntity::class, MergedIdNextEntity::class,
-        AlbumNextEntity::class, ArtistNextEntity::class, TakeInLogEntity::class, RatingNoteEntity::class,
+        AlbumNextEntity::class, ArtistNextEntity::class, TakeInLogEntity::class, RatingNoteEntity::class, RatingTapEntity::class,
         SourceMetaEntity::class, AccountSyncEntity::class, MergeStateEntity::class,
         SyncedStarEntity::class, SyncedRatingEntity::class, PendingPlayEntity::class,
         SentPlayEntity::class, SentRecentEntity::class, ListeningImportEntity::class,

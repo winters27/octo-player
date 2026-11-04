@@ -3,13 +3,10 @@ package app.winters.octo.server
 import android.database.sqlite.SQLiteFullException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -17,7 +14,6 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -32,14 +28,14 @@ import org.robolectric.RobolectricTestRunner
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class ServerChangeTest {
-    // The library merged for a server, as ServerSync keeps it, and the
-    // server in use.
+    // The server the library was last merged for, as the merge records it,
+    // and the server in use.
     private var mergedFor: String? = "server:old"
     private var wanted = "server:new"
     private val problem = MutableStateFlow<String?>(null)
 
-    // A merge answers the server it put in: the one in use as it starts.
-    private fun switch(merge: suspend () -> String = { wanted }) = LibrarySwitch({ mergedFor }, merge, { mergedFor = it }, problem) { wanted }
+    // A merge records the server it put in: the one in use as it starts.
+    private fun switch(merge: suspend () -> Unit = { mergedFor = wanted }) = LibrarySwitch({ mergedFor }, merge, problem) { wanted }
 
     @Test
     fun aSwitchWhoseMergeFillsTheDiskIsMarkedOnlyOnceAMergeWorks() = runBlocking {
@@ -48,7 +44,7 @@ class ServerChangeTest {
         val switch = switch {
             merges++
             if (full) throw SQLiteFullException("database or disk is full")
-            wanted
+            mergedFor = wanted
         }
         assertFalse(switch.finish("server:new"))
         assertEquals("server:old", mergedFor)
@@ -86,37 +82,40 @@ class ServerChangeTest {
         assertEquals("Couldn't reach the server.", problem.value)
     }
 
-    // A try whose server stopped being the one in use while it merged never
-    // marks the library for it, so the newer server's mark stands.
+    // Switched to b and back to a while b's merge ran: the library holds b
+    // and says so, so the switch back to a merges again.
     @Test
-    fun anOlderTryNeverNamesTheLibraryForItsServer() = runBlocking {
-        val switch = switch {
-            val inUse = wanted
-            if (inUse == "server:b") wanted = "server:c"
-            inUse
-        }
+    fun aSwitchAwayAndBackMergesAgain() = runBlocking {
+        mergedFor = "server:a"
         wanted = "server:b"
-        assertFalse(switch.finish("server:b"))
-        assertEquals("server:old", mergedFor)
-        // Not the switch in use any more, so not its words either.
-        assertNull(problem.value)
-        assertTrue(switch.finish("server:c"))
-        assertEquals("server:c", mergedFor)
+        var merges = 0
+        val switch = switch {
+            merges++
+            val inUse = wanted
+            if (inUse == "server:b") wanted = "server:a"
+            mergedFor = inUse
+        }
+        assertTrue(switch.finish("server:b"))
+        assertEquals("server:b", mergedFor)
+        assertTrue(switch.finish("server:a"))
+        assertEquals("server:a", mergedFor)
+        assertEquals(2, merges)
     }
 
-    // A switch away and back during one merge: the merge put in the other
-    // server, so the library is not named for the one in use again.
+    // A merge that put in another server than the one asked for leaves the
+    // switch unfinished and said, and the next try merges again.
     @Test
-    fun aMergeOfAnotherServerNeverNamesTheLibrary() = runBlocking {
+    fun aMergeOfAnotherServerLeavesTheSwitchUnfinished() = runBlocking {
         wanted = "server:a"
-        assertFalse(switch { "server:b" }.finish("server:a"))
-        assertEquals("server:old", mergedFor)
+        assertFalse(switch { mergedFor = "server:b" }.finish("server:a"))
+        assertEquals(SWITCH_PROBLEM, problem.value)
         assertTrue(switch().finish("server:a"))
         assertEquals("server:a", mergedFor)
+        assertNull(problem.value)
     }
 
-    // Tries run one at a time: a second waits for the first, so their marks
-    // never cross.
+    // Tries run one at a time: a second waits for the first, so it finds
+    // the first one's merge in place instead of merging again.
     @Test
     fun triesRunOneAtATime() = runTest {
         val letGo = CompletableDeferred<Unit>()
@@ -124,7 +123,7 @@ class ServerChangeTest {
         val switch = switch {
             order += "merge"
             letGo.await()
-            wanted
+            mergedFor = wanted
         }
         val first = async { switch.finish("server:new") }
         runCurrent()
@@ -139,16 +138,6 @@ class ServerChangeTest {
         assertTrue(second.await())
         // The second found the library already the wanted one's: one merge.
         assertEquals(listOf("merge", "second asks"), order)
-    }
-
-    // A try stopped once its merge finished (the app went to the back)
-    // still marks the library; the mark, like the real one, can be stopped.
-    @Test
-    fun aTryStoppedAfterItsMergeStillMarks() = runBlocking {
-        val scope = CoroutineScope(SupervisorJob())
-        val switch = LibrarySwitch({ mergedFor }, { scope.cancel(); wanted }, { yield(); mergedFor = it }, problem) { wanted }
-        scope.launch { switch.finish("server:new") }.join()
-        assertEquals("server:new", mergedFor)
     }
 
     // On arrival a fresh copy starts nothing but a look, unless its switch
@@ -220,7 +209,8 @@ class ServerChangeTest {
     }
 
     // A copy stopped by copying afresh still cleans up; stopping the fresh
-    // one waits for that cleanup, and no copy starts beside it meanwhile.
+    // one waits for that cleanup, and a copy asked for meanwhile runs only
+    // after it, never beside it.
     @Test
     fun stoppingAFreshCopyWaitsForTheOldOneToCleanUp() = runTest {
         val runs = mutableListOf<Boolean>()
@@ -228,7 +218,7 @@ class ServerChangeTest {
         val cleanup = CompletableDeferred<Unit>()
         val jobs = CopyJobs(this) { copyAll ->
             runs += copyAll
-            if (!copyAll) {
+            if (runs.size == 1) {
                 try {
                     awaitCancellation()
                 } finally {
@@ -262,8 +252,9 @@ class ServerChangeTest {
         }
         advanceUntilIdle()
         assertEquals(listOf("cleaned", "stopped"), order)
-        // The fresh copy was stopped, so it never ran.
-        assertEquals(listOf(false), runs)
+        // The fresh copy was stopped, so it never ran; the one asked for
+        // during the cleanup ran after it.
+        assertEquals(listOf(false, false), runs)
     }
 
     @Test

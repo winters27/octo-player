@@ -124,6 +124,11 @@ data class TakeInLogEntity(val generation: Long, val kind: String, val id: Strin
 @Entity(tableName = "rating_note")
 data class RatingNoteEntity(@PrimaryKey val sourceRowId: String, val rating: Int)
 
+// A rating tapped on the phone that its server copy shows but the server
+// has not yet confirmed taking, by server copy, until a send of it lands.
+@Entity(tableName = "rating_tap")
+data class RatingTapEntity(@PrimaryKey val sourceRowId: String, val rating: Int)
+
 // What the app knows of each source's rows: whose copy they are (a kept
 // account, for a server), a stamp raised whenever they change, and the
 // copy being built for it, if any.
@@ -156,7 +161,8 @@ data class AccountSyncEntity(
     val afterSyncDone: Boolean,
 )
 
-// The merge's own record: the inputs it last merged, and whether a merge
-// is between its claim and its swap.
+// The merge's own record: the inputs it last merged, whether a merge is
+// between its claim and its swap, and the server the library was last
+// merged for ("" for none, null before any merge recorded it).
 @Entity(tableName = "merge_state")
-data class MergeStateEntity(@PrimaryKey val id: Int, val skipKey: String?, val claimActive: Boolean)
+data class MergeStateEntity(@PrimaryKey val id: Int, val skipKey: String?, val claimActive: Boolean, val server: String? = null)
