@@ -54,6 +54,9 @@ internal class AfterSyncServer : AutoCloseable {
     @Volatile var starred: String = starredAnswer()
     @Volatile var refuseRatings = false
 
+    // Runs while the server answers a setRating, as a tap made meanwhile.
+    @Volatile var whileRating: (() -> Unit)? = null
+
     init {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
@@ -63,7 +66,10 @@ internal class AfterSyncServer : AutoCloseable {
                 asked += (listOf(endpoint) + ids + listOfNotNull(url.queryParameter("rating")?.let { "rating=$it" })).joinToString(" ")
                 val body = when (endpoint) {
                     "getStarred2" -> starred
-                    "setRating" -> if (refuseRatings) """{"subsonic-response":{"status":"failed","error":{"code":0,"message":"Not now"}}}""" else ok()
+                    "setRating" -> {
+                        whileRating?.invoke()
+                        if (refuseRatings) """{"subsonic-response":{"status":"failed","error":{"code":0,"message":"Not now"}}}""" else ok()
+                    }
                     else -> ok()
                 }
                 return MockResponse.Builder().body(body).build()

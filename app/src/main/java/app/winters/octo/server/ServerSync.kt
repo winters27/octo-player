@@ -37,6 +37,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -54,6 +55,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -80,42 +82,114 @@ internal suspend fun <T> orNoted(step: suspend () -> T): T? =
         null
     }
 
-// Merges the library for the server now in use (`want`, "" for none) when
-// the last merge was for another, and marks it done only once it worked.
-// Answers whether the library is the wanted one's.
-internal suspend fun switchLibrary(want: String, mergedFor: suspend () -> String?, merge: suspend () -> Unit, mark: suspend (String) -> Unit): Boolean =
-    orNoted {
-        if (mergedFor() != want) {
-            merge()
-            mark(want)
-        }
-        true
-    } == true
-
 // Said while the library still holds another server's music because its
 // switch could not be merged.
-internal const val SWITCH_PROBLEM = "Couldn't finish switching the library. Octo keeps trying while it's open."
+internal const val SWITCH_PROBLEM = "Couldn't finish switching the library. Octo tries again each time you open it."
 
-// Makes the library the wanted server's (switchLibrary) and says so in
-// `problem`: the switch's words show while it fails and go once the library
-// is the wanted one's, whichever try got it there. Any other problem stays.
+// Makes the library the server in use's (`wanted`, "" for none) when the
+// last merge was for another, and says so in `problem`: the switch's words
+// show while it fails and go once the library is the wanted one's,
+// whichever try got it there. Any other problem stays. One try at a time; a
+// try marks the library only once its merge worked and only while its
+// server is still the one in use, so an older try never names the library
+// for a server it was not merged for.
 internal class LibrarySwitch(
     private val mergedFor: suspend () -> String?,
     private val merge: suspend () -> Unit,
     private val mark: suspend (String) -> Unit,
     private val problem: MutableStateFlow<String?>,
+    private val wanted: () -> String,
 ) {
-    // Answers whether the library is `want`'s now ("" for none).
-    suspend fun finish(want: String): Boolean {
-        val done = switchLibrary(want, mergedFor, merge, mark)
-        if (done) problem.compareAndSet(SWITCH_PROBLEM, null) else problem.value = SWITCH_PROBLEM
-        return done
+    private val lock = Mutex()
+
+    // Answers whether the library is `want`'s now.
+    suspend fun finish(want: String): Boolean = lock.withLock {
+        val done = orNoted {
+            if (mergedFor() != want) {
+                merge()
+                // The merge is done whatever stops the caller now.
+                withContext(NonCancellable) { if (wanted() == want) mark(want) }
+            }
+            mergedFor() == want
+        } == true
+        if (done) {
+            problem.compareAndSet(SWITCH_PROBLEM, null)
+        } else if (wanted() == want) {
+            problem.value = SWITCH_PROBLEM
+        }
+        done
     }
 }
 
 // Whether a server's arrival starts a copy: unless its copy is fresh and
 // its library in place, since sync() finishes a failed switch first.
 internal fun copyOnArrival(needed: CopyNeed, switched: Boolean): Boolean = needed != CopyNeed.Fresh || !switched
+
+// A server's arrival (`account` null when signed out): the library is
+// switched to it and `ready` told whose it is; then a copy starts unless its
+// copy is fresh and its switch worked, and a fresh one gets a look instead.
+internal suspend fun arrive(
+    account: String?,
+    sourceId: String?,
+    finish: suspend (String) -> Boolean,
+    ready: (String) -> Unit,
+    need: suspend () -> CopyNeed,
+    copy: () -> Unit,
+    look: () -> Unit,
+) {
+    val switched = finish(sourceId.orEmpty())
+    ready(account ?: PHONE_LIBRARY)
+    if (account == null) return
+    if (copyOnArrival(need(), switched)) copy() else look()
+}
+
+// A freshen's first step: nothing until arrive() put a library in place;
+// then a switch whose merge failed is merged again, signed out too. Answers
+// whether the freshen goes on with the server in use.
+internal suspend fun freshenSwitch(ready: String?, account: String?, sourceId: String?, finish: suspend (String) -> Boolean): Boolean {
+    if (ready != (account ?: PHONE_LIBRARY)) return false
+    return finish(sourceId.orEmpty()) && account != null
+}
+
+// Before a copy: a switch to its server whose merge failed is finished
+// first, and while it fails nothing is copied (null). Otherwise answers
+// whether to copy the whole library (true) or only the steps owed after a
+// copy swapped in (false).
+internal suspend fun copyPlan(sourceId: String, copyAllAnyway: Boolean, finish: suspend (String) -> Boolean, need: suspend () -> CopyNeed): Boolean? {
+    if (!finish(sourceId)) return null
+    return copyAllAnyway || need() != CopyNeed.AfterSync
+}
+
+// The one copy running at a time. `run` copies; its flag copies the whole
+// library even when only the steps after a copy are owed.
+internal class CopyJobs(private val scope: CoroutineScope, private val run: suspend (copyAll: Boolean) -> Unit) {
+    private var job: Job? = null
+
+    // The copy running now, or the last one.
+    fun current(): Job? = synchronized(this) { job }
+
+    fun isActive(): Boolean = synchronized(this) { job?.isActive == true }
+
+    // Starts a copy unless one is already running.
+    fun start() {
+        synchronized(this) {
+            if (job?.isActive == true) return
+            job = scope.launch { run(false) }
+        }
+    }
+
+    // Stops the copy running and starts a whole one in its place, in one
+    // step, so no other start slips in between.
+    fun restart() {
+        synchronized(this) {
+            val old = job
+            job = scope.launch {
+                old?.cancelAndJoin()
+                run(true)
+            }
+        }
+    }
+}
 
 // A copy older than this is made again when the app starts or comes to the
 // front.
@@ -167,7 +241,7 @@ class ServerSync @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val dropLock = Mutex()
-    private var job: Job? = null
+    private val jobs = CopyJobs(scope) { copyAll -> sync(copyAll) }
     private var started = false
 
     // One take-in or look at a time, so two never put in the same rows.
@@ -189,7 +263,7 @@ class ServerSync @Inject constructor(
     private val _problem = MutableStateFlow<String?>(null)
     val problem: StateFlow<String?> = _problem
 
-    private val switch = LibrarySwitch(::mergedFor, { merge.rebuild() }, ::markMerged, _problem)
+    private val switch = LibrarySwitch(::mergedFor, { merge.rebuild() }, ::markMerged, _problem) { signedIn()?.sourceId.orEmpty() }
 
     // Whose library the screens show now: the id of the server in use once
     // its music has joined, or PHONE_LIBRARY. Null until the first is in place.
@@ -229,18 +303,18 @@ class ServerSync @Inject constructor(
     // is written only once a merge worked, so a failed switch is merged
     // again by the copy this starts and on every freshen.
     private suspend fun arrived(session: Session?) {
-        synchronized(this) { job }?.cancelAndJoin()
+        jobs.current()?.cancelAndJoin()
         _problem.value = null
         orNoted { dropUnkept() }
-        val switched = switch.finish(session?.sourceId.orEmpty())
-        _ready.value = session?.id ?: PHONE_LIBRARY
-        if (session == null) return
-        val needed = orNoted { need(session) } ?: CopyNeed.Copy
-        if (copyOnArrival(needed, switched)) {
-            syncNow()
-        } else if (foreground) {
-            scope.launch { quietly { look(session) } }
-        }
+        arrive(
+            session?.id,
+            session?.sourceId,
+            switch::finish,
+            ready = { _ready.value = it },
+            need = { session?.let { orNoted { need(it) } } ?: CopyNeed.Copy },
+            copy = ::syncNow,
+            look = { if (foreground && session != null) scope.launch { quietly { look(session) } } },
+        )
     }
 
     // What the server's copy needs (copyNeed): made again when never made,
@@ -250,39 +324,25 @@ class ServerSync @Inject constructor(
         copyNeed(copies.accountSync(session.id), copies.copyOf(session.sourceId), session.id, session.sourceId, System.currentTimeMillis())
 
     // Starts a copy unless one is already running.
-    fun syncNow() = startSync(copyAll = false)
-
-    // `copyAll` copies the whole library even when only the steps after a
-    // copy are owed.
-    private fun startSync(copyAll: Boolean) {
-        synchronized(this) {
-            if (job?.isActive == true) return
-            job = scope.launch { sync(copyAll) }
-        }
-    }
+    fun syncNow() = jobs.start()
 
     // Starts a copy unless one is already running, and waits for it to end.
     // Answers why it failed, in words, or null when it worked.
     suspend fun syncNowAndWait(): String? {
         syncNow()
-        synchronized(this) { job }?.join()
+        jobs.current()?.join()
         return _problem.value
     }
 
     // Copies the library afresh, stopping a copy already running: for when
     // what the copy should hold has changed, like the chosen music folder.
-    fun syncAgain() {
-        scope.launch {
-            synchronized(this@ServerSync) { job }?.cancelAndJoin()
-            startSync(copyAll = true)
-        }
-    }
+    fun syncAgain() = jobs.restart()
 
     // Signs out of the server in use. Its music leaves the library; its copy
     // stays for signing in again. Nothing on the server changes.
     fun disconnect() {
         scope.launch {
-            synchronized(this@ServerSync) { job }?.cancelAndJoin()
+            jobs.current()?.cancelAndJoin()
             sessions.signOut()
         }
     }
@@ -292,7 +352,7 @@ class ServerSync @Inject constructor(
     // server changes.
     suspend fun remove(id: String): StoredServer? {
         if (sessions.state.value.let { it is SessionState.SignedIn && it.session.id == id }) {
-            synchronized(this) { job }?.cancelAndJoin()
+            jobs.current()?.cancelAndJoin()
         }
         val gone = sessions.remove(id) ?: return null
         dropUnkept()
@@ -328,7 +388,7 @@ class ServerSync @Inject constructor(
         val session = signedIn() ?: return false
         return scope.async {
             takeInLock.withLock {
-                synchronized(this@ServerSync) { job }?.join()
+                jobs.current()?.join()
                 if (signedIn()?.sourceId != session.sourceId) return@withLock false
                 takeIn(session, arriving.songs, arriving.albumIds())
                 val songIds = arriving.songs.map { it.id }
@@ -347,7 +407,7 @@ class ServerSync @Inject constructor(
     suspend fun takeInIfFree(arriving: Arriving): Boolean? {
         if (arriving.isEmpty) return false
         val work = scope.async { takeInArriving(arriving) }
-        val copying = synchronized(this) { job?.isActive == true }
+        val copying = jobs.isActive()
         return unlessCopying(work, copying, _syncing)
     }
 
@@ -394,10 +454,7 @@ class ServerSync @Inject constructor(
     // NEW_MUSIC_LOOK_MS, so a copy that keeps failing is not tried on and on.
     private suspend fun freshen() {
         val session = signedIn()
-        // Until the server's music is in place, arrived() decides.
-        if (_ready.value != (session?.id ?: PHONE_LIBRARY)) return
-        // A switch whose merge failed is merged again, signed out too.
-        if (!switch.finish(session?.sourceId.orEmpty()) || session == null) return
+        if (!freshenSwitch(_ready.value, session?.id, session?.sourceId, switch::finish) || session == null) return
         if (need(session) == CopyNeed.Fresh) return look(session)
         val now = SystemClock.elapsedRealtime()
         if (!newMusicLookDue(lookedAt[session.id], now)) return
@@ -410,7 +467,7 @@ class ServerSync @Inject constructor(
     // in; too many at once copies the whole library instead. Never while a
     // copy runs, and never twice within NEW_MUSIC_LOOK_MS.
     private suspend fun look(session: Session) {
-        if (synchronized(this) { job }?.isActive == true) return
+        if (jobs.isActive()) return
         val now = SystemClock.elapsedRealtime()
         if (!newMusicLookDue(lookedAt[session.id], now)) return
         lookedAt[session.id] = now
@@ -474,11 +531,8 @@ class ServerSync @Inject constructor(
         _syncing.value = true
         try {
             val started = SystemClock.elapsedRealtime()
-            // A switch to this server whose merge failed is finished first;
-            // while it still fails, its words show and nothing is copied.
-            if (!switch.finish(session.sourceId)) return
-            // A copy swapped in whose steps afterwards were cut off needs only those.
-            val copyAll = copyAllAnyway || need(session) != CopyNeed.AfterSync
+            // While a failed switch still fails, its words show and nothing is copied.
+            val copyAll = copyPlan(session.sourceId, copyAllAnyway, switch::finish) { need(session) } ?: return
             val done = CopyRun(copy, copies, afterSyncSteps()).run(session.id, session.sourceId, session.client, copyAll)
             lookedAt[session.id] = SystemClock.elapsedRealtime()
             _problem.value = null

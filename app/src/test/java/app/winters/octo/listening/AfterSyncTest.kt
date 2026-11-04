@@ -221,6 +221,47 @@ class AfterSyncTest {
         }
     }
 
+    // While the sync re-sends a tap the server never confirmed, the user
+    // taps again: the library and the server copy show the new tap, never
+    // the one being re-sent.
+    @Test
+    fun aTapWhileATapIsResentStays() = runBlocking {
+        AfterSyncServer().use { server ->
+            val source = server.session.sourceId
+            db.song("device:1")
+            db.copy(source, "s1", "device:1", rating = 4)
+            val dao = db.listeningDao()
+            val store = store(dao)
+            store.setSyncedRatings("home", listOf("s1"), 2)
+            db.userDao().noteRating("device:1", 4, "rk-device:1", 1, copies = true)
+            server.whileRating = {
+                server.whileRating = null
+                runBlocking { db.userDao().noteRating("device:1", 3, "rk-device:1", 2, copies = true) }
+            }
+            listeningSync(server, dao, store).afterSync()
+            assertEquals(listOf("setRating s1 rating=4"), server.calls("setRating"))
+            assertEquals(3, db.userDao().rating("device:1"))
+            assertEquals(3, db.dao().track("device:1")!!.rating)
+            assertEquals(3, db.sourceDao().copies("device:1").single().rating)
+        }
+    }
+
+    // With no rating both sides agreed on, a copy that already shows the
+    // phone's rating is taken as agreed: nothing is sent.
+    @Test
+    fun withNoAgreedRatingMatchingCopiesSendNothing() = runBlocking {
+        AfterSyncServer().use { server ->
+            val source = server.session.sourceId
+            db.song("device:1")
+            db.copy(source, "s1", "device:1", rating = 4)
+            val dao = db.listeningDao()
+            db.userDao().rate(TrackRatingEntity("device:1", "rk-device:1", 4, 1))
+            listeningSync(server, dao, store(dao)).afterSync()
+            assertEquals(emptyList<String>(), server.calls("setRating"))
+            assertEquals(4, dao.syncedRatingsAmong("home", listOf("s1")).single().rating)
+        }
+    }
+
     @Test
     fun sentPlaysFoldAsTheyDidInThePreferencesFile() = runBlocking {
         AfterSyncServer().use { server ->

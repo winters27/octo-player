@@ -102,6 +102,16 @@ class RatingsTest {
         assertEquals(mapOf("s1" to 3), plan.settled(failed = setOf("t1"), before = mapOf("s1" to 3)))
     }
 
+    // Never agreed on, but the copy already shows the phone's rating: taken
+    // as agreed, nothing sent (a restored backup sends no flood).
+    @Test
+    fun withNoRecordACopyThatAgreesIsNotSent() {
+        val plan = reconcileRatings(listOf(copy("t1", "s1", 5)), local = mapOf("t1" to 5), synced = emptyMap())
+        assertTrue(plan.send.isEmpty())
+        assertTrue(plan.adopt.isEmpty())
+        assertEquals(mapOf("s1" to 5), plan.synced)
+    }
+
     @Test
     fun theRecordSurvivesStorage() {
         val record = mapOf("s1" to 5, "a b" to 1)

@@ -110,8 +110,9 @@ class UpgradeGuardTest {
         assertFalse(File(file.path + "-upgrade-floor").exists())
     }
 
-    // A write error with room for the usual ask counts as a full disk once,
-    // across a restart too; once its raised ask is met, it is passed on.
+    // A write error with room for the usual ask counts as a full disk once.
+    // Its raised ask lasts for that run only: after a restart the upgrade
+    // tries again with the room it had, and a second error is passed on.
     @Test
     fun aWriteErrorWithRoomCountsAsFullOnce() {
         val file = version18(rows = 100)
@@ -120,8 +121,9 @@ class UpgradeGuardTest {
         val guard = UpgradeGuard(file) { free }
         assertTrue(guard.ranOutOfSpace(full = false))
         assertEquals(UpgradeState.NeedsSpace(size * 4), guard.state.value)
-        free = size * 4
-        assertFalse(UpgradeGuard(file) { free }.ranOutOfSpace(full = false))
+        val next = UpgradeGuard(file) { free }
+        assertTrue(next.check())
+        assertFalse(next.ranOutOfSpace(full = false))
         // While the space is short it still counts.
         free = 10L
         assertTrue(UpgradeGuard(file) { free }.ranOutOfSpace(full = false))

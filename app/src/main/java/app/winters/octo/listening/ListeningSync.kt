@@ -233,8 +233,14 @@ class ListeningSync internal constructor(
             send.serverIds.any { failureOf { server.client.setRating(it, send.rating) } != null }
         }.keys
         val now = System.currentTimeMillis()
-        // The library shows the rating both sides now have, or will once sent.
-        val shown = plan.send.mapValues { it.value.rating } + plan.adopt
+        // The library shows the rating both sides now have, or will once
+        // sent. A song sent only because the server never confirmed what its
+        // copies already show is left as it is, so a tap made while this
+        // chunk was sending stays.
+        val alreadyShown = plan.send.filter { (song, send) ->
+            song !in plan.adopt && chunk.copies.filter { it.trackId == song }.all { it.rating == send.rating }
+        }.keys
+        val shown = (plan.send - alreadyShown).mapValues { it.value.rating } + plan.adopt
         if (shown.isNotEmpty()) {
             rebuilds.between {
                 // Each song by the id it has now: a rebuild since the chunk

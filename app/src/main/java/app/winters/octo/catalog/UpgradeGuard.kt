@@ -57,6 +57,10 @@ class UpgradeGuard internal constructor(
     private var floor = 0L
     private var writeErrorCounted = false
 
+    // What a write error taken for a full disk asks for, for this run only:
+    // after a restart the upgrade tries again, and a second error is passed on.
+    private var writeErrorAsk = 0L
+
     init {
         val saved = try {
             if (kept.exists()) kept.readText().split(' ') else emptyList()
@@ -115,17 +119,18 @@ class UpgradeGuard internal constructor(
     // be reported so), and after that (answering false) is the caller's to
     // pass on.
     fun ranOutOfSpace(full: Boolean): Boolean = synchronized(lock) {
-        val raise = when {
-            full -> true
-            freeSpace.bytes() < wholeFileNeed() -> false
+        val raised = maxOf(wholeFileNeed(), freeSpace.bytes() + file.length())
+        when {
+            full -> floor = maxOf(floor, raised)
+            freeSpace.bytes() < wholeFileNeed() -> Unit
             writeErrorCounted -> return false
-            else -> true.also { writeErrorCounted = true }
+            else -> {
+                writeErrorCounted = true
+                writeErrorAsk = raised
+            }
         }
-        if (raise) {
-            floor = maxOf(floor, wholeFileNeed(), freeSpace.bytes() + file.length())
-            keep()
-        }
-        _state.value = UpgradeState.NeedsSpace(maxOf(floor, wholeFileNeed()))
+        keep()
+        _state.value = UpgradeState.NeedsSpace(need())
         true
     }
 
@@ -140,9 +145,11 @@ class UpgradeGuard internal constructor(
 
     private fun measure(): UpgradeState {
         if (!upgradeDue()) return UpgradeState.Clear
-        val needed = maxOf(floor, wholeFileNeed())
+        val needed = need()
         return if (needed <= freeSpace.bytes()) UpgradeState.Clear else UpgradeState.NeedsSpace(needed)
     }
+
+    private fun need(): Long = maxOf(floor, writeErrorAsk, wholeFileNeed())
 
     // The version the database reports, read without changing the file: a
     // file SQLite finds damaged is left as it is (Android's default handler
