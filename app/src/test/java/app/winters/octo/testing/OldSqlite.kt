@@ -13,6 +13,9 @@ import java.sql.DriverManager
 object OldSqlite {
     // An empty library database at a schema version, from Room's own file.
     fun open(version: Int = 19): Connection {
+        // Loaded by name, so the driver registers itself with the class
+        // loader the test runs in (Robolectric has its own).
+        Class.forName("org.sqlite.JDBC")
         val conn = DriverManager.getConnection("jdbc:sqlite::memory:")
         check(conn.metaData.databaseProductVersion.startsWith("3.21")) { "expected SQLite 3.21, got ${conn.metaData.databaseProductVersion}" }
         conn.createStatement().use { st -> schemaStatements(version).forEach(st::execute) }
