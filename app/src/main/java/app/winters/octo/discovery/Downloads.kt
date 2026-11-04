@@ -263,10 +263,23 @@ class Downloads @Inject constructor(
         val now = System.currentTimeMillis()
         val kept = sessions.servers.value.servers.mapNotNull { it.sourceId }
         online.prune(serverSourceId(client.primaryUrl), kept + serverSourceId(client.primaryUrl), now - FORGET_MS)
+        forgetDeleted(serverSourceId(client.primaryUrl))
         val waiting = online.waiting().ifEmpty { return }
         val candidates = waiting.flatMap { titleKeys(it.title) }.distinct().chunked(900).flatMap { catalog.tracksWithKeys(it) }
         val adopted = adoptions(waiting, candidates.filter { !isFind(it.id) })
         for (find in waiting) adopted[find.id]?.let { adoptAs(find.id, it) }
+    }
+
+    // A find whose library song this server's library no longer holds, as
+    // when it was deleted there, is neither asked for nor arrived: it offers
+    // its add again, not a check for a song that is gone. Not after a copy
+    // that found no songs at all.
+    private suspend fun forgetDeleted(sourceId: String) {
+        val adopted = online.adopted(sourceId).ifEmpty { return }
+        if (catalog.trackCount(sourceId).first() == 0) return
+        val present = adopted.map { it.adoptedId }.distinct().chunked(900)
+            .flatMap { catalog.tracksByIdsUnordered(it) }.mapTo(HashSet()) { it.id }
+        goneFinds(adopted, present).chunked(900).forEach { online.forget(it) }
     }
 
     // A find became this library song: the two are linked. Downloading is
@@ -433,6 +446,11 @@ fun adoptions(waiting: List<OnlineSongEntity>, library: List<TrackEntity>): Map<
         byTitle.candidates(find.title, find.artist).firstOrNull { sameSong(find.title, find.artist, find.durationMs, it) }?.let { find.id to it }
     }.toMap()
 }
+
+// The finds whose library song is not among `present`, the library songs
+// still there.
+fun goneFinds(adopted: List<OnlineSongEntity>, present: Set<String>): List<String> =
+    adopted.filter { it.adoptedId.isNotEmpty() && it.adoptedId !in present }.map { it.id }
 
 // Whether a song Octo finished downloading is the one asked for: the same
 // recording by the same artist.

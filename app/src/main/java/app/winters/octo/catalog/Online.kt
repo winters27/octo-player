@@ -78,6 +78,14 @@ interface OnlineDao {
     @Query("UPDATE online_song SET adoptedId = :trackId WHERE id = :id")
     suspend fun adopt(id: String, trackId: String)
 
+    // The finds of server `sourceId` that arrived as a library song.
+    @Query("SELECT * FROM online_song WHERE sourceId = :sourceId AND adoptedId != ''")
+    suspend fun adopted(sourceId: String): List<OnlineSongEntity>
+
+    // Finds whose library song is gone: neither asked for nor arrived any more.
+    @Query("UPDATE online_song SET requestedAt = 0, adoptedId = '' WHERE id IN (:ids)")
+    suspend fun forget(ids: List<String>)
+
     // Gives a find the length the player measured, where its listing was
     // missing or wrong. Answers how many rows took it.
     @Query("UPDATE online_song SET durationMs = :durationMs WHERE id = :id")
