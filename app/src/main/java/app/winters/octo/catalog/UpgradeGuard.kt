@@ -1,8 +1,12 @@
 package app.winters.octo.catalog
 
 import android.content.Context
+import android.database.DatabaseErrorHandler
 import android.database.DatabaseUtils
 import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteDiskIOException
+import android.database.sqlite.SQLiteException
+import android.database.sqlite.SQLiteFullException
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
@@ -10,15 +14,15 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
+import java.io.IOException
 import java.io.RandomAccessFile
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// Bytes a song row (source_track or track) takes once the 18 to 19
-// upgrade rebuilt its table with the new indexes, measured on generated
-// libraries by MigrationSpaceTest. The upgrade needs that much again for
-// the copy, and the log about as much: UpgradeGuard asks for twice it.
-const val UPGRADE_BYTES_PER_ROW = 490L
+// The most disk the 18 to 19 upgrade takes per song row (source_track or
+// track), new tables and log together, measured on generated libraries by
+// MigrationSpaceTest. UpgradeGuard asks for half as much again on top.
+const val UPGRADE_BYTES_PER_ROW = 670L
 
 // Whether the library can open now.
 sealed interface UpgradeState {
@@ -66,16 +70,43 @@ class UpgradeGuard internal constructor(
         while (_state.value != UpgradeState.Clear) lock.wait()
     }
 
+    // Whether the file still waits for its upgrade.
+    fun upgradeDue(): Boolean = try {
+        file.exists() && headerVersion(file) < CATALOG_VERSION
+    } catch (e: IOException) {
+        false
+    }
+
+    // The upgrade ran out of disk after all: nothing opens until there is
+    // room for the most it could take, the whole file over twice.
+    fun ranOutOfSpace() = synchronized(lock) {
+        floor = wholeFileNeed()
+        _state.value = UpgradeState.NeedsSpace(floor)
+    }
+
+    // At least what an upgrade that ran out of disk showed it needs.
+    private var floor = 0L
+
     private fun measure(): UpgradeState {
-        if (!file.exists() || headerVersion(file) >= CATALOG_VERSION) return UpgradeState.Clear
-        val needed = SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING).use { db ->
-            // The header can lag the file by what the log holds; the version
-            // the database itself reports is the real one.
-            if (db.version >= CATALOG_VERSION) return UpgradeState.Clear
-            songRows(db) * UPGRADE_BYTES_PER_ROW * 2
-        }
+        if (!upgradeDue()) return UpgradeState.Clear
+        val needed = try {
+            // A file SQLite finds damaged is left as it is (Android's default
+            // handler would delete it); the open that follows decides.
+            SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY, DatabaseErrorHandler { }).use { db ->
+                // The header can lag the file by what the log holds; the
+                // version the database itself reports is the real one.
+                if (db.version >= CATALOG_VERSION) return UpgradeState.Clear
+                songRows(db) * UPGRADE_BYTES_PER_ROW * 3 / 2
+            }
+        } catch (e: SQLiteException) {
+            // The file could not be read as it is: ask for room for the most
+            // the upgrade could take.
+            wholeFileNeed()
+        }.coerceAtLeast(floor)
         return if (needed <= freeSpace.bytes()) UpgradeState.Clear else UpgradeState.NeedsSpace(needed)
     }
+
+    private fun wholeFileNeed(): Long = file.length() * 2
 }
 
 // The rows the upgrade copies. A table an old version never made counts nothing.
@@ -93,7 +124,9 @@ internal fun headerVersion(file: File): Int = RandomAccessFile(file, "r").use { 
 }
 
 // Opens the library through UpgradeGuard: every open waits until the guard
-// is clear, so no open can start an upgrade the disk has no room for.
+// is clear, so no open can start an upgrade the disk has no room for. An
+// upgrade that runs out of disk anyway is rolled back by SQLite, and the
+// open waits again, for room for the most it could take.
 class GuardedOpenHelperFactory(
     private val guard: UpgradeGuard,
     private val inner: SupportSQLiteOpenHelper.Factory = FrameworkSQLiteOpenHelperFactory(),
@@ -102,15 +135,24 @@ class GuardedOpenHelperFactory(
         val helper = inner.create(configuration)
         return object : SupportSQLiteOpenHelper by helper {
             override val writableDatabase: SupportSQLiteDatabase
-                get() {
-                    guard.awaitClear()
-                    return helper.writableDatabase
-                }
+                get() = opened { helper.writableDatabase }
             override val readableDatabase: SupportSQLiteDatabase
-                get() {
-                    guard.awaitClear()
-                    return helper.readableDatabase
-                }
+                get() = opened { helper.readableDatabase }
+        }
+    }
+
+    private fun opened(open: () -> SupportSQLiteDatabase): SupportSQLiteDatabase {
+        while (true) {
+            guard.awaitClear()
+            val due = guard.upgradeDue()
+            try {
+                return open()
+            } catch (e: SQLiteFullException) {
+                if (!due) throw e
+            } catch (e: SQLiteDiskIOException) {
+                if (!due) throw e
+            }
+            guard.ranOutOfSpace()
         }
     }
 }

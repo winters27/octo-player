@@ -1,7 +1,12 @@
 package app.winters.octo.catalog
 
 import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteFullException
+import androidx.room.Room
+import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.SupportSQLiteOpenHelper
 import app.winters.octo.testing.OldSqlite
+import app.winters.octo.testing.testContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -33,7 +38,7 @@ class UpgradeGuardTest {
         val file = version18(rows = 100)
         val guard = UpgradeGuard(file) { 1_000L }
         assertFalse(guard.check())
-        assertEquals(UpgradeState.NeedsSpace(100 * UPGRADE_BYTES_PER_ROW * 2), guard.state.value)
+        assertEquals(UpgradeState.NeedsSpace(100 * UPGRADE_BYTES_PER_ROW * 3 / 2), guard.state.value)
         // Nothing was opened for writing beyond the check: still version 18.
         SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { assertEquals(18, it.version) }
     }
@@ -61,4 +66,89 @@ class UpgradeGuardTest {
         assertEquals(CATALOG_VERSION, headerVersion(current))
         assertTrue(UpgradeGuard(current) { 0L }.check())
     }
+
+    // A file the check cannot read as a database asks for room for the
+    // most the upgrade could take, and nothing throws.
+    @Test
+    fun anUnreadableFileAsksForTheMostInsteadOfFailing() {
+        val file = File(Files.createTempDirectory("u").toFile(), CATALOG_FILE)
+        file.writeBytes(ByteArray(64).also { it[63] = 18 } + ByteArray(4_000) { 7 })
+        val size = file.length()
+        val guard = UpgradeGuard(file) { 10L }
+        assertFalse(guard.check())
+        assertEquals(UpgradeState.NeedsSpace(size * 2), guard.state.value)
+        // The check left the file as it was.
+        assertEquals(size, file.length())
+    }
+
+    // An upgrade that runs out of disk anyway leaves the open waiting, with
+    // the most it could take asked for, instead of failing the open.
+    @Test
+    fun anUpgradeThatFillsTheDiskWaitsForRoom() {
+        val file = version18(rows = 100)
+        var free = Long.MAX_VALUE
+        val guard = UpgradeGuard(file) { free }
+        var opens = 0
+        val inner = SupportSQLiteOpenHelper.Factory { _ ->
+            object : SupportSQLiteOpenHelper {
+                override val databaseName: String? = null
+                override fun setWriteAheadLoggingEnabled(enabled: Boolean) = Unit
+                override val writableDatabase: SupportSQLiteDatabase
+                    get() {
+                        opens++
+                        if (opens == 1) {
+                            free = 1_000L
+                            throw SQLiteFullException("database or disk is full")
+                        }
+                        return proxyDatabase()
+                    }
+                override val readableDatabase: SupportSQLiteDatabase get() = writableDatabase
+                override fun close() = Unit
+            }
+        }
+        val helper = GuardedOpenHelperFactory(guard, inner).create(
+            SupportSQLiteOpenHelper.Configuration.builder(testContext()).name(file.path)
+                .callback(object : SupportSQLiteOpenHelper.Callback(19) {
+                    override fun onCreate(db: SupportSQLiteDatabase) = Unit
+                    override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                }).build(),
+        )
+        val opened = CountDownLatch(1)
+        thread { helper.writableDatabase; opened.countDown() }
+        assertFalse(opened.await(200, TimeUnit.MILLISECONDS))
+        assertEquals(UpgradeState.NeedsSpace(file.length() * 2), guard.state.value)
+        free = Long.MAX_VALUE
+        assertTrue(guard.retry())
+        assertTrue(opened.await(5, TimeUnit.SECONDS))
+        assertEquals(2, opens)
+    }
+
+    // The app's own database, built as the app builds it, waits at its
+    // first read while the upgrade has no room, and upgrades once it has.
+    @Test
+    fun theLibraryWaitsThroughRoomUntilThereIsRoom() {
+        val file = version18(rows = 100)
+        var free = 1_000L
+        val guard = UpgradeGuard(file) { free }
+        val db = Room.databaseBuilder(testContext(), CatalogDatabase::class.java, file.path)
+            .openHelperFactory(GuardedOpenHelperFactory(guard))
+            .catalogSetup()
+            .allowMainThreadQueries()
+            .build()
+        val read = CountDownLatch(1)
+        thread { db.openHelper.writableDatabase.query("SELECT COUNT(*) FROM track").close(); read.countDown() }
+        assertFalse(read.await(200, TimeUnit.MILLISECONDS))
+        free = Long.MAX_VALUE
+        assertTrue(guard.retry())
+        assertTrue(read.await(10, TimeUnit.SECONDS))
+        db.openHelper.writableDatabase.query("SELECT COUNT(*) FROM track").use { it.moveToFirst(); assertEquals(100, it.getInt(0)) }
+        db.close()
+    }
 }
+
+// A database for an open that only has to succeed: any call on it fails.
+private fun proxyDatabase(): SupportSQLiteDatabase =
+    java.lang.reflect.Proxy.newProxyInstance(
+        SupportSQLiteDatabase::class.java.classLoader,
+        arrayOf(SupportSQLiteDatabase::class.java),
+    ) { _, method, _ -> throw UnsupportedOperationException(method.name) } as SupportSQLiteDatabase

@@ -80,6 +80,16 @@ class StagedCopyTest {
         seen.forEach { (offset, written) -> assertEquals("written before the page at $offset", offset, written) }
     }
 
+    // Removing a source takes its record, but its next copy still gets a
+    // number no earlier copy in this process had.
+    @Test
+    fun aSourceRemovedAndAddedAgainNeverRepeatsAGeneration() = runBlocking {
+        val first = copy.start(ACCOUNT, SOURCE)
+        db.sourceDao().deleteSource(SOURCE)
+        val second = copy.start(ACCOUNT, SOURCE)
+        assertTrue("$second after $first", second > first)
+    }
+
     @Test
     fun aCopyWritesEachPageAsItReads2k() = assertPagesWrittenAsRead(2_000)
 

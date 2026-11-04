@@ -19,13 +19,17 @@ import app.winters.octo.listening.STARRED_OF_SQL
 import app.winters.octo.listening.SYNCED_RATINGS_AMONG_SQL
 import app.winters.octo.listening.SYNCED_STARS_AMONG_SQL
 import app.winters.octo.listening.TRIM_PENDING_SQL
+import app.winters.octo.testing.CurrentSqlite
 import app.winters.octo.testing.OldSqlite
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 // Every statement the steps after a copy run over song-sized tables is led
-// by an index on SQLite 3.21, the oldest the app runs on: no sort or
-// temporary index in memory, and no walk of a whole table.
+// by an index on SQLite 3.21, the oldest the app runs on, and on a current
+// one: no sort or temporary index in memory, and no walk of a whole table.
+@RunWith(RobolectricTestRunner::class)
 class AfterSyncQueryPlanTest {
     private val statements = mapOf(
         "copy page" to COPY_PAGE_SQL,
@@ -77,8 +81,8 @@ class AfterSyncQueryPlanTest {
             val problems = mutableListOf<String>()
             for ((name, sql) in statements) {
                 val text = positional(sql)
-                val plan = OldSqlite.plan(conn, text, List(text.count { it == '?' }) { null })
-                for (line in plan) {
+                val args = List(text.count { it == '?' }) { null }
+                for (line in OldSqlite.plan(conn, text, args) + CurrentSqlite.plan(text, args)) {
                     val bad = "TEMP B-TREE" in line || "AUTOMATIC" in line || scanOfSongSized.containsMatchIn(line) ||
                         ("LIST SUBQUERY" in line && name !in listAllowed && listFromRows.containsMatchIn(sql))
                     if (bad) problems += "$name: $line"

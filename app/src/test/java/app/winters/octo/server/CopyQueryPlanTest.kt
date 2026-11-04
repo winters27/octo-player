@@ -1,13 +1,17 @@
 package app.winters.octo.server
 
+import app.winters.octo.testing.CurrentSqlite
 import app.winters.octo.testing.OldSqlite
 import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 // The copy's statements over song-sized tables, planned on the oldest
-// SQLite the app runs on: each walks an index, sorts nothing in memory and
-// makes no index of its own.
+// SQLite the app runs on and on a current one: each walks an index, sorts
+// nothing in memory and makes no index of its own.
+@RunWith(RobolectricTestRunner::class)
 class CopyQueryPlanTest {
     private val conn = OldSqlite.open()
 
@@ -17,9 +21,10 @@ class CopyQueryPlanTest {
     private fun list(sql: String, name: String, n: Int) = sql.replace("(:$name)", (1..n).joinToString(",", "(", ")") { "?" })
 
     private fun assertIndexed(sql: String, args: List<Any?>, scanAllowed: Boolean = false) {
-        val plan = OldSqlite.plan(conn, sql, args)
-        assertTrue("$sql\n$plan", plan.none { "TEMP B-TREE" in it || "AUTOMATIC" in it })
-        if (!scanAllowed) assertTrue("$sql\n$plan", plan.none { it.trimStart().startsWith("SCAN") })
+        for (plan in listOf(OldSqlite.plan(conn, sql, args), CurrentSqlite.plan(sql, args))) {
+            assertTrue("$sql\n$plan", plan.none { "TEMP B-TREE" in it || "AUTOMATIC" in it })
+            if (!scanAllowed) assertTrue("$sql\n$plan", plan.none { it.trimStart().startsWith("SCAN") })
+        }
     }
 
     @Test

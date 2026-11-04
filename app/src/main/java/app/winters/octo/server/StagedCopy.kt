@@ -10,6 +10,7 @@ import app.winters.octo.catalog.CatalogMerge
 import app.winters.octo.catalog.FreeSpace
 import app.winters.octo.catalog.NotEnoughSpace
 import app.winters.octo.catalog.STAGE_BUILDING
+import app.winters.octo.catalog.STAGE_NONE
 import app.winters.octo.catalog.STAGE_READY
 import app.winters.octo.catalog.SourceAlbumEntity
 import app.winters.octo.catalog.SourceTrackEntity
@@ -33,6 +34,7 @@ import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.readLibraryInto
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -123,8 +125,13 @@ class StagedCopy @Inject constructor(
             throw NotEnoughSpace(maxOf(lastNeed, 1))
         } finally {
             withContext(NonCancellable) { clearUnclaimed(sourceId, generation) }
+            merge.forgetStage(sourceId, generation)
         }
     }
+
+    // The last generation this process gave a copy, so none is given twice
+    // even after a source and its rows are removed and added again.
+    private val issued = AtomicLong(0)
 
     // Starts a stage for the source, once the merge holds no claim on one:
     // clears what an earlier copy left and takes a new generation, from
@@ -135,7 +142,9 @@ class StagedCopy @Inject constructor(
             dao.clearStage(sourceId)
             dao.clearSync(sourceId)
             dao.ensureMeta(sourceId)
-            val generation = (dao.lastGeneration() ?: 0L) + 1
+            endRatingNotes(sourceId)
+            val generation = maxOf(dao.lastGeneration() ?: 0L, issued.get()) + 1
+            issued.set(generation)
             dao.markBuilding(sourceId, generation, account)
             generation
         }
@@ -409,8 +418,16 @@ class StagedCopy @Inject constructor(
         if (meta != null && meta.generation == generation && (meta.stage == STAGE_BUILDING || meta.stage == STAGE_READY)) {
             dao.clearStage(sourceId)
             dao.markNone(sourceId)
+            endRatingNotes(sourceId)
         }
         dao.clearSync(sourceId)
+    }
+
+    // Rating notes kept for a copy end with it, unless another source's
+    // copy is still on its way.
+    private suspend fun endRatingNotes(sourceId: String) {
+        val work = db.workDao()
+        if (work.metas().none { it.sourceId != sourceId && it.stage != STAGE_NONE }) work.clearRatingNotes()
     }
 
     // What the read still needs room for: the next pages, and the stage of

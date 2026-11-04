@@ -71,15 +71,16 @@ interface UserDao {
     @Query("UPDATE source_track SET rating = :rating WHERE mergedId = :trackId AND sourceId LIKE 'server:%'")
     suspend fun setCopiesRating(trackId: String, rating: Int)
 
-    // While a merge is between its claim and its swap, a song's server
-    // copies note their new rating, so the swap puts it back over the one
-    // it read before.
+    // While a copy is being built or a merge is between its claim and its
+    // swap, a song's server copies note their new rating, so the swap puts
+    // it back over the one the copy or the merge read before.
     @Query(
         """
         INSERT OR REPLACE INTO rating_note (sourceRowId, rating)
         SELECT id, :rating FROM source_track
         WHERE mergedId = :trackId AND sourceId LIKE 'server:%'
-          AND (SELECT claimActive FROM merge_state WHERE id = 0) = 1
+          AND ((SELECT claimActive FROM merge_state WHERE id = 0) = 1
+            OR EXISTS (SELECT 1 FROM source_meta WHERE stage != 'none'))
         """,
     )
     suspend fun noteCopiesRating(trackId: String, rating: Int)

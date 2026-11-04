@@ -6,12 +6,14 @@ import app.winters.octo.device.DEVICE
 import app.winters.octo.testing.openTestCatalog
 import app.winters.octo.testing.rawConnection
 import app.winters.octo.testing.testMerge
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -106,21 +108,28 @@ class CatalogMergeTest {
         val merge = db.testMerge(server, hooks)
         val merging = launch(Dispatchers.Default) { merge.rebuild() }
         pause.reached.await()
+        val asked = List(3) { CompletableDeferred<Unit>() }
         val writers = listOf(
             async(Dispatchers.Default) {
+                asked[0].complete(Unit)
                 merge.sourceWrite { db.sourceDao().takeInRows(server, listOf(song(server, "t1", "Taken", "albumT")), listOf(albumRow(server, "albumT")), emptySet(), listOf(artistRow(server))) }
                 hooks.events += "take-in"
             },
             async(Dispatchers.Default) {
+                asked[1].complete(Unit)
                 merge.sourceWrite { db.put(library(DEVICE, 41)) }
                 hooks.events += "scan"
             },
             async(Dispatchers.Default) {
+                asked[2].complete(Unit)
                 merge.sourceWrite { db.sourceDao().deleteSource("server:gone.test") }
                 hooks.events += "drop"
             },
         )
-        assertTrue(writers.none { it.isCompleted })
+        // Each writer has asked for the gate and none gets it while the
+        // merge holds it.
+        asked.awaitAll()
+        assertNull(withTimeoutOrNull(300) { writers.awaitAll() })
         pause.release()
         writers.awaitAll()
         merging.join()
@@ -173,6 +182,44 @@ class CatalogMergeTest {
             assertEquals((5 - i % 5).toLong(), db.longOf("SELECT rating FROM source_track WHERE id = ?", "$server:s$i"))
         }
         assertEquals(0L, db.longOf("SELECT COUNT(*) FROM rating_note"))
+    }
+
+    // A tap while a copy is being built, before any merge claims it, is put
+    // back over the rating the copy read.
+    @Test
+    fun aTapWhileACopyIsBuiltStays() = run {
+        db.put(library(DEVICE, 4))
+        db.put(library(server, 4))
+        val merge = db.testMerge(server, TestHooks())
+        merge.rebuild()
+        db.stage(library(server, 4).let { s -> s.copy(tracks = s.tracks.map { it.copy(rating = 2) }) }, generation = 5)
+        db.userDao().noteRating("device:s1", 5, "k", 1, copies = true)
+        merge.rebuild()
+        assertEquals(5, ratingOf("device:s1"))
+        assertEquals(5L, db.longOf("SELECT rating FROM source_track WHERE id = ?", "$server:s1"))
+        assertEquals(0L, db.longOf("SELECT COUNT(*) FROM rating_note"))
+    }
+
+    // A copy's outcome is its own: a later copy of the same source under
+    // the same number (the source removed and added back) is told its own.
+    @Test
+    fun aCopyAgainUnderTheSameGenerationGetsItsOwnOutcome() = run {
+        db.put(library(DEVICE, 3))
+        var free = Long.MAX_VALUE
+        val merge = CatalogMerge(db, { free }, { server }, db.workDao())
+        db.stage(library(server, 3), generation = 1)
+        merge.rebuild()
+        merge.awaitStage(server, 1)
+        db.sourceDao().deleteSource(server)
+        db.stage(library(server, 3), generation = 1)
+        free = 0
+        merge.rebuild()
+        try {
+            merge.awaitStage(server, 1)
+            fail("the second copy was told the first one's outcome")
+        } catch (e: StageAborted) {
+            // its own: no room to swap it in
+        }
     }
 
     @Test

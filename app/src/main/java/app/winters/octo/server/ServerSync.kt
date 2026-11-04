@@ -67,6 +67,19 @@ data class LastSync(val sourceId: String, val at: Long, val songs: Int, val albu
 
 private val Context.syncData by preferencesDataStore("server_sync")
 
+// Runs a step of a server change, noting a database error (a full disk,
+// say) instead of passing it on, so the change still finishes and the next
+// one tries again. Answers the step's result, or null when it failed.
+internal suspend fun <T> orNoted(step: suspend () -> T): T? =
+    try {
+        step()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.w("Octo", "library switch failed: ${e.javaClass.simpleName}")
+        null
+    }
+
 // A copy older than this is made again when the app starts or comes to the
 // front.
 internal const val STALE_MS =6 * 60 * 60 * 1000L
@@ -172,18 +185,24 @@ class ServerSync @Inject constructor(
 
     // Another server (or none) is in use: a copy of the last one stops, the
     // library becomes the new one's, and its copy is made again when old.
+    // A database error (a full disk, say) is noted and the next server
+    // change tries again: the merge's library mark is written only once the
+    // merge worked, and this keeps listening for changes.
     private suspend fun arrived(session: Session?) {
         synchronized(this) { job }?.cancelAndJoin()
         _problem.value = null
-        dropUnkept()
-        val want = session?.sourceId.orEmpty()
-        if (context.syncData.data.first()[LIBRARY] != want) {
-            merge.rebuild()
-            context.syncData.edit { it[LIBRARY] = want }
+        orNoted {
+            dropUnkept()
+            val want = session?.sourceId.orEmpty()
+            if (context.syncData.data.first()[LIBRARY] != want) {
+                merge.rebuild()
+                context.syncData.edit { it[LIBRARY] = want }
+            }
         }
         _ready.value = session?.id ?: PHONE_LIBRARY
         if (session == null) return
-        if (need(session) != CopyNeed.Fresh) {
+        val needed = orNoted { need(session) } ?: CopyNeed.Copy
+        if (needed != CopyNeed.Fresh) {
             syncNow()
         } else if (foreground) {
             scope.launch { quietly { look(session) } }

@@ -1,5 +1,6 @@
 package app.winters.octo.catalog
 
+import app.winters.octo.testing.CurrentSqlite
 import app.winters.octo.testing.OldSqlite
 import app.winters.octo.testing.openTestCatalog
 import kotlinx.coroutines.runBlocking
@@ -34,10 +35,27 @@ class MergeSqlTest {
         conn.createStatement().use { s -> s.executeQuery("PRAGMA table_info(`$table`)").use { r -> buildList { while (r.next()) add(r.getString("name")) } } }
 
     private fun assertIndexed(sql: String, args: List<Any?>, chunked: Boolean) {
-        val plan = OldSqlite.plan(conn, sql, args)
-        val text = plan.joinToString(" / ")
-        assertFalse(text, plan.any { "TEMP B-TREE" in it || "AUTOMATIC" in it || "LIST SUBQUERY" in it })
-        if (chunked) assertFalse(text, plan.any { it.trimStart().startsWith("SCAN") })
+        for (plan in listOf(OldSqlite.plan(conn, sql, args), CurrentSqlite.plan(sql, args))) {
+            val text = plan.joinToString(" / ")
+            assertFalse(text, plan.any { "TEMP B-TREE" in it || "AUTOMATIC" in it || "LIST SUBQUERY" in it })
+            if (chunked) assertFalse(text, plan.any { it.trimStart().startsWith("SCAN") })
+        }
+    }
+
+    // Phones before SQLite 3.32 take at most 999 bound values a statement,
+    // and no engine a test can run keeps that limit, so the sizes lists are
+    // cut to are read from the code: every chunk and page is 900 or fewer.
+    @Test
+    fun noListIsCutBiggerThanOldPhonesBind() {
+        val root = java.io.File(System.getProperty("octo.mainSources")!!)
+        val sizes = Regex("""\.chunked\((\d[\d_]*)\)|\b\w*(?:PAGE|CHUNK|BATCH)\w*\s*=\s*(\d[\d_]*)""")
+        val tooBig = root.walkTopDown().filter { it.extension == "kt" }.flatMap { file ->
+            sizes.findAll(file.readText()).map { m ->
+                val n = (m.groupValues[1].ifEmpty { m.groupValues[2] }).replace("_", "").toInt()
+                "${file.name}: ${m.value}" to n
+            }
+        }.filter { it.second > 900 }.map { it.first }.toList()
+        assertEquals(emptyList<String>(), tooBig)
     }
 
     @Test

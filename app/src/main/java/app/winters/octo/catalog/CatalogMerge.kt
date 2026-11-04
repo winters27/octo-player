@@ -126,7 +126,18 @@ class CatalogMerge internal constructor(
 
     // Waits until the copy of `sourceId` built as `generation` is swapped
     // in, or throws StageAborted when it was not.
-    suspend fun awaitStage(sourceId: String, generation: Long) = stageOutcome(sourceId, generation).await()
+    suspend fun awaitStage(sourceId: String, generation: Long) {
+        try {
+            stageOutcome(sourceId, generation).await()
+        } finally {
+            forgetStage(sourceId, generation)
+        }
+    }
+
+    // The copy is done with its outcome, however it ended.
+    fun forgetStage(sourceId: String, generation: Long) {
+        synchronized(stages) { stages.remove(sourceId to generation) }
+    }
 
     // At launch: a source row no merge has placed (the app stopped between
     // a write and its merge) gets its merge now.
@@ -253,7 +264,6 @@ class CatalogMerge internal constructor(
             ClaimedStage(meta.sourceId, meta.generation, meta.stagedTracks + carryTakeIns(meta))
         }
         work.setClaimActive(true)
-        work.clearRatingNotes()
         val staged = claimed.mapTo(HashSet()) { it.sourceId }
         Step(Claim(ids.mapIndexed { rank, id -> MergeSource(id, rank, id in staged) }, claimed), dropped)
     }
@@ -319,12 +329,12 @@ class CatalogMerge internal constructor(
             favourites.relinkAll()
             // Songs with no rating on a server show the one made on the phone.
             user.showPhoneRatings()
-            // Ratings tapped since the claim go back over what the merge read.
+            // Ratings tapped while a copy was built or since the claim go
+            // back over what the copy or the merge read.
             for (note in work.ratingNotes()) {
                 work.setCopyRating(note.sourceRowId, note.rating)
                 work.showCopyRating(note.sourceRowId, note.rating)
             }
-            work.clearRatingNotes()
             for (stage in claim.claimed) {
                 work.owedSteps(stage.sourceId)
                 work.takeStageOwner(stage.sourceId)
@@ -333,20 +343,26 @@ class CatalogMerge internal constructor(
                 work.clearTakeInLog(stage.generation)
             }
             work.setClaimActive(false)
+            endRatingNotes()
             val stamps = work.metas().associate { it.sourceId to it.stamp }
             work.setSkipKey(skipKey(claim.sources.map { it.sourceId }, stamps, emptyMap()))
         }
     }
 
-    // A claimed copy is not swapped in: it goes, its copy is told why, and
-    // rating notes end with the claim.
+    // A claimed copy is not swapped in: it goes, and its copy is told why.
     private suspend fun abort(claim: Claim, reason: String) {
         db.withTransaction {
             claim.claimed.forEach { dropStageRows(it) }
-            work.clearRatingNotes()
             work.setClaimActive(false)
+            endRatingNotes()
         }
         failStages(claim.claimed, reason)
+    }
+
+    // Rating notes last while any copy is being built or waits to be
+    // swapped in: one still to come would bring the ratings it read.
+    private suspend fun endRatingNotes() {
+        if (work.metas().none { it.stage != STAGE_NONE }) work.clearRatingNotes()
     }
 
     private suspend fun dropStageRows(stage: ClaimedStage) {

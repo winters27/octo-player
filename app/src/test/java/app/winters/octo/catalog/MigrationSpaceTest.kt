@@ -18,12 +18,16 @@ import java.nio.file.Files
 
 @RunWith(RobolectricTestRunner::class)
 class MigrationSpaceTest {
-    // Bytes a song row takes in the rebuilt tables, on a generated library.
+    // The most disk the upgrade takes per song row, on a generated
+    // library: measured as it ends, before its one transaction commits,
+    // with Android's settings (auto-vacuum, secure delete) and a small page
+    // cache, so everything it wrote is on disk in the file and its log.
     @Test
     fun constantMatchesWhatTheUpgradeWrites() {
         val file = File(Files.createTempDirectory("s").toFile(), CATALOG_FILE)
         val rows = buildServerCatalog("server:h", LibraryGen.server(7, GenShape(songs = 5_000, albums = 500, artists = 200)))
         SQLiteDatabase.openOrCreateDatabase(file, null).use { db ->
+            db.execSQL("PRAGMA auto_vacuum = FULL")
             OldSqlite.schemaStatements(18).forEach(db::execSQL)
             db.beginTransaction()
             for (t in rows.tracks) {
@@ -42,6 +46,9 @@ class MigrationSpaceTest {
             db.setTransactionSuccessful(); db.endTransaction()
             db.version = 18
         }
+        fun onDisk(): Long = listOf("", "-wal", "-journal").sumOf { File(file.path + it).length() }
+        val before = onDisk()
+        var peak = 0L
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(testContext())
                 .name(file.path)
@@ -49,28 +56,20 @@ class MigrationSpaceTest {
                     override fun onConfigure(db: SupportSQLiteDatabase) {
                         db.enableWriteAheadLogging()
                         db.query("PRAGMA wal_autocheckpoint = 0").close()
+                        db.query("PRAGMA secure_delete = ON").close()
+                        db.query("PRAGMA cache_size = -256").close()
                     }
                     override fun onCreate(db: SupportSQLiteDatabase) = Unit
-                    override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = MIGRATION_18_19.migrate(db)
+                    override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
+                        MIGRATION_18_19.migrate(db)
+                        peak = onDisk() - before
+                    }
                 })
                 .build(),
         )
-        val db = helper.writableDatabase
-        // What the two rebuilt song tables take on disk, indexes and all:
-        // the upgrade holds a second copy of them until it drops the old
-        // ones, and the log holds about as much again (the guard doubles it).
-        fun bytes(): Long {
-            db.execSQL("VACUUM")
-            val pages = db.query("PRAGMA page_count").use { it.moveToFirst(); it.getLong(0) }
-            val size = db.query("PRAGMA page_size").use { it.moveToFirst(); it.getLong(0) }
-            return pages * size
-        }
-        val withRows = bytes()
-        db.execSQL("DELETE FROM source_track")
-        db.execSQL("DELETE FROM track")
-        val withoutRows = bytes()
+        helper.writableDatabase
         helper.close()
-        val perRow = (withRows - withoutRows) / (rows.tracks.size * 2)
+        val perRow = peak / (rows.tracks.size * 2)
         println("MEASURED bytesPerRow=$perRow")
         assertTrue("UPGRADE_BYTES_PER_ROW $UPGRADE_BYTES_PER_ROW below measured $perRow", UPGRADE_BYTES_PER_ROW >= perRow)
         assertTrue("UPGRADE_BYTES_PER_ROW $UPGRADE_BYTES_PER_ROW over 10% above measured $perRow", UPGRADE_BYTES_PER_ROW <= perRow * 11 / 10)
