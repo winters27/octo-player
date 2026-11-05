@@ -15,6 +15,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -48,6 +50,9 @@ val RowTitle = SemanticsPropertyKey<RowTitleInfo>("RowTitle")
 // while nothing is lit there.
 val RowFlash = SemanticsPropertyKey<Long>("RowFlash")
 
+// The id a row or card is found by on its page.
+val RowId = SemanticsPropertyKey<String>("RowId")
+
 // How long a row asked for stays lit, by default.
 const val ROW_FLASH_MS = 1_600L
 
@@ -73,6 +78,7 @@ data class SettingsFlash(val id: String, val nonce: Long)
 @Stable
 class SettingsAnchors {
     private val placed = mutableStateMapOf<String, LayoutCoordinates>()
+    private val keyboard = HashMap<String, FocusRequester>()
     private val standIns = mutableStateMapOf<String, String>()
 
     // The page's scroll content, which every place is measured in.
@@ -89,12 +95,25 @@ class SettingsAnchors {
     // The ids laid out now.
     val ids: Set<String> get() = placed.keys
 
-    internal fun place(id: String, at: LayoutCoordinates) {
+    internal fun place(id: String, at: LayoutCoordinates, focus: FocusRequester) {
         if (placed[id] !== at) placed[id] = at
+        keyboard[id] = focus
     }
 
     internal fun drop(id: String, at: LayoutCoordinates) {
-        if (placed[id] === at) placed.remove(id)
+        if (placed[id] === at) {
+            placed.remove(id)
+            keyboard.remove(id)
+        }
+    }
+
+    // Takes the keyboard to `id`'s first control, once laid out. A row with
+    // no control leaves the keyboard where it is.
+    fun focus(id: String) {
+        if (placed[id]?.isAttached != true) return
+        val focus = keyboard[id] ?: return
+        // A requester whose node has just left throws; the keyboard stays.
+        runCatching { focus.requestFocus() }
     }
 
     internal fun standIn(hidden: String, by: String) {
@@ -159,6 +178,7 @@ internal fun Modifier.settingsRow(title: String, stable: String? = null, id: Str
 internal fun Modifier.settingsPlace(id: String, inset: Boolean = false, light: Boolean = true): Modifier {
     val anchors = LocalSettingsAnchors.current ?: return this
     val mine = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    val focus = remember { FocusRequester() }
     DisposableEffect(anchors, id) {
         onDispose {
             mine[0]?.let { anchors.drop(id, it) }
@@ -167,11 +187,15 @@ internal fun Modifier.settingsPlace(id: String, inset: Boolean = false, light: B
     }
     val flash = anchors.flash?.takeIf { it.id == id }
     return this
-        .semantics { if (flash != null) this[RowFlash] = flash.nonce }
+        .semantics {
+            this[RowId] = id
+            if (flash != null) this[RowFlash] = flash.nonce
+        }
         .onGloballyPositioned {
             mine[0] = it
-            anchors.place(id, it)
+            anchors.place(id, it, focus)
         }
+        .focusRequester(focus)
         .then(if (light) Modifier.flashFill(flash, inset) else Modifier)
 }
 

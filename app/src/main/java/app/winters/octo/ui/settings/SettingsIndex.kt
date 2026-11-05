@@ -6,7 +6,7 @@ import app.winters.octo.radio.SONG_RADIO
 
 import app.winters.octo.covers.PLAYLIST_COVERS_SETTING
 import app.winters.octo.animated.AnimatedArtSetting
-import app.winters.octo.catalog.searchKey
+import app.winters.octo.ui.search.rankSettings
 import kotlinx.serialization.Serializable
 
 // The pages Settings opens, in the order the front page lists them.
@@ -569,40 +569,14 @@ object SettingsIndex {
     fun byId(id: String): SettingEntry? = registered.firstOrNull { it.id == id }
 }
 
-// How well a setting matches, best first: the title begins with what was
-// typed, every word is in the title, the title and other words together
-// cover it, or only the line about it does.
-private enum class Match { TitleStart, Title, Keywords, Summary }
-
-// Lowercase, accents and punctuation gone, so "wifi" finds "Wi-Fi".
-internal fun normalized(text: String): String =
-    searchKey(text).filter { it.isLetterOrDigit() || it.isWhitespace() }.replace(Regex("\\s+"), " ").trim()
-
-// A typed word is found in some text when a word there starts with it, or
-// anywhere inside it once it is three letters or more.
-private fun found(word: String, text: String): Boolean {
-    if (text.isEmpty()) return false
-    if (text.startsWith(word) || text.contains(" $word")) return true
-    return word.length >= 3 && text.contains(word)
-}
-
-// The settings that match what was typed, best first. Every typed word must
-// be found somewhere. Ties keep the order the settings are written in.
-fun searchSettings(query: String, entries: List<SettingEntry> = SettingsIndex.all): List<SettingEntry> {
-    val typed = normalized(query)
-    if (typed.isEmpty()) return emptyList()
-    val words = typed.split(' ')
-    return entries.mapNotNull { entry ->
-        val title = normalized(entry.title)
-        val other = normalized((entry.keywords + entry.page.title + listOfNotNull(entry.section)).joinToString(" "))
-        val summary = normalized(entry.summary)
-        val match = when {
-            title.startsWith(typed) -> Match.TitleStart
-            words.all { found(it, title) } -> Match.Title
-            words.all { found(it, title) || found(it, other) } -> Match.Keywords
-            words.all { found(it, title) || found(it, other) || found(it, summary) } -> Match.Summary
-            else -> return@mapNotNull null
-        }
-        entry to match
-    }.sortedBy { it.second }.map { it.first }
-}
+// The settings that match what was typed, best first: a title that begins
+// with it, then titles holding every word, then titles with other words,
+// then the line about it. Every typed word must be found somewhere. Ties
+// keep the order the settings are written in.
+fun searchSettings(query: String, entries: List<SettingEntry> = SettingsIndex.all): List<SettingEntry> = rankSettings(
+    query,
+    entries,
+    title = { it.title },
+    other = { (it.keywords + it.page.title + listOfNotNull(it.section)).joinToString(" ") },
+    summary = { it.summary },
+)

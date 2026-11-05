@@ -14,29 +14,40 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key as pressed
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -76,6 +87,7 @@ import app.winters.octo.desktop.nav.settingsPages
 import app.winters.octo.desktop.server.Reach
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.name
+import app.winters.octo.desktop.system.LocalSystem
 import app.winters.octo.desktop.system.hasDiscord
 import app.winters.octo.desktop.ui.windowRect
 import kotlin.math.ceil
@@ -169,6 +181,16 @@ internal fun SettingsList(app: AppState, chosen: FocusRequester, live: Boolean, 
         ui.page = key
         ui.aim(null)
     }
+    val here = settingsHere(app)
+    val query = ui.query
+    val hits = remember(query, here) { searchDesktopSettings(query, here) }
+    // The result Enter opens, moved with Up and Down; the first while typing.
+    var at by remember(query) { mutableIntStateOf(0) }
+    fun open(index: Int) {
+        val hit = hits.getOrNull(index) ?: return
+        at = index
+        app.openSettings(hit.entry.page, hit.entry.row)
+    }
     Column(modifier.padding(horizontal = ListSide, vertical = Space.M)) {
         SettingsHeader(app, live)
         val scroll = rememberScrollState()
@@ -176,8 +198,8 @@ internal fun SettingsList(app: AppState, chosen: FocusRequester, live: Boolean, 
             Spacer(Modifier.height(Space.S))
             AccountCard(app) { pick(SettingsKey.Servers) }
             Spacer(Modifier.height(Space.L))
-            SettingsSearch(app, live)
-            groups.forEach { group ->
+            SettingsSearch(app, live, onMove = { step -> if (hits.isNotEmpty()) at = (at + step).coerceIn(0, hits.lastIndex) }, onOpen = { open(at) })
+            if (query.isNotBlank()) SettingsResults(hits, at, ::open) else groups.forEach { group ->
                 Txt(
                     group.title.uppercase(),
                     DesktopType.label,
@@ -311,10 +333,25 @@ private fun CoverMosaic(covers: List<String?>) {
     }
 }
 
-// Settings' own search field. Its words are Settings' query; Ctrl+F (Cmd+F)
-// comes here while the list is live.
+// What this window has, for which settings the search finds.
 @Composable
-private fun SettingsSearch(app: AppState, live: Boolean) {
+private fun settingsHere(app: AppState): SettingsHere {
+    val system = LocalSystem.current
+    return SettingsHere(
+        os = app.os,
+        tray = system?.trayAvailable == true,
+        notifications = system?.notificationsAvailable == true,
+        discord = hasDiscord(),
+        engine = app.sound != null,
+        family = app.connection?.family == true,
+    )
+}
+
+// Settings' own search field. Its words are Settings' query; Ctrl+F (Cmd+F)
+// comes here while the list is live. While it holds words, Up and Down move
+// through the results under it and Enter opens the one marked.
+@Composable
+private fun SettingsSearch(app: AppState, live: Boolean, onMove: (Int) -> Unit, onOpen: () -> Unit) {
     val ui = app.settingsUi
     val focus = remember { FocusRequester() }
     DisposableEffect(focus, live) {
@@ -325,12 +362,81 @@ private fun SettingsSearch(app: AppState, live: Boolean) {
     GlassField(
         ui.query,
         { ui.query = it },
-        Modifier.fillMaxWidth().height(RowHeight.Nav).onFocusChanged { ui.searchHasKeyboard = it.hasFocus },
+        Modifier
+            .fillMaxWidth()
+            .height(RowHeight.Nav)
+            .onFocusChanged { ui.searchHasKeyboard = it.hasFocus }
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown || ui.query.isBlank()) return@onPreviewKeyEvent false
+                when (event.pressed) {
+                    Key.DirectionDown -> onMove(1)
+                    Key.DirectionUp -> onMove(-1)
+                    else -> return@onPreviewKeyEvent false
+                }
+                true
+            },
         placeholder = "Search settings",
         icon = OctoIcons.Search,
         focusRequester = focus,
+        onSubmit = { if (ui.query.isNotBlank()) onOpen() },
         trailing = if (ui.query.isEmpty()) ({ Txt(if (app.mac) "⌘F" else "Ctrl+F", DesktopType.meta, OctoColors.TextMuted, Modifier.padding(end = Space.S)) }) else null,
     )
+}
+
+// What the search found, under its field in the groups' place: how many,
+// said to a screen reader as it changes, then each setting by its title
+// with its page (and card) under it. The one Enter opens is lit as the page
+// shown is lit in the list.
+@Composable
+private fun SettingsResults(hits: List<SettingsHit>, marked: Int, onOpen: (Int) -> Unit) {
+    val count = when (hits.size) {
+        0 -> "No settings match"
+        1 -> "1 result"
+        else -> "${hits.size} results"
+    }
+    Txt(
+        count,
+        DesktopType.meta,
+        OctoColors.TextMuted,
+        Modifier.padding(start = ItemInset, top = Space.L, bottom = Space.Xs).semantics { liveRegion = LiveRegionMode.Polite },
+    )
+    hits.forEachIndexed { index, hit -> SettingsResult(hit, index == marked) { onOpen(index) } }
+}
+
+// One result: the page's icon, the setting's title, and where it is.
+@Composable
+private fun SettingsResult(hit: SettingsHit, marked: Boolean, onOpen: () -> Unit) {
+    val accent = OctoColors.Accent
+    val seen = remember { BringIntoViewRequester() }
+    LaunchedEffect(marked) { if (marked) seen.bringIntoView() }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = RowHeight.Nav)
+            .bringIntoViewRequester(seen)
+            .hoverLift(Corner.ControlShape, lifted = false)
+            .clickable(role = Role.Button, onClick = onOpen)
+            .semantics {
+                contentDescription = "${hit.entry.title}, ${hit.place}"
+                selected = marked
+            },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (marked) PlaceFill(Modifier.matchParentSize())
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = ItemInset, vertical = Space.S),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(ItemGap),
+        ) {
+            val icon = settingsPageIcon(hit.entry.page)
+            if (hit.entry.page == SettingsKey.Discord) Image(exactPainter(icon), null, Modifier.size(IconSize.Toolbar))
+            else Glyph(icon, size = IconSize.Toolbar, tint = if (marked) OctoColors.AccentHover else accent)
+            Column(Modifier.weight(1f)) {
+                Txt(hit.entry.title, DesktopType.body, if (marked) OctoColors.TextPrimary else mix(OctoColors.TextSecondary, OctoColors.TextPrimary, 0.6f), maxLines = 2)
+                Txt(hit.place, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xxs), maxLines = 2)
+            }
+        }
+    }
 }
 
 // One page in the list: its icon and name, and a dot or a quiet word after
@@ -346,8 +452,6 @@ private fun SettingsItem(
     onPick: () -> Unit,
 ) {
     val accent = OctoColors.Accent
-    val fill = remember(accent) { Brush.horizontalGradient(listOf(accent.copy(alpha = 0.22f), accent.copy(alpha = 0.08f))) }
-    val edge = accent.copy(alpha = 0.22f)
     val words = if (shown) OctoColors.TextPrimary else mix(OctoColors.TextSecondary, OctoColors.TextPrimary, 0.6f)
     Box(
         Modifier
@@ -362,7 +466,7 @@ private fun SettingsItem(
             },
         contentAlignment = Alignment.CenterStart,
     ) {
-        if (shown) Box(Modifier.matchParentSize().background(fill, Corner.ControlShape).border(FrameSize.Hairline, edge, Corner.ControlShape))
+        if (shown) PlaceFill(Modifier.matchParentSize())
         Row(
             Modifier.fillMaxWidth().padding(horizontal = ItemInset, vertical = Space.S),
             verticalAlignment = Alignment.CenterVertically,

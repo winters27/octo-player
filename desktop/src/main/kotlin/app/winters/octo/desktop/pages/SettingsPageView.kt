@@ -47,8 +47,9 @@ import kotlin.math.roundToInt
 // title alone on the first line, one line about it under that, then its
 // titled cards, all scrolling together in a column no wider than reads
 // well, with room at the foot so the last card clears the floating player.
-// A row asked for (Settings' row target) is brought into view and lit once
-// laid out; one never laid out lights its card instead. The scroll is kept
+// A row asked for (Settings' row target) is brought into view, lit and
+// given the keyboard once laid out; one never laid out lights its card
+// instead. The scroll is kept
 // with the visit, so a detour away and Back returns to the same spot; a
 // page picked in its place starts at its top the next time.
 @Composable
@@ -99,6 +100,9 @@ internal fun SettingsPageView(
                 }
             }
             anchors.flash = SettingsFlash(id, asked.nonce)
+            // The keyboard goes to what was asked for, so it can be changed
+            // at once.
+            anchors.focus(id)
             delay(flashMs)
             if (anchors.flash?.nonce == asked.nonce) anchors.flash = null
         }
