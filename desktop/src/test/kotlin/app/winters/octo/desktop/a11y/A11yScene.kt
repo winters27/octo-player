@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.a11y
 
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
@@ -60,6 +61,8 @@ class A11yScene(
     extensions: List<String> = listOf(),
     // What plays: the silent player unless a test brings its own.
     player: DesktopPlayer = SilentPlayer(),
+    // Around the window, for a test that sets something for all of it.
+    wrap: @Composable (@Composable () -> Unit) -> Unit = { it() },
 ) : AutoCloseable {
     val server = FakeServer()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -105,7 +108,7 @@ class A11yScene(
                 CompositionLocalProvider(
                     LocalTyping provides TypingState(),
                     LocalDensity provides Density(1f, textScale),
-                ) { Shell(app, null) {} }
+                ) { wrap { Shell(app, null) {} } }
             }
         }
         render(4)
