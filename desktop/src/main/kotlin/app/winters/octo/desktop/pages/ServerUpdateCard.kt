@@ -29,6 +29,7 @@ import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.GlazeCapsule
+import app.winters.octo.design.TextAction
 import app.winters.octo.design.IconSize
 import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
@@ -101,12 +102,12 @@ internal fun ServerUpdateCard(app: AppState) {
                 panel.problem?.let { Txt(it, DesktopType.meta, OctoColors.SignalOrange, maxLines = 4) }
                 Buttons {
                     if (panel.way == UpdateWay.Now) {
-                        GlazeCapsule(null, if (panel.starting) "Starting" else "Update now", { confirmUpdate(app, panel.latest.tag) }, lit = true, enabled = !panel.starting, height = ControlHeight.M)
+                        AccentPill(if (panel.starting) "Starting" else "Update now", { confirmUpdate(app, panel.latest.tag) }, enabled = !panel.starting)
                     } else {
-                        GlazeCapsule(null, "Open dashboard", app::openDashboard, lit = true, height = ControlHeight.M)
+                        AccentPill("Open dashboard", app::openDashboard)
                     }
-                    GlazeCapsule(null, "What's new", { showServerNotes(app, panel.newer) }, height = ControlHeight.M)
-                    GlazeCapsule(null, "Later", watcher::later, enabled = !panel.starting, height = ControlHeight.M)
+                    RowAction("What's new", { showServerNotes(app, panel.newer) })
+                    TextAction("Later", watcher::later, enabled = !panel.starting)
                 }
             }
             is UpdatePanel.Updating -> {
@@ -122,10 +123,10 @@ internal fun ServerUpdateCard(app: AppState) {
                 outcomeDetail(outcome)?.let { Txt(it, DesktopType.meta, OctoColors.TextSecondary, maxLines = 6) }
                 Buttons {
                     if (outcome is UpdateOutcome.Done) {
-                        GlazeCapsule(null, "Done", watcher::closeOutcome, lit = true, height = ControlHeight.M)
+                        AccentPill("Done", watcher::closeOutcome)
                     } else {
-                        GlazeCapsule(null, "Open dashboard", app::openDashboard, lit = true, height = ControlHeight.M)
-                        GlazeCapsule(null, "Close", watcher::closeOutcome, height = ControlHeight.M)
+                        AccentPill("Open dashboard", app::openDashboard)
+                        TextAction("Close", watcher::closeOutcome)
                     }
                 }
             }
@@ -140,6 +141,7 @@ private fun Buttons(content: @Composable () -> Unit) {
         Modifier.padding(top = Space.M),
         horizontalArrangement = Arrangement.spacedBy(Space.M),
         verticalArrangement = Arrangement.spacedBy(Space.M),
+        itemVerticalAlignment = Alignment.CenterVertically,
     ) { content() }
 }
 

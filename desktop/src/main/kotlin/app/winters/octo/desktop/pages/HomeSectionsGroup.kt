@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
@@ -78,8 +79,10 @@ internal fun HomeSectionsGroup(app: AppState, stored: String?) {
     val popups = LocalPopups.current
     Column(Modifier.fillMaxWidth()) {
         val changed = entries != DefaultHomeSections
+        // Reset's words end on the rows' value edge; its own padding reaches
+        // past it, as its height reaches above and below the title's line.
         SettingsCard("Shelves", OctoIcons.Home, trailing = {
-            TextAction(RESET_HOME_SECTIONS, {
+            TextAction(RESET_HOME_SECTIONS, modifier = Modifier.offset(x = Space.L), onClick = {
                 popups.showCentred { close ->
                     MenuTitle(RESET_HOME_SECTIONS_ASK)
                     PopupPadding {

@@ -124,7 +124,7 @@ fun FamilyPage(app: AppState, visit: Visit) {
             visit,
             FAMILY,
             listOf(
-                PageSection("plan", MY_PLAN, OctoIcons.Family) {
+                PageSection("plan", MY_PLAN, OctoIcons.Plan) {
                     Rows { SettingRow(if (model.problem == null) "Reading" else "Not here right now", model.problem ?: "Asking the server about your plan.") }
                 },
             ),
@@ -139,14 +139,14 @@ fun FamilyPage(app: AppState, visit: Visit) {
     val sections = model.sections().map { section ->
         when (section) {
             FamilySection.Login -> PageSection("login", YOUR_LOGIN, OctoIcons.Key, detail = model.login?.username) { LoginSection(app, model) }
-            FamilySection.Plan -> PageSection("plan", MY_PLAN, OctoIcons.Family, detail = planTitle(me)) { PlanSection(model, me) }
+            FamilySection.Plan -> PageSection("plan", MY_PLAN, OctoIcons.Plan, detail = planTitle(me)) { PlanSection(model, me) }
             FamilySection.Saved -> PageSection("saved", SAVED, OctoIcons.Like, detail = savedDetail(model)) { SavedSection(app, model, me) }
             FamilySection.Requests -> PageSection("requests", REQUESTS, OctoIcons.Downloading, detail = requestsDetail(model.requests)) { RequestsSection(model) }
             FamilySection.Devices -> PageSection("devices", DEVICES, OctoIcons.Device, detail = plural(model.devices.size, "device")) { DevicesSection(app, model) }
             FamilySection.Members -> PageSection("members", MEMBERS, OctoIcons.Family, detail = membersDetail(info.manager?.members.orEmpty(), info.manager?.liveStreams ?: 0)) {
                 MembersSection(model, info.manager?.members.orEmpty())
             }
-            FamilySection.Inbox -> PageSection("inbox", REQUESTS_WAITING, OctoIcons.Check, detail = if (model.inbox.isEmpty()) "None waiting" else "${model.inbox.size} waiting") {
+            FamilySection.Inbox -> PageSection("inbox", REQUESTS_WAITING, OctoIcons.Hourglass, detail = if (model.inbox.isEmpty()) "None waiting" else "${model.inbox.size} waiting") {
                 InboxSection(model)
             }
         }

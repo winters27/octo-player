@@ -160,8 +160,11 @@ fun EqCurve(
     onSettle: () -> Unit,
     modifier: Modifier = Modifier,
     plotHeight: Dp = PlotHeight,
+    // Off, the curve is only shown: the pointer and the wheel leave it be.
+    enabled: Boolean = true,
 ) {
     val measurer = rememberTextMeasurer()
+    val live by rememberUpdatedState(enabled)
     val latest by rememberUpdatedState(settings)
     val chosen by rememberUpdatedState(selected)
     val select by rememberUpdatedState(onSelect)
@@ -190,11 +193,13 @@ fun EqCurve(
                 .semantics { contentDescription = "Equalizer curve" }
                 .pointerHoverIcon(if (hovered != null) PointerIcon.Hand else PointerIcon.Default)
                 .onPointerEvent(PointerEventType.Move) { event ->
+                    if (!live) return@onPointerEvent
                     val at = event.changes.first().position
                     hovered = nodeAt(pointsOf(latest, Plot(size.width.toFloat(), size.height.toFloat(), this)), at, HitRadius.toPx(), chosen)
                 }
                 .onPointerEvent(PointerEventType.Exit) { hovered = null }
                 .onPointerEvent(PointerEventType.Scroll) { event ->
+                    if (!live) return@onPointerEvent
                     val change = event.changes.first()
                     val index = nodeAt(pointsOf(latest, Plot(size.width.toFloat(), size.height.toFloat(), this)), change.position, HitRadius.toPx(), chosen)
                         ?: return@onPointerEvent
@@ -207,6 +212,7 @@ fun EqCurve(
                 .pointerInput(Unit) {
                     awaitEachGesture {
                         val down = awaitFirstDown()
+                        if (!live) return@awaitEachGesture
                         val start = latest
                         val area = Plot(size.width.toFloat(), size.height.toFloat(), this)
                         val free = start.mode == EqMode.Parametric

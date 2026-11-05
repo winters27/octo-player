@@ -30,8 +30,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntRect
@@ -83,7 +85,8 @@ import app.winters.octo.serverupdate.upToDateLine
 import kotlinx.coroutines.launch
 
 // Settings > Servers: a newer Octo for the server in use, the servers kept
-// on this computer with the one in use on the darker pill, adding another,
+// on this computer with the one in use lit as Settings' list lights its
+// page, adding another,
 // what the one in use is and holds, and reading or scanning it again.
 
 @Composable
@@ -126,7 +129,7 @@ private fun ServerRow(app: AppState, server: SavedServer, inUse: Boolean) {
             .heightIn(min = RowHeight.Roomy)
             .semantics { selected = inUse },
     ) {
-        ChosenFill(inUse, Modifier.matchParentSize().padding(CardFit.Fill), Corner.RowShape)
+        if (inUse) PlaceFill(Modifier.matchParentSize().padding(CardFit.Fill))
         Row(
             Modifier.fillMaxWidth().padding(horizontal = RowInset, vertical = Space.L),
             verticalAlignment = Alignment.CenterVertically,
@@ -137,18 +140,21 @@ private fun ServerRow(app: AppState, server: SavedServer, inUse: Boolean) {
                     Txt(server.name, if (inUse) ChosenWords else DesktopType.body, if (server.signedOut) OctoColors.TextSecondary else OctoColors.TextPrimary)
                     if (inUse) InUseMark()
                 }
-                val subtitle = if (inUse) InUseSubtitle else OctoColors.TextMuted
-                Txt(accountLine(server), DesktopType.meta, subtitle, Modifier.padding(top = Space.Xxs))
+                Txt(accountLine(server), DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xxs))
+                // The one in use has its kind said under the list, and one
+                // being switched to says so at the row's end, so neither
+                // says it here too unless it has a problem to tell.
                 val quiet = check?.reach == Reach.Unreachable || check?.reach == Reach.WrongPassword
-                Txt(statusLine(server, check, switching, inUse), DesktopType.meta, if (quiet) OctoColors.SignalOrange else subtitle, Modifier.padding(top = Space.Xxs))
+                if (!switching && (!inUse || quiet)) {
+                    Txt(statusLine(server, check, false, inUse), DesktopType.meta, if (quiet) OctoColors.SignalOrange else OctoColors.TextMuted, Modifier.padding(top = Space.Xxs))
+                }
             }
             when {
-                // Ends where the words of Switch end: the button's own padding.
-                switching -> Row(Modifier.padding(end = Space.L), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
+                switching -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
                     Spinner(size = IconSize.Table)
-                    Txt("Switching", DesktopType.meta, OctoColors.TextSecondary)
+                    Txt("Switching", DesktopType.meta, OctoColors.TextMuted)
                 }
-                !inUse -> TextAction(if (server.signedOut) "Sign in" else "Switch", { switchServer(app, server.id) }, enabled = app.switching == null)
+                !inUse -> RowAction(if (server.signedOut) "Sign in" else "Switch", { switchServer(app, server.id) }, enabled = app.switching == null)
             }
             ServerMenuButton(app, server, inUse)
         }
@@ -237,7 +243,7 @@ private fun OverviewCards(app: AppState, connection: Connection) {
             }
         }
     }
-    SettingsCard("Maintenance", OctoIcons.Library) {
+    SettingsCard("Maintenance", OctoIcons.Wrench) {
         ActionRow("Read the library again", "When new music hasn't shown up yet.", "Read again", {
             app.library?.load()
             app.refreshPlaylists()
@@ -520,18 +526,15 @@ private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, clo
 // Asks before a server leaves the list, saying what goes and what stays.
 fun askToRemove(app: AppState, server: SavedServer) {
     val opening = Any()
-    app.popups.showCentred(width = SettingsSize.Sheet) { close ->
+    app.popups.showCentred(width = SettingsSize.Sheet, over = app.settingsColumn()) { close ->
         var forgetHere by remember(opening) { mutableStateOf(false) }
         val inUse = server.id == app.connection?.server?.id
-        MenuTitle("Remove ${server.name}?")
         PopupPadding {
-            Txt(
+            SheetQuestion(
+                "Remove ${server.name}?",
                 "It leaves your list and Octo forgets its password." +
                     (if (inUse) " You'll be signed out of it now." else "") +
                     " Your music and playlists stay on the server.",
-                DesktopType.body,
-                OctoColors.TextPrimary,
-                maxLines = 4,
             )
             SheetSwitch(
                 "Also delete what's kept here for it",
@@ -563,16 +566,18 @@ private fun Field(name: String, content: @Composable ColumnScope.() -> Unit) {
     }
 }
 
-// A switch in a sheet: its name and when you'd want it, the switch beside.
-// The whole line flips it.
+// A switch in a sheet: its name and when you'd want it, the switch beside,
+// all held in from the line's edge, where the keyboard's ring is drawn just
+// outside it. The whole line flips it.
 @Composable
 private fun SheetSwitch(title: String, caption: String, on: Boolean, change: (Boolean) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
+            .ringOutside(Corner.Row)
             .hoverLift(Corner.RowShape)
-            .toggleable(value = on, role = Role.Switch, onValueChange = change)
-            .padding(vertical = Space.S),
+            .toggleable(value = on, interactionSource = null, indication = null, role = Role.Switch, onValueChange = change)
+            .padding(horizontal = Space.L, vertical = SheetLineDepth),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.L),
     ) {
@@ -580,6 +585,10 @@ private fun SheetSwitch(title: String, caption: String, on: Boolean, change: (Bo
             Txt(title, DesktopType.body)
             Txt(caption, DesktopType.meta, OctoColors.TextMuted, maxLines = 3)
         }
-        OctoSwitch(on, change)
+        // The line is the one switch a screen reader hears.
+        OctoSwitch(on, change, Modifier.focusProperties { canFocus = false }.semantics { hideFromAccessibility() })
     }
 }
+
+// The room above and below a sheet line's words.
+private val SheetLineDepth = Space.M + Space.Xxs

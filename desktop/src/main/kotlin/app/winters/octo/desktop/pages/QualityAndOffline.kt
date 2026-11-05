@@ -14,7 +14,6 @@ import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FitOrElse
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.GlazeSegments
-import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.PopupPadding
@@ -137,7 +136,7 @@ internal fun OfflineRows(app: AppState, settings: AppSettings) {
             app.settings.update { it.copy(playback = it.playback.copy(startAfter = wait)) }
         }
     }
-    SettingsCard("Kept on this computer", OctoIcons.Downloaded, id = "kept") {
+    SettingsCard("Kept on this computer", OctoIcons.HardDrive, id = "kept") {
         SettingRow(
             "Kept on this computer",
             buildList {
@@ -181,7 +180,7 @@ internal fun OfflineRows(app: AppState, settings: AppSettings) {
         }
     }
     if (status.kept > 0 || choices.byHand.isNotEmpty() || choices.liked || choices.playlists.isNotEmpty()) {
-        Rows { ActionRow(REMOVE_ALL, "Lets every kept song go and stops keeping any.", REMOVE_ALL, { askToRemoveAll(app) }, danger = true) }
+        Rows { ActionRow(REMOVE_ALL, "Lets every kept song go and stops keeping any.", "Remove", { askToRemoveAll(app) }, danger = true) }
     }
 }
 
@@ -190,15 +189,12 @@ private const val REMOVE_ALL = "Remove all"
 // Asks before every kept song goes, saying what goes and what stays.
 internal fun askToRemoveAll(app: AppState) {
     val opening = Any()
-    app.popups.showCentred(width = SettingsSize.Sheet) { close ->
+    app.popups.showCentred(width = SettingsSize.Sheet, over = app.settingsColumn()) { close ->
         key(opening) {
-            MenuTitle("Remove every kept song?")
             PopupPadding {
-                Txt(
+                SheetQuestion(
+                    "Remove every kept song?",
                     "Octo deletes the songs it kept on this computer and stops keeping any. They still play from your server.",
-                    DesktopType.body,
-                    OctoColors.TextPrimary,
-                    maxLines = 4,
                 )
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = Space.Xs),

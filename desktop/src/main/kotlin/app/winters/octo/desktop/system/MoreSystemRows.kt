@@ -34,7 +34,7 @@ fun MiniPlayerGroup(app: AppState) {
     val system = LocalSystem.current ?: return
     val settings by app.settings.state.collectAsState()
     val command = if (app.os == DesktopOs.Mac) "Cmd+M" else "Ctrl+M"
-    SettingsCard("Mini player", OctoIcons.Minimize) {
+    SettingsCard("Mini player", OctoIcons.PictureInPicture) {
         SwitchRow("Mini player", "A small window in place of this one. $command opens it too.", system.miniPlayerOpen) { on -> system.setMiniPlayer(on) }
         SwitchRow("Keep it above other windows", null, settings.system.miniPlayerOnTop) { on ->
             app.settings.update { it.copy(system = it.system.copy(miniPlayerOnTop = on)) }

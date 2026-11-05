@@ -3,6 +3,8 @@ package app.winters.octo.desktop.a11y
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import app.winters.octo.desktop.nav.SettingsKey
 import app.winters.octo.desktop.pages.askToRemove
 import org.jetbrains.skia.Bitmap
@@ -14,7 +16,8 @@ import org.junit.rules.TemporaryFolder
 
 // What Settings asks before it lets something go: removing a server and
 // removing every kept song each ask in a sheet whose last button, the one
-// that goes ahead, is in the error red.
+// that goes ahead, is in the error red. On the page, Remove all's name is
+// plain and only its button, Remove, is red.
 class SettingsConfirmTest {
     @get:Rule val folder = TemporaryFolder()
 
@@ -65,7 +68,7 @@ class SettingsConfirmTest {
     }
 
     @Test(timeout = 120_000)
-    fun removeAllAsksWithItsRemoveAllLastAndRed() {
+    fun removeAllIsPlainUntilItsRedButtonAndAsksWithItsRemoveAllLastAndRed() {
         // Tall enough that Remove all, at the page's foot, is on screen.
         A11yScene(folder.root, reduceMotion = true, height = 1_400).use { s ->
             s.onUi {
@@ -73,10 +76,13 @@ class SettingsConfirmTest {
                 s.app.openSettings(SettingsKey.Offline)
             }
             s.render(4)
-            // On the page, Remove all is red too.
+            // On the page, the row's name is plain and its button, Remove,
+            // is red.
             val page = Bitmap.makeFromImage(s.settle(600))
-            val onPage = s.button("Remove all")
-            assertTrue("Remove all on the page is red", redness(page, onPage.boundsInRoot) >= 120)
+            val onPage = s.button("Remove")
+            assertTrue("Remove on the page is red", redness(page, onPage.boundsInRoot) >= 120)
+            val name = s.nodes().first { it.config.getOrNull(SemanticsProperties.Text)?.joinToString("") { t -> t.text } == "Remove all" }
+            assertTrue("the row's name is not red: ${redness(page, name.boundsInRoot)}", redness(page, name.boundsInRoot) < 40)
             s.click(onPage)
             assertTrue("the sheet asks", s.nodes().any { it.name() == "Remove every kept song?" })
             s.checkSheet("Remove all")

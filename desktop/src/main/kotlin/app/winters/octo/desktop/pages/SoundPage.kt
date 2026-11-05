@@ -145,7 +145,7 @@ internal fun SoundCards(app: AppState) {
     SettingsCard("Balance", OctoIcons.Balance, id = "balance") { BalanceRows(controller) }
     SettingsCard(
         "Crossfeed",
-        OctoIcons.Headphones,
+        OctoIcons.LeftRight,
         id = "crossfeed",
         footer = CROSSFEED_ABOUT,
         toggle = TitleSwitch(eq.crossfeed.on) { on -> controller.update { it.copy(crossfeed = it.crossfeed.copy(on = on)) } },
@@ -199,6 +199,7 @@ private fun Equalizer(app: AppState, sound: SoundController) {
             onSettle = sound::settle,
             modifier = Modifier.padding(horizontal = RowInset).padding(top = Space.L),
             plotHeight = SettingsSize.EqPlot,
+            enabled = !LocalRowsOff.current,
         )
         Txt(
             if (parametric) "Drag a point to move a filter; the wheel nudges its gain, a double click sets it flat." else "Drag a band up or down; the wheel nudges it, a double click sets it flat.",
@@ -235,13 +236,13 @@ private fun Equalizer(app: AppState, sound: SoundController) {
     }
 }
 
-// The preset in use, opening the list of presets to pick from, save to
-// and delete.
+// The preset in use, on the pill every list of choices opens from, opening
+// the presets to pick from, save to and delete.
 @Composable
 private fun PresetButton(app: AppState, sound: SoundController, settings: SoundSettings) {
     var anchor by remember { mutableStateOf(IntRect.Zero) }
     Box(Modifier.onGloballyPositioned { anchor = it.windowRect() }) {
-        GlazeCapsule(OctoIcons.Sound, presetLabel(settings), {
+        GlazeCapsule(null, presetLabel(settings), {
             app.popups.showUnder(anchor, width = FrameSize.Menu) { close ->
                 MenuTitle("Presets")
                 // Watched, so a preset deleted here leaves the list at once.
@@ -265,7 +266,7 @@ private fun PresetButton(app: AppState, sound: SoundController, settings: SoundS
                     app.popups.showCentred { done -> SavePreset(sound, done) }
                 }, OctoIcons.AddToLibrary)
             }
-        }, height = ControlHeight.M)
+        }, height = ControlHeight.L, quiet = true)
     }
 }
 
@@ -437,14 +438,10 @@ private fun readBalance(balance: Float): String {
     }
 }
 
-// How songs blend, once crossfade is on; off, each row hands an ask for it
-// to the switch on the card's title.
+// How songs blend. With crossfade off they stay in place, dimmed, showing
+// the shortest blend.
 @Composable
 private fun CrossfadeRows(app: AppState, playback: PlaybackPrefs, change: ((PlaybackPrefs) -> PlaybackPrefs) -> Unit) {
-    if (playback.crossfadeSeconds <= 0) {
-        listOf("longest-blend", "crossfade-curve", "smart-transitions", "filter-sweeps", "match-tempo").forEach { HiddenRow(it, by = "crossfade") }
-        return
-    }
     val seconds = playback.crossfadeSeconds.coerceIn(SHORTEST_BLEND_SECONDS, LONGEST_BLEND_SECONDS)
     val span = (LONGEST_BLEND_SECONDS - SHORTEST_BLEND_SECONDS).toFloat()
     SliderRow(
@@ -621,7 +618,7 @@ private fun CrossfeedRows(sound: SoundController) {
     fun change(edit: (Crossfeed) -> Crossfeed) = sound.update { it.copy(crossfeed = edit(it.crossfeed)) }
     fun preview(edit: (Crossfeed) -> Crossfeed) = sound.preview { it.copy(crossfeed = edit(it.crossfeed)) }
     Rows {
-        if (settings.mono && feed.on) SettingRow(CROSSFEED_MONO, null, dim = true)
+        if (settings.mono) SettingRow(CROSSFEED_MONO, null, dim = true)
         ChoiceRow("Preset", feed.preset.detail, CrossfeedPreset.entries, feed.preset, { it.label }) { preset ->
             change { it.copy(on = true, preset = preset) }
         }

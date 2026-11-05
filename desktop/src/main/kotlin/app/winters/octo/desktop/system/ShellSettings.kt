@@ -26,7 +26,7 @@ fun TaskbarAndStartupRows(app: AppState) {
 
 @Composable
 internal fun StartupRows(prefs: SystemPrefs, works: Boolean, turnedOff: Boolean, tray: Boolean, change: ((SystemPrefs) -> SystemPrefs) -> Unit) {
-    SettingsCard("Startup", OctoIcons.Timer) {
+    SettingsCard("Startup", OctoIcons.Power) {
         if (!works) {
             InfoRow("Start with Windows", "Works in the installed Octo.", "Installed app only")
             return@SettingsCard

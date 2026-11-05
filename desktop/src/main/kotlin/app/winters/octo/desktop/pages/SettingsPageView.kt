@@ -30,13 +30,14 @@ import app.winters.octo.design.SettingsSize
 import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 import app.winters.octo.design.scrollbar
-import app.winters.octo.design.topFade
+import app.winters.octo.design.topScrollFade
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.nav.ScrollSpot
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.ui.LocalBottomRoom
 import app.winters.octo.desktop.ui.PageSide
 import app.winters.octo.desktop.ui.PageTitle
+import app.winters.octo.desktop.ui.windowRect
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
@@ -74,6 +75,7 @@ internal fun SettingsPageView(
     val viewport = remember { mutableIntStateOf(0) }
     val bottomRoom = LocalBottomRoom.current
     val room by rememberUpdatedState(with(LocalDensity.current) { bottomRoom.roundToPx() to Space.Xl.roundToPx() })
+    val aboveTitle by rememberUpdatedState(with(LocalDensity.current) { CardTitleRoom.roundToPx() })
     val still by rememberUpdatedState(LocalReduceMotion.current)
     val flashMs by rememberUpdatedState(LocalRowFlashMs.current)
     LaunchedEffect(anchors) {
@@ -93,9 +95,15 @@ internal fun SettingsPageView(
                 val (foot, margin) = room
                 val shown = viewport.intValue - foot
                 val now = scroll.value
-                val inView = place.top >= now + margin && place.bottom <= now + shown - margin
+                // The row's card title comes into view with it, so the row
+                // is seen under its heading; a row too far down its card for
+                // both is brought in by itself.
+                val title = anchors.cardFor(id)?.takeIf { it != id }?.let(anchors::placeOf)?.top
+                val top = title?.let { it - aboveTitle } ?: (place.top - margin)
+                val inView = top >= now && place.bottom <= now + shown - margin
                 if (!inView) {
-                    val goal = (place.top - shown / 4f).roundToInt().coerceIn(0, scroll.maxValue)
+                    val fits = place.bottom - top <= shown - margin
+                    val goal = (if (fits) top else place.top - shown / 4f).roundToInt().coerceIn(0, scroll.maxValue)
                     if (still) scroll.scrollTo(goal) else scroll.animateScrollTo(goal)
                 }
             }
@@ -108,7 +116,13 @@ internal fun SettingsPageView(
         }
     }
     CompositionLocalProvider(LocalSettingsAnchors provides anchors) {
-        BoxWithConstraints(Modifier.fillMaxSize().onSizeChanged { viewport.intValue = it.height }.topFade(Space.Xl)) {
+        BoxWithConstraints(
+            Modifier
+                .fillMaxSize()
+                .onSizeChanged { viewport.intValue = it.height }
+                .onGloballyPositioned { ui.column = it.windowRect() }
+                .topScrollFade(scroll, Space.Xl, eased = true),
+        ) {
             val side = maxOf(PageSide, (maxWidth - SettingsSize.Column) / 2)
             Column(
                 Modifier
@@ -133,3 +147,6 @@ internal fun SettingsPageView(
 
 // Where each page of Settings keeps its scroll within the visit.
 private fun scrollKey(page: String) = "settings:$page"
+
+// The room above a card's title when a row asked for brings it into view.
+private val CardTitleRoom = Space.Page

@@ -4,6 +4,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -15,7 +19,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,17 +29,23 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -47,10 +56,16 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.hideFromAccessibility
@@ -58,14 +73,19 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.IntRect
 import app.winters.octo.design.CardEdge
 import app.winters.octo.design.CardFill
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FitOrElse
+import app.winters.octo.design.Focus
 import app.winters.octo.design.FocusRing
+import app.winters.octo.design.FocusRingColor
+import app.winters.octo.design.LocalFocusVisibility
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlazeSegments
 import app.winters.octo.design.Glyph
@@ -80,7 +100,6 @@ import app.winters.octo.design.SeparatorColor
 import app.winters.octo.design.SettingsSize
 import app.winters.octo.design.SliderLook
 import app.winters.octo.design.Space
-import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.design.crispPainter
 import app.winters.octo.design.exactPainter
@@ -220,7 +239,7 @@ internal fun SectionPick(section: PageSection, chosen: Boolean, onPick: () -> Un
     ) {
         if (chosen) PlaceFill(Modifier.matchParentSize())
         Row(Modifier.fillMaxWidth().padding(horizontal = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
-            section.icon?.let { SectionIcon(it, section.brand, IconSize.Toolbar, if (chosen) OctoColors.AccentHover else OctoColors.Accent) }
+            section.icon?.let { SectionIcon(it, section.brand, settingsIconSize(), if (chosen) OctoColors.AccentHover else OctoColors.Accent) }
             Txt(section.name, if (chosen) ChosenWords else DesktopType.body, if (chosen) OctoColors.TextPrimary else OctoColors.TextSecondary)
             section.mark?.let { what ->
                 Box(Modifier.size(FrameSize.NavMark).background(OctoColors.Accent, CircleShape).semantics { contentDescription = what })
@@ -304,27 +323,29 @@ internal fun SettingsCard(
     CompositionLocalProvider(LocalSettingsCard provides key) {
         Column(Modifier.fillMaxWidth().then(if (key != null) Modifier.settingsPlace(key, light = false) else Modifier)) {
             if (title != null) CardTitle(title, icon, brand, toggle, trailing)
-            Rows(flash = flashOf(key), content = content)
+            Rows(flash = flashOf(key), off = toggle?.on == false, content = content)
             if (footer != null) Txt(footer, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(start = RowInset, end = RowInset, top = Space.S), maxLines = 3)
         }
     }
 }
 
-// A card's title line: its icon in the accent and its title, then its
-// action or switch at the end. A title holding a switch is a row of its
-// own for the tree.
+// A card's title line: its icon in the accent, on the card's edge, and its
+// title, then its action or switch ending where the rows' controls end. The
+// line is as tall as its words whatever ends it: a taller control reaches
+// out above and below it. A title holding a switch is a row of its own for
+// the tree.
 @Composable
 private fun CardTitle(title: String, icon: ImageVector?, brand: Boolean, toggle: TitleSwitch?, trailing: (@Composable () -> Unit)?) {
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = ControlLine)
             .then(if (toggle != null) Modifier.semantics { this[RowTitle] = RowTitleInfo(title, title) } else Modifier)
-            .padding(start = Space.Xs, bottom = Space.M),
+            .padding(end = RowInset, bottom = Space.M)
+            .heightIn(min = TitleLine),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.M),
     ) {
-        if (icon != null) SectionIcon(icon, brand, IconSize.Toolbar, OctoColors.Accent)
+        if (icon != null) SectionIcon(icon, brand, settingsIconSize(), OctoColors.Accent)
         Txt(
             title,
             DesktopType.emphasis,
@@ -335,14 +356,37 @@ private fun CardTitle(title: String, icon: ImageVector?, brand: Boolean, toggle:
             },
             maxLines = 2,
         )
-        trailing?.invoke()
-        if (toggle != null) OctoSwitch(toggle.on, toggle.change, Modifier.semantics { contentDescription = title })
+        if (trailing != null) Box(Modifier.outward()) { trailing() }
+        if (toggle != null) OctoSwitch(toggle.on, toggle.change, Modifier.outward().semantics { contentDescription = title })
     }
 }
 
-// The least height of a card's title line, so cards with and without a
-// switch there start their glaze at the same depth.
-private val ControlLine = Space.Xxl
+// The height of a card's title line, whatever ends it.
+private val TitleLine = Space.Xxl
+
+// A control on a title's line, measured as tall as it likes but taking no
+// more of the line's height than the line has: it is drawn centered on the
+// line and reaches out above and below it, where it still takes clicks.
+private fun Modifier.outward(): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+    val line = TitleLine.roundToPx()
+    val height = minOf(placeable.height, maxOf(line, constraints.minHeight))
+    layout(placeable.width, height) { placeable.place(0, (height - placeable.height) / 2) }
+}
+
+// The icon size for a settings list item, card title or search result:
+// one size up once the text is 115% or more, so the icons keep up with
+// the words on whole pixels.
+@Composable
+internal fun settingsIconSize(): Dp = settingsIconSize(LocalDensity.current.fontScale)
+
+internal fun settingsIconSize(textScale: Float): Dp = if (textScale >= BIGGER_ICONS_FROM) IconSize.Transport else IconSize.Toolbar
+
+// Whether the text is big enough for the next icon size up.
+@Composable
+internal fun biggerIcons(): Boolean = settingsIconSize() == IconSize.Transport
+
+private const val BIGGER_ICONS_FROM = 1.15f
 
 // A group of rows in a card, with its name above when it has one (and
 // `action`, a quiet word for the whole group, at the end of that line), and
@@ -389,13 +433,21 @@ private const val TOP_LIGHT = 0.055f
 
 // Rows one under another in a card, with a hairline between each. A row
 // that draws nothing takes no place and gets no line; with no rows at all
-// there is no card. Rows already inside a card share its glaze.
+// there is no card. Rows already inside a card share its glaze. `off` rows
+// (their card's switch is off) stay in place, dimmed and out of reach.
 @Composable
-internal fun Rows(flash: SettingsFlash? = null, content: @Composable () -> Unit) {
+internal fun Rows(flash: SettingsFlash? = null, off: Boolean = false, content: @Composable () -> Unit) {
     val inside = LocalInCard.current
     val onePixel = with(LocalDensity.current) { 1.toDp() }
     val separator = SeparatorColor
-    SubcomposeLayout(Modifier.fillMaxWidth().then(if (inside) Modifier else Modifier.cardSurface(flash))) { constraints ->
+    val quiet = off || LocalRowsOff.current
+    // Provided around the layout, so the rows hear a change at once.
+    CompositionLocalProvider(LocalRowsOff provides quiet) { RowsLayout(inside, flash, off, onePixel, separator, content) }
+}
+
+@Composable
+private fun RowsLayout(inside: Boolean, flash: SettingsFlash?, off: Boolean, onePixel: Dp, separator: Color, content: @Composable () -> Unit) {
+    SubcomposeLayout(Modifier.fillMaxWidth().then(if (inside) Modifier else Modifier.cardSurface(flash)).switchedOff(off)) { constraints ->
         val loose = constraints.copy(minHeight = 0)
         val rows = subcompose("rows") { CompositionLocalProvider(LocalInCard provides true, content = content) }.map { it.measure(loose) }.filter { it.height > 0 }
         val lines = subcompose("lines") {
@@ -417,6 +469,29 @@ internal fun Rows(flash: SettingsFlash? = null, content: @Composable () -> Unit)
     }
 }
 
+// Whether the rows being drawn are switched off: their controls then say
+// nothing to a screen reader and take no wheel, and only their words are
+// read.
+internal val LocalRowsOff = compositionLocalOf { false }
+
+// Rows switched off, while `off`: drawn faint, with no press, drag or
+// keyboard reaching anything in them. The wheel still scrolls the page.
+internal fun Modifier.switchedOff(off: Boolean): Modifier = if (!off) this else this
+    .alpha(OFF_ALPHA)
+    .pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                if (event.type != PointerEventType.Scroll) event.changes.forEach { it.consume() }
+            }
+        }
+    }
+    .focusProperties { onEnter = { cancelFocusChange() } }
+    .focusGroup()
+
+// How strongly rows switched off are drawn.
+internal const val OFF_ALPHA = 0.45f
+
 // A setting's name.
 internal val RowTitleWords = DesktopType.body.copy(fontWeight = FontWeight.Medium)
 
@@ -431,7 +506,6 @@ internal fun SettingRow(
     dim: Boolean = false,
     stable: String? = null,
     id: String? = null,
-    danger: Boolean = false,
     control: @Composable RowScope.() -> Unit = {},
 ) {
     Row(
@@ -445,19 +519,14 @@ internal fun SettingRow(
         horizontalArrangement = Arrangement.spacedBy(Space.Xxl),
     ) {
         Column(Modifier.weight(1f)) {
-            val ink = when {
-                danger -> OctoColors.Error
-                dim -> OctoColors.TextMuted
-                else -> OctoColors.TextPrimary
-            }
-            Txt(title, RowTitleWords, ink, maxLines = 2)
+            Txt(title, RowTitleWords, if (dim) OctoColors.TextMuted else OctoColors.TextPrimary, maxLines = 2)
             if (caption != null) Txt(caption, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xxs), maxLines = Int.MAX_VALUE)
         }
         // The control is measured first, so it is held to its share of the
         // row and the words keep the rest; a picker too wide for that turns
-        // into its one-button form.
+        // into its one-button form. Switched off, it is only drawn.
         Row(
-            Modifier.layout { measurable, constraints ->
+            Modifier.then(if (LocalRowsOff.current) Modifier.clearAndSetSemantics { } else Modifier).layout { measurable, constraints ->
                 val most = if (constraints.hasBoundedWidth) (constraints.maxWidth * ControlShare).toInt() else constraints.maxWidth
                 val placeable = measurable.measure(constraints.copy(minWidth = 0, maxWidth = most))
                 layout(placeable.width, placeable.height) { placeable.place(0, 0) }
@@ -475,12 +544,17 @@ private const val ControlShare = 0.6f
 // A setting that is on or off. The whole row flips it.
 @Composable
 internal fun SwitchRow(title: String, caption: String?, on: Boolean, id: String? = null, stable: String? = null, change: (Boolean) -> Unit) {
+    val off = LocalRowsOff.current
     SettingRow(
         title,
         caption,
-        Modifier
-            .hoverLift()
-            .toggleable(value = on, interactionSource = null, indication = FocusRing(Corner.RowShape), role = Role.Switch, onValueChange = change),
+        if (off) {
+            Modifier
+        } else {
+            Modifier
+                .hoverLift()
+                .toggleable(value = on, interactionSource = null, indication = FocusRing(Corner.RowShape), role = Role.Switch, onValueChange = change)
+        },
         stable = stable,
         id = id,
     ) {
@@ -526,7 +600,7 @@ internal fun SliderRow(
                 modifier = Modifier.width(SettingsSize.Slider),
                 live = live,
                 onRelease = onRelease,
-                wheelStep = wheelStep,
+                wheelStep = wheelStep.takeIf { !LocalRowsOff.current },
                 look = SliderLook.Jewel,
                 label = title,
                 reading = { reading },
@@ -537,34 +611,80 @@ internal fun SliderRow(
     }
 }
 
-// A fact, with its value on the right.
+// A fact, with how it stands on the right in the captions' quiet words.
 @Composable
 internal fun InfoRow(title: String, caption: String?, value: String, stable: String? = null) {
     SettingRow(title, caption, stable = stable) {
-        Txt(value, DesktopType.body, OctoColors.TextSecondary, Modifier.padding(end = RowValueEnd))
+        Txt(value, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(end = RowValueEnd))
     }
 }
 
-// The room after a value at a row's end, so its words end where a text
-// button's words do (the button's own padding, less the offset RowAction
-// gives it).
-internal val RowValueEnd = Space.Xs
+// The room after a value at a row's end: none, so values end on the same
+// edge as the switches and the actions.
+internal val RowValueEnd = Space.None
 
-// Something to do, with its action in words on the right. A `danger` one
-// (it removes something for good) is in red, name and action both.
+// Something to do, with its action on the right. A `danger` one (it
+// removes something for good) has its action in red.
 @Composable
 internal fun ActionRow(title: String, caption: String?, action: String, onClick: () -> Unit, enabled: Boolean = true, stable: String? = null, danger: Boolean = false) {
-    SettingRow(title, caption, stable = stable, danger = danger) {
+    SettingRow(title, caption, stable = stable) {
         RowAction(action, onClick, enabled = enabled, danger = danger)
     }
 }
 
-// An action in words at a row's end. Its words line up with the switches'
-// edge; the lift under the pointer reaches a little past it.
+// An action at a row's end: a quiet pill, a faint fill of the words' ink
+// with the action in the accent (in red for a `danger` one), ending on the
+// row's value edge.
 @Composable
 internal fun RowAction(text: String, onClick: () -> Unit, enabled: Boolean = true, icon: ImageVector? = null, danger: Boolean = false) {
-    if (danger) DangerAction(text, onClick, Modifier.offset(x = Space.M), enabled = enabled, icon = icon)
-    else TextAction(text, onClick, Modifier.offset(x = Space.M), enabled = enabled, icon = icon)
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val ink = if (danger) OctoColors.Error else OctoColors.Accent
+    val fill = OctoColors.TextPrimary.copy(alpha = if (hovered && enabled) PILL_HOVER else PILL_REST)
+    Row(
+        Modifier
+            .alpha(if (enabled) 1f else DISABLED)
+            .clip(Corner.ControlShape)
+            .background(fill, Corner.ControlShape)
+            .hoverable(interaction, enabled = enabled)
+            .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
+            .tabStop(LocalTabStops.current)
+            .clickable(interactionSource = interaction, indication = FocusRing(Corner.ControlShape), enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = text }
+            .padding(horizontal = Space.L, vertical = Space.S),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.S),
+    ) {
+        if (icon != null) Glyph(icon, size = IconSize.Table, tint = ink)
+        Txt(text, OctoType.label, ink)
+    }
+}
+
+private const val PILL_REST = 0.06f
+private const val PILL_HOVER = 0.10f
+
+// The one action a card most wants taken: a pill of the accent with the
+// page's dark words, lighter under the pointer.
+@Composable
+internal fun AccentPill(text: String, onClick: () -> Unit, enabled: Boolean = true) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val fill = if (hovered && enabled) OctoColors.AccentHover else OctoColors.Accent
+    Row(
+        Modifier
+            .alpha(if (enabled) 1f else DISABLED)
+            .clip(Corner.ControlShape)
+            .background(fill, Corner.ControlShape)
+            .hoverable(interaction, enabled = enabled)
+            .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
+            .tabStop(LocalTabStops.current)
+            .clickable(interactionSource = interaction, indication = FocusRing(Corner.ControlShape), enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = text }
+            .padding(horizontal = Space.L, vertical = Space.S),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Txt(text, OctoType.label, OctoColors.Background)
+    }
 }
 
 // An action that removes something for good: a text button in red.
@@ -587,3 +707,43 @@ internal fun DangerAction(text: String, onClick: () -> Unit, modifier: Modifier 
 }
 
 private const val DISABLED = 0.5f
+
+// The keyboard's ring, `color`, drawn just outside what has it (rounded by
+// `corner`) while the keyboard is in use, so it never reads as the part's
+// own edge.
+@Composable
+internal fun Modifier.ringOutside(corner: Dp, color: Color = FocusRingColor): Modifier {
+    var focused by remember { mutableStateOf(false) }
+    val keyboard = LocalFocusVisibility.current.keyboard
+    return this
+        .drawWithContent {
+            drawContent()
+            if (focused && keyboard) {
+                val width = Focus.Ring.toPx()
+                drawRoundRect(
+                    color,
+                    topLeft = Offset(-width / 2, -width / 2),
+                    size = Size(size.width + width, size.height + width),
+                    cornerRadius = CornerRadius(corner.toPx() + width / 2),
+                    style = Stroke(width),
+                )
+            }
+        }
+        .onFocusChanged { focused = it.isFocused }
+}
+
+// What a sheet asking before something goes says first: the question, then
+// close under it what goes and what stays.
+@Composable
+internal fun SheetQuestion(question: String, detail: String) {
+    Column(Modifier.fillMaxWidth().padding(top = Space.S), verticalArrangement = Arrangement.spacedBy(Space.M)) {
+        Txt(question, SheetTitleWords, OctoColors.TextPrimary, Modifier.semantics { heading() }, maxLines = 2)
+        Txt(detail, DesktopType.table, OctoColors.TextSecondary, maxLines = 4)
+    }
+}
+
+private val SheetTitleWords = DesktopType.section.copy(fontWeight = FontWeight.SemiBold)
+
+// Where the Settings page shown sits in the window while Settings is open,
+// for a sheet asked from it to sit in the middle of and shade.
+internal fun AppState.settingsColumn(): IntRect? = settingsUi.column.takeIf { inSettings }

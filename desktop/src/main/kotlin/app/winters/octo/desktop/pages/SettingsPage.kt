@@ -190,7 +190,7 @@ private fun AppearanceCards(app: AppState, settings: AppSettings) {
             HiddenRow("movement", by = "ambience")
         }
     }
-    SettingsCard("Full player", OctoIcons.Play) {
+    SettingsCard("Full player", OctoIcons.Enlarge) {
         val animated = look.animatedArtSetting
         val animatedHelp = when {
             animated == AnimatedArtSetting.Off -> animated.about
@@ -209,7 +209,7 @@ private fun AppearanceCards(app: AppState, settings: AppSettings) {
             appearance { it.copy(playlistCovers = style) }
         }) { PlaylistCoverPicture(it) }
     }
-    SettingsCard("Motion", OctoIcons.Repeat) {
+    SettingsCard("Motion", OctoIcons.Wave) {
         SwitchRow(MOVING_BACKGROUND, "The cover's colors drift behind the full player.", look.wash.moving) { on ->
             wash { it.copy(moving = on) }
         }

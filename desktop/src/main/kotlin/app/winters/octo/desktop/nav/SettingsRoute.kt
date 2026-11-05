@@ -4,6 +4,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.IntRect
 import app.winters.octo.ui.family.AUDIO_QUALITY
 
 // The keys of Settings' pages, which links and the command search open.
@@ -82,6 +83,10 @@ class SettingsUi {
 
     // Whether the keyboard is in Settings' search field; the field sets it.
     var searchHasKeyboard by mutableStateOf(false)
+
+    // Where the page shown sits in the window, which a question asked
+    // from it is centered in; set by the page as it is laid out.
+    var column by mutableStateOf<IntRect?>(null)
 
     private var nonce = 0L
 

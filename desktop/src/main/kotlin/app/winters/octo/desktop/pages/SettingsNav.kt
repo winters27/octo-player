@@ -25,8 +25,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,6 +44,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -64,6 +69,7 @@ import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlassField
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconSize
+import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -76,6 +82,7 @@ import app.winters.octo.design.Txt
 import app.winters.octo.design.exactPainter
 import app.winters.octo.design.hoverLift
 import app.winters.octo.design.mix
+import app.winters.octo.design.scrollFades
 import app.winters.octo.design.scrollbar
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.discord.DiscordMark
@@ -90,7 +97,9 @@ import app.winters.octo.desktop.settings.name
 import app.winters.octo.desktop.system.LocalSystem
 import app.winters.octo.desktop.system.hasDiscord
 import app.winters.octo.desktop.ui.windowRect
+import kotlinx.coroutines.flow.filterNotNull
 import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 // Settings' list, in the sidebar's place while Settings is open: the way
 // back and the title on the first line, the account card, the settings
@@ -104,19 +113,32 @@ private val YourMusicPages = setOf(SettingsKey.Servers, SettingsKey.Quality, Set
 
 // The pages in their groups, in the order listed; About Octo is the foot's.
 internal fun settingsNavGroups(pages: List<SettingsPageInfo>): List<SettingsNavGroup> = listOf(
-    SettingsNavGroup("Listening", pages.filter { it.key in ListeningPages }),
-    SettingsNavGroup("Your music", pages.filter { it.key in YourMusicPages }),
-    SettingsNavGroup("This computer", pages.filter { it.key !in ListeningPages && it.key !in YourMusicPages && it.key != SettingsKey.About }),
+    SettingsNavGroup(LISTENING, pages.filter { it.key in ListeningPages }),
+    SettingsNavGroup(YOUR_MUSIC, pages.filter { it.key in YourMusicPages }),
+    SettingsNavGroup(THIS_COMPUTER, pages.filter { it.key !in ListeningPages && it.key !in YourMusicPages && it.key != SettingsKey.About }),
 ).filter { it.pages.isNotEmpty() }
+
+// The name of the group a page is listed under; About Octo, at the foot,
+// is Settings' own.
+internal fun settingsGroupOf(page: String): String = when (page) {
+    in ListeningPages -> LISTENING
+    in YourMusicPages -> YOUR_MUSIC
+    SettingsKey.About -> "Settings"
+    else -> THIS_COMPUTER
+}
+
+private const val LISTENING = "Listening"
+private const val YOUR_MUSIC = "Your music"
+private const val THIS_COMPUTER = "This computer"
 
 // Each page's icon in the list.
 internal fun settingsPageIcon(key: String): ImageVector = when (key) {
     SettingsKey.Playback -> OctoIcons.Playback
-    SettingsKey.Sound -> OctoIcons.Sound
+    SettingsKey.Sound -> OctoIcons.VolumeUp
     SettingsKey.Radio -> OctoIcons.Radio
     SettingsKey.Lyrics -> OctoIcons.Lyrics
     SettingsKey.Servers -> OctoIcons.Servers
-    SettingsKey.Quality -> OctoIcons.Equalizer
+    SettingsKey.Quality -> OctoIcons.Lossless
     SettingsKey.Offline -> OctoIcons.Download
     SettingsKey.Listening -> OctoIcons.History
     SettingsKey.Look -> OctoIcons.Appearance
@@ -139,6 +161,15 @@ private val ItemGap = Space.L
 
 // How far the list's items sit in from the slot's edges.
 private val ListSide = Space.M
+
+// How far the list's faded ends reach.
+private val ListFade = Space.Page
+
+// The room under the list's last page.
+private val ListFoot = RowHeight.Nav + Space.M
+
+// Where the page shown sits in the list's scrolling content.
+internal data class ItemSpot(val page: String, val top: Int, val height: Int)
 
 // What the about line says after its name: the version.
 private val AboutDetail: TextStyle get() = DesktopType.meta
@@ -163,7 +194,7 @@ internal fun settingsListNeeds(app: AppState): Dp {
                 // its width when one comes or goes.
                 words(page.name, DesktopType.body) + ItemGap.roundToPx() + words(version, AboutDetail) + dot
             } ?: 0
-            val around = (ListSide.roundToPx() + ItemInset.roundToPx()) * 2 + IconSize.Toolbar.roundToPx() + ItemGap.roundToPx()
+            val around = (ListSide.roundToPx() + ItemInset.roundToPx()) * 2 + settingsIconSize(fontScale).roundToPx() + ItemGap.roundToPx()
             // One pixel to spare, so a name measured to the pixel still fits.
             (around + maxOf(names, about) + 1).toDp()
         }
@@ -195,7 +226,27 @@ internal fun SettingsList(app: AppState, chosen: FocusRequester, live: Boolean, 
     Column(modifier.padding(horizontal = ListSide, vertical = Space.M)) {
         SettingsHeader(app, live)
         val scroll = rememberScrollState()
-        Column(Modifier.weight(1f).fillMaxWidth().scrollbar(scroll).verticalScroll(scroll)) {
+        var view by remember { mutableIntStateOf(0) }
+        var spot by remember { mutableStateOf<ItemSpot?>(null) }
+        val fade = with(LocalDensity.current) { ListFade.roundToPx() }
+        val still = LocalReduceMotion.current
+        // The page shown comes into view, opening Settings and on each pick,
+        // with an item's room under it and clear of the faded top; again
+        // whenever the list is laid out anew under it (as it settles in, or
+        // the window or text size changes), never as it is scrolled.
+        LaunchedEffect(ui.page, query.isBlank()) {
+            if (query.isNotBlank()) return@LaunchedEffect
+            snapshotFlow { spot?.takeIf { it.page == ui.page && view > 0 }?.let { it to view } }.filterNotNull().collect { (at, shown) ->
+                val goal = when {
+                    at.top + at.height * 2 > scroll.value + shown -> at.top + at.height * 2 - shown
+                    at.top - fade < scroll.value -> at.top - fade
+                    else -> return@collect
+                }.coerceIn(0, scroll.maxValue)
+                if (still) scroll.scrollTo(goal) else scroll.animateScrollTo(goal)
+            }
+        }
+        // Its ends fade while more of it is that way; the bar shows on hover.
+        Column(Modifier.weight(1f).fillMaxWidth().onSizeChanged { view = it.height }.scrollbar(scroll).scrollFades(scroll, ListFade, eased = true).verticalScroll(scroll)) {
             Spacer(Modifier.height(Space.S))
             AccountCard(app) { pick(SettingsKey.Servers) }
             Spacer(Modifier.height(Space.L))
@@ -212,10 +263,12 @@ internal fun SettingsList(app: AppState, chosen: FocusRequester, live: Boolean, 
                 )
                 group.pages.forEach { page ->
                     val mark = if (page.key == SettingsKey.Servers && serverUpdateWaits(app)) SERVER_UPDATE_MARK else null
-                    SettingsItem(page, ui.page == page.key, chosen, mark = mark) { pick(page.key) }
+                    SettingsItem(page, ui.page == page.key, chosen, mark = mark, placed = { spot = it }) { pick(page.key) }
                 }
             }
-            Spacer(Modifier.height(Space.M))
+            // Room under the last page, so it too can sit an item clear of
+            // the list's foot.
+            Spacer(Modifier.height(ListFoot))
         }
         pages.firstOrNull { it.key == SettingsKey.About }?.let { about ->
             Separator(Modifier.padding(vertical = Space.S))
@@ -426,12 +479,16 @@ private fun SettingsResult(hit: SettingsHit, marked: Boolean, onOpen: () -> Unit
         if (marked) PlaceFill(Modifier.matchParentSize())
         Row(
             Modifier.fillMaxWidth().padding(horizontal = ItemInset, vertical = Space.S),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(ItemGap),
         ) {
+            // The icon sits on the title's first line, however many follow.
             val icon = settingsPageIcon(hit.entry.page)
-            if (hit.entry.page == SettingsKey.Discord) Image(exactPainter(icon), null, Modifier.size(IconSize.Toolbar))
-            else Glyph(icon, size = IconSize.Toolbar, tint = if (marked) OctoColors.AccentHover else accent)
+            val size = if (biggerIcons()) IconSize.Transport else IconSize.Toolbar
+            Box(Modifier.height(firstLine(DesktopType.body)), contentAlignment = Alignment.Center) {
+                if (hit.entry.page == SettingsKey.Discord) Image(exactPainter(icon), null, Modifier.size(size))
+                else Glyph(icon, size = size, tint = if (marked) OctoColors.AccentHover else accent)
+            }
             Column(Modifier.weight(1f)) {
                 Txt(hit.entry.title, DesktopType.body, if (marked) OctoColors.TextPrimary else mix(OctoColors.TextSecondary, OctoColors.TextPrimary, 0.6f), maxLines = 2)
                 Txt(hit.place, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xxs), maxLines = 2)
@@ -440,9 +497,18 @@ private fun SettingsResult(hit: SettingsHit, marked: Boolean, onOpen: () -> Unit
     }
 }
 
+// How tall one line of `style` is at the text size in use.
+@Composable
+private fun firstLine(style: TextStyle): Dp {
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    return remember(measurer, density, style) { with(density) { measurer.measure("Ag", style).size.height.toDp() } }
+}
+
 // One page in the list: its icon and name, and a dot or a quiet word after
 // it. The page shown sits on an accent-tinted fill with a fine accent edge,
-// its icon brighter; the keyboard comes to it through `chosen`.
+// its icon brighter; the keyboard comes to it through `chosen`. Shown, it
+// tells `placed` where it sits in the list.
 @Composable
 private fun SettingsItem(
     page: SettingsPageInfo,
@@ -450,6 +516,7 @@ private fun SettingsItem(
     chosen: FocusRequester,
     mark: String? = null,
     detail: String? = null,
+    placed: ((ItemSpot) -> Unit)? = null,
     onPick: () -> Unit,
 ) {
     val accent = OctoColors.Accent
@@ -458,6 +525,7 @@ private fun SettingsItem(
         Modifier
             .fillMaxWidth()
             .heightIn(min = RowHeight.Nav)
+            .then(if (shown && placed != null) Modifier.onPlaced { placed(ItemSpot(page.key, it.positionInParent().y.roundToInt(), it.size.height)) } else Modifier)
             .then(if (shown) Modifier.focusRequester(chosen) else Modifier)
             .hoverLift(Corner.ControlShape, lifted = false)
             .clickable(role = Role.Tab, onClick = onPick)
@@ -474,9 +542,10 @@ private fun SettingsItem(
             horizontalArrangement = Arrangement.spacedBy(ItemGap),
         ) {
             val icon = settingsPageIcon(page.key)
+            val size = if (biggerIcons()) IconSize.Transport else IconSize.Toolbar
             // A brand's mark keeps its own shape and colors.
-            if (page.key == SettingsKey.Discord) Image(exactPainter(icon), null, Modifier.size(IconSize.Toolbar))
-            else Glyph(icon, size = IconSize.Toolbar, tint = if (shown) OctoColors.AccentHover else accent)
+            if (page.key == SettingsKey.Discord) Image(exactPainter(icon), null, Modifier.size(size))
+            else Glyph(icon, size = size, tint = if (shown) OctoColors.AccentHover else accent)
             if (detail == null) Txt(page.name, DesktopType.body, words, Modifier.weight(1f), maxLines = 3)
             else NameAndDetail(Modifier.weight(1f), { Txt(page.name, DesktopType.body, words, maxLines = 3) }, { Txt(detail, AboutDetail, OctoColors.TextMuted) })
             if (mark != null) Box(Modifier.size(FrameSize.NavMark).background(accent, CircleShape))

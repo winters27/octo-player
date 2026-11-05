@@ -70,6 +70,7 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
@@ -100,8 +101,9 @@ val MenuShape = RoundedCornerShape(14.dp)
 // down and to the right of it, flipping up or left where it would not fit.
 // Under a control (`anchor`) it opens below it, or above when only that
 // fits, lined up with the control's start edge, or its end edge on the far
-// half of the window. With neither it sits in the middle.
-fun placePopupAt(point: IntOffset?, anchor: IntRect?, size: IntSize, window: IntSize, margin: Int, gap: Int = 0): IntOffset {
+// half of the window. With neither it sits in the middle, of `within` when
+// given (the part of the window it is about), else of the window.
+fun placePopupAt(point: IntOffset?, anchor: IntRect?, size: IntSize, window: IntSize, margin: Int, gap: Int = 0, within: IntRect? = null): IntOffset {
     val maxX = maxOf(margin, window.width - margin - size.width)
     val maxY = maxOf(margin, window.height - margin - size.height)
     return when {
@@ -117,6 +119,9 @@ fun placePopupAt(point: IntOffset?, anchor: IntRect?, size: IntSize, window: Int
             val x = if (point.x + size.width <= window.width - margin) point.x else point.x - size.width
             val y = if (point.y + size.height <= window.height - margin) point.y else point.y - size.height
             IntOffset(x.coerceIn(margin, maxX), y.coerceIn(margin, maxY))
+        }
+        within != null -> IntOffset(within.left + (within.width - size.width) / 2, within.top + (within.height - size.height) / 2).let {
+            IntOffset(it.x.coerceIn(margin, maxX), it.y.coerceIn(margin, maxY))
         }
         else -> IntOffset((window.width - size.width) / 2, (window.height - size.height) / 2).let {
             IntOffset(it.x.coerceIn(margin, maxX), it.y.coerceIn(margin, maxY))
@@ -138,7 +143,17 @@ class PopupRequest(
     // The content scrolls itself (to keep a footer in place), so the card
     // only gives it the room there is.
     val scrollsItself: Boolean = false,
+    // A question about one part of the window (a page): that part is
+    // shaded while it is open, and it sits in the middle of it.
+    val over: IntRect? = null,
 )
+
+// How dark the shade over the part of the window a question is about.
+private const val OVER_SHADE = 0.40f
+
+// What the tests call an open pop-up's card, and the shade under a question.
+const val POPUP_TAG = "popup"
+const val POPUP_SHADE_TAG = "popup-shade"
 
 // How far the page behind a dialog blurs.
 private val ScrimBlur = HazeBlurStyle {
@@ -170,16 +185,18 @@ class PopupHost {
         request = PopupRequest(null, anchor, width, content, scrollsItself = scrollsItself)
     }
 
-    // Opens in the middle of the window, for a small form. A taller form
-    // may ask for more room before it scrolls.
+    // Opens in the middle of the window, for a small form, or of `over`
+    // with that part shaded, for a question about it. A taller form may ask
+    // for more room before it scrolls.
     fun showCentred(
         width: Dp? = 380.dp,
         maxHeight: Dp = PopupMaxHeight,
         scrim: Boolean = false,
         scrollsItself: Boolean = false,
+        over: IntRect? = null,
         content: @Composable ColumnScope.(close: () -> Unit) -> Unit,
     ) {
-        request = PopupRequest(null, null, width, content, maxHeight, scrim, scrollsItself)
+        request = PopupRequest(null, null, width, content, maxHeight, scrim, scrollsItself, over)
     }
 
     fun close() {
@@ -262,6 +279,16 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
                 .background(Color.Black.copy(alpha = 0.55f)),
         )
     }
+    request.over?.let { area ->
+        // The part the question is about, shaded under it.
+        Layout(
+            content = { Box(Modifier.graphicsLayer { alpha = grow.value }.background(Color.Black.copy(alpha = OVER_SHADE)).testTag(POPUP_SHADE_TAG)) },
+            modifier = Modifier.fillMaxSize(),
+        ) { measurables, constraints ->
+            val shade = measurables.first().measure(Constraints.fixed(area.width.coerceAtLeast(0), area.height.coerceAtLeast(0)))
+            layout(constraints.maxWidth, constraints.maxHeight) { shade.place(area.left, area.top) }
+        }
+    }
     Layout(
         content = {
             // The menu plate's halo and inner hairline keep its words
@@ -284,7 +311,8 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
                     }
                     .then(if (request.width != null) Modifier.width(request.width) else Modifier.widthIn(min = 200.dp, max = 420.dp))
                     // Clicks on the card stay on the card.
-                    .pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false).consume() } },
+                    .pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false).consume() } }
+                    .testTag(POPUP_TAG),
             ) {
                 val scroll = rememberScrollState()
                 Column(
@@ -347,7 +375,7 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
             Constraints(maxWidth = (window.width - margin * 2).coerceAtLeast(0), maxHeight = (window.height - margin * 2).coerceAtLeast(0)),
         )
         val size = IntSize(card.width, card.height)
-        val spot = placePopupAt(request.point, request.anchor, size, window, margin, gap = 6.dp.roundToPx())
+        val spot = placePopupAt(request.point, request.anchor, size, window, margin, gap = 6.dp.roundToPx(), within = request.over)
         val point = request.point
         origin = when {
             point != null -> TransformOrigin(if (spot.x < point.x) 1f else 0f, if (spot.y < point.y) 1f else 0f)

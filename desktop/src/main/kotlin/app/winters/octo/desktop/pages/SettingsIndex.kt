@@ -79,8 +79,9 @@ data class SettingsIndexEntry(
 // A search result: the entry, and the name its page has in this window.
 data class SettingsHit(val entry: SettingsIndexEntry, val pageName: String) {
     // Where it is, for the result's second line: the page, and its card
-    // when that says more than the title.
-    val place: String get() = listOfNotNull(pageName, entry.card?.takeIf { it != entry.title && it != pageName }).joinToString(" · ")
+    // when that says more than the title; a whole page's own group in the
+    // list, so its name is not said twice.
+    val place: String get() = if (entry.row == null) settingsGroupOf(entry.page) else listOfNotNull(pageName, entry.card?.takeIf { it != entry.title && it != pageName }).joinToString(" · ")
 }
 
 private class PageWords(val page: String, val needs: Set<SettingsNeed>, val out: MutableList<SettingsIndexEntry>) {

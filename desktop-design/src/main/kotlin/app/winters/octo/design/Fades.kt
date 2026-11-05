@@ -21,15 +21,26 @@ fun Modifier.topFade(height: Dp): Modifier = edgeFades(height, top = { 1f }, bot
 // Soft fades at the top and bottom edges of a list that scrolls, each only
 // while there is more of the list that way, and coming in over the first
 // stretch scrolled so it never pops.
-fun Modifier.scrollFades(state: ScrollState, height: Dp = 12.dp): Modifier = edgeFades(
+fun Modifier.scrollFades(state: ScrollState, height: Dp = 12.dp, eased: Boolean = false): Modifier = edgeFades(
     height,
     top = { edge -> (state.value / edge).coerceIn(0f, 1f) },
     bottom = { edge -> ((state.maxValue - state.value) / edge).coerceIn(0f, 1f) },
+    eased = eased,
+)
+
+// The top edge fading only while scrolled from the top, eased in over the
+// first stretch scrolled.
+fun Modifier.topScrollFade(state: ScrollState, height: Dp, eased: Boolean = false): Modifier = edgeFades(
+    height,
+    top = { edge -> (state.value / edge).coerceIn(0f, 1f) },
+    bottom = { 0f },
+    eased = eased,
 )
 
 // Fades the top and bottom `height` of what is drawn, `top` and `bottom` of
-// the way (0 to 1), read while drawing from the fade's height in pixels.
-private fun Modifier.edgeFades(height: Dp, top: (Float) -> Float, bottom: (Float) -> Float): Modifier = this
+// the way (0 to 1), read while drawing from the fade's height in pixels. An
+// `eased` fade starts and ends gently rather than in a straight ramp.
+private fun Modifier.edgeFades(height: Dp, top: (Float) -> Float, bottom: (Float) -> Float, eased: Boolean = false): Modifier = this
     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
     .drawWithContent {
         drawContent()
@@ -37,7 +48,7 @@ private fun Modifier.edgeFades(height: Dp, top: (Float) -> Float, bottom: (Float
         val above = top(edge)
         if (above > 0f) {
             drawRect(
-                Brush.verticalGradient(listOf(Color.Black.copy(alpha = 1f - above), Color.Black), startY = 0f, endY = edge),
+                Brush.verticalGradient(*ramp(1f - above, 1f, eased), startY = 0f, endY = edge),
                 size = Size(size.width, edge),
                 blendMode = BlendMode.DstIn,
             )
@@ -45,13 +56,26 @@ private fun Modifier.edgeFades(height: Dp, top: (Float) -> Float, bottom: (Float
         val below = bottom(edge)
         if (below > 0f) {
             drawRect(
-                Brush.verticalGradient(listOf(Color.Black, Color.Black.copy(alpha = 1f - below)), startY = size.height - edge, endY = size.height),
+                Brush.verticalGradient(*ramp(1f, 1f - below, eased), startY = size.height - edge, endY = size.height),
                 topLeft = Offset(0f, size.height - edge),
                 size = Size(size.width, edge),
                 blendMode = BlendMode.DstIn,
             )
         }
     }
+
+// The stops of a fade's mask from `from` to `to` (how much shows): two for
+// a straight ramp, or several along a smooth step for an eased one.
+private fun ramp(from: Float, to: Float, eased: Boolean): Array<Pair<Float, Color>> {
+    val steps = if (eased) EASED_STOPS else 1
+    return Array(steps + 1) { i ->
+        val t = i.toFloat() / steps
+        val k = if (eased) t * t * (3 - 2 * t) else t
+        t to Color.Black.copy(alpha = from + (to - from) * k)
+    }
+}
+
+private const val EASED_STOPS = 8
 
 // Soft fades at the two ends of a row that scrolls sideways, each only
 // while there is more of the row that way, so a chip running under the

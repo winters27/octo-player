@@ -267,13 +267,14 @@ class SettingsPagesTest {
             s.onUi { s.app.offline.keepLiked(true) }
             s.open(SettingsKey.Offline)
             fun action(name: String) = s.nodes(merged = true).last { it.name() == name && it.clickable }
-            s.click(action("Remove all"))
+            // The row's button is Remove; the sheet's go-ahead is Remove all.
+            s.click(action("Remove"))
             assertTrue("the sheet asks", s.nodes().any { it.name() == "Remove every kept song?" })
             assertTrue("nothing is gone yet", s.app.offline.choices().liked)
             s.click(action("Cancel"))
             assertFalse(s.nodes().any { it.name() == "Remove every kept song?" })
             assertTrue(s.app.offline.choices().liked)
-            s.click(action("Remove all"))
+            s.click(action("Remove"))
             s.click(action("Remove all"))
             assertFalse("Remove all in the sheet lets every kept song go", s.app.offline.choices().liked)
         }

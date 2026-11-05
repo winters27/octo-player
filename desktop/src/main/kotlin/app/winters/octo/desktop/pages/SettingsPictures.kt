@@ -33,7 +33,6 @@ import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
-import app.winters.octo.design.FocusRing
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconSize
@@ -78,7 +77,8 @@ internal fun <T> PictureChoiceRow(
 private const val PICTURES_ACROSS = 3
 
 // One choice: its drawing and its name. Chosen, it sits on the accent fill
-// inside an accent ring, with a check after its name.
+// inside an accent ring, with a check after its name. The keyboard's ring
+// is white and just outside the tile, so it never reads as a second choice.
 @Composable
 internal fun PictureChoice(text: String, chosen: Boolean, onPick: () -> Unit, modifier: Modifier = Modifier, picture: @Composable () -> Unit) {
     val ring = if (chosen) OctoColors.Accent else SeparatorColor
@@ -86,11 +86,12 @@ internal fun PictureChoice(text: String, chosen: Boolean, onPick: () -> Unit, mo
     Column(
         modifier
             .testTag(pictureTag(text))
+            .ringOutside(Corner.Panel, Color.White)
             .clip(Corner.PanelShape)
             .background(fill, Corner.PanelShape)
             .border(if (chosen) SettingsSize.PictureRing else FrameSize.Hairline, ring, Corner.PanelShape)
             .hoverLift(Corner.PanelShape, lifted = false)
-            .selectable(selected = chosen, interactionSource = null, indication = FocusRing(Corner.PanelShape), role = Role.RadioButton, onClick = onPick)
+            .selectable(selected = chosen, interactionSource = null, indication = null, role = Role.RadioButton, onClick = onPick)
             .semantics { contentDescription = text }
             .padding(Space.S),
     ) {
