@@ -3,6 +3,7 @@ package app.winters.octo.desktop.a11y
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -10,6 +11,9 @@ import androidx.compose.ui.state.ToggleableState
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Shortcut
+import app.winters.octo.desktop.nav.settingsPages
+import app.winters.octo.desktop.pages.RowId
+import app.winters.octo.desktop.pages.RowTitle
 import app.winters.octo.design.FrameSize
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -255,6 +259,53 @@ class A11yTest {
             assertNotNull(position.config.getOrNull(SemanticsProperties.ProgressBarRangeInfo))
             assertTrue(position.config.getOrNull(SemanticsProperties.StateDescription).orEmpty().endsWith("of 4:44"))
             assertTrue(nodes.any { it.name() == "Pause" })
+        }
+    }
+
+    // Every page of Settings, Discord's too: its title and each card's title
+    // are headings, every control on it has a name and a role, and the
+    // search's results are buttons named by setting and place, one marked.
+    @Test(timeout = 180_000)
+    fun everySettingsPageHeadsItsCardsAndNamesItsControls() {
+        System.setProperty("octo.discordAppId", "1234567890123456789")
+        try {
+            A11yScene(folder.root, reduceMotion = true, player = SettingsWalk.ShapingPlayer(), look = SettingsWalk.everyRowShown, withSystem = true).use { s ->
+                val problems = mutableListOf<String>()
+                val pages = settingsPages(windows = true, discord = true)
+                for (page in pages) {
+                    s.onUi { s.app.openSettings(page.key) }
+                    s.render(6)
+                    val all = s.nodes()
+                    fun SemanticsNode.heading() = config.getOrNull(SemanticsProperties.Heading) != null
+                    if (all.none { it.heading() && it.name() == page.name && it.boundsInRoot.left > 300f }) problems += "${page.key}: its title is not a heading"
+                    // A card is a place that is not a row (a row carries its
+                    // title); every card has a title, the heading inside it.
+                    fun SemanticsNode.under(): List<SemanticsNode> = children.flatMap { listOf(it) + it.under() }
+                    val cards = all.filter { node -> node.config.getOrNull(RowId)?.contains('.') == false && node.config.getOrNull(RowTitle) == null }
+                    if (cards.isEmpty()) problems += "${page.key}: no cards"
+                    for (card in cards) {
+                        if (card.under().none { it.heading() && it.name().isNotBlank() }) problems += "${page.key}: card ${card.config[RowId]} has no heading"
+                    }
+                    for (node in s.nodes(merged = true).filterNot { it.hidden() }) {
+                        val focusable = node.config.getOrNull(SemanticsProperties.Focused) != null
+                        if ((node.clickable || focusable) && node.name().isBlank()) problems += "${page.key}: nameless ${node.config}"
+                        val row = node.name().contains(", ") && node.config.getOrNull(SemanticsProperties.Selected) != null
+                        if (node.clickable && !node.field() && !row && node.config.getOrNull(SemanticsProperties.Role) == null) problems += "${page.key}: no role on '${node.name()}'"
+                    }
+                }
+                s.onUi { s.app.settingsUi.query = "motion" }
+                s.render(4)
+                val results = s.nodes(merged = true).filter { it.config.getOrNull(SemanticsProperties.Selected) != null && it.boundsInRoot.right < 300f && it.config.getOrNull(SemanticsProperties.Role) != Role.Tab }
+                assertTrue("results are listed", results.size >= 2)
+                results.forEach { result ->
+                    if (result.config.getOrNull(SemanticsProperties.Role) != Role.Button) problems += "result '${result.name()}' is not a button"
+                    if (!result.name().contains(", ")) problems += "result '${result.name()}' does not say where it is"
+                }
+                assertEquals("one result is marked", 1, results.count { it.config.getOrNull(SemanticsProperties.Selected) == true })
+                assertTrue(problems.joinToString("\n"), problems.isEmpty())
+            }
+        } finally {
+            System.clearProperty("octo.discordAppId")
         }
     }
 

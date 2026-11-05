@@ -29,16 +29,19 @@ import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.server.Accounts
+import app.winters.octo.desktop.server.SignInOutcome
 import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.songJson
 import app.winters.octo.desktop.ui.Shell
+import app.winters.octo.desktop.update.DesktopUpdates
 import app.winters.octo.lyrics.OnlineLyrics
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import java.io.File
@@ -73,6 +76,14 @@ class A11yScene(
     // any app, and Discord in a build with it), made with the app when
     // asked for; keys are claimed from a pretend system.
     withSystem: Boolean = false,
+    // More answers for the pretend server, given after the usual ones (so
+    // they can replace them) and before the app starts.
+    serve: (FakeServer) -> Unit = {},
+    // The updater, made with the window's settings, when a test wants one.
+    updates: ((SettingsStore) -> DesktopUpdates)? = null,
+    // Signed in the usual way, so the server is kept in Settings' list and
+    // its checks are asked of it, rather than handed to the app as it is.
+    saved: Boolean = false,
 ) : AutoCloseable {
     val server = FakeServer()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -98,20 +109,29 @@ class A11yScene(
         server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"p1","name":"Late night","songCount":2}]}""")
         server.answer("search3", """"searchResult3":{"song":[$songs]}""")
         server.answer("getStarred2", """"starred2":{}""")
+        if (saved) {
+            server.answer("ping")
+            server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[${extensions.joinToString(",") { """{"name":"${it.substringBefore(':')}","versions":[${it.substringAfter(':')}]}""" }}]""")
+        }
+        serve(server)
         val settings = SettingsStore(File(folder, "settings.json"), 0)
         settings.update { look(it.copy(lyrics = it.lyrics.copy(online = false))) }
         val http = OkHttpClient()
+        val updater = updates?.invoke(settings)
+        val accounts = Accounts(settings, SessionOnlySecrets(), http)
+        val restored = if (saved) (runBlocking { accounts.signIn(server.address, "winters", "pw") } as SignInOutcome.Done).connection else server.connection(extensions)
         SwingUtilities.invokeAndWait {
             app = AppState(
                 settings,
-                Accounts(settings, SessionOnlySecrets(), http),
+                accounts,
                 http,
                 scope,
                 os,
                 player,
                 OnlineLyrics(http, server.address.toHttpUrl()),
-                restored = server.connection(extensions),
+                restored = restored,
                 listeningRoot = File(folder, "listening"),
+                updates = updater,
             )
             if (withSystem) {
                 system = SystemIntegration(app, AppPlaces(File(folder, "config").apply { mkdirs() }, File(folder, "cache").apply { mkdirs() }), os, null, hotkeys = FakeHotkeys())

@@ -17,7 +17,10 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.nav.SettingsKey
 import app.winters.octo.desktop.settings.AmbienceStyle
+import app.winters.octo.desktop.settings.AppSettings
+import app.winters.octo.theme.AccentChoice
 import app.winters.octo.desktop.ui.SongMenu
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.EncodedImageFormat
@@ -186,6 +189,44 @@ class ContrastTest {
 
     @Test(timeout = 400_000)
     fun wordsReadOverADarkCover() = everyLook("dark")
+
+    // Settings' captions, in the muted ink the accent tints, on its glaze
+    // cards over the immersive wash of a white cover at full strength, in
+    // every accent; with the page's line, a card's title and the list's
+    // group names beside them.
+    @Test(timeout = 300_000)
+    fun settingsCaptionsReadOverAWhiteWashInEveryAccent() {
+        val immersive: (AppSettings) -> AppSettings = { it.copy(appearance = it.appearance.copy(ambientGlow = true, ambience = AmbienceStyle.Immersive, glowStrength = 1f)) }
+        val spots = A11yScene(folder.newFolder(), height = 1_200, cover = covers.getValue("white"), coverId = "cover-white-settings", look = immersive).use { s ->
+            s.onUi {
+                s.app.play(s.app.library!!.index!!.songs, 0)
+                s.app.player.togglePlay()
+                s.app.openSettings(SettingsKey.Look)
+            }
+            // Long enough for the cover to load and the wash to settle.
+            s.settle(3_000).close()
+            AccentChoice.entries.flatMap { accent ->
+                s.onUi { s.app.settings.update { it.copy(appearance = it.appearance.copy(accent = accent)) } }
+                val image = s.settle(700)
+                keep(image, "contrast-settings-white-${accent.name.lowercase()}")
+                val label = "white immersive, ${accent.label}"
+                val page: (Rect) -> Boolean = { it.left > 300f && it.bottom < 1_080f }
+                val list: (Rect) -> Boolean = { it.right < 300f }
+                s.spots(image, "$label page", listOf(
+                    Triple("${accent.label}: ...", "accent caption (muted)", 4.5),
+                    Triple("Like Windows follows...", "text size caption (muted)", 4.5),
+                    Triple("The cover's colors behind the whole window.", "ambience caption (muted)", 4.5),
+                    Triple("Lower it if bright covers make words hard to read.", "brightness cap caption (muted)", 4.5),
+                    Triple("How Octo looks: colors, backgrounds and text.", "page line (secondary)", 4.5),
+                    Triple("Window background", "card title (primary)", 4.5),
+                ), page) + s.spots(image, "$label list", listOf(
+                    Triple("LISTENING", "group name (muted)", 4.5),
+                    Triple("Appearance", "page shown (primary)", 4.5),
+                ), list)
+            }
+        }
+        check(spots, minimum = AccentChoice.entries.size * 6)
+    }
 
     @Test(timeout = 180_000)
     fun aMenuOverTheGlowReads() {
