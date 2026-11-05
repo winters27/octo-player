@@ -30,8 +30,8 @@ pub enum NvidiaOverlay {
     On,
     /// It is marked as not a game.
     KeptOff,
-    /// Octo's profile is there but no longer keeps this exe out (the entry
-    /// was dropped, or Octo now runs from another folder).
+    /// Listed in Octo's profile, but the setting there no longer keeps the
+    /// overlay off (changed in NVIDIA's own settings).
     Undone,
 }
 
@@ -59,10 +59,9 @@ pub(crate) enum Lookup {
         profile: String,
         value: Option<u32>,
     },
-    /// In no profile; `octo_profile` says whether Octo's own profile exists.
-    Unlisted {
-        octo_profile: bool,
-    },
+    /// In no profile. Octo's own profile may still list other Octo exes (a
+    /// portable copy, an older folder), which says nothing about this one.
+    Unlisted,
 }
 
 pub(crate) fn classify(lookup: &Lookup) -> NvidiaOverlay {
@@ -71,8 +70,7 @@ pub(crate) fn classify(lookup: &Lookup) -> NvidiaOverlay {
         Lookup::Listed { value: Some(NOT_A_GAME), .. } => NvidiaOverlay::KeptOff,
         Lookup::Listed { profile, .. } if profile == OCTO_PROFILE => NvidiaOverlay::Undone,
         Lookup::Listed { .. } => NvidiaOverlay::On,
-        Lookup::Unlisted { octo_profile: true } => NvidiaOverlay::Undone,
-        Lookup::Unlisted { octo_profile: false } => NvidiaOverlay::On,
+        Lookup::Unlisted => NvidiaOverlay::On,
     }
 }
 
@@ -370,7 +368,7 @@ mod windows_impl {
                 profile: settings.profile_name(profile).unwrap_or_default(),
                 value: settings.overlay_value(profile),
             },
-            None => Lookup::Unlisted { octo_profile: settings.profile_named(OCTO_PROFILE).is_some() },
+            None => Lookup::Unlisted,
         }
     }
 
@@ -465,9 +463,9 @@ mod tests {
     }
 
     #[test]
-    fn an_unlisted_exe_is_undone_only_when_octos_profile_exists() {
-        assert_eq!(classify(&Lookup::Unlisted { octo_profile: false }), NvidiaOverlay::On);
-        assert_eq!(classify(&Lookup::Unlisted { octo_profile: true }), NvidiaOverlay::Undone);
+    fn an_unlisted_exe_is_simply_offered() {
+        // Octo's profile may list other Octo exes; that says nothing about this one.
+        assert_eq!(classify(&Lookup::Unlisted), NvidiaOverlay::On);
         assert_eq!(classify(&Lookup::NoNvidia), NvidiaOverlay::NoNvidia);
     }
 
@@ -533,7 +531,7 @@ mod tests {
         std::fs::write(&exe, b"x").unwrap();
         let path = exe.to_str().unwrap().to_string();
         assert_eq!(keep_off(&path), EXIT_REFUSED);
-        assert!(matches!(lookup(&path), Lookup::NoNvidia | Lookup::Unlisted { .. }));
+        assert!(matches!(lookup(&path), Lookup::NoNvidia | Lookup::Unlisted));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
