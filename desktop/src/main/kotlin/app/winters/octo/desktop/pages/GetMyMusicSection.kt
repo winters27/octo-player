@@ -227,7 +227,7 @@ private fun ServiceTile(service: ImportServiceLink, chosen: Boolean, enabled: Bo
             modifier = Modifier.align(Alignment.Center).padding(horizontal = 18.dp, vertical = 8.dp),
         )
         // The check sits in the corner, taking no room from the name.
-        if (chosen) Glyph(OctoIcons.Check, Modifier.align(Alignment.TopEnd).padding(6.dp), size = 12.dp, tint = ink)
+        if (chosen) Glyph(OctoIcons.Check, Modifier.align(Alignment.TopEnd).padding(6.dp), size = 12.dp, tint = ink, exact = true)
     }
 }
 

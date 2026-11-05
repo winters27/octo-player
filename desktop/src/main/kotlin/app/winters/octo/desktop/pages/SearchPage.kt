@@ -56,6 +56,7 @@ import app.winters.octo.design.FitOrElse
 import app.winters.octo.design.GlassField
 import app.winters.octo.design.GlazeSegments
 import app.winters.octo.design.Glyph
+import app.winters.octo.design.IconSize
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -283,9 +284,9 @@ private fun LazyListScope.outsideLine(app: AppState, look: OutsideLook, kind: St
 private fun OutsideMark(look: OutsideLook) {
     when (look) {
         OutsideLook.Looking -> Spinner(size = 18.dp, color = LocalKeyColour.current)
-        OutsideLook.Failed -> Glyph(OctoIcons.Info, size = 18.dp, tint = OctoColors.SignalOrange)
-        OutsideLook.Found -> Glyph(OctoIcons.Add, size = 18.dp, tint = OctoColors.TextMuted)
-        else -> Glyph(OctoIcons.Search, size = 18.dp, tint = OctoColors.TextMuted)
+        OutsideLook.Failed -> Glyph(OctoIcons.Info, size = IconSize.Toolbar, tint = OctoColors.SignalOrange)
+        OutsideLook.Found -> Glyph(OctoIcons.Add, size = IconSize.Toolbar, tint = OctoColors.TextMuted)
+        else -> Glyph(OctoIcons.Search, size = IconSize.Toolbar, tint = OctoColors.TextMuted)
     }
 }
 

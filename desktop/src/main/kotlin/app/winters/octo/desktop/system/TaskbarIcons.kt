@@ -2,15 +2,15 @@ package app.winters.octo.desktop.system
 
 import app.winters.octo.design.IconSource
 import app.winters.octo.design.loadIcon
+import app.winters.octo.design.pixelOutlines
+import app.winters.octo.design.toSkiaPath
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.Canvas
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
 import org.jetbrains.skia.Paint
-import org.jetbrains.skia.Path
 import org.jetbrains.skia.RRect
-import org.jetbrains.skia.PathFillMode
 import org.jetbrains.skia.Surface
 
 // The taskbar thumbnail's icons, drawn from the same icon files as the
@@ -52,18 +52,12 @@ private fun drawn(size: Int, draw: (Canvas, Paint) -> Unit): ByteArray {
     return pixels
 }
 
-// An icon file's paths, filling the square as its grid lays them out.
+// An icon file's paths, filling the square as its grid lays them out, on
+// whole pixels for this size where the fit is kept (as the app's own icons
+// are drawn).
 private fun glyph(canvas: Canvas, paint: Paint, icon: IconSource, size: Int) {
     val scale = size / icon.viewportWidth
-    canvas.save()
-    canvas.scale(scale, scale)
-    icon.paths.forEach { part ->
-        val path = Path.makeFromSVGString(part.data)
-        if (part.evenOdd) path.fillMode = PathFillMode.EVEN_ODD
-        canvas.drawPath(path, paint)
-        path.close()
-    }
-    canvas.restore()
+    pixelOutlines(icon, size).drawn.forEach { part -> canvas.drawPath(part.toSkiaPath(scale), paint) }
 }
 
 // A rounded square in the middle of the icon, as wide as the pause bars

@@ -71,7 +71,7 @@ import kotlinx.coroutines.withContext
 fun LiveMark(size: Dp, modifier: Modifier = Modifier) {
     val key = LocalKeyColour.current
     Box(modifier.size(size).clip(Corner.ArtSShape).background(key.copy(alpha = MarkWash)), contentAlignment = Alignment.Center) {
-        Glyph(OctoIcons.Filter, size = size * MarkGlyph, tint = key)
+        Glyph(OctoIcons.Filter, size = size * MarkGlyph, tint = key, exact = true)
     }
 }
 

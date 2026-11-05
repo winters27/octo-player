@@ -56,7 +56,7 @@ fun SystemRows(app: AppState) {
 @Composable
 fun MiniPlayerButton() {
     val system = LocalSystem.current ?: return
-    IconAction(MiniPlayerIcon, if (system.miniPlayerOpen) "Close the mini player" else "Mini player", system::toggleMiniPlayer, size = 34.dp, iconSize = 19.dp, active = system.miniPlayerOpen)
+    IconAction(MiniPlayerIcon, if (system.miniPlayerOpen) "Close the mini player" else "Mini player", system::toggleMiniPlayer, size = 34.dp, iconSize = 19.dp, active = system.miniPlayerOpen, exact = true)
 }
 
 // A frame with a smaller filled one in its lower right, on the icons' grid.

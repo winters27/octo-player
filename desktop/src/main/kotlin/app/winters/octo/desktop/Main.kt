@@ -32,6 +32,7 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import app.winters.octo.design.ArrowKeys
+import app.winters.octo.design.WarmCrispIcons
 import app.winters.octo.design.FocusVisibility
 import app.winters.octo.design.LocalTyping
 import app.winters.octo.design.ProvideWindowLook
@@ -296,6 +297,7 @@ fun main(args: Array<String>) {
             remember { useTextPixels(window, appTextPixels) }
             // What the drawing let go of closes as this window draws.
             FollowLateCloses()
+            WarmCrispIcons()
             LaunchedEffect(Unit) {
                 val drawn = withContext(Dispatchers.IO) { icons.get() }
                 if (drawn.isNotEmpty()) window.iconImages = drawn

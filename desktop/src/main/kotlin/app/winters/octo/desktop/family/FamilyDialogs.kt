@@ -76,6 +76,7 @@ import app.winters.octo.design.DesktopType
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconAction
+import app.winters.octo.design.IconSize
 import app.winters.octo.design.LocalTabStops
 import app.winters.octo.design.MonoFontFamily
 import app.winters.octo.design.OctoColors
@@ -323,7 +324,7 @@ private fun HandOverBody(sheet: HandOverSheet, options: LinkOptions, reach: Link
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                             ) {
-                                Glyph(OctoIcons.Check, size = 13.dp)
+                                Glyph(OctoIcons.Check, size = IconSize.Mark)
                                 Txt(NEW_CODE, DesktopType.label, OctoColors.TextPrimary)
                             }
                         } else {
@@ -368,7 +369,7 @@ private fun Finished(words: String) {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(Modifier.size(32.dp).background(OctoColors.SignalGreen.copy(alpha = 0.18f), CircleShape), contentAlignment = Alignment.Center) {
-            Glyph(OctoIcons.Check, size = 18.dp, tint = OctoColors.SignalGreen)
+            Glyph(OctoIcons.Check, size = IconSize.Toolbar, tint = OctoColors.SignalGreen)
         }
         Txt(words, DesktopType.body, OctoColors.TextPrimary, Modifier.weight(1f), maxLines = 3)
     }
@@ -386,7 +387,7 @@ fun ColumnScope.AskingCard(asking: FamilySignInPending, sending: Boolean, allow:
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Box(Modifier.size(56.dp).background(OctoColors.AccentSelected, CircleShape), contentAlignment = Alignment.Center) {
-            Glyph(OctoIcons.Device, size = 28.dp)
+            Glyph(OctoIcons.Device, size = IconSize.Feature)
         }
         Txt("Sign in on", DesktopType.meta, OctoColors.TextMuted)
         Txt(asking.deviceName.ifBlank { "A new device" }, OctoType.title, OctoColors.TextPrimary, maxLines = 2, align = TextAlign.Center)
@@ -545,7 +546,7 @@ private fun MoreBelow(scroll: ScrollState, target: BringIntoViewRequester, modif
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Txt(MORE_BELOW, DesktopType.label, OctoColors.TextPrimary)
-                Glyph(OctoIcons.Collapse, size = 14.dp)
+                Glyph(OctoIcons.Collapse, size = IconSize.Inline)
             }
         }
     }
@@ -570,13 +571,13 @@ private fun Header(name: String, title: String, subtitle: String, subtitleColor:
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Txt(title, OctoType.headline, OctoColors.TextPrimary, maxLines = 2)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (clock) Glyph(OctoIcons.Timer, size = 14.dp, tint = subtitleColor)
+                if (clock) Glyph(OctoIcons.Timer, size = IconSize.Inline, tint = subtitleColor)
                 Txt(subtitle, DesktopType.meta, subtitleColor, maxLines = 2)
             }
         }
         // Escape closes it too, so the keyboard skips this.
         CompositionLocalProvider(LocalTabStops provides false) {
-            IconAction(OctoIcons.Close, "Close", close, size = 32.dp, iconSize = 18.dp)
+            IconAction(OctoIcons.Close, "Close", close, size = 32.dp, iconSize = IconSize.Toolbar)
         }
     }
 }
@@ -612,7 +613,7 @@ private fun ReachChooser(question: String, reach: LinkReach, options: LinkOption
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Glyph(OctoIcons.Lock, size = 18.dp, tint = OctoColors.TextSecondary)
+                Glyph(OctoIcons.Lock, size = IconSize.Toolbar, tint = OctoColors.TextSecondary)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Txt(SET_OUTSIDE_FIRST, DesktopType.emphasis, OctoColors.TextPrimary, maxLines = 2)
                     if (!actions.owner) Txt(ASK_OWNER_OUTSIDE, DesktopType.meta, OctoColors.TextMuted, maxLines = 2)
@@ -646,7 +647,7 @@ private fun ReachOption(reach: LinkReach, icon: androidx.compose.ui.graphics.vec
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         ) {
-            Glyph(if (locked && !chosen) OctoIcons.Lock else icon, size = 18.dp, tint = ink)
+            Glyph(if (locked && !chosen) OctoIcons.Lock else icon, size = IconSize.Toolbar, tint = ink)
             // 15 sp, smaller only when there is no room, so the word is never cut.
             BasicText(
                 reach.label,
@@ -657,7 +658,7 @@ private fun ReachOption(reach: LinkReach, icon: androidx.compose.ui.graphics.vec
             )
         }
         // The check sits in the corner, taking no room from the word.
-        if (chosen) Glyph(OctoIcons.Check, Modifier.align(Alignment.TopEnd).padding(6.dp), size = 12.dp, tint = ink)
+        if (chosen) Glyph(OctoIcons.Check, Modifier.align(Alignment.TopEnd).padding(6.dp), size = 12.dp, tint = ink, exact = true)
     }
 }
 
@@ -715,7 +716,7 @@ internal fun LinkRow(url: String, copyName: String, copy: (String) -> Unit, open
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Glyph(OctoIcons.Link, size = 16.dp, tint = OctoColors.AccentHover)
+        Glyph(OctoIcons.Link, size = IconSize.Table, tint = OctoColors.AccentHover)
         OctoTooltip(url, Modifier.weight(1f)) {
             Txt(
                 shownLink(url, 52),
@@ -774,7 +775,7 @@ internal fun CopyButton(value: String, name: String, copy: (String) -> Unit) {
                 copied = true
             },
             size = 34.dp,
-            iconSize = 18.dp,
+            iconSize = IconSize.Toolbar,
             tint = if (copied) OctoColors.SignalGreen else Color.White,
         )
     }
@@ -787,7 +788,7 @@ internal fun Problem(error: String, retry: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Glyph(OctoIcons.Info, size = 20.dp, tint = OctoColors.SignalOrange)
+        Glyph(OctoIcons.Info, size = IconSize.Transport, tint = OctoColors.SignalOrange)
         Txt(error, DesktopType.body, OctoColors.TextPrimary, Modifier.weight(1f), maxLines = 2)
         GlazeCapsule(null, TRY_AGAIN, retry, height = 36.dp)
     }
@@ -815,7 +816,7 @@ private fun LinkAction(text: String, icon: androidx.compose.ui.graphics.vector.I
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Glyph(icon, size = 16.dp, tint = OctoColors.AccentHover)
+        Glyph(icon, size = IconSize.Table, tint = OctoColors.AccentHover)
         Txt(text, OctoType.label, OctoColors.AccentHover, maxLines = 2)
     }
 }

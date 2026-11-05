@@ -73,6 +73,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.rememberWindowState
 import app.winters.octo.design.ChromeEdge
+import app.winters.octo.design.WarmCrispIcons
 import androidx.compose.foundation.lazy.rememberLazyListState
 import app.winters.octo.design.scrollbar
 import app.winters.octo.design.ControlHeight
@@ -286,6 +287,7 @@ fun MiniPlayerWindow(
     ) {
         // Colour text needs a window drawn whole; a see-through one stays grey.
         remember { useTextPixels(window, if (systemRounds) appTextPixels else null) }
+        WarmCrispIcons()
         val frame = remember { Frame(window, windowState) }
         density = LocalDensity.current.density
         LaunchedEffect(Unit) {
@@ -564,7 +566,7 @@ private fun Transport(app: AppState, state: PlayerState) {
     state.live?.let { live -> return LiveTransport(app, state, live, playSize = PlayTarget, stepSize = ControlHeight.S, stepIcon = IconSize.Toolbar, tint = OctoColors.TextPrimary, gap = Space.Xxs) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xxs)) {
         IconAction(OctoIcons.Previous, "Previous", app.player::previous, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = song != null)
-        PlayButton(state.playing, enabled = song != null, size = PlayTarget, glyph = IconSize.Toolbar * PlayScale, waiting = state.buffering) { app.player.togglePlay() }
+        PlayButton(state.playing, enabled = song != null, size = PlayTarget, glyph = IconSize.Toolbar * PlayScale, waiting = state.buffering, exact = true) { app.player.togglePlay() }
         IconAction(OctoIcons.Next, "Next", app.player::next, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = song != null)
     }
 }

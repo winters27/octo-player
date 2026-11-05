@@ -40,6 +40,7 @@ import app.winters.octo.design.GlassField
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.IconAction
+import app.winters.octo.design.IconSize
 import app.winters.octo.design.MenuRow
 import app.winters.octo.design.MenuSeparator
 import app.winters.octo.design.MenuTitle
@@ -139,7 +140,7 @@ fun LyricsMenuButton(app: AppState, tint: Color = Color.White) {
     val shown by app.lyrics.state.collectAsState()
     val song = shown.song ?: return
     Box(Modifier.onGloballyPositioned { anchor = it.windowRect() }) {
-        IconAction(OctoIcons.More, "Lyrics options", { openLyricsMenu(app, song, anchor) }, size = 32.dp, iconSize = 18.dp, tint = tint)
+        IconAction(OctoIcons.More, "Lyrics options", { openLyricsMenu(app, song, anchor) }, size = 32.dp, iconSize = IconSize.Toolbar, tint = tint)
     }
 }
 

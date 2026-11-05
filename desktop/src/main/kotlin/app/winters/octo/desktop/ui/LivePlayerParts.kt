@@ -55,7 +55,9 @@ import app.winters.octo.design.DesktopType
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconAction
+import app.winters.octo.design.IconFits
 import app.winters.octo.design.IconSize
+import kotlin.math.roundToInt
 import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.MenuRow
 import app.winters.octo.design.MenuSeparator
@@ -110,10 +112,20 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 @Composable
 fun StopGlyph(color: Color, modifier: Modifier = Modifier, size: Dp = 20.dp) {
     Canvas(modifier.size(size)) {
-        val side = this.size.width * 0.62f
-        val inset = (this.size.width - side) / 2
+        val (inset, side) = stopSquare(this.size.width, density)
         drawRoundRect(color, Offset(inset, inset), Size(side, side), CornerRadius(side * 0.18f))
     }
+}
+
+// Where the stop square sits in a box `width` pixels across: its margin and
+// side, the side 62 percent of the box, in the middle. Below 2x the margin
+// is a whole number of pixels, the same on every side, so the square's
+// straight edges are solid.
+fun stopSquare(width: Float, density: Float): Pair<Float, Float> {
+    val side = width * 0.62f
+    if (density >= IconFits.HIGH_DENSITY) return (width - side) / 2 to side
+    val inset = ((width - side) / 2).roundToInt().toFloat()
+    return inset to width - 2 * inset
 }
 
 // The LIVE pill: a red dot that breathes gently (held still when motion
@@ -212,7 +224,7 @@ fun LiveTransport(app: AppState, state: PlayerState, live: LiveNow, playSize: Dp
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(gap)) {
         val lineup = live.lineup
         if (lineup.shows) IconAction(OctoIcons.Previous, "Previous station", app.player::previous, size = stepSize, iconSize = stepIcon, enabled = lineup.hasPrevious, tint = tint)
-        PlayButton(state.playing, enabled = true, size = playSize, glyph = stepIcon * PlayScale, waiting = state.buffering, stop = true, tint = tint) { app.player.togglePlay() }
+        PlayButton(state.playing, enabled = true, size = playSize, glyph = stepIcon * PlayScale, waiting = state.buffering, stop = true, tint = tint, exact = true) { app.player.togglePlay() }
         if (lineup.shows) IconAction(OctoIcons.Next, "Next station", app.player::next, size = stepSize, iconSize = stepIcon, enabled = lineup.hasNext, tint = tint)
     }
 }

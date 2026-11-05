@@ -18,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.semantics.Role
@@ -97,7 +96,7 @@ fun GlazedIconButton(
             .semantics { this.contentDescription = contentDescription },
     ) {
         Image(
-            rememberVectorPainter(icon),
+            rememberIconPainter(icon),
             contentDescription = null,
             colorFilter = ColorFilter.tint(OctoColors.TextPrimary),
             modifier = Modifier

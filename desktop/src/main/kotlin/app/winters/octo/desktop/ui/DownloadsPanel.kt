@@ -542,7 +542,7 @@ private fun LogLine(line: AcquisitionEvent, last: Boolean, live: Boolean) {
                 if (live && mark != LogMark.Done && mark != LogMark.Failed) {
                     ProgressRing(null, size = IconSize.Inline)
                 } else {
-                    Glyph(markIcon(mark), size = IconSize.Inline - Space.Xxs, tint = markTint(mark))
+                    Glyph(markIcon(mark), size = IconSize.Inline - Space.Xxs, tint = markTint(mark), exact = true)
                 }
             }
             if (!last) Box(Modifier.width(FrameSize.Hairline).weight(1f).background(SeparatorColor))
@@ -936,7 +936,7 @@ private fun MoreBelow(scroll: ScrollState, modifier: Modifier) {
                 horizontalArrangement = Arrangement.spacedBy(Space.Xs),
             ) {
                 Txt(MORE_BELOW, DesktopType.label, OctoColors.TextPrimary)
-                Glyph(OctoIcons.Collapse, size = 14.dp)
+                Glyph(OctoIcons.Collapse, size = IconSize.Inline)
             }
         }
     }

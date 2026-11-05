@@ -6,6 +6,10 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.unit.dp
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.float
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.w3c.dom.Element
 import org.xml.sax.InputSource
 import java.io.StringReader
@@ -19,7 +23,9 @@ data class IconPath(val data: String, val evenOdd: Boolean = false)
 
 // An icon as its vector file describes it: its size, the square its paths
 // are drawn in, and the paths. Kept apart from the ImageVector so an icon
-// can be drawn turned or mirrored from the same paths.
+// can be drawn turned or mirrored from the same paths. `stroke` is how wide
+// its lines are, in viewport units, when the icon list says (see
+// loadIcon); an icon without one is always drawn exactly as written.
 data class IconSource(
     val name: String,
     val widthDp: Float,
@@ -27,10 +33,13 @@ data class IconSource(
     val viewportWidth: Float,
     val viewportHeight: Float,
     val paths: List<IconPath>,
+    val stroke: Float? = null,
 ) {
     // The icon as Compose draws it, white, optionally turned by `rotation`
     // degrees or mirrored left to right around its middle, and moved down
     // by `shiftY` (for paths written above the viewport, as the web's are).
+    // The vector is remembered with how it was made, so it can be drawn on
+    // whole pixels later (crispPainter).
     fun toImageVector(rotation: Float = 0f, mirrored: Boolean = false, shiftY: Float = 0f): ImageVector {
         val builder = ImageVector.Builder(
             name = name,
@@ -54,7 +63,7 @@ data class IconSource(
             )
         }
         builder.clearGroup()
-        return builder.build()
+        return builder.build().also { IconRecipes.record(it,IconRecipe(this, rotation, mirrored, shiftY)) }
     }
 }
 
@@ -97,9 +106,40 @@ fun parseVectorXml(name: String, xml: String): IconSource {
     )
 }
 
-// Reads one of the phone app's icons from the resources this module packs.
+// Reads one of the phone app's icons from the resources this module packs,
+// with its stroke width when the icon list names the file.
 fun loadIcon(file: String): IconSource {
     val stream = OctoIcons::class.java.getResourceAsStream("/octo-icons/$file.xml")
         ?: error("The icon $file is not packaged")
-    return parseVectorXml(file, stream.use { it.readBytes().decodeToString() })
+    val icon = parseVectorXml(file, stream.use { it.readBytes().decodeToString() })
+    return icon.copy(stroke = IconList.strokeOf(file)?.let { it * icon.viewportWidth / PHOSPHOR_GRID })
+}
+
+// Phosphor draws on a 256 square.
+private const val PHOSPHOR_GRID = 256f
+
+// tools/icons/icons.json, packaged beside the icons: which Phosphor icon,
+// weight and scale each file is made from. A weight's stroke is the width
+// Phosphor outlines its lines at, on its 256 square; make_icons.py scales
+// every file by the list's scale times the file's own.
+internal object IconList {
+    private val weightStroke = mapOf("regular" to 16f, "bold" to 24f, "light" to 12f, "thin" to 8f, "fill" to 16f)
+
+    // Each file's weight and the scale it is drawn at.
+    val entries: Map<String, Pair<String, Float>> by lazy {
+        val stream = OctoIcons::class.java.getResourceAsStream("/octo-icons/icons.json") ?: error("The icon list is not packaged")
+        val root = Json.parseToJsonElement(stream.use { it.readBytes().decodeToString() }).jsonObject
+        val scale = root["scale"]?.jsonPrimitive?.float ?: 1f
+        root.getValue("icons").jsonObject.mapValues { (_, entry) ->
+            val fields = entry.jsonObject
+            fields.getValue("weight").jsonPrimitive.content to scale * (fields["scale"]?.jsonPrimitive?.float ?: 1f)
+        }
+    }
+
+    // The file's stroke on Phosphor's square, or null when the list does
+    // not name it.
+    fun strokeOf(file: String): Float? {
+        val (weight, scale) = entries[file] ?: return null
+        return (weightStroke[weight] ?: return null) * scale
+    }
 }

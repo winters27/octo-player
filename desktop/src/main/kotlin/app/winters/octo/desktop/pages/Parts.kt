@@ -47,6 +47,7 @@ import app.winters.octo.design.DesktopType
 import app.winters.octo.design.PageSize
 import app.winters.octo.design.Space
 import app.winters.octo.design.IconAction
+import app.winters.octo.design.IconSize
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
@@ -79,8 +80,8 @@ fun <T> Shelf(title: String, items: List<T>, key: (T) -> Any, card: @Composable 
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Txt(title, OctoType.headline, modifier = Modifier.weight(1f))
-            IconAction(OctoIcons.Back, "Scroll back", { scope.launch { if (still) state.scrollBy(-step) else state.animateScrollBy(-step) } }, size = 30.dp, iconSize = 18.dp, enabled = state.canScrollBackward)
-            IconAction(OctoIcons.Forward, "Scroll on", { scope.launch { if (still) state.scrollBy(step) else state.animateScrollBy(step) } }, size = 30.dp, iconSize = 18.dp, enabled = state.canScrollForward)
+            IconAction(OctoIcons.Back, "Scroll back", { scope.launch { if (still) state.scrollBy(-step) else state.animateScrollBy(-step) } }, size = 30.dp, iconSize = IconSize.Toolbar, enabled = state.canScrollBackward)
+            IconAction(OctoIcons.Forward, "Scroll on", { scope.launch { if (still) state.scrollBy(step) else state.animateScrollBy(step) } }, size = 30.dp, iconSize = IconSize.Toolbar, enabled = state.canScrollForward)
         }
         LazyRow(state = state, contentPadding = PaddingValues(horizontal = 0.dp)) {
             items(items, key = key) { item -> Box(Modifier.width(ShelfCardWidth)) { card(item) } }

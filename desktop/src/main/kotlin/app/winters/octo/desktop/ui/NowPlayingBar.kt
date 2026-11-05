@@ -85,7 +85,6 @@ import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
-import app.winters.octo.design.PauseGlyph
 import app.winters.octo.design.Scrubber
 import app.winters.octo.design.Space
 import app.winters.octo.design.Spinner
@@ -259,7 +258,7 @@ private fun Transport(app: AppState, state: PlayerState) {
     Row(Modifier.padding(horizontal = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
         IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = state.shuffle, toggled = state.shuffle)
         IconAction(OctoIcons.Previous, "Previous", app.player::previous, size = ControlHeight.L, iconSize = IconSize.Transport, enabled = song != null)
-        PlayButton(state.playing, enabled = song != null, size = PlayTarget, glyph = IconSize.Transport * PlayScale, waiting = state.buffering) { app.player.togglePlay() }
+        PlayButton(state.playing, enabled = song != null, size = PlayTarget, glyph = IconSize.Lead, waiting = state.buffering) { app.player.togglePlay() }
         IconAction(OctoIcons.Next, "Next", app.player::next, size = ControlHeight.L, iconSize = IconSize.Transport, enabled = song != null)
         val repeat = state.repeat
         IconAction(
@@ -432,7 +431,8 @@ private fun ColumnScope.SleepMenu(app: AppState, sleep: SleepState, back: () -> 
 // a half times theirs), in a round target `size` across that lifts under
 // the pointer and shrinks a touch when pressed, as theirs do. While waiting
 // for sound a spinner turns in its place. For a live station (`stop`) it is
-// Play and Stop.
+// Play and Stop. `exact` draws the sign as written, for a `glyph` that is
+// not one of the icon sizes.
 @Composable
 fun PlayButton(
     playing: Boolean,
@@ -443,6 +443,7 @@ fun PlayButton(
     label: String? = null,
     stop: Boolean = false,
     tint: Color = OctoColors.TextPrimary,
+    exact: Boolean = false,
     onClick: () -> Unit,
 ) {
     val tip = rememberTooltipState()
@@ -468,8 +469,8 @@ fun PlayButton(
         when {
             waiting && playing -> Spinner(size = glyph * 0.8f, color = tint)
             playing && stop -> StopGlyph(tint, size = glyph)
-            playing -> PauseGlyph(tint, size = glyph)
-            else -> Glyph(OctoIcons.Play, size = glyph, tint = tint)
+            playing -> Glyph(OctoIcons.Pause, size = glyph, tint = tint, exact = exact)
+            else -> Glyph(OctoIcons.Play, size = glyph, tint = tint, exact = exact)
         }
         TooltipPopup(tip, words)
     }
@@ -489,7 +490,7 @@ fun PlayBadge(size: Dp, label: String, onClick: () -> Unit) {
             .semantics { contentDescription = label },
         light = GlazeLight.Lifted,
     ) {
-        Glyph(OctoIcons.Play, size = size * 0.48f)
+        Glyph(OctoIcons.Play, size = size * 0.48f, exact = true)
         TooltipPopup(tip, "Play")
     }
 }

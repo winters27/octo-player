@@ -25,7 +25,6 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.TextStyle
@@ -69,11 +68,13 @@ fun Txt(
 fun isHeading(style: TextStyle): Boolean =
     style === DesktopType.pageTitle || style === DesktopType.section || style === OctoType.title || style === OctoType.headline || style === OctoType.section
 
-// An icon, white unless tinted.
+// An icon, white unless tinted. At one of the IconSize sizes it is drawn on
+// whole pixels; `exact` draws it as written whatever the size, for an icon
+// whose size is worked out (a share of a cover) rather than a token.
 @Composable
-fun Glyph(icon: ImageVector, modifier: Modifier = Modifier, size: Dp = 20.dp, tint: Color = Color.White) {
+fun Glyph(icon: ImageVector, modifier: Modifier = Modifier, size: Dp = IconSize.Transport, tint: Color = Color.White, exact: Boolean = false) {
     Image(
-        rememberVectorPainter(icon),
+        if (exact) exactPainter(icon) else crispPainter(icon),
         contentDescription = null,
         modifier = modifier.size(size),
         colorFilter = ColorFilter.tint(tint),

@@ -246,7 +246,7 @@ private fun LazyListScope.group(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Txt(title.uppercase(), DesktopType.label, OctoColors.TextMuted, Modifier.padding(start = Space.M))
-                Glyph(OctoIcons.Chevron, Modifier.padding(start = Space.Xs).rotate(if (shut) 0f else 90f), size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextMuted)
+                Glyph(OctoIcons.Chevron, Modifier.padding(start = Space.Xs).rotate(if (shut) 0f else 90f), size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextMuted, exact = true)
                 Spacer(Modifier.weight(1f))
                 action?.invoke()
             }
@@ -364,7 +364,7 @@ private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, ra
                 PlaylistPicture(app, playlist, Modifier.size(FrameSize.PlaylistCover), Corner.ArtSShape)
                 if (!rail) {
                     CompositionLocalProvider(LocalKeyboardHere provides (here && keyboard)) { CutTxt(playlist.name, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f)) }
-                    if (pinned) Glyph(OctoIcons.Pinned, size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextMuted)
+                    if (pinned) Glyph(OctoIcons.Pinned, size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextMuted, exact = true)
                 }
             }
         }

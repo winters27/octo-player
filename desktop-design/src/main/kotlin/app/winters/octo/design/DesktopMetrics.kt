@@ -49,12 +49,24 @@ object RowHeight {
     val Nav = 36.dp
 }
 
-// Icon sizes: beside words, in a table, in a toolbar, in the transport.
+// Icon sizes: beside words, in a table, in a toolbar, in the transport;
+// a tick inside a small label, the full player's actions beside the
+// song, a large mark at the head of a dialog, and the full player's
+// previous and next (also the bar's play sign, half again its transport).
+// Icons drawn at one of these sizes sit on whole pixels below 2x; any
+// other size is drawn exactly as its file says.
 object IconSize {
     val Inline = 14.dp
     val Table = 16.dp
     val Toolbar = 18.dp
     val Transport = 20.dp
+    val Mark = 13.dp
+    val Prominent = 22.dp
+    val Feature = 28.dp
+    val Lead = 30.dp
+
+    // Every size above: the only ones an icon is fitted to pixels at.
+    val Fitted = listOf(Mark, Inline, Table, Toolbar, Transport, Prominent, Feature, Lead)
 }
 
 // The keyboard's mark: the ring round what has the keyboard, a hairline of

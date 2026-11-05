@@ -655,7 +655,7 @@ private fun HeaderRow(
                         } else {
                             Txt(column.title.uppercase(), DesktopType.label, if (active) OctoColors.TextPrimary else OctoColors.TextMuted)
                         }
-                        if (active) Glyph(if (order.descending) OctoIcons.Descending else OctoIcons.Ascending, Modifier.padding(start = Space.Xs), size = IconSize.Inline - Space.Xxs)
+                        if (active) Glyph(if (order.descending) OctoIcons.Descending else OctoIcons.Ascending, Modifier.padding(start = Space.Xs), size = IconSize.Inline - Space.Xxs, exact = true)
                     }
                     if (specOf(column).resizable) {
                         ResizeHandle(onDrag = { onDrag(column, it) }, onDone = { onDragEnd(column) }, modifier = Modifier.align(Alignment.CenterEnd))
@@ -892,9 +892,9 @@ private fun SongCell(
             MarkedTitle(song, DesktopType.tableTitle, Modifier.weight(1f, fill = false)) { title ->
                 CutTxt(song.title, DesktopType.tableTitle, if (failed != null) muted else OctoColors.TextPrimary, title)
             }
-            if (heartInTitle && !outside && app.isStarred(song)) Glyph(OctoIcons.Liked, size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextSecondary)
+            if (heartInTitle && !outside && app.isStarred(song)) Glyph(OctoIcons.Liked, size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextSecondary, exact = true)
             // A song that would not play this time says why on hover.
-            if (failed != null) OctoTooltip(failed) { Glyph(OctoIcons.Info, size = IconSize.Inline - Space.Xxs, tint = OctoColors.SignalOrange) }
+            if (failed != null) OctoTooltip(failed) { Glyph(OctoIcons.Info, size = IconSize.Inline - Space.Xxs, tint = OctoColors.SignalOrange, exact = true) }
             // A FLAC being looked for: a ring, filling once it downloads.
             app.upgrades?.pending?.get(song.id)?.let { upgrade ->
                 OctoTooltip(upgradeHint(upgrade)) { ProgressRing(upgrade.fraction, size = IconSize.Inline - Space.Xxs) }

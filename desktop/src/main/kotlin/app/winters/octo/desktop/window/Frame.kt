@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowState
 import app.winters.octo.design.Glyph
+import app.winters.octo.design.IconSize
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.TooltipPopup
@@ -289,7 +290,7 @@ private fun WindowButton(
             hovered -> Color.White
             else -> OctoColors.TextSecondary
         }
-        Glyph(icon, size = 16.dp, tint = tint)
+        Glyph(icon, size = IconSize.Table, tint = tint)
         TooltipPopup(tip, description, TooltipSide.Bottom)
     }
 }

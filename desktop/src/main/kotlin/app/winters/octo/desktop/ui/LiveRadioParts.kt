@@ -113,7 +113,7 @@ fun LiveArt(
         if (!covered && !logoShown && !serverShown) {
             val hue = remember(name) { stationHue(name) }
             Box(Modifier.matchParentSize().background(drawnGround(hue)), contentAlignment = Alignment.Center) {
-                Glyph(OctoIcons.Radio, size = glyph, tint = Color.White.copy(alpha = 0.85f))
+                Glyph(OctoIcons.Radio, size = glyph, tint = Color.White.copy(alpha = 0.85f), exact = true)
             }
             if (!small && app != null) DesignedStation(app, name, streamUrl, px)
         }
@@ -206,7 +206,7 @@ fun FindStationsArt(modifier: Modifier, shape: Shape) {
         modifier.clip(shape).background(Brush.linearGradient(listOf(OctoColors.AccentSelected, OctoColors.BackgroundTertiary))),
         contentAlignment = Alignment.Center,
     ) {
-        Glyph(OctoIcons.Radio, size = maxWidth * 0.36f, tint = OctoColors.TextPrimary)
+        Glyph(OctoIcons.Radio, size = maxWidth * 0.36f, tint = OctoColors.TextPrimary, exact = true)
         Box(Modifier.matchParentSize().artworkRim(shape))
     }
 }

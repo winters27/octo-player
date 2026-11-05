@@ -410,7 +410,7 @@ fun MenuRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (leading != null) leading() else if (icon != null) Glyph(icon, size = 16.dp, tint = if (enabled) Color.White else OctoColors.TextMuted)
+        if (leading != null) leading() else if (icon != null) Glyph(icon, size = IconSize.Table, tint = if (enabled) Color.White else OctoColors.TextMuted)
         Txt(
             text,
             if (selected) OctoType.bodySmall.copy(fontWeight = FontWeight.Medium) else OctoType.bodySmall,
@@ -422,8 +422,8 @@ fun MenuRow(
             Modifier.weight(1f),
         )
         if (detail != null) Txt(detail, OctoType.caption, OctoColors.TextMuted)
-        if (checked || selected) Glyph(OctoIcons.Check, size = 16.dp, tint = OctoColors.TextPrimary)
-        if (more) Glyph(OctoIcons.Chevron, size = 16.dp, tint = OctoColors.TextMuted)
+        if (checked || selected) Glyph(OctoIcons.Check, size = IconSize.Table, tint = OctoColors.TextPrimary)
+        if (more) Glyph(OctoIcons.Chevron, size = IconSize.Table, tint = OctoColors.TextMuted)
     }
 }
 

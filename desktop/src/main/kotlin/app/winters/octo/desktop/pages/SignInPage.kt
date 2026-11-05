@@ -67,6 +67,7 @@ import app.winters.octo.design.GlassField
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconAction
+import app.winters.octo.design.IconSize
 import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
@@ -353,7 +354,7 @@ internal fun ColumnScope.Advanced(form: SignInForm, submit: () -> Unit) {
                         password = true,
                         onSubmit = submit,
                     )
-                    IconAction(OctoIcons.Close, "Remove header", { form.removeHeader(index) }, size = 32.dp, iconSize = 16.dp)
+                    IconAction(OctoIcons.Close, "Remove header", { form.removeHeader(index) }, size = 32.dp, iconSize = IconSize.Table)
                 }
             }
             GlazeCapsule(null, "Add header", form::addHeader, height = 32.dp)
@@ -382,7 +383,7 @@ internal fun SecretField(value: String, onChange: (String) -> Unit, placeholder:
                 // Tab goes from field to field, past the eye.
                 Modifier.focusProperties { canFocus = false },
                 size = 32.dp,
-                iconSize = 18.dp,
+                iconSize = IconSize.Toolbar,
                 tint = OctoColors.TextSecondary,
             )
         },
@@ -425,7 +426,7 @@ internal fun AdvancedToggle(open: Boolean, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Txt("Advanced", OctoType.label, OctoColors.TextSecondary, Modifier.weight(1f))
-            Glyph(OctoIcons.Chevron, Modifier.rotate(turn), size = 18.dp, tint = OctoColors.TextMuted)
+            Glyph(OctoIcons.Chevron, Modifier.rotate(turn), size = IconSize.Toolbar, tint = OctoColors.TextMuted)
         }
     }
 }

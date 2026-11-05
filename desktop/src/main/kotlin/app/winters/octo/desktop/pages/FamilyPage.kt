@@ -333,7 +333,7 @@ private fun LoginSection(app: AppState, model: FamilyModel) {
             loginSteps(main, login.username).forEach { app ->
                 val expanded = open == app.app
                 SettingRow(app.app, if (expanded) null else app.steps.first(), Modifier.clickable { open = if (expanded) null else app.app }) {
-                    Glyph(if (expanded) OctoIcons.Expand else OctoIcons.Collapse, size = 16.dp, tint = OctoColors.TextMuted)
+                    Glyph(if (expanded) OctoIcons.Expand else OctoIcons.Collapse, size = IconSize.Table, tint = OctoColors.TextMuted)
                 }
                 if (expanded) {
                     Column(Modifier.fillMaxWidth().padding(horizontal = RowInset, vertical = Space.M), verticalArrangement = Arrangement.spacedBy(6.dp)) {

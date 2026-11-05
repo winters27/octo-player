@@ -107,7 +107,7 @@ fun GlassField(
             verticalAlignment = if (single) Alignment.CenterVertically else Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (icon != null) Glyph(icon, size = 18.dp, tint = OctoColors.TextMuted)
+            if (icon != null) Glyph(icon, size = IconSize.Toolbar, tint = OctoColors.TextMuted)
             leading?.invoke()
             Box(Modifier.weight(1f), contentAlignment = if (single) Alignment.CenterStart else Alignment.TopStart) {
                 if (value.isEmpty()) Txt(placeholder, OctoType.bodySmall, OctoColors.TextMuted)

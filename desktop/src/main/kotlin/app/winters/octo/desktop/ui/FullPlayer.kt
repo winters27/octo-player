@@ -75,6 +75,7 @@ import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.wash.ImmersiveWash
 import app.winters.octo.desktop.player.wash.WashCover
 import app.winters.octo.design.IconAction
+import app.winters.octo.design.IconSize
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.LocalReduceMotion
@@ -281,15 +282,15 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
         // The panel toggles and the way out.
         Row(Modifier.align(Alignment.TopEnd).padding(top = top + 4.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             if (live != null) {
-                if (state.queue.size > 1) IconAction(OctoIcons.Queue, "Stations", { app.togglePlayerPanel(SidePanel.Queue) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Queue, tint = ink)
+                if (state.queue.size > 1) IconAction(OctoIcons.Queue, "Stations", { app.togglePlayerPanel(SidePanel.Queue) }, size = 36.dp, iconSize = IconSize.Transport, active = app.playerPanel == SidePanel.Queue, tint = ink)
                 LiveMoreButton(app, live, state.current?.song?.id.orEmpty(), ink)
             } else {
                 if (app.playerPanel == SidePanel.Lyrics) LyricsMenuButton(app, tint = ink)
-                IconAction(OctoIcons.Lyrics, "Lyrics", { app.togglePlayerPanel(SidePanel.Lyrics) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Lyrics, tint = ink)
-                IconAction(OctoIcons.Queue, "Queue", { app.togglePlayerPanel(SidePanel.Queue) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Queue, tint = ink)
-                IconAction(OctoIcons.Info, "Song details", { app.togglePlayerPanel(SidePanel.Info) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Info, tint = ink)
+                IconAction(OctoIcons.Lyrics, "Lyrics", { app.togglePlayerPanel(SidePanel.Lyrics) }, size = 36.dp, iconSize = IconSize.Transport, active = app.playerPanel == SidePanel.Lyrics, tint = ink)
+                IconAction(OctoIcons.Queue, "Queue", { app.togglePlayerPanel(SidePanel.Queue) }, size = 36.dp, iconSize = IconSize.Transport, active = app.playerPanel == SidePanel.Queue, tint = ink)
+                IconAction(OctoIcons.Info, "Song details", { app.togglePlayerPanel(SidePanel.Info) }, size = 36.dp, iconSize = IconSize.Transport, active = app.playerPanel == SidePanel.Info, tint = ink)
             }
-            IconAction(OctoIcons.Collapse, "Close the player", { app.fullPlayer = false }, size = 36.dp, iconSize = 20.dp, tint = ink)
+            IconAction(OctoIcons.Collapse, "Close the player", { app.fullPlayer = false }, size = 36.dp, iconSize = IconSize.Transport, tint = ink)
         }
     }
 }
@@ -398,7 +399,7 @@ private fun PlayerColumn(
             }
             OnTitleCapitals(OctoType.headline) {
                 if (isOutside(app, song)) {
-                    FetchButton(app, song, 40.dp, 22.dp, tint = ink.copy(alpha = quiet))
+                    FetchButton(app, song, 40.dp, IconSize.Prominent, tint = ink.copy(alpha = quiet))
                 } else {
                     val starred = app.isStarred(song)
                     IconAction(
@@ -406,7 +407,7 @@ private fun PlayerColumn(
                         if (starred) "Remove from favorites" else "Add to favorites",
                         { app.setStarred(listOf(song), !starred) },
                         size = 40.dp,
-                        iconSize = 22.dp,
+                        iconSize = IconSize.Prominent,
                         tint = if (starred) ink else ink.copy(alpha = quiet),
                     )
                 }
@@ -431,10 +432,10 @@ private fun PlayerColumn(
         }
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = 40.dp, iconSize = 22.dp, active = state.shuffle, tint = ink, toggled = state.shuffle)
-            IconAction(OctoIcons.Previous, "Previous", app.player::previous, size = 48.dp, iconSize = 30.dp, tint = ink)
-            PlayButton(state.playing, enabled = true, size = 68.dp, glyph = 30.dp * PlayScale, tint = ink) { app.player.togglePlay() }
-            IconAction(OctoIcons.Next, "Next", app.player::next, size = 48.dp, iconSize = 30.dp, tint = ink)
+            IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = 40.dp, iconSize = IconSize.Prominent, active = state.shuffle, tint = ink, toggled = state.shuffle)
+            IconAction(OctoIcons.Previous, "Previous", app.player::previous, size = 48.dp, iconSize = IconSize.Lead, tint = ink)
+            PlayButton(state.playing, enabled = true, size = 68.dp, glyph = 30.dp * PlayScale, tint = ink, exact = true) { app.player.togglePlay() }
+            IconAction(OctoIcons.Next, "Next", app.player::next, size = 48.dp, iconSize = IconSize.Lead, tint = ink)
             val repeat = state.repeat
             IconAction(
                 if (repeat == RepeatMode.One) OctoIcons.RepeatOne else OctoIcons.Repeat,
@@ -445,7 +446,7 @@ private fun PlayerColumn(
                 },
                 { app.player.setRepeat(RepeatMode.entries[(repeat.ordinal + 1) % RepeatMode.entries.size]) },
                 size = 40.dp,
-                iconSize = 22.dp,
+                iconSize = IconSize.Prominent,
                 active = repeat != RepeatMode.Off,
                 tint = ink,
                 toggled = repeat != RepeatMode.Off,
@@ -462,9 +463,9 @@ private fun PlayerColumn(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            IconAction(OctoIcons.VolumeDown, "Quieter", { app.setVolume(volume - 0.1f) }, size = 30.dp, iconSize = 18.dp, tint = muted)
+            IconAction(OctoIcons.VolumeDown, "Quieter", { app.setVolume(volume - 0.1f) }, size = 30.dp, iconSize = IconSize.Toolbar, tint = muted)
             LineSlider(fraction = { volume }, onSeek = app::setVolume, modifier = Modifier.weight(1f), live = true, color = ink, trackColor = ink.copy(alpha = 0.22f), label = "Volume")
-            IconAction(OctoIcons.VolumeUp, "Louder", { app.setVolume(volume + 0.1f) }, size = 30.dp, iconSize = 18.dp, tint = muted)
+            IconAction(OctoIcons.VolumeUp, "Louder", { app.setVolume(volume + 0.1f) }, size = 30.dp, iconSize = IconSize.Toolbar, tint = muted)
         }
     }
     Spacer(Modifier.weight((1f - foot).coerceAtLeast(0.0001f)))
@@ -484,12 +485,12 @@ private fun LivePlayerLines(app: AppState, song: Song, state: PlayerState, live:
             Txt(song.title, OctoType.headline, ink, maxLines = 2)
             Txt(live.shown.subtitle, OctoType.body, muted, Modifier.heightIn(min = Focus.MinTarget), maxLines = 2)
         }
-        OnTitleCapitals(OctoType.headline) { OnAirButton(app, live, 40.dp, 22.dp, ink, quiet) }
+        OnTitleCapitals(OctoType.headline) { OnAirButton(app, live, 40.dp, IconSize.Prominent, ink, quiet) }
     }
     Spacer(Modifier.height(14.dp))
     LiveLine(app, ink, muted, Modifier.fillMaxWidth().heightIn(min = SeekArea), stacked = true)
     Spacer(Modifier.height(10.dp))
-    LiveTransport(app, state, live, playSize = 68.dp, stepSize = 48.dp, stepIcon = 30.dp, tint = ink, gap = 14.dp)
+    LiveTransport(app, state, live, playSize = 68.dp, stepSize = 48.dp, stepIcon = IconSize.Lead, tint = ink, gap = 14.dp)
     Spacer(Modifier.height(10.dp))
     val volume = state.volume
     Row(
@@ -500,9 +501,9 @@ private fun LivePlayerLines(app: AppState, song: Song, state: PlayerState, live:
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        IconAction(OctoIcons.VolumeDown, "Quieter", { app.setVolume(volume - 0.1f) }, size = 30.dp, iconSize = 18.dp, tint = muted)
+        IconAction(OctoIcons.VolumeDown, "Quieter", { app.setVolume(volume - 0.1f) }, size = 30.dp, iconSize = IconSize.Toolbar, tint = muted)
         LineSlider(fraction = { volume }, onSeek = app::setVolume, modifier = Modifier.weight(1f), live = true, color = ink, trackColor = ink.copy(alpha = 0.22f), label = "Volume")
-        IconAction(OctoIcons.VolumeUp, "Louder", { app.setVolume(volume + 0.1f) }, size = 30.dp, iconSize = 18.dp, tint = muted)
+        IconAction(OctoIcons.VolumeUp, "Louder", { app.setVolume(volume + 0.1f) }, size = 30.dp, iconSize = IconSize.Toolbar, tint = muted)
     }
 }
 
@@ -514,7 +515,7 @@ private fun LiveMoreButton(app: AppState, live: LiveNow, stationId: String, ink:
     Box(Modifier.onGloballyPositioned { anchor = it.windowRect() }) {
         IconAction(OctoIcons.More, "More", {
             app.popups.showUnder(anchor, width = FrameSize.Menu) { close -> LiveMenuRows(app, live, stationId, close) }
-        }, size = 36.dp, iconSize = 20.dp, tint = ink)
+        }, size = 36.dp, iconSize = IconSize.Transport, tint = ink)
     }
 }
 

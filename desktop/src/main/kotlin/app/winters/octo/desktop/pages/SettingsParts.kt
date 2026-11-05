@@ -42,7 +42,6 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -59,6 +58,8 @@ import app.winters.octo.design.scrollbar
 import app.winters.octo.design.topFade
 import app.winters.octo.design.CardFill
 import app.winters.octo.design.Corner
+import app.winters.octo.design.crispPainter
+import app.winters.octo.design.exactPainter
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FocusRing
 import app.winters.octo.design.FrameSize
@@ -217,12 +218,12 @@ internal fun SectionPick(section: PageSection, chosen: Boolean, onPick: () -> Un
     }
 }
 
-// A section's icon: tinted like the words beside it, or a brand's mark in
-// its own colours.
+// A section's icon: tinted like the words beside it and on whole pixels,
+// or a brand's mark exactly as drawn, in its own colors.
 @Composable
 private fun SectionIcon(icon: ImageVector, brand: Boolean, size: Dp, tint: Color) {
     Image(
-        rememberVectorPainter(icon),
+        if (brand) exactPainter(icon) else crispPainter(icon),
         contentDescription = null,
         modifier = Modifier.size(size),
         colorFilter = if (brand) null else ColorFilter.tint(tint),

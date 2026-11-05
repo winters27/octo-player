@@ -38,10 +38,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.AccentButton
+import app.winters.octo.design.crispPainter
 import app.winters.octo.design.AccentPeak
 import app.winters.octo.design.ButtonGroup
 import app.winters.octo.design.ButtonSize
@@ -242,7 +242,7 @@ private fun Line(content: @Composable RowScope.() -> Unit) {
 }
 
 @Composable
-private fun painter(icon: ImageVector) = rememberVectorPainter(icon)
+private fun painter(icon: ImageVector) = crispPainter(icon)
 
 @Composable
 private fun ColumnScope.Buttons() {

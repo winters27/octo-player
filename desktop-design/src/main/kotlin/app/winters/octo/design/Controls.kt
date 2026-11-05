@@ -39,7 +39,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.semantics.Role
@@ -57,7 +56,8 @@ import androidx.compose.ui.unit.dp
 // the pointer. `active` marks a mode that is on (shuffle, repeat, an open
 // panel) with the accent, never a border. `toggled`, when given, tells a
 // screen reader it is a switch that is on or off. Resting the pointer on
-// it shows `tooltip` (its description, unless told otherwise).
+// it shows `tooltip` (its description, unless told otherwise). `exact`
+// draws the glyph as written, for one at a size outside the icon sizes.
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun IconAction(
@@ -66,12 +66,13 @@ fun IconAction(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     size: Dp = 36.dp,
-    iconSize: Dp = 20.dp,
+    iconSize: Dp = IconSize.Transport,
     enabled: Boolean = true,
     active: Boolean = false,
     tint: Color = Color.White,
     toggled: Boolean? = null,
     tooltip: String = description,
+    exact: Boolean = false,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val tip = rememberTooltipState()
@@ -102,7 +103,7 @@ fun IconAction(
         contentAlignment = Alignment.Center,
     ) {
         // An active one (shuffle on, a panel open) glows rather than changing colour.
-        GlowIcon(rememberVectorPainter(icon), tint = tint, lit = active, modifier = Modifier.size(iconSize))
+        GlowIcon(if (exact) exactPainter(icon) else crispPainter(icon), tint = tint, lit = active, modifier = Modifier.size(iconSize))
         TooltipPopup(tip, tooltip)
     }
 }
@@ -144,9 +145,9 @@ fun GlazeCapsule(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            if (icon != null) Glyph(icon, size = 16.dp, tint = ink)
+            if (icon != null) Glyph(icon, size = IconSize.Table, tint = ink)
             Txt(text, OctoType.label, ink)
-            Glyph(OctoIcons.Chevron, Modifier.rotate(90f), size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextMuted)
+            Glyph(OctoIcons.Chevron, Modifier.rotate(90f), size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextMuted, exact = true)
         }
         return
     }
@@ -167,7 +168,7 @@ fun GlazeCapsule(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (icon != null) Glyph(icon, size = 20.dp)
+            if (icon != null) Glyph(icon, size = IconSize.Transport)
             Txt(text, OctoType.label)
         }
     }
@@ -203,7 +204,7 @@ fun GlazeRound(
             .semantics { contentDescription = description },
         light = if (lit || look.hovered || look.pressed) GlazeLight.Lifted else GlazeLight.Rest,
     ) {
-        Glyph(icon, size = 18.dp)
+        Glyph(icon, size = IconSize.Toolbar)
         TooltipPopup(tip, description)
     }
 }
@@ -238,7 +239,7 @@ fun TextAction(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        if (icon != null) Glyph(icon, size = 16.dp, tint = tint)
+        if (icon != null) Glyph(icon, size = IconSize.Table, tint = tint)
         Txt(text, style, tint)
     }
 }
@@ -318,7 +319,7 @@ fun <T> GlazeSegments(
 }
 
 // The check shown before the chosen segment's words, and the gap after it.
-val SegmentCheck = 14.dp
+val SegmentCheck = IconSize.Inline
 val SegmentCheckGap = 4.dp
 
 // A ring that fills as something downloads; with no fraction known it turns.
