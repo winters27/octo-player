@@ -17,6 +17,7 @@ import app.winters.octo.desktop.nav.Shortcut
 import app.winters.octo.desktop.nav.settingsPages
 import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.desktop.ui.settingsListWidth
+import app.winters.octo.desktop.update.FakeReleases
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -70,7 +71,15 @@ class SettingsTakeoverTest {
         return out
     }
 
-    private fun TextLayoutResult.cut(): Boolean = hasVisualOverflow || (0 until lineCount).any { isLineEllipsized(it) }
+    // Cut short, ellipsized, or a word broken across two lines.
+    private fun TextLayoutResult.cut(): Boolean {
+        val words = layoutInput.text.text
+        val broken = (0 until lineCount - 1).any { line ->
+            val end = getLineEnd(line)
+            end in 1 until words.length && !words[end - 1].isWhitespace() && !words[end].isWhitespace()
+        }
+        return broken || hasVisualOverflow || (0 until lineCount).any { isLineEllipsized(it) }
+    }
 
     // Whether the player shows its panel buttons, which a compact player
     // moves into its More menu.
@@ -92,7 +101,7 @@ class SettingsTakeoverTest {
             assertTrue(tabs.toString(), tabs.containsAll(pageNames))
             assertFalse("the sidebar's rows are gone", tabs.contains("Albums"))
             assertEquals("the sidebar's search field took its place with it", IntRect.Zero, s.app.omnibox.field)
-            s.click("Leave Settings")
+            s.click("Back")
             assertEquals(Page.Songs, s.app.navigator.current.page)
             assertTrue(s.tabs().contains("Albums"))
             assertFalse(s.tabs().contains("Playback"))
@@ -153,7 +162,7 @@ class SettingsTakeoverTest {
             assertEquals(pageNames.toSet(), names.keys)
             names.forEach { (name, laid) ->
                 assertEquals("$name on one line", 1, laid.lineCount)
-                assertFalse("$name is cut", laid.cut())
+                assertFalse("$name is cut: ${laid.size} in ${laid.layoutInput.constraints}, wide ${laid.didOverflowWidth}, tall ${laid.didOverflowHeight}", laid.cut())
             }
         }
     }
@@ -164,6 +173,38 @@ class SettingsTakeoverTest {
         assertEquals("a rail widens to what the names need", 250.dp, settingsListWidth(1440.dp, FrameSize.SidebarRail, 250.dp))
         val most = 960.dp - (FrameSize.PlayerMin + FrameSize.PlayerGap * 2) - FrameSize.Hairline
         assertEquals("never past the player's room", most, settingsListWidth(960.dp, FrameSize.SidebarRail, 400.dp))
+    }
+
+    // Settings as the first page shown: the title bar's Back still leaves,
+    // to Home.
+    @Test(timeout = 120_000)
+    fun backLeavesSettingsWithNothingBehindIt() {
+        A11yScene(folder.root, reduceMotion = true).use { s ->
+            s.onUi { s.app.navigator.replace(Page.Settings) }
+            s.render(4)
+            assertTrue(s.app.inSettings)
+            assertFalse(s.app.navigator.canGoBack)
+            s.click("Back")
+            assertEquals(Page.Home, s.app.navigator.current.page)
+        }
+    }
+
+    // An update's dot beside About takes room the list already kept, so the
+    // page does not move when one is ready.
+    @Test(timeout = 120_000)
+    fun anUpdateReadyKeepsTheListsWidth() {
+        fun listWidth(s: A11yScene): Float {
+            s.onUi { s.app.openSettings() }
+            s.render(4)
+            var width = 0f
+            s.onUi { width = s.nodes(merged = true).first { it.config.getOrNull(SemanticsProperties.Role) == Role.Tab }.boundsInRoot.width }
+            return width
+        }
+        val without = A11yScene(folder.newFolder(), reduceMotion = true).use(::listWidth)
+        val with = FakeReleases().use { github ->
+            A11yScene(folder.newFolder(), reduceMotion = true, updates = SettingsWalk.readyUpdates(github, folder.newFolder())).use(::listWidth)
+        }
+        assertEquals(without, with)
     }
 
     @Test(timeout = 120_000)
@@ -256,8 +297,8 @@ class SettingsTakeoverTest {
             val nodes = s.nodes(merged = true)
             val headings = s.nodes().filter { it.config.getOrNull(SemanticsProperties.Heading) != null }.map { it.name() }
             assertTrue(headings.toString(), headings.containsAll(listOf("Settings", "Listening", "Your music", "This computer")))
-            val back = nodes.first { it.name() == "Leave Settings" }
-            assertEquals(Role.Button, back.role())
+            // The one way back is the title bar's.
+            assertEquals(1, nodes.count { it.name() == "Back" && it.role() == Role.Button })
             for (name in pageNames) {
                 val item = nodes.firstOrNull { it.role() == Role.Tab && it.name().startsWith(name) }
                 assertTrue("$name is a tab", item != null)

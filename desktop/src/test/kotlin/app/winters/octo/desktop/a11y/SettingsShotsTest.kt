@@ -222,6 +222,33 @@ class SettingsShotsTest {
         }
     }
 
+    // The narrowest window at the largest text, without pictures: the
+    // quality pickers leave their rows' names and lines whole, and About
+    // with its version and an update's dot is not broken. Every word in a
+    // setting's row is watched here, its line under the name too.
+    @Test(timeout = 120_000)
+    fun theNarrowestWindowCutsNoWords() {
+        FakeReleases().use { github ->
+            scene(sizes.last(), updates = SettingsWalk.readyUpdates(github, folder.newFolder())).use { s ->
+                for (page in listOf(SettingsKey.Quality, SettingsKey.Offline)) {
+                    s.open(page)
+                    s.render(4)
+                    val cut = s.cutWords().toMutableList()
+                    s.onUi {
+                        for (row in s.nodes().filter { it.config.getOrNull(RowTitle) != null }) {
+                            for (node in row.under().filter { it.words() != null }) {
+                                val laid = mutableListOf<TextLayoutResult>()
+                                node.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(laid)
+                                if (laid.firstOrNull()?.cut() == true) cut += node.words().orEmpty()
+                            }
+                        }
+                    }
+                    assertTrue("$page cuts: ${cut.distinct()}", cut.isEmpty())
+                }
+            }
+        }
+    }
+
     // Every page at every size, its foot too where it scrolls, with an
     // update ready, a Discord build and a server that answers.
     @Test(timeout = 600_000)

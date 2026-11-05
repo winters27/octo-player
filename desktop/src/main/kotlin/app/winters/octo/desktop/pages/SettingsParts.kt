@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -450,11 +451,26 @@ internal fun SettingRow(
                 else -> OctoColors.TextPrimary
             }
             Txt(title, RowTitleWords, ink, maxLines = 2)
-            if (caption != null) Txt(caption, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xxs), maxLines = 3)
+            if (caption != null) Txt(caption, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xxs), maxLines = Int.MAX_VALUE)
         }
-        control()
+        // The control is measured first, so it is held to its share of the
+        // row and the words keep the rest; a picker too wide for that turns
+        // into its one-button form.
+        Row(
+            Modifier.layout { measurable, constraints ->
+                val most = if (constraints.hasBoundedWidth) (constraints.maxWidth * ControlShare).toInt() else constraints.maxWidth
+                val placeable = measurable.measure(constraints.copy(minWidth = 0, maxWidth = most))
+                layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+            },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.Xxl),
+            content = control,
+        )
     }
 }
+
+// The most of a row its control may take beside its words.
+private const val ControlShare = 0.6f
 
 // A setting that is on or off. The whole row flips it.
 @Composable
@@ -479,20 +495,13 @@ internal fun SwitchRow(title: String, caption: String?, on: Boolean, id: String?
 // words, the choices are one button that opens them instead.
 @Composable
 internal fun <T> ChoiceRow(title: String, caption: String?, options: List<T>, selected: T, label: (T) -> String, stable: String? = null, onSelect: (T) -> Unit) {
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val room = maxWidth * ChoiceShare
-        SettingRow(title, caption, stable = stable) {
-            FitOrElse(
-                { GlazeSegments(options, selected, label, onSelect) },
-                { ChoiceButton(options, selected, label, onSelect, title = title) },
-                Modifier.widthIn(max = room),
-            )
-        }
+    SettingRow(title, caption, stable = stable) {
+        FitOrElse(
+            { GlazeSegments(options, selected, label, onSelect) },
+            { ChoiceButton(options, selected, label, onSelect, title = title) },
+        )
     }
 }
-
-// The most of a row its choices may take beside its words.
-private const val ChoiceShare = 0.6f
 
 // A value along a line of a fixed width, with what it reads right beside
 // it. `live` sends the value while dragging; `onRelease` hears when a

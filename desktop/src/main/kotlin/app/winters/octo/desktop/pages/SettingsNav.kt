@@ -40,6 +40,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key as pressed
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -62,7 +63,6 @@ import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlassField
 import app.winters.octo.design.Glyph
-import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -151,8 +151,7 @@ internal fun settingsListNeeds(app: AppState): Dp {
     val density = LocalDensity.current
     val pages = shownPages(app)
     val version = appVersion()
-    val update = app.updates?.ready != null
-    return remember(measurer, density, pages, version, update) {
+    return remember(measurer, density, pages, version) {
         with(density) {
             fun words(text: String, style: TextStyle) = ceil(measurer.measure(text, style).size.width.toFloat()).toInt()
             val dot = ItemGap.roundToPx() + FrameSize.NavMark.roundToPx()
@@ -160,7 +159,9 @@ internal fun settingsListNeeds(app: AppState): Dp {
                 words(page.name, DesktopType.body) + if (page.key == SettingsKey.Servers) dot else 0
             } ?: 0
             val about = pages.firstOrNull { it.key == SettingsKey.About }?.let { page ->
-                words(page.name, DesktopType.body) + ItemGap.roundToPx() + words(version, AboutDetail) + if (update) dot else 0
+                // The update's dot always has its room, so the list keeps
+                // its width when one comes or goes.
+                words(page.name, DesktopType.body) + ItemGap.roundToPx() + words(version, AboutDetail) + dot
             } ?: 0
             val around = (ListSide.roundToPx() + ItemInset.roundToPx()) * 2 + IconSize.Toolbar.roundToPx() + ItemGap.roundToPx()
             // One pixel to spare, so a name measured to the pixel still fits.
@@ -224,8 +225,9 @@ internal fun SettingsList(app: AppState, chosen: FocusRequester, live: Boolean, 
     }
 }
 
-// Line one: the way back, and the title. The title marks where the search
-// box floats out while Settings holds the sidebar's place.
+// Line one: the title, on the group names' edge; the way back is the title
+// bar's. The title marks where the search box floats out while Settings
+// holds the sidebar's place.
 @Composable
 private fun SettingsHeader(app: AppState, live: Boolean) {
     val box = app.omnibox
@@ -236,8 +238,7 @@ private fun SettingsHeader(app: AppState, live: Boolean) {
     }
     LaunchedEffect(live) { if (!live) letGo() }
     DisposableEffect(Unit) { onDispose { letGo() } }
-    Row(Modifier.fillMaxWidth().height(ControlHeight.L), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
-        IconAction(OctoIcons.Back, "Leave Settings", { app.leaveSettings() }, size = ControlHeight.M, iconSize = IconSize.Toolbar, tint = OctoColors.TextPrimary)
+    Row(Modifier.fillMaxWidth().height(ControlHeight.L).padding(start = ItemInset), verticalAlignment = Alignment.CenterVertically) {
         Txt(
             "Settings",
             OctoType.section,
@@ -476,9 +477,37 @@ private fun SettingsItem(
             // A brand's mark keeps its own shape and colors.
             if (page.key == SettingsKey.Discord) Image(exactPainter(icon), null, Modifier.size(IconSize.Toolbar))
             else Glyph(icon, size = IconSize.Toolbar, tint = if (shown) OctoColors.AccentHover else accent)
-            Txt(page.name, DesktopType.body, words, Modifier.weight(1f), maxLines = 3)
-            if (detail != null) Txt(detail, AboutDetail, OctoColors.TextMuted)
+            if (detail == null) Txt(page.name, DesktopType.body, words, Modifier.weight(1f), maxLines = 3)
+            else NameAndDetail(Modifier.weight(1f), { Txt(page.name, DesktopType.body, words, maxLines = 3) }, { Txt(detail, AboutDetail, OctoColors.TextMuted) })
             if (mark != null) Box(Modifier.size(FrameSize.NavMark).background(accent, CircleShape))
+        }
+    }
+}
+
+// A name with a quiet word at the line's end, both centered on the line;
+// when the name on one line and the word do not fit across, the word goes
+// under the name, so the name is never broken for it.
+@Composable
+private fun NameAndDetail(modifier: Modifier, name: @Composable () -> Unit, detail: @Composable () -> Unit) {
+    Layout({ name(); detail() }, modifier) { (nameIn, detailIn), constraints ->
+        val gap = ItemGap.roundToPx()
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val word = detailIn.measure(loose)
+        val across = nameIn.maxIntrinsicWidth(constraints.maxHeight) + gap + word.width <= constraints.maxWidth
+        val room = if (across) constraints.maxWidth - gap - word.width else constraints.maxWidth
+        val words = nameIn.measure(loose.copy(minWidth = room, maxWidth = room))
+        val width = constraints.maxWidth
+        if (across) {
+            val height = maxOf(words.height, word.height)
+            layout(width, height) {
+                words.place(0, (height - words.height) / 2)
+                word.place(width - word.width, (height - word.height) / 2)
+            }
+        } else {
+            layout(width, words.height + word.height) {
+                words.place(0, 0)
+                word.place(0, words.height)
+            }
         }
     }
 }

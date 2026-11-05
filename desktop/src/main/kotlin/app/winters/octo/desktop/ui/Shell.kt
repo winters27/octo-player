@@ -571,7 +571,10 @@ private fun TitleBar(app: AppState, frame: Frame?, onClose: () -> Unit) {
     TitleStrip {
         if (app.mac) Spacer(Modifier.width(MacLightsRoom)) else Spacer(Modifier.width(Space.M))
         if (app.connection != null) {
-            IconAction(OctoIcons.Back, "Back", { app.navigator.back() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.navigator.canGoBack, tint = ink ?: Color.White)
+            // In Settings it is always the way out, to Home when Settings
+            // was the first page shown.
+            val back = { if (app.inSettings) app.leaveSettings() else app.navigator.back() }
+            IconAction(OctoIcons.Back, "Back", { back() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.inSettings || app.navigator.canGoBack, tint = ink ?: Color.White)
             IconAction(OctoIcons.Forward, "Forward", { app.navigator.forward() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.navigator.canGoForward, tint = ink ?: Color.White)
             val settings by app.settings.state.collectAsState()
             IconAction(
