@@ -15,7 +15,7 @@ struct OctoTone: ShapeStyle, Sendable, Hashable {
         case background, backgroundSecondary, backgroundTertiary, surfaceRaised, sheetFill, edge, hairline
         case textPrimary, textSecondary, textMuted, selectedWords
         case accent, accentHover, accentTonal, accentSelected, accentFill, onAccentFill, onAccent, focusRing, menuPress
-        case complement, third, offTrack
+        case complement, third, offTrack, highlight
         case glazeFilm, glazeSelected
         case inkPrimary, inkSecondary, inkTertiary, inkQuaternary, inkQuinary
     }
@@ -55,6 +55,7 @@ extension ResolvedPalette {
         case .focusRing: accents.focusRing
         case .menuPress: accents.menuPress
         case .complement: complement
+        case .highlight: theme == .octo ? text : complement
         case .third: third
         case .offTrack: offTrack
         case .glazeFilm: glazeFilm
@@ -71,17 +72,17 @@ extension ResolvedPalette {
     var glassTinted: Bool { accents.glassAccent != theme.base.accent }
 
     /// The tint laid into Octo's glass while the glass takes the accent: on a dark theme the accent
-    /// pulled toward black, on a light one the accent's light form, at the same opacity. Clear
-    /// while untinted, when the glass is Apple's own with no film.
+    /// pulled toward black, on a light one the accent's light form, at the same opacity. Untinted,
+    /// a dark theme keeps Octo's faint dim and a light one is Apple's own glass with no film.
     var glazeFilm: UInt32 {
-        guard glassTinted else { return 0 }
+        guard glassTinted else { return light ? 0 : OctoPalette.glazeFilm.argb }
         let dark = glassFilm(accent: RGBA(argb: accents.glassAccent), tinted: true)
         guard light else { return dark.argb }
         return alphaArgb(accents.glassAccent, Int((dark.alpha * 1000).rounded()))
     }
 
-    /// The tint for Octo's glass, or nil while the glass is Apple's untinted own.
-    var glassTintColor: Color? { glassTinted ? Color(argb: glazeFilm) : nil }
+    /// The tint for Octo's glass, or nil where the glass is Apple's own with no film.
+    var glassTintColor: Color? { glazeFilm == 0 ? nil : Color(argb: glazeFilm) }
 
     /// Black at `alpha`, scaled by how strong this theme's shadows are.
     func shadowColor(_ alpha: Double) -> Color { Color.black.opacity(alpha * Double(shadow) / 1000) }
@@ -142,6 +143,8 @@ enum OctoColor {
     static let menuPress = OctoTone(.menuPress)
     /// The theme's highlight and placeholder colors.
     static let complement = OctoTone(.complement)
+    /// What is liked or counted: the complement, or the words' white in Octo, as it always was.
+    static let highlight = OctoTone(.highlight)
     static let third = OctoTone(.third)
     /// A switch's track while off.
     static let offTrack = OctoTone(.offTrack)

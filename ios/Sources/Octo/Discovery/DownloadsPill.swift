@@ -47,7 +47,7 @@ struct DownloadsPill: View {
                         if more > 0 {
                             Text("+\(more)")
                                 .font(.octoCaption)
-                                .foregroundStyle(OctoColor.complement)
+                                .foregroundStyle(OctoColor.highlight)
                                 .lineLimit(1)
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 2)

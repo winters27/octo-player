@@ -244,7 +244,7 @@ struct TrackRow: View {
                     }
                     Text(track.title)
                         .font(.octoBodySmall)
-                        .foregroundStyle(isNow ? OctoColor.complement : OctoColor.textPrimary)
+                        .foregroundStyle(OctoColor.textPrimary)
                         .lineLimit(1)
                     if track.explicit == true {
                         ExplicitMark().padding(.leading, 6).layoutPriority(1)
@@ -436,7 +436,7 @@ struct SongRow: View {
                         }
                         Text(shown.title)
                             .font(.octoBodySmall)
-                            .foregroundStyle(isCurrent(shown) ? OctoColor.complement : OctoColor.textPrimary)
+                            .foregroundStyle(OctoColor.textPrimary)
                             .lineLimit(1)
                         if shown.explicitStatus == "explicit" { ExplicitMark() }
                     }

@@ -391,8 +391,8 @@ struct FavoriteHeart: View {
 
     var body: some View {
         Button(action: toggle) {
-            IconView(on ? .liked : .like, size: 24, color: on ? palette.color(.complement) : palette.color(.inkSecondary))
-                .shadow(color: on ? palette.color(.complement).opacity(0.5) : .clear, radius: 6)
+            IconView(on ? .liked : .like, size: 24, color: on ? palette.color(.highlight) : palette.color(.textPrimary).opacity(0.6))
+                .shadow(color: on ? palette.color(.highlight).opacity(0.5) : .clear, radius: 6)
                 .iconAccent(on ? .pulse : nil, trigger: on)
                 .frame(width: 44, height: 44)
                 .contentShape(Circle())

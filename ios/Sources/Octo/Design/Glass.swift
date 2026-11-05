@@ -4,8 +4,8 @@ import SwiftUI
 // Octo's glass on iPhone is Apple's Liquid Glass. Each surface keeps Octo's shape, size, film
 // and shadow: the film tints the glass, and floating glass casts a soft shadow pooled under it.
 
-// Octo's glass is Apple's untinted glass with no film in every theme; only the glass tint switch
-// lays the accent into it (`octoGlass`).
+// Octo's glass is Apple's glass with Octo's faint dim on a dark theme and no film on a light one;
+// the glass tint switch lays the accent into it instead (`octoGlass`).
 
 extension View {
     /// Glass floating over the page, like the bar or a toast: the glass, with

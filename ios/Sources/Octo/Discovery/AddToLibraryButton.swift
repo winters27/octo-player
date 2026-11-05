@@ -51,7 +51,7 @@ private struct AddButton: View {
         let saved = accounts.family.isSaved(id)
         let words = ink ?? palette.color(.textPrimary)
         return Button { accounts.family.toggleSaved(id, title: song.title) } label: {
-            IconView(saved ? .liked : .like, size: iconSize, color: saved ? (ink ?? palette.color(.complement)) : words.opacity(quiet))
+            IconView(saved ? .liked : .like, size: iconSize, color: saved ? (ink ?? palette.color(.highlight)) : words.opacity(quiet))
                 .iconGlow(saved)
                 .frame(width: size, height: size)
                 .contentShape(Rectangle())
