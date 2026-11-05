@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.system
 
+import app.winters.octo.audio.HookReport
 import app.winters.octo.desktop.settings.AppSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -90,6 +91,15 @@ class MemoryLogTest {
     }
 
     @Test
+    fun theNonHeapSumLeavesTheClassSpaceOut() {
+        val pools = ManagementFactory.getMemoryPoolMXBeans().filter { it.type == java.lang.management.MemoryType.NON_HEAP }
+        val classSpace = pools.first { it.name == "Compressed Class Space" }.usage.committed
+        assertTrue(classSpace > 0)
+        val expected = (pools.sumOf { it.usage.committed } - classSpace) / (1024 * 1024)
+        assertTrue("${nonHeapPools().second} vs $expected", kotlin.math.abs(nonHeapPools().second - expected) <= 1)
+    }
+
+    @Test
     fun metaspaceAlreadyHoldsTheClassSpace() {
         // The non-heap sum leaves Compressed Class Space out because the
         // Metaspace pool's committed already holds it: it matches the JVM's
@@ -116,14 +126,37 @@ class MemoryLogTest {
 
     @Test
     fun theBugDetailsNameKnownHooksButNoOtherModule() {
+        val dir = File(temp.root, "logs")
+        val log = MemoryLog(dir)
+        val modules = MemoryLog(dir, name = "modules.log")
+        val report = HookReport(listOf("nvspcap64.dll"), 2u, listOf("secret-a.dll", "secret-b.dll"))
+        logHooks("2026-01-01T10:00:00", report, HookLines(), log, modules)
         val text = bugDetails(
-            "1.2.3", "Direct3D | NVIDIA", 60_000, known, emptyList(),
-            listOf("2026-01-01T10:00:00 hooks known=nvspcap64.dll foreign=2"),
-            hooks = hooksText(listOf("nvspcap64.dll"), 2),
+            "1.2.3", "Direct3D | NVIDIA", 60_000, known, emptyList(), log.lastLines(24),
+            hooks = hooksText(report.hooks, report.foreign.toLong()),
         )
         assertTrue(text.contains("Hooks: known=nvspcap64.dll foreign=2"))
+        assertTrue(text.contains("hooks known=nvspcap64.dll foreign=2"))
         assertTrue(text.contains("other=${known.otherMb()} "))
-        assertFalse(text.contains("a.dll"))
+        assertFalse(text.contains("secret-a.dll"))
+        assertFalse(File(dir, "memory.log").readText().contains("secret"))
+        assertTrue(File(dir, "modules.log").readText().contains("secret-a.dll,secret-b.dll"))
+    }
+
+    @Test
+    fun anUnreadModuleListSaysSoAndWritesNoNames() {
+        val dir = File(temp.root, "logs")
+        val log = MemoryLog(dir)
+        val modules = MemoryLog(dir, name = "modules.log")
+        val lines = HookLines()
+        logHooks("t1", null, lines, log, modules)
+        logHooks("t2", null, lines, log, modules)
+        assertEquals(listOf("t1 hooks ?"), log.lastLines(5))
+        assertFalse(File(dir, "modules.log").exists())
+        val text = bugDetails("1.2.3", null, 0, known.copy(overlays = null), emptyList(), emptyList(), hooks = null)
+        assertTrue(text.contains("Hooks: unknown"))
+        // The last field of the "Memory now" line.
+        assertTrue(text.contains(" overlays=?\n"))
     }
 
     @Test

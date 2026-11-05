@@ -1093,10 +1093,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_octo_audio_checksum_func_graphic_bands() and 0xFFFF) != 40024) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_octo_audio_checksum_func_loaded_hooks() and 0xFFFF) != 64688) {
+    if ((lib.uniffi_octo_audio_checksum_func_loaded_hooks() and 0xFFFF) != 56551) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_octo_audio_checksum_func_overlay_processes() and 0xFFFF) != 57013) {
+    if ((lib.uniffi_octo_audio_checksum_func_overlay_processes() and 0xFFFF) != 56367) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_func_engine_counters() and 0xFFFF) != 53802) {
@@ -6180,6 +6180,38 @@ public object FfiConverterOptionalTypeHeadphoneCorrection: FfiConverterRustBuffe
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeHookReport: FfiConverterRustBuffer<HookReport?> {
+    override fun read(buf: ByteBuffer): HookReport? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeHookReport.read(buf)
+    }
+
+    override fun allocationSize(value: HookReport?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeHookReport.allocationSize(value)
+        }
+    }
+
+    override fun write(value: HookReport?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeHookReport.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeOutputDevice: FfiConverterRustBuffer<OutputDevice?> {
     override fun read(buf: ByteBuffer): OutputDevice? {
         if (buf.get().toInt() == 0) {
@@ -6362,6 +6394,38 @@ public object FfiConverterOptionalTypeTrackInfo: FfiConverterRustBuffer<TrackInf
         } else {
             buf.put(1)
             FfiConverterTypeTrackInfo.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalSequenceTypeOverlayProcess: FfiConverterRustBuffer<List<OverlayProcess>?> {
+    override fun read(buf: ByteBuffer): List<OverlayProcess>? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterSequenceTypeOverlayProcess.read(buf)
+    }
+
+    override fun allocationSize(value: List<OverlayProcess>?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterSequenceTypeOverlayProcess.allocationSize(value)
+        }
+    }
+
+    override fun write(value: List<OverlayProcess>?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterSequenceTypeOverlayProcess.write(value, buf)
         }
     }
 }
@@ -6673,9 +6737,10 @@ public object FfiConverterSequenceTypeTrustedCertificate: FfiConverterRustBuffer
 
         /**
          * The overlay and capture modules loaded now, and how many others came
-         * from outside the system and the app. Empty when the list cannot be read.
-         */ fun `loadedHooks`(): HookReport {
-            return FfiConverterTypeHookReport.lift(
+         * from outside the system and the app. None when the list cannot be read,
+         * so a failed read never looks like no hooks.
+         */ fun `loadedHooks`(): HookReport? {
+            return FfiConverterOptionalTypeHookReport.lift(
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_octo_audio_fn_func_loaded_hooks(
     
@@ -6686,9 +6751,11 @@ public object FfiConverterSequenceTypeTrustedCertificate: FfiConverterRustBuffer
     
 
         /**
-         * The overlay programs running now, each with its processes' memory.
-         */ fun `overlayProcesses`(): List<OverlayProcess> {
-            return FfiConverterSequenceTypeOverlayProcess.lift(
+         * The overlay programs running now, each with its processes' memory. None
+         * when the processes cannot be listed, so a failed read never looks like
+         * none running.
+         */ fun `overlayProcesses`(): List<OverlayProcess>? {
+            return FfiConverterOptionalSequenceTypeOverlayProcess.lift(
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_octo_audio_fn_func_overlay_processes(
     

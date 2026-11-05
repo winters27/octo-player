@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.system
 
+import app.winters.octo.audio.HookReport
 import app.winters.octo.audio.engineCounters
 import app.winters.octo.audio.loadedHooks
 import app.winters.octo.audio.overlayProcesses
@@ -50,6 +51,8 @@ data class MemoryReading(
     val directMb: Long? = null,
     val directCount: Long? = null,
     val mappedMb: Long? = null,
+    // The covers' memory cache: the MB of the covers it keeps, and how many
+    // covers it has a key for (kept, or still held elsewhere).
     val coverMemMb: Long? = null,
     val coverCount: Long? = null,
     val loops: Long? = null,
@@ -123,7 +126,7 @@ fun readMemory(reopens: () -> Long?): MemoryReading {
         hlsStreams = counters?.hlsStreams,
         trackInfos = counters?.trackInfos,
         overlays = runCatching {
-            overlayProcesses().map { OverlayReading(it.key, it.count.toInt(), it.privateBytes?.let { b -> b.toLong() / MB }) }
+            overlayProcesses()?.map { OverlayReading(it.key, it.count.toInt(), it.privateBytes?.let { b -> b.toLong() / MB }) }
         }.getOrNull(),
     )
 }
@@ -170,15 +173,26 @@ fun memoryLine(
 // The hook line and the names line for a module report, when it differs from
 // the last one given: the hook line names only known overlay modules and how
 // many others there are (it goes into bug reports); the names line lists the
-// others' file names and stays in a file on this computer.
+// others' file names and stays in a file on this computer. A report that
+// could not be read (null hooks) gives "hooks ?" and no names line.
 internal class HookLines {
-    private var last: Triple<List<String>, Long, List<String>>? = null
+    private var last: Any? = Unit
 
-    fun next(time: String, hooks: List<String>, foreign: Long, foreignNames: List<String>): Pair<String, String>? {
-        val now = Triple(hooks, foreign, foreignNames)
+    fun next(time: String, hooks: List<String>?, foreign: Long, foreignNames: List<String>): Pair<String, String?>? {
+        val now: Any? = hooks?.let { Triple(it, foreign, foreignNames) }
         if (now == last) return null
         last = now
+        if (hooks == null) return "$time hooks ?" to null
         return "$time hooks ${hooksText(hooks, foreign)}" to "$time ${foreignNames.joinToString(",").ifEmpty { "-" }}"
+    }
+}
+
+// Writes the hooks line to the memory log, and the other modules' names to
+// their own file, when the report changed.
+internal fun logHooks(time: String, report: HookReport?, lines: HookLines, log: MemoryLog, modules: MemoryLog) {
+    lines.next(time, report?.hooks, report?.foreign?.toLong() ?: 0, report?.foreignNames ?: emptyList())?.let { (hooks, names) ->
+        log.append(hooks)
+        names?.let(modules::append)
     }
 }
 
@@ -289,7 +303,7 @@ suspend fun copyBugDetails(app: AppState, window: java.awt.Window?, logs: File) 
                 reading = readMemory { (app.player as? EnginePlayer)?.engine?.deviceReopens() },
                 settings = bugSettings(app.settings.current, app.library?.index?.songs?.size),
                 logLines = MemoryLog(logs).lastLines(24),
-                hooks = runCatching { loadedHooks().let { hooksText(it.hooks, it.foreign.toLong()) } }.getOrNull(),
+                hooks = runCatching { loadedHooks()?.let { hooksText(it.hooks, it.foreign.toLong()) } }.getOrNull(),
             )
         }.getOrNull()
     }
@@ -352,11 +366,7 @@ fun startMemoryLog(
                     // The graphics hooks load with the drawing, so they are
                     // looked for once it is up.
                     if (rendererLogged) {
-                        val report = loadedHooks()
-                        hookLines.next(nowText(), report.hooks, report.foreign.toLong(), report.foreignNames)?.let { (hooks, names) ->
-                            log.append(hooks)
-                            modules.append(names)
-                        }
+                        logHooks(nowText(), runCatching { loadedHooks() }.getOrNull(), hookLines, log, modules)
                     }
                 }
                 delay(10 * 60_000L)

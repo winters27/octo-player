@@ -43,8 +43,13 @@ fn an_open_stream_is_counted_until_its_fetch_ends() {
     let mut buf = vec![0u8; 1000];
     source.read_exact(&mut buf).unwrap();
     assert_eq!(OPEN.load(Ordering::Relaxed), 1);
+    // What a fetch thread holds: the stream's shared state, buffers and all.
+    let held = source.shared.clone();
     drop(source);
-    // The fetch thread lets go once it sees the stream closed.
+    // Still counted while anything holds that state, as a fetch thread
+    // stuck in a read would.
+    assert_eq!(OPEN.load(Ordering::Relaxed), 1);
+    drop(held);
     let until = Instant::now() + Duration::from_secs(10);
     while OPEN.load(Ordering::Relaxed) != 0 {
         assert!(Instant::now() < until, "still counted: {}", OPEN.load(Ordering::Relaxed));

@@ -44,17 +44,21 @@ pub struct OverlayProcess {
 }
 
 /// The overlay and capture modules loaded now, and how many others came
-/// from outside the system and the app. Empty when the list cannot be read.
+/// from outside the system and the app. None when the list cannot be read,
+/// so a failed read never looks like no hooks.
 #[uniffi::export]
-pub fn loaded_hooks() -> HookReport {
-    let Some(own_root) = own_root() else { return HookReport::default() };
-    classify(&module_paths(), &system_dirs(), &own_root)
+pub fn loaded_hooks() -> Option<HookReport> {
+    let exe = std::env::current_exe().ok()?;
+    let own_root = root_of(&exe, cfg!(windows))?;
+    Some(classify(&module_paths()?, &system_dirs(), &own_root))
 }
 
-/// The overlay programs running now, each with its processes' memory.
+/// The overlay programs running now, each with its processes' memory. None
+/// when the processes cannot be listed, so a failed read never looks like
+/// none running.
 #[uniffi::export]
-pub fn overlay_processes() -> Vec<OverlayProcess> {
-    sum_by_key(process_snapshot())
+pub fn overlay_processes() -> Option<Vec<OverlayProcess>> {
+    process_snapshot().map(sum_by_key)
 }
 
 /// The file name of a path with either kind of separator.
@@ -168,21 +172,23 @@ pub(crate) fn sum_by_key(processes: Vec<(&'static str, Option<u64>)>) -> Vec<Ove
     out
 }
 
-// The folder Octo is installed in: on Windows the launcher sits in it, on
-// Linux it sits in its bin folder.
-fn own_root() -> Option<String> {
-    let exe = std::env::current_exe().ok()?;
+/// The folder Octo is installed in, from its launcher: on Windows the
+/// launcher sits in it, on Linux it sits in its bin folder.
+pub(crate) fn root_of(exe: &std::path::Path, windows: bool) -> Option<String> {
     let dir = exe.parent()?;
-    #[cfg(windows)]
-    let root = dir;
-    #[cfg(not(windows))]
-    let root = dir.parent().unwrap_or(dir);
+    let root = if windows { dir } else { dir.parent().unwrap_or(dir) };
     Some(root.to_string_lossy().into_owned())
 }
 
 #[cfg(windows)]
 fn system_dirs() -> Vec<String> {
-    vec![std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string())]
+    use windows::Win32::System::SystemInformation::GetWindowsDirectoryW;
+    let mut buffer = [0u16; 260];
+    let len = unsafe { GetWindowsDirectoryW(Some(&mut buffer)) } as usize;
+    if len == 0 || len > buffer.len() {
+        return vec![std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string())];
+    }
+    vec![String::from_utf16_lossy(&buffer[..len])]
 }
 
 #[cfg(not(windows))]
@@ -194,7 +200,7 @@ fn system_dirs() -> Vec<String> {
 // is taken (a module loading), which the snapshot reports as a bad length;
 // it is taken again, a few times at most.
 #[cfg(windows)]
-fn module_paths() -> Vec<String> {
+fn module_paths() -> Option<Vec<String>> {
     use windows::Win32::Foundation::{CloseHandle, ERROR_BAD_LENGTH};
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, MODULEENTRY32W, Module32FirstW, Module32NextW, TH32CS_SNAPMODULE,
@@ -204,7 +210,7 @@ fn module_paths() -> Vec<String> {
         let snapshot = match unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0) } {
             Ok(handle) => handle,
             Err(e) if e.code() == ERROR_BAD_LENGTH.to_hresult() => continue,
-            Err(_) => return Vec::new(),
+            Err(_) => return None,
         };
         let mut paths = Vec::new();
         let mut entry =
@@ -216,19 +222,20 @@ fn module_paths() -> Vec<String> {
             more = unsafe { Module32NextW(snapshot, &mut entry) }.is_ok();
         }
         let _ = unsafe { CloseHandle(snapshot) };
-        return paths;
+        return Some(paths);
     }
-    Vec::new()
+    None
 }
 
+// Read as bytes: a path that is not UTF-8 must not lose the whole list.
 #[cfg(target_os = "linux")]
-fn module_paths() -> Vec<String> {
-    std::fs::read_to_string("/proc/self/maps").map(|text| maps_paths(&text)).unwrap_or_default()
+fn module_paths() -> Option<Vec<String>> {
+    std::fs::read("/proc/self/maps").ok().map(|bytes| maps_paths(&String::from_utf8_lossy(&bytes)))
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-fn module_paths() -> Vec<String> {
-    Vec::new()
+fn module_paths() -> Option<Vec<String>> {
+    None
 }
 
 // Overlay programs by process file name.
@@ -241,7 +248,7 @@ const OVERLAY_EXES: &[(&str, &str)] = &[
 ];
 
 #[cfg(windows)]
-fn process_snapshot() -> Vec<(&'static str, Option<u64>)> {
+fn process_snapshot() -> Option<Vec<(&'static str, Option<u64>)>> {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
@@ -250,7 +257,7 @@ fn process_snapshot() -> Vec<(&'static str, Option<u64>)> {
     use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 
     let mut out = Vec::new();
-    let Ok(snapshot) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }) else { return out };
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }.ok()?;
     let mut entry =
         PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
     let mut more = unsafe { Process32FirstW(snapshot, &mut entry) }.is_ok();
@@ -276,14 +283,14 @@ fn process_snapshot() -> Vec<(&'static str, Option<u64>)> {
         more = unsafe { Process32NextW(snapshot, &mut entry) }.is_ok();
     }
     let _ = unsafe { CloseHandle(snapshot) };
-    out
+    Some(out)
 }
 
 // Steam's overlay is the one overlay program with its own process on Linux.
 #[cfg(target_os = "linux")]
-fn process_snapshot() -> Vec<(&'static str, Option<u64>)> {
+fn process_snapshot() -> Option<Vec<(&'static str, Option<u64>)>> {
     let mut out = Vec::new();
-    let Ok(dir) = std::fs::read_dir("/proc") else { return out };
+    let dir = std::fs::read_dir("/proc").ok()?;
     for entry in dir.flatten() {
         let path = entry.path();
         let is_pid =
@@ -306,12 +313,12 @@ fn process_snapshot() -> Vec<(&'static str, Option<u64>)> {
         });
         out.push(("steam-overlay", bytes));
     }
-    out
+    Some(out)
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-fn process_snapshot() -> Vec<(&'static str, Option<u64>)> {
-    Vec::new()
+fn process_snapshot() -> Option<Vec<(&'static str, Option<u64>)>> {
+    None
 }
 
 #[cfg(test)]
@@ -370,6 +377,17 @@ mod tests {
         );
         assert_eq!(report.hooks, vec!["gameoverlayrenderer.so", "libmangohud.so"]);
         assert_eq!(report.foreign_names, vec!["libhelper.so.1"]);
+    }
+
+    #[test]
+    fn the_install_folder_is_the_launchers_on_windows_and_above_bin_on_linux() {
+        // A backslash path only splits into folders on Windows.
+        #[cfg(windows)]
+        assert_eq!(
+            root_of(std::path::Path::new(r"C:\Users\Sam\AppData\Local\OctoPlayer\Octo.exe"), true).unwrap(),
+            r"C:\Users\Sam\AppData\Local\OctoPlayer"
+        );
+        assert_eq!(root_of(std::path::Path::new("/opt/octo/bin/Octo"), false).unwrap(), "/opt/octo");
     }
 
     fn system_dirs_linux() -> Vec<String> {
@@ -440,9 +458,10 @@ mod tests {
     #[cfg(any(windows, target_os = "linux"))]
     #[test]
     fn this_process_lists_no_system_module_as_foreign() {
-        let report = loaded_hooks();
+        let report = loaded_hooks().expect("the module list reads");
+        assert!(overlay_processes().is_some());
         let system = system_dirs();
-        let all = module_paths();
+        let all = module_paths().unwrap();
         assert!(!all.is_empty());
         for name in &report.foreign_names {
             let from_system = all.iter().any(|p| {

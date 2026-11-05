@@ -185,21 +185,30 @@ suspend fun soakRun(app: AppState, plan: File) {
 // Checks that the memory log's parts move as they should, with the song
 // paused: memory the app takes outside every named part shows in `other`
 // alone, and the graphics memory of the full player does not. Writes a
-// "calib" line with the memory fields once each step has settled.
+// "calib" line with the memory fields once each step has settled (or
+// settled=no after 5 minutes), then "calib done".
 private suspend fun calibrate(app: AppState, note: (String) -> Unit) {
+    fun art(choice: String) = app.settings.update { it.copy(appearance = it.appearance.copy(animatedArt = choice)) }
     app.player.pause()
+    art("off")
     app.fullPlayer = false
-    // Read until two readings 30 s apart are within 8 MB, at most 5 minutes.
-    suspend fun settled(step: String) {
+    // Read until two readings 30 s apart have `watched` within 8 MB, at most 5 minutes.
+    suspend fun settled(step: String, watched: (MemoryReading) -> Long? = { it.privateMb }) {
         var last = withContext(Dispatchers.IO) { readMemory { null } }
+        var steady = false
         for (attempt in 1..10) {
             delay(30_000)
             val now = withContext(Dispatchers.IO) { readMemory { null } }
-            val before = last.privateMb
+            val before = watched(last)
+            val after = watched(now)
             last = now
-            if (before != null && now.privateMb != null && kotlin.math.abs(now.privateMb - before) <= 8) break
+            if (before != null && after != null && kotlin.math.abs(after - before) <= 8) {
+                steady = true
+                break
+            }
         }
-        note("calib $step private=" + memoryLine("", 0, last, "", false, 0, null).substringAfter("private=").substringBefore(" window="))
+        val fields = memoryLine("", 0, last, "", false, 0, null).substringAfter("private=").substringBefore(" window=")
+        note("calib $step settled=${if (steady) "yes" else "no"} private=$fields")
     }
     settled("start")
     val block = com.sun.jna.Memory(256L * 1024 * 1024)
@@ -214,8 +223,9 @@ private suspend fun calibrate(app: AppState, note: (String) -> Unit) {
         block.close()
     }
     settled("native-freed")
+    art("full_screen")
     app.fullPlayer = true
-    settled("full-player")
+    settled("full-player") { it.gpuCommittedMb }
     note("calib done")
 }
 
