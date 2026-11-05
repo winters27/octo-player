@@ -200,6 +200,37 @@ class SoundControllerTest {
     }
 
     @Test
+    fun anOutputChangeMidDragIsHeardWithTheNewOutputsOwnSound() {
+        val target = FakeTarget()
+        val settings = SettingsStore(file())
+        val controller = SoundController(target, settings, scope)
+        controller.setPerOutput(true)
+        controller.preview { it.copy(balance = -0.5f) }
+        assertEquals(-0.5f, target.dsp?.balance)
+        target.deviceKey.value = "usb"
+        assertEquals("the new output plays its own balance", 0f, target.dsp?.balance)
+        assertEquals(0f, controller.current.value.balance)
+    }
+
+    @Test
+    fun aDragLetGoAfterAnOutputChangeIsKeptByTheOutputItStartedOn() {
+        val target = FakeTarget()
+        val settings = SettingsStore(file())
+        val controller = SoundController(target, settings, scope)
+        controller.setPerOutput(true)
+        controller.preview { it.copy(balance = -0.5f) }
+        target.deviceKey.value = "usb"
+        controller.preview { it.copy(balance = -0.7f) }
+        controller.settle()
+        val saved = SettingsStore(file()).current.sound
+        assertEquals(-0.7f, saved.profiles["spk"]?.balance)
+        assertEquals("the new output is untouched", 0f, soundFor(saved, "usb").balance)
+        assertEquals(0f, target.dsp?.balance)
+        target.deviceKey.value = "spk"
+        assertEquals(-0.7f, target.dsp?.balance)
+    }
+
+    @Test
     fun crossfadeAndSpeedComeFromPlayback() {
         val target = FakeTarget()
         val settings = SettingsStore(file())
