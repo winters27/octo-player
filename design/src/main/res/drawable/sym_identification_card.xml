@@ -1,0 +1,10 @@
+<!-- Phosphor Icons 2.1.1, identification-card (regular), MIT. Made by tools/icons/make_icons.py. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="256"
+    android:viewportHeight="256">
+  <path
+      android:fillColor="@android:color/white"
+      android:pathData="M200,112A8,8,0,0,1,192,120H152A8,8,0,0,1,152,104H192A8,8,0,0,1,200,112ZM192,136H152A8,8,0,0,0,152,152H192A8,8,0,0,0,192,136ZM232,56V200A16,16,0,0,1,216,216H40A16,16,0,0,1,24,200V56A16,16,0,0,1,40,40H216A16,16,0,0,1,232,56ZM216,200V56H40V200H216ZM135.74,166A8,8,0,1,1,120.24,170C117.61,159.74,107.18,152,95.99,152S74.38,159.74,71.74,170A8,8,0,1,1,56.24,166A39.84,39.84,0,0,1,73.43,142.66A32,32,0,1,1,118.55,142.66A39.76,39.76,0,0,1,135.75,166ZM96,136A16,16,0,1,0,80,120A16,16,0,0,0,96,136Z"/>
+</vector>

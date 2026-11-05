@@ -97,6 +97,19 @@ object OctoIcons {
     // Signing out of a server: an arrow leaving a box.
     val SignOut by sym("sym_sign_out")
 
+    // Settings' own cards and sections: songs kept on this computer, keeping
+    // a server well, crossfeed between the ears, the mini and full player,
+    // a family plan, requests waiting, motion and startup.
+    val HardDrive by sym("sym_hard_drive")
+    val Wrench by sym("sym_wrench")
+    val LeftRight by sym("sym_arrows_left_right")
+    val PictureInPicture by sym("sym_picture_in_picture")
+    val Enlarge by sym("sym_arrows_out_simple")
+    val Plan by sym("sym_identification_card")
+    val Hourglass by sym("sym_hourglass")
+    val Wave by sym("sym_wave_sine")
+    val Power by sym("sym_power")
+
     // Back and forward through the pages, and opening the full player: the
     // chevron turned.
     val Back by lazy { loadIcon("sym_chevron_right").toImageVector(mirrored = true) }
@@ -144,5 +157,7 @@ val allIcons: List<Pair<String, () -> ImageVector>> = listOf(
     "Expand" to { OctoIcons.Expand }, "Collapse" to { OctoIcons.Collapse }, "Home" to { OctoIcons.Home },
     "Settings" to { OctoIcons.Settings }, "Reveal" to { OctoIcons.Reveal }, "Conceal" to { OctoIcons.Conceal },
     "Minimize" to { OctoIcons.Minimize }, "Maximize" to { OctoIcons.Maximize }, "Restore" to { OctoIcons.Restore },
-    "SignOut" to { OctoIcons.SignOut },
+    "SignOut" to { OctoIcons.SignOut }, "HardDrive" to { OctoIcons.HardDrive }, "Wrench" to { OctoIcons.Wrench },
+    "LeftRight" to { OctoIcons.LeftRight }, "PictureInPicture" to { OctoIcons.PictureInPicture }, "Enlarge" to { OctoIcons.Enlarge },
+    "Plan" to { OctoIcons.Plan }, "Hourglass" to { OctoIcons.Hourglass }, "Wave" to { OctoIcons.Wave }, "Power" to { OctoIcons.Power },
 )

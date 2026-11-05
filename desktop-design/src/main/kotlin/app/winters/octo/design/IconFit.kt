@@ -238,8 +238,9 @@ fun fitOutlines(outlines: List<Outline>, viewport: Float, px: Int, stroke: Float
     val ey = HashMap<Double, DoubleArray>()
     val g = orientation(onGrid)
     for (outline in onGrid) {
+        val sides = inkSides(outline, g)
         for ((target, axis) in listOf(ex to 0, ey to 1)) {
-            edges(outline.steps, axis, g).forEach { (k, ws) ->
+            edges(outline.steps, axis, sides).forEach { (k, ws) ->
                 val sum = target.getOrPut(k) { DoubleArray(2) }
                 sum[0] += ws[0]
                 sum[1] += ws[1]
@@ -265,21 +266,25 @@ private fun hundredth(v: Double): Double = BigDecimal(v).setScale(2, RoundingMod
 // straight along the other axis, or turns there (a curve's flat side). Each
 // holds its weight (how much it matters: a straight edge its length, a flat
 // side 4) and its side, above zero when the ink lies after the edge along
-// the axis (a line's first edge) and below when before. `g` is the
-// outline's winding, from orientation.
-internal fun edges(steps: List<OutlineStep>, axis: Int, g: Int): Map<Double, DoubleArray> {
+// the axis (a line's first edge) and below when before. `sides` holds, for
+// each shape of the outline in order, which side of its way round the ink
+// is on, from inkSides.
+internal fun edges(steps: List<OutlineStep>, axis: Int, sides: IntArray): Map<Double, DoubleArray> {
     val other = 1 - axis
     val found = LinkedHashMap<Double, DoubleArray>()
     var prev: DoubleArray? = null
+    var shape = -1
     fun add(at: Double, weight: Double, travel: Double) {
         val key = hundredth(at)
         val ws = found.getOrPut(key) { DoubleArray(2) }
+        val g = sides.getOrElse(shape.coerceAtLeast(0)) { sides.lastOrNull() ?: 1 }
         val start = if (axis == 0) travel * g < 0 else travel * g > 0
         ws[0] += weight
         ws[1] += if (start) weight else -weight
     }
     for (step in steps) {
         val v = step.values
+        if (step.kind == OutlineStep.Kind.Move) shape++
         when (step.kind) {
             OutlineStep.Kind.Move, OutlineStep.Kind.Line -> {
                 val p = doubleArrayOf(v[0], v[1])
@@ -323,6 +328,63 @@ internal fun orientation(outlines: List<Outline>): Int {
     }
     return sign
 }
+
+// For each shape of the outline (each move starts one), which side of its
+// way round the ink lies on: 1 when the ink is on the side a quarter turn
+// from its way (down from a step to the right), -1 when on the other. Read
+// by trying a point just off the shape's first step against the whole
+// outline's fill, so a shape wound against the rest (a bar drawn inside a
+// hole, as the keyboard's rows of keys are) still has its ink on the right
+// side. A shape whose sides cannot be told apart keeps the icon's `g`.
+internal fun inkSides(outline: Outline, g: Int): IntArray {
+    val shapes = polygons(outline.steps)
+    val moves = outline.steps.count { it.kind == OutlineStep.Kind.Move }
+    return IntArray(moves) { index ->
+        val poly = shapes.getOrNull(index) ?: return@IntArray g
+        val from = poly.indices.firstOrNull { i ->
+            val p = poly[i]
+            val q = poly[(i + 1) % poly.size]
+            abs(q[0] - p[0]) + abs(q[1] - p[1]) > 0.5
+        } ?: return@IntArray g
+        val p = poly[from]
+        val q = poly[(from + 1) % poly.size]
+        val length = sqrt((q[0] - p[0]) * (q[0] - p[0]) + (q[1] - p[1]) * (q[1] - p[1]))
+        val nx = -(q[1] - p[1]) / length * SIDE_PROBE
+        val ny = (q[0] - p[0]) / length * SIDE_PROBE
+        val mx = (p[0] + q[0]) / 2
+        val my = (p[1] + q[1]) / 2
+        val turned = inked(shapes, outline.evenOdd, mx + nx, my + ny)
+        val back = inked(shapes, outline.evenOdd, mx - nx, my - ny)
+        when {
+            turned && !back -> 1
+            back && !turned -> -1
+            else -> g
+        }
+    }
+}
+
+// How far off a shape's step the fill is tried, in the 256 square.
+private const val SIDE_PROBE = 0.5
+
+// Whether a point is inside the outline's fill: its shapes' winding round
+// it, by the fill's rule.
+private fun inked(shapes: List<List<DoubleArray>>, evenOdd: Boolean, x: Double, y: Double): Boolean {
+    var winding = 0
+    for (poly in shapes) {
+        for (i in poly.indices) {
+            val p = poly[i]
+            val q = poly[(i + 1) % poly.size]
+            if (p[1] <= y) {
+                if (q[1] > y && cross(p, q, x, y) > 0) winding++
+            } else if (q[1] <= y && cross(p, q, x, y) < 0) {
+                winding--
+            }
+        }
+    }
+    return if (evenOdd) winding % 2 != 0 else winding != 0
+}
+
+private fun cross(p: DoubleArray, q: DoubleArray, x: Double, y: Double): Double = (q[0] - p[0]) * (y - p[1]) - (x - p[0]) * (q[1] - p[1])
 
 // The outline's shapes as points, each curve cut into 16 straight steps.
 internal fun polygons(steps: List<OutlineStep>): List<List<DoubleArray>> {
@@ -451,14 +513,22 @@ internal fun snaps(found: Map<Double, DoubleArray>, unit: Double, stroke: Double
             out[u.edges[0]] = u.at
         }
     }
-    // The order kept: edges that were apart stay at least a pixel apart.
+    // The order kept: edges that were apart stay at least a pixel apart, and
+    // so does a gap between two lines (one's end, then the next one's start)
+    // at least half a pixel wide as written, so no line closes up.
     val fixed = ArrayList<Pair<Double, Double>>()
     for ((a, placed) in out.entries.sortedBy { it.key }) {
         var s = placed
         val last = fixed.lastOrNull()
         if (last != null) {
             val (pa, ps) = last
-            if (s < ps || (s == ps && a - pa > unit / 2)) s = ps + (if (a - pa > unit / 2) unit else a - pa)
+            val gap = found.getValue(pa)[1] < 0 && found.getValue(a)[1] > 0 && a - pa >= unit / 2
+            val apart = a - pa > unit / 2
+            // Places are whole pixels, so one under half a pixel past the
+            // last is the same pixel, whatever rounding left between them.
+            if (apart && s < ps + unit / 2) s = ps + unit
+            if (!apart && s < ps) s = ps + (a - pa)
+            if (gap && s < ps + unit / 2) s = ps + unit
         }
         fixed += a to s
     }

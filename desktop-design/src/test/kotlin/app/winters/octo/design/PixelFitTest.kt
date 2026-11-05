@@ -83,6 +83,70 @@ class PixelFitTest {
         }
     }
 
+    // No line closes up: where two straight edges face each other at least
+    // half a pixel apart as written, across a gap (one line's end, then the
+    // next one's start) or across a line (its start, then its end), over
+    // the same stretch, the drawn icon keeps them at least a whole pixel
+    // apart. The keyboard, whose rows of keys are drawn inside a hole and
+    // wound the other way, is fitted at the list's and the cards' sizes.
+    @Test
+    fun noLineClosesUp() {
+        val closed = mutableListOf<String>()
+        for (px in sizes) {
+            for (icon in listed) {
+                val outlines = pixelOutlines(icon, px)
+                val fitted = outlines.fitted ?: continue
+                val unit = icon.viewportWidth.toDouble() / px
+                val g = orientation(outlines.plain)
+                for (axis in 0..1) {
+                    val found = outlines.plain.zip(fitted).flatMap { (plain, fit) -> straightEdges(plain.steps, fit.steps, axis, inkSides(plain, g)) }
+                    for (first in found) {
+                        val next = found.filter { it.start != first.start && it.at > first.at && it.overlaps(first, unit) }.minByOrNull { it.at } ?: continue
+                        if (found.any { it !== first && it.start == first.start && it.at > first.at && it.at < next.at && it.overlaps(first, unit) }) continue
+                        if (next.at - first.at >= unit / 2 && next.drawnAt - first.drawnAt < unit - 1e-6) {
+                            val what = if (first.start) "line" else "gap"
+                            closed += "${icon.name} at $px px: $what ${"xy"[axis]} %.1f to %.1f drawn %.2f px".format(first.at, next.at, (next.drawnAt - first.drawnAt) / unit)
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue("lines close up:\n" + closed.distinct().joinToString("\n"), closed.isEmpty())
+        val keyboard = listed.first { it.name == "sym_keyboard" }
+        for (px in listOf(16, 18)) assertNotNull("the keyboard is fitted at $px px", pixelOutlines(keyboard, px).fitted)
+    }
+
+    // A straight edge along one axis: where it is as written and as drawn,
+    // whether the ink lies after it, and what stretch of the other axis it
+    // covers.
+    private class StraightEdge(val at: Double, val drawnAt: Double, val start: Boolean, val from: Double, val to: Double) {
+        fun overlaps(other: StraightEdge, unit: Double): Boolean = minOf(to, other.to) - maxOf(from, other.from) >= unit
+    }
+
+    private fun straightEdges(plain: List<OutlineStep>, fitted: List<OutlineStep>, axis: Int, sides: IntArray): List<StraightEdge> {
+        val other = 1 - axis
+        val out = mutableListOf<StraightEdge>()
+        var prev: DoubleArray? = null
+        var shape = -1
+        for ((step, fit) in plain.zip(fitted)) {
+            if (step.kind == OutlineStep.Kind.Move) shape++
+            val g = sides.getOrElse(shape.coerceAtLeast(0)) { 1 }
+            if (step.kind != OutlineStep.Kind.Move && step.kind != OutlineStep.Kind.Line) {
+                if (step.kind == OutlineStep.Kind.Cubic) prev = step.values.copyOfRange(4, 6)
+                continue
+            }
+            val p = step.values
+            val q = prev
+            if (q != null && step.kind == OutlineStep.Kind.Line && abs(p[axis] - q[axis]) < 0.05 && abs(p[other] - q[other]) > 0.5) {
+                val travel = p[other] - q[other]
+                val start = if (axis == 0) travel * g < 0 else travel * g > 0
+                out += StraightEdge(p[axis], fit.values[axis], start, minOf(p[other], q[other]), maxOf(p[other], q[other]))
+            }
+            prev = p
+        }
+        return out
+    }
+
     // A fit that lands a pixel off moves the ink's middle a whole pixel:
     // the guard draws the icon as written instead.
     @Test
