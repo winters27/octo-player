@@ -63,7 +63,7 @@ data class IconSource(
             )
         }
         builder.clearGroup()
-        return builder.build().also { IconRecipes.record(it,IconRecipe(this, rotation, mirrored, shiftY)) }
+        return builder.build().also { IconRecipes.record(it, IconRecipe(this, rotation, mirrored, shiftY)) }
     }
 }
 

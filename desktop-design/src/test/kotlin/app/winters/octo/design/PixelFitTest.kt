@@ -100,7 +100,13 @@ class PixelFitTest {
     // asked for.
     @Test
     fun twoTimesLeavesEveryIconAsWritten() {
-        runBlocking { IconFits.shared.warm(2f).join() }
+        runBlocking {
+            IconFits.shared.warm(2f).join()
+            // Fits for these pixel sizes at hand, so a draw at 2x would find
+            // them if it looked.
+            allIcons.forEach { (_, icon) -> icon() }
+            IconRecipes.fittable().forEach { (vector, recipe) -> iconSizePxs(2f).forEach { px -> IconFits.shared.ask(vector, recipe, px)?.join() } }
+        }
         val crisp = drawAll(2f) { icon, size -> Glyph(icon, size = size) }
         val exact = drawAll(2f) { icon, size -> Image(exactPainter(icon), null, Modifier.size(size), colorFilter = ColorFilter.tint(Color.White)) }
         assertTrue(crisp.contentEquals(exact))
@@ -114,7 +120,10 @@ class PixelFitTest {
     // Once the window's icons are worked out, drawing them works out none.
     @Test
     fun drawingAfterTheWarmUpRastersNothing() {
-        runBlocking { IconFits.shared.warm(1f).join() }
+        runBlocking {
+            IconFits.shared.forget().join()
+            IconFits.shared.warm(1f).join()
+        }
         IconSize.Fitted.forEach { size ->
             allIcons.forEach { (name, icon) ->
                 val vector = icon()

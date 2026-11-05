@@ -171,6 +171,12 @@ class IconFits(private val cap: Int = 4096, private val decide: (IconRecipe, Int
         while (order.size > cap) fits.remove(order.removeFirst())
     }
 
+    // Drops every fit, on the worker, so a test can start from none.
+    internal fun forget(): Job = scope.launch {
+        fits.clear()
+        order.clear()
+    }
+
     // Works out every fittable icon at every icon size for this screen
     // scale. The job ends when they are all known.
     fun warm(density: Float): Job = scope.launch {
