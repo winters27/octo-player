@@ -1,25 +1,28 @@
 import OctoKit
 import SwiftUI
 
-/// Appearance's accent picker: a circle for each accent and one for the playing cover's, the one
-/// in use carrying a dark check and a white ring, and a line naming it and saying what it colors.
+/// Appearance's accent picker: a circle for each accent, in the form the theme showing draws it,
+/// and one for the playing cover's. The first is the theme's own color, labeled Theme. The one in
+/// use carries a check and a ring, and a line names it and says what it colors in this theme.
 struct AccentPickerRow: View {
     @State private var settings = AppSettings.shared
+    @State private var theme = ThemeState.shared
 
     var body: some View {
         let chosen = settings.player.accent
+        let showing = theme.active
         RowFrame(entry: SettingsIndex.accentColor) {
             VStack(alignment: .leading, spacing: 0) {
                 Text(SettingsIndex.accentColor.title).font(.octoBody).foregroundStyle(OctoColor.textPrimary)
                 FlowRow(spacing: 2) {
                     ForEach(AccentChoice.allCases, id: \.self) { choice in
-                        AccentSwatch(choice: choice, selected: choice == chosen) { settings.setAccent(choice) }
+                        AccentSwatch(choice: choice, theme: showing, selected: choice == chosen) { settings.setAccent(choice) }
                     }
                 }
                 .padding(.top, 8)
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(SettingsIndex.accentColor.title)
-                Text("\(chosen.label): \(chosen.help)")
+                Text("\(chosen.label): \(accentHelp(chosen, showing))")
                     .font(.octoCaption)
                     .foregroundStyle(OctoColor.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -31,26 +34,27 @@ struct AccentPickerRow: View {
     }
 }
 
-/// One accent to pick, a 44 point target round a colored circle. From the album art is drawn as
-/// every other accent round its circle.
+/// One accent to pick, a 44 point target round a colored circle in the theme's form of it. From
+/// the album art is drawn as every other accent round its circle.
 private struct AccentSwatch: View {
     let choice: AccentChoice
+    let theme: ThemeChoice
     let selected: Bool
     let pick: () -> Void
 
-    private static let spectrum: [Color] = AccentChoice.fixed.dropFirst().map { Color(RGBA(argb: $0.argb!)) }
+    @Environment(\.octoPalette) private var palette
 
     var body: some View {
         Button(action: pick) {
             ZStack {
                 if selected {
-                    Circle().strokeBorder(Color.white, lineWidth: 2).frame(width: 40, height: 40)
+                    Circle().strokeBorder(palette.color(.textPrimary), lineWidth: 2).frame(width: 40, height: 40)
                 }
                 fill.frame(width: 30, height: 30)
                 if selected {
                     Image(systemName: "checkmark")
                         .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Color(hex: 0x0C0C0D))
+                        .foregroundStyle(Color(argb: palette.accents.onAccent))
                 }
             }
             .frame(width: 44, height: 44)
@@ -63,16 +67,18 @@ private struct AccentSwatch: View {
 
     @ViewBuilder
     private var fill: some View {
-        if let argb = choice.argb {
-            Circle().fill(Color(RGBA(argb: argb)))
+        if choice.argb != nil {
+            Circle().fill(Color(argb: themedAccent(theme, choice, nil)))
         } else {
-            Circle().fill(AngularGradient(colors: Self.spectrum + [Self.spectrum[0]], center: .center))
+            let spectrum = AccentChoice.fixed.dropFirst().map { Color(argb: themedAccent(theme, $0, nil)) }
+            Circle().fill(AngularGradient(colors: spectrum + [spectrum[0]], center: .center))
         }
     }
 }
 
-/// Whether Octo's glass takes the accent too, under the picker. Off, the glass stays Apple's own;
-/// with Octo's own accent there is nothing to tint it with, and the row says so.
+/// Whether Octo's glass takes the accent too, under the picker. Off, the glass stays Apple's own
+/// untinted glass; on, it takes the accent in the theme's form. With the theme's own accent there
+/// is nothing to tint it with, and the row says so.
 struct GlassTintRow: View {
     @State private var settings = AppSettings.shared
 

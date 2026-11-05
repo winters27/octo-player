@@ -19,7 +19,7 @@ public enum AccentChoice: String, StoredChoice, Codable {
 
     public var label: String {
         switch self {
-        case .octo: "Octo"
+        case .octo: "Theme"
         case .sky: "Sky"
         case .iris: "Iris"
         case .lilac: "Lilac"
@@ -48,14 +48,8 @@ public enum AccentChoice: String, StoredChoice, Codable {
         }
     }
 
-    /// One line under the picker saying what the choice does.
-    public var help: String {
-        switch self {
-        case .fromArt: "Follows the playing song's cover. Octo's own color while nothing plays or the cover is gray."
-        case .octo: "Octo's own blue gray for selections, sliders, switches and buttons."
-        default: "Selections, sliders, switches and buttons in \(label.lowercased())."
-        }
-    }
+    /// One line under the picker saying what the choice does in Octo's own theme.
+    public var help: String { accentHelp(self, .octo) }
 
     /// The fixed accents, in the order the picker shows them.
     public static let fixed: [AccentChoice] = allCases.filter { $0.argb != nil }
@@ -75,25 +69,42 @@ public let accentContrast = 4.5
 /// Below this chroma a cover is gray enough to keep Octo's own accent.
 private let minArtChroma = 0.04
 
-/// Whether an accent reads on the page and on the raised surface, each at AA.
-public func accentReads(_ argb: UInt32) -> Bool {
-    contrastRatio(argb, accentPageArgb) >= accentContrast && contrastRatio(argb, accentSurfaceArgb) >= accentContrast
+/// One line under the picker saying what the choice does in `theme`.
+public func accentHelp(_ choice: AccentChoice, _ theme: ThemeChoice) -> String {
+    switch choice {
+    case .fromArt: "Follows the playing song's cover. \(theme.label)'s own color while nothing plays or the cover is gray."
+    case .octo: "\(theme.label)'s own color for selections, sliders, switches and buttons."
+    default: "Selections, sliders, switches and buttons in \(choice.label.lowercased())."
+    }
 }
 
-/// A cover's color made into an accent: the same hue, at the fixed accents' lightness and a
-/// chroma held between theirs, lightened further while the page would still not read it at AA.
-/// Nil for a cover with hardly any color, which keeps Octo's own.
-public func accentFromArt(_ argb: UInt32) -> UInt32? {
+/// Whether an accent reads on Octo's page and raised surface, each at AA.
+public func accentReads(_ argb: UInt32) -> Bool { accentReads(argb, .octo) }
+
+/// Whether an accent reads at AA on `theme`'s page and card.
+public func accentReads(_ argb: UInt32, _ theme: ThemeChoice) -> Bool {
+    contrastRatio(argb, theme.base.page) >= accentContrast && contrastRatio(argb, theme.base.card) >= accentContrast
+}
+
+/// A cover's color made into an accent for Octo's own theme.
+public func accentFromArt(_ argb: UInt32) -> UInt32? { accentFromArt(argb, .octo) }
+
+/// A cover's color made into an accent for `theme`: the same hue at the fixed accents' lightness,
+/// chroma held between theirs, lightened until it reads on a dark theme's page and card; on a
+/// light theme, that color's form for light surfaces. Nil for a cover with hardly any color,
+/// which keeps the theme's own.
+public func accentFromArt(_ argb: UInt32, _ theme: ThemeChoice) -> UInt32? {
     let lch = toLch(argb)
     if lch.c < minArtChroma { return nil }
     let chroma = min(max(lch.c, 0.07), 0.12)
-    var lightness = 0.76
-    var accent = lchToArgb(lightness, chroma, lch.h)
-    while !accentReads(accent) && lightness < 0.95 {
-        lightness += 0.02
-        accent = lchToArgb(lightness, chroma, lch.h)
+    let darkTheme: ThemeChoice = theme.light ? .octo : theme
+    var accent = lchToArgb(0.76, chroma, lch.h)
+    var k = 0
+    while !accentReads(accent, darkTheme) && k < 10 {
+        k += 1
+        accent = lchToArgb(0.76 + Double(k) * 0.02, chroma, lch.h)
     }
-    return accent
+    return theme.light ? onLightForm(accent, theme.base) : accent
 }
 
 /// The accent to draw now: a fixed one as it is, the cover's for From the album art (`art` is
@@ -106,7 +117,7 @@ public func accentArgb(_ choice: AccentChoice, art: UInt32?) -> UInt32 {
 /// nothing to change.
 public enum GlassTintWords {
     public static let help = "The bar, glass buttons and toasts take the accent too. Off, the glass stays Apple's own, untinted."
-    public static let same = "Octo's own accent is already the glass's color. Pick another accent to tint the glass with it."
+    public static let same = "The theme's own accent is already the glass's color. Pick another accent to tint the glass with it."
 
     /// The line under the switch for the accent chosen.
     public static func helper(_ choice: AccentChoice) -> String { choice == .octo ? same : help }

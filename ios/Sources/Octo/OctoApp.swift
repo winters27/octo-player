@@ -110,7 +110,6 @@ struct OctoApp: App {
                 .environment(accounts)
                 .task { accounts.start() }
                 .motionScaled(motion)
-                .preferredColorScheme(.dark)
                 #if DEBUG
                 .task { PlaybackDrive.install(player: player, router: router, overlays: overlays)
                         SystemDrive.install(router: router)
@@ -125,11 +124,12 @@ struct OctoApp: App {
     }
 }
 
-/// Octo opens on its library whether or not a server is signed in; a server is an add-on.
+/// Octo opens on its library whether or not a server is signed in; a server is an add-on. It is
+/// drawn in the theme `ThemeState` resolves.
 struct RootView: View {
     var body: some View {
         MainShell()
             .systemEntries()
-            .keepsAccent()
+            .keepsTheme()
     }
 }

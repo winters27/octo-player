@@ -19,8 +19,6 @@
         <key>UIImageRespectsSafeAreaInsets</key>
         <false/>
     </dict>
-    <key>UIUserInterfaceStyle</key>
-    <string>Dark</string>
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>

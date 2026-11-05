@@ -584,8 +584,26 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
     public var glassTint = false
     /// How an album's animated art shows.
     public var animatedArt: AnimatedArtSetting = .standard
+    /// The theme shown while Match the system is off.
+    public var theme: ThemeChoice = .octo
+    /// The light and dark themes Match the system uses.
+    public var themeLight: ThemeChoice = .daylight
+    public var themeDark: ThemeChoice = .octo
+    /// Whether the theme follows the phone's light or dark mode.
+    public var themeMatch = false
 
     public init() {}
+
+    /// The four theme fields together.
+    public var themes: ThemeSettings {
+        get { ThemeSettings(theme: theme, light: themeLight, dark: themeDark, match: themeMatch) }
+        set {
+            theme = newValue.theme
+            themeLight = newValue.light
+            themeDark = newValue.dark
+            themeMatch = newValue.match
+        }
+    }
 
     /// The longest blend the player uses, or 0 for none.
     public var crossfadeMs: Int { crossfade ? crossfadeSeconds * 1_000 : 0 }
@@ -609,6 +627,7 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
         held.crossfadeSeconds = crossfadeSeconds.clamped(to: Self.crossfadeSecondsRange)
         held.speed = Pace.snapSpeed(speed)
         held.pitchSemitones = pitchSemitones.clamped(to: -Pace.pitchRangeSemitones...Pace.pitchRangeSemitones)
+        held.themes = themeSettings(theme.storedName, themeLight.storedName, themeDark.storedName, themeMatch)
         return held
     }
 
@@ -616,7 +635,7 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
         case liveBackground, background, crossfade, crossfadeSeconds, crossfadeCurve, smartTransitions, filterSweeps, matchTempo, lyricsOnline,
              speed, keepPitch, pitchSemitones, skipSilence, autoplay, radioDiscovery, radioAdventure, radioVariety, radioFavorites,
              resumeWired, resumeBluetooth, resumeAlways, ambient, reduceMotion, castRenderers, castKeepPlaying, libraryOnly, swipeAction, accent, glassTint,
-             animatedArt
+             animatedArt, theme, themeLight, themeDark, themeMatch
     }
 
     public init(from decoder: Decoder) throws {
@@ -652,6 +671,8 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
         accent = c.choice(.accent, or: d.accent)
         glassTint = c.value(.glassTint, or: d.glassTint)
         animatedArt = c.choice(.animatedArt, or: d.animatedArt)
+        func name(_ key: CodingKeys) -> String? { (try? c.decodeIfPresent(String.self, forKey: key)) ?? nil }
+        themes = themeSettings(name(.theme), name(.themeLight), name(.themeDark), c.value(.themeMatch, or: d.themeMatch))
     }
 }
 

@@ -69,32 +69,67 @@ private let byte = 1.0 / 255.0 + 1e-4
         #expect(abs(perceivedLightness(RGBA(128, 128, 128)) - 0.536) < 0.005)
     }
 
-    @Test func theAccentFamilyIsDerivedFromTheAccent() {
-        let accent = OctoPalette.accent
-        #expect(abs(accent.red * 0.4 - OctoPalette.accentSelected.red) < byte)
-        #expect(abs(accent.green * 0.4 - OctoPalette.accentSelected.green) < byte)
-        #expect(abs(accent.blue * 0.4 - OctoPalette.accentSelected.blue) < byte)
-        let gray = 30.0 / 255.0
-        #expect(abs(gray + (accent.red - gray) * 0.1 - OctoPalette.accentTonal.red) < byte)
-        #expect(abs(gray + (accent.blue - gray) * 0.1 - OctoPalette.accentTonal.blue) < byte)
-        #expect(OctoPalette.focusRing == accent.opacity(0.7))
-        #expect(OctoPalette.menuPress == OctoPalette.accentSelected.opacity(0.55))
+    @Test func theAccentFamilyIsDerivedFromTheAccentInEveryTheme() {
+        for theme in ThemeChoice.allCases {
+            for choice in AccentChoice.allCases {
+                for glass in [false, true] {
+                    let p = resolvePalette(theme, choice, choice == .fromArt ? 0xFFE0_1010 : nil, glass)
+                    let f = p.accents
+                    let name = "\(theme) \(choice) \(glass)"
+                    if theme.light {
+                        #expect((14...40).contains { mixArgb(p.card, f.accent, $0 * 10) == f.selected }, "\(name)")
+                        #expect(f.tonal == mixArgb(p.card, f.accent, 80), "\(name)")
+                        #expect(f.focusRing == alphaArgb(f.accent, 1000), "\(name)")
+                        #expect(f.fill == f.accent, "\(name)")
+                    } else {
+                        #expect(f.selected == mixArgb(0xFF00_0000, f.accent, 400), "\(name)")
+                        #expect(f.tonal == mixArgb(0xFF1E_1E1E, f.accent, 100), "\(name)")
+                        #expect(f.focusRing == alphaArgb(f.accent, 700), "\(name)")
+                        #expect(f.fill == mixArgb(f.accent, 0xFF00_0000, 450), "\(name)")
+                    }
+                    #expect(f.menuPress == alphaArgb(f.selected, 550), "\(name)")
+                    #expect(f.glassAccent == (glass ? f.accent : theme.base.accent), "\(name)")
+                }
+            }
+        }
         #expect(OctoPalette.destructive == OctoPalette.signalRed.opacity(0.85))
     }
 
     @Test func theDerivedColorsAreTheNamedOnes() {
+        let p = resolvePalette(.octo, .octo, nil, false)
+        #expect(p.page == 0xFF0C_0C0D)
+        #expect(p.card == 0xFF1A_1A1B)
+        #expect(p.raised == 0xFF22_2324)
+        #expect(p.accents.tonal == 0xFF2A_2D2E)
+        #expect(p.accents.selected == 0xFF3C_474A)
+        #expect(p.accents.hover == 0xFFAD_C4CC)
+        #expect(p.accents.fill == 0xFF53_6166)
+        #expect(p.sheet == 0xF713_1416)
+        #expect(p.secondary == 0xFF98_B2BA)
+        // The shared tokens are Octo's resolved colors.
         #expect(OctoPalette.surfaceRaised.hex == 0x222324)
         #expect(OctoPalette.accentTonal.hex == 0x2A2D2E)
         #expect(OctoPalette.accentSelected.hex == 0x3C474A)
         #expect(OctoPalette.accentFill.hex == 0x536166)
         #expect(OctoPalette.sheetFill.hex == 0x131416)
-        #expect(abs(OctoPalette.sheetFill.alpha - 0.97) < 1e-9)
+        #expect(OctoPalette.textSecondary.hex == 0x98B2BA)
+        #expect(abs(OctoPalette.sheetFill.alpha - 247.0 / 255.0) < 1e-9)
     }
 
-    @Test func theTextHierarchyIsWhiteAtFallingOpacities() {
-        let levels = [OctoInk.primary, OctoInk.secondary, OctoInk.tertiary, OctoInk.quaternary, OctoInk.quinary]
-        for (want, color) in zip([0.85, 0.55, 0.25, 0.10, 0.05], levels) { #expect(abs(color.alpha - want) < 0.003) }
-        #expect(levels.allSatisfy { $0.red == 1 && $0.green == 1 && $0.blue == 1 })
+    @Test func theTextHierarchyIsTheInkAtFallingOpacitiesInEveryTheme() {
+        for theme in ThemeChoice.allCases {
+            let p = resolvePalette(theme, .octo, nil, false)
+            let levels = [p.inkPrimary, p.inkSecondary, p.inkTertiary, p.inkQuaternary, p.inkQuinary]
+            let alphas = [850, theme.base.inkSecondary, 250, 100, 50].map { (255 * $0 + 500) / 1000 }
+            for (want, color) in zip(alphas, levels) {
+                #expect(Int(color >> 24) == want, "\(theme)")
+                #expect(color & 0xFF_FFFF == p.ink & 0xFF_FFFF, "\(theme)")
+            }
+            // Secondary ink reads at 4.5:1 on the page and the card.
+            #expect(contrastOn(p.inkSecondary, p.page) >= 4.5 && contrastOn(p.inkSecondary, p.card) >= 4.5, "\(theme)")
+        }
+        #expect([217, 140, 64, 26, 13] == [OctoInk.primary, OctoInk.secondary, OctoInk.tertiary, OctoInk.quaternary, OctoInk.quinary]
+            .map { Int(($0.alpha * 255).rounded()) })
     }
 
     @Test func theRadiiAreTheSpecs() {

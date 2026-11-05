@@ -4,7 +4,7 @@ import Testing
 
 @Suite struct AccentTests {
     @Test func theChoicesAreTheOtherAppsOwnInTheirOrder() {
-        #expect(AccentChoice.allCases.map(\.label) == ["Octo", "Sky", "Iris", "Lilac", "Rose", "Coral", "Amber", "Lime", "Mint", "From the album art"])
+        #expect(AccentChoice.allCases.map(\.label) == ["Theme", "Sky", "Iris", "Lilac", "Rose", "Coral", "Amber", "Lime", "Mint", "From the album art"])
         #expect(AccentChoice.allCases.map(\.storedName) == ["Octo", "Sky", "Iris", "Lilac", "Rose", "Coral", "Amber", "Lime", "Mint", "FromArt"])
         #expect(AccentChoice.fixed.map { $0.argb! } == [0xFF97_B1B9, 0xFF73_BAEA, 0xFFA3_A9F6, 0xFFC7_9DE6, 0xFFE4_96B4, 0xFFEF_9687,
                                                         0xFFDA_A75D, 0xFFA0_BE66, 0xFF6F_C5A1])
@@ -40,9 +40,33 @@ import Testing
     }
 
     @Test func eachChoiceSaysWhatItColors() {
-        #expect(AccentChoice.octo.help == "Octo's own blue gray for selections, sliders, switches and buttons.")
+        for theme in ThemeChoice.allCases {
+            #expect(accentHelp(.octo, theme) == "\(theme.label)'s own color for selections, sliders, switches and buttons.")
+            #expect(accentHelp(.fromArt, theme) ==
+                "Follows the playing song's cover. \(theme.label)'s own color while nothing plays or the cover is gray.")
+            for choice in AccentChoice.fixed.dropFirst() {
+                #expect(accentHelp(choice, theme) == "Selections, sliders, switches and buttons in \(choice.label.lowercased()).")
+            }
+        }
+        #expect(AccentChoice.octo.help == "Octo's own color for selections, sliders, switches and buttons.")
         #expect(AccentChoice.rose.help == "Selections, sliders, switches and buttons in rose.")
-        #expect(AccentChoice.fromArt.help.hasPrefix("Follows the playing song's cover."))
+    }
+
+    @Test func everyAccentReadsInEveryTheme() {
+        for theme in ThemeChoice.allCases {
+            let p = resolvePalette(theme, .octo, nil, false)
+            for choice in AccentChoice.fixed {
+                let accent = themedAccent(theme, choice, nil)
+                for layer in [p.page, p.card, p.raised] {
+                    #expect(contrastRatio(accent, layer) >= (theme.light ? 5.0 : 4.5), "\(theme) \(choice)")
+                }
+                if theme.light { #expect(contrastRatio(0xFFFF_FFFF, accent) >= 4.5, "\(theme) \(choice)") }
+            }
+            for art: UInt32 in [0xFFE0_1010, 0xFF10_30C0, 0xFFFF_E000, 0xFF0A_4010, 0xFF80_8080] {
+                let accent = themedAccent(theme, .fromArt, art)
+                #expect(contrastRatio(accent, p.page) >= 4.5 && contrastRatio(accent, p.card) >= 4.5, "\(theme) \(art)")
+            }
+        }
     }
 
     @Test func theGlassStaysApplesOwnUntilItIsAskedToTakeTheAccent() {

@@ -23,10 +23,9 @@ final class ToastWindow {
     private init(scene: UIWindowScene, below: UIWindow, router: Router) {
         let spot = ToastSpot()
         let host = ToastController(rootView: AnyView(
-            ToastHost()
+            ThemedToast()
                 .environment(router)
                 .environment(spot)
-                .preferredColorScheme(.dark)
         ))
         host.below = below
         host.view.backgroundColor = .clear
@@ -36,12 +35,25 @@ final class ToastWindow {
         window.backgroundColor = .clear
         window.rootViewController = host
         window.isHidden = false
+        ThemeState.shared.adoptToast(window)
     }
 
     /// Puts the window up once, over the window `below` of the app.
     static func install(over below: UIWindow, router: Router) {
         guard shared == nil, let scene = below.windowScene else { return }
         shared = ToastWindow(scene: scene, below: below, router: router)
+    }
+}
+
+/// The message line in the theme's colors, or over the art while the full player is open. The
+/// window's light or dark style is set by `ThemeState`.
+private struct ThemedToast: View {
+    @State private var theme = ThemeState.shared
+
+    var body: some View {
+        ToastHost()
+            .environment(\.octoPalette, theme.toastPalette)
+            .tint(theme.toastPalette.color(.accent))
     }
 }
 

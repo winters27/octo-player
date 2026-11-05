@@ -160,7 +160,8 @@ extension BackupShape {
         )),
         BackupField("reduceMotion", .flag), BackupField("castRenderers", .flag), BackupField("castKeepPlaying", .flag),
         BackupField("libraryOnly", .flag), BackupField("swipeAction", .choice), BackupField("accent", .choice), BackupField("glassTint", .flag),
-        BackupField("animatedArt", .choice)
+        BackupField("animatedArt", .choice),
+        BackupField("theme", .choice), BackupField("themeLight", .choice), BackupField("themeDark", .choice), BackupField("themeMatch", .flag)
     )
 
     static let streaming = fields(

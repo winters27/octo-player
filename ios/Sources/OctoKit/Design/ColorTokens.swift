@@ -57,30 +57,34 @@ public func mix(_ from: RGBA, _ to: RGBA, _ amount: Double) -> RGBA {
          blue: from.blue + (to.blue - from.blue) * amount)
 }
 
-/// Winters' Glass, the palette every Octo app shares. Dark only.
+/// Winters' Glass in Octo's own theme, the colors drawn over a cover in every theme. Every theme's
+/// colors, this one's included, come from `resolvePalette`; these are Octo's, with its own accent
+/// and untinted glass.
 public enum OctoPalette {
-    public static let background = RGBA(hex: 0x0C0C0D)
+    /// Octo's own theme, resolved.
+    public static let octo = resolvePalette(.octo, .octo, nil, false)
+    public static let background = RGBA(argb: octo.page)
     /// A low-alpha wash that tints glass panels.
-    public static let backgroundSecondary = RGBA.white.opacity(0.03)
+    public static let backgroundSecondary = RGBA(argb: octo.backgroundSecondary)
     /// The solid surface under cards and glazed controls.
-    public static let backgroundTertiary = RGBA(hex: 0x1A1A1B)
-    public static let accent = RGBA(hex: 0x97B1B9)
+    public static let backgroundTertiary = RGBA(argb: octo.card)
+    public static let accent = RGBA(argb: octo.accents.accent)
     /// A raised surface for rows to read and change: the solid gray with a touch of the accent.
-    public static let surfaceRaised = mix(RGBA(hex: 0x1A1A1B), RGBA(hex: 0x97B1B9), 0.06)
-    public static let accentHover = RGBA(hex: 0xADC4CC)
-    public static let textPrimary = RGBA.white
-    public static let textSecondary = accent
-    /// The quietest words: four fifths of the accent, 5.8:1 on the page.
-    public static let textMuted = accent.opacity(0.8)
+    public static let surfaceRaised = RGBA(argb: octo.raised)
+    public static let accentHover = RGBA(argb: octo.accents.hover)
+    public static let textPrimary = RGBA(argb: octo.text)
+    public static let textSecondary = RGBA(argb: octo.secondary)
+    /// The quietest words: four fifths of the secondary words.
+    public static let textMuted = RGBA(argb: octo.muted)
     public static let error = RGBA(hex: 0xEF4444)
     /// A standard button's resting fill: a tenth of the accent in a dark gray.
-    public static let accentTonal = mix(RGBA(hex: 0x1E1E1E), accent, 0.10)
+    public static let accentTonal = RGBA(argb: octo.accents.tonal)
     /// A selected list row: the accent 40% of the way out of black.
-    public static let accentSelected = mix(.black, accent, 0.40)
+    public static let accentSelected = RGBA(argb: octo.accents.selected)
     /// The ring round a focused control.
-    public static let focusRing = accent.opacity(0.70)
+    public static let focusRing = RGBA(argb: octo.accents.focusRing)
     /// A menu row under the finger: the selected row's tint, half as strong.
-    public static let menuPress = accentSelected.opacity(0.55)
+    public static let menuPress = RGBA(argb: octo.accents.menuPress)
     /// A destructive action's words: a soft red.
     public static let destructive = RGBA(hex: 0xFF3B30).opacity(0.85)
     public static let signalRed = RGBA(hex: 0xFF3B30)
@@ -89,9 +93,9 @@ public enum OctoPalette {
     public static let signalGreen = RGBA(hex: 0x28CD41)
     public static let signalBlue = RGBA(hex: 0x007AFF)
     /// The filled button: the accent 45% of the way to black.
-    public static let accentFill = mix(accent, .black, 0.45)
+    public static let accentFill = RGBA(argb: octo.accents.fill)
     /// A sheet's fill: the background with a little accent, nearly solid.
-    public static let sheetFill = mix(background, accent, 0.05).opacity(0.97)
+    public static let sheetFill = RGBA(argb: octo.sheet)
     /// The film in Octo's glass: the faintest dim.
     public static let glazeFilm = RGBA.black.opacity(0.16)
     /// The film under a pop-up: darker, since words sit on it.
@@ -99,7 +103,7 @@ public enum OctoPalette {
     /// The darker pill that marks the chosen item inside glass.
     public static let glazeSelected = RGBA.black.opacity(0.72)
     /// The words and checks on a full accent fill.
-    public static let onAccent = RGBA(hex: 0x0C0C0D)
+    public static let onAccent = RGBA(argb: octo.accents.onAccent)
 }
 
 /// White at falling opacities, for what has no Octo color of its own.

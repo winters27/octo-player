@@ -162,6 +162,15 @@ final class AppSettings {
     func setSwipeAction(_ value: SwipeAction) { update { $0.swipeAction = value } }
     func setAccent(_ accent: AccentChoice) { update { $0.accent = accent } }
     func setGlassTint(_ on: Bool) { update { $0.glassTint = on } }
+
+    /// Makes `choice` the theme and fills the Match slot of its kind, in one write.
+    func pickTheme(_ choice: ThemeChoice) { update { $0.themes = OctoKit.pickTheme($0.themes, choice) } }
+
+    /// Turns Match the system on or off in one write; off keeps the theme that is showing.
+    func setThemeMatch(_ on: Bool) {
+        let deviceDark = ThemeState.shared.deviceDark
+        update { $0.themes = OctoKit.setMatch($0.themes, on: on, deviceDark: deviceDark) }
+    }
     func setAmbientStrength(_ strength: AmbientStrength) { update { $0.ambient.strength = strength } }
 
     func setAmbientArea(_ area: AmbientArea, _ on: Bool) {
@@ -487,6 +496,10 @@ final class AppSettings {
         static let swipeAction = "swipe_action"
         static let accent = "accent_color"
         static let glassTint = "accent_glass"
+        static let theme = "theme"
+        static let themeLight = "theme_light"
+        static let themeDark = "theme_dark"
+        static let themeMatch = "theme_match"
 
         static let cacheSize = "cache_size"
         static let prefetchWifi = "prefetch_wifi"
@@ -565,6 +578,8 @@ final class AppSettings {
         p.accent = AccentChoice.stored(s.string(forKey: Keys.accent), or: d.accent)
         p.glassTint = bool(Keys.glassTint, d.glassTint)
         p.animatedArt = AnimatedArtSetting.from(key: s.string(forKey: AnimatedArtSetting.prefKey))
+        p.themes = themeSettings(s.string(forKey: Keys.theme), s.string(forKey: Keys.themeLight), s.string(forKey: Keys.themeDark),
+                                 bool(Keys.themeMatch, d.themeMatch))
         return p.sane()
     }
 
@@ -610,6 +625,10 @@ final class AppSettings {
         put(\.accent, Keys.accent) { $0.storedName }
         put(\.glassTint, Keys.glassTint)
         put(\.animatedArt, AnimatedArtSetting.prefKey) { $0.storedName }
+        put(\.theme, Keys.theme) { $0.storedName }
+        put(\.themeLight, Keys.themeLight) { $0.storedName }
+        put(\.themeDark, Keys.themeDark) { $0.storedName }
+        put(\.themeMatch, Keys.themeMatch)
     }
 
     private func writeBackground(_ b: BackgroundPrefs) {

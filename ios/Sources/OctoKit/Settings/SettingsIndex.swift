@@ -117,6 +117,12 @@ public enum SettingsIndex {
     public static let sound: [SettingEntry] = SoundSearchEntry.all.map { SettingEntry($0.id, .sound, $0.title, $0.summary, $0.keywords) }
 
     // Appearance
+    public static let theme = SettingEntry("theme", .appearance, "Theme", "The colors of every page, card, menu and control",
+                                           ["theme", "light mode", "dark mode", "night", "day", "colors", "palette", "appearance"],
+                                           section: "Theme")
+    public static let themeMatch = SettingEntry("theme_match", .appearance, "Match the system",
+                                                "A light theme while the phone is light, a dark one while it is dark",
+                                                ["match", "system", "automatic", "day", "night"], section: "Theme")
     public static let ambient = SettingEntry("ambient", .appearance, "Ambient color from the artwork", "The artwork's colors glowing behind the pages",
                                              ["glow", "background", "colours", "colors", "theme", "strength"])
     public static let ambientHome = SettingEntry("ambient_home", .appearance, "Home", "The glow on the home page", ["glow"], section: "Where it shows")
@@ -158,8 +164,7 @@ public enum SettingsIndex {
                                                     "Designed covers, or the covers of their albums",
                                                     ["playlist", "cover", "artwork", "mosaic", "picture", "designed"], section: "Playlists")
     public static let accentColor = SettingEntry("accent_color", .appearance, "Accent color", "The color of selections, sliders, switches and buttons",
-                                                 ["accent", "color", "colour", "theme", "tint", "highlight", "palette", "album art", "cover",
-                                                  "personalize"],
+                                                 ["accent", "color", "colour", "tint", "highlight", "album art", "cover", "personalize"],
                                                  section: "Accent color")
     public static let glassTint = SettingEntry("accent_glass", .appearance, "Color the glass", "The bar, glass buttons and toasts take the accent too",
                                                ["glass", "glaze", "frosted", "bar", "tint", "accent", "color", "colour", "theme"], section: "Accent color")
@@ -333,7 +338,7 @@ public enum SettingsIndex {
         resumeWired, resumeBluetooth, resumeAlways, castKeepPlaying,
         radioDiscovery, radioAdventure, radioVariety, radioFavorites, liveRadioNear, radioStations,
     ] + sound + [
-        ambient, ambientHome, ambientLibrary, ambientSearch, ambientSettings, ambientBar, ambientPageArtwork, homeSections,
+        theme, themeMatch, ambient, ambientHome, ambientLibrary, ambientSearch, ambientSettings, ambientBar, ambientPageArtwork, homeSections,
         playerBackground, animatedArt, liveBackground, backgroundBrightnessCap, backgroundSaturation, backgroundContrast, backgroundUseBpm,
         backgroundSpeed, backgroundFps, playlistCovers, accentColor, glassTint, reduceMotion,
         phoneAccess, phoneSongs, rescan, libraryOnly, musicFolders,

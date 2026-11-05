@@ -450,4 +450,33 @@ import Testing
         #expect(read.homeSections == nil)
         #expect(BackupFile.decode(#"{"kind": "octo-settings", "homeSections": ["charts"]}"#) == .notABackup)
     }
+
+    @Test func theThemeIsKept() {
+        for theme in ThemeChoice.allCases {
+            var backup = Backup()
+            var player = PlayerPrefs()
+            player.themes = pickTheme(ThemeSettings(theme: .octo, light: .paper, dark: .dusk, match: true), theme)
+            backup.player = player
+            let text = BackupFile.encode(backup)
+            for key in ["theme", "themeLight", "themeDark", "themeMatch"] { #expect(text.contains("\"\(key)\""), "\(key) is missing") }
+            guard case .read(let read) = BackupFile.decode(text) else { Issue.record("not read"); return }
+            #expect(read.player?.themes == player.themes)
+            #expect(read.player?.theme == theme)
+        }
+        // Names this app does not know, or a theme in the wrong slot, read as each slot's default.
+        let odd = #"{"kind": "octo-settings", "version": 1, "player": {"theme": "Neon", "themeLight": "Moss", "themeDark": "Paper", "themeMatch": true}}"#
+        guard case .read(let coerced) = BackupFile.decode(odd) else { Issue.record("not read"); return }
+        #expect(coerced.player?.themes == ThemeSettings(theme: .octo, light: .daylight, dark: .octo, match: true))
+    }
+
+    @Test func anOldBackupKeepsOcto() {
+        guard case .read(let old) = BackupFile.decode(#"{"kind": "octo-settings", "version": 1, "player": {"crossfade": true}}"#) else {
+            Issue.record("not read"); return
+        }
+        #expect(old.player?.themes == ThemeSettings())
+        #expect(old.player?.theme == .octo)
+        #expect(old.player?.themeLight == .daylight)
+        #expect(old.player?.themeDark == .octo)
+        #expect(old.player?.themeMatch == false)
+    }
 }
