@@ -17,7 +17,7 @@ plugins {
     alias(libs.plugins.compose.multiplatform)
 }
 
-kotlin { jvmToolchain(17) }
+kotlin { jvmToolchain(25) }
 
 // The Android design files that compile unchanged on the desktop. A file
 // added here must not import anything from Android; the build fails loudly

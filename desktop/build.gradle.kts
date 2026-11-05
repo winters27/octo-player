@@ -9,7 +9,23 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-kotlin { jvmToolchain(17) }
+// Java 25 (LTS): the runtime the installers bundle and the one the app's
+// tests run on. The shared modules it builds on stay on 17, which the
+// Android app needs.
+val appJavaVersion = 25
+kotlin { jvmToolchain(appJavaVersion) }
+
+// jlink and jpackage cut the installers' runtime from this JDK. The Compose
+// plugin takes the JDK Gradle itself runs on unless told otherwise, which
+// would pack a Java 17 runtime around classes made for 25 (and fail at the
+// first start).
+val appJdk = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(appJavaVersion) }
+// After the plugin's own afterEvaluate, which sets it for every task.
+afterEvaluate {
+    tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJvmToolOperationTask>().configureEach {
+        javaHome.set(appJdk.map { it.metadata.installationPath.asFile.absolutePath })
+    }
+}
 
 // The version the installers carry and the app shows. Windows only
 // replaces an installed Octo with a higher version, so every build handed
@@ -274,6 +290,10 @@ compose.desktop {
         // and on OpenGL kept growing. At 64 MB it stays near 1.27 GB on
         // either, at the same processor use (soaks of 2026-10-20).
         jvmArgs("-Dskiko.gpu.resourceCacheLimit=64m")
+        // JNA (the audio engine, the system library) loads its native
+        // library through System.load; Java 24 and later warn about that on
+        // every start and plan to block it unless the app says it may.
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
         // `-Pocto.checkPlay=build/check/tone.wav` plays a made-up tone once
         // the window opens and prints what the engine says (audio/SoundCheck.kt).
         providers.gradleProperty("octo.checkPlay").orNull?.let { jvmArgs("-Docto.checkPlay=${file(it).absolutePath}") }
@@ -333,7 +353,7 @@ compose.desktop {
                 // %LOCALAPPDATA%\OctoPlayer, a folder of the program's own.
                 // Earlier builds went into %LOCALAPPDATA%\Octo, which holds
                 // the cache, and replacing one emptied that whole folder.
-                // Not %LOCALAPPDATA%\Programs\Octo: jpackage 17 lists only
+                // Not %LOCALAPPDATA%\Programs\Octo: jpackage lists only
                 // the install folder and those inside it for removal, and
                 // a per-user MSI fails its checks (ICE64) for the Programs
                 // folder above it. The app knows this folder as

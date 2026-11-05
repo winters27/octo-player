@@ -68,7 +68,7 @@ New versions appear on the [Octo Releases page](https://github.com/winters27/oct
 
 ## Build from source
 
-You need JDK 17. The Android app also needs the Android SDK (platform 37). The desktop app plays through its own audio engine, written in Rust, so it needs Rust 1.88 or newer and:
+You need JDK 17 and JDK 25 (Gradle picks each module's own; the desktop app builds and runs on 25, the Android app and the shared code on 17). The Android app also needs the Android SDK (platform 37). The desktop app plays through its own audio engine, written in Rust, so it needs Rust 1.88 or newer and:
 
 - Windows: the MSVC build tools.
 - Linux: `libasound2-dev` and `pkg-config` (Fedora: `alsa-lib-devel`), plus `fakeroot` and `rpm` to build packages.
