@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 use symphonia::core::io::MediaSource;
 
 use crate::error::{ErrorKind, Failure};
+use crate::live::Live;
 use crate::source::http::HttpOptions;
 use crate::source::ts::TsDemuxer;
 use crate::source::{Opened, Periods};
@@ -106,7 +107,13 @@ fn start(url: String, media: Media, http: HttpOptions) -> Result<Opened, Failure
         Some(_) => Some("mp4".to_string()),
         None => super::url_extension(&s.uri).filter(|e| e != "ts"),
     });
-    let shared = Arc::new(Shared { opts: http, state: Mutex::new(State::default()), wake: Condvar::new() });
+    let counted = Live::new(http.hls_count);
+    let shared = Arc::new(Shared {
+        opts: http,
+        state: Mutex::new(State::default()),
+        wake: Condvar::new(),
+        _live: counted,
+    });
     let worker = shared.clone();
     thread::Builder::new()
         .name("octo-hls".into())
@@ -149,6 +156,8 @@ struct Shared {
     opts: HttpOptions,
     state: Mutex<State>,
     wake: Condvar,
+    // Held while the reader or the fetch thread still has this.
+    _live: Live,
 }
 
 #[derive(Default)]

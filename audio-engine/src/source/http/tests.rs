@@ -35,6 +35,28 @@ fn reads_a_whole_stream() {
 }
 
 #[test]
+fn an_open_stream_is_counted_until_its_fetch_ends() {
+    static OPEN: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+    let body = data(3_000_000);
+    let server = TestServer::start(body.clone(), Behaviour::default());
+    let mut source = HttpSource::open(&server.url(), HttpOptions { stream_count: &OPEN, ..quick() }).unwrap();
+    let mut buf = vec![0u8; 1000];
+    source.read_exact(&mut buf).unwrap();
+    assert_eq!(OPEN.load(Ordering::Relaxed), 1);
+    drop(source);
+    // The fetch thread lets go once it sees the stream closed.
+    let until = Instant::now() + Duration::from_secs(10);
+    while OPEN.load(Ordering::Relaxed) != 0 {
+        assert!(Instant::now() < until, "still counted: {}", OPEN.load(Ordering::Relaxed));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // A refused open counts nothing.
+    let refused = TestServer::start(body, Behaviour { status: Some(404), ..Behaviour::default() });
+    assert!(HttpSource::open(&refused.url(), HttpOptions { stream_count: &OPEN, ..quick() }).is_err());
+    assert_eq!(OPEN.load(Ordering::Relaxed), 0);
+}
+
+#[test]
 fn seeks_with_ranges() {
     let body = data(4_000_000);
     let server = TestServer::start(body.clone(), Behaviour::default());
@@ -146,7 +168,8 @@ fn a_wait_for_input_is_limited_and_a_shorter_one_kept() {
     assert_eq!(*idle_limited(endless, limit).after, limit);
     let long = NextTimeout { after: Wait::Exact(Duration::from_secs(90)), reason: ureq::Timeout::RecvBody };
     assert_eq!(*idle_limited(long, limit).after, limit);
-    let short = NextTimeout { after: Wait::Exact(Duration::from_secs(5)), reason: ureq::Timeout::RecvResponse };
+    let short =
+        NextTimeout { after: Wait::Exact(Duration::from_secs(5)), reason: ureq::Timeout::RecvResponse };
     let kept = idle_limited(short, limit);
     assert_eq!(*kept.after, Duration::from_secs(5));
     assert_eq!(kept.reason, ureq::Timeout::RecvResponse);

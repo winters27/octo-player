@@ -9,7 +9,9 @@ pub mod deck;
 pub mod decode;
 pub mod error;
 pub mod fifo;
+pub mod hooks;
 pub mod lane;
+pub mod live;
 pub mod mixer;
 #[cfg(feature = "opus")]
 pub mod opus;

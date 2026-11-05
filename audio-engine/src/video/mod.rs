@@ -7,12 +7,13 @@
 //! keeps the newest frame for the app to copy into memory it owns. Nothing
 //! here touches the audio threads, device or clock.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::error::{EngineError, ErrorKind, Failure};
+use crate::live::Live;
 
 #[cfg(all(unix, not(target_os = "macos")))]
 mod gstreamer;
@@ -345,15 +346,21 @@ fn run(shared: &Shared, mut source: Box<dyn FrameSource>, clock: &dyn Clock) {
 pub struct LoopVideo {
     shared: Arc<Shared>,
     thread: Mutex<Option<thread::JoinHandle<()>>>,
+    _live: Live,
 }
 
 impl LoopVideo {
     fn start(opener: Opener) -> Result<Arc<Self>, Failure> {
-        Self::start_on(opener, Arc::new(RealClock))
+        Self::start_on(opener, Arc::new(RealClock), &crate::live::LOOP_VIDEOS)
     }
 
-    /// As `start`, pacing the frames by `clock`.
-    fn start_on(opener: Opener, clock: Arc<dyn Clock>) -> Result<Arc<Self>, Failure> {
+    /// As `start`, pacing the frames by `clock`, counted in `count` while it
+    /// is open.
+    fn start_on(
+        opener: Opener,
+        clock: Arc<dyn Clock>,
+        count: &'static AtomicI64,
+    ) -> Result<Arc<Self>, Failure> {
         let (sizes, size) = std::sync::mpsc::sync_channel::<Result<(u32, u32), Failure>>(1);
         let (shares, shared_rx) = std::sync::mpsc::sync_channel::<Arc<Shared>>(1);
         let thread = thread::Builder::new()
@@ -400,7 +407,7 @@ impl LoopVideo {
             decoded: AtomicU64::new(0),
         });
         let _ = shares.send(shared.clone());
-        Ok(Arc::new(Self { shared, thread: Mutex::new(Some(thread)) }))
+        Ok(Arc::new(Self { shared, thread: Mutex::new(Some(thread)), _live: Live::new(count) }))
     }
 
     #[cfg(test)]

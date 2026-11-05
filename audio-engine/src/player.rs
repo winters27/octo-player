@@ -23,6 +23,7 @@ use crate::crossfade::{FadeSong, SHORTEST_FADE_MS, blend_decision};
 use crate::deck::{Deck, DeckStatus};
 use crate::decode::TrackInfo;
 use crate::lane::Lane;
+use crate::live::LenCount;
 use crate::mixer::{FadeShape, LowPassSteps, Marker, MixState, Mixer, Transition};
 use crate::output::{
     DeviceEvent, Driver, OpenedOutput, OutputDevice, OutputFormat, OutputShared, Renderer, ring,
@@ -152,10 +153,17 @@ pub struct Shared {
     /// How many track infos the player holds, for tests.
     #[cfg(test)]
     pub infos_len: std::sync::atomic::AtomicUsize,
+    /// Where the player counts the track infos it holds.
+    pub track_info_count: &'static std::sync::atomic::AtomicI64,
 }
 
 impl Shared {
     pub fn new() -> Self {
+        Self::counting(&crate::live::TRACK_INFOS)
+    }
+
+    /// As `new`, counting track infos in `track_info_count`.
+    pub fn counting(track_info_count: &'static std::sync::atomic::AtomicI64) -> Self {
         let trust = Arc::new(Trust::default());
         Shared {
             listener: Mutex::new(None),
@@ -178,6 +186,7 @@ impl Shared {
             planner: Mutex::new(None),
             #[cfg(test)]
             infos_len: std::sync::atomic::AtomicUsize::new(0),
+            track_info_count,
         }
     }
 
@@ -358,6 +367,8 @@ struct Player {
     // When playback was paused, while it is.
     paused_at: Option<Instant>,
     infos: HashMap<u64, TrackInfo>,
+    // Follows `infos`' length; gives it back when the player ends.
+    infos_count: LenCount,
     block: Vec<f32>,
     markers: Vec<Marker>,
     crossed: Vec<Marker>,
@@ -365,6 +376,7 @@ struct Player {
 
 /// Runs the player until it is told to shut down.
 pub fn run(driven: Driven) {
+    let infos_count = LenCount::new(driven.shared.track_info_count);
     let mut p = Player {
         driver: driven.driver,
         commands: driven.commands,
@@ -408,6 +420,7 @@ pub fn run(driven: Driven) {
         lost_at: None,
         paused_at: None,
         infos: HashMap::new(),
+        infos_count,
         block: vec![0.0; 2048],
         markers: Vec::new(),
         crossed: Vec::new(),
@@ -935,6 +948,7 @@ impl Player {
                     self.queue[i].item.duration_ms = Some(ms);
                 }
                 self.infos.insert(deck.key(), info);
+                self.infos_count.set(self.infos.len());
                 #[cfg(test)]
                 self.shared.infos_len.store(self.infos.len(), std::sync::atomic::Ordering::Relaxed);
             }
@@ -1146,6 +1160,7 @@ impl Player {
                 self.queue[next].item.duration_ms = Some(ms);
             }
             self.infos.insert(up_key, info);
+            self.infos_count.set(self.infos.len());
             #[cfg(test)]
             self.shared.infos_len.store(self.infos.len(), std::sync::atomic::Ordering::Relaxed);
         }
@@ -1774,6 +1789,7 @@ impl Player {
         let heard = self.heard;
         let queue = &self.queue;
         self.infos.retain(|key, _| Some(*key) == heard || queue.iter().any(|e| e.key == *key));
+        self.infos_count.set(self.infos.len());
         #[cfg(test)]
         self.shared.infos_len.store(self.infos.len(), std::sync::atomic::Ordering::Relaxed);
     }

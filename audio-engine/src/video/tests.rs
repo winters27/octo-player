@@ -130,9 +130,13 @@ fn the_loop_starts_over_without_a_pause() {
         elapsed: Mutex::new(Duration::ZERO),
         waits: Mutex::new(Vec::new()),
     });
-    let video =
-        LoopVideo::start_on(Box::new(move || Ok(Box::new(source) as Box<dyn FrameSource>)), clock.clone())
-            .unwrap();
+    static OPEN: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+    let video = LoopVideo::start_on(
+        Box::new(move || Ok(Box::new(source) as Box<dyn FrameSource>)),
+        clock.clone(),
+        &OPEN,
+    )
+    .unwrap();
     video.play();
     let mut seen = 0;
     while seen < 10 {
@@ -147,6 +151,37 @@ fn the_loop_starts_over_without_a_pause() {
     for (i, at) in waits.iter().take(9).enumerate() {
         assert_eq!(*at, Duration::from_millis(15) * (i as u32 + 1), "frame {} off its place", i + 1);
     }
+}
+
+#[test]
+fn an_open_loop_is_counted_until_dropped() {
+    static OPEN: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+    let source = Counting {
+        frames: 3,
+        gap: Duration::from_millis(15),
+        at: 0,
+        round: 0,
+        rewinds: Arc::new(AtomicU32::new(0)),
+        lengths: true,
+    };
+    let video = LoopVideo::start_on(
+        Box::new(move || Ok(Box::new(source) as Box<dyn FrameSource>)),
+        Arc::new(RealClock),
+        &OPEN,
+    )
+    .unwrap();
+    assert_eq!(OPEN.load(Ordering::Relaxed), 1);
+    drop(video);
+    assert_eq!(OPEN.load(Ordering::Relaxed), 0);
+    let failed = LoopVideo::start_on(
+        Box::new(|| -> Result<Box<dyn FrameSource>, Failure> {
+            Err(Failure::new(ErrorKind::Decode, "no such video"))
+        }),
+        Arc::new(RealClock),
+        &OPEN,
+    );
+    assert!(failed.is_err());
+    assert_eq!(OPEN.load(Ordering::Relaxed), 0);
 }
 
 #[test]

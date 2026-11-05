@@ -1328,6 +1328,36 @@ fn the_player_keeps_infos_only_for_queued_songs() {
 }
 
 #[test]
+fn track_infos_are_counted_and_given_back() {
+    static INFOS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+    let dir = temp_dir();
+    let songs: Vec<QueueItem> = ["a", "b"]
+        .iter()
+        .map(|id| {
+            let path = dir.join(format!("{id}.wav"));
+            write_wav(&path, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 3, 0.3));
+            item(id, &path)
+        })
+        .collect();
+    let (driver, pump) = NullDriver::driven(RATE, 2, None);
+    let engine = Engine::with_driver_counting(Box::new(move || Box::new(driver)), &INFOS);
+    engine.load(songs, 0, 0, true).unwrap();
+    for _ in 0..3_000 {
+        pump.play();
+        if engine.infos_len() > 0 {
+            break;
+        }
+    }
+    // Both are written on the player thread, so they are read until they agree.
+    wait_until("the count to follow the infos", || {
+        let held = engine.infos_len() as i64;
+        held > 0 && INFOS.load(Ordering::Relaxed) == held
+    });
+    engine.shutdown();
+    assert_eq!(INFOS.load(Ordering::Relaxed), 0);
+}
+
+#[test]
 fn device_reopens_are_counted() {
     let dir = temp_dir();
     let a = dir.join("a.wav");

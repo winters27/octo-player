@@ -485,9 +485,18 @@ impl Engine {
     /// An engine with a chosen way to reach devices. The driver is made on
     /// the engine's thread, since device streams may not move between threads.
     pub fn with_driver(make_driver: Box<dyn FnOnce() -> Box<dyn crate::output::Driver> + Send>) -> Arc<Self> {
+        Self::with_driver_counting(make_driver, &crate::live::TRACK_INFOS)
+    }
+
+    /// As `with_driver`, counting the track infos its player holds in
+    /// `track_infos`.
+    pub fn with_driver_counting(
+        make_driver: Box<dyn FnOnce() -> Box<dyn crate::output::Driver> + Send>,
+        track_infos: &'static std::sync::atomic::AtomicI64,
+    ) -> Arc<Self> {
         let (commands, command_rx) = unbounded();
         let (event_tx, event_rx) = unbounded::<EngineEvent>();
-        let shared = Arc::new(Shared::new());
+        let shared = Arc::new(Shared::counting(track_infos));
         let events_shared = shared.clone();
         let events = thread::Builder::new()
             .name("octo-events".into())

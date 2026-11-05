@@ -12,7 +12,7 @@
 
 use std::collections::VecDeque;
 use std::io::{self, Read, Seek, SeekFrom};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -20,9 +20,10 @@ use std::time::{Duration, Instant};
 use symphonia::core::io::MediaSource;
 
 use crate::error::{ErrorKind, Failure};
+use crate::live::Live;
 use crate::source::icy::{IcySplitter, IcyStatus, StreamMeta};
-use ureq::unversioned::transport::{Buffers, ConnectionDetails, Connector, NextTimeout, Transport};
 use crate::source::trust::{PinnedTls, Trust};
+use ureq::unversioned::transport::{Buffers, ConnectionDetails, Connector, NextTimeout, Transport};
 
 /// How a stream is fetched.
 #[derive(Clone, Debug)]
@@ -54,6 +55,11 @@ pub struct HttpOptions {
     pub titles: Option<Arc<TitleSlot>>,
     /// The address is an HLS playlist, whatever it looks like.
     pub hls: bool,
+    /// Counts the streams open on these options until their last fetch
+    /// thread lets go.
+    pub stream_count: &'static AtomicI64,
+    /// The same for HLS streams.
+    pub hls_count: &'static AtomicI64,
 }
 
 impl Default for HttpOptions {
@@ -71,6 +77,8 @@ impl Default for HttpOptions {
             live_backoff: Duration::from_secs(1),
             titles: None,
             hls: false,
+            stream_count: &crate::live::HTTP_STREAMS,
+            hls_count: &crate::live::HLS_STREAMS,
         }
     }
 }
@@ -151,7 +159,11 @@ struct IdleLimit(Duration);
 impl<In: Transport> Connector<In> for IdleLimit {
     type Out = IdleTransport<In>;
 
-    fn connect(&self, _details: &ConnectionDetails, chained: Option<In>) -> Result<Option<Self::Out>, ureq::Error> {
+    fn connect(
+        &self,
+        _details: &ConnectionDetails,
+        chained: Option<In>,
+    ) -> Result<Option<Self::Out>, ureq::Error> {
         Ok(chained.map(|inner| IdleTransport { inner, limit: self.0 }))
     }
 }
@@ -187,7 +199,10 @@ impl<In: Transport> Transport for IdleTransport<In> {
 /// The wait for input, at most `limit`.
 fn idle_limited(timeout: NextTimeout, limit: Duration) -> NextTimeout {
     if timeout.after.is_not_happening() || *timeout.after > limit {
-        NextTimeout { after: ureq::unversioned::transport::time::Duration::Exact(limit), reason: timeout.reason }
+        NextTimeout {
+            after: ureq::unversioned::transport::time::Duration::Exact(limit),
+            reason: timeout.reason,
+        }
     } else {
         timeout
     }
@@ -214,6 +229,8 @@ struct Shared {
     partial: bool,
     state: Mutex<State>,
     wake: Condvar,
+    // Held while the reader or any fetch thread still has this.
+    _live: Live,
 }
 
 struct State {
@@ -271,6 +288,7 @@ impl HttpSource {
         };
         let content_type = header("content-type");
         let metaint = if live { metaint(&response) } else { None };
+        let counted = Live::new(opts.stream_count);
         let shared = Arc::new(Shared {
             url: url.to_string(),
             opts,
@@ -292,6 +310,7 @@ impl HttpSource {
                 last_title: None,
             }),
             wake: Condvar::new(),
+            _live: counted,
         });
         let body = response.into_body().into_reader();
         spawn_fetch(shared.clone(), 0, 0, Some((body, metaint)));

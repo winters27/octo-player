@@ -16,6 +16,11 @@ pub struct ProcessStats {
     pub gpu_shared: Option<u64>,
     /// "I/O other bytes" (Process Explorer): where socket reads land.
     pub io_other_bytes: Option<u64>,
+    /// Graphics memory the driver committed for this process, in video
+    /// memory or moved out of it; part of the private bytes.
+    pub gpu_committed: Option<u64>,
+    /// Memory of this process moved to swap (Linux).
+    pub swap: Option<u64>,
 }
 
 /// The counters now; each is `None` when it cannot be read.
@@ -84,13 +89,22 @@ fn windows_stats() -> ProcessStats {
         stats.gpu_dedicated = Some(dedicated);
         stats.gpu_shared = Some(shared);
     }
+    // In its own query, so a system without this counter still reads the two above.
+    stats.gpu_committed = windows_gpu_counters(&["Total Committed"]).map(|v| v[0]);
     stats
 }
 
-// This process's graphics memory from the performance counters, opened and
-// closed on each call. None when the counter set is missing or any step fails.
+// This process's graphics memory counters by name, from one query.
 #[cfg(windows)]
 fn windows_gpu() -> Option<(u64, u64)> {
+    windows_gpu_counters(&["Dedicated Usage", "Shared Usage"]).map(|v| (v[0], v[1]))
+}
+
+// This process's graphics memory from the performance counters named, in
+// that order, opened and closed on each call. None when the counter set is
+// missing or any step fails.
+#[cfg(windows)]
+fn windows_gpu_counters(names: &[&str]) -> Option<Vec<u64>> {
     use windows::Win32::System::Performance::{
         PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_LARGE, PDH_HCOUNTER, PDH_HQUERY, PdhAddEnglishCounterW,
         PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterArrayW, PdhOpenQueryW,
@@ -134,18 +148,17 @@ fn windows_gpu() -> Option<(u64, u64)> {
             (PdhAddEnglishCounterW(query, PCWSTR(path.as_ptr()), 0, &mut counter) == 0).then_some(counter)
         };
         let found = (|| {
-            let dedicated = add("Dedicated Usage")?;
-            let shared = add("Shared Usage")?;
+            let counters = names.iter().map(|name| add(name)).collect::<Option<Vec<_>>>()?;
             // "No data" here means this process has no graphics memory yet.
             // PDH_NO_DATA (0x800007D5): the process has no GPU instances, so it holds none.
             let status = PdhCollectQueryData(query);
             if status == 0x800007D5 {
-                return Some((0, 0));
+                return Some(vec![0; names.len()]);
             }
             if status != 0 {
                 return None;
             }
-            Some((sum(dedicated)?, sum(shared)?))
+            counters.into_iter().map(|counter| sum(counter)).collect::<Option<Vec<_>>>()
         })();
         PdhCloseQuery(query);
         found
@@ -164,6 +177,8 @@ fn linux_stats() -> ProcessStats {
                 stats.working_set = kb(line).map(|k| k * 1024);
             } else if line.starts_with("Threads:") {
                 stats.threads = kb(line).map(|n| n as u32);
+            } else if line.starts_with("VmSwap:") {
+                stats.swap = kb(line).map(|k| k * 1024);
             }
         }
     }
@@ -187,7 +202,10 @@ mod tests {
             assert!(stats.handles.is_some(), "{stats:?}");
             assert!(stats.io_other_bytes.is_some(), "{stats:?}");
         }
-        println!("gpu dedicated {:?}, gpu shared {:?}", stats.gpu_dedicated, stats.gpu_shared);
+        println!(
+            "gpu dedicated {:?}, gpu shared {:?}, gpu committed {:?}",
+            stats.gpu_dedicated, stats.gpu_shared, stats.gpu_committed
+        );
     }
 
     #[cfg(any(windows, target_os = "linux"))]
