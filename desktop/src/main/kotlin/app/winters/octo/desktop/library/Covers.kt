@@ -281,7 +281,7 @@ fun coverLoader(context: PlatformContext, http: OkHttpClient, cacheDir: File): I
             add(KeptCoverFetcher.Factory())
             add(OkHttpNetworkFetcherFactory(callFactory = { covers }))
         }
-        .memoryCache { MemoryCache.Builder().maxSizeBytes(COVER_MEMORY_BYTES).build() }
+        .memoryCache { MemoryCache.Builder().maxSizeBytes(COVER_MEMORY_BYTES).build().also { CoverMemory.cache = it } }
         .diskCache {
             DiskCache.Builder()
                 .directory(File(cacheDir, "covers").toOkioPath())
@@ -290,6 +290,12 @@ fun coverLoader(context: PlatformContext, http: OkHttpClient, cacheDir: File): I
         }
         .crossfade(true)
         .build()
+}
+
+// The covers held in memory, for the memory log; null until the loader
+// makes its cache.
+object CoverMemory {
+    @Volatile var cache: MemoryCache? = null
 }
 
 // Covers fetched from the server as they come in, by id, so what waits on

@@ -701,6 +701,12 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_octo_audio_checksum_func_graphic_bands(
     ): Int
+    external fun uniffi_octo_audio_checksum_func_loaded_hooks(
+    ): Int
+    external fun uniffi_octo_audio_checksum_func_overlay_processes(
+    ): Int
+    external fun uniffi_octo_audio_checksum_func_engine_counters(
+    ): Int
     external fun uniffi_octo_audio_checksum_func_process_stats(
     ): Int
     external fun uniffi_octo_audio_checksum_func_loop_video_available(
@@ -952,6 +958,12 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_octo_audio_fn_func_graphic_bands(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_octo_audio_fn_func_loaded_hooks(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_octo_audio_fn_func_overlay_processes(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_octo_audio_fn_func_engine_counters(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_octo_audio_fn_func_process_stats(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_octo_audio_fn_func_loop_video_available(uniffi_out_err: UniffiRustCallStatus, 
@@ -1081,6 +1093,15 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_octo_audio_checksum_func_graphic_bands() and 0xFFFF) != 40024) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_octo_audio_checksum_func_loaded_hooks() and 0xFFFF) != 64688) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_func_overlay_processes() and 0xFFFF) != 57013) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_func_engine_counters() and 0xFFFF) != 53802) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_octo_audio_checksum_func_process_stats() and 0xFFFF) != 56945) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1090,7 +1111,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_octo_audio_checksum_method_engine_current_device() and 0xFFFF) != 45769) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_octo_audio_checksum_method_engine_device_reopens() and 0xFFFF) != 59436) {
+    if ((lib.uniffi_octo_audio_checksum_method_engine_device_reopens() and 0xFFFF) != 7428) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_method_engine_devices() and 0xFFFF) != 33937) {
@@ -1757,8 +1778,9 @@ public interface EngineInterface {
     fun `currentDevice`(): OutputDevice?
     
     /**
-     * How many times the output device was opened again since the engine
-     * started: a device lost, the default moved, or an output chosen.
+     * How many times a device was opened again and opened since the engine
+     * started (a device lost and found, the default moved, or an output
+     * chosen), not the attempts that found none.
      */
     fun `deviceReopens`(): kotlin.ULong
     
@@ -2067,8 +2089,9 @@ open class Engine: Disposable, AutoCloseable, EngineInterface
 
     
     /**
-     * How many times the output device was opened again since the engine
-     * started: a device lost, the default moved, or an output chosen.
+     * How many times a device was opened again and opened since the engine
+     * started (a device lost and found, the default moved, or an output
+     * chosen), not the attempts that found none.
      */override fun `deviceReopens`(): kotlin.ULong {
             return FfiConverterULong.lift(
     callWithHandle {
@@ -3716,6 +3739,57 @@ public object FfiConverterTypeDspSettings: FfiConverterRustBuffer<DspSettings> {
 
 
 /**
+ * The engine's live counts now.
+ */
+data class EngineCounters (
+    val `loopVideos`: kotlin.Long
+    , 
+    val `httpStreams`: kotlin.Long
+    , 
+    val `hlsStreams`: kotlin.Long
+    , 
+    val `trackInfos`: kotlin.Long
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeEngineCounters: FfiConverterRustBuffer<EngineCounters> {
+    override fun read(buf: ByteBuffer): EngineCounters {
+        return EngineCounters(
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: EngineCounters) = (
+            FfiConverterLong.allocationSize(value.`loopVideos`) +
+            FfiConverterLong.allocationSize(value.`httpStreams`) +
+            FfiConverterLong.allocationSize(value.`hlsStreams`) +
+            FfiConverterLong.allocationSize(value.`trackInfos`)
+    )
+
+    override fun write(value: EngineCounters, buf: ByteBuffer) {
+            FfiConverterLong.write(value.`loopVideos`, buf)
+            FfiConverterLong.write(value.`httpStreams`, buf)
+            FfiConverterLong.write(value.`hlsStreams`, buf)
+            FfiConverterLong.write(value.`trackInfos`, buf)
+    }
+}
+
+
+
+/**
  * One equalizer filter. `q` is the width, as in the Audio EQ Cookbook.
  */
 data class EqFilter (
@@ -3939,6 +4013,61 @@ public object FfiConverterTypeHeadphoneCorrection: FfiConverterRustBuffer<Headph
 
 
 /**
+ * The modules loaded in this process that came from elsewhere.
+ */
+data class HookReport (
+    /**
+     * Known overlay and capture modules, by file name.
+     */
+    val `hooks`: List<kotlin.String>
+    , 
+    /**
+     * How many other modules come from outside the system and the app.
+     */
+    val `foreign`: kotlin.UInt
+    , 
+    /**
+     * Their file names (at most 20), never their folders.
+     */
+    val `foreignNames`: List<kotlin.String>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeHookReport: FfiConverterRustBuffer<HookReport> {
+    override fun read(buf: ByteBuffer): HookReport {
+        return HookReport(
+            FfiConverterSequenceString.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterSequenceString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: HookReport) = (
+            FfiConverterSequenceString.allocationSize(value.`hooks`) +
+            FfiConverterUInt.allocationSize(value.`foreign`) +
+            FfiConverterSequenceString.allocationSize(value.`foreignNames`)
+    )
+
+    override fun write(value: HookReport, buf: ByteBuffer) {
+            FfiConverterSequenceString.write(value.`hooks`, buf)
+            FfiConverterUInt.write(value.`foreign`, buf)
+            FfiConverterSequenceString.write(value.`foreignNames`, buf)
+    }
+}
+
+
+
+/**
  * An extra request header for a stream, such as one a server's proxy needs.
  */
 data class HttpHeader (
@@ -4087,6 +4216,61 @@ public object FfiConverterTypeOutputFormat: FfiConverterRustBuffer<OutputFormat>
 
 
 /**
+ * One overlay program's processes beside this one.
+ */
+data class OverlayProcess (
+    /**
+     * A short name without spaces, like `nvidia-overlay`.
+     */
+    val `key`: kotlin.String
+    , 
+    /**
+     * How many processes it runs.
+     */
+    val `count`: kotlin.UInt
+    , 
+    /**
+     * Their private bytes together; None when any could not be read.
+     */
+    val `privateBytes`: kotlin.ULong?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeOverlayProcess: FfiConverterRustBuffer<OverlayProcess> {
+    override fun read(buf: ByteBuffer): OverlayProcess {
+        return OverlayProcess(
+            FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterOptionalULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: OverlayProcess) = (
+            FfiConverterString.allocationSize(value.`key`) +
+            FfiConverterUInt.allocationSize(value.`count`) +
+            FfiConverterOptionalULong.allocationSize(value.`privateBytes`)
+    )
+
+    override fun write(value: OverlayProcess, buf: ByteBuffer) {
+            FfiConverterString.write(value.`key`, buf)
+            FfiConverterUInt.write(value.`count`, buf)
+            FfiConverterOptionalULong.write(value.`privateBytes`, buf)
+    }
+}
+
+
+
+/**
  * Where playback is, from the audio clock.
  */
 data class PlaybackPosition (
@@ -4175,6 +4359,17 @@ data class ProcessStats (
      * "I/O other bytes" (Process Explorer): where socket reads land.
      */
     val `ioOtherBytes`: kotlin.ULong?
+    , 
+    /**
+     * Graphics memory the driver committed for this process, in video
+     * memory or moved out of it; part of the private bytes.
+     */
+    val `gpuCommitted`: kotlin.ULong?
+    , 
+    /**
+     * Memory of this process moved to swap (Linux).
+     */
+    val `swap`: kotlin.ULong?
     
 ){
     
@@ -4198,6 +4393,8 @@ public object FfiConverterTypeProcessStats: FfiConverterRustBuffer<ProcessStats>
             FfiConverterOptionalULong.read(buf),
             FfiConverterOptionalULong.read(buf),
             FfiConverterOptionalULong.read(buf),
+            FfiConverterOptionalULong.read(buf),
+            FfiConverterOptionalULong.read(buf),
         )
     }
 
@@ -4208,7 +4405,9 @@ public object FfiConverterTypeProcessStats: FfiConverterRustBuffer<ProcessStats>
             FfiConverterOptionalUInt.allocationSize(value.`threads`) +
             FfiConverterOptionalULong.allocationSize(value.`gpuDedicated`) +
             FfiConverterOptionalULong.allocationSize(value.`gpuShared`) +
-            FfiConverterOptionalULong.allocationSize(value.`ioOtherBytes`)
+            FfiConverterOptionalULong.allocationSize(value.`ioOtherBytes`) +
+            FfiConverterOptionalULong.allocationSize(value.`gpuCommitted`) +
+            FfiConverterOptionalULong.allocationSize(value.`swap`)
     )
 
     override fun write(value: ProcessStats, buf: ByteBuffer) {
@@ -4219,6 +4418,8 @@ public object FfiConverterTypeProcessStats: FfiConverterRustBuffer<ProcessStats>
             FfiConverterOptionalULong.write(value.`gpuDedicated`, buf)
             FfiConverterOptionalULong.write(value.`gpuShared`, buf)
             FfiConverterOptionalULong.write(value.`ioOtherBytes`, buf)
+            FfiConverterOptionalULong.write(value.`gpuCommitted`, buf)
+            FfiConverterOptionalULong.write(value.`swap`, buf)
     }
 }
 
@@ -6367,6 +6568,34 @@ public object FfiConverterSequenceTypeOutputDevice: FfiConverterRustBuffer<List<
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeOverlayProcess: FfiConverterRustBuffer<List<OverlayProcess>> {
+    override fun read(buf: ByteBuffer): List<OverlayProcess> {
+        val len = buf.getInt()
+        return List<OverlayProcess>(len) {
+            FfiConverterTypeOverlayProcess.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<OverlayProcess>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeOverlayProcess.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<OverlayProcess>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeOverlayProcess.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeQueueItem: FfiConverterRustBuffer<List<QueueItem>> {
     override fun read(buf: ByteBuffer): List<QueueItem> {
         val len = buf.getInt()
@@ -6435,6 +6664,43 @@ public object FfiConverterSequenceTypeTrustedCertificate: FfiConverterRustBuffer
             return FfiConverterSequenceFloat.lift(
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_octo_audio_fn_func_graphic_bands(
+    
+        _status)
+}
+    )
+    }
+    
+
+        /**
+         * The overlay and capture modules loaded now, and how many others came
+         * from outside the system and the app. Empty when the list cannot be read.
+         */ fun `loadedHooks`(): HookReport {
+            return FfiConverterTypeHookReport.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_func_loaded_hooks(
+    
+        _status)
+}
+    )
+    }
+    
+
+        /**
+         * The overlay programs running now, each with its processes' memory.
+         */ fun `overlayProcesses`(): List<OverlayProcess> {
+            return FfiConverterSequenceTypeOverlayProcess.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_func_overlay_processes(
+    
+        _status)
+}
+    )
+    }
+    
+ fun `engineCounters`(): EngineCounters {
+            return FfiConverterTypeEngineCounters.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_func_engine_counters(
     
         _status)
 }

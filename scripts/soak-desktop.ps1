@@ -61,6 +61,8 @@
 #                     after it shows (drawn by the window itself, so other
 #                     windows over it do not matter), for comparing builds
 #   -Keep             keeps the test profile afterwards
+#   -Calibrate        pauses and checks the memory log's parts instead of
+#                     playing on (calib lines in events.log; Soak.kt)
 #   -Gate <mode>      judges the run against 1.10.0's own: full, still, tray,
 #                     minimized or radio fail when private bytes grow more than
 #                     the mode's baseline plus 60 MB/h from minute 26; mini
@@ -107,6 +109,7 @@ param(
     [int]$Height = 900,
     [string]$Shots = "",
     [switch]$Keep,
+    [switch]$Calibrate,
     [ValidateSet("", "full", "still", "tray", "minimized", "radio", "mini")][string]$Gate = "",
     [switch]$SelfTest
 )
@@ -176,7 +179,8 @@ function ConvertFrom-Kb([string]$Text) { [math]::Round([double]($Text -replace '
 
 # The Java heap's size and use from GC.heap_info.
 function Read-HeapInfo([string]$Text) {
-    if ($Text -match 'total (\d+)K, used (\d+)K') { return [pscustomobject]@{ HeapMB = ConvertFrom-Kb $Matches[1]; HeapUsedMB = ConvertFrom-Kb $Matches[2] } }
+    # JDK 23 and later write "total reserved X, committed Y, used Z".
+    if ($Text -match 'total (?:reserved \d+K, committed )?(\d+)K, used (\d+)K') { return [pscustomobject]@{ HeapMB = ConvertFrom-Kb $Matches[1]; HeapUsedMB = ConvertFrom-Kb $Matches[2] } }
     [pscustomobject]@{ HeapMB = $null; HeapUsedMB = $null }
 }
 
@@ -212,6 +216,26 @@ function Get-GpuMB([int]$ProcessId) {
     } catch { return @($null, $null) }
 }
 
+# The graphics memory the driver committed for the process, resident or not.
+function Get-GpuCommittedMB([int]$ProcessId) {
+    try {
+        $counters = Get-Counter -Counter "\GPU Process Memory(pid_$($ProcessId)_*)\Total Committed" -ErrorAction Stop
+        return [math]::Round(($counters.CounterSamples | Measure-Object CookedValue -Sum).Sum / 1MB, 1)
+    } catch { return $null }
+}
+
+# The NVIDIA overlay's processes beside the app: their private MB and handles
+# together, and how many processes have NVIDIA's capture hook loaded.
+function Get-NvidiaSample {
+    $nv = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(NVIDIA Overlay|NVIDIA Share|NVIDIA app|nvcontainer|nvsphelper64)$' })
+    $hooked = @(tasklist /m nvspcap64.dll /fo csv /nh 2>$null | Where-Object { $_ -match '^"' })
+    [pscustomobject]@{
+        NvidiaMB = [math]::Round(($nv | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB, 1)
+        NvidiaHandles = ($nv | Measure-Object HandleCount -Sum).Sum
+        HookedPids = $hooked.Count
+    }
+}
+
 function Get-Sample([int]$ProcessId, [double]$Minute, [string]$Note = "") {
     $p = Get-Process -Id $ProcessId -ErrorAction Stop
     $video = 0
@@ -230,6 +254,7 @@ function Get-Sample([int]$ProcessId, [double]$Minute, [string]$Note = "") {
         Handles = $p.HandleCount
         GpuDedicatedMB = $gpu[0]
         GpuSharedMB = $gpu[1]
+        GpuCommittedMB = Get-GpuCommittedMB $ProcessId
         CpuS = [math]::Round($p.TotalProcessorTime.TotalSeconds, 1)
         IoOtherMB = $(try { [math]::Round((Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId").OtherTransferCount / 1MB, 1) } catch { $null })
     }
@@ -240,6 +265,10 @@ function Get-Sample([int]$ProcessId, [double]$Minute, [string]$Note = "") {
     foreach ($name in "NmtMB", "NmtJavaHeap", "NmtClass", "NmtThread", "NmtCode", "NmtGC", "NmtInternal", "NmtOther", "NmtSymbol", "NmtArenaChunk") { $row[$name] = $nmt[$name] }
     # What the JVM does not know of: Skia, the engine, the system's own.
     $row["OutsideJvmMB"] = if ($nmt["NmtMB"]) { [math]::Round($row.PrivateMB - $nmt["NmtMB"], 1) } else { $null }
+    $nvidia = Get-NvidiaSample
+    $row["NvidiaMB"] = $nvidia.NvidiaMB
+    $row["NvidiaHandles"] = $nvidia.NvidiaHandles
+    $row["HookedPids"] = $nvidia.HookedPids
     [pscustomobject]$row
 }
 
@@ -310,6 +339,10 @@ if ($SelfTest) {
     $heap = Read-HeapInfo " garbage-first heap   total 262144K, used 131072K [0x00000000c0000000, 0x0000000100000000)"
     Check "heap total" ($heap.HeapMB -eq 256)
     Check "heap used" ($heap.HeapUsedMB -eq 128)
+    $heap = Read-HeapInfo " garbage-first heap   total reserved 1048576K, committed 262144K, used 131072K [0x00000000c0000000, 0x0000000100000000)"
+    Check "heap committed and used on JDK 23+" ($heap.HeapMB -eq 256 -and $heap.HeapUsedMB -eq 128)
+    $nvidia = Get-NvidiaSample
+    Check "NVIDIA sample reads (overlay $($nvidia.NvidiaMB) MB, $($nvidia.HookedPids) hooked)" ($nvidia.NvidiaMB -ge 0 -and $nvidia.HookedPids -ge 0)
     $nmt = Read-NativeMemory "Total: reserved=2097152KB, committed=524288KB`n-                 Java Heap (reserved=1048576KB, committed=262144KB)`n-                     Class (reserved=1048576KB, committed=10240KB)`n-                     Arena Chunk (reserved=2048KB, committed=2048KB)"
     Check "native total" ($nmt["NmtMB"] -eq 512)
     Check "native heap part" ($nmt["NmtJavaHeap"] -eq 256)
@@ -378,7 +411,7 @@ foreach ($place in "config\settings.json", "Roaming\Octo\settings.json") {
     [IO.File]::WriteAllText($file, ($settings | ConvertTo-Json -Depth 32), (New-Object System.Text.UTF8Encoding($false)))
 }
 $plan = Join-Path $profileDir "soak.properties"
-$planText = "source=$Source`nlyrics=$Lyrics`nfull=$Full`npauseAfter=$PauseAfter`ncacheAfter=$CacheAfter`nadvance=$Advance`nswitchOutputs=$SwitchOutputs`noutput=$Output`nminiOnly=$(if ($MiniOnly) { 'true' } else { 'false' })`npurgeEvery=$PurgeEvery`ntoggleMiniEvery=$ToggleMiniEvery`nqueue=$($Queue -replace '\\', '/')`n"
+$planText = "source=$Source`nlyrics=$Lyrics`nfull=$Full`npauseAfter=$PauseAfter`ncacheAfter=$CacheAfter`nadvance=$Advance`nswitchOutputs=$SwitchOutputs`noutput=$Output`nminiOnly=$(if ($MiniOnly) { 'true' } else { 'false' })`npurgeEvery=$PurgeEvery`ntoggleMiniEvery=$ToggleMiniEvery`ncalibrate=$(if ($Calibrate) { 'true' } else { 'false' })`nqueue=$($Queue -replace '\\', '/')`n"
 [IO.File]::WriteAllText($plan, $planText)
 
 $gcLog = Join-Path $out "gc.log"
@@ -500,7 +533,7 @@ try {
     $summary = @(
         "Soak $Label ($((Get-Date).ToString('yyyy-MM-dd HH:mm'))): art $Art, wash $Wash (moving $WashMotion), lyrics $Lyrics, full player $Full, $Source, $(if ($Minimized) { 'minimized' } elseif ($MinimizeAfter) { "minimized after $MinimizeAfter min" } else { 'shown' }), $(if ($PauseAfter) { "paused after $PauseAfter min, " })$Advance s a song, $Minutes min, $(if ($cycles) { "$cycles tray or minimize steps, " })JVM extra '$Jvm'",
         "Private MB: start $($regular[0].PrivateMB), 15 min $($mark.PrivateMB), end $($last.PrivateMB), most $(($regular | Measure-Object PrivateMB -Maximum).Maximum), after GC $($after.PrivateMB) (drop $([math]::Round($before.PrivateMB - $after.PrivateMB, 1)))",
-        "Growth MB/h from 15 min: private $(Get-Slope $samples 'PrivateMB'), working set $(Get-Slope $samples 'WorkingSetMB'), outside the JVM $(Get-Slope $samples 'OutsideJvmMB'), JVM total $(Get-Slope $samples 'NmtMB'), heap used $(Get-Slope $samples 'HeapUsedMB'), GPU dedicated $(Get-Slope $samples 'GpuDedicatedMB')",
+        "Growth MB/h from 15 min: private $(Get-Slope $samples 'PrivateMB'), working set $(Get-Slope $samples 'WorkingSetMB'), outside the JVM $(Get-Slope $samples 'OutsideJvmMB'), JVM total $(Get-Slope $samples 'NmtMB'), heap used $(Get-Slope $samples 'HeapUsedMB'), GPU dedicated $(Get-Slope $samples 'GpuDedicatedMB'), GPU committed $(Get-Slope $samples 'GpuCommittedMB'), NVIDIA overlay processes $(Get-Slope $samples 'NvidiaMB')",
         "End: working set $($last.WorkingSetMB), threads $($last.Threads), octo-video threads $($last.VideoThreads), handles $($last.Handles), heap $($last.HeapUsedMB)/$($last.HeapMB), JVM total $($last.NmtMB), outside the JVM $($last.OutsideJvmMB), GPU dedicated $($last.GpuDedicatedMB)",
         "After GC: working set $($after.WorkingSetMB), heap $($after.HeapUsedMB)/$($after.HeapMB), JVM total $($after.NmtMB), outside the JVM $($after.OutsideJvmMB)",
         "Within 300 MB of the 15-minute mark at the end: $([math]::Abs($last.PrivateMB - $mark.PrivateMB) -le 300)"

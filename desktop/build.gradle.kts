@@ -320,7 +320,9 @@ compose.desktop {
             // jdk.accessibility carries the Java Access Bridge, the only way
             // a screen reader on Windows (NVDA, JAWS) can read the app;
             // without it the installed Octo is a blank window to them.
-            modules("java.instrument", "jdk.security.auth", "jdk.unsupported", "jdk.crypto.ec", "java.naming", "java.xml", "jdk.accessibility")
+            // java.management lets the memory log read the JVM's memory
+            // outside the heap and its direct buffers.
+            modules("java.instrument", "jdk.security.auth", "jdk.unsupported", "jdk.crypto.ec", "java.naming", "java.xml", "jdk.accessibility", "java.management")
             windows {
                 iconFile = file("icons/octo.ico")
                 menuGroup = "Octo"
@@ -451,6 +453,11 @@ tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJLinkTask
         // every start, on the thread before the window (measured).
         val release = File(runtime, "release").readText()
         val modules = Regex("MODULES=\"([^\"]*)\"").find(release)?.groupValues?.get(1)?.split(' ')?.toSet().orEmpty()
+        // The memory log reads the JVM's own memory through java.management;
+        // tests run on a full JDK, so only this check sees it missing here.
+        if ("java.management" !in modules) {
+            throw GradleException("The runtime lacks java.management (MODULES: ${modules.ifEmpty { setOf("unreadable") }})")
+        }
         val security = File(runtime, "conf/security/java.security")
         if (modules.isNotEmpty() && security.isFile) {
             val lines = security.readLines()
