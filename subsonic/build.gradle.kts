@@ -3,7 +3,13 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-kotlin { jvmToolchain(17) }
+// Built with Java 25 like the rest, but the Android app uses this module, so
+// its classes stay at Java 17.
+kotlin { jvmToolchain(25) }
+tasks.withType<JavaCompile>().configureEach { options.release = 17 }
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile>().configureEach {
+    compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+}
 
 dependencies {
     api(libs.okhttp)

@@ -12,8 +12,15 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+// Built with Java 25 like the rest, but the Android app uses this module, so
+// its classes stay at Java 17.
+tasks.withType<JavaCompile>().configureEach { options.release = 17 }
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile>().configureEach {
+    compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+}
+
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(25)
 
     android {
         namespace = "app.winters.octo.core"

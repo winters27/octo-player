@@ -10,8 +10,8 @@ plugins {
 }
 
 // Java 25 (LTS): the runtime the installers bundle and the one the app's
-// tests run on. The shared modules it builds on stay on 17, which the
-// Android app needs.
+// tests run on. The shared modules it builds on are built with 25 too but
+// keep Java 17 classes, which the Android app needs.
 val appJavaVersion = 25
 kotlin { jvmToolchain(appJavaVersion) }
 

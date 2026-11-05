@@ -50,7 +50,7 @@ jobs:
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 25
 
       - name: Build number
         run: echo "OCTO_BUILD=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"

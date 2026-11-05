@@ -59,12 +59,7 @@ jobs:
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          # 17 for the shared modules, 25 for the desktop app and its
-          # runtime; Gradle finds both through the toolchains file this
-          # step writes.
-          java-version: |
-            17
-            25
+          java-version: 25
 
       - name: Rust
         run: rustup toolchain install stable --profile minimal
