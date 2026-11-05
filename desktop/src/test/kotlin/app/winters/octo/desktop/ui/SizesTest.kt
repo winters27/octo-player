@@ -32,6 +32,7 @@ class SizesTest {
         "pages/SettingsParts.kt",
         "pages/SettingsNav.kt",
         "pages/SettingsAnchors.kt",
+        "pages/SettingsIndex.kt",
         "pages/SettingsPageView.kt",
         "pages/SettingsPictures.kt",
         "pages/HomeSectionsGroup.kt",

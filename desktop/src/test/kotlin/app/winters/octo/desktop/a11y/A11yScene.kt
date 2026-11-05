@@ -21,6 +21,10 @@ import app.winters.octo.design.ProvideWindowLook
 import app.winters.octo.design.TypingState
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.FakeServer
+import app.winters.octo.desktop.hotkeys.FakeHotkeys
+import app.winters.octo.desktop.settings.AppPlaces
+import app.winters.octo.desktop.system.LocalSystem
+import app.winters.octo.desktop.system.SystemIntegration
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
@@ -63,6 +67,12 @@ class A11yScene(
     player: DesktopPlayer = SilentPlayer(),
     // Around the window, for a test that sets something for all of it.
     wrap: @Composable (@Composable () -> Unit) -> Unit = { it() },
+    // The system the app runs on.
+    os: DesktopOs = DesktopOs.Windows,
+    // Ties to the system (its tray, notifications, mini player, keys from
+    // any app, and Discord in a build with it), made with the app when
+    // asked for; keys are claimed from a pretend system.
+    withSystem: Boolean = false,
 ) : AutoCloseable {
     val server = FakeServer()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -70,6 +80,8 @@ class A11yScene(
     val keyboard = FocusVisibility(keyboard = true)
     val arrows = ArrowKeys()
     lateinit var app: AppState
+    var system: SystemIntegration? = null
+        private set
     val scene: ImageComposeScene
 
     init {
@@ -95,12 +107,15 @@ class A11yScene(
                 Accounts(settings, SessionOnlySecrets(), http),
                 http,
                 scope,
-                DesktopOs.Windows,
+                os,
                 player,
                 OnlineLyrics(http, server.address.toHttpUrl()),
                 restored = server.connection(extensions),
                 listeningRoot = File(folder, "listening"),
             )
+            if (withSystem) {
+                system = SystemIntegration(app, AppPlaces(File(folder, "config").apply { mkdirs() }, File(folder, "cache").apply { mkdirs() }), os, null, hotkeys = FakeHotkeys())
+            }
         }
         waitFor { app.library?.index != null }
         scene = ImageComposeScene(width, height, Density(1f)) {
@@ -108,6 +123,7 @@ class A11yScene(
                 CompositionLocalProvider(
                     LocalTyping provides TypingState(),
                     LocalDensity provides Density(1f, textScale),
+                    LocalSystem provides system,
                 ) { wrap { Shell(app, null) {} } }
             }
         }
@@ -191,6 +207,7 @@ class A11yScene(
 
     override fun close() {
         runCatching { SwingUtilities.invokeAndWait { scene.close() } }
+        system?.let { runCatching { it.shortcuts.close() } }
         scope.cancel()
         server.close()
     }
