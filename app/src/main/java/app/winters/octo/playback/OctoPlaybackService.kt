@@ -322,7 +322,9 @@ class OctoPlaybackService : MediaLibraryService() {
         // A car hears of changes to the lists it has open, each list of what
         // it reads; a change to the library alone waits for a copy to end.
         scope.launch { car.inputs.collect { notifier.changed(it) } }
-        scope.launch { serverSync.syncing.collect { notifier.syncing(it) } }
+        scope.launch {
+            combine(serverSync.syncing, serverSync.copyRun, ::carHoldsLibrary).distinctUntilChanged().collect { notifier.syncing(it) }
+        }
         car.listChanged = { id -> scope.launch { notifier.changedNode(id) } }
         // A switch of server stops the music and brings the other's queue.
         switcher.attach(side)

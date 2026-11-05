@@ -77,12 +77,15 @@ struct SettingsView: View {
     @ViewBuilder
     private var serverRow: some View {
         if let active = session.active, session.client != nil {
-            let problem = feeds.syncProblem
+            // A copy under way says how far it is over an older problem.
+            let run = feeds.copyRun.flatMap { $0.account == active.id ? $0 : nil }
+            let problem = run == nil ? feeds.syncProblem : nil
             let status = problem ?? SettingsSummaries.serverStatus(
                 syncing: feeds.syncing,
                 place: active.homeAddress == nil ? nil : (session.atHome ? .home : .away),
                 syncedAt: syncedAt(active.id),
-                now: now
+                now: now,
+                run: run
             )
             AccountRow(icon: SettingsIcon.cloud, title: active.name, lines: [
                 (active.username.isEmpty ? "Signed in with a key" : active.username, OctoColor.textSecondary),
@@ -131,7 +134,8 @@ struct SettingsView: View {
         let player = settings.player
         let serverLine: String = {
             guard let active = session.active, session.client != nil else { return "Not connected" }
-            return SettingsSummaries.serverStatus(syncing: feeds.syncing, place: nil, syncedAt: syncedAt(active.id), now: now)
+            return SettingsSummaries.serverStatus(syncing: feeds.syncing, place: nil, syncedAt: syncedAt(active.id), now: now,
+                                                  run: feeds.copyRun.flatMap { $0.account == active.id ? $0 : nil })
         }()
         return VStack(spacing: 20) {
             SettingsGroup(title: "Listening", inset: iconRowInset) {

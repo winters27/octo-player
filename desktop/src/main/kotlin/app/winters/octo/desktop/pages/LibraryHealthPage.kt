@@ -39,7 +39,10 @@ import app.winters.octo.desktop.health.healthColumns
 import app.winters.octo.desktop.health.healthRows
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.runFix
+import app.winters.octo.design.Spinner
 import app.winters.octo.desktop.ui.LoadingLine
+import app.winters.octo.desktop.ui.readLine
+import app.winters.octo.desktop.ui.readingAgain
 import app.winters.octo.desktop.ui.PageSide
 import app.winters.octo.desktop.ui.ChoiceButton
 import app.winters.octo.desktop.ui.PageHeader
@@ -118,6 +121,8 @@ fun LibraryHealthPage(app: AppState, visit: Visit) {
 @Composable
 private fun HealthHeader(app: AppState, health: HealthModel, report: HealthReport<Song>, check: HealthCheck?, all: List<Song>) {
     val running = health.running
+    // A fix's read of the library again shows in the same place.
+    val reading = readingAgain(app)
     val trash = health.actions?.canRestore == true
     val fixes = remember(report, check, health.actions, running == null, all) { check?.let { fixesFor(app, health, report, it, all) } }
     PageHeader(
@@ -133,11 +138,14 @@ private fun HealthHeader(app: AppState, health: HealthModel, report: HealthRepor
                 words = "${check.title()} · ${"%,d".format(report.count(check))}",
             )
         }),
-        actions = if (running == null && fixes?.all == null && fixes?.lookUp == null && !trash) null else ({
+        actions = if (running == null && reading == null && fixes?.all == null && fixes?.lookUp == null && !trash) null else ({
             if (running != null) {
                 ProgressRing(running.done.toFloat() / running.total.coerceAtLeast(1), size = IconSize.Table)
                 Txt(running.words, DesktopType.meta, OctoColors.TextSecondary, Modifier.widthIn(max = PageSize.RunningWords))
                 GlazeCapsule(null, "Stop", { health.stop() }, height = ControlHeight.L)
+            } else if (reading != null) {
+                Spinner(size = IconSize.Table)
+                Txt(readLine(reading), DesktopType.meta.copy(fontFeatureSettings = "tnum"), OctoColors.TextSecondary, Modifier.widthIn(max = PageSize.RunningWords))
             } else {
                 fixes?.all?.let { (label, open) -> GlazeCapsule(OctoIcons.Check, label, open, lit = true, height = ControlHeight.L) }
                 fixes?.lookUp?.let { (label, open) -> GlazeCapsule(OctoIcons.Search, label, open, height = ControlHeight.L) }

@@ -57,6 +57,10 @@ class LibraryIntoTest {
             calls += "albums $offset ${page.joinToString(",") { it.id }}"
         }
 
+        override suspend fun albumsListed() {
+            calls += "listed"
+        }
+
         override suspend fun artists(artists: List<Artist>) {
             calls += "artists ${artists.joinToString(",") { it.id }}"
         }
@@ -89,6 +93,53 @@ class LibraryIntoTest {
         assertEquals(listOf("albums 0 a1,a2", "albums 2 a2"), sink.calls.filter { it.startsWith("albums") })
         assertEquals(listOf("artists ar1,ar2"), sink.calls.filter { it.startsWith("artists") })
         assertEquals(listOf("search3 0", "search3 2", "search3 4"), asked.filter { it.startsWith("search3") })
+        // Listed once, right after the last album page.
+        val albumCalls = sink.calls.filter { it.startsWith("albums") || it == "listed" }
+        assertEquals(listOf("albums 0 a1,a2", "albums 2 a2", "listed"), albumCalls)
+    }
+
+    // A read into memory says how far it is after each page, then the songs
+    // it kept once whole.
+    @Test
+    fun aWholeReadSaysHowFarItIsThenTheSongsKept() = runTest {
+        serve { endpoint, request ->
+            val offset = request.url.queryParameter("offset") ?: request.url.queryParameter("songOffset")
+            when (endpoint) {
+                "getAlbumList2" -> albums("a1")
+                "getArtists" -> artists
+                "search3" -> when (offset) {
+                    "0" -> songs("s1", "x1")
+                    "2" -> songs("s1", "s2")
+                    else -> songs("s3")
+                }
+                else -> error("Unexpected $endpoint")
+            }
+        }
+        val heard = Collections.synchronizedList(mutableListOf<ReadProgress>())
+        val library = client().readLibrary(page = 2) { heard += it }
+        assertEquals(3, library.songs.size)
+        // Songs outside the library never count; a repeat counts until the end.
+        assertEquals(listOf(1L, 3L, 4L), heard.filter { !it.whole }.map { it.songs }.filter { it > 0 }.distinct())
+        assertEquals(ReadProgress(3, 0, whole = true), heard.last())
+    }
+
+    @Test
+    fun albumsAreListedBeforeAnySongReadAlbumByAlbum() = runTest {
+        serve { endpoint, request ->
+            when (endpoint) {
+                "getAlbumList2" -> if (request.url.queryParameter("offset") == "0") albums("a1", "a2") else albums("a3")
+                "getArtists" -> artists
+                "search3" -> songs()
+                "getAlbum" -> request.url.queryParameter("id")!!.let { album(it, "$it-1") }
+                else -> error("Unexpected $endpoint")
+            }
+        }
+        val sink = Recording()
+        client().readLibraryInto(sink, page = 2)
+        val listed = sink.calls.indexOf("listed")
+        assertEquals(1, sink.calls.count { it == "listed" })
+        assertEquals(sink.calls.indexOfLast { it.startsWith("albums") } + 1, listed)
+        assertEquals(true, sink.calls.indexOfFirst { it.startsWith("songs") } > listed)
     }
 
     @Test

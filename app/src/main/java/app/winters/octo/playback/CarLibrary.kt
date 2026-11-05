@@ -169,8 +169,17 @@ class CarLibrary @Inject constructor(
             CarInput.LibraryOnly to player.prefs.map { it.libraryOnly },
             CarInput.Offer to serverQueue.offer.map(::resumeOfferKey),
             CarInput.CoverStyle to artSettings.style,
+            CarInput.Copy to combine(serverSync.copyWait, serverSync.copyRun, ::carCopyKey),
         ),
     )
+
+    // The first copy's status row while the server's music is still to
+    // come, or null.
+    private fun copyStatus(): MediaItem? {
+        if (serverSync.copyWait.value?.awaiting != true) return null
+        val account = (sessions.state.value as? SessionState.SignedIn)?.session?.id
+        return look.copyStatus(serverSync.copyRun.value?.takeIf { it.account == account && it.whole })
+    }
 
     // The whole answer for a list a car opened, before it is cut into the
     // page asked for. `limit` is the most tabs this car shows; `ownAccord`
@@ -191,7 +200,11 @@ class CarLibrary @Inject constructor(
             CarNode.Charts -> shelves.current().charts.map(look::chart)
             is CarNode.Part -> partOf(node)
             is CarNode.Heading -> listed(node.parent, ownAccord)?.let { carLetterAnswer(node, it, splitRows) }.orEmpty()
-            else -> listed(node, ownAccord)?.let { carListAnswer(node, it, splitRows) }.orEmpty()
+            else -> listed(node, ownAccord)?.let { list ->
+                // An empty library list says the server's music is on its way while it is.
+                val coming = carCopyAnswer(node, list.count, ::copyStatus)
+                if (coming != null) listOf(coming) else carListAnswer(node, list, splitRows)
+            }.orEmpty()
         }
     }
 
@@ -512,8 +525,9 @@ class CarLibrary @Inject constructor(
         val order = homePrefs.homeSections.first()
         val empty = catalog.libraryTrackCount().first() == 0
         val shelvesNow = homeShelves(carHomeWanted(order, empty))
-        val resume = serverQueue.offer.value?.let(look::resume)
-        return carHomeAnswer(resume, carHomeShelves(order, shelvesNow, empty), homeParts)
+        // A first copy on its way leads Home, as on the phone.
+        val lead = copyStatus() ?: serverQueue.offer.value?.let(look::resume)
+        return carHomeAnswer(lead, carHomeShelves(order, shelvesNow, empty), homeParts)
     }
 
     private val homeParts = CarHomeParts(

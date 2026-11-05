@@ -267,19 +267,25 @@ enum class CarInput {
     LibraryOnly,
     CoverStyle,
     Offer,
+    Copy,
 }
 
 // The inputs a list reads. Play history is none of them, so Recently played
 // and Most played stay as they are while the car shows them.
 fun carInputsOf(node: CarNode): Set<CarInput> = when (node) {
-    CarNode.Home, is CarNode.Shelf -> setOf(
+    CarNode.Home -> setOf(
+        CarInput.Library, CarInput.Playlists, CarInput.Favorites, CarInput.Kept, CarInput.Shelves,
+        CarInput.HomeOrder, CarInput.Pins, CarInput.Adopted, CarInput.Downloads, CarInput.Offer, CarInput.CoverStyle, CarInput.Copy,
+    )
+    is CarNode.Shelf -> setOf(
         CarInput.Library, CarInput.Playlists, CarInput.Favorites, CarInput.Kept, CarInput.Shelves,
         CarInput.HomeOrder, CarInput.Pins, CarInput.Adopted, CarInput.Downloads, CarInput.Offer, CarInput.CoverStyle,
     )
     CarNode.Radio -> setOf(CarInput.Kept, CarInput.Shelves)
     CarNode.Playlists -> setOf(CarInput.Playlists, CarInput.Liked, CarInput.LiveLists, CarInput.Shelves, CarInput.Sorts, CarInput.CoverStyle)
-    CarNode.Albums, CarNode.Artists, CarNode.Genres, is CarNode.Genre -> setOf(CarInput.Library, CarInput.Sorts)
-    CarNode.Songs -> setOf(CarInput.Library, CarInput.Sorts, CarInput.Downloads)
+    CarNode.Albums, CarNode.Artists, CarNode.Genres -> setOf(CarInput.Library, CarInput.Sorts, CarInput.Copy)
+    is CarNode.Genre -> setOf(CarInput.Library, CarInput.Sorts)
+    CarNode.Songs -> setOf(CarInput.Library, CarInput.Sorts, CarInput.Downloads, CarInput.Copy)
     CarNode.FavoriteAlbums, CarNode.FavoriteArtists -> setOf(CarInput.Favorites, CarInput.Sorts)
     CarNode.Liked -> setOf(CarInput.Liked, CarInput.Sorts, CarInput.Downloads)
     CarNode.Downloads -> setOf(CarInput.Downloads, CarInput.Sorts)

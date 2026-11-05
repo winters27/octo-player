@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import OctoKit
+import UIKit
 
 /// When a server's library was last copied, and how much came.
 struct LastSync: Equatable {
@@ -25,6 +26,34 @@ struct SyncAccount: Equatable {
     var sourceId: String
 }
 
+/// The few seconds iOS gives an app that leaves while a copy runs. It ends when the copy ends or
+/// when the time is up, whichever comes first: a hand-over still open when the time runs out gets
+/// the app ended by the system.
+@MainActor
+private final class HandOver {
+    private var id = UIBackgroundTaskIdentifier.invalid
+
+    init() {
+        id = UIApplication.shared.beginBackgroundTask(withName: "Library copy") { [weak self] in
+            MainActor.assumeIsolated { self?.end() }
+        }
+    }
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
+    }
+}
+
+/// What started a copy. Only one the listener asked for (signing in, Sync now, a switch of
+/// server) asks the system to keep it going in the background; an automatic one waits for the app.
+enum SyncOrigin {
+    case signIn, asked, switched, auto
+
+    var keepsGoing: Bool { self != .auto }
+}
+
 /// Keeps a copy of each kept server's library beside the phone's music: copied after signing in,
 /// at app start when the last copy is old, and when asked. Only the server in use joins the
 /// library; the others' copies wait for a switch, which then needs no new copy unless it is old.
@@ -38,6 +67,15 @@ final class ServerSync {
     private(set) var problem: String?
     /// The last copy of the server in use.
     private(set) var last: LastSync?
+    /// How far the copy running is, and how the last first copy ended. Changed only by a copy
+    /// starting (`sync`) and through `note`.
+    private(set) var ledger = CopyLedger()
+    /// Whether the server in use's music is still to come: no whole copy of its address was ever
+    /// taken in. Nil until read; false signed out.
+    private(set) var awaiting: Bool?
+
+    var copyRun: CopyRunState? { ledger.run }
+    var copyOutcome: CopyOutcome? { ledger.outcome }
 
     @ObservationIgnored private let session: Session
     @ObservationIgnored private let library: Library
@@ -75,24 +113,28 @@ final class ServerSync {
     func start() {
         guard !started else { return }
         started = true
-        watch = Watch({ [weak self] in self?.account }) { [weak self] account in self?.arrive(account) }
-        arrive(account)
+        // A server signed in to or switched to after launch is one the listener chose.
+        watch = Watch({ [weak self] in self?.account }) { [weak self] account in self?.arrive(account, origin: .switched) }
+        arrive(account, origin: .auto)
     }
 
-    private func arrive(_ account: SyncAccount?) {
+    private func arrive(_ account: SyncAccount?, origin: SyncOrigin) {
         let previous = arriving
         arriving = Task { [weak self] in
             await previous?.value
-            await self?.arrived(account)
+            await self?.arrived(account, origin: origin)
         }
     }
 
     /// Another server (or none) is in use: a copy of the last one stops, the library becomes the
     /// new one's, and its copy is made again when old.
-    private func arrived(_ account: SyncAccount?) async {
+    private func arrived(_ account: SyncAccount?, origin: SyncOrigin) async {
         job?.cancel()
         await job?.value
         problem = nil
+        // How the last server's first copy ended is not this one's.
+        note { $0.clearOutcome() }
+        awaiting = account.map { prefs.string("copy_of", $0.sourceId) == nil } ?? false
         await dropUnkept()
         let want = account?.sourceId ?? ""
         library.serverInUse = account?.sourceId
@@ -102,7 +144,7 @@ final class ServerSync {
         }
         library.ready = account?.id ?? phoneLibrary
         refreshLast()
-        if let account, stale(account) { syncNow() }
+        if let account, stale(account) { syncNow(origin: origin) }
     }
 
     /// Whether the server's copy should be made again: never made, made by an older version, old,
@@ -114,19 +156,42 @@ final class ServerSync {
             || epochNowMs() - at > staleMs
     }
 
-    /// Starts a copy unless one is already running.
-    func syncNow() {
+    /// Starts a copy unless one is already running. `origin` says who asked: only the listener's
+    /// own asks keep going in the background.
+    func syncNow(origin: SyncOrigin = .auto) {
         guard job == nil else { return }
         job = Task { [weak self] in
-            await self?.sync()
+            await self?.sync(origin: origin)
             self?.job = nil
         }
     }
 
+    /// Try again on a first copy that failed: its card goes and a copy starts.
+    func tryAgain() {
+        note { $0.clearOutcome() }
+        syncNow(origin: .asked)
+    }
+
+    /// The done card of the copy `token` was put away, or seen and left.
+    func dismissCopy(_ token: Int) { note { $0.dismiss(token) } }
+
+    /// The system's time for the copy `token` in the background ran out: a first copy says it
+    /// stopped, and the copy stops.
+    func cutOff(_ token: Int) {
+        note { $0.failed(token, CopyWords.cutOff) }
+        job?.cancel()
+    }
+
+    /// Every change to the copy's state goes through here, and on to the system's own progress.
+    private func note(_ change: (inout CopyLedger) -> Void) {
+        change(&ledger)
+        CopyNotices.progressed(ledger.run)
+    }
+
     /// Starts a copy unless one is already running, and waits for it to end. Answers why it
     /// failed, in words, or nil when it worked.
-    func syncNowAndWait() async -> String? {
-        syncNow()
+    func syncNowAndWait(origin: SyncOrigin = .auto) async -> String? {
+        syncNow(origin: origin)
         await job?.value
         return problem
     }
@@ -138,7 +203,7 @@ final class ServerSync {
             guard let self else { return }
             self.job?.cancel()
             await self.job?.value
-            self.syncNow()
+            self.syncNow(origin: .asked)
         }
     }
 
@@ -195,21 +260,50 @@ final class ServerSync {
         }
     }
 
-    private func sync() async {
+    private func sync(origin: SyncOrigin) async {
         guard let account, let client = session.client else { return }
         let sourceId = account.sourceId
         let folder = musicFolder(account.id)
+        let server = session.active.map { serverName(label: $0.label ?? "", address: $0.address.absoluteString) } ?? ""
         syncing = true
-        defer { syncing = false }
+        let token = ledger.begin(account: account.id, server: server, arriving: prefs.string("copy_of", sourceId) == nil)
+        CopyNotices.progressed(ledger.run)
+        CopyNotices.cancelClosing()
+        // A few seconds to hand over to the system's own task, or to finish, if the app leaves.
+        let handOver = HandOver()
+        if origin.keepsGoing, UIApplication.shared.applicationState == .active { CopyNotices.keepGoing(token, sync: self) }
+        defer {
+            syncing = false
+            CopyNotices.ended(token, outcome: ledger.outcome)
+            note { $0.end(token) }
+            handOver.end()
+        }
+        // Building and saving report from the store's own executor.
+        let built: @Sendable (Double) -> Void = { part in Task { @MainActor [weak self] in self?.note { $0.built(token, part) } } }
         do {
-            let read = try await client.readLibrary(folder: folder)
+            let read = try await client.readLibrary(folder: folder) { progress in
+                Task { @MainActor [weak self] in self?.note { $0.read(token, progress) } }
+            }
             try Task.checkCancellation()
-            let catalog = await Task.detached(priority: .utility) { buildServerCatalog(sourceId, read) }.value
+            note { $0.building(token) }
+            let catalog = await Task.detached(priority: .utility) { buildServerCatalog(sourceId, read) { part in built(0.15 * part) } }.value
+            note {
+                $0.staged(token, songs: catalog.tracks.count, albums: catalog.albums.count)
+                $0.built(token, 0.15)
+            }
             try Task.checkCancellation()
-            try await library.store.replaceSource(sourceId, tracks: catalog.tracks, albums: catalog.albums, artists: catalog.artists)
-            try await library.store.rebuild(serverInUse: sourceId)
-            for step in steps {
+            try await library.store.replaceSource(sourceId, tracks: catalog.tracks, albums: catalog.albums, artists: catalog.artists) { part in
+                built(0.15 + 0.35 * part)
+            }
+            try await library.store.rebuild(serverInUse: sourceId) { part in built(0.5 + 0.5 * part) }
+            // The address's music is in the library: a whole copy of it was taken in, whatever
+            // the steps after it do.
+            prefs.set(account.id, "copy_of", sourceId)
+            awaiting = false
+            note { $0.swapped(token) }
+            for (index, step) in steps.enumerated() {
                 if Task.isCancelled { break }
+                note { $0.settling(token, Double(index + 1) / Double(steps.count + 1)) }
                 await step.run()
             }
             // A copy cut short saves nothing of itself, so it is made again.
@@ -219,13 +313,15 @@ final class ServerSync {
             prefs.set(catalog.tracks.count, "songs", account.id)
             prefs.set(catalog.albums.count, "albums", account.id)
             prefs.set(rowsVersion, "rows_version", account.id)
-            prefs.set(account.id, "copy_of", sourceId)
             problem = nil
             refreshLast()
+            note { $0.done(token) }
         } catch let error where isCancellation(error) {
             // A copy stopped says nothing.
         } catch {
-            problem = userMessage(error)
+            let words = userMessage(error)
+            problem = words
+            note { $0.failed(token, words) }
         }
     }
 

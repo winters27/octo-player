@@ -44,6 +44,8 @@ import app.winters.octo.desktop.library.totalLengthText
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.ui.PageLoadingLine
+import app.winters.octo.desktop.ui.ReadAgainLine
+import app.winters.octo.desktop.ui.readingAgain
 import app.winters.octo.desktop.ui.FilterBar
 import app.winters.octo.desktop.ui.LocalBottomRoom
 import app.winters.octo.desktop.ui.NoMatches
@@ -170,8 +172,12 @@ private fun GenreBody(
             order = order,
             onSort = { order = it },
             empty = {
+                val reading = readingAgain(app)
                 if (query.filters && contents.songs.isNotEmpty()) {
                     NoMatches { filter(query.cleared()) }
+                } else if (reading != null) {
+                    // The read asked for here shows here.
+                    ReadAgainLine(reading, Modifier.padding(vertical = Space.Xxl))
                 } else NextStep(
                     "No songs in $name",
                     "The library may have changed since it was read.",

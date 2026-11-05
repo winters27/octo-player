@@ -134,7 +134,7 @@ private const val SettleBelow = 0.2f
 // a minute before it settles; it stops with the ring when the ring leaves
 // the screen, and breathes again when the app comes back.
 @Composable
-private fun rememberPauseBreath(on: Boolean): FloatState {
+internal fun rememberPauseBreath(on: Boolean): FloatState {
     val breath = remember { mutableFloatStateOf(1f) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(on, lifecycle) {

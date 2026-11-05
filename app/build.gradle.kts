@@ -102,7 +102,10 @@ tasks.withType<Test>().configureEach {
         maxHeapSize = (project.findProperty("octoHeapProof") as String).ifEmpty { "256m" }
         systemProperty("octo.heapProof", "true")
     }
-    if (project.hasProperty("octoProofServer")) systemProperty("octo.proofServer", "true")
+    if (project.hasProperty("octoProofServer")) {
+        systemProperty("octo.proofServer", (project.findProperty("octoProofServer") as String).ifEmpty { "true" })
+        project.findProperty("octoProofDelay")?.let { systemProperty("octo.proofDelay", it as String) }
+    }
     // The grep gate reads the app's own sources.
     systemProperty("octo.mainSources", file("src/main/java").absolutePath)
     // Each proof class gets a fresh JVM, so one's peak heap never counts in another's.

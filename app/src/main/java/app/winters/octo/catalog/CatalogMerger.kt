@@ -28,6 +28,18 @@ internal class MergeSource(val sourceId: String, val rank: Int, val staged: Bool
     val artistTable get() = if (staged) "stage_artist" else "source_artist"
 }
 
+// Hears how far a merge is: each page of a source's songs placed, then
+// once every song is.
+internal interface MergeProgress {
+    fun page(source: MergeSource, rows: Int) {}
+
+    fun placed() {}
+
+    companion object {
+        val None: MergeProgress = object : MergeProgress {}
+    }
+}
+
 // Merges the sources into one library, so something on the phone and on a
 // server shows once. The library comes out in merge_candidate (songs),
 // album_next and artist_next, and which library song each copy became in
@@ -68,7 +80,7 @@ internal class CatalogMerger(
     private val work: WorkDao,
     private val hooks: () -> MergeHooks,
 ) {
-    suspend fun merge(sources: List<MergeSource>): MergeCounts {
+    suspend fun merge(sources: List<MergeSource>, progress: MergeProgress = MergeProgress.None): MergeCounts {
         work.clearMergeWork()
 
         // Artists and albums match only across sources: two a source keeps
@@ -106,10 +118,12 @@ internal class CatalogMerger(
                     firstWritten = true
                     hooks().firstOutputWritten()
                 }
+                progress.page(source, page.size)
                 val last = page.last()
                 after = PageKey(last.albumOrder, last.seq, last.id)
             }
         }
+        progress.placed()
 
         orderMixedAlbums(placed)
         val albumCount = writeAlbums(albumBases, artistIdFor, placed)

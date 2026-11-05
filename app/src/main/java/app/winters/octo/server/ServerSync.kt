@@ -1,11 +1,11 @@
 package app.winters.octo.server
 
-import android.app.Activity
 import android.app.Application
 import android.content.Context
-import android.os.Bundle
+import android.content.Intent
 import android.os.SystemClock
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
@@ -24,6 +24,7 @@ import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.data.StoredServer
 import app.winters.octo.data.userMessage
+import app.winters.octo.device.DEVICE
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playlists.PlaylistSync
@@ -37,6 +38,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -46,6 +48,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -53,12 +56,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -206,6 +209,57 @@ internal suspend fun copyPlan(sourceId: String, copyAllAnyway: Boolean, finish: 
     return copyAllAnyway || need() != CopyNeed.AfterSync
 }
 
+// Why a copy failed, in words.
+internal fun copyProblem(e: Exception): String = if (e is StageAborted) e.reason else e.userMessage()
+
+// One copy of a sync job, start to end, as `tracker` shows it: it starts at
+// Connect with `guess` at whether it copies the whole library, learns what
+// it copies from `plan` (null while a failed switch still fails, which a
+// first copy says), tells `planned`, runs, and says how it ended. Answers
+// what `plan` said. A job whose run another took over still copies,
+// unseen.
+internal suspend fun copyPass(
+    tracker: CopyTracker,
+    token: Long,
+    arriving: suspend () -> Boolean,
+    guess: Boolean,
+    plan: suspend () -> Boolean?,
+    planned: (whole: Boolean) -> Unit = {},
+    run: suspend (copyAll: Boolean, report: CopyReport) -> Unit,
+): Boolean? {
+    val pass = tracker.nextPass(token, arriving(), guess) ?: -1
+    try {
+        val copyAll = plan()
+        if (copyAll == null) {
+            tracker.passFailed(token, pass, SWITCH_PROBLEM)
+            return null
+        }
+        tracker.planned(token, pass, arriving(), copyAll)
+        planned(copyAll)
+        run(copyAll, tracker.report(token, pass))
+        tracker.passDone(token, pass)
+        return copyAll
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        tracker.passFailed(token, pass, copyProblem(e))
+        throw e
+    }
+}
+
+// Leaving the front (not a turn of the screen) during a whole copy starts
+// its notice, which keeps it going.
+internal fun leaveStartsNotice(run: CopyRunState?): Boolean = run?.whole == true
+
+// So does a whole copy planned while the app is away. A service already up
+// may be stopping, and a start of one that runs on only keeps it.
+internal fun plannedStartsNotice(whole: Boolean, away: Boolean): Boolean = whole && away
+
+// Whether the server in use's music is still to come (signed in, and no
+// whole copy of its address was ever taken in), and whether the phone has
+// music of its own; `sourceId` is the address it was read for ("" signed out).
+data class CopyWait(val awaiting: Boolean, val phoneMusic: Boolean, val sourceId: String = "")
+
 // A copy older than this is made again when the app starts or comes to the
 // front.
 internal const val STALE_MS =6 * 60 * 60 * 1000L
@@ -253,7 +307,8 @@ class ServerSync @Inject constructor(
     private val downloads: Downloads,
     private val playlists: PlaylistSync,
     private val offline: OfflineDownloads,
-) {
+    private val tracker: CopyTracker,
+) : CopySource {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val dropLock = Mutex()
     private var job: Job? = null
@@ -271,6 +326,21 @@ class ServerSync @Inject constructor(
     // while one is.
     @Volatile private var foreground = false
     private var looks: Job? = null
+
+    // The same, for what follows the app leaving the front (the copy's
+    // notice): in front turns false only when the app leaves, never while a
+    // screen turns or changes size.
+    private val front = CopyFront({ tracker.run.value }, ::startCopyNotice)
+    override val inFront: StateFlow<Boolean> = front.inFront
+
+    // How far the copy running is, and how the last first copy ended.
+    override val copyRun: StateFlow<CopyRunState?> = tracker.run
+    val copyOutcome: StateFlow<CopyOutcome?> = tracker.outcome
+
+    // The copy's notice posted plainly, when the system would not start
+    // the copy's service; it posts only while it is the one kept here.
+    private val plainLock = Any()
+    private var plainNotice: Job? = null
 
     private val _syncing = MutableStateFlow(false)
     val syncing: StateFlow<Boolean> = _syncing
@@ -295,15 +365,35 @@ class ServerSync @Inject constructor(
         .map { row -> row?.takeIf { it.syncedAt > 0 }?.let { LastSync(it.sourceId, it.syncedAt, it.songs, it.albums) } }
         .distinctUntilChanged()
 
+    // Whether the server in use's music is still to come, and whether the
+    // phone has music of its own; null until read. A copy taken in by an
+    // older version counts by its record until the record moves into the
+    // database. Signed out, nothing is to come.
+    val copyWait: StateFlow<CopyWait?> = copyWaitOf(
+        sessions.state.map { state ->
+            when (state) {
+                SessionState.Loading -> null
+                SessionState.SignedOut -> ""
+                is SessionState.SignedIn -> state.session.sourceId
+            }
+        },
+        // Read again for each copy that starts, so one failed read lasts only until then.
+        again = tracker.run.map { it?.token },
+        state = { sourceId -> copies.copyState(sourceId, DEVICE) },
+        older = { sourceId -> context.syncData.data.map { it[copyOfKey(sourceId)] } },
+    ).stateIn(scope, SharingStarted.Eagerly, null)
+
     fun start() {
         if (started) return
         started = true
-        (context.applicationContext as? Application)?.registerActivityLifecycleCallbacks(ForegroundCallbacks())
+        (context.applicationContext as? Application)?.registerActivityLifecycleCallbacks(ForegroundCallbacks(::cameToFront, ::wentAway))
         scope.launch {
             // The kept servers are known once the saved sign-in is read.
             sessions.state.first { it !is SessionState.Loading }
-            takeInOneServersRecord()
-            moveCopyRecords()
+            // A record that cannot be moved (a full disk, say) stays where it
+            // is and is read from there; the servers are followed either way.
+            orNoted { takeInOneServersRecord() }
+            orNoted { moveCopyRecords() }
             sessions.state
                 .filter { it !is SessionState.Loading }
                 .map { (it as? SessionState.SignedIn)?.session }
@@ -321,6 +411,8 @@ class ServerSync @Inject constructor(
     private suspend fun arrived(session: Session?) {
         synchronized(this) { job }?.cancelAndJoin()
         _problem.value = null
+        // How the last server's first copy ended is not this one's.
+        tracker.clearOutcome()
         orNoted { dropUnkept() }
         arrive(
             session?.id,
@@ -339,9 +431,34 @@ class ServerSync @Inject constructor(
     private suspend fun need(session: Session): CopyNeed =
         copyNeed(copies.accountSync(session.id), copies.copyOf(session.sourceId), session.id, session.sourceId, System.currentTimeMillis())
 
+    // No whole copy of the server's address was ever taken in, so none of
+    // its music is here yet. An older version's record counts until it
+    // moves into the database. Unreadable, the last read of this address says.
+    private suspend fun arriving(session: Session): Boolean = readOr(copyWait.value?.takeIf { it.sourceId == session.sourceId }?.awaiting == true) {
+        arrivingFrom(copies.copyOf(session.sourceId), context.syncData.data.first()[copyOfKey(session.sourceId)])
+    }
+
+    // Whether a copy that may copy whole (`whole`, asked for) reads the
+    // whole library, before its switch is finished; counted as whole when
+    // that cannot be told.
+    private suspend fun copiesWhole(session: Session, whole: Boolean): Boolean =
+        whole || readOr(true) { need(session) != CopyNeed.AfterSync }
+
     // Copies the whole library unless a copy is already running; that one
     // then copies whole before it ends (WholeCopyOwed).
     fun syncNow() = startSync(whole = true)
+
+    // Try again on a first copy that failed: its card goes and a copy starts.
+    fun tryAgain() {
+        tracker.clearOutcome()
+        syncNow()
+    }
+
+    // The done card of the run `token` was put away.
+    fun dismissCopy(token: Long) = tracker.dismiss(token)
+
+    // The done card of the first copy `token` was seen, and Home was left.
+    fun copySeen(token: Long) = tracker.clearArrived(token)
 
     // What an automatic start needs (arrival, freshen): only the steps after
     // a copy when those are all that is owed.
@@ -359,6 +476,15 @@ class ServerSync @Inject constructor(
     // Answers why it failed, in words, or null when it worked.
     suspend fun syncNowAndWait(): String? {
         syncNow()
+        synchronized(this) { job }?.join()
+        return _problem.value
+    }
+
+    // The same, unless a whole copy for the account in use runs already:
+    // that one is waited for instead, so a pull during a copy asks for no
+    // second one.
+    suspend fun copyAfreshAndWait(): String? {
+        if (!pullWaits(tracker.run.value, signedIn()?.id)) return syncNowAndWait()
         synchronized(this) { job }?.join()
         return _problem.value
     }
@@ -558,33 +684,95 @@ class ServerSync @Inject constructor(
     private suspend fun sync() {
         val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return
         _syncing.value = true
+        // From its first moment the run says what its first copy will likely
+        // be, so a copy of only the steps never shows as a whole one.
+        val token = tracker.begin(session.id, session.name, arriving(session), copiesWhole(session, wholeOwed.owed(session.id) != null))
+        // How the last copy ended is old news once another starts.
+        CopyNotices.cancel(context, CopyNotices.COPY_CLOSING)
         try {
             copyUntilWhole(wholeOwed, session.id) { whole, swapped ->
                 val started = SystemClock.elapsedRealtime()
+                var done: CopyDone? = null
                 // While a failed switch still fails, its words show and nothing is copied.
-                val copyAll = copyPlan(session.sourceId, whole, switch::finish) { need(session) } ?: return@copyUntilWhole null
-                val done = CopyRun(copy, copies, afterSyncSteps()).run(session.id, session.sourceId, session.client, copyAll, swapped)
+                val copyAll = copyPass(
+                    tracker,
+                    token,
+                    arriving = { arriving(session) },
+                    guess = copiesWhole(session, whole),
+                    plan = { copyPlan(session.sourceId, whole, switch::finish) { need(session) } },
+                    planned = front::planned,
+                ) { copyAll, report ->
+                    done = CopyRun(copy, copies, afterSyncSteps()).run(session.id, session.sourceId, session.client, copyAll, swapped, report)
+                } ?: return@copyUntilWhole null
                 lookedAt[session.id] = SystemClock.elapsedRealtime()
                 _problem.value = null
                 // Counts only, like the phone scan's line.
                 Log.i(
                     "Octo",
-                    "server sync: ${if (copyAll) "copy" else "steps after a copy"}, ${done.songs} tracks, ${done.albums} albums, " +
+                    "server sync: ${if (copyAll) "copy" else "steps after a copy"}, ${done?.songs} tracks, ${done?.albums} albums, " +
                         "${SystemClock.elapsedRealtime() - started} ms",
                 )
                 copyAll
             }
         } catch (e: CancellationException) {
             throw e
-        } catch (e: StageAborted) {
-            _problem.value = e.reason
-            Log.w("Octo", "server sync failed: the merge could not swap the copy in")
         } catch (e: Exception) {
-            _problem.value = e.userMessage()
-            Log.w("Octo", "server sync failed: ${e.javaClass.simpleName}")
+            _problem.value = copyProblem(e)
+            Log.w("Octo", if (e is StageAborted) "server sync failed: the merge could not swap the copy in" else "server sync failed: ${e.javaClass.simpleName}")
         } finally {
             _syncing.value = false
+            tracker.end(token)
+            stopPlainNotice()
+            // While the app is away, a first copy says how it ended.
+            val ended = tracker.outcome.value?.takeIf { it.token == token }
+            if (ended != null && !front.inFront.value) CopyNotices.closing(context, ended)
         }
+    }
+
+    // Starts the copy's service, which keeps a whole copy going while the
+    // app is away with a notice of how far it is. When the system will not
+    // start it, the same notice is posted plainly instead, unless a service
+    // that is not stopping shows it already.
+    private fun startCopyNotice() {
+        try {
+            ContextCompat.startForegroundService(context, Intent(context, CopyService::class.java))
+        } catch (e: IllegalStateException) {
+            Log.w("Octo", "copy service refused: ${e.javaClass.simpleName}")
+            if (!CopyService.keeping) postPlainNotice()
+        } catch (e: SecurityException) {
+            Log.w("Octo", "copy service refused: ${e.javaClass.simpleName}")
+            if (!CopyService.keeping) postPlainNotice()
+        }
+    }
+
+    // The copy's notice without its service, posted again when it says
+    // something new, until the copy ends or the app comes back.
+    private fun postPlainNotice() {
+        synchronized(plainLock) {
+            if (plainNotice?.isActive == true) return
+            val notice = scope.launch(start = CoroutineStart.LAZY) {
+                val me = coroutineContext[Job]
+                var shown: NoticeKey? = null
+                tracker.run.collect { run ->
+                    if (run == null || !run.whole || CopyNotices.dismissed) return@collect
+                    val key = noticeKey(run)
+                    if (key == shown) return@collect
+                    shown = key
+                    // Stopped meanwhile, it posts nothing more.
+                    synchronized(plainLock) {
+                        if (plainNotice === me) CopyNotices.post(context, CopyNotices.COPY_CLOSING, CopyNotices.copy(context, copyNotice(run)))
+                    }
+                }
+            }
+            plainNotice = notice
+            notice.start()
+        }
+    }
+
+    private fun stopPlainNotice() {
+        val notice = synchronized(plainLock) { plainNotice.also { plainNotice = null } } ?: return
+        notice.cancel()
+        CopyNotices.cancel(context, CopyNotices.COPY_CLOSING)
     }
 
     // What follows every copy, in order: likes and stars brought together
@@ -676,6 +864,10 @@ class ServerSync @Inject constructor(
     // asked while no screen is showing.
     private fun cameToFront() {
         foreground = true
+        front.came()
+        // The app says it all itself now; the copy's service stops on its own.
+        stopPlainNotice()
+        CopyNotices.cancel(context, CopyNotices.COPY_CLOSING)
         synchronized(this) {
             looks?.cancel()
             looks = scope.launch {
@@ -687,33 +879,15 @@ class ServerSync @Inject constructor(
         }
     }
 
-    private fun wentAway() {
+    // `turning`: the last screen stopped only to come back at once in
+    // another shape (a turn, a resize), so the app has not left.
+    private fun wentAway(turning: Boolean) {
         foreground = false
         synchronized(this) {
             looks?.cancel()
             looks = null
         }
-    }
-
-    private inner class ForegroundCallbacks : Application.ActivityLifecycleCallbacks {
-        private val started = AtomicInteger(0)
-
-        override fun onActivityStarted(activity: Activity) {
-            if (started.incrementAndGet() == 1) cameToFront()
-        }
-
-        override fun onActivityStopped(activity: Activity) {
-            if (started.decrementAndGet() <= 0) {
-                started.set(0)
-                wentAway()
-            }
-        }
-
-        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
-        override fun onActivityResumed(activity: Activity) = Unit
-        override fun onActivityPaused(activity: Activity) = Unit
-        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
-        override fun onActivityDestroyed(activity: Activity) = Unit
+        front.left(turning)
     }
 
     private companion object {

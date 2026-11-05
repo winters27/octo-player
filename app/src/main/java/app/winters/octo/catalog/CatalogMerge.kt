@@ -15,6 +15,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -28,6 +30,11 @@ data class MergeCounts(val tracks: Int, val albums: Int, val artists: Int)
 
 // A copy of a source's library that was not swapped in, and why, in words.
 class StageAborted(val reason: String) : Exception(reason)
+
+// How far a merge is with a copy it claimed: `placed` of the copy's `of`
+// songs, then `saving` once every song is placed (albums, artists and the
+// swap are left).
+data class StageProgress(val sourceId: String, val generation: Long, val placed: Int, val of: Int, val saving: Boolean)
 
 // The space a swap takes per song, measured (SwapSpaceTest), and asked for
 // twice over before a copy is swapped in.
@@ -47,6 +54,9 @@ internal open class MergeHooks {
     open fun merged() {}
 
     open fun skipped() {}
+
+    // Every write of how far the merge is with a claimed copy.
+    open fun progress(progress: StageProgress?) {}
 }
 
 // Rebuilds the library the screens read from what the sources have, after
@@ -104,6 +114,12 @@ class CatalogMerge internal constructor(
 
     // How each copy waiting to be swapped in ended, by source and generation.
     private val stages = HashMap<Pair<String, Long>, CompletableDeferred<Unit>>()
+
+    // How far the merge holding a claim is with the copy it claimed; null
+    // whenever no claim is held. Only the server in use joins the library,
+    // so a claim holds one copy at most.
+    private val _stageProgress = MutableStateFlow<StageProgress?>(null)
+    val stageProgress: StateFlow<StageProgress?> = _stageProgress
 
     // Asks for a merge and waits for it. Answers how big the library is.
     suspend fun rebuild(): MergeCounts {
@@ -199,7 +215,7 @@ class CatalogMerge internal constructor(
                 val claim = step.claim ?: return@withLock null
                 hooks.claimed()
                 try {
-                    val counts = merger.merge(claim.sources)
+                    val counts = merger.merge(claim.sources, progressOf(claim))
                     checkSpace(claim, counts)
                     swap(claim)
                     claim.claimed.forEach { stageOutcome(it.sourceId, it.generation).complete(Unit) }
@@ -224,12 +240,34 @@ class CatalogMerge internal constructor(
                     abort(claim, e.userMessage())
                     throw e
                 } finally {
+                    if (_stageProgress.value != null) progressIs(null)
                     withContext(NonCancellable) { work.clearMergeWork() }
                 }
             }
             if (again) continue
             return counts ?: skipped()
         }
+    }
+
+    // Says how far the merge is with the copy `claim` holds, if it holds one.
+    private fun progressOf(claim: Claim): MergeProgress {
+        val stage = claim.claimed.firstOrNull() ?: return MergeProgress.None
+        var placed = 0
+        progressIs(StageProgress(stage.sourceId, stage.generation, 0, stage.tracks, saving = false))
+        return object : MergeProgress {
+            override fun page(source: MergeSource, rows: Int) {
+                if (source.sourceId != stage.sourceId || !source.staged) return
+                placed += rows
+                progressIs(StageProgress(stage.sourceId, stage.generation, placed, stage.tracks, saving = false))
+            }
+
+            override fun placed() = progressIs(StageProgress(stage.sourceId, stage.generation, placed, stage.tracks, saving = true))
+        }
+    }
+
+    private fun progressIs(progress: StageProgress?) {
+        _stageProgress.value = progress
+        hooks.progress(progress)
     }
 
     // Nothing changed since the last merge: the library stays, and rows

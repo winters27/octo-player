@@ -75,7 +75,7 @@ class StagedCopyTest {
             chain.proceed(chain.request())
         }.build()
         copy.start(ACCOUNT, SOURCE)
-        copy.read(fake(library).client(http))
+        copy.read(fake(library).client(http), SOURCE)
         assertEquals(songs / 500 + 1, seen.size)
         seen.forEach { (offset, written) -> assertEquals("written before the page at $offset", offset, written) }
     }
@@ -186,7 +186,7 @@ class StagedCopyTest {
                 order += n
             }
         }
-        val done = CopyRun(copy, dao, steps, clock = { 42L }).run(ACCOUNT, SOURCE, fakeServer.client(), copyAll = true) {}
+        val done = CopyRun(copy, dao, steps, clock = { 42L }).run(ACCOUNT, SOURCE, fakeServer.client(), copyAll = true, swapped = {})
         assertEquals(listOf(1, 2, 3, 4, 5), order)
         val row = dao.accountSync(ACCOUNT)!!
         assertTrue(row.afterSyncDone)
@@ -245,7 +245,7 @@ class StagedCopyTest {
             (count("PRAGMA page_count") - count("PRAGMA freelist_count")) * count("PRAGMA page_size")
         val base = usedBytes()
         val generation = copy.start(ACCOUNT, SOURCE)
-        copy.read(fake(library).client())
+        copy.read(fake(library).client(), SOURCE)
         val sync = (usedBytes() - base) / songs
         copy.build(SOURCE, generation, songs.toLong())
         val stage = (usedBytes() - base) / songs

@@ -32,9 +32,14 @@ import app.winters.octo.subsonic.LibrarySink
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.readLibraryInto
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -47,6 +52,9 @@ internal const val GIANT_ALBUM = 2_000
 
 // How many song pages a copy reads between looks at the free space.
 private const val PAGES_PER_SPACE_CHECK = 10
+
+// How many song pages a copy reads between covers it shows.
+private const val PAGES_PER_COVER = 10
 
 // How much the database grows for each song a copy reads (the server's
 // pages as they came, with their indexes) and for each song it builds (the
@@ -110,22 +118,47 @@ class StagedCopy @Inject constructor(
     // The free space the last check asked for, for wording a full disk.
     @Volatile private var lastNeed = 0L
 
-    // Copies the library and waits until the merge swapped it in. Throws
-    // StageAborted when the merge could not swap it, NotEnoughSpace when the
-    // phone runs short of room.
-    suspend fun copy(account: String, sourceId: String, client: SubsonicClient): CopyCounts {
+    // Copies the library and waits until the merge swapped it in, saying how
+    // far it is to `report`. Throws StageAborted when the merge could not
+    // swap it, NotEnoughSpace when the phone runs short of room.
+    suspend fun copy(account: String, sourceId: String, client: SubsonicClient, report: CopyReport = CopyReport.None): CopyCounts {
         val generation = start(account, sourceId)
         try {
-            val counts = fill(account, sourceId, generation, client)
+            val counts = fill(account, sourceId, generation, client, report)
+            report.staged(counts.tracks, counts.albums)
             reached(CopyPoint.Ready)
-            merge.rebuild()
-            merge.awaitStage(sourceId, generation)
+            report.at(CopyStep.Add, 0, counts.tracks.toLong())
+            adding(sourceId, generation, report) {
+                merge.rebuild()
+                merge.awaitStage(sourceId, generation)
+            }
             return counts
         } catch (e: SQLiteFullException) {
             throw NotEnoughSpace(maxOf(lastNeed, 1))
         } finally {
             withContext(NonCancellable) { clearUnclaimed(sourceId, generation) }
             merge.forgetStage(sourceId, generation)
+        }
+    }
+
+    // Runs `swap` while what the merge says of this copy goes on to
+    // `report`: its songs placed, then saving. Listening starts before the
+    // merge is asked for and ends with `swap`, however it ends.
+    private suspend fun adding(sourceId: String, generation: Long, report: CopyReport, swap: suspend () -> Unit) = coroutineScope {
+        val forward = launch(start = CoroutineStart.UNDISPATCHED) {
+            merge.stageProgress.collect { progress ->
+                if (progress == null || progress.sourceId != sourceId || progress.generation != generation) return@collect
+                if (progress.saving) {
+                    report.at(CopyStep.Save, 0, null)
+                } else {
+                    report.at(CopyStep.Add, progress.placed.toLong(), progress.of.toLong())
+                }
+            }
+        }
+        try {
+            swap()
+        } finally {
+            forward.cancelAndJoin()
         }
     }
 
@@ -152,9 +185,15 @@ class StagedCopy @Inject constructor(
 
     // Reads the server into the stage and marks it ready for the merge.
     @VisibleForTesting
-    internal suspend fun fill(account: String, sourceId: String, generation: Long, client: SubsonicClient): CopyCounts {
-        val songs = read(client)
-        val counts = build(sourceId, generation, songs)
+    internal suspend fun fill(
+        account: String,
+        sourceId: String,
+        generation: Long,
+        client: SubsonicClient,
+        report: CopyReport = CopyReport.None,
+    ): CopyCounts {
+        val songs = read(client, sourceId, report)
+        val counts = build(sourceId, generation, songs, report)
         db.withTransaction {
             check(dao.markReady(sourceId, generation, counts.tracks, counts.albums, counts.artists) == 1) {
                 "The copy's stage for $sourceId is gone"
@@ -165,16 +204,29 @@ class StagedCopy @Inject constructor(
     }
 
     // Keeps each page of the server's library as it arrives, one transaction
-    // a page. Answers how many songs came.
+    // a page. Answers how many songs came. Says to `report` how many songs
+    // went in, of the songs the listed albums hold once every album is
+    // listed, and now and then a cover that came.
     @VisibleForTesting
-    internal suspend fun read(client: SubsonicClient): Long {
+    internal suspend fun read(client: SubsonicClient, sourceId: String, report: CopyReport = CopyReport.None): Long {
         var songs = 0L
         var pages = 0
+        // Albums and songs arrive side by side.
+        val inserted = AtomicLong(0)
+        val listedSongs = AtomicLong(0)
+        val total = AtomicReference<Long?>(null)
         checkSpace(readNeed(0))
         client.readLibraryInto(
             object : LibrarySink {
                 override suspend fun albums(page: List<Album>, offset: Int) {
-                    dao.insertSyncAlbums(page.mapIndexed { i, album -> SyncAlbumEntity(album.id, (offset + i).toLong(), LibraryJson.encodeAlbum(album)) })
+                    val ids = dao.insertSyncAlbums(page.mapIndexed { i, album -> SyncAlbumEntity(album.id, (offset + i).toLong(), LibraryJson.encodeAlbum(album)) })
+                    // An album a shifted page lists again counts once.
+                    listedSongs.addAndGet(page.zip(ids).sumOf { (album, id) -> if (id == -1L) 0L else album.songCount.toLong() })
+                }
+
+                override suspend fun albumsListed() {
+                    total.set(listedSongs.get())
+                    report.at(CopyStep.Read, inserted.get(), total.get())
                 }
 
                 override suspend fun artists(artists: List<Artist>) {
@@ -184,9 +236,13 @@ class StagedCopy @Inject constructor(
                 }
 
                 override suspend fun songs(page: List<Song>) {
-                    dao.insertSyncSongs(page.map { SyncSongEntity(songId = it.id, albumKey = serverAlbumKey(it), json = LibraryJson.encodeSong(it)) })
+                    val ids = dao.insertSyncSongs(page.map { SyncSongEntity(songId = it.id, albumKey = serverAlbumKey(it), json = LibraryJson.encodeSong(it)) })
+                    val went = inserted.addAndGet(ids.count { it != -1L }.toLong())
                     songs += page.size
-                    if (++pages % PAGES_PER_SPACE_CHECK == 0) checkSpace(readNeed(songs))
+                    pages++
+                    if (pages % PAGES_PER_SPACE_CHECK == 0) checkSpace(readNeed(songs))
+                    val cover = if (pages == 1 || pages % PAGES_PER_COVER == 0) page.firstNotNullOfOrNull { serverArt(sourceId, it.coverArt) } else null
+                    report.at(CopyStep.Read, went, total.get(), cover)
                     reached(CopyPoint.Page)
                 }
             },
@@ -196,9 +252,11 @@ class StagedCopy @Inject constructor(
 
     // Builds the stage album by album in the order of each album's first
     // song, writing as it goes, so only one album (or one page of a giant
-    // one), the albums' keys and the artists are held at once.
+    // one), the albums' keys and the artists are held at once. Says to
+    // `report` how many albums with songs are built, each time some are
+    // written.
     @VisibleForTesting
-    internal suspend fun build(sourceId: String, generation: Long, songs: Long): CopyCounts {
+    internal suspend fun build(sourceId: String, generation: Long, songs: Long, report: CopyReport = CopyReport.None): CopyCounts {
         checkSpace(2 * songs * STAGE_BYTES_PER_SONG)
         reached(CopyPoint.Build)
         val owner = "$sourceId#$generation"
@@ -217,18 +275,30 @@ class StagedCopy @Inject constructor(
             artistAfter = page.last().seq
         }
         val albumKeys = albumKeysInOrder()
+        val withSongs = albumKeys.size.toLong()
         // Listed albums keep their place in the server's list; albums made up
         // from songs follow, in the order of their first songs.
         val firstUnlistedSeq = (dao.maxSyncAlbumSeq() ?: -1L) + 1
         val built = Built()
         val batch = Batch()
+        report.at(CopyStep.Build, 0, withSongs)
+
+        // Writes the albums built so far and says how many there are.
+        suspend fun written() {
+            if (batch.albums.isEmpty()) return
+            val cover = batch.albums.firstNotNullOfOrNull { it.artwork }
+            flush(batch)
+            report.at(CopyStep.Build, built.albums.toLong(), withSongs, cover)
+        }
+
         for (key in albumKeys) {
             val listedRow = dao.syncAlbum(key)
             val listed = listedRow?.let { LibraryJson.decodeAlbum(it.json) }
             val albumSeq = listedRow?.seq ?: (firstUnlistedSeq + built.unlisted++)
             if (dao.albumSongCount(key) > GIANT_ALBUM) {
-                flush(batch)
+                written()
                 giant(sourceId, owner, key, listed, albumSeq, artistMusicIds, built)
+                report.at(CopyStep.Build, built.albums.toLong(), withSongs)
                 continue
             }
             val inAlbum = dao.albumSongs(key).map { LibraryJson.decodeSong(it.json) }
@@ -238,11 +308,11 @@ class StagedCopy @Inject constructor(
             val tracks = ordered.mapIndexed { index, song ->
                 serverTrackRow(sourceId, song, album, record, index, artistMusicIds).copy(seq = built.nextTrackSeq++).withKeys()
             }
-            if (batch.tracks.size + tracks.size > GIANT_ALBUM) flush(batch)
+            if (batch.tracks.size + tracks.size > GIANT_ALBUM) written()
             batch.add(key, album, tracks)
             built.album(album, tracks.size)
         }
-        flush(batch)
+        written()
         songlessAlbums(sourceId, albumKeys, built)
         writeArtists(sourceId, listedArtists, built)
         return CopyCounts(built.tracks, built.albums, built.artists)
@@ -515,13 +585,22 @@ class CopyRun(
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     // `swapped` runs once a whole copy is in the library, before the steps
-    // after it.
-    suspend fun run(account: String, sourceId: String, client: SubsonicClient, copyAll: Boolean, swapped: suspend () -> Unit): CopyDone {
+    // after it. `report` hears how far the copy is, and that it is in the
+    // library before anything after it can fail.
+    suspend fun run(
+        account: String,
+        sourceId: String,
+        client: SubsonicClient,
+        copyAll: Boolean,
+        swapped: suspend () -> Unit,
+        report: CopyReport = CopyReport.None,
+    ): CopyDone {
         // When the server last read its folders, before the copy, so a look
         // afterwards reads on only once it has read them again.
         val scan = if (copyAll) lastScanOf(client) else null
         if (copyAll) {
-            copy.copy(account, sourceId, client)
+            copy.copy(account, sourceId, client, report)
+            report.swapped()
             records.markSwapped(account, ROWS_VERSION)
             swapped()
         }

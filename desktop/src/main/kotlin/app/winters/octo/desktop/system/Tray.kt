@@ -5,6 +5,8 @@ import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.window.ApplicationScope
 import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.TrayState
+import app.winters.octo.desktop.ui.readLine
+import app.winters.octo.server.CopyRunState
 
 // What the tray icon's menu (the menu bar's, on macOS) can do.
 enum class TrayAction { PlayPause, Next, Previous, ShowWindow, MiniPlayer, Quit }
@@ -43,8 +45,13 @@ fun trayMenu(now: NowPlaying?, miniPlayerOpen: Boolean): List<TrayEntry> = listO
     TrayEntry.Action(TrayAction.Quit, "Quit Octo"),
 )
 
-// The words shown when the pointer rests on the tray icon.
-fun trayTooltip(now: NowPlaying?): String = now?.let { "Octo: " + shortLabel(songLine(it), 100) } ?: "Octo"
+// The words shown when the pointer rests on the tray icon: the read of the
+// library while one runs and the window is hidden (`read`), its step and
+// count, and otherwise what plays.
+fun trayTooltip(now: NowPlaying?, read: CopyRunState? = null): String {
+    if (read != null) return "Octo: " + readLine(read)
+    return now?.let { "Octo: " + shortLabel(songLine(it), 100) } ?: "Octo"
+}
 
 // The tray icon, drawn from the menu above. A click on the icon itself
 // brings the window forward.
@@ -55,11 +62,12 @@ fun ApplicationScope.OctoTray(
     now: NowPlaying?,
     miniPlayerOpen: Boolean,
     onAction: (TrayAction) -> Unit,
+    read: CopyRunState? = null,
 ) {
     Tray(
         icon = icon,
         state = state,
-        tooltip = trayTooltip(now),
+        tooltip = trayTooltip(now, read),
         onAction = { onAction(TrayAction.ShowWindow) },
         menu = {
             trayMenu(now, miniPlayerOpen).forEach { entry ->

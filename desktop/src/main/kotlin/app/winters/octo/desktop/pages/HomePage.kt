@@ -41,6 +41,8 @@ import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.queue.ResumeOffer
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.desktop.ui.FailedLine
+import app.winters.octo.desktop.ui.ReadAgainLine
+import app.winters.octo.desktop.ui.readingAgain
 import app.winters.octo.desktop.ui.LoadingLine
 import app.winters.octo.desktop.ui.LocalBottomRoom
 import app.winters.octo.desktop.ui.LocalKeyColour
@@ -138,12 +140,18 @@ fun HomePage(app: AppState, visit: Visit) {
             home == null -> item(key = "loading") { LoadingLine() }
             home.isEmpty && shelves.stations.isEmpty() && playlists.isEmpty() && forYou.isEmpty() && (found == null || found.isEmpty) -> {
                 item(key = "empty") {
+                    val reading = readingAgain(app)
                     Column(verticalArrangement = Arrangement.spacedBy(Space.M)) {
                         NothingHere("No music yet", "Music on your server shows up here on its own. Once some is there, look again.")
-                        GlazeCapsule(null, "Look again", {
-                            store.retry()
-                            app.library?.load()
-                        })
+                        // The read asked for here shows here while it runs.
+                        if (reading != null) {
+                            ReadAgainLine(reading)
+                        } else {
+                            GlazeCapsule(null, "Look again", {
+                                store.retry()
+                                app.library?.load()
+                            })
+                        }
                     }
                 }
                 // An empty library is where the charts help most: songs to start from.

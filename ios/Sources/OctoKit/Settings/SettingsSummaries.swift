@@ -87,10 +87,12 @@ public enum SettingsSummaries {
         return "Synced " + ago.prefix(1).lowercased() + ago.dropFirst()
     }
 
-    /// How the server is doing, for the account card and its category: syncing, or where it is
-    /// reached from and how fresh the copy is. Place is nil when the server has one address.
-    public static func serverStatus(syncing: Bool, place: ServerPlace?, syncedAt: Int64?, now: Int64) -> String {
-        if syncing { return "Syncing…" }
+    /// How the server is doing, for the account card and its category: syncing (how far, while a
+    /// copy `run` can tell), or where it is reached from and how fresh the copy is. Place is nil
+    /// when the server has one address.
+    public static func serverStatus(syncing: Bool, place: ServerPlace?, syncedAt: Int64?, now: Int64, run: CopyRunState? = nil) -> String {
+        if let run { return CopyWords.status(run) }
+        if syncing { return "Syncing" }
         let where_: String? = switch place {
         case .home: "Connected at home"
         case .away: "Connected away"

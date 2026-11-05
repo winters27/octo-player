@@ -30,13 +30,14 @@ import kotlinx.coroutines.flow.Flow
 // over song-sized tables runs on an index (CopyQueryPlanTest).
 @Dao
 interface CopyDao {
-    // The server's pages
+    // The server's pages. The inserts answer each row's id, -1 for a repeat
+    // left out.
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertSyncSongs(rows: List<SyncSongEntity>)
+    suspend fun insertSyncSongs(rows: List<SyncSongEntity>): List<Long>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertSyncAlbums(rows: List<SyncAlbumEntity>)
+    suspend fun insertSyncAlbums(rows: List<SyncAlbumEntity>): List<Long>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertSyncArtists(rows: List<SyncArtistEntity>)
@@ -203,6 +204,11 @@ interface CopyDao {
     @Query("UPDATE source_meta SET copyOf = :account WHERE sourceId = :sourceId")
     suspend fun setCopyOf(sourceId: String, account: String)
 
+    // Whose whole copy an address's rows are, and whether the phone's own
+    // music is in, in one read so both change together.
+    @Query(CopySql.COPY_STATE)
+    fun copyState(sourceId: String, phone: String): Flow<CopyStateRow>
+
     // Music taken in ahead of a copy
 
     @Query(CopySql.KNOWN_TRACKS)
@@ -308,6 +314,10 @@ data class SongAlbumKey(val seq: Long, val albumKey: String)
 // A row's id and its place in its source's order.
 data class RowSeq(val id: String, val seq: Long)
 
+// Whose whole copy an address's rows are (null before the first), and
+// whether the phone has music of its own.
+data class CopyStateRow(val copyOf: String?, val phoneMusic: Boolean)
+
 // The copy's statements over song-sized tables, kept here so their query
 // plans can be checked on the oldest SQLite the app runs on.
 object CopySql {
@@ -337,4 +347,7 @@ object CopySql {
     const val MAX_ARTIST_SEQ = "SELECT MAX(seq) FROM source_artist WHERE sourceId = :sourceId"
     const val LIVE_TRACKS = "SELECT COUNT(*) FROM source_track WHERE sourceId = :sourceId"
     const val LIVE_ALBUMS = "SELECT COUNT(*) FROM source_album WHERE sourceId = :sourceId"
+    const val COPY_STATE =
+        "SELECT (SELECT copyOf FROM source_meta WHERE sourceId = :sourceId) AS copyOf, " +
+            "EXISTS (SELECT 1 FROM source_track WHERE sourceId = :phone) AS phoneMusic"
 }

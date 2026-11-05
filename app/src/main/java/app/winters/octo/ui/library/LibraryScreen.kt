@@ -74,6 +74,7 @@ import app.winters.octo.sort.Sorted
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistRow
+import app.winters.octo.ui.common.CopyNote
 import app.winters.octo.ui.common.EmptyLibraryNote
 import app.winters.octo.ui.common.GlassIconButton
 import app.winters.octo.ui.common.LetterRail
@@ -218,7 +219,7 @@ fun AlbumsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: LibraryViewMo
         "Albums",
         onBack,
         count = listCount(albums, "album"),
-        lead = listOfNotNull(albums?.let { sortItem(SortList.Albums, it.order, { order -> vm.setOrder(SortList.Albums, order) }) }),
+        lead = listOfNotNull(albums?.takeIf { it.items.isNotEmpty() }?.let { sortItem(SortList.Albums, it.order, { order -> vm.setOrder(SortList.Albums, order) }) }),
         tail = playItems(albums, vm::playAlbums),
         more = if (albums?.items.isNullOrEmpty()) {
             emptyList()
@@ -260,7 +261,7 @@ fun ArtistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: LibraryViewM
         "Artists",
         onBack,
         count = listCount(artists, "artist"),
-        lead = listOfNotNull(artists?.let { sortItem(SortList.Artists, it.order, { order -> vm.setOrder(SortList.Artists, order) }) }),
+        lead = listOfNotNull(artists?.takeIf { it.items.isNotEmpty() }?.let { sortItem(SortList.Artists, it.order, { order -> vm.setOrder(SortList.Artists, order) }) }),
         tail = playItems(artists, vm::playArtists),
     ) {
         Loaded(artists) { sorted ->
@@ -305,10 +306,10 @@ fun SongsScreen(onBack: () -> Unit, onOpen: (NavKey) -> Unit = {}, vm: LibraryVi
         }
     }
     val searchWords = if (searching) "Close the search" else "Search these songs"
-    // The sort first, then Search; the sort is the first to move into More
-    // on a narrow phone, then Search.
+    // The sort first, then Search, both once there is something to sort;
+    // the sort is the first to move into More on a narrow phone, then Search.
     val lead = listOfNotNull(
-        songs?.let { sortItem(SortList.Songs, it.order, { order -> vm.setOrder(SortList.Songs, order) }) },
+        songs?.takeIf { it.items.isNotEmpty() }?.let { sortItem(SortList.Songs, it.order, { order -> vm.setOrder(SortList.Songs, order) }) },
         if (songs?.items?.isNotEmpty() == true) {
             LineItem("search", overflow = 1, more = MoreItem(searchWords, if (searching) OctoIcons.Close else OctoIcons.Search, onClick = toggleSearch)) { _ ->
                 GlassIconButton(if (searching) OctoIcons.Close else OctoIcons.Search, searchWords, onClick = toggleSearch, lit = searching)
@@ -481,9 +482,10 @@ private fun SearchPanel(open: Boolean, content: @Composable () -> Unit) {
     ) { content() }
 }
 
-// How many a list holds, for the title line: "2,835 songs".
+// How many a list holds, for the title line: "2,835 songs". An empty list
+// counts nothing; its note says why.
 internal fun listCount(list: Sorted<*>?, noun: String): String? {
-    val count = list?.items?.size ?: return null
+    val count = list?.items?.size?.takeIf { it > 0 } ?: return null
     return "%,d %s".format(count, if (count == 1) noun else "${noun}s")
 }
 
@@ -499,8 +501,9 @@ private fun <T> Loaded(sorted: Sorted<T>?, content: @Composable (Sorted<T>) -> U
         sorted == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = OctoColors.Accent, modifier = Modifier.size(28.dp))
         }
-        // Offers phone access or a server sign-in when either is missing.
-        sorted.items.isEmpty() -> EmptyLibraryNote()
+        // Offers phone access or a server sign-in when either is missing,
+        // and says the server's music is on its way while it is.
+        sorted.items.isEmpty() -> CopyNote { EmptyLibraryNote() }
         else -> content(sorted)
     }
 }

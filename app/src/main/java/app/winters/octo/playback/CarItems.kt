@@ -35,7 +35,10 @@ import app.winters.octo.liveradio.LiveStation
 import app.winters.octo.liveradio.detailLine
 import app.winters.octo.liveradio.radioId
 import app.winters.octo.livelists.LiveList
+import app.winters.octo.server.COPY_ON_ITS_WAY
+import app.winters.octo.server.CopyRunState
 import app.winters.octo.server.ResumeOffer
+import app.winters.octo.server.copyDescription
 import app.winters.octo.subsonic.ChartChoice
 import app.winters.octo.ui.home.songCountLine
 import app.winters.octo.ui.livelists.LIVE_LIST
@@ -320,6 +323,26 @@ class CarLook(private val context: Context, private val coverStyle: () -> Playli
             .setArtworkUri(icon(OctoIcons.History))
             .setIsBrowsable(false)
             .setIsPlayable(true),
+    )
+
+    // A first copy on its way, in place of an empty list and at the top of
+    // Home: it neither opens nor plays, and says how far the copy is
+    // (`run`, null before one runs), with the cover of an album that came.
+    fun copyStatus(run: CopyRunState?): MediaItem = shownAs(
+        MediaItem.Builder()
+            .setMediaId(COPY_STATUS_ID)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(carText(COPY_ON_ITS_WAY))
+                    .setDisplayTitle(carText(COPY_ON_ITS_WAY))
+                    .setSubtitle(carText(run?.let(::copyDescription)))
+                    .setArtworkUri(cover(run?.artwork) ?: glyph(CarGlyph.Album))
+                    .setIsBrowsable(false)
+                    .setIsPlayable(false)
+                    .build(),
+            )
+            .build(),
+        CarStyle.List,
     )
 
     // A search that could not look outside the library, to try again.

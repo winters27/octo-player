@@ -1,6 +1,7 @@
 package app.winters.octo.ui.favourites
 
 import app.winters.octo.ui.common.sortItem
+import app.winters.octo.ui.common.CopyNote
 import app.winters.octo.ui.common.playShuffleItems
 import app.winters.octo.ui.common.LineSegments
 import androidx.compose.foundation.background
@@ -218,7 +219,7 @@ private fun FavouriteSongs(
         val selecting = LocalSongSelection.current?.active == true
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = 4.dp, bottom = 140.dp)) {
             if (rows.isEmpty()) {
-                item(key = "empty") { EmptyText(SONGS_EMPTY) }
+                item(key = "empty") { CopyNote(likes = true) { EmptyText(SONGS_EMPTY) } }
             }
             items(rows, key = { it.id }) { track ->
                 val swipe = rememberSwipeToDismissBoxState()
@@ -283,7 +284,7 @@ private fun FavouriteArtists(artists: Sorted<ArtistEntity>?, onOpen: (NavKey) ->
 private fun <T> Shown(sorted: Sorted<T>?, empty: String, content: @Composable (Sorted<T>) -> Unit) {
     when {
         sorted == null -> Loading()
-        sorted.items.isEmpty() -> EmptyText(empty)
+        sorted.items.isEmpty() -> CopyNote(likes = true) { EmptyText(empty) }
         else -> content(sorted)
     }
 }

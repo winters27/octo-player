@@ -23,14 +23,13 @@ import javax.inject.Inject
 @HiltViewModel
 class RefreshViewModel @Inject constructor(
     private val library: LibraryRefresh,
-    private val feedback: Feedback,
 ) : ViewModel() {
     var refreshing by mutableStateOf(false)
         private set
 
     // Rescans the phone and syncs the server, with the page's own reload
     // alongside. A second pull while one runs is ignored. A failed server
-    // copy is said, since the pull asked for it.
+    // copy is said once it ends, since the pull asked for it.
     fun refresh(own: suspend () -> Unit) {
         if (refreshing) return
         refreshing = true
@@ -38,7 +37,7 @@ class RefreshViewModel @Inject constructor(
             try {
                 coroutineScope {
                     launch { own() }
-                    library.refresh()?.let(feedback::show)
+                    library.refresh()
                 }
             } catch (e: CancellationException) {
                 throw e

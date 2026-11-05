@@ -35,8 +35,8 @@ import app.winters.octo.desktop.library.totalLengthText
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.ui.AlbumMenu
 import app.winters.octo.desktop.ui.EmptyLine
-import app.winters.octo.desktop.ui.FailedLine
-import app.winters.octo.desktop.ui.LoadingLine
+import app.winters.octo.desktop.ui.LibraryReadFailed
+import app.winters.octo.desktop.ui.LibraryReadHero
 import app.winters.octo.desktop.ui.LocalPointer
 import app.winters.octo.desktop.ui.MediaCard
 import app.winters.octo.desktop.ui.PageSide
@@ -59,10 +59,11 @@ import kotlinx.coroutines.launch
 fun WithLibrary(app: AppState, content: @Composable (LibraryIndex) -> Unit) {
     val store = app.library ?: return
     val state by store.state.collectAsState()
+    val progress by store.progress.collectAsState()
     when (val s = state) {
         // In from the page's side, where the page's own words start.
-        LibraryState.Idle, LibraryState.Loading -> LoadingLine("Reading your library", Modifier.padding(horizontal = PageSide))
-        is LibraryState.Failed -> FailedLine(s.message, store::load, Modifier.padding(horizontal = PageSide))
+        LibraryState.Idle, LibraryState.Loading -> LibraryReadHero(progress, Modifier.padding(horizontal = PageSide))
+        is LibraryState.Failed -> LibraryReadFailed(s.message, s.step, s.done, store::load, Modifier.padding(horizontal = PageSide))
         is LibraryState.Ready -> content(s.index)
     }
 }

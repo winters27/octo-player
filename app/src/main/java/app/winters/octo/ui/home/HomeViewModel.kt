@@ -38,6 +38,11 @@ import app.winters.octo.liveradio.lineupOf
 import app.winters.octo.liveradio.radioId
 import app.winters.octo.liveradio.streamUrl
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.data.SessionRepository
+import app.winters.octo.data.SessionState
+import app.winters.octo.server.CopyOutcome
+import app.winters.octo.server.CopyRunState
+import app.winters.octo.server.CopyWait
 import app.winters.octo.server.ServerSync
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.common.Feedback
@@ -71,7 +76,8 @@ class HomeViewModel @Inject constructor(
     val library: DeviceLibrary,
     private val prefs: HomePrefs,
     private val feedback: Feedback,
-    serverSync: ServerSync,
+    private val serverSync: ServerSync,
+    sessions: SessionRepository,
     pins: PinStore,
     favourites: FavouritesDao,
     private val chartLists: ChartLists,
@@ -124,6 +130,40 @@ class HomeViewModel @Inject constructor(
     // Whether the phone access card was put away with "Not now". Null until read.
     val accessDismissed: StateFlow<Boolean?> =
         prefs.accessDismissed.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // Whether the server's music is still to come. Null until read, and
+    // Home's empty note waits for it.
+    val copyWait: StateFlow<CopyWait?> = serverSync.copyWait
+
+    // The card in Home's copy slot, if any, from its first frame, so the
+    // empty note never shows for a moment before it.
+    val copyCard: StateFlow<HomeCopyCard?> =
+        combine(serverSync.copyWait, serverSync.copyRun, serverSync.copyOutcome, sessions.state, ::copyCardOf)
+            .distinctUntilChanged()
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                copyCardOf(serverSync.copyWait.value, serverSync.copyRun.value, serverSync.copyOutcome.value, sessions.state.value),
+            )
+
+    private fun copyCardOf(wait: CopyWait?, run: CopyRunState?, outcome: CopyOutcome?, state: SessionState): HomeCopyCard? {
+        val session = (state as? SessionState.SignedIn)?.session
+        return homeCopyCard(wait, run, outcome, session?.id, session?.name.orEmpty())
+    }
+
+    private val doneSeen = DoneCardSeen()
+
+    // The done card shown now (its token), or none.
+    fun copyCardShown(token: Long?) = doneSeen.shown(token)
+
+    // Home was left: the done card it showed goes, unless the screen only turned.
+    fun leftHome(turning: Boolean) {
+        doneSeen.paused(turning)?.let(serverSync::dismissCopy)
+    }
+
+    fun dismissCopy(token: Long) = serverSync.dismissCopy(token)
+
+    fun tryCopyAgain() = serverSync.tryAgain()
 
     // Picked once, then again on a pull, when the library changes size, or
     // after a server copy (which can change the music without changing the count).

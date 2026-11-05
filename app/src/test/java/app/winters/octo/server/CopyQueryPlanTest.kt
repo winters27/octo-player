@@ -23,7 +23,8 @@ class CopyQueryPlanTest {
     private fun assertIndexed(sql: String, args: List<Any?>, scanAllowed: Boolean = false) {
         for (plan in listOf(OldSqlite.plan(conn, sql, args), CurrentSqlite.plan(sql, args))) {
             assertTrue("$sql\n$plan", plan.none { "TEMP B-TREE" in it || "AUTOMATIC" in it })
-            if (!scanAllowed) assertTrue("$sql\n$plan", plan.none { it.trimStart().startsWith("SCAN") })
+            // A select of values alone reads its one row of constants.
+            if (!scanAllowed) assertTrue("$sql\n$plan", plan.none { it.trimStart().startsWith("SCAN") && "CONSTANT ROW" !in it })
         }
     }
 
@@ -60,6 +61,7 @@ class CopyQueryPlanTest {
         assertIndexed(CopySql.MAX_ARTIST_SEQ, listOf("server:h"))
         assertIndexed(CopySql.LIVE_TRACKS, listOf("server:h"))
         assertIndexed(CopySql.LIVE_ALBUMS, listOf("server:h"))
+        assertIndexed(CopySql.COPY_STATE, listOf("server:h", "device"))
         // source_meta holds a row per source.
         assertIndexed(CopySql.LAST_GENERATION, emptyList(), scanAllowed = true)
     }

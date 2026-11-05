@@ -2,6 +2,18 @@ package app.winters.octo.ui.home
 
 import app.winters.octo.ui.nav.ChartsRoute
 import app.winters.octo.ui.nav.HomeSectionsRoute
+import androidx.activity.compose.LocalActivity
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.runtime.LaunchedEffect
+import app.winters.octo.design.LocalReduceMotion
+import app.winters.octo.design.OctoDuration
+import app.winters.octo.design.OctoMotion
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
@@ -54,6 +66,7 @@ import app.winters.octo.ui.common.PageHeader
 import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.SongCard
+import app.winters.octo.ui.common.rememberCopyNoticeAsk
 import app.winters.octo.ui.common.accessButtonLabel
 import app.winters.octo.ui.common.rememberAccessRequest
 import app.winters.octo.ui.common.screenPadding
@@ -91,7 +104,11 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
     val rediscovery by vm.rediscovery.collectAsStateWithLifecycle()
     val sections by vm.sections.collectAsStateWithLifecycle()
     val keptStations by vm.keptStations.collectAsStateWithLifecycle()
+    val copyCard by vm.copyCard.collectAsStateWithLifecycle()
+    val copyWait by vm.copyWait.collectAsStateWithLifecycle()
     val sheet = LocalChoiceSheet.current
+    val activity = LocalActivity.current
+    val noticeAsk = rememberCopyNoticeAsk()
     // The Live radio shelf: the way to stations near the listener, then the
     // server's stations and the ones kept on this phone.
     val liveRadio: LazyListScope.(String) -> Unit = { title ->
@@ -109,7 +126,7 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
 
     LifecycleResumeEffect(Unit) {
         vm.onShown()
-        onPauseOrDispose { }
+        onPauseOrDispose { vm.leftHome(turning = activity?.isChangingConfigurations == true) }
     }
 
     PullToRefreshBox(
@@ -131,9 +148,12 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
             if (layout.askAccess) item(key = "access") { AccessCard(access, vm) }
             item(key = "resume") { ResumeCard() }
             item(key = "whats-new") { WhatsNewCard() }
+            copyCard?.let { card -> item(key = "copy") { CopySlot(card, vm, noticeAsk, Modifier.animateItem()) } }
             when {
                 layout.empty -> {
-                    item(key = "empty") { EmptyCard(offerAccess = !layout.askAccess) }
+                    // Until whether the server's music is on its way is read,
+                    // neither its card nor this note shows.
+                    if (copyCard == null && copyWait != null) item(key = "empty") { EmptyCard(offerAccess = !layout.askAccess) }
                     // An empty library is where the charts and live radio
                     // help most: music to start from.
                     songShelf("Charts", vm.charts, vm::play, onTitle = { onOpen(ChartsRoute) })
@@ -350,6 +370,39 @@ private fun AccessCard(access: Access, vm: HomeViewModel) {
             GlazeButton("Not now", onClick = vm::dismissAccess)
         }
     }
+}
+
+// Home's one copy slot: the hero, banner, done card and failed card take
+// turns in it, fading between each other while it settles to the new size.
+// `noticeAsk` offers a notification for while the copy runs.
+@Composable
+private fun CopySlot(card: HomeCopyCard, vm: HomeViewModel, noticeAsk: (() -> Unit)?, modifier: Modifier) {
+    val still = LocalReduceMotion.current
+    val done = (card as? HomeCopyCard.Here)?.token
+    LaunchedEffect(done) { vm.copyCardShown(done) }
+    AnimatedContent(
+        card,
+        modifier,
+        transitionSpec = {
+            (fadeIn(tween(OctoDuration.Card)) togetherWith fadeOut(tween(OctoDuration.Card)))
+                .using(SizeTransform(clip = false) { _, _ -> if (still) snap() else OctoMotion.calm() })
+        },
+        contentKey = { it.slotKind() },
+        label = "copy slot",
+    ) { shown ->
+        when (shown) {
+            is HomeCopyCard.Coming -> if (shown.big) CopyHero(shown, onAsk = noticeAsk) else CopyBanner(shown)
+            is HomeCopyCard.Here -> CopyDone(shown, onDismiss = { vm.dismissCopy(shown.token) })
+            is HomeCopyCard.Stopped -> CopyFailed(shown, onTryAgain = vm::tryCopyAgain)
+        }
+    }
+}
+
+// Cards of one kind change in place; another kind fades in.
+private fun HomeCopyCard.slotKind(): String = when (this) {
+    is HomeCopyCard.Coming -> if (big) "hero" else "banner"
+    is HomeCopyCard.Here -> "done"
+    is HomeCopyCard.Stopped -> if (big) "stopped" else "stopped-banner"
 }
 
 // A library with no songs at all, from anywhere. `offerAccess` is off

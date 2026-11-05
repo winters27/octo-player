@@ -4,6 +4,9 @@ private let serverPrefix = "server"
 private let unknownArtist = "Unknown artist"
 private let unknownAlbum = "Unknown album"
 
+/// How many songs a long build or merge goes between the progress it hands on.
+let progressEvery = 2_000
+
 /// The source a server's music is kept under: its host, and its port when that is not the usual
 /// one for the address. Always made from the server's main address, so moving between home and
 /// away keeps the same library.
@@ -30,7 +33,8 @@ public struct ServerCatalog: Sendable {
 /// Turns what a server lists into its source's rows, shaped like the phone's so the two merge: a
 /// song's artist id is its album artist's, its keys come from the same functions, and times added
 /// are in seconds.
-public func buildServerCatalog(_ sourceId: String, _ library: ServerLibrary) -> ServerCatalog {
+/// `progress` hears how much of the songs are built (0 to 1), every few thousand.
+public func buildServerCatalog(_ sourceId: String, _ library: ServerLibrary, progress: @Sendable (Double) -> Void = { _ in }) -> ServerCatalog {
     func id(_ native: String) -> String { "\(sourceId):\(native)" }
     func art(_ coverId: String?, _ fallbackId: String? = nil) -> String? {
         guard let coverId, !coverId.isEmpty else { return nil }
@@ -98,6 +102,7 @@ public func buildServerCatalog(_ sourceId: String, _ library: ServerLibrary) -> 
         let listedAlbum = albumsByKey[key]
         let albumYear = listedAlbum.map(albumYears)
         for (index, song) in inAlbumOrder(group).enumerated() {
+            if tracks.count % progressEvery == 0 { progress(Double(tracks.count) / Double(max(1, songs.count))) }
             let title = blankOr(song.title, "Untitled")
             let durationMs = Int64(song.duration) * 1000
             let year = positive(song.year) ?? albumYear?.year

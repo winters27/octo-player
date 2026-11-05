@@ -20,6 +20,8 @@ struct ServerPage: View {
     /// The server whose sharing this page has asked about.
     @State private var sharingProbedFor: String?
     @State private var readingFolders = false
+    /// Whether to offer a notice for how a copy ends.
+    @State private var noticeAsk = false
     @State private var look: (answerMs: Int64?, scan: ServerScanStatus?)?
     @State private var listening: [ServerNowPlaying] = []
     @Environment(\.dataServices) private var data
@@ -57,6 +59,7 @@ struct ServerPage: View {
                 }
             }
         }
+        .task { noticeAsk = await CopyNoticeAsk.due() }
         .sheet(isPresented: $changingPassword) {
             ChangePasswordForm { changingPassword = false }.fittedSheet()
         }
@@ -178,8 +181,23 @@ struct ServerPage: View {
                 InfoRow(nil, title: "Songs", value: SettingsSummaries.grouped(Int(copy.songs)))
                 InfoRow(nil, title: "Albums", value: SettingsSummaries.grouped(Int(copy.albums)))
             }
-            ActionRow(SettingsIndex.syncNow, chevron: false, busy: sync.syncing) { sync.syncNow() }
-            if let problem = sync.problem { NoteRow(problem, color: OctoColor.error) }
+            // A copy under way shows how far it is, over an older problem.
+            if let run = sync.copyRun, run.account == server.id {
+                CopyProgressRow(run: run)
+                if noticeAsk {
+                    NoticeAskLine {
+                        Task {
+                            await CopyNoticeAsk.ask()
+                            noticeAsk = false
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                }
+            } else {
+                ActionRow(SettingsIndex.syncNow, chevron: false, busy: sync.syncing) { sync.syncNow(origin: .asked) }
+                if let problem = sync.problem { NoteRow(problem, color: OctoColor.error) }
+            }
             ToggleRow(SettingsIndex.queueSync, isOn: queueSync,
                       helper: "Keeps what's playing on the server, so you can pick up where another device left off.") { on in
                 queueSync = on

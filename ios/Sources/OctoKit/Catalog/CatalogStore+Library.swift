@@ -174,12 +174,18 @@ extension CatalogStore {
     public func artistCount() throws -> Int { Int(try db.scalar("SELECT COUNT(*) FROM artist")) }
 
     /// Swaps in the whole merged library at once, so pages never read a half-written one.
-    func replaceAll(_ tracks: [LibraryTrack], _ albums: [LibraryAlbum], _ artists: [LibraryArtist]) throws {
+    /// `progress` hears how much of it is written (0 to 1) after each chunk of songs.
+    func replaceAll(_ tracks: [LibraryTrack], _ albums: [LibraryAlbum], _ artists: [LibraryArtist], progress: (Double) -> Void = { _ in }) throws {
         try db.transaction {
             try db.execute("DELETE FROM track; DELETE FROM album; DELETE FROM artist;")
             for chunk in artists.catalogChunks(500) { try db.insert(Array(chunk)) }
             for chunk in albums.catalogChunks(500) { try db.insert(Array(chunk)) }
-            for chunk in tracks.catalogChunks(500) { try db.insert(Array(chunk)) }
+            var written = 0
+            for chunk in tracks.catalogChunks(500) {
+                try db.insert(Array(chunk))
+                written += chunk.count
+                progress(Double(written) / Double(max(1, tracks.count)))
+            }
         }
         changed(.library)
     }

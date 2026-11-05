@@ -39,7 +39,10 @@ private let sameLengthMs: Int64 = 3_000
 /// track and disc numbers and the rating are the first copy's; explicit is the first copy that
 /// says. Anything only one source has is passed through as it was, apart from its year, which is
 /// its original year when it has one.
-public func mergeCatalogs(_ sources: [SourceCatalog]) -> MergedCatalog {
+/// `progress` hears how much of the songs are placed (0 to 1), every few thousand.
+public func mergeCatalogs(_ sources: [SourceCatalog], progress: (Double) -> Void = { _ in }) -> MergedCatalog {
+    let total = max(1, sources.reduce(0) { $0 + $1.tracks.count })
+    var placed = 0
     // Artists and albums match only across sources: two a source keeps apart stay apart.
     let artistBases = acrossSources(sources, items: { $0.artists }, id: { $0.id }, key: { matchKey($0.name) })
     let artistIdFor = artistBases.idFor
@@ -71,6 +74,8 @@ public func mergeCatalogs(_ sources: [SourceCatalog]) -> MergedCatalog {
             a.element.albumOrder != b.element.albumOrder ? a.element.albumOrder < b.element.albumOrder : a.offset < b.offset
         }.map(\.element)
         for track in ordered {
+            placed += 1
+            if placed % progressEvery == 0 { progress(Double(placed) / Double(total)) }
             let albumId = albumIdFor[track.albumId] ?? track.albumId
             let trackKeys = keysOf(track)
             func fits(_ song: MergingSong) -> Bool {

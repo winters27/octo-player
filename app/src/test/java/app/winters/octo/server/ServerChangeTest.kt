@@ -312,7 +312,7 @@ class ServerChangeTest {
         assertEquals(listOf("copy = ::resume", "resume()"), Regex("""copy = ::resume|(?<!fun )resume\(\)""").findAll(text).map { it.value }.toList())
         assertEquals(1, Regex("""startSync\(whole = false\)""").findAll(text).count())
         // The copy settles what it was asked for with the run's own swap.
-        assertTrue(text.contains("session.client, copyAll, swapped)"))
+        assertTrue(text.contains("session.client, copyAll, swapped, report)"))
     }
 
     @Test

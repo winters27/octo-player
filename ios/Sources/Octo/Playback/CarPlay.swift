@@ -59,7 +59,37 @@ final class CarLibrary {
 
     func root() -> CPTabBarTemplate {
         reload()
+        // While the server's music is still to come, the tabs that show it say how far it is, again
+        // on each step and whole percent. A car connecting again replaces the last watch.
+        copyWatch?.stop()
+        copyWatch = Watch({ [weak self] in self?.copyKey ?? "" }) { [weak self] _ in
+            Task {
+                await self?.fillRecent()
+                await self?.fillAlbums()
+                await self?.fillArtists()
+            }
+        }
         return CPTabBarTemplate(templates: [recent, playlists, albums, artists])
+    }
+
+    private var copyWatch: Watch<String>?
+
+    /// What the car shows of a first copy: its step and whole percent while the music is to come.
+    private var copyKey: String {
+        guard let sync = data?.serverSync, sync.awaiting == true else { return "" }
+        let run = sync.copyRun
+        return "\(run?.step.rawValue ?? -1)|\(run?.fraction.map(CopyWords.percent) ?? -1)"
+    }
+
+    /// The first copy's status row while the server's music is still to come: it neither opens
+    /// nor plays, and says how far the copy is, with the cover of a song that came.
+    private func copyStatus() -> CPListItem? {
+        guard let sync = data?.serverSync, sync.awaiting == true else { return nil }
+        let run = sync.copyRun.flatMap { $0.account == sync.account?.id ? $0 : nil }
+        let row = CPListItem(text: CopyWords.onItsWay, detailText: run.map(CopyWords.description), image: UIImage(systemName: "arrow.down.circle"))
+        row.isEnabled = false
+        if let artwork = run?.artwork { loadCover(artwork, into: row) }
+        return row
     }
 
     /// Reads every tab again, as after a server switch.
@@ -89,7 +119,9 @@ final class CarLibrary {
                 self?.play(ids, from: index)
             }
         }
-        recent.updateSections([
+        // A first copy on its way leads the tab, as on the phone's Home.
+        let coming = copyStatus().map { [CPListSection(items: [$0])] } ?? []
+        recent.updateSections(coming + [
             CPListSection(items: Array(albumItems.prefix(most / 2)), header: "Recently played", sectionIndexTitle: nil),
             CPListSection(items: Array(songItems.prefix(most / 2)), header: "Most played", sectionIndexTitle: nil),
         ].filter { !$0.items.isEmpty })
@@ -131,12 +163,20 @@ final class CarLibrary {
     private func fillAlbums() async {
         guard let library = data?.library else { return }
         let all = await library.albums()
+        if all.isEmpty, let coming = copyStatus() {
+            albums.updateSections([CPListSection(items: [coming])])
+            return
+        }
         albums.updateSections([CPListSection(items: Array(all.prefix(most)).map(albumItem))])
     }
 
     private func fillArtists() async {
         guard let library = data?.library else { return }
         let all = await library.artists()
+        if all.isEmpty, let coming = copyStatus() {
+            artists.updateSections([CPListSection(items: [coming])])
+            return
+        }
         let items = Array(all.prefix(most)).map { artist in
             item(artist.name, nil, artist.artwork) { [weak self] in self?.openArtist(artist) }
         }

@@ -23,6 +23,9 @@
     <!-- Playing music with the screen off. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Bringing in a server's music while Octo is closed, with a notice of
+         how far it is. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- Keeping the phone awake while it plays, or while it drives a TV or
          speaker it is casting to. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -160,6 +163,17 @@
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
+
+        <!-- Keeps a copy of a server's library going while Octo is closed. -->
+        <service
+            android:name=".server.CopyService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Hears the copy's notice swiped away. -->
+        <receiver
+            android:name=".server.CopyNoticeDismissed"
+            android:exported="false" />
 
         <!-- Covers for a car's screen, readable only by apps granted each one. -->
         <provider
