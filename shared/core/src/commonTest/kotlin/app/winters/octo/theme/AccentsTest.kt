@@ -33,7 +33,24 @@ class AccentsTest {
     }
 
     @Test
+    fun everyAccentReadsInEveryTheme() {
+        for (theme in ThemeChoice.entries) {
+            val base = theme.base
+            val raised = base.raised ?: mixArgb(base.card, OctoAccentArgb, 60)
+            for (choice in FixedAccents) {
+                val accent = themedAccent(theme, choice, null)
+                val min = if (theme.light) 5.0 else 4.5
+                for (layer in listOf(base.page, base.card, raised)) {
+                    assertTrue("${choice.label} in $theme on %08X".format(layer), contrastRatio(accent, layer) >= min)
+                }
+                if (theme.light) assertTrue("white on ${choice.label} in $theme", contrastRatio(white, accent) >= 4.5)
+            }
+        }
+    }
+
+    @Test
     fun octoIsTheDefaultAndKeepsItsColour() {
+        assertEquals("Theme", AccentChoice.Octo.label)
         assertEquals(AccentChoice.Octo, AccentChoice.entries.first())
         assertEquals(0xFF97B1B9.toInt(), OctoAccentArgb)
         assertEquals(OctoAccentArgb, accentArgb(AccentChoice.Octo, art = 0xFFFF0000.toInt()))

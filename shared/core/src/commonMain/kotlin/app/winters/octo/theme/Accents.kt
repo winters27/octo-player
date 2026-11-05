@@ -12,7 +12,7 @@ import kotlinx.serialization.Serializable
 // is null for the one taken from the playing song's cover.
 @Serializable
 enum class AccentChoice(val label: String, val argb: Int?) {
-    Octo("Octo", 0xFF97B1B9.toInt()),
+    Octo("Theme", 0xFF97B1B9.toInt()),
     Sky("Sky", 0xFF73BAEA.toInt()),
     Iris("Iris", 0xFFA3A9F6.toInt()),
     Lilac("Lilac", 0xFFC79DE6.toInt()),
@@ -39,37 +39,41 @@ const val AccentSurfaceArgb: Int = 0xFF1A1A1B.toInt()
 // and the dark ink: WCAG AA for small text.
 const val AccentContrast = 4.5
 
-// One line under the picker saying what the choice does.
-fun accentHelp(choice: AccentChoice): String = when (choice) {
-    AccentChoice.FromArt -> "Follows the playing song's cover. Octo's own color while nothing plays or the cover is gray."
-    AccentChoice.Octo -> "Octo's own blue gray for selections, sliders, switches and buttons."
+// One line under the picker saying what the choice does in `theme`.
+fun accentHelp(choice: AccentChoice, theme: ThemeChoice): String = when (choice) {
+    AccentChoice.FromArt -> "Follows the playing song's cover. ${theme.label}'s own color while nothing plays or the cover is gray."
+    AccentChoice.Octo -> "${theme.label}'s own color for selections, sliders, switches and buttons."
     else -> "Selections, sliders, switches and buttons in ${choice.label.lowercase()}."
 }
 
-// A cover's colour made into an accent: the same hue, at the fixed
-// accents' lightness and a chroma held between theirs, lightened further
-// when the page would still read it under AA. Null for a cover with
-// hardly any colour, which keeps Octo's own.
-fun accentFromArt(argb: Int): Int? {
+fun accentFromArt(argb: Int): Int? = accentFromArt(argb, ThemeChoice.Octo)
+
+// A cover's color made into an accent for `theme`: the same hue at the
+// fixed accents' lightness, chroma held between theirs, lightened until it
+// reads on a dark theme's page and card; on a light theme, that color's
+// form for light surfaces.
+fun accentFromArt(argb: Int, theme: ThemeChoice): Int? {
     val lch = toLch(argb)
     if (lch.c < MinArtChroma) return null
     val chroma = lch.c.coerceIn(0.07, 0.12)
-    var lightness = 0.76
-    var accent = lchToArgb(lightness, chroma, lch.h)
-    while (!accentReads(accent) && lightness < 0.95) {
-        lightness += 0.02
-        accent = lchToArgb(lightness, chroma, lch.h)
+    val darkTheme = if (theme.light) ThemeChoice.Octo else theme
+    var accent = lchToArgb(0.76, chroma, lch.h)
+    var k = 0
+    while (!accentReads(accent, darkTheme) && k < 10) {
+        k++
+        accent = lchToArgb(0.76 + k * 0.02, chroma, lch.h)
     }
-    return accent
+    return if (theme.light) onLightForm(accent, theme.base) else accent
 }
 
 // Below this chroma a cover is grey enough to keep Octo's own accent.
 private const val MinArtChroma = 0.04
 
-// Whether an accent reads on the page and the raised surface, and dark
-// ink reads on it, each at AA.
-fun accentReads(argb: Int): Boolean =
-    contrastRatio(argb, AccentPageArgb) >= AccentContrast && contrastRatio(argb, AccentSurfaceArgb) >= AccentContrast
+fun accentReads(argb: Int): Boolean = accentReads(argb, ThemeChoice.Octo)
+
+// Whether an accent reads at AA on `theme`'s page and card.
+fun accentReads(argb: Int, theme: ThemeChoice): Boolean =
+    contrastRatio(argb, theme.base.page) >= AccentContrast && contrastRatio(argb, theme.base.card) >= AccentContrast
 
 // The accent to draw now: a fixed one as it is, the cover's for From the
 // album art (`art` is the playing cover's colour, null with none), or

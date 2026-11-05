@@ -54,6 +54,18 @@ kotlin {
     }
 }
 
+// Rewrites src/commonTest/resources/themes/resolved.txt from the resolver.
+// The test fails on purpose after writing, so a fixture is never written
+// silently.
+tasks.register<Test>("writeThemeFixture") {
+    val desktopTest = tasks.named<Test>("desktopTest")
+    testClassesDirs = desktopTest.get().testClassesDirs
+    classpath = desktopTest.get().classpath
+    filter.includeTestsMatching("app.winters.octo.theme.ResolvedFixtureTest")
+    systemProperty("octo.writeThemeFixture", "1")
+    ignoreFailures = true
+}
+
 // A rehearsal of the desktop update on one PC (scripts/rehearse-update.ps1):
 // -PoctoRehearsalKey=<base64 public key> adds a throwaway key to the keys
 // this build's desktop app trusts, in the built copy of trusted-keys.txt
