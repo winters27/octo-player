@@ -59,7 +59,7 @@ class AccentShotsTest {
             keep(s, "accent-settings-coral")
             assertEquals(Color(AccentChoice.Coral.argb!!), OctoColors.Accent)
             assertEquals(true, s.swatch("Coral").config.getOrNull(SemanticsProperties.Selected))
-            assertEquals(false, s.swatch("Octo").config.getOrNull(SemanticsProperties.Selected))
+            assertEquals(false, s.swatch(AccentChoice.Octo.label).config.getOrNull(SemanticsProperties.Selected))
             val words = s.nodes().map { it.name() }
             assertTrue(words.any { it.startsWith("Coral: Selections, sliders, switches and buttons") })
 
