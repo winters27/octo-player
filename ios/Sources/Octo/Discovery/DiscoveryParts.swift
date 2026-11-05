@@ -5,8 +5,6 @@ import SwiftUI
 enum DiscoveryStyle {
     /// Octo's label style: small buttons, chips and choices.
     static let label = Font.system(size: 13.5, weight: .semibold)
-    /// The darker pill a chosen chip sits in.
-    static var accentSelected: Color { Color.black.mix(with: OctoColor.accent, by: 0.40) }
     static let orange = Color(hex: 0xFF9500)
     static let green = Color(hex: 0x28CD41)
     static let red = Color(hex: 0xFF3B30)
@@ -23,7 +21,7 @@ struct TitleRow: View {
         HStack(spacing: 0) {
             Text(title)
                 .font(.octoSection)
-                .foregroundStyle(.white)
+                .foregroundStyle(OctoColor.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)
@@ -52,12 +50,13 @@ struct SearchHint: View {
 /// A one-line note in a list, quieter than its rows.
 struct QuietNote: View {
     let text: String
-    var color: Color = OctoColor.textMuted
+    /// The note's color; nil takes the theme's muted words.
+    var color: Color?
 
     var body: some View {
         Text(text)
             .font(.octoBodySmall)
-            .foregroundStyle(color)
+            .foregroundStyle(color.map { AnyShapeStyle($0) } ?? AnyShapeStyle(OctoColor.textMuted))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
             .padding(.vertical, 8)
@@ -79,7 +78,7 @@ struct FindsSubtitle: View {
     }
 }
 
-/// One filter as a filled chip: the darker pill with white words while on, a faint fill with
+/// One filter as a filled chip: the selected fill with its own words while on, a faint fill with
 /// quieter words while off.
 struct OnOffChip: View {
     let text: String
@@ -90,12 +89,13 @@ struct OnOffChip: View {
         Button(action: action) {
             Text(text)
                 .font(DiscoveryStyle.label)
-                .foregroundStyle(on ? Color.white : OctoColor.textSecondary)
+                .foregroundStyle(OctoColor.textSecondary)
                 .lineLimit(1)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .frame(minHeight: 36)
-                .background(on ? DiscoveryStyle.accentSelected : Color.white.opacity(0.07), in: Capsule())
+                .background { if !on { Capsule().fill(OctoColor.textPrimary.opacity(0.07)) } }
+                .octoSelectedFill(Capsule(), on: on)
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -149,7 +149,7 @@ struct OnlineAlbumCard: View {
                 Spacer().frame(height: 8)
                 Text(album.title)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(OctoColor.textPrimary)
                     .lineLimit(1)
                 Text(album.artist)
                     .font(.octoCaption)
@@ -185,7 +185,7 @@ struct OnlineArtistCircle: View {
                 OutsideCover(id: coverArt, size: 96, radius: 48, outside: outside)
                 Text(name)
                     .font(.octoCaption)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(OctoColor.textPrimary)
                     .lineLimit(1)
                     .multilineTextAlignment(.center)
                     .frame(width: 96)
@@ -221,7 +221,7 @@ struct ArtistListRow: View {
             HStack(spacing: 12) {
                 OutsideCover(id: coverArt, size: 48, radius: 24, outside: outside)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
+                    Text(name).font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary).lineLimit(1)
                     if !outside || albumCount > 0 {
                         Text(albumCount == 1 ? "1 album" : "\(albumCount) albums")
                             .font(.octoCaption)
@@ -258,7 +258,7 @@ struct PlaylistListRow: View {
             HStack(spacing: 12) {
                 PlaylistCover(playlist: summary, size: 56)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(summary.name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
+                    Text(summary.name).font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary).lineLimit(1)
                     HStack(spacing: 4) {
                         Text(summary.songCount == 1 ? "1 song" : "\(summary.songCount) songs")
                             .font(.octoCaption)

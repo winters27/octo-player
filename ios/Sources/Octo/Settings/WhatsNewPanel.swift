@@ -83,6 +83,7 @@ struct WhatsNewPanel: View {
 struct MarkdownView: View {
     let blocks: [Markdown.Block]
     @Environment(\.openURL) private var openURL
+    @Environment(\.octoPalette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -97,14 +98,14 @@ struct MarkdownView: View {
         switch block {
         case .heading(let level, let spans):
             let style = headingStyle(level)
-            Text(Self.attributed(spans, base: style.color, font: style.font))
+            Text(Self.attributed(spans, base: style.color, palette: palette, font: style.font))
                 .font(style.font)
                 .lineSpacing(style.spacing)
                 .padding(.top, first ? 0 : style.above)
                 .padding(.bottom, 8)
                 .accessibilityAddTraits(.isHeader)
         case .paragraph(let spans):
-            Text(Self.attributed(spans, base: OctoColor.textSecondary))
+            Text(Self.attributed(spans, base: palette.color(.textSecondary), palette: palette))
                 .font(.octoBodySmall)
                 .lineSpacing(4)
                 .padding(.top, first ? 0 : 10)
@@ -112,23 +113,23 @@ struct MarkdownView: View {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     VStack(alignment: .leading, spacing: 6) {
-                        bulletLine(item.text, dot: 5, color: OctoColor.textMuted)
+                        bulletLine(item.text, dot: 5, color: palette.color(.textMuted))
                         ForEach(Array(item.children.enumerated()), id: \.offset) { _, child in
-                            bulletLine(child.text, dot: 4, color: OctoColor.textMuted.opacity(0.35)).padding(.leading, 18)
+                            bulletLine(child.text, dot: 4, color: palette.color(.textMuted).opacity(0.35)).padding(.leading, 18)
                         }
                     }
                 }
             }
             .padding(.top, first ? 0 : 6)
         case .rule:
-            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1).padding(.vertical, 18)
+            Rectangle().fill(OctoColor.hairline).frame(height: 1).padding(.vertical, 18)
         }
     }
 
     private func bulletLine(_ spans: [Markdown.Span], dot: CGFloat, color: Color) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Circle().fill(color).frame(width: dot, height: dot).padding(.top, 8)
-            Text(Self.attributed(spans, base: OctoColor.textSecondary))
+            Text(Self.attributed(spans, base: palette.color(.textSecondary), palette: palette))
                 .font(.octoBodySmall)
                 .lineSpacing(4)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -137,22 +138,22 @@ struct MarkdownView: View {
 
     private func headingStyle(_ level: Int) -> (font: Font, color: Color, spacing: CGFloat, above: CGFloat) {
         switch level {
-        case 1: (.octoHeadline, OctoColor.textPrimary, 2, 28)
-        case 2: (.octoBody.weight(.bold), OctoColor.textPrimary, 3, 26)
-        default: (.settingsLabel, OctoColor.textSecondary, 2, 18)
+        case 1: (.octoHeadline, palette.color(.textPrimary), 2, 28)
+        case 2: (.octoBody.weight(.bold), palette.color(.textPrimary), 3, 26)
+        default: (.settingsLabel, palette.color(.textSecondary), 2, 18)
         }
     }
 
     /// Bold words in the primary color at semibold, italic slanted, code in monospace on a faint
     /// patch, links in the primary color and underlined.
-    static func attributed(_ spans: [Markdown.Span], base: Color, font: Font = .octoBodySmall) -> AttributedString {
+    static func attributed(_ spans: [Markdown.Span], base: Color, palette: ResolvedPalette, font: Font = .octoBodySmall) -> AttributedString {
         var out = AttributedString()
         for span in spans {
             var run = AttributedString(span.text)
-            run.foregroundColor = span.bold || span.link != nil ? OctoColor.textPrimary : base
+            run.foregroundColor = span.bold || span.link != nil ? palette.color(.textPrimary) : base
             if span.code {
                 run.font = .system(size: 13, design: .monospaced)
-                run.backgroundColor = Color.white.opacity(0.08)
+                run.backgroundColor = palette.color(.textPrimary).opacity(0.08)
             } else if span.bold || span.italic {
                 var look = font
                 if span.bold { look = look.weight(.semibold) }

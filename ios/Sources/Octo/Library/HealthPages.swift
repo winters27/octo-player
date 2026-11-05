@@ -21,7 +21,7 @@ struct HealthPage: View {
                     if report.clean {
                         Text("Everything looks right")
                             .font(.octoSection)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(OctoColor.textPrimary)
                             .padding(.horizontal, 20)
                             .padding(.top, 16)
                             .accessibilityAddTraits(.isHeader)
@@ -306,7 +306,7 @@ struct HealthWords: View {
 
 /// A hairline between rows, inset at both sides.
 private struct HealthHairline: View {
-    var body: some View { OctoColor.hairline.frame(height: 1).padding(.horizontal, 20) }
+    var body: some View { Rectangle().fill(OctoColor.hairline).frame(height: 1).padding(.horizontal, 20) }
 }
 
 /// A row of the front page: what it is over its count, and a chevron.
@@ -318,7 +318,7 @@ private struct FindingRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(title).font(.octoBody).foregroundStyle(.white)
+                Text(title).font(.octoBody).foregroundStyle(OctoColor.textPrimary)
                 Text(count).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -340,7 +340,7 @@ private struct HeadingLine<Action: View>: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.octoLabel).foregroundStyle(.white).accessibilityAddTraits(.isHeader)
+                Text(title).font(.octoLabel).foregroundStyle(OctoColor.textPrimary).accessibilityAddTraits(.isHeader)
                 Text(detail).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -391,7 +391,7 @@ private struct TrashRow: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(song.title).font(.octoBody).foregroundStyle(.white)
+                Text(song.title).font(.octoBody).foregroundStyle(OctoColor.textPrimary)
                 let from = [song.artist, song.album].filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.joined(separator: " • ")
                 if !from.isEmpty { Text(from).font(.octoCaption).foregroundStyle(OctoColor.textMuted) }
                 if song.replaced {

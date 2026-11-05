@@ -29,7 +29,7 @@ struct ScreenTitle: View {
         Text(breakableText(text))
             .font(.system(size: base * scale, weight: .black))
             .tracking(octoDisplayTracking)
-            .foregroundStyle(.white)
+            .foregroundStyle(OctoColor.textPrimary)
             .fixedSize(horizontal: false, vertical: true)
             .modifier(TitlePlace(inset: font.ascender - font.capHeight))
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -65,7 +65,7 @@ struct TitlePlace: ViewModifier {
 /// The big title's report under its earlier name, for `bigTitle()`.
 typealias TitleTopReport = TitlePlace
 
-/// A section's title inside a page: 18 point Bold, white.
+/// A section's title inside a page: 18 point Bold, in the theme's words.
 struct SectionTitle: View {
     let text: String
 
@@ -74,7 +74,7 @@ struct SectionTitle: View {
     var body: some View {
         Text(text)
             .font(.octoSection)
-            .foregroundStyle(.white)
+            .foregroundStyle(OctoColor.textPrimary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
@@ -468,7 +468,7 @@ private struct PageBar: ViewModifier {
             .toolbar {
                 if back {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button(action: goBack) { IconView(.back, size: 20, color: .white) }
+                        Button(action: goBack) { IconView(.back, size: 20, color: OctoColor.textPrimary) }
                             .accessibilityLabel("Back")
                             .onGeometryChange(for: CGPoint.self) { CGPoint(x: $0.frame(in: .global).midX, y: $0.frame(in: .global).midY) } action: { backOnScreen = $0 }
                     }

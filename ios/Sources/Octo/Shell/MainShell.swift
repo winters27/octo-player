@@ -120,6 +120,7 @@ struct MainShell: View {
     @Environment(Accounts.self) private var accounts
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.motionScale) private var motion
+    @Environment(\.octoPalette) private var palette
     @SceneStorage("tab") private var tab: AppTab = .home
     /// The bar's small player, kept through a relaunch of the scene.
     @SceneStorage("bar.player") private var barPlayer = false
@@ -157,14 +158,15 @@ struct MainShell: View {
 
     var body: some View {
         ZStack {
-            OctoColor.background.ignoresSafeArea()
+            Rectangle().fill(OctoColor.background).ignoresSafeArea()
             tabs
                 .onChange(of: playerOpen && hasTrack, initial: true) { _, open in playerShown(open) }
 
             OctoBar(tab: tab, playerMode: barPlayer, select: select, roundButton: roundButton,
                     showTabs: { barPlayer = false }, openPlayer: openPlayer,
-                    film: BarFilm.color(settings: ambience, store: colorStore, player: player))
-                .animation(.octoTween(fixed: AmbientTiming.crossMs), value: BarFilm.color(settings: ambience, store: colorStore, player: player))
+                    film: BarFilm.color(settings: ambience, store: colorStore, player: player, palette: palette))
+                .animation(.octoTween(fixed: AmbientTiming.crossMs),
+                           value: BarFilm.color(settings: ambience, store: colorStore, player: player, palette: palette))
                 .padding(.bottom, ShellMeasures.barBottomGap)
                 .frame(maxHeight: .infinity, alignment: .bottom)
                 .opacity(playerOpen && hasTrack ? 0 : 1)
@@ -381,6 +383,7 @@ struct MainShell: View {
     /// lingers), and on closing taken down and the pages woken 0.7 s later, once the cover is home.
     private func playerShown(_ open: Bool) {
         takeDown?.cancel()
+        ThemeState.shared.setPlayerOpen(open)
         PlayerMotion.shared.moved(for: open ? PlayerMotionClock.openSeconds : PlayerMotionClock.closeSeconds)
         if open {
             if playerMounted { playerOpening += 1 }
@@ -528,7 +531,7 @@ struct PageBackdrop: View {
 
     var body: some View {
         ZStack {
-            OctoColor.background
+            Rectangle().fill(OctoColor.background)
             AmbientBackdrop(page: page, route: route, awake: awake)
         }
         .ignoresSafeArea()

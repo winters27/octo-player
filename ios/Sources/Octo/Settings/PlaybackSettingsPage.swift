@@ -267,10 +267,10 @@ struct FadeCurveCard: View {
                     .padding(.vertical, 8)
                     .background {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(chosen ? OctoColor.accent.opacity(0.18) : .clear)
+                            .fill(chosen ? AnyShapeStyle(OctoColor.accent.opacity(0.18)) : AnyShapeStyle(Color.clear))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .strokeBorder(chosen ? OctoColor.accent.opacity(0.55) : .clear, lineWidth: 1)
+                                    .strokeBorder(chosen ? AnyShapeStyle(OctoColor.accent.opacity(0.55)) : AnyShapeStyle(Color.clear), lineWidth: 1)
                             }
                     }
                     .contentShape(Rectangle())
@@ -291,8 +291,11 @@ struct FadeCurveCard: View {
 private struct FadeCurveDrawing: View {
     let curve: FadeCurve
     let chosen: Bool
+    @Environment(\.octoPalette) private var palette
 
     var body: some View {
+        let outColor = palette.color(.textSecondary).opacity(chosen ? 0.9 : 0.6)
+        let intoColor = palette.color(.accent)
         Canvas { context, size in
             let points = 48
             var out = Path()
@@ -312,8 +315,8 @@ private struct FadeCurveDrawing: View {
                 }
             }
             let line = StrokeStyle(lineWidth: 1.75, lineCap: .round, lineJoin: .round)
-            context.stroke(out, with: .color(OctoColor.textSecondary.opacity(chosen ? 0.9 : 0.6)), style: line)
-            context.stroke(into, with: .color(OctoColor.accent), style: line)
+            context.stroke(out, with: .color(outColor), style: line)
+            context.stroke(into, with: .color(intoColor), style: line)
         }
     }
 }

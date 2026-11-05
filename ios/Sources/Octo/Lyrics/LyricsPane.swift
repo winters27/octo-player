@@ -45,6 +45,7 @@ struct LyricsPane: View {
         .onChange(of: keepsScreenOn(state), initial: true) { _, on in UIApplication.shared.isIdleTimerDisabled = on }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .background(RefreshRateReader(hz: $refreshHz))
+        .octoOverArt()
     }
 
     private func syncWatch() {

@@ -101,7 +101,9 @@ struct ImportScreen: View {
         }
     }
 
-    private func line(_ text: String, color: Color = OctoColor.textMuted) -> some View {
+    private func line(_ text: String) -> some View { line(text, color: OctoColor.textMuted) }
+
+    private func line<S: ShapeStyle>(_ text: String, color: S) -> some View {
         Text(text)
             .font(.octoBodySmall)
             .foregroundStyle(color)
@@ -341,11 +343,11 @@ private struct TrackLine<Actions: View>: View {
         return "\(word) \(Int((progress * 100).rounded(.down)))%"
     }
 
-    private var stateColor: Color {
+    private var stateColor: AnyShapeStyle {
         switch track.stage {
-        case .have, .done: OctoColor.signalGreen
-        case .notFound, .skipped: OctoColor.signalOrange
-        default: OctoColor.textSecondary
+        case .have, .done: AnyShapeStyle(OctoColor.signalGreen)
+        case .notFound, .skipped: AnyShapeStyle(OctoColor.signalOrange)
+        default: AnyShapeStyle(OctoColor.textSecondary)
         }
     }
 }
@@ -455,18 +457,18 @@ private struct GetMyMusicView: View {
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .minimumScaleFactor(10.0 / 15.0)
-                .foregroundStyle(picked ? OctoColor.background : OctoColor.textPrimary)
+                .foregroundStyle(picked ? AnyShapeStyle(OctoColor.onAccent) : AnyShapeStyle(OctoColor.textPrimary))
                 .padding(.horizontal, 20)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, minHeight: 56)
-                .background(picked ? OctoColor.accent : OctoColor.accent.opacity(0.06), in: shape)
-                .overlay(shape.strokeBorder(picked ? .clear : OctoColor.textMuted.opacity(0.25), lineWidth: 1))
+                .background(picked ? AnyShapeStyle(OctoColor.accent) : AnyShapeStyle(OctoColor.accent.opacity(0.06)), in: shape)
+                .overlay(shape.strokeBorder(picked ? AnyShapeStyle(Color.clear) : AnyShapeStyle(OctoColor.textMuted.opacity(0.25)), lineWidth: 1))
                 .overlay(alignment: .topTrailing) {
                     if picked {
                         Image(systemName: "checkmark")
                             .font(.system(size: 11, weight: .bold))
                             .frame(width: 14, height: 14)
-                            .foregroundStyle(OctoColor.background)
+                            .foregroundStyle(OctoColor.onAccent)
                             .padding(6)
                     }
                 }

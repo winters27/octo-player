@@ -175,7 +175,7 @@ private struct StepRow: View {
         .accessibilityValue(step.state == .done ? "Done" : step.state == .now ? "Under way" : "Waiting")
     }
 
-    private var color: Color {
+    private var color: OctoTone {
         switch step.state {
         case .done: OctoColor.textSecondary
         case .now: OctoColor.textPrimary
@@ -205,7 +205,7 @@ private struct CommandRow: View {
         .padding(.leading, 12)
         .padding(.trailing, 4)
         .padding(.vertical, 6)
-        .background(Color.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(OctoShade(0.25), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 

@@ -13,7 +13,7 @@ struct SoundPage: View {
             if let model {
                 SoundPageContent(model: model)
             } else {
-                OctoColor.background.ignoresSafeArea()
+                Rectangle().fill(OctoColor.background).ignoresSafeArea()
             }
         }
         .onAppear { if model == nil { model = SoundPageModel(store: store) } }

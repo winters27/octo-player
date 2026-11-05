@@ -197,9 +197,9 @@ public enum AmbientStrength: String, StoredChoice, Codable {
 
     public var detail: String {
         switch self {
-        case .off: "The plain dark background everywhere."
+        case .off: "The plain background everywhere."
         case .subtle: "A faint glow of the artwork's colors behind the pages."
-        case .rich: "A fuller glow, still kept dark enough for text."
+        case .rich: "A fuller glow, still kept soft enough for text."
         }
     }
 

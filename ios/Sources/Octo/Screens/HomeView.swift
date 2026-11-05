@@ -234,7 +234,7 @@ struct HomeView: View {
     /// good; the empty Library pages still offer access.
     private var accessCard: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Music on this phone").font(.octoBodySmall).foregroundStyle(.white)
+            Text("Music on this phone").font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary)
             Text("Allow access to play the music already on your phone here too.")
                 .font(.octoCaption)
                 .foregroundStyle(OctoColor.textSecondary)
@@ -246,7 +246,7 @@ struct HomeView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(Glass.octo, in: .rect(cornerRadius: 20))
+        .octoGlass(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
     }
@@ -255,7 +255,7 @@ struct HomeView: View {
     private var whatsNewCard: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("New in Octo").font(.octoCaption).foregroundStyle(OctoColor.textMuted)
-            Text(WhatsNew.summary).font(.octoBody).foregroundStyle(.white).lineLimit(2)
+            Text(WhatsNew.summary).font(.octoBody).foregroundStyle(OctoColor.textPrimary).lineLimit(2)
             HStack(spacing: 12) {
                 GlazeButton("See what's new") { reading = true }
                 GlazeButton("Dismiss") { model.dismissWhatsNew() }
@@ -264,7 +264,7 @@ struct HomeView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(Glass.octo, in: .rect(cornerRadius: 20))
+        .octoGlass(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .padding(.horizontal, 20)
         .padding(.bottom, 8)
         .transition(.opacity.combined(with: .move(edge: .top)))
@@ -276,7 +276,7 @@ struct HomeView: View {
         let askAccess = offerAccess && model.access != .granted
         let signIn = session.client == nil
         return VStack(alignment: .leading, spacing: 6) {
-            Text("No music yet").font(.octoHeadline).foregroundStyle(.white)
+            Text("No music yet").font(.octoHeadline).foregroundStyle(OctoColor.textPrimary)
             Text("Songs on this phone and on your server show up here on their own.")
                 .font(.octoBodySmall)
                 .foregroundStyle(OctoColor.textMuted)
@@ -305,7 +305,7 @@ struct HomeShelfTitle: View {
                 HStack(spacing: 0) {
                     Text(title)
                         .font(.octoSection)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(OctoColor.textPrimary)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 10)
                     Image(systemName: "chevron.right")
@@ -342,7 +342,7 @@ private struct PinnedCard<Picture: View>: View {
                 Spacer().frame(height: 8)
                 Text(title)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(OctoColor.textPrimary)
                     .lineLimit(1)
                 Text(subtitle).font(.octoCaption).foregroundStyle(OctoColor.textMuted).lineLimit(1)
             }

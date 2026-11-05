@@ -180,12 +180,11 @@ private struct SoundGraphDrawing: View, Animatable {
     }
 
     @Environment(\.displayScale) private var scale
+    @Environment(\.octoPalette) private var palette
 
-    /// The line's color: grey when off, white when on.
+    /// The line's color: the muted words when off, the theme's words when on.
     private var line: Color {
-        let t = min(1, max(0, lit))
-        func mix(_ from: Double) -> Double { from / 255 + (1 - from / 255) * t }
-        return Color(.sRGB, red: mix(0x6B), green: mix(0x70), blue: mix(0x75), opacity: 1)
+        palette.color(.textMuted).mix(with: palette.color(.textPrimary), by: min(1, max(0, lit)))
     }
 
     var body: some View {
@@ -200,12 +199,13 @@ private struct SoundGraphDrawing: View, Animatable {
 
     private func grid(_ context: inout GraphicsContext) {
         let hair = 1 / max(scale, 1)
+        let ink = palette.color(.textPrimary)
         for hz in SoundGraph.gridHz {
             let x = plot.x(hz)
-            context.stroke(segment(CGPoint(x: x, y: plot.top), CGPoint(x: x, y: plot.bottom)), with: .color(.white.opacity(0.06)), lineWidth: hair)
+            context.stroke(segment(CGPoint(x: x, y: plot.top), CGPoint(x: x, y: plot.bottom)), with: .color(ink.opacity(0.06)), lineWidth: hair)
         }
         let zero = plot.y(0)
-        context.stroke(segment(CGPoint(x: plot.left, y: zero), CGPoint(x: plot.right, y: zero)), with: .color(.white.opacity(0.14)), lineWidth: hair)
+        context.stroke(segment(CGPoint(x: plot.left, y: zero), CGPoint(x: plot.right, y: zero)), with: .color(ink.opacity(0.14)), lineWidth: hair)
     }
 
     private func drawCurve(_ context: inout GraphicsContext) {
@@ -230,7 +230,7 @@ private struct SoundGraphDrawing: View, Animatable {
             for spread in [2.5, 1, 0.3] {
                 context.drawLayer { layer in
                     layer.addFilter(.blur(radius: SoundStyle.pixelBlur(12 * spread)))
-                    layer.stroke(path, with: .color(.white.opacity(0.4 * lit / 3)), style: style)
+                    layer.stroke(path, with: .color(palette.color(.textPrimary).opacity(0.4 * lit / 3)), style: style)
                 }
             }
         }
@@ -239,16 +239,16 @@ private struct SoundGraphDrawing: View, Animatable {
 
     private func node(_ context: inout GraphicsContext, at point: CGPoint, big: Bool) {
         let radius = big ? ResponsePlot.activeRadius : ResponsePlot.nodeRadius
-        if big && lit > 0 { context.fill(circle(point, radius * 2), with: .color(.white.opacity(0.18 * lit))) }
+        if big && lit > 0 { context.fill(circle(point, radius * 2), with: .color(palette.color(.textPrimary).opacity(0.18 * lit))) }
         // A dark edge so a node stands out against the line through it.
-        context.fill(circle(point, radius + 1.5 / max(scale, 1)), with: .color(.black.opacity(0.45)))
+        context.fill(circle(point, radius + 1.5 / max(scale, 1)), with: .color(palette.shadowColor(0.45)))
         context.fill(circle(point, radius), with: .color(line))
     }
 
     private func drawLabels(_ context: inout GraphicsContext, size: CGSize) {
         let y = plot.bottom + ResponsePlot.padUpDown + 4
         for hz in labels {
-            let text = context.resolve(Text(SoundEdits.shortHz(hz)).font(.system(size: 10).monospacedDigit()).foregroundStyle(OctoColor.textMuted))
+            let text = context.resolve(Text(SoundEdits.shortHz(hz)).font(.system(size: 10).monospacedDigit()).foregroundStyle(palette.color(.textMuted)))
             let measured = text.measure(in: size)
             let x = min(max(0, plot.x(hz) - measured.width / 2), size.width - measured.width)
             context.draw(text, in: CGRect(x: x, y: y, width: measured.width, height: measured.height))
@@ -258,7 +258,7 @@ private struct SoundGraphDrawing: View, Animatable {
     /// The value of the node being dragged, in a small dark pill above it, or below it near the
     /// top.
     private func pill(_ context: inout GraphicsContext, text: String, at point: CGPoint, size: CGSize) {
-        let resolved = context.resolve(Text(text).font(.system(size: 11).monospacedDigit()).foregroundStyle(.white))
+        let resolved = context.resolve(Text(text).font(.system(size: 11).monospacedDigit()).foregroundStyle(palette.color(.textPrimary)))
         let measured = resolved.measure(in: size)
         let width = measured.width + 16
         let height = measured.height + 6
@@ -266,7 +266,7 @@ private struct SoundGraphDrawing: View, Animatable {
         let top = above >= 0 ? above : point.y + 16
         let left = min(max(0, point.x - width / 2), size.width - width)
         let rect = CGRect(x: left, y: top, width: width, height: height)
-        context.fill(Path(roundedRect: rect, cornerRadius: height / 2), with: .color(.black.opacity(0.72)))
+        context.fill(Path(roundedRect: rect, cornerRadius: height / 2), with: .color(palette.filmColor(0.72)))
         context.draw(resolved, in: CGRect(x: left + 8, y: top + 3, width: measured.width, height: measured.height))
     }
 

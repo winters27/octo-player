@@ -383,7 +383,7 @@ private struct FolderRow: View {
             HStack(spacing: 16) {
                 IconView(.folder, size: 24, color: OctoColor.accent)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
+                    Text(name).font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary).lineLimit(1)
                     if let subtitle { Text(subtitle).font(.octoCaption).foregroundStyle(OctoColor.textMuted) }
                 }
                 Spacer(minLength: 0)

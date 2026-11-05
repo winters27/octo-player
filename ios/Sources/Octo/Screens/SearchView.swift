@@ -94,7 +94,7 @@ struct SearchView: View {
                 }
                 TextField("", text: $model.text)
                     .font(.octoBody)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(OctoColor.textPrimary)
                     .tint(OctoColor.accent)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -139,10 +139,10 @@ struct SearchView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(OctoColor.accent)
                     .frame(width: 40, height: 40)
-                    .glassEffect(Glass.octo, in: .circle)
+                    .octoGlass(Circle())
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Live radio near you").font(.octoBodySmall).foregroundStyle(.white)
+                    Text("Live radio near you").font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary)
                     Text("Stations on the air around you").font(.octoCaption).foregroundStyle(OctoColor.textMuted)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -210,7 +210,7 @@ struct SearchView: View {
                         } label: {
                             Text(query)
                                 .font(.octoBody)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(OctoColor.textPrimary)
                                 .lineLimit(1)
                                 .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                                 .contentShape(Rectangle())
@@ -542,7 +542,8 @@ private struct OutsideLine: View {
             .accessibilityHidden(true)
             Text(text)
                 .font(.octoBodySmall)
-                .foregroundStyle(look == .failed ? .white : look == .found ? OctoColor.textMuted : OctoColor.textSecondary)
+                .foregroundStyle(look == .failed ? AnyShapeStyle(OctoColor.textPrimary)
+                                 : look == .found ? AnyShapeStyle(OctoColor.textMuted) : AnyShapeStyle(OctoColor.textSecondary))
                 .frame(maxWidth: .infinity, alignment: .leading)
             if let retry {
                 Button("Try again", action: retry)
@@ -568,7 +569,7 @@ private struct WaitingRow: View {
     @State private var dim = false
 
     var body: some View {
-        let fill = Color.white.opacity(0.10)
+        let fill = OctoInkColor.quaternary
         HStack(spacing: 12) {
             RoundedRectangle(cornerRadius: round ? 24 : OctoRadius.artS, style: .continuous)
                 .fill(fill)

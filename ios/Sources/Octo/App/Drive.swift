@@ -202,7 +202,7 @@ enum DriveSamples {
                         overlays.hideSheet(id)
                         router.done("Sleeping in \(item)")
                     } label: {
-                        Text(item).font(.octoBodySmall).foregroundStyle(.white)
+                        Text(item).font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary)
                             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                             .padding(.horizontal, 20)
                             .contentShape(Rectangle())
@@ -234,7 +234,7 @@ private struct OctoSwitchRow: View {
 
     var body: some View {
         HStack {
-            Text("Fade out at the end").font(.octoBodySmall).foregroundStyle(.white)
+            Text("Fade out at the end").font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary)
             Spacer()
             OctoSwitch(isOn: $on, label: "Fade out at the end")
         }

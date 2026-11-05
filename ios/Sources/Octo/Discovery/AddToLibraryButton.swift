@@ -10,8 +10,9 @@ struct AddToLibraryButton: View {
     let song: Song
     var size: CGFloat = 44
     var iconSize: CGFloat = 24
-    /// The color of its plus and heart: white, or the player's dark words over a light background.
-    var ink: Color = .white
+    /// The color of its plus and heart: the theme's words, or the player's dark words over a light
+    /// background.
+    var ink: Color?
 
     var body: some View {
         AddButton(song: song, size: size, iconSize: iconSize, ink: ink)
@@ -22,7 +23,8 @@ private struct AddButton: View {
     let song: Song
     let size: CGFloat
     let iconSize: CGFloat
-    let ink: Color
+    let ink: Color?
+    @Environment(\.octoPalette) private var palette
     @Environment(\.titleIcons) private var titleIcons
     @Environment(Downloads.self) private var downloads
     @Environment(Router.self) private var router
@@ -47,8 +49,9 @@ private struct AddButton: View {
     private var saveHeart: some View {
         let id = song.id.hasPrefix("find:") ? song.id : findId(song.id)
         let saved = accounts.family.isSaved(id)
+        let words = ink ?? palette.color(.textPrimary)
         return Button { accounts.family.toggleSaved(id, title: song.title) } label: {
-            IconView(saved ? .liked : .like, size: iconSize, color: saved ? ink : ink.opacity(quiet))
+            IconView(saved ? .liked : .like, size: iconSize, color: saved ? (ink ?? palette.color(.complement)) : words.opacity(quiet))
                 .iconGlow(saved)
                 .frame(width: size, height: size)
                 .contentShape(Rectangle())
@@ -77,7 +80,7 @@ private struct AddButton: View {
                 case .none:
                     Image(systemName: "plus")
                         .font(.system(size: iconSize * 0.84, weight: .regular))
-                        .foregroundStyle(ink.opacity(quiet))
+                        .foregroundStyle((ink ?? palette.color(.textPrimary)).opacity(quiet))
                 case .failed:
                     DownloadAlert().frame(width: iconSize, height: iconSize)
                 default:
@@ -149,6 +152,7 @@ struct DownloadRing: View {
     @State private var doneAt: Date?
     @State private var doneFirst: Bool?
     @State private var tick = 0
+    @Environment(\.octoPalette) private var palette
 
     private static let turnSeconds = 1.6
     private static let fillSeconds = 1.2
@@ -232,6 +236,7 @@ struct DownloadRing: View {
         let side = min(size.width, size.height)
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         let radius = side / 2 - stroke / 2
+        let ink = palette.color(.textPrimary)
         let t = date.timeIntervalSinceReferenceDate
 
         // How far the check has drawn in, and how bright its glow is.
@@ -256,7 +261,7 @@ struct DownloadRing: View {
         let fade = 1 - morph
         if fade > 0 {
             let ring = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
-            canvas.stroke(ring, with: .color(.white.opacity(0.2 * fade)), lineWidth: stroke)
+            canvas.stroke(ring, with: .color(ink.opacity(0.2 * fade)), lineWidth: stroke)
 
             var arc = Path()
             var alpha = 1.0
@@ -274,7 +279,7 @@ struct DownloadRing: View {
                     alpha = 1 - 0.55 * Easing.fastOutSlowIn(p)
                 }
             }
-            canvas.stroke(arc, with: .color(.white.opacity(fade * alpha)), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
+            canvas.stroke(arc, with: .color(ink.opacity(fade * alpha)), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
 
             let arm = side * 0.18
             var plus = Path()
@@ -282,7 +287,7 @@ struct DownloadRing: View {
             plus.addLine(to: CGPoint(x: center.x + arm, y: center.y))
             plus.move(to: CGPoint(x: center.x, y: center.y - arm))
             plus.addLine(to: CGPoint(x: center.x, y: center.y + arm))
-            canvas.stroke(plus, with: .color(.white.opacity(fade)), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
+            canvas.stroke(plus, with: .color(ink.opacity(fade)), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
         }
 
         if morph > 0 {
@@ -296,33 +301,36 @@ struct DownloadRing: View {
                 var wide = canvas
                 wide.addFilter(.blur(radius: 10))
                 wide.opacity = 0.6 * glow
-                wide.stroke(drawn, with: .color(.white), style: style)
+                wide.stroke(drawn, with: .color(ink), style: style)
                 var near = canvas
                 near.addFilter(.blur(radius: 3))
                 near.opacity = 0.7 * glow
-                near.stroke(drawn, with: .color(.white), style: style)
+                near.stroke(drawn, with: .color(ink), style: style)
             }
-            canvas.stroke(drawn, with: .color(.white), style: style)
+            canvas.stroke(drawn, with: .color(ink), style: style)
         }
     }
 }
 
-/// A download that failed: a white circle with an exclamation mark.
+/// A download that failed: a circle with an exclamation mark, in the theme's words.
 struct DownloadAlert: View {
+    @Environment(\.octoPalette) private var palette
+
     var body: some View {
+        let ink = palette.color(.textPrimary)
         Canvas { canvas, size in
             let stroke: CGFloat = 2
             let center = CGPoint(x: size.width / 2, y: size.height / 2)
             let radius = min(size.width, size.height) * 0.42 - stroke / 2
             canvas.stroke(Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)),
-                          with: .color(.white), lineWidth: stroke)
+                          with: .color(ink), lineWidth: stroke)
             var bar = Path()
             bar.move(to: CGPoint(x: center.x, y: center.y - radius * 0.5))
             bar.addLine(to: CGPoint(x: center.x, y: center.y + radius * 0.1))
-            canvas.stroke(bar, with: .color(.white), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
+            canvas.stroke(bar, with: .color(ink), style: StrokeStyle(lineWidth: stroke, lineCap: .round))
             let dot = stroke * 0.7
             canvas.fill(Path(ellipseIn: CGRect(x: center.x - dot, y: center.y + radius * 0.48 - dot, width: dot * 2, height: dot * 2)),
-                        with: .color(.white))
+                        with: .color(ink))
         }
     }
 }

@@ -81,7 +81,7 @@ private struct SectionRow: View {
     var body: some View {
         HStack(spacing: 16) {
             IconView(icon, size: 24, color: OctoColor.accent)
-            Text(label).font(.octoBody).foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .leading)
+            Text(label).font(.octoBody).foregroundStyle(OctoColor.textPrimary).frame(maxWidth: .infinity, alignment: .leading)
             if let detail { Text(detail).font(.octoCaption).foregroundStyle(OctoColor.textMuted) }
             IconView(.chevron, size: 22, color: OctoColor.textMuted)
         }
@@ -97,7 +97,7 @@ struct LibraryHairline: View {
     var trailing: CGFloat = 20
 
     var body: some View {
-        Rectangle().fill(LibraryLook.hairline).frame(height: 1).padding(.leading, leading).padding(.trailing, trailing)
+        Rectangle().fill(OctoColor.hairline).frame(height: 1).padding(.leading, leading).padding(.trailing, trailing)
     }
 }
 

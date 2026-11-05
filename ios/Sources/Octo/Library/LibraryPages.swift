@@ -260,7 +260,7 @@ struct SongsPage: View {
             }
             .padding(.leading, 14)
             .frame(minHeight: 44)
-            .glassEffect(Glass.octo, in: .capsule)
+            .octoGlass(Capsule())
             .padding(.horizontal, 20)
             // The filters as one menu button, never a row that scrolls sideways: each quick
             // filter checked while on, a rating, a genre and a decade each in a menu of its own.
@@ -329,7 +329,7 @@ struct GenresPage: View {
                             HStack(spacing: 12) {
                                 ArtCover(artwork: genre.artwork, size: 48, radius: 6)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(genre.name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
+                                    Text(genre.name).font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary).lineLimit(1)
                                     Text(songsCount(genre.songCount)).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
                                 }
                                 Spacer(minLength: 0)
@@ -680,7 +680,7 @@ struct DownloadsPage: View {
                 if row.state == .downloading {
                     GeometryReader { box in
                         ZStack(alignment: .leading) {
-                            Rectangle().fill(.white.opacity(0.08))
+                            Rectangle().fill(OctoColor.hairline)
                             Rectangle().fill(OctoColor.accent).frame(width: box.size.width * CGFloat(row.progress))
                         }
                     }

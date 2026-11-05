@@ -1,3 +1,4 @@
+import OctoKit
 import SwiftUI
 import UIKit
 
@@ -15,8 +16,11 @@ struct JewelSlider: View {
 
     @State private var dragging: Double?
     @State private var shown: Double = 0
+    @Environment(\.octoPalette) private var palette
 
     var body: some View {
+        let accent = palette.color(.accent)
+        let ink = palette.color(.textPrimary)
         GeometryReader { box in
             let thumb: CGFloat = dragging == nil ? 14 : 16
             let radius = thumb / 2
@@ -25,23 +29,23 @@ struct JewelSlider: View {
             let x = radius + (width - 2 * radius) * CGFloat(min(max(at, 0), 1))
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(LinearGradient(colors: [.white.opacity(0.10), .white.opacity(0.14)], startPoint: .top, endPoint: .bottom))
-                    .overlay(Capsule().stroke(Color.black.opacity(0.25), lineWidth: 0.5).offset(y: 0.5).mask(Capsule()))
+                    .fill(LinearGradient(colors: [ink.opacity(0.10), ink.opacity(0.14)], startPoint: .top, endPoint: .bottom))
+                    .overlay(Capsule().stroke(OctoShade(0.25), lineWidth: 0.5).offset(y: 0.5).mask(Capsule()))
                     .frame(height: 4)
                 Capsule()
-                    .fill(LinearGradient(colors: [OctoColor.accent, OctoColor.accent.mix(with: .black, by: 0.22)],
+                    .fill(LinearGradient(colors: [accent, accent.mix(with: .black, by: 0.22)],
                                          startPoint: .top, endPoint: .bottom))
                     .frame(width: max(0, x), height: 4)
                 Circle()
-                    .fill(OctoColor.accent.opacity(0.25))
+                    .fill(accent.opacity(0.25))
                     .frame(width: thumb + 12, height: thumb + 12)
                     .opacity(dragging == nil ? 0 : 1)
                     .offset(x: x - radius - 6)
                 Circle()
                     .fill(.white)
-                    .overlay(Circle().fill(OctoColor.accent).scaleEffect(dragging == nil ? 0.35 : 0.42))
-                    .shadow(color: .black.opacity(0.3), radius: 1.5, y: 1)
-                    .shadow(color: OctoColor.accent.opacity(dragging == nil ? 0 : 0.5), radius: 6)
+                    .overlay(Circle().fill(accent).scaleEffect(dragging == nil ? 0.35 : 0.42))
+                    .octoShadow(0.3, radius: 1.5, y: 1)
+                    .shadow(color: accent.opacity(dragging == nil ? 0 : 0.5), radius: 6)
                     .frame(width: thumb, height: thumb)
                     .offset(x: x - radius)
             }
@@ -91,20 +95,22 @@ struct GlowSlider: View {
     let onSeek: (Double) -> Void
 
     @State private var dragging: Double?
+    @Environment(\.octoPalette) private var palette
 
     var body: some View {
+        let ink = palette.color(.textPrimary)
         GeometryReader { box in
             let width = box.size.width
             let at = min(max(dragging ?? fraction, 0), 1)
             let held = dragging != nil
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.24)).frame(height: held ? 8 : 3.5)
+                Capsule().fill(ink.opacity(0.24)).frame(height: held ? 8 : 3.5)
                 Capsule()
-                    .fill(Color.white)
+                    .fill(ink)
                     .frame(width: max(0, width * at), height: held ? 8 : 3.5)
-                    .shadow(color: .white.opacity(held ? 0.6 : 0.35), radius: held ? 8 : 4)
+                    .shadow(color: ink.opacity(held ? 0.6 : 0.35), radius: held ? 8 : 4)
                 if held {
-                    Circle().fill(.white).frame(width: 18, height: 18).offset(x: width * at - 9)
+                    Circle().fill(ink).frame(width: 18, height: 18).offset(x: width * at - 9)
                 }
             }
             .frame(width: width, height: box.size.height)

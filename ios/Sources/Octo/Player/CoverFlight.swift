@@ -247,7 +247,6 @@ final class FlightView: UIView {
         card.masksToBounds = true
         card.cornerCurve = .continuous
         card.contentsGravity = .resizeAspectFill
-        card.backgroundColor = UIColor(OctoColor.backgroundTertiary).cgColor
         layer.addSublayer(card)
         clear()
     }
@@ -266,6 +265,7 @@ final class FlightView: UIView {
         corner = (trip.fromCorner, trip.toCorner)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        card.backgroundColor = UIColor(Color(argb: ThemeState.shared.resolved.card)).cgColor
         card.contents = trip.image?.cgImage
         CATransaction.setCompletionBlock { [weak self] in
             guard let self, self.generation == mine else { return }

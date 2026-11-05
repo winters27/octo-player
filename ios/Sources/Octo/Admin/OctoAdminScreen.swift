@@ -241,12 +241,12 @@ private struct HealthRow: View {
         .padding(.vertical, 8)
     }
 
-    private func color(_ dot: HealthDot) -> Color {
+    private func color(_ dot: HealthDot) -> AnyShapeStyle {
         switch dot {
-        case .ok: Color(hex: 0x8FBFA0)
-        case .warning: Color(hex: 0xE3B35B)
-        case .down: OctoColor.error
-        case .notSetUp: OctoColor.accent.opacity(0.3)
+        case .ok: AnyShapeStyle(Color(hex: 0x8FBFA0))
+        case .warning: AnyShapeStyle(Color(hex: 0xE3B35B))
+        case .down: AnyShapeStyle(OctoColor.error)
+        case .notSetUp: AnyShapeStyle(OctoColor.accent.opacity(0.3))
         }
     }
 

@@ -56,11 +56,11 @@ extension Color {
 
 /// Secondary words in the player (times, the album's name, the volume's speakers): the dark ink
 /// at 60% over a light background, otherwise the app's muted words.
-func mutedInk(_ ink: Color, dark: Bool) -> Color { dark ? ink.opacity(0.6) : OctoColor.textMuted }
+func mutedInk(_ ink: Color, dark: Bool, palette: ResolvedPalette) -> Color { dark ? ink.opacity(0.6) : palette.color(.textMuted) }
 
 /// The artist's name and the explicit mark: the dark ink at 75% over a light background,
 /// otherwise the accent.
-func accentInk(_ ink: Color, dark: Bool) -> Color { dark ? ink.opacity(0.75) : OctoColor.accent }
+func accentInk(_ ink: Color, dark: Bool, palette: ResolvedPalette) -> Color { dark ? ink.opacity(0.75) : palette.color(.accent) }
 
 extension BackgroundPrefs {
     /// How the cover is prepared for this background.

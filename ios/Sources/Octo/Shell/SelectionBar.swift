@@ -180,7 +180,7 @@ private struct SelectionBar: View {
                     .frame(width: 44)
                 Text(selectedWords(picked.count))
                     .font(.octoBodySmall)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(OctoColor.textPrimary)
                     .padding(.leading, 4)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityAddTraits(.updatesFrequently)
@@ -199,7 +199,7 @@ private struct SelectionBar: View {
                             }
                         }
                     } label: {
-                        IconView(.delete, size: 22, color: .white)
+                        IconView(.delete, size: 22, color: OctoColor.textPrimary)
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .contentShape(Rectangle())
                     }
@@ -289,7 +289,8 @@ private struct BarButton: View {
 
     var body: some View {
         Button(action: action) {
-            IconView(icon, size: 22, color: enabled ? .white : OctoColor.textMuted.opacity(0.35))
+            IconView(icon, size: 22,
+                     color: enabled ? AnyShapeStyle(OctoColor.textPrimary) : AnyShapeStyle(OctoColor.textMuted.opacity(0.35)))
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .contentShape(Rectangle())
         }
@@ -303,7 +304,7 @@ private struct BarButton: View {
 private struct RectPress: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(Color.white.opacity(configuration.isPressed ? 0.10 : 0))
+            .background(OctoColor.textPrimary.opacity(configuration.isPressed ? 0.10 : 0))
             .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }

@@ -95,7 +95,7 @@ struct LyricsChooserContent: View {
                     if results.isEmpty { quiet("Nothing found for that") }
                     ForEach(Array(results.enumerated()), id: \.offset) { index, candidate in
                         let isShowing = current != nil && candidate.pick == current
-                        if index > 0 { OctoColor.hairline.frame(height: 1).padding(.horizontal, 30) }
+                        if index > 0 { Rectangle().fill(OctoColor.hairline).frame(height: 1).padding(.horizontal, 30) }
                         CandidateRow(candidate: candidate, showing: isShowing, songTitle: song.title, byHand: true) {
                             pick(candidate, showing: isShowing)
                         }
@@ -116,7 +116,10 @@ struct LyricsChooserContent: View {
                 ForEach(Array(choices.items.enumerated()), id: \.offset) { index, candidate in
                     let isShowing = index == choices.showing
                     // No line touches the darker pill.
-                    if index > 0 { (index - 1 != choices.showing ? OctoColor.hairline : Color.clear).frame(height: 1).padding(.horizontal, 30) }
+                    if index > 0 {
+                        Rectangle().fill(index - 1 != choices.showing ? AnyShapeStyle(OctoColor.hairline) : AnyShapeStyle(Color.clear))
+                            .frame(height: 1).padding(.horizontal, 30)
+                    }
                     CandidateRow(candidate: candidate, showing: isShowing, songTitle: song.title, byHand: false) {
                         pick(candidate, showing: isShowing)
                     }

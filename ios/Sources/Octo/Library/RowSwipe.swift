@@ -35,7 +35,8 @@ private struct RowSwipeModifier: ViewModifier {
             content
         } else {
             content
-                .background(offset < 0 ? OctoColor.background : Color.clear, in: RoundedRectangle(cornerRadius: OctoRadius.row))
+                .background(offset < 0 ? AnyShapeStyle(OctoColor.background) : AnyShapeStyle(Color.clear),
+                            in: RoundedRectangle(cornerRadius: OctoRadius.row))
                 .offset(x: offset)
                 .background { wash }
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
@@ -64,14 +65,14 @@ private struct RowSwipeModifier: ViewModifier {
                 IconView(queueAction == .addToQueue ? .addToQueue : .playNext, size: 20)
                 Text(queueAction.label).font(.octoBodySmall).lineLimit(1).fixedSize()
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(OctoColor.textPrimary)
             .padding(.leading, 24)
             .frame(width: offset, alignment: .leading)
             .frame(maxHeight: .infinity)
             .background(OctoColor.accent.opacity(0.22))
             .mask(LinearGradient(stops: [
-                .init(color: .black, location: 0),
-                .init(color: .black, location: max(0, 1 - 24 / max(offset, 1))),
+                .init(color: .primary, location: 0),
+                .init(color: .primary, location: max(0, 1 - 24 / max(offset, 1))),
                 .init(color: .clear, location: 1),
             ], startPoint: .leading, endPoint: .trailing))
             .clipShape(RoundedRectangle(cornerRadius: OctoRadius.row))
@@ -81,7 +82,7 @@ private struct RowSwipeModifier: ViewModifier {
                 Spacer()
                 IconView(.delete, size: 20).accessibilityLabel("Remove")
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(OctoColor.textPrimary)
             .padding(.horizontal, 24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(OctoColor.error.opacity(0.25), in: RoundedRectangle(cornerRadius: OctoRadius.row))

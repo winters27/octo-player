@@ -18,6 +18,7 @@ struct SignInView: View {
     @State private var certificatePassword = ""
     @State private var certificateError: String?
     @FocusState private var focus: Field?
+    @Environment(\.octoPalette) private var palette
     let done: (String?) -> Void
 
     enum Field: Hashable { case address, label, username, password, apiKey, home, joinName, joinPassword, joinAgain }
@@ -152,7 +153,7 @@ struct SignInView: View {
         VStack(spacing: 6) {
             OctopusMark()
                 .frame(width: 132)
-                .shadow(color: OctoColor.accent.opacity(0.35), radius: 36)
+                .shadow(color: palette.color(.accent).opacity(0.35), radius: 36)
                 .padding(.top, 56)
                 .padding(.bottom, 10)
             if let heading = model.heading {
@@ -216,7 +217,7 @@ struct SignInView: View {
             }
         }
         .padding(16)
-        .glassEffect(Glass.octo, in: .rect(cornerRadius: 22))
+        .octoGlass(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     private func errorLine(_ text: String) -> some View {
@@ -435,7 +436,7 @@ struct GlassField<Content: View>: View {
             .autocorrectionDisabled()
             .padding(.horizontal, 14)
             .frame(minHeight: 50)
-            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(OctoColor.textPrimary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
@@ -540,11 +541,11 @@ struct ConnectionNoteView: View {
 
     /// Red when the password itself travels in the open, secondary for other plain traffic
     /// across the internet, muted otherwise.
-    private var color: Color {
+    private var color: AnyShapeStyle {
         switch note {
-        case .legacyInTheOpen: OctoColor.error
-        case .tokenInTheOpen: OctoColor.textSecondary
-        case .encrypted, .homeNetwork: OctoColor.textMuted
+        case .legacyInTheOpen: AnyShapeStyle(OctoColor.error)
+        case .tokenInTheOpen: AnyShapeStyle(OctoColor.textSecondary)
+        case .encrypted, .homeNetwork: AnyShapeStyle(OctoColor.textMuted)
         }
     }
 
@@ -573,10 +574,10 @@ struct TrustSheet: View {
                 .scrollBounceBehavior(.basedOnSize)
         }
         .frame(maxWidth: 380)
-        .glassEffect(Glass.octo, in: .rect(cornerRadius: 20))
+        .octoGlass(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(0.45).ignoresSafeArea().onTapGesture(perform: cancel))
+        .background(Rectangle().fill(OctoShade(0.45)).ignoresSafeArea().onTapGesture(perform: cancel))
         .accessibilityAddTraits(.isModal)
         .accessibilityLabel("Trust this certificate")
     }

@@ -14,7 +14,7 @@ struct OctoTone: ShapeStyle, Sendable, Hashable {
     enum Role: Sendable, Hashable {
         case background, backgroundSecondary, backgroundTertiary, surfaceRaised, sheetFill, edge, hairline
         case textPrimary, textSecondary, textMuted, selectedWords
-        case accent, accentHover, accentTonal, accentSelected, accentFill, onAccentFill, focusRing, menuPress
+        case accent, accentHover, accentTonal, accentSelected, accentFill, onAccentFill, onAccent, focusRing, menuPress
         case complement, third, offTrack
         case glazeFilm, glazeSelected
         case inkPrimary, inkSecondary, inkTertiary, inkQuaternary, inkQuinary
@@ -51,6 +51,7 @@ extension ResolvedPalette {
         case .accentSelected: accents.selected
         case .accentFill: accents.fill
         case .onAccentFill: accents.onFill
+        case .onAccent: accents.onAccent
         case .focusRing: accents.focusRing
         case .menuPress: accents.menuPress
         case .complement: complement
@@ -69,15 +70,26 @@ extension ResolvedPalette {
     /// Whether the glass carries an accent other than the theme's own.
     var glassTinted: Bool { accents.glassAccent != theme.base.accent }
 
-    /// The film laid into Octo's glass. On a dark theme the faintest dim, carrying the accent while
-    /// the glass is tinted. On a light theme the sheet's base at the dark film's opacity plus a
-    /// half (at most 0.92), or while tinted the accent's light form at the dark tint's opacity.
+    /// The tint laid into Octo's glass while the glass takes the accent: on a dark theme the accent
+    /// pulled toward black, on a light one the accent's light form, at the same opacity. Clear
+    /// while untinted, when the glass is Apple's own with no film.
     var glazeFilm: UInt32 {
-        let dark = glassFilm(accent: RGBA(argb: accents.glassAccent), tinted: glassTinted)
-        let darkAlpha = Int((dark.alpha * 1000).rounded())
+        guard glassTinted else { return 0 }
+        let dark = glassFilm(accent: RGBA(argb: accents.glassAccent), tinted: true)
         guard light else { return dark.argb }
-        if glassTinted { return alphaArgb(accents.glassAccent, darkAlpha) }
-        return alphaArgb(theme.base.sheet ?? theme.base.page, min(920, 500 + darkAlpha))
+        return alphaArgb(accents.glassAccent, Int((dark.alpha * 1000).rounded()))
+    }
+
+    /// The tint for Octo's glass, or nil while the glass is Apple's untinted own.
+    var glassTintColor: Color? { glassTinted ? Color(argb: glazeFilm) : nil }
+
+    /// Black at `alpha`, scaled by how strong this theme's shadows are.
+    func shadowColor(_ alpha: Double) -> Color { Color.black.opacity(alpha * Double(shadow) / 1000) }
+
+    /// A dark film's color in this theme: black on a dark theme; on a light one the sheet at half
+    /// again the opacity, at most 0.92.
+    func filmColor(_ alpha: Double) -> Color {
+        light ? Color(argb: sheet).opacity(min(0.92, 0.5 + alpha)) : Color.black.opacity(alpha)
     }
 
     /// Inside a selected row: the secondary, muted and accent words become the small-words color
@@ -165,14 +177,83 @@ enum OctoInkColor {
     static let disabled = OctoInk.disabledAlpha
 }
 
+/// Black at `alpha` as a shadow or contour in the theme showing, resolved where it is drawn.
+struct OctoShade: ShapeStyle, Sendable, Hashable {
+    let alpha: Double
+
+    init(_ alpha: Double) { self.alpha = alpha }
+
+    func resolve(in environment: EnvironmentValues) -> Color { environment.octoPalette.shadowColor(alpha) }
+}
+
+/// A dark film at `alpha` laid behind words, in the theme showing, resolved where it is drawn.
+struct OctoFilm: ShapeStyle, Sendable, Hashable {
+    let alpha: Double
+
+    init(_ alpha: Double) { self.alpha = alpha }
+
+    func resolve(in environment: EnvironmentValues) -> Color { environment.octoPalette.filmColor(alpha) }
+}
+
+/// A shadow in the theme's strength.
+private struct OctoShadow: ViewModifier {
+    let alpha: Double
+    let radius: CGFloat
+    let x: CGFloat
+    let y: CGFloat
+    @Environment(\.octoPalette) private var palette
+
+    func body(content: Content) -> some View {
+        content.shadow(color: palette.shadowColor(alpha), radius: radius, x: x, y: y)
+    }
+}
+
+/// Octo's glass: Apple's own, tinted only while the glass takes the accent.
+private struct OctoGlassFace<S: Shape>: ViewModifier {
+    let shape: S
+    let film: Color?
+    let interactive: Bool
+    let lifted: Bool
+    @Environment(\.octoPalette) private var palette
+
+    func body(content: Content) -> some View {
+        var glass = Glass.regular
+        if lifted {
+            glass = glass.tint(palette.color(.textPrimary).opacity(0.14))
+        } else if let tint = film ?? palette.glassTintColor {
+            glass = glass.tint(tint)
+        }
+        if interactive { glass = glass.interactive() }
+        return content.glassEffect(glass, in: shape)
+    }
+}
+
 extension View {
+    /// Octo's glass in `shape`: Apple's untinted glass, or tinted with `film` (or with the accent
+    /// while the glass takes it). `interactive` lets it answer the finger the way Liquid Glass
+    /// controls do; `lifted` brightens it a little, for the main button of a pair.
+    func octoGlass<S: Shape>(_ shape: S, film: Color? = nil, interactive: Bool = false, lifted: Bool = false) -> some View {
+        modifier(OctoGlassFace(shape: shape, film: film, interactive: interactive, lifted: lifted))
+    }
+
+    /// A black shadow at `alpha`, scaled by the theme's shadow strength.
+    func octoShadow(_ alpha: Double, radius: CGFloat, x: CGFloat = 0, y: CGFloat = 0) -> some View {
+        modifier(OctoShadow(alpha: alpha, radius: radius, x: x, y: y))
+    }
+
     /// Draws what is inside over a cover: Octo's own surfaces and words with the accent in its
     /// form for dark surfaces, and the system's own parts dark.
     func octoOverArt() -> some View { modifier(OverArt()) }
 
     /// A selected row's fill in `shape`, with the secondary, muted and accent words inside it in
-    /// the color tested on that fill.
-    func octoSelectedFill<S: Shape>(_ shape: S = Rectangle()) -> some View { modifier(SelectedFill(shape: shape)) }
+    /// the color tested on that fill. Nothing changes while `on` is false.
+    func octoSelectedFill<S: Shape>(_ shape: S = Rectangle(), on: Bool = true) -> some View {
+        modifier(SelectedFill(shape: shape, on: on))
+    }
+
+    /// The words inside a selected row whose fill is drawn elsewhere: while `on`, the secondary,
+    /// muted and accent words take the color tested on the selected fill.
+    func octoOnSelectedFill(_ on: Bool = true) -> some View { modifier(OnSelectedFill(on: on)) }
 }
 
 private struct OverArt: ViewModifier {
@@ -185,14 +266,24 @@ private struct OverArt: ViewModifier {
     }
 }
 
+private struct OnSelectedFill: ViewModifier {
+    let on: Bool
+    @Environment(\.octoPalette) private var palette
+
+    func body(content: Content) -> some View {
+        content.environment(\.octoPalette, on ? palette.onSelectedRow : palette)
+    }
+}
+
 private struct SelectedFill<S: Shape>: ViewModifier {
     let shape: S
+    let on: Bool
     @Environment(\.octoPalette) private var palette
 
     func body(content: Content) -> some View {
         content
-            .environment(\.octoPalette, palette.onSelectedRow)
-            .background(palette.color(.accentSelected), in: shape)
+            .environment(\.octoPalette, on ? palette.onSelectedRow : palette)
+            .background { if on { shape.fill(palette.color(.accentSelected)) } }
     }
 }
 

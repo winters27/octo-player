@@ -99,7 +99,7 @@ struct NameForm: View {
             HStack(spacing: 8) {
                 TextField(placeholder, text: $name)
                     .font(.octoBody)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(OctoColor.textPrimary)
                     .tint(OctoColor.accent)
                     .textInputAutocapitalization(capitalization)
                     .autocorrectionDisabled(!autocorrects)
@@ -128,10 +128,15 @@ struct NameForm: View {
 extension View {
     /// A popover holding `content`, kept a popover on iPhone too, so it draws as Liquid Glass
     /// beside the control it came from instead of turning into a sheet.
-    func glassPopover<Content: View>(isPresented: Binding<Bool>, arrowEdge: Edge? = nil,
+    /// `overArt` is for a popover from the player: its content keeps the dark look over the cover.
+    func glassPopover<Content: View>(isPresented: Binding<Bool>, arrowEdge: Edge? = nil, overArt: Bool = false,
                                      @ViewBuilder content: @escaping () -> Content) -> some View {
         popover(isPresented: isPresented, arrowEdge: arrowEdge) {
-            content().presentationCompactAdaptation(.popover)
+            if overArt {
+                content().presentationCompactAdaptation(.popover).preferredColorScheme(.dark).octoOverArt()
+            } else {
+                content().presentationCompactAdaptation(.popover)
+            }
         }
     }
 

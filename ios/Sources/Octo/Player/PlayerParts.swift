@@ -339,7 +339,7 @@ struct PlayerProgress: View {
                         .accessibilityLabel("Playback speed \(Pace.speedLabel(speed))")
                     }
                 }
-                .glassPopover(isPresented: $speedOpen) {
+                .glassPopover(isPresented: $speedOpen, overArt: true) {
                     TimeCard(start: .speed) { speedOpen = false }
                 }
             }

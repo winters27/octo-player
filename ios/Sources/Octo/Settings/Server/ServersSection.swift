@@ -59,7 +59,7 @@ struct ServersSection: View {
                 Text(statusLine(serverType: server.serverType, serverVersion: server.serverVersion, signedOut: server.signedOut,
                                 check: check, switching: switchingThis, inUse: inUse))
                     .font(.octoCaption)
-                    .foregroundStyle(!inUse && check?.isWarning == true ? OctoColor.signalOrange : OctoColor.textMuted)
+                    .foregroundStyle(!inUse && check?.isWarning == true ? AnyShapeStyle(OctoColor.signalOrange) : AnyShapeStyle(OctoColor.textMuted))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if switchingThis {
@@ -106,10 +106,11 @@ struct ServersSection: View {
                 Text(removeDetail(inUse: inUse))
             }
         }
+        .octoOnSelectedFill(inUse)
         .background {
             if inUse {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.black.opacity(0.3))
+                    .fill(OctoColor.accentSelected)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 4)
             }

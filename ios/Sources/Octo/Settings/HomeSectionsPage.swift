@@ -7,6 +7,7 @@ import SwiftUI
 struct HomeSectionsPage: View {
     @State private var settings = AppSettings.shared
     @State private var askingReset = false
+    @Environment(\.octoPalette) private var palette
 
     var body: some View {
         let entries = settings.homeSections
@@ -23,8 +24,8 @@ struct HomeSectionsPage: View {
                 .onMove { offsets, destination in
                     withAnimation(.easeInOut(duration: 0.25)) { settings.moveHomeSections(fromOffsets: offsets, toOffset: destination) }
                 }
-                .listRowBackground(OctoColor.surfaceRaised)
-                .listRowSeparatorTint(Color.white.opacity(0.10))
+                .listRowBackground(palette.color(.surfaceRaised))
+                .listRowSeparatorTint(palette.color(.inkQuaternary))
             } header: {
                 groupLabel("On Home")
             } footer: {
@@ -43,7 +44,7 @@ struct HomeSectionsPage: View {
                 // A borderless button takes its own taps, so it works while the list is editing.
                 .buttonStyle(.borderless)
                 .disabled(entries == defaultHomeSections)
-                .listRowBackground(OctoColor.surfaceRaised)
+                .listRowBackground(palette.color(.surfaceRaised))
             }
         }
         .listStyle(.insetGrouped)

@@ -83,10 +83,10 @@ struct OnlineAlbumView: View {
         return VStack(alignment: .leading, spacing: 0) {
             VStack(spacing: 0) {
                 Cover(id: album.artwork, size: 240, radius: 10)
-                    .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
+                    .octoShadow(0.4, radius: 16, y: 8)
                 Text(album.title)
                     .font(.octoTitle)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(OctoColor.textPrimary)
                     .multilineTextAlignment(.center)
                     .bigTitle()
                     .padding(.top, 20)
@@ -198,7 +198,7 @@ struct OnlineArtistView: View {
                     Cover(id: artist.artwork, size: 160, radius: 80)
                     Text(artist.name)
                         .font(.octoTitle)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(OctoColor.textPrimary)
                         .multilineTextAlignment(.center)
                         .bigTitle()
                         .padding(.top, 16)

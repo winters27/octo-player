@@ -30,12 +30,20 @@ struct AccountLinkRow: View {
 /// A muted line of a list page, 20 points in.
 struct PanelLine: View {
     let text: String
-    var color: Color = OctoColor.textMuted
+    /// The line's color; nil takes the theme's muted words.
+    var color: AnyShapeStyle?
+
+    init(text: String) { self.text = text }
+
+    init<S: ShapeStyle>(text: String, color: S) {
+        self.text = text
+        self.color = AnyShapeStyle(color)
+    }
 
     var body: some View {
         Text(text)
             .font(.octoBodySmall)
-            .foregroundStyle(color)
+            .foregroundStyle(color ?? AnyShapeStyle(OctoColor.textMuted))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
             .padding(.vertical, 6)
@@ -44,5 +52,5 @@ struct PanelLine: View {
 
 /// The faint fill the account cards use beyond the shared palette.
 enum AccountColor {
-    static let fill = Color.white.opacity(0.04)
+    static var fill: some ShapeStyle { OctoColor.textPrimary.opacity(0.04) }
 }

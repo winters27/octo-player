@@ -275,7 +275,7 @@ struct RoundPlayShuffle: View {
             if loading {
                 Spinner(size: 18)
                     .frame(width: 34, height: 34)
-                    .glassEffect(LibraryLook.lifted, in: .circle)
+                    .octoGlass(Circle(), interactive: true, lifted: true)
                     .frame(width: 48, height: 48)
             } else {
                 GlassIconButton(icon: .play, label: "Play", lit: true, action: play)
@@ -304,9 +304,9 @@ struct GlassMoreMenu<Content: View>: View {
         Menu {
             content
         } label: {
-            IconView(icon, size: 17, color: .white)
+            IconView(icon, size: 17, color: OctoColor.textPrimary)
                 .frame(width: 34, height: 34)
-                .glassEffect(LibraryLook.resting, in: .circle)
+                .octoGlass(Circle(), interactive: true)
                 .frame(width: 48, height: 48)
                 .contentShape(Circle())
         }

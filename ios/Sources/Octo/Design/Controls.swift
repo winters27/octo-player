@@ -29,6 +29,7 @@ private struct SwitchFace: ButtonStyle {
     let size: SwitchSize
     let enabled: Bool
     @Environment(\.motionScale) private var motion
+    @Environment(\.octoPalette) private var palette
 
     func makeBody(configuration: Configuration) -> some View {
         let width = CGFloat(size.width)
@@ -39,27 +40,27 @@ private struct SwitchFace: ButtonStyle {
         let thumb = switchThumb(track: Double(width), thumb: Double(thumbSide), padding: SwitchSize.padding,
                                 position: on, stretch: stretch)
         return ZStack(alignment: .leading) {
-            Capsule().fill(Color.white.opacity(0.18)).opacity(1 - on)
+            Capsule().fill(OctoColor.offTrack).opacity(1 - on)
             Capsule().fill(OctoColor.accent).opacity(on)
             // Recessed while off: a shade along the top inside edge.
             Capsule()
-                .stroke(Color.black.opacity(0.22 * (1 - on)), lineWidth: 1)
+                .stroke(OctoShade(0.22 * (1 - on)), lineWidth: 1)
                 .blur(radius: shadowRadius(1.5))
                 .offset(y: 0.5)
                 .clipShape(Capsule())
-            Capsule().strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5)
+            Capsule().strokeBorder(OctoColor.textPrimary.opacity(0.06), lineWidth: 0.5)
             Capsule()
                 .fill(Color.white)
                 .frame(width: CGFloat(thumb.width), height: thumbSide)
-                .shadow(color: .black.opacity(0.18), radius: 0, y: 0.5)
-                .shadow(color: .black.opacity(0.12), radius: 0, y: 1)
+                .octoShadow(0.18, radius: 0, y: 0.5)
+                .octoShadow(0.12, radius: 0, y: 1)
                 .offset(x: CGFloat(thumb.x))
         }
         .frame(width: width, height: height)
         .background {
             Capsule().fill(OctoColor.accent).blur(radius: shadowRadius(5)).offset(y: 1).opacity(0.30 * on)
         }
-        .shadow(color: .white.opacity(0.05), radius: 0, y: 0.5)
+        .shadow(color: palette.color(.textPrimary).opacity(0.05), radius: 0, y: 0.5)
         .contentShape(Capsule())
         .animation(.octoTween(OctoDuration.card, scale: motion), value: isOn)
         .animation(.octoTween(OctoDuration.press, scale: motion), value: configuration.isPressed)
@@ -105,11 +106,11 @@ struct GlazeTabs<Tab: View>: View {
         .frame(height: height)
         .background {
             // Recessed: a shade from the top inside edge, and a hairline of accent round the rim.
-            Capsule().stroke(Color.black.opacity(0.15), lineWidth: 1.6).blur(radius: shadowRadius(2)).offset(y: 3).clipShape(Capsule())
+            Capsule().stroke(OctoShade(0.15), lineWidth: 1.6).blur(radius: shadowRadius(2)).offset(y: 3).clipShape(Capsule())
         }
         .overlay { Capsule().strokeBorder(OctoColor.accent.opacity(0.25), lineWidth: 0.5) }
         .octoGlass(Capsule())
-        .shadow(color: .black.opacity(0.20), radius: shadowRadius(10), y: 2)
+        .octoShadow(0.20, radius: shadowRadius(10), y: 2)
         .onAppear { pill = Double(selected) }
         .onChange(of: selected) { old, new in
             way = new > old ? 1 : -1
@@ -135,6 +136,7 @@ private struct PillLayer: View, Animatable {
     let moving: Bool
     let cell: CGFloat
     let count: Int
+    @Environment(\.octoPalette) private var palette
 
     nonisolated var animatableData: Double {
         get { pill }
@@ -142,14 +144,15 @@ private struct PillLayer: View, Animatable {
     }
 
     var body: some View {
+        let accent = palette.color(.accent)
         Canvas { context, size in
             guard cell > 0 else { return }
             let left = CGFloat(pill) * cell
             let rect = CGRect(x: left, y: 0, width: cell, height: size.height)
             let shape = Path(roundedRect: rect, cornerRadius: size.height / 2)
-            context.fill(shape, with: .color(OctoColor.accent))
+            context.fill(shape, with: .color(accent))
             let travel = min(1, max(0, abs(pill - Double(selected)) * 2))
-            let lit = OctoColor.accent.opacity(0.10 + 0.12 * travel)
+            let lit = accent.opacity(0.10 + 0.12 * travel)
             let from = way > 0 ? left : left + cell
             let to = way > 0 ? left + cell * 0.7 : left + cell * 0.3
             context.fill(shape, with: .linearGradient(Gradient(colors: [lit, .clear]),
@@ -159,7 +162,7 @@ private struct PillLayer: View, Animatable {
                 let tint = gearShiftTint(index, pill: pill, selected: selected)
                 if tint > 0 {
                     let cellRect = CGRect(x: CGFloat(index) * cell, y: 0, width: cell, height: size.height)
-                    context.fill(Path(roundedRect: cellRect, cornerRadius: size.height / 2), with: .color(OctoColor.accent.opacity(tint)))
+                    context.fill(Path(roundedRect: cellRect, cornerRadius: size.height / 2), with: .color(accent.opacity(tint)))
                 }
             }
         }
@@ -169,38 +172,46 @@ private struct PillLayer: View, Animatable {
 
 extension OctoColor {
     /// The words and checks on a full accent fill.
-    static let onAccent = Color(OctoPalette.onAccent)
+    static let onAccent = OctoTone(.onAccent)
 }
 
-/// Keeps a system segmented control in the current accent. The system tints only controls made
-/// after its appearance is set, so the tint is set again as the accent changes and the control is
-/// rebuilt under an identity made from the accent. The chosen segment comes from the binding, so
-/// it stays.
+/// Keeps a system segmented control in the current theme and accent. The system tints only
+/// controls made after its appearance is set, so the appearance is set again, for the kind of
+/// window the palette draws in, as the theme or accent changes, and the control is rebuilt under
+/// an identity made from the palette. The chosen segment comes from the binding, so it stays.
 struct SegmentedAccent: ViewModifier {
-    /// The chosen segment in the accent fill with dark words, the others white.
-    static func tint() {
+    @Environment(\.octoPalette) private var palette
+
+    /// The chosen segment in the accent fill with its own words, the others in the theme's words.
+    static func tint(_ palette: ResolvedPalette) {
         #if canImport(UIKit)
-        let control = UISegmentedControl.appearance()
-        control.selectedSegmentTintColor = UIColor(OctoColor.accent)
-        control.setTitleTextAttributes([.foregroundColor: UIColor(OctoColor.onAccent)], for: .selected)
-        control.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .normal)
+        let control = UISegmentedControl.appearance(for: UITraitCollection(userInterfaceStyle: palette.light ? .light : .dark))
+        control.selectedSegmentTintColor = UIColor(palette.color(.accent))
+        control.setTitleTextAttributes([.foregroundColor: UIColor(palette.color(.onAccent))], for: .selected)
+        control.setTitleTextAttributes([.foregroundColor: UIColor(palette.color(.textPrimary))], for: .normal)
         #endif
     }
 
     func body(content: Content) -> some View {
-        let key = AccentState.shared.rgba
-        Self.tint()
-        return content.id(key)
+        Self.tint(palette)
+        return content.id(Identity(light: palette.light, accent: palette.accents.accent, onAccent: palette.accents.onAccent, text: palette.text))
+    }
+
+    private struct Identity: Hashable {
+        let light: Bool
+        let accent: UInt32
+        let onAccent: UInt32
+        let text: UInt32
     }
 }
 
 extension View {
-    /// Rebuilds a system segmented control the moment the accent changes.
+    /// Rebuilds a system segmented control the moment the theme or accent changes.
     func segmentedAccent() -> some View { modifier(SegmentedAccent()) }
 }
 
-/// A segment's words: white, or on the accent pill dark with a check before them. Never cut or
-/// wrapped; the row it sits in changes to a menu when they do not fit.
+/// A segment's words: the theme's, or on the accent pill the words that read on it with a check
+/// before them. Never cut or wrapped; the row it sits in changes to a menu when they do not fit.
 struct SegmentLabel: View {
     let text: String
     let chosen: Bool
@@ -213,7 +224,7 @@ struct SegmentLabel: View {
             }
             Text(text).font(font)
         }
-        .foregroundStyle(chosen ? OctoColor.onAccent : Color.white)
+        .foregroundStyle(chosen ? AnyShapeStyle(OctoColor.onAccent) : AnyShapeStyle(OctoColor.textPrimary))
         .fixedSize(horizontal: true, vertical: false)
     }
 }
@@ -274,7 +285,7 @@ struct SegmentsOrMenu<Row: View>: View {
                 Text(options.indices.contains(selected) ? options[selected] : "").font(font)
                 Image(systemName: "chevron.up.chevron.down").font(.caption.weight(.bold))
             }
-            .foregroundStyle(Color.white)
+            .foregroundStyle(OctoColor.textPrimary)
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity)
             .frame(height: 40)
@@ -284,7 +295,7 @@ struct SegmentsOrMenu<Row: View>: View {
 }
 
 /// A few word choices in glass tabs filling the width: the chosen one in a full accent pill with
-/// dark words and a check, the others white.
+/// the words that read on it and a check, the others in the theme's words.
 struct Segmented: View {
     let options: [String]
     @Binding var selected: Int
@@ -338,7 +349,7 @@ struct GlassInput<Leading: View, Trailing: View>: View {
                 }
                 .labelsHidden()
                 .font(.octoBody)
-                .foregroundStyle(.white)
+                .foregroundStyle(OctoColor.textPrimary)
                 .tint(OctoColor.accent)
                 .focused($focused)
                 .submitLabel(submitLabel)
@@ -353,10 +364,10 @@ struct GlassInput<Leading: View, Trailing: View>: View {
         .overlay {
             // Sunk in: dark from the top left, light from the bottom right.
             ZStack {
-                shape.stroke(Color.black.opacity(0.5 + 0.1 * depth), lineWidth: 4 + depth)
+                shape.stroke(OctoShade(0.5 + 0.1 * depth), lineWidth: 4 + depth)
                     .blur(radius: shadowRadius(7 + 2 * depth))
                     .offset(x: 2 + depth / 2, y: 2 + depth / 2)
-                shape.stroke(Color.white.opacity(0.10 + 0.05 * depth), lineWidth: 4 + depth)
+                shape.stroke(OctoColor.textPrimary.opacity(0.10 + 0.05 * depth), lineWidth: 4 + depth)
                     .blur(radius: shadowRadius(7 + 2 * depth))
                     .offset(x: -2 - depth / 2, y: -2 - depth / 2)
             }
@@ -400,9 +411,10 @@ struct OctoSlider: View {
     let onChange: (Double) -> Void
     var look: SliderLook = .glow
     var live = false
-    var color: Color = .white
-    var trackColor: Color = .white.opacity(0.24)
-    var fill: Color = OctoColor.accent
+    /// The played line and thumb, the track and the jewel's fill; nil takes the theme's.
+    var color: Color?
+    var trackColor: Color?
+    var fill: Color?
     var steps = 0
     var valueLabel: ((Double) -> String)?
     @State private var dragging = false
@@ -418,6 +430,7 @@ struct OctoSlider: View {
     @GestureState private var touching = false
     @Environment(\.motionScale) private var motion
     @Environment(\.passedDrag) private var passedDrag
+    @Environment(\.octoPalette) private var palette
 
     /// How far the finger moves before a drag is told from a tap, and its way decided.
     private static let slop: CGFloat = 8
@@ -429,10 +442,11 @@ struct OctoSlider: View {
             Group {
                 switch look {
                 case .glow:
-                    GlowLine(fraction: current, line: line, glow: glow, color: color, trackColor: trackColor)
+                    GlowLine(fraction: current, line: line, glow: glow, color: color ?? palette.color(.textPrimary),
+                             trackColor: trackColor ?? palette.color(.textPrimary).opacity(0.24))
                 case .jewel:
-                    JewelLine(fraction: current, thumb: thumb, ring: ring, bubble: bubble, fill: fill, steps: steps,
-                              label: valueLabel?(current))
+                    JewelLine(fraction: current, thumb: thumb, ring: ring, bubble: bubble, fill: fill ?? palette.color(.accent),
+                              steps: steps, label: valueLabel?(current))
                 }
             }
             .frame(width: width, height: box.size.height)
@@ -571,6 +585,7 @@ private struct JewelLine: View, Animatable {
     let fill: Color
     let steps: Int
     let label: String?
+    @Environment(\.octoPalette) private var palette
 
     nonisolated var animatableData: AnimatablePair<AnimatablePair<Double, Double>, Double> {
         get { AnimatablePair(AnimatablePair(thumb, ring), bubble) }
@@ -582,6 +597,9 @@ private struct JewelLine: View, Animatable {
     }
 
     var body: some View {
+        let ink = palette.color(.textPrimary)
+        let shadow = palette.shadowColor
+        let bubbleFill = palette.filmColor(0.85)
         Canvas { context, size in
             let y = size.height / 2
             let track: CGFloat = 4
@@ -591,9 +609,9 @@ private struct JewelLine: View, Animatable {
             let x = start + (end - start) * fraction
             let top = y - track / 2
             let trackShape = Path(roundedRect: CGRect(x: 0, y: top, width: size.width, height: track), cornerRadius: track / 2)
-            context.fill(trackShape, with: .linearGradient(Gradient(colors: [.white.opacity(0.10), .white.opacity(0.14)]),
+            context.fill(trackShape, with: .linearGradient(Gradient(colors: [ink.opacity(0.10), ink.opacity(0.14)]),
                                                           startPoint: CGPoint(x: 0, y: top), endPoint: CGPoint(x: 0, y: top + track)))
-            context.fill(Path(roundedRect: CGRect(x: 0, y: top, width: size.width, height: 1), cornerRadius: 0.5), with: .color(.black.opacity(0.25)))
+            context.fill(Path(roundedRect: CGRect(x: 0, y: top, width: size.width, height: 1), cornerRadius: 0.5), with: .color(shadow(0.25)))
             if x > 0 {
                 context.fill(Path(roundedRect: CGRect(x: 0, y: top, width: x, height: track), cornerRadius: track / 2),
                              with: .linearGradient(Gradient(colors: [fill, fill.mix(with: .black, by: 0.22)]),
@@ -602,7 +620,7 @@ private struct JewelLine: View, Animatable {
             if (1...40).contains(steps) {
                 for i in 1..<steps {
                     let tx = start + (end - start) * CGFloat(i) / CGFloat(steps)
-                    let color: Color = tx <= x ? .black.opacity(0.30) : .white.opacity(0.30)
+                    let color: Color = tx <= x ? shadow(0.30) : ink.opacity(0.30)
                     context.fill(Path(ellipseIn: CGRect(x: tx - 1, y: y - 1, width: 2, height: 2)), with: .color(color))
                 }
             }
@@ -616,21 +634,21 @@ private struct JewelLine: View, Animatable {
                                with: .color(fill.opacity(0.45 * ring)), lineWidth: 4)
             }
             context.fill(Path(ellipseIn: CGRect(x: x - radius - 0.5, y: y + 1 - radius - 0.5, width: radius * 2 + 1, height: radius * 2 + 1)),
-                         with: .color(.black.opacity(0.35)))
+                         with: .color(shadow(0.35)))
             context.fill(Path(ellipseIn: CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)),
                          with: .radialGradient(Gradient(colors: [.white, Color(hex: 0xE4E6E8)]),
                                                center: CGPoint(x: x - radius * 0.35, y: y - radius * 0.35), startRadius: 0, endRadius: radius * 1.6))
             let dot = radius * CGFloat(0.35 + 0.07 * thumb)
             context.fill(Path(ellipseIn: CGRect(x: x - dot, y: y - dot, width: dot * 2, height: dot * 2)), with: .color(fill))
             if bubble > 0, let label {
-                let text = context.resolve(Text(label).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white))
+                let text = context.resolve(Text(label).font(.system(size: 11, weight: .semibold)).foregroundStyle(ink))
                 let measured = text.measure(in: CGSize(width: 200, height: 40))
                 let w = measured.width + 12
                 let h = measured.height + 6
                 let arrow: CGFloat = 4
                 let bottom = y - radius - 14 + arrow
                 let left = min(max(0, x - w / 2), max(0, size.width - w))
-                let shade = Color.black.opacity(0.85 * bubble)
+                let shade = bubbleFill.opacity(bubble)
                 context.fill(Path(roundedRect: CGRect(x: left, y: bottom - arrow - h, width: w, height: h), cornerRadius: 8), with: .color(shade))
                 var tip = Path()
                 tip.move(to: CGPoint(x: x - arrow, y: bottom - arrow))

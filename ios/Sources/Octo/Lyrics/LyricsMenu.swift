@@ -96,7 +96,7 @@ struct TimingControl: View {
                 .padding(.bottom, 12)
             TimingAdjuster(title: "This song", about: "For this song only, on every output.", offsetMs: songs.offset(trackId),
                            limitMs: TIMING_LIMIT_MS, step: { songs.step(trackId, $0) }, reset: { songs.reset(trackId) })
-            OctoColor.hairline.frame(height: 1).padding(.horizontal, 14).padding(.vertical, 6)
+            Rectangle().fill(OctoColor.hairline).frame(height: 1).padding(.horizontal, 14).padding(.vertical, 6)
             Spacer().frame(height: 8)
             let output = LyricsOutput.current
             let timing = LyricsOutput.timing

@@ -6,10 +6,6 @@ import UIKit
 enum SoundStyle {
     /// Buttons, tabs and quiet actions: 13.5 semibold.
     static let label = Font.system(size: 13.5, weight: .semibold)
-    /// The accent button's fill: the accent taken nearly halfway to black.
-    static var accentFill: Color { OctoColor.accent.mix(with: .black, by: 0.45) }
-    /// The darker pill that marks the chosen item inside glass.
-    static let pill = Color.black.opacity(0.72)
     /// The springs the sliders move on.
     static let bouncy = Animation.interpolatingSpring(mass: 1, stiffness: 200, damping: 14.142)
     static let settled = Animation.interpolatingSpring(mass: 1, stiffness: 200, damping: 28.284)
@@ -27,11 +23,11 @@ extension View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return background {
             shape.fill(OctoColor.surfaceRaised)
-                .overlay(shape.strokeBorder(Color.white.opacity(0.06), lineWidth: 1))
-                .overlay(shape.stroke(Color.white.opacity(0.06), lineWidth: 1).offset(y: 1).clipShape(shape))
-                .background(shape.inset(by: -0.5).fill(Color.black.opacity(0.40)))
-                .shadow(color: .black.opacity(0.20), radius: 1, y: 1)
-                .shadow(color: .black.opacity(0.12), radius: 3, y: 2)
+                .overlay(shape.strokeBorder(OctoColor.textPrimary.opacity(0.06), lineWidth: 1))
+                .overlay(shape.stroke(OctoColor.textPrimary.opacity(0.06), lineWidth: 1).offset(y: 1).clipShape(shape))
+                .background(shape.inset(by: -0.5).fill(OctoShade(0.40)))
+                .octoShadow(0.20, radius: 1, y: 1)
+                .octoShadow(0.12, radius: 3, y: 2)
         }
     }
 }
@@ -180,7 +176,7 @@ struct SoundStillStyle: ButtonStyle {
 struct SoundRowPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(Color.white.opacity(configuration.isPressed ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 8))
+            .background(OctoColor.textPrimary.opacity(configuration.isPressed ? 0.06 : 0), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -189,6 +185,7 @@ struct SoundRowPressStyle: ButtonStyle {
 struct SoundGlassButtonStyle: ButtonStyle {
     var accent = false
     @Environment(\.isEnabled) private var enabled
+    @Environment(\.octoPalette) private var palette
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -197,7 +194,7 @@ struct SoundGlassButtonStyle: ButtonStyle {
             .lineLimit(1)
             .padding(.horizontal, 24)
             .frame(height: 50)
-            .glassEffect(accent ? .regular.tint(SoundStyle.accentFill).interactive() : Glass.octo.interactive(), in: .capsule)
+            .octoGlass(Capsule(), film: accent ? Color(argb: palette.accents.fill) : nil, interactive: true)
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .opacity(enabled ? 1 : 0.5)
             .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
@@ -246,7 +243,7 @@ struct SoundSegmented: View {
             .padding(4)
         }
         .frame(height: 40)
-        .glassEffect(Glass.octo, in: .capsule)
+        .octoGlass(Capsule())
         .overlay(Capsule().strokeBorder(OctoColor.accent.opacity(0.25), lineWidth: 0.5))
     }
 }
@@ -262,6 +259,7 @@ struct SoundPresetBar: View {
     @State private var position: String?
     /// The preset just held down, so the release that follows does not also pick it.
     @State private var heldDown: (key: String, at: Date)?
+    @Environment(\.octoPalette) private var palette
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -274,7 +272,7 @@ struct SoundPresetBar: View {
         .scrollPosition(id: $position, anchor: .leading)
         .frame(height: 44)
         .clipShape(Capsule())
-        .glassEffect(Glass.octo, in: .capsule)
+        .octoGlass(Capsule())
         .onAppear {
             // Opens with the chosen preset in view; it does not follow it later.
             if !choices.isEmpty { position = choices[PresetChoice.firstShown(choices, label: selected)].key }
@@ -293,11 +291,12 @@ struct SoundPresetBar: View {
             Text(choice.name)
                 .font(SoundStyle.label)
                 .foregroundStyle(chosen ? OctoColor.accent : OctoColor.textPrimary)
+                .octoOnSelectedFill(chosen && palette.light)
                 .lineLimit(1)
                 .fixedSize()
                 .padding(.horizontal, 14)
                 .frame(maxHeight: .infinity)
-                .background { if chosen { Capsule().fill(SoundStyle.pill) } }
+                .background { if chosen { Capsule().fill(OctoColor.glazeSelected) } }
                 .padding(.vertical, 4)
                 .contentShape(Rectangle())
         }
@@ -344,6 +343,7 @@ struct SoundHoldButton: View {
     let onHold: (Bool) -> Void
     @GestureState private var pressing = false
     @State private var held = false
+    @Environment(\.octoPalette) private var palette
 
     var body: some View {
         Text(text)
@@ -351,7 +351,7 @@ struct SoundHoldButton: View {
             .foregroundStyle(OctoColor.textPrimary)
             .padding(.horizontal, 24)
             .frame(height: 48)
-            .glassEffect(held ? .regular.tint(OctoColor.accent.opacity(0.07)).interactive() : Glass.octo.interactive(), in: .capsule)
+            .octoGlass(Capsule(), film: held ? palette.color(.accent).opacity(0.07) : nil, interactive: true)
             .opacity(enabled || held ? 1 : 0.6)
             .contentShape(Capsule())
             // The press is followed for as long as it lasts, even as the page changes under it.
@@ -465,6 +465,7 @@ struct SoundLineSlider: View {
 private struct SoundLineDrawing: View, Animatable {
     var fraction: Double
     var held: Double
+    @Environment(\.octoPalette) private var palette
 
     nonisolated var animatableData: Double {
         get { held }
@@ -472,6 +473,7 @@ private struct SoundLineDrawing: View, Animatable {
     }
 
     var body: some View {
+        let ink = palette.color(.textPrimary)
         Canvas { context, size in
             let y = size.height / 2
             let thickness = 3.5 + 4.5 * held
@@ -480,18 +482,18 @@ private struct SoundLineDrawing: View, Animatable {
             let glow = 0.4 + 0.4 * min(1, max(0, held))
             let end = size.width * fraction
             let style = StrokeStyle(lineWidth: thickness, lineCap: .round)
-            context.stroke(line(0, size.width, y), with: .color(.white.opacity(0.24)), style: style)
+            context.stroke(line(0, size.width, y), with: .color(ink.opacity(0.24)), style: style)
             if end > 0 {
                 for spread in [2.5, 1, 0.3] {
                     context.drawLayer { layer in
                         layer.addFilter(.blur(radius: SoundStyle.pixelBlur(blur * spread)))
-                        layer.stroke(line(0, end, y), with: .color(.white.opacity(glow / 3)), style: style)
+                        layer.stroke(line(0, end, y), with: .color(ink.opacity(glow / 3)), style: style)
                     }
                 }
-                context.stroke(line(0, end, y), with: .color(.white), style: style)
+                context.stroke(line(0, end, y), with: .color(ink), style: style)
             }
             if thumb > 0 {
-                context.fill(Path(ellipseIn: CGRect(x: end - thumb, y: y - thumb, width: thumb * 2, height: thumb * 2)), with: .color(.white))
+                context.fill(Path(ellipseIn: CGRect(x: end - thumb, y: y - thumb, width: thumb * 2, height: thumb * 2)), with: .color(ink))
             }
         }
     }
@@ -563,6 +565,7 @@ struct SoundBalanceSlider: View {
 private struct SoundBalanceDrawing: View, Animatable {
     var value: Double
     var held: Double
+    @Environment(\.octoPalette) private var palette
 
     nonisolated var animatableData: Double {
         get { held }
@@ -570,6 +573,7 @@ private struct SoundBalanceDrawing: View, Animatable {
     }
 
     var body: some View {
+        let ink = palette.color(.textPrimary)
         Canvas { context, size in
             let y = size.height / 2
             let thickness = 3.5 + 4.5 * held
@@ -581,7 +585,7 @@ private struct SoundBalanceDrawing: View, Animatable {
             var track = Path()
             track.move(to: CGPoint(x: 0, y: y))
             track.addLine(to: CGPoint(x: size.width, y: y))
-            context.stroke(track, with: .color(.white.opacity(0.24)), style: style)
+            context.stroke(track, with: .color(ink.opacity(0.24)), style: style)
             if end != center {
                 var fill = Path()
                 fill.move(to: CGPoint(x: center, y: y))
@@ -589,16 +593,16 @@ private struct SoundBalanceDrawing: View, Animatable {
                 for spread in [2.5, 1, 0.3] {
                     context.drawLayer { layer in
                         layer.addFilter(.blur(radius: SoundStyle.pixelBlur(12 * spread)))
-                        layer.stroke(fill, with: .color(.white.opacity(glow / 3)), style: style)
+                        layer.stroke(fill, with: .color(ink.opacity(glow / 3)), style: style)
                     }
                 }
-                context.stroke(fill, with: .color(.white), style: style)
+                context.stroke(fill, with: .color(ink), style: style)
             }
             var mark = Path()
             mark.move(to: CGPoint(x: center, y: y - 7))
             mark.addLine(to: CGPoint(x: center, y: y + 7))
-            context.stroke(mark, with: .color(.white.opacity(0.5)), lineWidth: 1)
-            context.fill(Path(ellipseIn: CGRect(x: end - thumb, y: y - thumb, width: thumb * 2, height: thumb * 2)), with: .color(.white))
+            context.stroke(mark, with: .color(ink.opacity(0.5)), lineWidth: 1)
+            context.fill(Path(ellipseIn: CGRect(x: end - thumb, y: y - thumb, width: thumb * 2, height: thumb * 2)), with: .color(ink))
         }
     }
 }

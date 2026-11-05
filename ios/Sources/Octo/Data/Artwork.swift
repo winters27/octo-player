@@ -144,7 +144,7 @@ struct ArtworkView: View {
             } else {
                 Image(systemName: "music.note")
                     .font(.system(size: size * 0.3, weight: .semibold))
-                    .foregroundStyle(OctoColor.textMuted)
+                    .foregroundStyle(OctoColor.third)
             }
         }
         .frame(width: size, height: size)

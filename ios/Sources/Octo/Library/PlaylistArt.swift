@@ -307,16 +307,17 @@ struct DesignedCover: View {
     var body: some View {
         let side = coverSide(Int((size * scale).rounded(.up)))
         let spec = palette.map { CoverSpec(id: id, name: name, line: line, footer: footer, palette: $0, glyph: glyph) }
-        let ground = spec.map { Color(argb: backgroundColour(chooseBackground($0.id, $0.palette))) } ?? OctoColor.backgroundTertiary
+        let ground = spec.map { AnyShapeStyle(Color(argb: backgroundColour(chooseBackground($0.id, $0.palette)))) }
+            ?? AnyShapeStyle(OctoColor.backgroundTertiary)
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         ZStack {
-            ground
+            Rectangle().fill(ground)
             // The last picture stays up while a changed one is drawn.
             if let shown { Image(uiImage: shown).resizable().interpolation(.high) }
         }
         .frame(width: size, height: size)
         .clipShape(shape)
-        .overlay { if size >= 96 { shape.strokeBorder(.white.opacity(0.1), lineWidth: 1) } }
+        .overlay { if size >= 96 { shape.strokeBorder(OctoInkColor.quaternary, lineWidth: 1) } }
         .accessibilityHidden(true)
         .task(id: coverPaletteKey(session.inUse?.sourceId ?? "phone", covers)) {
             let key = coverPaletteKey(session.inUse?.sourceId ?? "phone", covers)

@@ -43,23 +43,25 @@ struct NowPlayingBars: View {
     let playing: Bool
     var size: CGFloat = 16
     @Environment(\.motionScale) private var motion
+    @Environment(\.octoPalette) private var palette
 
     private static let rest: [Double] = [0.45, 0.8, 0.6]
     private static let speeds: [Double] = [2, 3, 4]
     private static let offsets: [Double] = [0, 0.3, 0.65]
 
     var body: some View {
+        let lit = palette.color(.complement)
         Group {
             if playing && !motion.still {
                 TimelineView(.animation) { time in
                     let phase = time.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.4) / 2.4
                     ZStack {
-                        bars(phase: phase, color: .white).blur(radius: 4).opacity(0.7)
-                        bars(phase: phase, color: .white)
+                        bars(phase: phase, color: lit).blur(radius: 4).opacity(0.7)
+                        bars(phase: phase, color: lit)
                     }
                 }
             } else {
-                bars(phase: nil, color: playing ? .white : OctoColor.textMuted)
+                bars(phase: nil, color: playing ? lit : palette.color(.textMuted))
             }
         }
         .frame(width: size, height: size)
@@ -137,6 +139,7 @@ struct TrackRow: View {
     @Environment(LibraryActions.self) private var actions
     @Environment(Downloads.self) private var downloads
     @Environment(\.songSelection) private var selection
+    @Environment(\.octoPalette) private var palette
 
     private var key: String { selectKey ?? track.id }
     private var song: Song { track.asSong }
@@ -177,6 +180,7 @@ struct TrackRow: View {
             if selecting { selection?.toggle(key) } else { onTap() }
         } label: {
             face
+                .octoOnSelectedFill(picked)
                 .padding(.horizontal, ListRow.side)
                 .padding(.vertical, 4)
                 .frame(minHeight: 56)
@@ -187,10 +191,11 @@ struct TrackRow: View {
         .background {
             if picked {
                 RoundedRectangle(cornerRadius: OctoRadius.row)
-                    .fill(LibraryLook.accentSelected)
+                    .fill(OctoColor.accentSelected)
                     .overlay {
                         RoundedRectangle(cornerRadius: OctoRadius.row)
-                            .strokeBorder(LinearGradient(colors: [.white.opacity(0.12), .black.opacity(0.25)], startPoint: .top, endPoint: .bottom),
+                            .strokeBorder(LinearGradient(colors: [palette.color(.textPrimary).opacity(0.12), palette.shadowColor(0.25)],
+                                                         startPoint: .top, endPoint: .bottom),
                                           lineWidth: 1)
                     }
                     .padding(.horizontal, ListRow.pickInset)
@@ -233,13 +238,13 @@ struct TrackRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 0) {
                     if highlighted {
-                        IconView(.starFilled, size: 14, color: OctoColor.accent)
+                        IconView(.starFilled, size: 14, color: OctoColor.complement)
                             .padding(.trailing, 6)
                             .accessibilityLabel("Most popular")
                     }
                     Text(track.title)
                         .font(.octoBodySmall)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(isNow ? OctoColor.complement : OctoColor.textPrimary)
                         .lineLimit(1)
                     if track.explicit == true {
                         ExplicitMark().padding(.leading, 6).layoutPriority(1)
@@ -277,7 +282,7 @@ struct TrackRow: View {
         case .number(let number):
             ZStack(alignment: .trailing) {
                 if picked {
-                    IconView(.select, size: 22, color: .white)
+                    IconView(.select, size: 22, color: OctoColor.selectedWords)
                 } else if isNow {
                     NowPlayingBars(playing: player.isPlaying, size: 14)
                 } else {
@@ -297,12 +302,15 @@ struct TrackRow: View {
             }
             .overlay {
                 if picked || isNow {
-                    RoundedRectangle(cornerRadius: OctoRadius.artS).fill(.black.opacity(0.5))
-                    if picked {
-                        IconView(.select, size: 22, color: .white)
-                    } else {
-                        NowPlayingBars(playing: player.isPlaying)
+                    ZStack {
+                        RoundedRectangle(cornerRadius: OctoRadius.artS).fill(.black.opacity(0.5))
+                        if picked {
+                            IconView(.select, size: 22, color: OctoColor.textPrimary)
+                        } else {
+                            NowPlayingBars(playing: player.isPlaying)
+                        }
                     }
+                    .octoOverArt()
                 }
             }
             .accessibilityLabel(track.isFound ? "Not in your library" : "")
@@ -392,6 +400,7 @@ struct SongRow: View {
     @Environment(Downloads.self) private var downloads
     @Environment(LibraryActions.self) private var actions
     @Environment(\.songSelection) private var selection
+    @Environment(\.octoPalette) private var palette
 
     /// The row is picked by the song it was given, whichever song it shows.
     private var key: String { song.id }
@@ -422,12 +431,12 @@ struct SongRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         if highlight {
-                            IconView(.starFilled, size: 14, color: OctoColor.accent)
+                            IconView(.starFilled, size: 14, color: OctoColor.complement)
                                 .accessibilityLabel("Most popular")
                         }
                         Text(shown.title)
                             .font(.octoBodySmall)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(isCurrent(shown) ? OctoColor.complement : OctoColor.textPrimary)
                             .lineLimit(1)
                         if shown.explicitStatus == "explicit" { ExplicitMark() }
                     }
@@ -453,6 +462,7 @@ struct SongRow: View {
                 case .trailing: EmptyView()
                 }
             }
+            .octoOnSelectedFill(picked)
             .padding(.horizontal, ListRow.side)
             .padding(.vertical, 4)
             .frame(minHeight: 56)
@@ -464,10 +474,11 @@ struct SongRow: View {
         .background {
             if picked {
                 RoundedRectangle(cornerRadius: OctoRadius.row)
-                    .fill(LibraryLook.accentSelected)
+                    .fill(OctoColor.accentSelected)
                     .overlay {
                         RoundedRectangle(cornerRadius: OctoRadius.row)
-                            .strokeBorder(LinearGradient(colors: [.white.opacity(0.12), .black.opacity(0.25)], startPoint: .top, endPoint: .bottom),
+                            .strokeBorder(LinearGradient(colors: [palette.color(.textPrimary).opacity(0.12), palette.shadowColor(0.25)],
+                                                         startPoint: .top, endPoint: .bottom),
                                           lineWidth: 1)
                     }
                     .padding(.horizontal, ListRow.pickInset)
@@ -515,12 +526,15 @@ struct SongRow: View {
                 BadgedCover(id: shown.coverArt, size: 44, radius: OctoRadius.artS, external: sign(shown) == .mark)
                     .overlay {
                         if picked || isCurrent(shown) {
-                            RoundedRectangle(cornerRadius: OctoRadius.artS).fill(.black.opacity(0.5))
-                            if picked {
-                                IconView(.check, size: 20, color: .white)
-                            } else {
-                                NowPlayingBars(playing: player.isPlaying)
+                            ZStack {
+                                RoundedRectangle(cornerRadius: OctoRadius.artS).fill(.black.opacity(0.5))
+                                if picked {
+                                    IconView(.check, size: 20, color: OctoColor.textPrimary)
+                                } else {
+                                    NowPlayingBars(playing: player.isPlaying)
+                                }
                             }
+                            .octoOverArt()
                         }
                     }
             }
@@ -528,7 +542,7 @@ struct SongRow: View {
             let isCurrent = isCurrent(shown)
             ZStack(alignment: .trailing) {
                 if picked {
-                    IconView(.check, size: 18, color: .white)
+                    IconView(.check, size: 18, color: OctoColor.selectedWords)
                 } else if isCurrent {
                     NowPlayingBars(playing: player.isPlaying, size: 14)
                 } else if let number {
@@ -558,7 +572,7 @@ struct AlbumCard: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(album.name)
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(OctoColor.textPrimary)
                         .lineLimit(1)
                     Text(album.byline)
                         .font(.octoCaption)
@@ -663,7 +677,7 @@ struct StationCard: View {
     private var card: some View {
         VStack(alignment: .leading, spacing: 8) {
             Cover(id: coverArt, size: Self.size)
-            Text(name).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+            Text(name).font(.system(size: 14, weight: .semibold)).foregroundStyle(OctoColor.textPrimary).lineLimit(1)
             if let songCount {
                 Text(songCount == 1 ? "1 song" : "\(songCount) songs")
                     .font(.octoBodySmall)
@@ -686,9 +700,9 @@ struct StationCard: View {
                 }
             }
             .frame(width: 22, height: 22)
-            .foregroundStyle(.white)
+            .foregroundStyle(OctoColor.textPrimary)
             .padding(8)
-            .glassEffect(Glass.octo.interactive(), in: .circle)
+            .octoGlass(Circle(), interactive: true)
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
         }
@@ -714,7 +728,7 @@ struct ArtistCircle: View {
         NavigationLink(value: external ? Route.onlineArtist(id: id, name: name) : Route.artist(id: id, name: name)) {
             VStack(spacing: 8) {
                 BadgedCover(id: coverArt, size: size, radius: size / 2, external: external)
-                Text(name).font(.octoCaption).foregroundStyle(.white).lineLimit(1).frame(width: size)
+                Text(name).font(.octoCaption).foregroundStyle(OctoColor.textPrimary).lineLimit(1).frame(width: size)
             }
         }
         .buttonStyle(PressScale(scale: 0.97))
@@ -732,7 +746,7 @@ struct ArtistRow: View {
             HStack(spacing: 12) {
                 ArtCover(artwork: artist.artwork, size: 48, radius: 24)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(artist.name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
+                    Text(artist.name).font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary).lineLimit(1)
                     Text(albumsCount(artist.albumCount)).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
                 }
                 Spacer(minLength: 0)
@@ -790,7 +804,7 @@ struct PlaylistCover: View {
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .overlay {
             if size >= 96 || covers.count >= 4 {
-                RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(OctoInkColor.quaternary, lineWidth: 1)
             }
         }
     }
@@ -830,7 +844,7 @@ struct PlaylistLine<Picture: View>: View {
         HStack(spacing: 14) {
             picture.frame(width: 56, height: 56)
             VStack(alignment: .leading, spacing: 2) {
-                Text(name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
+                Text(name).font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary).lineLimit(1)
                 if subtitle != nil || onServer {
                     HStack(spacing: 4) {
                         if let subtitle { Text(subtitle).font(.octoCaption).foregroundStyle(OctoColor.textMuted).lineLimit(1) }

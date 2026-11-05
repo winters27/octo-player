@@ -37,6 +37,7 @@ struct QrScanner: View {
             }
             .padding(24)
         }
+        .octoOverArt()
         .task {
             reader.found = { link in
                 reader.stop()

@@ -25,8 +25,6 @@ struct QueueEntry: Identifiable, Equatable {
 enum QueuePlace { case played, now, coming }
 
 private let queueRowHeight: CGFloat = 56
-private var comingFill: Color { OctoColor.background.mix(with: OctoColor.accent, by: 0.05) }
-private var nowFill: Color { Color(hex: 0x1A1A1B).mix(with: OctoColor.accent, by: 0.12) }
 
 /// Up next, in a sheet: the songs already played, the song on now in its own card, and the songs
 /// to come in the order they play. A song to come can be dragged by its handle to another place
@@ -36,6 +34,7 @@ struct QueueSheet: View {
     @Environment(Player.self) private var player
     @Environment(Router.self) private var router
     @Environment(\.dataServices) private var data
+    @Environment(\.octoPalette) private var palette
     @State private var removed: Set<String> = []
     @State private var drag: QueueDrag?
     @State private var saving = false
@@ -115,6 +114,11 @@ struct QueueSheet: View {
     // MARK: Heading and tools
 
     /// The listener's own songs still to come, "N songs · length", and how many Autoplay added.
+    /// The cards the songs to come and the song on now sit on: the page and the card a little lit
+    /// with the accent.
+    private var comingFill: Color { palette.color(.background).mix(with: palette.color(.accent), by: 0.05) }
+    private var nowFill: Color { palette.color(.backgroundTertiary).mix(with: palette.color(.accent), by: 0.12) }
+
     private func summary(_ coming: [QueueEntry]) -> String {
         let own = coming.filter { $0.source != .autoplay }
         let seconds = own.reduce(0) { $0 + $1.song.duration }
@@ -147,7 +151,7 @@ struct QueueSheet: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 34, height: 34)
-                    .glassEffect(LibraryLook.resting, in: .circle)
+                    .octoGlass(Circle(), interactive: true)
                     .frame(width: 48, height: 48)
                     .contentShape(Circle())
             }

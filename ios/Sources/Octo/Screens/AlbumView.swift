@@ -169,7 +169,7 @@ struct AlbumView: View {
                 }
                 .onAppear { coverShown = true }
                 .onDisappear { coverShown = false }
-                .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+                .octoShadow(0.35, radius: 10, y: 4)
                 .frame(maxWidth: .infinity)
             Text(album.title)
                 .font(.octoTitle)
@@ -330,7 +330,7 @@ private struct OnlineAlbum: View {
                 }
                 .onAppear { coverShown = true }
                 .onDisappear { coverShown = false }
-                .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+                .octoShadow(0.35, radius: 10, y: 4)
             Text(album.name).font(.octoTitle).multilineTextAlignment(.center).bigTitle().padding(.top, 20)
             Text(album.byline).font(.octoBody).foregroundStyle(OctoColor.textSecondary).padding(.top, 4)
             PlayButtons(songs: album.song).padding(.top, 14)
@@ -528,7 +528,7 @@ struct ArtistView: View {
             SectionTitle("About").padding(.top, 8)
             Text(text)
                 .font(.octoBodySmall)
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(OctoInkColor.primary)
                 .lineLimit(moreAbout ? nil : 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background {
@@ -548,7 +548,7 @@ struct ArtistView: View {
             if aboutClipped && !moreAbout {
                 Button("More") { moreAbout = true }
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(OctoColor.textPrimary)
                     .buttonStyle(.plain)
                     .padding(.vertical, 8)
                     .padding(.horizontal, 20)
@@ -862,7 +862,7 @@ struct ServerListPage: View {
         let details = [songsCount(songs.count), seconds > 0 ? asLength(seconds) : nil].compactMap { $0 }.joined(separator: " · ")
         return VStack(spacing: 0) {
             Cover(id: playlist.coverArt, size: 240, radius: 10)
-                .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+                .octoShadow(0.35, radius: 10, y: 4)
             Text(playlist.name).font(.octoTitle).multilineTextAlignment(.center).bigTitle().padding(.top, 20)
             Text(details)
                 .font(.octoCaption)
@@ -968,7 +968,7 @@ struct PlaylistPage: View {
         let length = Int(tracks.reduce(0) { $0 + $1.durationMs } / 1_000)
         VStack(spacing: 0) {
             PlaylistCover(playlist: playlist, size: 240, radius: 10)
-                .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+                .octoShadow(0.35, radius: 10, y: 4)
             Text(playlist.name).font(.octoTitle).multilineTextAlignment(.center).bigTitle().padding(.top, 20)
             HStack(spacing: 8) {
                 Text(playlistDetails(songs: rows.count, length: asLength(length),

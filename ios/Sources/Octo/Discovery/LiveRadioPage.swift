@@ -273,10 +273,10 @@ struct ChoiceChip: View {
             Text(text).font(.octoBodySmall).lineLimit(1)
             Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold)).foregroundStyle(OctoColor.textSecondary)
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(OctoColor.textPrimary)
         .padding(.horizontal, 14)
         .frame(minHeight: 44)
-        .glassEffect(Glass.octo.interactive(), in: .capsule)
+        .octoGlass(Capsule(), interactive: true)
         .contentShape(Capsule())
     }
 }
@@ -299,7 +299,7 @@ struct PlaceChooser: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if inSheet {
-                Text("Find stations near").font(.octoHeadline).foregroundStyle(.white)
+                Text("Find stations near").font(.octoHeadline).foregroundStyle(OctoColor.textPrimary)
             } else {
                 Text("Hear what's on the air around you. Octo finds the stations near a place.")
                     .font(.octoBodySmall)
@@ -410,7 +410,7 @@ private struct ChooserBackground: ViewModifier {
             content
         } else {
             content
-                .glassEffect(Glass.octo, in: .rect(cornerRadius: 20))
+                .octoGlass(RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .padding(.horizontal, 20)
         }
     }
@@ -431,11 +431,11 @@ struct FindNearbyCard: View {
                         Image(systemName: "dot.radiowaves.left.and.right").font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(OctoColor.textSecondary)
                     }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(OctoColor.textPrimary)
                 }
                 .frame(width: Self.size, height: Self.size)
-                .glassEffect(Glass.octo, in: .rect(cornerRadius: OctoRadius.artS))
-                Text("Find stations near you").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).lineLimit(2)
+                .octoGlass(RoundedRectangle(cornerRadius: OctoRadius.artS, style: .continuous))
+                Text("Find stations near you").font(.system(size: 14, weight: .semibold)).foregroundStyle(OctoColor.textPrimary).lineLimit(2)
             }
             .frame(width: Self.size, alignment: .leading)
             .contentShape(Rectangle())
@@ -457,7 +457,7 @@ struct KeptStationCard: View {
         Button(action: play) {
             VStack(alignment: .leading, spacing: 8) {
                 StationLogo(address: station.favicon, name: station.name, size: Self.size)
-                Text(station.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+                Text(station.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(OctoColor.textPrimary).lineLimit(1)
                 if !station.placeLine.isEmpty {
                     Text(station.placeLine).font(.octoBodySmall).foregroundStyle(OctoColor.textSecondary).lineLimit(1)
                 }

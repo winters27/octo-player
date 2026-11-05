@@ -33,7 +33,7 @@ struct DownloadsPill: View {
                             .frame(width: 20, height: 20)
                         Text(words)
                             .font(.octoCaption)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(OctoColor.textPrimary)
                             .lineLimit(1)
                             .id(words)
                             .transition(.opacity)
@@ -47,11 +47,11 @@ struct DownloadsPill: View {
                         if more > 0 {
                             Text("+\(more)")
                                 .font(.octoCaption)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(OctoColor.complement)
                                 .lineLimit(1)
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 2)
-                                .background(.white.opacity(0.12), in: Capsule())
+                                .background(OctoColor.textPrimary.opacity(0.12), in: Capsule())
                         }
                     }
                     .padding(.leading, 8)
@@ -62,7 +62,7 @@ struct DownloadsPill: View {
                     .animation(.easeInOut(duration: calm ? 0.08 : 0.16), value: words)
                 }
                 .buttonStyle(.plain)
-                .glassEffect(Glass.octo.interactive(), in: .capsule)
+                .octoGlass(Capsule(), interactive: true)
                 .clipShape(Capsule())
                 .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: calm ? 0.1 : 0.2), value: more)
                 .accessibilityElement(children: .ignore)

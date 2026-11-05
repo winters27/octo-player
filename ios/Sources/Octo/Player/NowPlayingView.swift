@@ -18,6 +18,7 @@ struct NowPlayingView: View {
     @Environment(LikeStore.self) private var likes
     @Environment(\.octoReduceMotion) private var calm
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.octoPalette) private var palette
     @State private var settings = AppSettings.shared
     @State private var look = PlayerLook.shared
     @State private var facts = PlayerSongFacts()
@@ -102,8 +103,8 @@ struct NowPlayingView: View {
     private var loop: PlayerLoop { settings.animatedArt.inPlayer(animated.known(loopAlbumId)) }
 
     private var ink: Color { colors.content }
-    private var muted: Color { mutedInk(ink, dark: colors.dark) }
-    private var accent: Color { accentInk(ink, dark: colors.dark) }
+    private var muted: Color { mutedInk(ink, dark: colors.dark, palette: palette) }
+    private var accent: Color { accentInk(ink, dark: colors.dark, palette: palette) }
 
 
     var body: some View {
@@ -186,28 +187,37 @@ struct NowPlayingView: View {
         .task(id: loopAlbumId) { _ = await animated.want(loopAlbumId) }
         .onAppear(perform: arrive)
         .accessibilityAction(.escape) { close() }
+        .octoOverArt()
         .sheet(isPresented: $showsChooser) {
             if let song = player.current {
                 LyricsChooserContent(song: song) { showsChooser = false }
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
+                    .preferredColorScheme(.dark)
+                    .octoOverArt()
             }
         }
         .sheet(isPresented: $showsQueue) {
             QueueSheet()
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+                .preferredColorScheme(.dark)
+                .octoOverArt()
         }
         .sheet(isPresented: $showsStations) {
             StationListSheet { showsStations = false }
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+                .preferredColorScheme(.dark)
+                .octoOverArt()
         }
         .sheet(isPresented: $showsStationInfo) {
             if let live = player.live {
                 StationInfoSheet(shown: live, coverArt: player.current?.coverArt) { showsStationInfo = false }
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
+                    .preferredColorScheme(.dark)
+                    .octoOverArt()
             }
         }
     }
@@ -452,12 +462,16 @@ struct NowPlayingView: View {
     /// The live station's menu, then AirPlay and Sound.
     private func liveMoreButton(_ live: LiveShown) -> some View {
         Menu {
-            if let item = player.currentItem {
-                LiveMenuItems(trackId: item.trackId, onAir: live.onAir, showInfo: { showsStationInfo = true }, openSearch: openSearch)
+            Group {
+                if let item = player.currentItem {
+                    LiveMenuItems(trackId: item.trackId, onAir: live.onAir, showInfo: { showsStationInfo = true }, openSearch: openSearch)
+                }
+                Section {
+                    PlayerMenuExtras(airPlay: airPlay) { route in close { router.go(route) } }
+                }
             }
-            Section {
-                PlayerMenuExtras(airPlay: airPlay) { route in close { router.go(route) } }
-            }
+            .preferredColorScheme(.dark)
+            .octoOverArt()
         } label: {
             TitleGlyph(icon: .more, color: ink.opacity(titleIcons.alpha))
                 .contentShape(Rectangle())
@@ -526,11 +540,15 @@ struct NowPlayingView: View {
     /// The song menu for the song playing, the same one every song row opens.
     private var moreButton: some View {
         Menu {
-            if let menuSubject {
-                SongMenuItems(subject: menuSubject) {
-                    PlayerMenuExtras(airPlay: airPlay) { route in close { router.go(route) } }
+            Group {
+                if let menuSubject {
+                    SongMenuItems(subject: menuSubject) {
+                        PlayerMenuExtras(airPlay: airPlay) { route in close { router.go(route) } }
+                    }
                 }
             }
+            .preferredColorScheme(.dark)
+            .octoOverArt()
         } label: {
             TitleGlyph(icon: .more, color: ink.opacity(titleIcons.alpha))
                 .contentShape(Rectangle())
@@ -563,7 +581,7 @@ struct NowPlayingView: View {
                         .offset(x: 6, y: -4)
                 }
             }
-            .glassPopover(isPresented: $showsSleep) {
+            .glassPopover(isPresented: $showsSleep, overArt: true) {
                 TimeCard(start: .sleep, opening: sleepOpening) { showsSleep = false }
             }
     }

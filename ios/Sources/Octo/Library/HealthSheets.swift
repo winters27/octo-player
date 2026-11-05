@@ -370,7 +370,7 @@ private struct Mark: View {
         let symbol = round ? (on ? "checkmark.circle.fill" : "circle") : (on ? "checkmark.square.fill" : "square")
         Image(systemName: symbol)
             .font(.title3)
-            .foregroundStyle(on ? OctoColor.accent : Color.secondary)
+            .foregroundStyle(on ? AnyShapeStyle(OctoColor.accent) : AnyShapeStyle(Color.secondary))
             .frame(width: 24, height: 24)
     }
 }

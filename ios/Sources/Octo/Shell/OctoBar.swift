@@ -16,7 +16,7 @@ struct OctoBar: View {
     let showTabs: () -> Void
     let openPlayer: () -> Void
     /// The glass's film, which can carry a trace of the song's color.
-    var film: Color = OctoColor.glazeFilm
+    var film: Color?
     @Environment(Player.self) private var player
 
     static let height = ShellMeasures.barHeight
@@ -53,7 +53,7 @@ private struct BarFrame: View, Animatable {
     let tab: AppTab
     let folded: Bool
     let hasSong: Bool
-    let film: Color
+    let film: Color?
     let select: (AppTab) -> Void
     let roundButton: () -> Void
     let showTabs: () -> Void
@@ -107,11 +107,11 @@ private struct BarShadow: View {
     var body: some View {
         Capsule()
             .inset(by: 12)
-            .fill(Color.black.opacity(0.45))
+            .fill(OctoShade(0.45))
             .blur(radius: shadowRadius(24))
             .offset(y: 8)
             .mask {
-                Rectangle().padding(-48).overlay { Capsule().fill(Color.black).blendMode(.destinationOut) }.compositingGroup()
+                Rectangle().padding(-48).overlay { Capsule().fill(OctoColor.background).blendMode(.destinationOut) }.compositingGroup()
             }
             .allowsHitTesting(false)
     }
@@ -120,7 +120,7 @@ private struct BarShadow: View {
 /// The tabs in their glass, the selected one in a darker pill that glides between them.
 /// Folding, the tabs slide under the shrinking edge and fade, while the pill slides left and
 /// swells into the whole circle carrying the selected tab's icon, which turns from the accent to
-/// white.
+/// the theme's words.
 private struct TabTray: View {
     let fullWidth: CGFloat
     let folded: Double
@@ -130,6 +130,7 @@ private struct TabTray: View {
     let select: (AppTab) -> Void
 
     @State private var updates = ServerUpdates.shared
+    @Environment(\.octoPalette) private var palette
 
     private static let iconSize: CGFloat = 23
     private static let pillWidth: CGFloat = 62
@@ -164,7 +165,7 @@ private struct TabTray: View {
             }
             if folded > 0 {
                 IconView(tab.selectedIcon, size: Self.iconSize,
-                         color: OctoColor.accent.mix(with: .white, by: fold))
+                         color: palette.color(.accent).mix(with: palette.color(.textPrimary), by: fold))
                     .offset(x: pillX + (pillW - Self.iconSize) / 2)
                     .accessibilityHidden(true)
             }
@@ -173,7 +174,7 @@ private struct TabTray: View {
     }
 }
 
-/// One tab: its icon only, white, or filled in the accent while selected. The whole column
+/// One tab: its icon only, in the theme's words, or filled in the accent while selected. The whole column
 /// answers the finger, with no highlight.
 private struct TabButton: View {
     let item: AppTab
@@ -185,7 +186,8 @@ private struct TabButton: View {
 
     var body: some View {
         Button(action: action) {
-            IconView(selected ? item.selectedIcon : item.icon, size: 23, color: selected ? OctoColor.accent : .white)
+            IconView(selected ? item.selectedIcon : item.icon, size: 23,
+                     color: selected ? AnyShapeStyle(OctoColor.accent) : AnyShapeStyle(OctoColor.textPrimary))
                 // The outline and filled symbols swap at once; only the color moves. The system's
                 // own symbol replace would shrink the icon out of sight and back.
                 .contentTransition(.identity)
@@ -373,7 +375,7 @@ struct NowPlayingFace: View {
                     Cover(id: song.coverArt, size: OctoBar.height - 12, radius: (OctoBar.height - 12) / 2, online: song.isExternal)
                 }
                 if song == nil {
-                    IconView(.play, size: 22, color: .white)
+                    IconView(.play, size: 22, color: OctoColor.textPrimary)
                 } else {
                     ProgressRing().padding(3)
                 }
@@ -425,7 +427,7 @@ struct MiniPlayerPill: View {
             .frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 0) {
                 SongTitleLine(player.current?.title ?? "", explicit: player.current?.isExplicit ?? false, font: .octoLabel,
-                              color: .white)
+                              color: nil)
                 Text(player.current?.byline ?? "")
                     .font(.octo(11, .regular, .caption1))
                     .foregroundStyle(OctoColor.textMuted)
@@ -487,6 +489,7 @@ struct ProgressRing: View {
     @Environment(Player.self) private var player
     @Environment(\.octoReduceMotion) private var calm
     @Environment(\.scenePhase) private var phase
+    @Environment(\.octoPalette) private var palette
     @State private var pausedAt = Date()
     @State private var settled = false
     @State private var motion = PlayerMotion.shared
@@ -533,7 +536,7 @@ struct ProgressRing: View {
 
     @ViewBuilder
     private func ring(sweep: Double, arc: RingArc, track: Bool) -> some View {
-        let accent = OctoColor.accent
+        let accent = palette.color(.accent)
         let drawn = ZStack {
             if track {
                 Circle().stroke(accent.opacity(RingLook.pausedTrackAlpha), lineWidth: RingLook.thinWidth)
@@ -570,13 +573,15 @@ extension View {
 /// the text size. Screen readers hear "Explicit".
 struct ExplicitMark: View {
     var size: CGFloat = 14
-    var color: Color = OctoColor.textMuted
+    /// The tile's color; nil takes the theme's muted words.
+    var color: Color?
     @ScaledMetric(relativeTo: .caption) private var grow: CGFloat = 1
+    @Environment(\.octoPalette) private var palette
 
     var body: some View {
         let side = size * grow
         RoundedRectangle(cornerRadius: side * 3 / 14, style: .continuous)
-            .fill(color)
+            .fill(color ?? palette.color(.textMuted))
             .frame(width: side, height: side)
             .overlay {
                 Text("E")
@@ -595,7 +600,7 @@ private struct TransportIcon: View {
     @Environment(\.isEnabled) private var enabled
 
     var body: some View {
-        IconView(icon, size: 28, color: .white.opacity(enabled ? 1 : 0.35))
+        IconView(icon, size: 28, color: OctoColor.textPrimary.opacity(enabled ? 1 : 0.35))
             .frame(width: 36, height: 36)
             .contentShape(Rectangle())
     }

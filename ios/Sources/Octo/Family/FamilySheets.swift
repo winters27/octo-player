@@ -91,7 +91,7 @@ struct HandOverSheetView: View {
         let reach = picked ?? options?.defaultReach ?? .anywhere
         return VStack(spacing: 0) {
             SheetHeader(name: avatarName, title: HandOverText.title, subtitle: subtitle,
-                        subtitleColor: warn ? OctoColor.signalOrange : OctoColor.textMuted, clock: !ended, close: source.close)
+                        subtitleColor: warn ? OctoColor.signalOrange : nil, clock: !ended, close: source.close)
             GeometryReader { geometry in
                 SheetScrollArea(target: "what") {
                     let side = qrSide(geometry.size.width - 40)
@@ -164,7 +164,7 @@ struct HandOverSheetView: View {
                         .foregroundStyle(OctoColor.textPrimary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 2)
-                        .background(OctoColor.accentSelected, in: Capsule())
+                        .octoSelectedFill(Capsule())
                         .transition(.opacity)
                     } else {
                         Text(HandOverText.caption).font(.octoCaption).foregroundStyle(OctoColor.textMuted).multilineTextAlignment(.center).transition(.opacity)
@@ -203,7 +203,7 @@ struct AskingView: View {
                     .font(.system(size: 26))
                     .foregroundStyle(OctoColor.textPrimary)
                     .frame(width: 64, height: 64)
-                    .background(OctoColor.accentSelected, in: Circle())
+                    .octoSelectedFill(Circle())
                 Text("Sign in on").font(.octoCaption).foregroundStyle(OctoColor.textMuted)
                 Text(asking.deviceName.trimmingCharacters(in: .whitespaces).isEmpty ? "A new device" : asking.deviceName)
                     .font(.octoTitle)

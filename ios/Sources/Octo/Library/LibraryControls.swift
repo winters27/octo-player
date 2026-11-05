@@ -3,16 +3,9 @@ import SwiftUI
 
 /// The tokens the library pages use beyond the shared palette.
 enum LibraryLook {
-    /// A selected row: the accent 40% of the way out of black.
-    static var accentSelected: Color { Color.black.mix(with: OctoColor.accent, by: 0.4) }
-    /// A hairline between rows.
-    static let hairline = Color.white.opacity(0.08)
     /// The small bold words of buttons and chips.
     static let label = Font.system(size: 13.5, weight: .semibold)
     static let labelMedium = Font.system(size: 13.5, weight: .medium)
-    /// Lifted glass: a little brighter than the resting glass, for the main button of a pair.
-    static let lifted = Glass.regular.tint(.white.opacity(0.14)).interactive()
-    static var resting: Glass { Glass.octo.interactive() }
 }
 
 /// Play and Shuffle across a detail page: two glass capsules of equal width. Play has the lifted
@@ -26,15 +19,15 @@ struct PlayShuffle: View {
     var body: some View {
         GlassEffectContainer(spacing: 12) {
             HStack(spacing: 12) {
-                capsule("Play", icon: .play, glass: LibraryLook.lifted, spinner: loading, action: play)
-                capsule("Shuffle", icon: .shuffle, glass: LibraryLook.resting, spinner: false, action: shuffle)
+                capsule("Play", icon: .play, lifted: true, spinner: loading, action: play)
+                capsule("Shuffle", icon: .shuffle, lifted: false, spinner: false, action: shuffle)
             }
         }
         .disabled(!enabled || loading)
         .opacity(enabled || loading ? 1 : 0.4)
     }
 
-    private func capsule(_ word: String, icon: OctoIcon, glass: Glass, spinner: Bool, action: @escaping () -> Void) -> some View {
+    private func capsule(_ word: String, icon: OctoIcon, lifted: Bool, spinner: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if spinner {
@@ -44,10 +37,10 @@ struct PlayShuffle: View {
                 }
                 Text(word).font(.octoBody)
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(OctoColor.textPrimary)
             .frame(maxWidth: .infinity)
             .frame(height: 46)
-            .glassEffect(glass, in: .capsule)
+            .octoGlass(Capsule(), interactive: true, lifted: lifted)
             .frame(minHeight: 48)
             .contentShape(Capsule())
         }
@@ -64,9 +57,9 @@ struct GlassIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            IconView(icon, size: 17, color: .white)
+            IconView(icon, size: 17, color: OctoColor.textPrimary)
                 .frame(width: 34, height: 34)
-                .glassEffect(lit ? LibraryLook.lifted : LibraryLook.resting, in: .circle)
+                .octoGlass(Circle(), interactive: true, lifted: lit)
                 .frame(width: 48, height: 48)
                 .contentShape(Circle())
                 .animation(.easeInOut(duration: 0.16), value: icon)
@@ -77,7 +70,7 @@ struct GlassIconButton: View {
 }
 
 /// A quiet action: an icon and a word in the secondary color, no glass. As a switch it turns
-/// white while on.
+/// to the primary words while on.
 struct QuietAction: View {
     let icon: OctoIcon
     let text: String
@@ -108,14 +101,14 @@ struct QuietActionLabel: View {
             IconView(icon, size: 18)
             Text(text).font(LibraryLook.label).lineLimit(1)
         }
-        .foregroundStyle(lit ? Color.white : OctoColor.textSecondary)
+        .foregroundStyle(lit ? AnyShapeStyle(OctoColor.textPrimary) : AnyShapeStyle(OctoColor.textSecondary))
         .padding(.horizontal, 10)
         .padding(.vertical, 12)
         .contentShape(Capsule())
     }
 }
 
-/// The plain white icon at 80% in a 48 circle, no glass.
+/// The plain icon in the primary ink in a 48 circle, no glass.
 struct QuietIconAction: View {
     let icon: OctoIcon
     let label: String
@@ -123,7 +116,7 @@ struct QuietIconAction: View {
 
     var body: some View {
         Button(action: action) {
-            IconView(icon, size: 22, color: .white.opacity(0.8))
+            IconView(icon, size: 22, color: OctoInkColor.primary)
                 .frame(width: 48, height: 48)
                 .contentShape(Circle())
         }
@@ -216,19 +209,19 @@ struct SortButton: View {
             SortMenuItems(list: list)
         } label: {
             HStack(spacing: 7) {
-                IconView(.sort, size: 16, color: .white.opacity(0.72))
+                IconView(.sort, size: 16, color: OctoInkColor.primary)
                 Text(order.by.label)
                     .font(LibraryLook.labelMedium)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(OctoColor.textPrimary)
                     .lineLimit(1)
-                IconView(.ascending, size: 14, color: .white.opacity(0.72))
+                IconView(.ascending, size: 14, color: OctoInkColor.primary)
                     .rotationEffect(.degrees(sortArrowTurn(descending: order.descending)))
                     .animation(.interpolatingSpring(stiffness: 300, damping: 2 * 0.7 * sqrt(300)), value: order.descending)
             }
             .padding(.leading, 12)
             .padding(.trailing, 11)
             .frame(height: 34)
-            .glassEffect(LibraryLook.resting, in: .capsule)
+            .octoGlass(Capsule(), interactive: true)
             .frame(minHeight: 48)
             .contentShape(Capsule())
         }
@@ -316,6 +309,7 @@ struct LetterHeading: View {
             Text(String(letter))
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(OctoColor.textMuted)
+                .octoOverArt()
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .frame(minWidth: 26, minHeight: 26)
@@ -345,7 +339,7 @@ struct LetterRail: View {
                     ForEach(Array(stops.enumerated()), id: \.offset) { index, stop in
                         Text(String(stop.letter))
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(touched == index ? Color.white : OctoColor.textMuted)
+                            .foregroundStyle(touched == index ? AnyShapeStyle(OctoColor.textPrimary) : AnyShapeStyle(OctoColor.textMuted))
                             .frame(width: 24, height: slot)
                     }
                 }
@@ -364,9 +358,9 @@ struct LetterRail: View {
                 if let touched {
                     Text(String(shown))
                         .font(.octoTitle)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(OctoColor.textPrimary)
                         .frame(width: 64, height: 64)
-                        .glassEffect(Glass.octo, in: .circle)
+                        .octoGlass(Circle())
                         .offset(x: -(24 + 16), y: slot * (CGFloat(touched) + 0.5) - 32)
                         .transition(.asymmetric(
                             insertion: .scale(scale: 0.85).combined(with: .opacity).animation(.easeOut(duration: 0.12)),
@@ -393,11 +387,12 @@ struct LetterRail: View {
 struct FavoriteHeart: View {
     let on: Bool
     let toggle: () -> Void
+    @Environment(\.octoPalette) private var palette
 
     var body: some View {
         Button(action: toggle) {
-            IconView(on ? .liked : .like, size: 24, color: on ? .white : .white.opacity(0.6))
-                .shadow(color: on ? .white.opacity(0.5) : .clear, radius: 6)
+            IconView(on ? .liked : .like, size: 24, color: on ? palette.color(.complement) : palette.color(.inkSecondary))
+                .shadow(color: on ? palette.color(.complement).opacity(0.5) : .clear, radius: 6)
                 .iconAccent(on ? .pulse : nil, trigger: on)
                 .frame(width: 44, height: 44)
                 .contentShape(Circle())

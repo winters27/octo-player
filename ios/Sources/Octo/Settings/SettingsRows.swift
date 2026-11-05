@@ -211,7 +211,7 @@ private struct Hairline: View {
 
     var body: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.10))
+            .fill(OctoInkColor.quaternary)
             .frame(height: 1 / scale)
             .padding(.leading, inset)
     }
@@ -225,12 +225,12 @@ extension View {
         return self
             .background(OctoColor.surfaceRaised, in: shape)
             .clipShape(shape)
-            .overlay(shape.strokeBorder(Color.white.opacity(0.06), lineWidth: 1))
+            .overlay(shape.strokeBorder(OctoColor.textPrimary.opacity(0.06), lineWidth: 1))
             .overlay(alignment: .top) {
-                shape.stroke(Color.white.opacity(0.06), lineWidth: 1).offset(y: 1).mask(shape).allowsHitTesting(false)
+                shape.stroke(OctoColor.textPrimary.opacity(0.06), lineWidth: 1).offset(y: 1).mask(shape).allowsHitTesting(false)
             }
-            .shadow(color: .black.opacity(0.20), radius: 1, y: 1)
-            .shadow(color: .black.opacity(0.12), radius: 3, y: 2)
+            .octoShadow(0.20, radius: 1, y: 1)
+            .octoShadow(0.12, radius: 3, y: 2)
     }
 }
 
@@ -257,21 +257,27 @@ private struct RowLabel: View {
     let title: String
     var below: String?
     var enabled = true
-    var titleColor: Color = OctoColor.textPrimary
-    var belowColor: Color = OctoColor.textMuted
+    /// The title's and the line under it; nil takes the theme's primary and muted words.
+    var titleColor: Color?
+    var belowColor: Color?
     /// Every answer's own line, when the line under the title is the chosen answer's: the room under the
     /// title fits the tallest, so the row keeps one height and its title one place.
     var belowAnswers: [String] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.octoBody).foregroundStyle(enabled ? titleColor : OctoColor.textMuted).fixedSize(horizontal: false, vertical: true)
+            Text(title).font(.octoBody)
+                .foregroundStyle(!enabled ? AnyShapeStyle(OctoColor.textMuted)
+                                 : titleColor.map { AnyShapeStyle($0) } ?? AnyShapeStyle(OctoColor.textPrimary))
+                .fixedSize(horizontal: false, vertical: true)
             if let below {
                 ZStack(alignment: .topLeading) {
                     ForEach(Array(belowAnswers.enumerated()), id: \.offset) { _, line in
                         Text(line).font(.octoCaption).fixedSize(horizontal: false, vertical: true).hidden().accessibilityHidden(true)
                     }
-                    Text(below).font(.octoCaption).foregroundStyle(belowColor).fixedSize(horizontal: false, vertical: true)
+                    Text(below).font(.octoCaption)
+                        .foregroundStyle(belowColor.map { AnyShapeStyle($0) } ?? AnyShapeStyle(OctoColor.textMuted))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -581,7 +587,7 @@ struct ActionRow: View {
             RowFrame(entry: entry) {
                 TitleValueLayout {
                     RowLabel(title: title ?? entry?.title ?? "", below: helper, enabled: enabled,
-                             titleColor: destructive ? OctoColor.error : OctoColor.textPrimary)
+                             titleColor: destructive ? OctoColor.error : nil)
                         .layoutValue(key: RowShare.self, value: 1)
                     if busy {
                         ProgressView().controlSize(.small).tint(OctoColor.accent).frame(width: 18, height: 18)
@@ -633,17 +639,25 @@ struct InfoRow: View {
 struct NoteRow: View {
     let text: String
     var entry: SettingEntry?
-    var color: Color = OctoColor.textMuted
+    /// The note's color; nil takes the theme's muted words.
+    var color: AnyShapeStyle?
 
-    init(_ text: String, entry: SettingEntry? = nil, color: Color = OctoColor.textMuted) {
+    init(_ text: String, entry: SettingEntry? = nil) {
         self.text = text
         self.entry = entry
-        self.color = color
+    }
+
+    init<S: ShapeStyle>(_ text: String, entry: SettingEntry? = nil, color: S) {
+        self.text = text
+        self.entry = entry
+        self.color = AnyShapeStyle(color)
     }
 
     var body: some View {
         RowFrame(entry: entry, minHeight: 0) {
-            Text(text).font(.octoCaption).foregroundStyle(color).frame(maxWidth: .infinity, alignment: .leading)
+            Text(text).font(.octoCaption)
+                .foregroundStyle(color ?? AnyShapeStyle(OctoColor.textMuted))
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -771,7 +785,7 @@ let iconRowInset: CGFloat = 66
 struct SettingsRowPress: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(Color.white.opacity(configuration.isPressed ? 0.06 : 0))
+            .background(OctoColor.textPrimary.opacity(configuration.isPressed ? 0.06 : 0))
             .contentShape(Rectangle())
     }
 }

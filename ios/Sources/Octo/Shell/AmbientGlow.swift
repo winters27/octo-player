@@ -173,8 +173,28 @@ final class AmbientDrift {
     }
 }
 
-/// The glow behind every page: the artwork's colors, faint and dark, above the plain
-/// background and under the page.
+/// The mesh a cover's colors glow with on `palette`'s page, as `0xAARRGGBB`. On a dark page each is
+/// held dark and soft; on a light page each passes through `glowForCover` at the glow's own
+/// opacity, so every word still reads over it. Done as the glow is drawn, never kept with the
+/// cover's colors.
+func glowMesh(_ colors: ArtworkColors, palette: ResolvedPalette, alpha: Double) -> [UInt32] {
+    let perMille = Int((alpha * 1000).rounded())
+    return colors.mesh.prefix(4).map { color in
+        let argb = 0xFF00_0000 | color
+        return palette.light ? glowForCover(palette.theme, argb, perMille) : ambientColor(argb)
+    }
+}
+
+/// The glow a theme rests in: its accent, complement, third and accent again; empty for a theme
+/// with none.
+func restingMesh(_ palette: ResolvedPalette) -> [UInt32] {
+    guard palette.glow.count >= 3 else { return [] }
+    return [palette.glow[0], palette.glow[1], palette.glow[2], palette.glow[0]]
+}
+
+/// The glow behind every page: the artwork's colors, faint and soft, above the plain background
+/// and under the page. With nothing with artwork to feed it, the theme's own colors rest there,
+/// still, on the pages and at the strength the glow is switched on for.
 struct AmbientBackdrop: View {
     let page: AmbientPage?
     let route: Route?
@@ -183,6 +203,7 @@ struct AmbientBackdrop: View {
     @Environment(PageArtworks.self) private var pages
     @Environment(ArtworkColorStore.self) private var store
     @Environment(Player.self) private var player
+    @Environment(\.octoPalette) private var palette
     @State private var held: ArtworkColors?
 
     var body: some View {
@@ -197,9 +218,16 @@ struct AmbientBackdrop: View {
         let found = artwork.flatMap { store.colors(for: $0) }
         // Kept through a turn to none, so the old colors fade out as they are.
         let colors = found ?? held
-        let strength = source == .none || colors == nil ? 0 : ambientAlpha(prefs.strength)
-        AmbientField(paint: AmbientPaint(colors: colors ?? .quiet, strength: strength), shown: awake)
-            .animation(.octoTween(fixed: AmbientTiming.crossMs), value: AmbientPaint(colors: colors ?? .quiet, strength: strength))
+        let alpha = ambientAlpha(prefs.strength)
+        let rests = source == .none && !restingMesh(palette).isEmpty && (areaOf(page).map { prefs.shows($0) } ?? false)
+        let paint: AmbientPaint = if rests {
+            AmbientPaint(mesh: restingMesh(palette), strength: alpha)
+        } else {
+            AmbientPaint(mesh: glowMesh(colors ?? .quiet, palette: palette, alpha: alpha),
+                         strength: source == .none || colors == nil ? 0 : alpha)
+        }
+        AmbientField(paint: paint, shown: awake, rests: rests)
+            .animation(.octoTween(fixed: AmbientTiming.crossMs), value: paint)
             .onChange(of: found, initial: true) { _, new in if let new { held = new } }
             .allowsHitTesting(false)
             .accessibilityHidden(true)
@@ -212,10 +240,10 @@ struct AmbientPaint: VectorArithmetic {
 
     init(values: [Double]) { self.values = values }
 
-    init(colors: ArtworkColors, strength: Double) {
+    init(mesh: [UInt32], strength: Double) {
         var out: [Double] = []
-        for color in colors.mesh.prefix(4) {
-            let safe = RGBA(argb: ambientColor(0xFF00_0000 | color))
+        for color in mesh.prefix(4) {
+            let safe = RGBA(argb: color)
             out += [safe.red, safe.green, safe.blue]
         }
         while out.count < 12 { out.append(0) }
@@ -245,7 +273,10 @@ private struct AmbientField: View, Animatable {
     var paint: AmbientPaint
     /// Pages out of sight keep the time they were drawn at.
     let shown: Bool
+    /// The theme's own colors at rest, which hold the time they began at.
+    let rests: Bool
     @Environment(AmbientDrift.self) private var drift
+    @Environment(\.octoPalette) private var palette
     @State private var still = 0.0
 
     nonisolated var animatableData: AmbientPaint {
@@ -255,14 +286,14 @@ private struct AmbientField: View, Animatable {
 
     var body: some View {
         if paint.strength > AmbientTiming.threshold {
-            MeshImage(colors: paint.colors, time: shown ? drift.time : still)
+            MeshImage(colors: paint.colors, time: shown && !rests ? drift.time : still)
                 .opacity(paint.strength)
                 .overlay {
                     LinearGradient(stops: [.init(color: .clear, location: 0.35),
-                                           .init(color: OctoColor.background.opacity(0.4), location: 1)],
+                                           .init(color: palette.color(.background).opacity(0.4), location: 1)],
                                    startPoint: .top, endPoint: .bottom)
                 }
-                .onChange(of: shown, initial: true) { _, now in if !now { still = drift.time } }
+                .onChange(of: shown && !rests, initial: true) { _, now in if !now { still = drift.time } }
         } else {
             Color.clear
         }
@@ -305,27 +336,37 @@ struct AmbientPreview: View {
     let strength: AmbientStrength
     @Environment(ArtworkColorStore.self) private var store
     @Environment(Player.self) private var player
+    @Environment(\.octoPalette) private var palette
 
     var body: some View {
-        // With no artwork the quiet colors show; artwork whose colors are still being read
-        // shows the plain strip until they are.
+        // With nothing playing the theme's own colors show, or the quiet ones for a theme with none;
+        // artwork whose colors are still being read shows the plain strip until they are.
         let cover = player.current?.coverArt
-        let colors: ArtworkColors? = cover == nil ? .quiet : store.colors(for: cover)
-        let paint = AmbientPaint(colors: colors ?? .quiet, strength: colors == nil ? 0 : ambientAlpha(strength))
+        let paint = previewPaint(cover: cover)
         ZStack(alignment: .leading) {
-            OctoColor.background
+            Rectangle().fill(OctoColor.background)
             AmbientPreviewField(paint: paint)
                 .animation(.octoTween(fixed: AmbientTiming.crossMs), value: paint)
             VStack(alignment: .leading, spacing: 0) {
                 Text(player.current?.title ?? "Nothing playing")
-                    .font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
-                Text(player.current != nil ? (player.current?.artist ?? "") : "The glow takes its colors from the song on now.")
-                    .font(.octoCaption).foregroundStyle(OctoColor.textSecondary).lineLimit(1)
+                    .font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary).lineLimit(1)
+                Text(player.current != nil ? (player.current?.artist ?? "") : "The glow takes its colors from the song on now, or the theme's while nothing plays.")
+                    .font(.octoCaption).foregroundStyle(OctoColor.textSecondary).lineLimit(2)
             }
             .padding(.horizontal, 16)
         }
         .frame(height: 72)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    /// The theme's own colors while nothing plays, else the song's.
+    private func previewPaint(cover: String?) -> AmbientPaint {
+        let alpha = ambientAlpha(strength)
+        if player.current == nil && !restingMesh(palette).isEmpty {
+            return AmbientPaint(mesh: restingMesh(palette), strength: alpha)
+        }
+        let colors: ArtworkColors? = cover == nil ? .quiet : store.colors(for: cover)
+        return AmbientPaint(mesh: glowMesh(colors ?? .quiet, palette: palette, alpha: alpha), strength: colors == nil ? 0 : alpha)
     }
 }
 
@@ -333,6 +374,7 @@ struct AmbientPreview: View {
 /// do, faded toward the bottom the same way.
 private struct AmbientPreviewField: View, Animatable {
     var paint: AmbientPaint
+    @Environment(\.octoPalette) private var palette
 
     nonisolated var animatableData: AmbientPaint {
         get { paint }
@@ -345,7 +387,7 @@ private struct AmbientPreviewField: View, Animatable {
                 .opacity(paint.strength)
                 .overlay {
                     LinearGradient(stops: [.init(color: .clear, location: 0.35),
-                                           .init(color: OctoColor.background.opacity(0.4), location: 1)],
+                                           .init(color: palette.color(.background).opacity(0.4), location: 1)],
                                    startPoint: .top, endPoint: .bottom)
                 }
         } else {
@@ -354,14 +396,18 @@ private struct AmbientPreviewField: View, Animatable {
     }
 }
 
-/// The bar's film: the plain dim, or with the bar tint on and a song loaded, a trace of the
-/// song's main color laid over it. It changes over 800 ms.
+/// The bar's film: none, so the glass stays Apple's own, or with the bar tint on and a song
+/// loaded, a trace of the song's main color. On a light page the color first passes through
+/// `glowForCover`, as the glow's does. It changes over 800 ms.
 struct BarFilm {
     @MainActor
-    static func color(settings: AmbientSettings, store: ArtworkColorStore, player: Player) -> Color {
+    static func color(settings: AmbientSettings, store: ArtworkColorStore, player: Player, palette: ResolvedPalette) -> Color? {
         let prefs = settings.prefs
-        guard prefs.tintsBar, let song = player.current else { return OctoColor.glazeFilm }
-        guard let colors = store.colors(for: song.coverArt), let first = colors.mesh.first else { return OctoColor.glazeFilm }
-        return Color(barFilm(prefs: prefs, hasTrack: true, firstMeshColor: first))
+        guard prefs.tintsBar, let song = player.current else { return nil }
+        guard let colors = store.colors(for: song.coverArt), let first = colors.mesh.first else { return nil }
+        let alpha = barTintAlpha(prefs.strength)
+        let argb = 0xFF00_0000 | first
+        let tint = palette.light ? glowForCover(palette.theme, argb, Int((alpha * 1000).rounded())) : ambientColor(argb)
+        return Color(argb: tint).opacity(alpha)
     }
 }

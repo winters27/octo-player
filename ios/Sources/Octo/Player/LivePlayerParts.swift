@@ -511,7 +511,7 @@ struct StationListSheet: View {
                     Text(name).font(.octo(15, .semibold)).foregroundStyle(on ? Color.black : .white).lineLimit(2)
                     Text(on ? "Playing now" : line)
                         .font(.octoCaption)
-                        .foregroundStyle(on ? Color.black.opacity(0.7) : OctoColor.textMuted)
+                        .foregroundStyle(on ? AnyShapeStyle(Color.black.opacity(0.7)) : AnyShapeStyle(OctoColor.textMuted))
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -524,7 +524,7 @@ struct StationListSheet: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(on ? OctoColor.accent : Color.clear))
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(on ? AnyShapeStyle(OctoColor.accent) : AnyShapeStyle(Color.clear)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

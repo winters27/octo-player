@@ -187,7 +187,7 @@ private struct SleepPage: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text(Pace.speedLabel(speed))
                     .font(.octo(14, .regular).monospacedDigit())
-                    .foregroundStyle(speed == 1 ? OctoColor.textMuted : .white)
+                    .foregroundStyle(speed == 1 ? AnyShapeStyle(OctoColor.textMuted) : AnyShapeStyle(Color.white))
                 IconView(.chevron, size: 20, color: OctoColor.textMuted)
                     .padding(.leading, 6)
             }
@@ -263,7 +263,7 @@ struct SpeedPage: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Text(Pace.semitonesLabel(prefs.pitchSemitones))
                         .font(.octo(14, .regular).monospacedDigit())
-                        .foregroundStyle(prefs.pitchSemitones == 0 ? OctoColor.textMuted : .white)
+                        .foregroundStyle(prefs.pitchSemitones == 0 ? AnyShapeStyle(OctoColor.textMuted) : AnyShapeStyle(Color.white))
                 }
                 .padding(.top, 12)
                 OctoSlider(value: Double(Pace.semitonesFraction(prefs.pitchSemitones)), onChange: { fraction in
@@ -289,7 +289,7 @@ struct SpeedPage: View {
                     Button { settings.setSpeed(mark) } label: {
                         Text(Pace.speedLabel(mark))
                             .font(.octoCaption.monospacedDigit())
-                            .foregroundStyle(mark == speed ? Color.white : OctoColor.textMuted)
+                            .foregroundStyle(mark == speed ? AnyShapeStyle(Color.white) : AnyShapeStyle(OctoColor.textMuted))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 4)
                             .fixedSize()

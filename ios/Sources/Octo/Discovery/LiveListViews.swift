@@ -87,10 +87,10 @@ struct LiveListView: View {
                 if let list {
                     VStack(spacing: 0) {
                         LiveListCover(id: list.id, name: list.name, songs: songs, size: 240)
-                            .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
+                            .octoShadow(0.4, radius: 16, y: 8)
                         Text(list.name)
                             .font(.octoTitle)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(OctoColor.textPrimary)
                             .multilineTextAlignment(.center)
                             .bigTitle()
                             .padding(.top, 20)
@@ -144,7 +144,7 @@ struct LiveListView: View {
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(OctoInkColor.primary)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
@@ -225,7 +225,7 @@ struct LiveListEditView: View {
                             HStack(spacing: 14) {
                                 LiveMarkTile(size: 44, radius: OctoRadius.artS)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(starter.name).font(.octoBodySmall).foregroundStyle(.white).lineLimit(1)
+                                    Text(starter.name).font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary).lineLimit(1)
                                     Text(starter.detail).font(.octoCaption).foregroundStyle(OctoColor.textMuted).lineLimit(2)
                                 }
                                 Spacer(minLength: 0)
@@ -290,7 +290,7 @@ struct LiveListEditView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .frame(minHeight: 36)
-                .background(Color.white.opacity(0.07), in: Capsule())
+                .background(OctoColor.textPrimary.opacity(0.07), in: Capsule())
                 .contentShape(Capsule())
         }
         .menuOrder(.fixed)

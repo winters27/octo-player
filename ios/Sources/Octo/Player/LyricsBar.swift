@@ -73,6 +73,8 @@ struct LyricsBar: View {
             .accessibilityValue("Showing")
             Menu {
                 LyricsMenuItems(trackId: player.current?.id, openTiming: { timing = true }, chooseOther: chooseOther)
+                    .preferredColorScheme(.dark)
+                    .octoOverArt()
             } label: {
                 IconView(.more, size: 22, color: ink.opacity(0.7))
                     .frame(width: 40, height: 40)
@@ -80,7 +82,7 @@ struct LyricsBar: View {
             }
             .menuOrder(.fixed)
             .accessibilityLabel("Lyrics menu")
-            .glassPopover(isPresented: $timing) {
+            .glassPopover(isPresented: $timing, overArt: true) {
                 if let trackId = player.current?.id { TimingCard(trackId: trackId) }
             }
         }

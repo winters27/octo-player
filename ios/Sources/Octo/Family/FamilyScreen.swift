@@ -288,11 +288,11 @@ struct FamilyItemLine<Actions: View>: View {
         .padding(.vertical, 8)
     }
 
-    private func stateColor(_ state: FamilyRequestState) -> Color {
+    private func stateColor(_ state: FamilyRequestState) -> AnyShapeStyle {
         switch state {
-        case .done: OctoColor.signalGreen
-        case .declined, .failed: OctoColor.signalOrange
-        default: OctoColor.textSecondary
+        case .done: AnyShapeStyle(OctoColor.signalGreen)
+        case .declined, .failed: AnyShapeStyle(OctoColor.signalOrange)
+        default: AnyShapeStyle(OctoColor.textSecondary)
         }
     }
 }

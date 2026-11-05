@@ -7,8 +7,9 @@ struct SongTitleLine<Lead: View>: View {
     let title: String
     var explicit = false
     var font: Font = .octoBodySmall
-    var color: Color = .white
-    var markColor: Color = OctoColor.textMuted
+    /// The title's color, and the explicit mark's; nil takes the theme's.
+    var color: Color?
+    var markColor: Color?
     @ViewBuilder var lead: Lead
 
     var body: some View {
@@ -16,7 +17,7 @@ struct SongTitleLine<Lead: View>: View {
             lead
             Text(title)
                 .font(font)
-                .foregroundStyle(color)
+                .foregroundStyle(color.map { AnyShapeStyle($0) } ?? AnyShapeStyle(OctoColor.textPrimary))
                 .lineLimit(1)
                 .truncationMode(.tail)
             if explicit {
@@ -27,8 +28,8 @@ struct SongTitleLine<Lead: View>: View {
 }
 
 extension SongTitleLine where Lead == EmptyView {
-    init(_ title: String, explicit: Bool = false, font: Font = .octoBodySmall, color: Color = .white,
-         markColor: Color = OctoColor.textMuted) {
+    init(_ title: String, explicit: Bool = false, font: Font = .octoBodySmall, color: Color? = nil,
+         markColor: Color? = nil) {
         self.init(title: title, explicit: explicit, font: font, color: color, markColor: markColor, lead: { EmptyView() })
     }
 }

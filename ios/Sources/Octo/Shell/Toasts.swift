@@ -68,10 +68,10 @@ private struct ToastPill: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            if let icon = toast.icon { IconView(icon, size: 18, color: .white) }
+            if let icon = toast.icon { IconView(icon, size: 18, color: OctoColor.textPrimary) }
             Text(toast.text)
                 .font(.octo(14, .medium, .subheadline))
-                .foregroundStyle(.white)
+                .foregroundStyle(OctoColor.textPrimary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.vertical, 12)
@@ -82,7 +82,7 @@ private struct ToastPill: View {
                 } label: {
                     Text(action)
                         .font(.octo(14, .semibold, .subheadline))
-                        .foregroundStyle(OctoColor.background)
+                        .foregroundStyle(OctoColor.onAccent)
                         .lineLimit(1)
                         .padding(.horizontal, 14)
                         .frame(minHeight: 34)
