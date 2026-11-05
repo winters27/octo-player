@@ -80,6 +80,9 @@ internal fun SettingsPageView(
             // An ask made for another page is that page's, drawn next.
             if (ui.page != key) return@collectLatest
             ui.aim(null)
+            // A new ask lets go of the last one's light, found or not; the
+            // light it lights is new by its nonce, so it lights anew.
+            anchors.flash = null
             snapshotFlow { anchors.laidOut }.first { it }
             val id = anchors.found(asked.row) ?: run {
                 withFrameNanos { }
@@ -94,11 +97,6 @@ internal fun SettingsPageView(
                     val goal = (place.top - shown / 4f).roundToInt().coerceIn(0, scroll.maxValue)
                     if (still) scroll.scrollTo(goal) else scroll.animateScrollTo(goal)
                 }
-            }
-            if (anchors.flash?.id == id) {
-                // The same row lit again: let go for a frame so it lights anew.
-                anchors.flash = null
-                withFrameNanos { }
             }
             anchors.flash = SettingsFlash(id, asked.nonce)
             delay(flashMs)
