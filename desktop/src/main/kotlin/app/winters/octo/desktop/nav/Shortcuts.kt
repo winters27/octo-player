@@ -42,10 +42,13 @@ private val ListKeys = setOf(Key.DirectionUp, Key.DirectionDown, Key.PageUp, Key
 // open menu, `arrows`) keeps them, and Home, End and the page keys too.
 private val ArrowKeys = setOf(Key.DirectionUp, Key.DirectionDown, Key.DirectionLeft, Key.DirectionRight, Key.PageUp, Key.PageDown, Key.MoveHome, Key.MoveEnd)
 
-fun shortcutFor(press: KeyPress, mac: Boolean, typing: Boolean, list: Boolean = false, arrows: Boolean = false): Shortcut? {
+// `menuSettings`: the Mac's own Octo > Settings menu item answers Cmd+comma,
+// so the window leaves it to the menu.
+fun shortcutFor(press: KeyPress, mac: Boolean, typing: Boolean, list: Boolean = false, arrows: Boolean = false, menuSettings: Boolean = false): Shortcut? {
     val command = if (mac) press.meta else press.ctrl
     val plain = !press.ctrl && !press.alt && !press.meta
     return when {
+        mac && menuSettings && press.meta && press.key == Key.Comma -> null
         command && press.shift && !press.alt && press.key == Key.P -> Shortcut.Commands
         command && !press.alt && press.key == Key.K -> Shortcut.Search
         command && !press.alt && press.key == Key.F -> Shortcut.Filter

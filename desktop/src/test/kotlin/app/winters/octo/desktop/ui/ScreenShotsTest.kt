@@ -25,7 +25,6 @@ import app.winters.octo.desktop.home.AlbumShelf
 import app.winters.octo.desktop.listening.LoggedPlay
 import app.winters.octo.desktop.listening.logged
 import app.winters.octo.desktop.nav.Page
-import app.winters.octo.desktop.pages.showSection
 import app.winters.octo.desktop.nav.ScrollSpot
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.server.Accounts
@@ -521,10 +520,10 @@ class ScreenShotsTest {
             tap(400f, 278f)
             shot("settings-jump")
             // About starts with its card; on a narrow window too.
-            SwingUtilities.invokeAndWait { showSection("Settings", "about") }
+            SwingUtilities.invokeAndWait { app.openSettings("about") }
             shot("settings-about")
             SwingUtilities.invokeAndWait {
-                app.navigator.go(Page.Sound)
+                app.openSettings("sound")
                 app.sound?.update { withPreset(it, EqPresets.first { preset -> preset.name == "Bass Boost" }).copy(eqEnabled = true, replayGain = ReplayGainMode.Smart) }
             }
             shot("sound")
@@ -542,23 +541,21 @@ class ScreenShotsTest {
             }
             shot("sound-wide", on = wideSettings)
             // The equalizer's switch on the title's line, with no heading over its cards.
-            SwingUtilities.invokeAndWait { showSection("Sound", "eq") }
+            SwingUtilities.invokeAndWait { app.openSettings("sound", "eq") }
             shot("sound-wide-eq", on = wideSettings)
-            SwingUtilities.invokeAndWait { showSection("Sound", "output") }
+            SwingUtilities.invokeAndWait { app.openSettings("sound", "output") }
             wheel(60, wideSettings)
             shot("sound-wide-bottom", on = wideSettings)
-            SwingUtilities.invokeAndWait { app.navigator.go(Page.Settings) }
+            SwingUtilities.invokeAndWait { app.openSettings("servers") }
             shot("settings-wide", on = wideSettings)
             wheel(8, wideSettings)
             shot("settings-wide-middle", on = wideSettings)
-            SwingUtilities.invokeAndWait { showSection("Settings", "about") }
+            SwingUtilities.invokeAndWait { app.openSettings("about") }
             shot("settings-wide-about", on = wideSettings)
-            // Appearance's Home group, with its Reset on the group's line.
-            SwingUtilities.invokeAndWait { showSection("Settings", "look") }
-            shot(null, 600, wideSettings)
-            wheel(60, wideSettings)
+            // Home's shelves, with Reset on the group's line.
+            SwingUtilities.invokeAndWait { app.openSettings("home") }
             shot("settings-wide-home-sections", on = wideSettings)
-            SwingUtilities.invokeAndWait { showSection("Settings", "servers") }
+            SwingUtilities.invokeAndWait { app.openSettings("servers") }
             wideSettings.close()
             // The narrowest window: the list of sections is left out.
             val narrow = ImageComposeScene(960, 640, Density(1f)) {

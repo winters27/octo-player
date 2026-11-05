@@ -109,10 +109,11 @@ class PageSection(
 internal val RowInset = Space.Xl
 
 // The section each page last showed, by page, for the rest of the session.
+// Settings keeps its own page in the app's SettingsUi instead.
 private val shownSections = mutableStateMapOf<String, String>()
 
 // Shows a page's section by its key, as a click in the list would: for a
-// link straight to it, and for the tests' pictures.
+// link straight to it, and for the tests' pictures, on Family and Import.
 fun showSection(page: String, key: String) {
     shownSections[page] = key
 }
@@ -129,12 +130,23 @@ internal fun shownSection(keys: List<String>, remembered: String?): Int =
 // it goes under the cards. On a narrow window the list becomes a button
 // over the section, naming it and opening the others.
 // `detail` is a quiet word after the title (the output Sound is for).
+// With `onPick`, the caller keeps the section picked and gives it as
+// `shown`; without it the page remembers it by its title.
 @Composable
-internal fun SectionedPage(app: AppState, visit: Visit, title: String, sections: List<PageSection>, detail: String? = null) {
-    val index = shownSection(sections.map { it.key }, shownSections[title])
+internal fun SectionedPage(
+    app: AppState,
+    visit: Visit,
+    title: String,
+    sections: List<PageSection>,
+    detail: String? = null,
+    shown: String? = null,
+    onPick: ((String) -> Unit)? = null,
+) {
+    val index = shownSection(sections.map { it.key }, if (onPick != null) shown else shownSections[title])
     val section = sections.getOrNull(index) ?: return
     fun pick(at: Int) {
-        shownSections[title] = sections[at].key
+        val key = sections[at].key
+        if (onPick != null) onPick(key) else shownSections[title] = key
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val withList = maxWidth >= PageSide * 2 + SettingsSize.Nav + Space.Wide + SettingsSize.ColumnMin

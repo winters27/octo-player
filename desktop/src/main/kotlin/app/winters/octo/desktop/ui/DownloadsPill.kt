@@ -64,13 +64,17 @@ val DownloadsPillRoom = DownloadsPillMax + Space.Page
 // how many more. A click opens the Downloads panel; nothing opens by
 // itself, and the pill steps aside while that panel is open or nothing is
 // on its way.
+// Whether the pill shows, with `running` songs on their way: not while the
+// Downloads panel is drawn.
+internal fun pillShows(app: AppState, running: Int): Boolean = running > 0 && app.shownPanel != SidePanel.Downloads
+
 @Composable
 fun DownloadsPill(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier) {
     val drawer = app.downloads?.takeIf { it.supported == true } ?: return
     val rows by drawer.rows.collectAsState()
     // A download waiting for the person is not on its way.
     val running = onTheWayCount(rows)
-    if (running <= 0 || app.sidePanel == SidePanel.Downloads) return
+    if (!pillShows(app, running)) return
     val lead = pillLead(rows) ?: return
     val more = running - 1
     val motion = motionScale()

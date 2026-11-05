@@ -40,6 +40,7 @@ import app.winters.octo.desktop.lyrics.LyricsSources
 import app.winters.octo.desktop.nav.Navigator
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.SEEK_STEP_MS
+import app.winters.octo.desktop.nav.SettingsUi
 import app.winters.octo.desktop.nav.Shortcut
 import app.winters.octo.desktop.nav.VOLUME_STEP
 import app.winters.octo.desktop.pages.SignInForm
@@ -190,6 +191,48 @@ class AppState(
 
     // Whether the keyboard is in the side panel, where Escape closes it.
     var panelHasKeyboard by mutableStateOf(false)
+
+    // Settings' page, the row asked for and its search.
+    val settingsUi = SettingsUi()
+
+    // Whether Settings is the page on screen.
+    val inSettings: Boolean get() = navigator.current.page == Page.Settings
+
+    init {
+        navigator.onMove = { from, to ->
+            // The side panel is not drawn in Settings, so it cannot keep the
+            // keyboard; leaving Settings clears its search.
+            if (to == Page.Settings) panelHasKeyboard = false
+            if (from == Page.Settings && to != Page.Settings) {
+                settingsUi.query = ""
+                settingsUi.aim(null)
+            }
+        }
+    }
+
+    // Opens Settings on `page` (or the page it last showed), bringing `row`
+    // into view when given. Already in Settings, it only moves there.
+    fun openSettings(page: String? = null, row: String? = null) {
+        if (popups.open) popups.close()
+        fullPlayer = false
+        if (page != null) settingsUi.page = page
+        settingsUi.aim(row)
+        if (!inSettings) navigator.go(Page.Settings)
+    }
+
+    // Goes back to where Settings was opened from, or Home when it was the
+    // first page.
+    fun leaveSettings() {
+        if (!inSettings) return
+        if (!navigator.back()) navigator.replace(Page.Home)
+    }
+
+    // Settings' shortcut: leaves Settings when in it, else opens it on the
+    // page it last showed. An open menu closes first.
+    fun toggleSettings() {
+        if (popups.open) popups.close()
+        if (inSettings) leaveSettings() else openSettings()
+    }
 
     // Bumped by the search shortcut, so a Search page already open brings
     // its field back into view.
@@ -890,10 +933,16 @@ class AppState(
         if (now - playlistsReadAt >= PLAYLISTS_FRESH_MS) refreshPlaylists()
     }
 
-    fun toggleSidePanel(panel: SidePanel) = showSidePanel(if (sidePanel == panel) null else panel)
+    // The side panel as drawn: none in Settings, where the open one waits
+    // for the way out.
+    val shownPanel: SidePanel? get() = sidePanel.takeIf { !inSettings }
 
-    // Opens the panel on a tab, or closes it with null.
+    fun toggleSidePanel(panel: SidePanel) = showSidePanel(if (shownPanel == panel) null else panel)
+
+    // Opens the panel on a tab, or closes it with null. Opening one from
+    // Settings leaves Settings first, so it shows.
     fun showSidePanel(panel: SidePanel?) {
+        if (panel != null) leaveSettings()
         sidePanel = panel
         settings.update { it.copy(sidePanel = panel?.key) }
     }
@@ -1077,8 +1126,8 @@ class AppState(
         settings.update { it.copy(albumSort = SortList.Albums.encode(order)) }
     }
 
-    // The window's keyboard shortcuts.
-    fun perform(shortcut: Shortcut): Boolean {
+    // The window's keyboard shortcuts. `typing`: a text field has the keyboard.
+    fun perform(shortcut: Shortcut, typing: Boolean = false): Boolean {
         when (shortcut) {
             Shortcut.PlayPause -> player.togglePlay()
             // A live station has no place to move to.
@@ -1097,22 +1146,32 @@ class AppState(
             Shortcut.Lyrics -> if (connection != null) toggleSidePanel(SidePanel.Lyrics) else return false
             Shortcut.Queue -> if (connection != null) toggleSidePanel(SidePanel.Queue) else return false
             Shortcut.Info -> if (connection != null) toggleSidePanel(SidePanel.Info) else return false
-            Shortcut.Sidebar -> if (connection != null) updateFrame { it.copy(sidebarRail = !it.sidebarRail) } else return false
+            // Settings holds the sidebar's place, so there is nothing to fold.
+            Shortcut.Sidebar -> if (connection != null && !inSettings) updateFrame { it.copy(sidebarRail = !it.sidebarRail) } else return false
             Shortcut.MiniPlayer -> toggleMiniPlayer?.invoke() ?: return false
-            Shortcut.Settings -> {
-                if (connection == null) return false
-                fullPlayer = false
-                navigator.go(Page.Settings)
-            }
+            Shortcut.Settings -> if (connection != null) toggleSettings() else return false
             Shortcut.Back -> navigator.back()
             Shortcut.Forward -> navigator.forward()
-            Shortcut.CloseLayer -> when {
-                popups.open -> popups.close()
-                fullPlayer -> fullPlayer = false
-                // Escape in the side panel closes it.
-                sidePanel != null && panelHasKeyboard -> showSidePanel(null)
-                else -> return false
-            }
+            Shortcut.CloseLayer -> return closeLayer(typing)
+        }
+        return true
+    }
+
+    // Escape closes the topmost thing open: a menu, the full player, then
+    // the side panel holding the keyboard. The search box's field and other
+    // text fields deal with it themselves, except Settings' search, which
+    // is cleared and then leaves. Last, Escape leaves Settings.
+    private fun closeLayer(typing: Boolean): Boolean {
+        val ui = settingsUi
+        when {
+            popups.open -> popups.close()
+            fullPlayer -> fullPlayer = false
+            omnibox.open -> return false
+            shownPanel != null && panelHasKeyboard -> showSidePanel(null)
+            typing && inSettings && ui.searchHasKeyboard -> if (ui.query.isNotEmpty()) ui.query = "" else leaveSettings()
+            typing -> return false
+            inSettings -> leaveSettings()
+            else -> return false
         }
         return true
     }

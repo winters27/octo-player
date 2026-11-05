@@ -12,7 +12,6 @@ import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.liveradio.LiveFind
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.pages.StationDraft
-import app.winters.octo.desktop.pages.showSection
 import app.winters.octo.desktop.pages.showWhere
 import app.winters.octo.desktop.pages.stationSheet
 import app.winters.octo.desktop.player.SilentPlayer
@@ -166,10 +165,7 @@ class LiveRadioShotsTest {
                 app.liveRadio.setSort(LiveSort.Popular)
             }
             shot("live-page-most-played")
-            SwingUtilities.invokeAndWait {
-                showSection("Settings", "radio")
-                app.navigator.go(Page.Settings)
-            }
+            SwingUtilities.invokeAndWait { app.openSettings("radio") }
             shot("live-settings-stations")
             SwingUtilities.invokeAndWait { stationSheet(app, StationDraft("r1", "Jazz24", "https://live.wostreaming.net/direct/ppm-jazz24aac256-ibc1", "https://www.jazz24.org")) {} }
             shot("live-settings-edit-station")

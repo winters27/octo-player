@@ -30,8 +30,8 @@ sealed interface Page {
     data object Family : Page
     // Live radio near you: stations from the radio catalog around a place.
     data object LiveRadio : Page
+    // Settings, on the page SettingsUi names (Sound is one of them).
     data object Settings : Page
-    data object Sound : Page
     data class Album(val id: String) : Page
     data class Artist(val id: String, val name: String = "") : Page
     data class Genre(val name: String) : Page
@@ -64,7 +64,7 @@ sealed interface SidebarItem {
 // it was opened from.
 fun sidebarItemOf(page: Page): SidebarItem? = when (page) {
     Page.Home, Page.Search, Page.Songs, Page.Albums, Page.Artists, Page.Genres, Page.Folders,
-    Page.Favourites, Page.History, Page.RecentlyAdded, Page.LibraryHealth, Page.Imports, Page.Charts, Page.Family, Page.LiveRadio, Page.Settings, Page.Sound,
+    Page.Favourites, Page.History, Page.RecentlyAdded, Page.LibraryHealth, Page.Imports, Page.Charts, Page.Family, Page.LiveRadio, Page.Settings,
     -> SidebarItem.Top(page)
     is Page.Playlist -> SidebarItem.PlaylistItem(page.id)
     is Page.Album, is Page.Artist, is Page.Genre, is Page.Folder -> null
@@ -101,8 +101,20 @@ class Navigator(start: Page = Page.Home, private val limit: Int = 100) {
     // Bumped on every move, so the screen redraws.
     private var moves by mutableStateOf(0)
 
+    // Hears every move that changes the page on screen, with the page left
+    // and the page shown.
+    var onMove: ((from: Page, to: Page) -> Unit)? = null
+
     init {
         visits += visit(start, null)
+    }
+
+    // Tells onMove when `move` changed the page on screen.
+    private inline fun moving(move: () -> Unit) {
+        val from = visits[at].page
+        move()
+        val to = visits[at].page
+        if (from != to) onMove?.invoke(from, to)
     }
 
     val current: Visit get() = moves.let { visits[at] }
@@ -116,18 +128,20 @@ class Navigator(start: Page = Page.Home, private val limit: Int = 100) {
 
     fun go(page: Page) {
         if (page == current.page) return
-        // Anything ahead is dropped, with its scroll positions.
-        while (visits.lastIndex > at) forget(visits.removeAt(visits.lastIndex))
-        visits += visit(page, current.item)
-        // A very long history forgets its oldest pages.
-        while (visits.size > limit) forget(visits.removeAt(0))
-        at = visits.lastIndex
-        moves++
+        moving {
+            // Anything ahead is dropped, with its scroll positions.
+            while (visits.lastIndex > at) forget(visits.removeAt(visits.lastIndex))
+            visits += visit(page, current.item)
+            // A very long history forgets its oldest pages.
+            while (visits.size > limit) forget(visits.removeAt(0))
+            at = visits.lastIndex
+            moves++
+        }
     }
 
     // Shows `page` in place of the one on screen, so Back skips what it
     // replaced: a live list once made, in place of its editor.
-    fun replace(page: Page) {
+    fun replace(page: Page) = moving {
         val old = visits[at]
         forget(old)
         visits[at] = visit(page, old.item)
@@ -136,27 +150,33 @@ class Navigator(start: Page = Page.Home, private val limit: Int = 100) {
 
     fun back(): Boolean {
         if (!canGoBack) return false
-        at--
-        moves++
+        moving {
+            at--
+            moves++
+        }
         return true
     }
 
     fun forward(): Boolean {
         if (!canGoForward) return false
-        at++
-        moves++
+        moving {
+            at++
+            moves++
+        }
         return true
     }
 
     // Forgets every page and scroll and starts again at `page`, for a
-    // different account.
-    fun startOver(page: Page = Page.Home) {
+    // different account. Settings starts over with Home behind it, so Back
+    // has somewhere to go.
+    fun startOver(page: Page = Page.Home) = moving {
         visits.clear()
         scrolls.clear()
         tabs.clear()
         filters.clear()
+        if (page == Page.Settings) visits += visit(Page.Home, null)
         visits += visit(page, null)
-        at = 0
+        at = visits.lastIndex
         moves++
     }
 

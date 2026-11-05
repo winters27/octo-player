@@ -79,6 +79,7 @@ import app.winters.octo.ui.downloads.overallFraction
 import app.winters.octo.desktop.importPlaylistFile
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.nav.SettingsKey
 import app.winters.octo.desktop.nav.SidebarItem
 import app.winters.octo.desktop.playlists.choosePlaylistFile
 import app.winters.octo.desktop.settings.DesktopOs
@@ -181,7 +182,9 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
         }
         Separator(Modifier.padding(vertical = Space.S))
         DownloadsRow(app, rail)
-        NavRow("Sound", OctoIcons.Sound, lit == SidebarItem.Top(Page.Sound), rail) { go(Page.Sound) }
+        // Sound opens Settings on its Sound page, and is lit while that shows.
+        val onSound = app.inSettings && app.settingsUi.page == SettingsKey.Sound
+        NavRow("Sound", OctoIcons.Sound, onSound, rail) { app.openSettings(SettingsKey.Sound) }
         // A small dot while an update waits to go in, the news itself in
         // Settings > About, or while a newer Octo waits for the server, in Settings > Servers.
         val serverUpdate = serverUpdateWaits(app)
@@ -190,7 +193,7 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
             serverUpdate -> "server update available"
             else -> null
         }
-        NavRow("Settings", OctoIcons.Settings, lit == SidebarItem.Top(Page.Settings), rail, mark = mark) { go(Page.Settings) }
+        NavRow("Settings", OctoIcons.Settings, lit == SidebarItem.Top(Page.Settings) && !onSound, rail, mark = mark) { app.openSettings() }
     }
 }
 
@@ -268,7 +271,7 @@ private fun DownloadsRow(app: AppState, rail: Boolean) {
     NavRow(
         DOWNLOADS,
         OctoIcons.Download,
-        app.sidePanel == SidePanel.Downloads,
+        app.shownPanel == SidePanel.Downloads,
         rail,
         mark = drawerState(rows).takeIf { mark == DrawerMark.Waits },
         state = drawerState(rows).takeIf { mark != DrawerMark.Waits },

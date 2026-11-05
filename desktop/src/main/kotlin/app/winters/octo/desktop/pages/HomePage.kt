@@ -37,6 +37,7 @@ import app.winters.octo.desktop.home.yourPlaylists
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.library.LibraryState
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.nav.SettingsKey
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.queue.ResumeOffer
 import app.winters.octo.desktop.server.userMessage
@@ -126,10 +127,7 @@ fun HomePage(app: AppState, visit: Visit) {
         // Changing the shelves is a quiet word at the end of the title's line.
         item(key = "title") {
             PageTitle("Home", trailing = {
-                TextAction(EDIT_HOME, {
-                    showSection("Settings", "look")
-                    app.navigator.go(Page.Settings)
-                })
+                TextAction(EDIT_HOME, { app.openSettings(SettingsKey.Home) })
             })
         }
         app.queueSync.offer?.let { offer -> item(key = "resume") { ResumeCard(app, offer) } }

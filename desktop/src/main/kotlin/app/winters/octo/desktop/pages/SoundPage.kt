@@ -3,6 +3,7 @@ package app.winters.octo.desktop.pages
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -20,6 +21,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntRect
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.DesktopType
@@ -39,7 +43,6 @@ import app.winters.octo.design.Space
 import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.desktop.AppState
-import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.settings.PlaybackPrefs
 import app.winters.octo.desktop.sound.DEFAULT_BLEND_SECONDS
 import app.winters.octo.desktop.sound.EqCurve
@@ -121,57 +124,71 @@ private val ReplayGainHelp = mapOf(
 
 private val FilterTypes = listOf(FilterType.Peak, FilterType.LowShelf, FilterType.HighShelf)
 
-// Sound: which output it is for, the equalizer, loudness, balance,
-// crossfade and speed, and a correction for headphones, each a section in
-// the list beside the page. Everything is heard as it moves and saved.
+// Settings' Sound page: which output it is for, the equalizer, loudness,
+// balance, crossfeed and a correction for headphones, one after another,
+// each under its name. Everything is heard as it moves and saved.
 @Composable
-fun SoundPage(app: AppState, visit: Visit) {
+internal fun SoundSections(app: AppState) {
     val controller = app.sound
     val playerState by app.player.state.collectAsState()
     val all by app.settings.state.collectAsState()
     if (controller == null) {
-        SectionedPage(
-            app,
-            visit,
-            "Sound",
-            listOf(
-                PageSection("none", "No sound engine", OctoIcons.Speaker) {
-                    Rows { SettingRow("Nothing to shape", "Octo's sound engine couldn't start on this computer.") }
-                },
-            ),
-        )
+        Rows { SettingRow("Nothing to shape", "Octo's sound engine couldn't start on this computer.") }
         return
     }
     val eq by controller.current.collectAsState()
     val device = playerState.playingOn?.name ?: "this computer"
-    SectionedPage(
-        app,
-        visit,
-        "Sound",
-        detail = playerState.playingOn?.name,
-        sections = listOf(
-            PageSection("output", "Output", OctoIcons.Speaker, detail = if (all.sound.perOutput) "These settings are for $device." else "These settings are for every output.") {
-                Rows {
-                    SwitchRow(
-                        "Each output keeps its own sound",
-                        "Speakers, headphones and each USB device remember theirs.",
-                        all.sound.perOutput,
-                        controller::setPerOutput,
-                    )
-                }
-            },
-            PageSection("eq", "Equalizer", OctoIcons.Equalizer, trailing = { OctoSwitch(eq.eqEnabled, { on -> controller.update { it.copy(eqEnabled = on) } }) }) {
-                Equalizer(app, controller)
-            },
-            PageSection("loudness", "Loudness", OctoIcons.Loudness) { LoudnessRows(controller) },
-            PageSection("balance", "Balance", OctoIcons.Balance) { BalanceRows(controller) },
-            PageSection("crossfeed", "Crossfeed", OctoIcons.Headphones, detail = CROSSFEED_ABOUT, trailing = {
-                OctoSwitch(eq.crossfeed.on, { on -> controller.update { it.copy(crossfeed = it.crossfeed.copy(on = on)) } })
-            }) { CrossfeedRows(controller) },
-            PageSection("playback", "Crossfade and speed", OctoIcons.Crossfade) { PlaybackRows(app, all.playback) },
-            PageSection("correction", "Headphone correction", OctoIcons.Headphones) { CorrectionRows(controller) },
-        ),
-    )
+    listOf(
+        PageSection("output", "Output", OctoIcons.Speaker, detail = if (all.sound.perOutput) "These settings are for $device." else "These settings are for every output.") {
+            Rows {
+                SwitchRow(
+                    "Each output keeps its own sound",
+                    "Speakers, headphones and each USB device remember theirs.",
+                    all.sound.perOutput,
+                    controller::setPerOutput,
+                )
+            }
+        },
+        PageSection("eq", "Equalizer", OctoIcons.Equalizer, trailing = { OctoSwitch(eq.eqEnabled, { on -> controller.update { it.copy(eqEnabled = on) } }) }) {
+            Equalizer(app, controller)
+        },
+        PageSection("loudness", "Loudness", OctoIcons.Loudness) { LoudnessRows(controller) },
+        PageSection("balance", "Balance", OctoIcons.Balance) { BalanceRows(controller) },
+        PageSection("crossfeed", "Crossfeed", OctoIcons.Headphones, detail = CROSSFEED_ABOUT, trailing = {
+            OctoSwitch(eq.crossfeed.on, { on -> controller.update { it.copy(crossfeed = it.crossfeed.copy(on = on)) } })
+        }) { CrossfeedRows(controller) },
+        PageSection("correction", "Headphone correction", OctoIcons.Headphones) { CorrectionRows(controller) },
+    ).forEach { SoundPart(it) }
+}
+
+// One part of Sound: its name, with its switch at the end of that line,
+// its cards, and its line about it under them.
+@Composable
+private fun SoundPart(part: PageSection) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(bottom = Space.S), verticalAlignment = Alignment.CenterVertically) {
+            Txt(
+                part.name.uppercase(),
+                DesktopType.label,
+                OctoColors.TextMuted,
+                Modifier.weight(1f).padding(start = RowInset).semantics {
+                    heading()
+                    contentDescription = part.name
+                },
+            )
+            part.trailing?.invoke()
+        }
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.Xl)) { part.content(this) }
+        part.detail?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(start = RowInset, end = RowInset, top = Space.S), maxLines = 3) }
+    }
+}
+
+// Crossfade and speed, for Settings' Playback page, while the sound engine runs.
+@Composable
+internal fun CrossfadeAndSpeed(app: AppState) {
+    if (app.sound == null) return
+    val all by app.settings.state.collectAsState()
+    SoundPart(PageSection("crossfade", "Crossfade and speed", OctoIcons.Crossfade) { PlaybackRows(app, all.playback) })
 }
 
 // Presets first, then the kind of curve, the curve itself, and the level

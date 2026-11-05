@@ -33,6 +33,7 @@ import app.winters.octo.desktop.discord.discordPipes
 import app.winters.octo.desktop.hotkeys.GlobalShortcuts
 import app.winters.octo.desktop.hotkeys.HotkeyAction
 import app.winters.octo.desktop.hotkeys.HotkeyBackend
+import app.winters.octo.desktop.nav.SettingsKey
 import app.winters.octo.desktop.nav.VOLUME_STEP
 import app.winters.octo.desktop.ui.GpuCacheTrim
 import app.winters.octo.desktop.ui.anyOutside
@@ -144,6 +145,12 @@ class SystemIntegration(
     // Closing the window keeps Octo in the tray, when there is a tray.
     val closesToTray: Boolean get() = trayAvailable && app.settings.current.system.closeToTray
 
+    // Whether the Mac's Octo menu has a Settings item that Octo answers,
+    // which then takes Cmd+comma from the window.
+    val macSettingsMenu: Boolean = os == DesktopOs.Mac && runCatching {
+        Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.APP_PREFERENCES)
+    }.getOrDefault(false)
+
     // The Windows taskbar button, jump list and starting at sign-in.
     val shell = ShellIntegration(app, os, places.config)
 
@@ -191,10 +198,36 @@ class SystemIntegration(
     // On macOS files and links come as events, not on the command line, and
     // a click on the Dock icon should bring a hidden window back. Quitting
     // from the menu or with Cmd+Q goes through the app's own quit, which
-    // saves and lets go of everything, before macOS ends it.
+    // saves and lets go of everything, before macOS ends it. Octo > Settings
+    // opens and leaves Settings as Cmd+comma does, and Octo > About opens
+    // Settings on About, while signed in.
     private fun listenToMac() {
         if (os != DesktopOs.Mac || !Desktop.isDesktopSupported()) return
         val desktop = Desktop.getDesktop()
+        if (macSettingsMenu) {
+            runCatching {
+                desktop.setPreferencesHandler {
+                    app.scope.launch {
+                        if (app.connection != null) {
+                            raise()
+                            app.toggleSettings()
+                        }
+                    }
+                }
+            }
+        }
+        if (desktop.isSupported(Desktop.Action.APP_ABOUT)) {
+            runCatching {
+                desktop.setAboutHandler {
+                    app.scope.launch {
+                        if (app.connection != null) {
+                            raise()
+                            app.openSettings(SettingsKey.About)
+                        }
+                    }
+                }
+            }
+        }
         runCatching { desktop.setOpenFileHandler { event -> app.scope.launch { open(parseLaunchArgs(event.files.map { it.path })) } } }
         runCatching { desktop.setOpenURIHandler { event -> app.scope.launch { raise(); open(parseLaunchArgs(listOf(event.uri.toString()))) } } }
         runCatching { desktop.addAppEventListener(AppReopenedListener { app.scope.launch { raise() } }) }

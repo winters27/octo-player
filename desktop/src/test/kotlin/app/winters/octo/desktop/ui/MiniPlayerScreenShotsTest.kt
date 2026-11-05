@@ -11,7 +11,7 @@ import androidx.compose.ui.unit.Density
 import app.winters.octo.design.LocalTyping
 import app.winters.octo.design.TypingState
 import app.winters.octo.desktop.AppState
-import app.winters.octo.desktop.pages.showSection
+import app.winters.octo.desktop.nav.soundSectionPlace
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.audio.EnginePlayer
 import app.winters.octo.desktop.audio.LocalOrServer
@@ -169,25 +169,21 @@ class MiniPlayerScreenShotsTest {
             }
             draw(scene, null, 800)
             for (key in listOf("servers", "look", "playback", "listening", "lyrics", "discord", "system", "keys", "about")) {
-                SwingUtilities.invokeAndWait { showSection("Settings", key) }
+                SwingUtilities.invokeAndWait { app.openSettings(key) }
                 draw(scene, "settings-$key", 1_200)
             }
-            SwingUtilities.invokeAndWait { showSection("Settings", "keys") }
+            SwingUtilities.invokeAndWait { app.openSettings("keys") }
             wheel(40)
             SwingUtilities.invokeAndWait { system.shortcuts.record(HotkeyAction.Like) }
             draw(scene, "settings-shortcuts", 1_500)
-            SwingUtilities.invokeAndWait { app.navigator.go(Page.Sound) }
             for (key in listOf("output", "eq", "loudness", "balance", "playback", "correction")) {
-                SwingUtilities.invokeAndWait { showSection("Sound", key) }
+                SwingUtilities.invokeAndWait { soundSectionPlace(key).let { app.openSettings(it.page, it.row) } }
                 draw(scene, "sound-$key", 1_200)
             }
             val narrow = ImageComposeScene(960, 640, Density(1f)) {
                 Provided(app, system) { Shell(app, null) {} }
             }
-            SwingUtilities.invokeAndWait {
-                app.navigator.go(Page.Settings)
-                showSection("Settings", "discord")
-            }
+            SwingUtilities.invokeAndWait { app.openSettings("discord") }
             draw(narrow, "settings-narrow", 1_200)
             narrow.close()
             scene.close()

@@ -332,9 +332,9 @@ private fun UtilityZone(app: AppState, state: PlayerState, compact: Boolean = fa
     Row(horizontalArrangement = Arrangement.spacedBy(Space.Xxs), verticalAlignment = Alignment.CenterVertically) {
         if (!compact) {
             // A station has no lyrics.
-            if (state.live == null) IconAction(OctoIcons.Lyrics, "Lyrics", { app.toggleSidePanel(SidePanel.Lyrics) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Lyrics, toggled = app.sidePanel == SidePanel.Lyrics)
+            if (state.live == null) IconAction(OctoIcons.Lyrics, "Lyrics", { app.toggleSidePanel(SidePanel.Lyrics) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.shownPanel == SidePanel.Lyrics, toggled = app.shownPanel == SidePanel.Lyrics)
             // A station alone has no stations to list.
-            if (state.live == null || state.queue.size > 1) IconAction(OctoIcons.Queue, if (state.live != null) "Stations" else "Queue", { app.toggleSidePanel(SidePanel.Queue) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.sidePanel == SidePanel.Queue, toggled = app.sidePanel == SidePanel.Queue)
+            if (state.live == null || state.queue.size > 1) IconAction(OctoIcons.Queue, if (state.live != null) "Stations" else "Queue", { app.toggleSidePanel(SidePanel.Queue) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, active = app.shownPanel == SidePanel.Queue, toggled = app.shownPanel == SidePanel.Queue)
         }
         VolumeButton(app, state.volume)
         MoreButton(app, state, compact)
@@ -369,8 +369,8 @@ private fun ColumnScope.MoreMenu(app: AppState, close: () -> Unit, compact: Bool
             MenuRow("Open the player", { app.fullPlayer = true; close() }, OctoIcons.Expand, enabled = now.current != null)
             // The panel buttons, when the player is too narrow to show them.
             if (compact) {
-                if (live == null) MenuRow("Lyrics", { app.toggleSidePanel(SidePanel.Lyrics); close() }, if (app.sidePanel == SidePanel.Lyrics) OctoIcons.Check else OctoIcons.Lyrics)
-                if (live == null || now.queue.size > 1) MenuRow(if (live != null) "Stations" else "Queue", { app.toggleSidePanel(SidePanel.Queue); close() }, if (app.sidePanel == SidePanel.Queue) OctoIcons.Check else OctoIcons.Queue)
+                if (live == null) MenuRow("Lyrics", { app.toggleSidePanel(SidePanel.Lyrics); close() }, if (app.shownPanel == SidePanel.Lyrics) OctoIcons.Check else OctoIcons.Lyrics)
+                if (live == null || now.queue.size > 1) MenuRow(if (live != null) "Stations" else "Queue", { app.toggleSidePanel(SidePanel.Queue); close() }, if (app.shownPanel == SidePanel.Queue) OctoIcons.Check else OctoIcons.Queue)
             }
             MenuRow("Play on", { page = MorePage.Output }, outputIcon(now.playingOn?.name), more = true, detail = now.playingOn?.name ?: "System default")
             MenuSeparator()

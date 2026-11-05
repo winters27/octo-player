@@ -144,6 +144,36 @@ class NavigatorTest {
     }
 
     @Test
+    fun startingOverOnSettingsPutsHomeBehindIt() {
+        val nav = Navigator()
+        nav.go(Page.Albums)
+        nav.go(Page.Settings)
+        nav.startOver(Page.Settings)
+        assertEquals(Page.Settings, nav.current.page)
+        assertEquals(1 to 0, nav.depth)
+        assertTrue(nav.back())
+        assertEquals(Page.Home, nav.current.page)
+        assertFalse(nav.back())
+    }
+
+    @Test
+    fun everyMoveThatChangesThePageIsHeard() {
+        val nav = Navigator()
+        val heard = mutableListOf<Pair<Page, Page>>()
+        nav.onMove = { from, to -> heard += from to to }
+        nav.go(Page.Settings)
+        nav.go(Page.Settings)
+        nav.back()
+        nav.forward()
+        nav.replace(Page.Home)
+        nav.startOver(Page.Settings)
+        assertEquals(
+            listOf(Page.Home to Page.Settings, Page.Settings to Page.Home, Page.Home to Page.Settings, Page.Settings to Page.Home, Page.Home to Page.Settings),
+            heard,
+        )
+    }
+
+    @Test
     fun aLongHistoryForgetsItsOldestPages() {
         val nav = Navigator(limit = 5)
         repeat(10) { nav.go(Page.Album("a$it")) }
@@ -182,6 +212,14 @@ class ShortcutsTest {
         assertNull(on(Key.F, ctrl = true, mac = true))
         assertEquals(Shortcut.Back, on(Key.LeftBracket, meta = true, mac = true))
         assertNull("Windows keeps Ctrl", on(Key.F, meta = true))
+    }
+
+    @Test
+    fun aMacSettingsMenuTakesCmdCommaFromTheWindow() {
+        fun comma(mac: Boolean, menu: Boolean) = shortcutFor(KeyPress(Key.Comma, ctrl = !mac, meta = mac), mac, typing = false, menuSettings = menu)
+        assertNull("the menu item answers it", comma(mac = true, menu = true))
+        assertEquals(Shortcut.Settings, comma(mac = true, menu = false))
+        assertEquals("only the Mac has the menu", Shortcut.Settings, comma(mac = false, menu = true))
     }
 
     @Test

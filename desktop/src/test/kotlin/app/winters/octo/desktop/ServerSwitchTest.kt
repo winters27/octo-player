@@ -193,6 +193,10 @@ class ServerSwitchTest {
         app.switchTo(workId, Page.Settings)
         waitFor { app.onWork() }
         assertEquals(Page.Settings, app.navigator.current.page)
+        // The fresh history has Home behind Settings, so there is a way out.
+        assertEquals(1 to 0, app.navigator.depth)
+        app.leaveSettings()
+        assertEquals(Page.Home, app.navigator.current.page)
     }
 
     @Test

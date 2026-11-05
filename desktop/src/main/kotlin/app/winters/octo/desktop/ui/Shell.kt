@@ -128,7 +128,6 @@ import app.winters.octo.desktop.pages.SearchPage
 import app.winters.octo.desktop.pages.SettingsPage
 import app.winters.octo.desktop.pages.SignInPage
 import app.winters.octo.desktop.pages.SongsPage
-import app.winters.octo.desktop.pages.SoundPage
 import app.winters.octo.desktop.settings.AmbienceStyle
 import app.winters.octo.desktop.search.omniPanelPlace
 import app.winters.octo.desktop.search.railFieldPlace
@@ -255,7 +254,7 @@ internal class FrameFocus {
 
     fun order(app: AppState): List<FocusRequester> = when {
         app.fullPlayer -> listOf(title, full)
-        app.sidePanel != null -> listOf(title, sidebar, page, panel, player)
+        app.shownPanel != null -> listOf(title, sidebar, page, panel, player)
         else -> listOf(title, sidebar, page, player)
     }
 }
@@ -285,7 +284,8 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus)
     var sidebar by remember { mutableStateOf(saved.sidebarWidth.dp) }
     var panelWidth by remember { mutableStateOf(saved.panelWidth.dp) }
     val shade = rememberPageShade(app)
-    val panel = app.sidePanel
+    // Settings draws no side panel; the one open comes back on leaving it.
+    val panel = app.shownPanel
     LaunchedEffect(panel) {
         if (panel == null && app.panelHasKeyboard) {
             app.panelHasKeyboard = false
@@ -519,7 +519,6 @@ private fun PageHost(app: AppState) {
             Page.Family -> FamilyPage(app, visit)
             Page.LiveRadio -> LiveRadioPage(app, visit)
             Page.Settings -> SettingsPage(app, visit)
-            Page.Sound -> SoundPage(app, visit)
             is Page.Album -> AlbumPage(app, visit, page.id)
             is Page.Artist -> ArtistPage(app, visit, page.id, page.name)
             is Page.Genre -> GenrePage(app, visit, page.name)

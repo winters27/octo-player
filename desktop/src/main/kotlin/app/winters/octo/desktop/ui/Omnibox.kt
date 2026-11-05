@@ -162,7 +162,7 @@ private fun rememberOmniSections(app: AppState): List<OmniSection> {
         }
     }
     val player by app.player.state.collectAsState()
-    val commands = remember(player.current, player.playing, player.shuffle, player.repeat, player.outputs, app.sidePanel, settings.frame.sidebarRail) { commandsFor(app) }
+    val commands = remember(player.current, player.playing, player.shuffle, player.repeat, player.outputs, app.shownPanel, app.inSettings, settings.frame.sidebarRail) { commandsFor(app) }
     return remember(model.text, box.lastFound, commands, settings.recentSearches) {
         omniSections(model.text, box.lastFound, commands, settings.recentSearches)
     }

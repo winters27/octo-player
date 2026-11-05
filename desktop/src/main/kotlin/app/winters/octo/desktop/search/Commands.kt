@@ -4,13 +4,15 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.liveradio.LIVE_RADIO_NEAR
 import app.winters.octo.desktop.nav.Page
-import app.winters.octo.desktop.pages.RADIO_SECTION
+import app.winters.octo.desktop.nav.SettingsKey
+import app.winters.octo.desktop.nav.settingsPages
 import app.winters.octo.desktop.pages.STATIONS_ON_SERVER
 import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.desktop.pages.addServer
-import app.winters.octo.desktop.pages.showSection
 import app.winters.octo.desktop.pages.switchServer
+import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.name
+import app.winters.octo.desktop.discord.discordAppId
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.ui.newLiveList
 import app.winters.octo.desktop.ui.newPlaylist
@@ -52,26 +54,17 @@ fun commandsFor(app: AppState): List<Command> = buildList {
     page(LIVE_RADIO_NEAR, Page.LiveRadio, "live radio stations fm am local near me nearby internet stream broadcast")
     if (app.connection?.family == true) page(FAMILY, Page.Family, "family members requests devices plan approve")
     if (app.search?.charts?.offered == true) page("Charts", Page.Charts, "top songs popular right now best new trending genre chart hip hop pop country")
-    page("Sound", Page.Sound, "equalizer eq loudness crossfade blend transitions automix tempo")
-    page("Settings", Page.Settings, "preferences options")
-    // Settings' Radio section, by what each of its parts holds.
-    fun radio(title: String, words: String) = add(Command(title, go, "open settings radio $words") {
-        app.fullPlayer = false
-        showSection("Settings", RADIO_SECTION)
-        app.navigator.go(Page.Settings)
-    })
-    radio("Song radio settings", "start radio autoplay discovery adventure artist variety favorites more often tuning similar songs")
-    radio(STATIONS_ON_SERVER, "live radio internet radio stations streams add a station edit fm")
-    add(Command("Accent color", "Settings", "theme colour tint highlight palette appearance album art cover") {
-        app.fullPlayer = false
-        showSection("Settings", "look")
-        app.navigator.go(Page.Settings)
-    })
-    add(Command(AnimatedArtSetting.TITLE, go, "settings animated covers album art loops apple music full screen square still") {
-        app.fullPlayer = false
-        showSection("Settings", "look")
-        app.navigator.go(Page.Settings)
-    })
+    add(Command("Settings", go, "open show page preferences options") { app.openSettings() })
+    // Each page of Settings, and a few of its settings by name.
+    fun setting(title: String, group: String, words: String, page: String, row: String? = null) =
+        add(Command(title, group, "open settings $words") { app.openSettings(page, row) })
+    settingsPages(app.os == DesktopOs.Windows, discordAppId() != null).forEach { page -> setting(page.name, "Settings", page.words, page.key) }
+    setting("Crossfade", "Settings", "blend transitions automix fade songs together", SettingsKey.Playback, "crossfade")
+    setting("Equalizer", "Settings", "eq bass treble presets bands", SettingsKey.Sound, "eq")
+    setting("Accent color", "Settings", "theme colour tint highlight palette appearance album art cover", SettingsKey.Look)
+    setting("Song radio settings", go, "radio start radio autoplay discovery adventure artist variety favorites more often tuning similar songs", SettingsKey.Radio)
+    setting(STATIONS_ON_SERVER, go, "radio live radio internet radio stations streams add a station edit fm", SettingsKey.Radio)
+    setting(AnimatedArtSetting.TITLE, go, "animated covers album art loops apple music full screen square still", SettingsKey.Look)
     app.liveLists.lists.value.forEach { list -> page(list.name, Page.LiveList(list.id), "live list smart playlist") }
 
     val state = app.player.state.value
@@ -99,8 +92,11 @@ fun commandsFor(app: AppState): List<Command> = buildList {
     add(Command("Show lyrics", view, "words panel") { app.showSidePanel(SidePanel.Lyrics) })
     add(Command("Show song details", view, "info panel") { app.showInfo(null) })
     if (app.downloads?.supported == true) add(Command("Show downloads", view, "downloads log progress drawer") { app.showSidePanel(SidePanel.Downloads) })
-    if (app.sidePanel != null) add(Command("Close the side panel", view, "hide panel") { app.showSidePanel(null) })
-    add(Command(if (app.settings.current.frame.sidebarRail) "Unfold the sidebar" else "Fold the sidebar to icons", view, "sidebar rail compact") { app.updateFrame { it.copy(sidebarRail = !it.sidebarRail) } })
+    if (app.shownPanel != null) add(Command("Close the side panel", view, "hide panel") { app.showSidePanel(null) })
+    // Settings holds the sidebar's place, so there it has nothing to fold.
+    if (!app.inSettings) {
+        add(Command(if (app.settings.current.frame.sidebarRail) "Unfold the sidebar" else "Fold the sidebar to icons", view, "sidebar rail compact") { app.updateFrame { it.copy(sidebarRail = !it.sidebarRail) } })
+    }
     app.toggleMiniPlayer?.let { toggle -> add(Command("Mini player", view, "small window compact") { toggle() }) }
 
     val output = "Output"

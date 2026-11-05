@@ -34,7 +34,7 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.setLibraryOnly
 import app.winters.octo.discovery.LIBRARY_ONLY_HELP
 import app.winters.octo.discovery.LIBRARY_ONLY_SETTING
-import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.nav.SettingsKey
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.nav.shortcutList
 import app.winters.octo.desktop.server.Connection
@@ -67,25 +67,37 @@ import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.desktop.settings.animatedArtSetting
 import kotlin.math.roundToInt
 
-// Settings: the servers, how Octo looks, playback, listening, lyrics, radio,
-// Discord, how it fits into the system, the keyboard shortcuts and the
-// version, each a section of its own in the list beside the page. Every
-// change is saved at once.
+// Settings: the servers, how Octo looks, Home, playback, sound, listening,
+// lyrics, radio, Discord, how it fits into the system, the keyboard
+// shortcuts and the version, each a section of its own in the list beside
+// the page, the one shown kept in the app's SettingsUi. Every change is
+// saved at once.
 
 // The Radio section's key, for a link straight to it.
-const val RADIO_SECTION = "radio"
+const val RADIO_SECTION = SettingsKey.Radio
 @Composable
 fun SettingsPage(app: AppState, visit: Visit) {
     val settings by app.settings.state.collectAsState()
     val discord = hasDiscord()
+    val ui = app.settingsUi
     SectionedPage(
         app,
         visit,
         "Settings",
-        listOfNotNull(
+        shown = ui.page,
+        onPick = { key ->
+            ui.page = key
+            ui.aim(null)
+        },
+        sections = listOfNotNull(
             PageSection("servers", "Servers", OctoIcons.Servers, mark = if (serverUpdateWaits(app)) SERVER_UPDATE_MARK else null) { ServerRows(app) },
             PageSection("look", "Appearance", OctoIcons.Appearance) { AppearanceGroups(app, settings) },
-            PageSection("playback", "Playback", OctoIcons.Playback) { PlaybackRows(app, settings) },
+            PageSection(SettingsKey.Home, "Home", OctoIcons.Home) { HomeSectionsGroup(app, settings.appearance.homeSections) },
+            PageSection("playback", "Playback", OctoIcons.Playback) {
+                PlaybackRows(app, settings)
+                CrossfadeAndSpeed(app)
+            },
+            PageSection(SettingsKey.Sound, "Sound", OctoIcons.Sound) { SoundSections(app) },
             PageSection("quality", AUDIO_QUALITY, OctoIcons.Equalizer, detail = "At home, away, and on this computer.") { AudioQualityRows(app, settings) },
             PageSection("offline", "Offline", OctoIcons.Download, detail = "Songs kept here to play without a connection.") { OfflineRows(app, settings) },
             PageSection("listening", "Listening", OctoIcons.Headphones) { ListeningRows(app, settings) },
@@ -110,8 +122,8 @@ fun SettingsPage(app: AppState, visit: Visit) {
 internal fun serverOffers(connection: Connection): String? =
     serverOffers(lyrics = connection.lyricsByIdOn || connection.supports(OCTO_LYRICS), adds = connection.acquires)
 
-// The accent, the window's background, Home's sections, the full player's
-// background, then how much moves.
+// The accent, the window's background, the full player's background, then
+// how much moves.
 // Each tuning line shows only while it has something to change.
 @Composable
 private fun AppearanceGroups(app: AppState, settings: AppSettings) {
@@ -142,7 +154,6 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
             }
         }
     }
-    HomeSectionsGroup(app, look.homeSections)
     Group("Full player") {
         val animated = look.animatedArtSetting
         val animatedHelp = when {
@@ -211,7 +222,6 @@ private fun PlaybackRows(app: AppState, settings: AppSettings) {
             app.settings.update { it.copy(playback = it.playback.copy(startAfter = wait)) }
         }
         SwitchRow(LIBRARY_ONLY_SETTING, LIBRARY_ONLY_HELP, settings.libraryOnly) { on -> app.setLibraryOnly(on) }
-        ActionRow("Equalizer, loudness, crossfade and speed", null, "Open Sound", { app.navigator.go(Page.Sound) })
     }
 }
 

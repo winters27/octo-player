@@ -213,7 +213,7 @@ class PolishShotsTest {
                 SwingUtilities.invokeAndWait { app.fullPlayer = true }
             },
             "settings" to { _ -> go(Page.Settings) },
-            "sound" to { _ -> go(Page.Sound) },
+            "sound" to { _ -> SwingUtilities.invokeAndWait { app.openSettings("sound") } },
             "menu" to { scene ->
                 go(Page.Songs)
                 SwingUtilities.invokeAndWait {

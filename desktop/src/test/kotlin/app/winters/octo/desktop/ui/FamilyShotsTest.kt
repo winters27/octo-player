@@ -126,10 +126,7 @@ class FamilyShotsTest {
                     // Audio quality and offline copies, in Settings.
                     for (section in listOf("quality", "offline")) {
                         rig.reset(scene)
-                        SwingUtilities.invokeAndWait {
-                            showSection("Settings", section)
-                            app.navigator.go(Page.Settings)
-                        }
+                        SwingUtilities.invokeAndWait { app.openSettings(section) }
                         rig.shot(scene, "family/settings-$section", 2_000)
                     }
 

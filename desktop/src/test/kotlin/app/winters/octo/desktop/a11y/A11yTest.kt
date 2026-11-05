@@ -29,7 +29,7 @@ class A11yTest {
 
     private val pages = listOf(
         Page.Home, Page.Songs, Page.Albums, Page.Artists, Page.Genres, Page.Folders, Page.Favourites,
-        Page.History, Page.RecentlyAdded, Page.LibraryHealth, Page.Settings, Page.Sound, Page.Album("a1"),
+        Page.History, Page.RecentlyAdded, Page.LibraryHealth, Page.Settings, Page.Album("a1"),
         Page.Playlist("p1"), Page.Search,
     )
 
@@ -105,7 +105,7 @@ class A11yTest {
     // Which part of the frame a node is in, by where it is.
     private fun A11yScene.partOf(node: SemanticsNode): String {
         val c = node.boundsInRoot.center
-        val panel = app.sidePanel != null
+        val panel = app.shownPanel != null
         return when {
             c.y < FrameSize.TitleBar.value -> "title"
             c.x < FrameSize.Sidebar.value -> "sidebar"

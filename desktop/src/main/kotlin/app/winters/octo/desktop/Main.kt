@@ -289,8 +289,8 @@ fun main(args: Array<String>) {
                     return@Window system.shortcuts.pressed((event.nativeKeyEvent as? java.awt.event.KeyEvent)?.keyCode ?: 0, event.isCtrlPressed, event.isAltPressed, event.isShiftPressed, event.isMetaPressed)
                 }
                 val press = KeyPress(event.key, event.isCtrlPressed, event.isAltPressed, event.isShiftPressed, event.isMetaPressed)
-                val shortcut = shortcutFor(press, app.mac, typing.active, lists.active, arrows = arrows.claimed || app.popups.open) ?: return@Window false
-                app.perform(shortcut)
+                val shortcut = shortcutFor(press, app.mac, typing.active, lists.active, arrows = arrows.claimed || app.popups.open, menuSettings = system.macSettingsMenu) ?: return@Window false
+                app.perform(shortcut, typing.active)
             },
         ) {
             // Before the window first draws, so its surfaces know their pixels.
