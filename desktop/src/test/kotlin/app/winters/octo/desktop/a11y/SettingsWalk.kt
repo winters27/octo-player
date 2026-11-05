@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.Density
 import app.winters.octo.design.ArrowKeys
 import app.winters.octo.design.FocusVisibility
 import app.winters.octo.design.LocalTyping
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.ProvideWindowLook
 import app.winters.octo.design.TypingState
 import app.winters.octo.audio.AutomixSettings
@@ -27,6 +28,7 @@ import app.winters.octo.desktop.pages.RowId
 import app.winters.octo.desktop.pages.RowTitle
 import app.winters.octo.desktop.pages.RowTitleInfo
 import app.winters.octo.desktop.pages.SettingsAnchors
+import app.winters.octo.desktop.pages.SettingsCard
 import app.winters.octo.desktop.pages.SettingsHere
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.OutputDevice
@@ -37,6 +39,9 @@ import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SHARED_SOUND
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.desktop.system.NVIDIA_OVERLAY_TITLE
+import app.winters.octo.desktop.system.NvidiaOverlayRow
+import app.winters.octo.desktop.system.NvidiaRow
 import app.winters.octo.desktop.system.StartupRows
 import app.winters.octo.desktop.system.SystemPrefs
 import app.winters.octo.desktop.update.DesktopUpdates
@@ -229,6 +234,7 @@ internal object SettingsWalk {
                 only = setOf(SettingsKey.Sound, SettingsKey.Playback),
             )
             windows += installedStartup()
+            windows += nvidiaOverlay()
             return windows
         } finally {
             System.clearProperty("octo.discordAppId")
@@ -266,6 +272,42 @@ internal object SettingsWalk {
         }
         check(rows.any { it.title.stable == "Start in the tray" }) { "the installed startup card draws Start in the tray" }
         return Window("Windows, the installed app's startup card", SettingsHere(DesktopOs.Windows, tray = true, notifications = true, discord = false, engine = true, family = false), rows)
+    }
+
+    // The NVIDIA overlay row as an installed app on an NVIDIA computer draws
+    // it, offered and kept off: the walk's own scenes run from source, where
+    // the row stays out.
+    @OptIn(ExperimentalComposeUiApi::class, InternalComposeUiApi::class)
+    private fun nvidiaOverlay(): Window {
+        lateinit var scene: ImageComposeScene
+        SwingUtilities.invokeAndWait {
+            scene = ImageComposeScene(900, 400, Density(1f)) {
+                ProvideWindowLook(reduceMotion = true, focus = FocusVisibility(keyboard = false), arrows = ArrowKeys()) {
+                    CompositionLocalProvider(LocalTyping provides TypingState(), LocalSettingsAnchors provides SettingsAnchors()) {
+                        // In its card, as Settings > System draws it.
+                        SettingsCard("Window", OctoIcons.System) {
+                            NvidiaOverlayRow(NvidiaRow.Offer(null)) {}
+                            NvidiaOverlayRow(NvidiaRow.Kept(justNow = true)) {}
+                        }
+                    }
+                }
+            }
+        }
+        val rows = mutableListOf<Drawn>()
+        try {
+            repeat(3) { SwingUtilities.invokeAndWait { scene.render() } }
+            SwingUtilities.invokeAndWait {
+                fun walk(node: SemanticsNode) {
+                    node.config.getOrNull(RowTitle)?.let { rows += Drawn(SettingsKey.System, it, node.placeId()) }
+                    node.children.forEach(::walk)
+                }
+                scene.semanticsOwners.forEach { walk(it.unmergedRootSemanticsNode) }
+            }
+        } finally {
+            SwingUtilities.invokeAndWait { scene.close() }
+        }
+        check(rows.count { it.title.stable == NVIDIA_OVERLAY_TITLE } == 2) { "both NVIDIA rows are drawn: $rows" }
+        return Window("Windows with NVIDIA, the installed app's overlay row", SettingsHere(DesktopOs.Windows, tray = true, notifications = true, discord = false, engine = true, family = false), rows)
     }
 
     private fun window(

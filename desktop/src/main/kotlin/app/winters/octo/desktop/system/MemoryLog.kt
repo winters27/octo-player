@@ -271,6 +271,7 @@ fun bugDetails(
     settings: List<Pair<String, String>>,
     logLines: List<String>,
     hooks: String? = null,
+    nvidia: String? = null,
 ): String {
     val minutes = uptimeMs / 60_000
     val fields = memoryLine("", 0, reading, "", false, GpuCacheTrim.trims.get(), GpuCacheTrim.lastFreedMb).substringAfter("private=").substringBefore(" window=")
@@ -279,6 +280,7 @@ fun bugDetails(
         appendLine("${System.getProperty("os.name")} ${System.getProperty("os.version")}, Java ${System.getProperty("java.version")}")
         appendLine("Renderer: ${renderer ?: "unknown"}")
         appendLine("Hooks: ${hooks ?: "unknown"}")
+        nvidia?.let(::appendLine)
         appendLine("Up for ${minutes / 60} h ${minutes % 60} min")
         appendLine("Memory now: private=$fields")
         appendLine("Settings: ${settings.joinToString(", ") { (name, value) -> "$name=$value" }}")
@@ -304,6 +306,7 @@ suspend fun copyBugDetails(app: AppState, window: java.awt.Window?, logs: File) 
                 settings = bugSettings(app.settings.current, app.library?.index?.songs?.size),
                 logLines = MemoryLog(logs).lastLines(24),
                 hooks = runCatching { loadedHooks()?.let { hooksText(it.hooks, it.foreign.toLong()) } }.getOrNull(),
+                nvidia = if (onWindows) runCatching { NvidiaOverlays.reportLine() }.getOrNull() else null,
             )
         }.getOrNull()
     }
@@ -360,6 +363,8 @@ fun startMemoryLog(
                     if (!rendererLogged) {
                         renderer()?.let {
                             log.append("${nowText()} renderer $it")
+                            // Once a start: an entry NVIDIA's settings dropped shows here.
+                            if (onWindows) log.append("${nowText()} ${NvidiaOverlays.reportLine()}")
                             rendererLogged = true
                         }
                     }

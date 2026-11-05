@@ -50,6 +50,7 @@ fun SystemRows(app: AppState) {
                 if (system.mediaKeysWork) "Working" else "Not available here",
             )
         }
+        if (app.os == DesktopOs.Windows) NvidiaOverlaySetting()
     }
 }
 

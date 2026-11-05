@@ -13,6 +13,7 @@ pub mod hooks;
 pub mod lane;
 pub mod live;
 pub mod mixer;
+pub mod nvidia_profile;
 #[cfg(feature = "opus")]
 pub mod opus;
 pub mod output;

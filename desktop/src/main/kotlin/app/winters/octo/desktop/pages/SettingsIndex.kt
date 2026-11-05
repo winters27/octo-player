@@ -297,6 +297,7 @@ val DesktopSettingsIndex: List<SettingsIndexEntry> = index {
             row("Now playing notifications", listOf("notifications", "notify", "toast", "popup", "song change"), "While Octo's window is behind others", needs = setOf(SettingsNeed.Notifications))
             row("Use the system title bar", listOf("title bar", "frame", "window border", "native", "decorations"), "Takes effect the next time Octo opens", needs = setOf(SettingsNeed.NotMac))
             row("Media keys", listOf("keyboard", "play pause", "media controls", "headset buttons"), "Whether the media keys reach Octo")
+            row("NVIDIA overlay", listOf("nvidia", "geforce", "overlay", "share", "instant replay", "memory", "game", "popup"), "Stops NVIDIA's game overlay popping up when Octo opens", needs = setOf(SettingsNeed.Windows))
         }
         card("Startup", needs = setOf(SettingsNeed.Windows), listed = false) {
             row("Start with Windows", listOf("startup", "sign in", "login", "boot", "launch", "autostart"), "Octo opens when you sign in")

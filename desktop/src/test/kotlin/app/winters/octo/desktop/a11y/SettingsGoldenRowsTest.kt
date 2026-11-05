@@ -61,7 +61,7 @@ class SettingsGoldenRowsTest {
             "Show what you're playing", "Include songs opened from files", "Friends' list shows", "First line", "Second line", "Lines as they were",
             "Time", "Picture", "Badge", "Album name on the cover", "Keep showing while paused", "Link to Last.fm",
             // System
-            "Keep playing when the window closes", "Now playing notifications", "Use the system title bar", "Media keys", "Start with Windows",
+            "Keep playing when the window closes", "Now playing notifications", "Use the system title bar", "Media keys", "NVIDIA overlay", "Start with Windows",
             "Start in the tray", "Mini player", "Keep it above other windows", "Pin it in place",
             // Keyboard
             "[each of Octo's keys]", "Use these keys from any app", "[each global shortcut]", "Use the usual keys",

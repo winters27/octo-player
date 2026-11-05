@@ -125,12 +125,17 @@ val engineLibrary = when {
 }
 val prebuiltEngine = providers.gradleProperty("octo.audioLib")
 
+// The helper that keeps NVIDIA's game overlay off Octo, run as an
+// administrator from Settings (audio-engine/src/bin/octo-nvidia.rs).
+val nvidiaHelper = if (hostOs.startsWith("windows")) "octo-nvidia.exe" else "octo-nvidia"
+
 val buildAudioEngine = tasks.register<Exec>("buildAudioEngine") {
-    description = "Builds the Rust audio engine for this machine."
+    description = "Builds the Rust audio engine for this machine, and its NVIDIA helper."
     workingDir = engineDir
-    commandLine("cargo", "build", "--release", "--lib")
+    commandLine("cargo", "build", "--release", "--lib", "--bin", "octo-nvidia")
     inputs.files(fileTree(engineDir) { include("src/**", "Cargo.toml", "Cargo.lock", "uniffi.toml") })
     outputs.file(File(engineDir, "target/release/$engineLibrary"))
+    outputs.file(File(engineDir, "target/release/$nvidiaHelper"))
 }
 
 val shareAudioEngine = tasks.register<Sync>("shareAudioEngine") {
@@ -159,6 +164,9 @@ val packsNatives = hostName.startsWith("windows")
 val shareAppNatives by tasks.registering(Sync::class) {
     if (packsNatives) {
         from(shareAudioEngine) { include("$jnaFolder/*") }
+        // Not with a prebuilt engine: that build has no helper, and Settings
+        // then leaves the NVIDIA row out.
+        if (!prebuiltEngine.isPresent) from(buildAudioEngine) { include(nvidiaHelper) }
         from(shareSystemShim) { include("$jnaFolder/*") }
         from(configurations.runtimeClasspath.map { jars -> jars.filter { it.name.startsWith("jna-") }.map { zipTree(it) } }) { include("com/sun/jna/$jnaFolder/*") }
         eachFile { path = "common/$name" }

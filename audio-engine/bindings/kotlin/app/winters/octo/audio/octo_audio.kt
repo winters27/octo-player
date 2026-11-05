@@ -707,6 +707,10 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_octo_audio_checksum_func_engine_counters(
     ): Int
+    external fun uniffi_octo_audio_checksum_func_keep_nvidia_overlay_off(
+    ): Int
+    external fun uniffi_octo_audio_checksum_func_nvidia_overlay(
+    ): Int
     external fun uniffi_octo_audio_checksum_func_process_stats(
     ): Int
     external fun uniffi_octo_audio_checksum_func_loop_video_available(
@@ -964,6 +968,10 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_octo_audio_fn_func_engine_counters(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_octo_audio_fn_func_keep_nvidia_overlay_off(`helper`: RustBuffer.ByValue,`exe`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_octo_audio_fn_func_nvidia_overlay(`exe`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_octo_audio_fn_func_process_stats(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_octo_audio_fn_func_loop_video_available(uniffi_out_err: UniffiRustCallStatus, 
@@ -1100,6 +1108,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_func_engine_counters() and 0xFFFF) != 53802) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_func_keep_nvidia_overlay_off() and 0xFFFF) != 19655) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_func_nvidia_overlay() and 0xFFFF) != 12998) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_func_process_stats() and 0xFFFF) != 56945) {
@@ -5790,6 +5804,108 @@ public object FfiConverterTypeFilterType: FfiConverterRustBuffer<FilterType> {
 
 
 
+/**
+ * What asking for the overlay to be kept off came to.
+ */
+
+enum class NvidiaChange {
+    
+    DONE,
+    /**
+     * Said no at Windows' prompt.
+     */
+    CANCELLED,
+    /**
+     * Ran without administrator rights.
+     */
+    REFUSED,
+    NO_NVIDIA,
+    /**
+     * The exe is in a profile Octo did not make; it was left alone.
+     */
+    ELSEWHERE,
+    FAILED;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeNvidiaChange: FfiConverterRustBuffer<NvidiaChange> {
+    override fun read(buf: ByteBuffer) = try {
+        NvidiaChange.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: NvidiaChange) = 4UL
+
+    override fun write(value: NvidiaChange, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * How NVIDIA's overlay stands with an exe.
+ */
+
+enum class NvidiaOverlay {
+    
+    /**
+     * No NVIDIA driver to ask.
+     */
+    NO_NVIDIA,
+    /**
+     * The overlay treats it as a game.
+     */
+    ON,
+    /**
+     * It is marked as not a game.
+     */
+    KEPT_OFF,
+    /**
+     * Octo's profile is there but no longer keeps this exe out (the entry
+     * was dropped, or Octo now runs from another folder).
+     */
+    UNDONE;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeNvidiaOverlay: FfiConverterRustBuffer<NvidiaOverlay> {
+    override fun read(buf: ByteBuffer) = try {
+        NvidiaOverlay.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: NvidiaOverlay) = 4UL
+
+    override fun write(value: NvidiaOverlay, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
 
 enum class PlaybackState {
     
@@ -6770,6 +6886,37 @@ public object FfiConverterSequenceTypeTrustedCertificate: FfiConverterRustBuffer
     UniffiLib.uniffi_octo_audio_fn_func_engine_counters(
     
         _status)
+}
+    )
+    }
+    
+
+        /**
+         * Asks Windows to run `helper` as an administrator to keep the overlay off
+         * `exe`, and waits for it. Windows' own prompt comes first; saying no there
+         * is Cancelled. Blocks, so it is called off the window's thread.
+         */ fun `keepNvidiaOverlayOff`(`helper`: kotlin.String, `exe`: kotlin.String): NvidiaChange {
+            return FfiConverterTypeNvidiaChange.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_func_keep_nvidia_overlay_off(
+    
+        
+        FfiConverterString.lower(`helper`),
+        FfiConverterString.lower(`exe`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * How NVIDIA's overlay stands with `exe` (a full path). Reads only.
+         */ fun `nvidiaOverlay`(`exe`: kotlin.String): NvidiaOverlay {
+            return FfiConverterTypeNvidiaOverlay.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_func_nvidia_overlay(
+    
+        
+        FfiConverterString.lower(`exe`),_status)
 }
     )
     }
