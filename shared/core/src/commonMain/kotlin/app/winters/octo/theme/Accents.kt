@@ -46,6 +46,9 @@ fun accentHelp(choice: AccentChoice, theme: ThemeChoice): String = when (choice)
     else -> "Selections, sliders, switches and buttons in ${choice.label.lowercase()}."
 }
 
+// The same line in Octo's own theme.
+fun accentHelp(choice: AccentChoice): String = accentHelp(choice, ThemeChoice.Octo)
+
 fun accentFromArt(argb: Int): Int? = accentFromArt(argb, ThemeChoice.Octo)
 
 // A cover's color made into an accent for `theme`: the same hue at the

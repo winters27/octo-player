@@ -85,6 +85,7 @@ class ResolvedFixtureTest {
             file.writeText(actual)
             fail("fixture written to ${file.absolutePath}; run the test again without octo.writeThemeFixture")
         }
-        assertEquals(file.readText(), actual)
+        // A Windows checkout may hold the file with CRLF line ends.
+        assertEquals(file.readText().replace("\r\n", "\n"), actual)
     }
 }
