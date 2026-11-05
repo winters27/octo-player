@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -46,6 +47,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.unit.IntRect
 import app.winters.octo.design.Corner
 import app.winters.octo.design.scrollbar
 import app.winters.octo.design.DesktopType
@@ -88,16 +90,24 @@ enum class OmniHow { Main, Queue, Next, GoTo }
 // The search field at the top of the sidebar. Focusing it opens the list
 // under it; the arrows move through the list and Enter chooses, with
 // Shift, Ctrl or Alt for other ways; Escape closes the list, and again
-// clears the field. Empty, it shows the shortcut that reaches it.
+// clears the field. Empty, it shows the shortcut that reaches it. Gone, it
+// takes its place in the window with it, unless another field has put its
+// own there since.
 @Composable
 fun OmniField(app: AppState, modifier: Modifier = Modifier) {
     val model = app.search ?: return
     val box = app.omnibox
     val focus = LocalFocusManager.current
     val lines = rememberOmniLines(app)
+    val mine = remember { arrayOf(IntRect.Zero) }
+    DisposableEffect(Unit) { onDispose { if (mine[0] != IntRect.Zero && box.field == mine[0]) box.field = IntRect.Zero } }
     Box(
         modifier
-            .onGloballyPositioned { box.field = it.windowRect() }
+            .onGloballyPositioned {
+                val at = it.windowRect()
+                mine[0] = at
+                box.field = at
+            }
             // Tab on from the field shuts its list, as a click elsewhere does.
             .onFocusChanged { if (it.hasFocus) box.open = true else if (box.open) box.open = false }
             .onPreviewKeyEvent { event ->

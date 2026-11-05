@@ -1,7 +1,20 @@
 package app.winters.octo.desktop.ui
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.lerp
+import app.winters.octo.design.LocalReduceMotion
+import app.winters.octo.design.OctoEasing
+import app.winters.octo.design.SettingsSize
+import app.winters.octo.desktop.nav.SettingsKey
+import app.winters.octo.desktop.pages.SettingsList
+import app.winters.octo.desktop.pages.settingsListNeeds
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.animation.core.tween
@@ -271,6 +284,83 @@ internal fun Modifier.part(parts: FrameFocus, me: FocusRequester, app: AppState)
 // Draws nothing while `hidden`, keeping what is inside composed and laid out.
 private fun Modifier.drawnUnless(hidden: Boolean): Modifier = drawWithContent { if (!hidden) drawContent() }
 
+// How long the sidebar and Settings' list take to trade places.
+private const val SettingsSwapMs = 360
+
+// How far the sidebar's place has gone over to Settings' list: 0 the app's
+// sidebar, 1 the list, between while they trade places. With motion
+// reduced, by Calm motion or the system, they swap at once.
+@Composable
+private fun settingsSwap(inSettings: Boolean): Float {
+    val target = if (inSettings) 1f else 0f
+    val still = LocalReduceMotion.current
+    val swap = remember { Animatable(target) }
+    LaunchedEffect(target, still) {
+        if (still) swap.snapTo(target) else swap.animateTo(target, tween(SettingsSwapMs, easing = OctoEasing.Spring))
+    }
+    return if (still) target else swap.value
+}
+
+// One face of the sidebar's place, slid `shift` across and drawn at
+// `alpha`. The face on its way out is only drawn: a screen reader, the
+// keyboard and the pointer pass it by.
+private fun Modifier.face(shift: Float, alpha: Float, leaving: Boolean): Modifier = this
+    .graphicsLayer {
+        translationX = shift
+        this.alpha = alpha
+    }
+    .then(
+        if (leaving) {
+            Modifier
+                .clearAndSetSemantics { }
+                .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() } } }
+                .focusProperties { onEnter = { cancelFocusChange() } }
+                .focusGroup()
+        } else {
+            Modifier
+        },
+    )
+
+// Where the keyboard goes as Settings takes the sidebar's place or gives it
+// back: from the sidebar or the side panel to the page shown in Settings'
+// list, and from the list back to the sidebar's Settings row (or its Sound
+// row, while Settings shows Sound).
+@Stable
+internal class SlotFocus {
+    val chosen = FocusRequester()
+    val settingsRow = FocusRequester()
+    val soundRow = FocusRequester()
+
+    // Whether the keyboard is in the sidebar's place, or in the side panel.
+    var inSlot = false
+    var inPanel = false
+
+    private var was: Boolean? = null
+    private var next: FocusRequester? = null
+
+    // Called as the frame is composed, before either face changes, so the
+    // keyboard's place is read from before the swap.
+    fun swapped(inSettings: Boolean, page: String) {
+        val before = was
+        was = inSettings
+        if (before == null || before == inSettings) return
+        next = when {
+            inSettings && (inSlot || inPanel) -> chosen
+            !inSettings && inSlot -> if (page == SettingsKey.Sound) soundRow else settingsRow
+            else -> null
+        }
+        inPanel = false
+    }
+
+    // Moves the keyboard once the face it goes to is there.
+    suspend fun handOff() {
+        val to = next ?: return
+        next = null
+        withFrameNanos { }
+        runCatching { to.requestFocus() }
+    }
+}
+
 // The full player's fade: brief, and briefer still with motion reduced.
 @Composable
 private fun motionFade() = tween<Float>(motionScale().ms(OctoDuration.Neutral))
@@ -300,6 +390,22 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus)
         saved.sidebarRail,
         if (panel != null) panelWidth.coerceIn(FrameSize.PanelMin, FrameSize.PanelMax) else null,
     )
+    // Settings puts its list in the sidebar's place, as wide as the sidebar
+    // unless its names need more; the two slide past each other as they
+    // trade places, and the slot's width, the page's left edge and the
+    // player go with them.
+    val inSettings = app.inSettings
+    val listFit = settingsFit(window, fit.sidebar, settingsListNeeds(app))
+    val shown = if (inSettings) listFit else fit
+    val swap = settingsSwap(inSettings)
+    val slot = lerp(fit.sidebar, listFit.sidebar, swap)
+    val swapping = swap > 0f && swap < 1f
+    val shift = with(LocalDensity.current) { SettingsSize.SwapShift.toPx() }
+    // The sidebar keeps its place in its list while Settings is open.
+    val sidebarList = rememberLazyListState()
+    val handOff = remember { SlotFocus() }
+    handOff.swapped(inSettings, app.settingsUi.page)
+    LaunchedEffect(inSettings) { handOff.handOff() }
     // Under the full player the frame is out of a screen reader's reach too.
     Column(Modifier.fillMaxSize().then(if (app.fullPlayer) Modifier.clearAndSetSemantics { } else Modifier)) {
         // Room for the title bar, in the frame's glass; its buttons are drawn
@@ -308,14 +414,33 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus)
         Seam(vertical = false)
         Box(Modifier.weight(1f).fillMaxWidth()) {
             Row(Modifier.fillMaxSize()) {
-                Box(Modifier.width(fit.sidebar).fillMaxHeight().part(parts, parts.sidebar, app)) {
-                    Sidebar(app, backdrop, Modifier.fillMaxSize(), rail = fit.rail)
-                    if (!fit.rail) {
-                        ResizeHandle(
-                            onDrag = { sidebar = (sidebar + it).coerceIn(FrameSize.SidebarMin, FrameSize.SidebarMax) },
-                            onDone = { app.updateFrame { f -> f.copy(sidebarWidth = sidebar.value) } },
-                            modifier = Modifier.align(Alignment.CenterEnd),
-                        )
+                Box(
+                    Modifier
+                        .width(slot)
+                        .fillMaxHeight()
+                        .clipToBounds()
+                        .chromeFilm(backdrop)
+                        .onFocusChanged { handOff.inSlot = it.hasFocus }
+                        .part(parts, parts.sidebar, app),
+                ) {
+                    // Each face is laid out at its own width, so nothing in
+                    // it wraps anew while the slot changes width.
+                    if (!inSettings || swap < 1f) {
+                        Box(Modifier.fillMaxHeight().wrapContentWidth(Alignment.Start, unbounded = true).width(fit.sidebar).face(-shift * swap, 1f - swap, leaving = inSettings)) {
+                            Sidebar(app, backdrop, Modifier.fillMaxSize(), rail = fit.rail, list = sidebarList, film = false, settingsRow = handOff.settingsRow, soundRow = handOff.soundRow)
+                        }
+                        if (!fit.rail && !inSettings && swap == 0f) {
+                            ResizeHandle(
+                                onDrag = { sidebar = (sidebar + it).coerceIn(FrameSize.SidebarMin, FrameSize.SidebarMax) },
+                                onDone = { app.updateFrame { f -> f.copy(sidebarWidth = sidebar.value) } },
+                                modifier = Modifier.align(Alignment.CenterEnd),
+                            )
+                        }
+                    }
+                    if (inSettings || swap > 0f) {
+                        Box(Modifier.fillMaxHeight().wrapContentWidth(Alignment.Start, unbounded = true).width(listFit.sidebar).face(shift * (1f - swap), swap, leaving = !inSettings)) {
+                            SettingsList(app, handOff.chosen, live = inSettings, modifier = Modifier.fillMaxSize())
+                        }
                     }
                 }
                 Seam(vertical = true)
@@ -334,7 +459,10 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus)
                                 .pageShade(shade, FrameSize.TitleBar + FrameSize.Hairline)
                                 .part(parts, parts.page, app),
                         ) {
-                            Box(Modifier.weight(1f)) { PageHost(app) }
+                            // While the slot changes width, the page keeps the width it
+                            // ends at and its right edge, so its words never wrap anew.
+                            val page = if (swapping) Modifier.wrapContentWidth(Alignment.End, unbounded = true).width(shown.page) else Modifier.fillMaxWidth()
+                            Box(Modifier.weight(1f).then(page)) { PageHost(app) }
                         }
                         // The notice floats over the page, above the player, so its coming and
                         // going never moves the page.
@@ -357,7 +485,10 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus)
                         Modifier
                             .width(fit.panel)
                             .fillMaxHeight()
-                            .onFocusChanged { app.panelHasKeyboard = it.hasFocus }
+                            .onFocusChanged {
+                                app.panelHasKeyboard = it.hasFocus
+                                handOff.inPanel = it.hasFocus
+                            }
                             .part(parts, parts.panel, app),
                     ) {
                         ContextPanel(app, panel, backdrop, Modifier.fillMaxSize())
@@ -371,16 +502,18 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus)
             }
             // The player floats over the foot of the page, a third of the window
             // wide in its middle. It is laid out after the side panel, so Tab
-            // comes to it last, after the panel.
-            val start = fit.sidebar + FrameSize.Hairline
-            val end = fit.panel?.let { it + FrameSize.Hairline } ?: Space.None
+            // comes to it last, after the panel. While Settings and the sidebar
+            // trade places it moves with the slot's edge to where it ends.
+            val start = slot + FrameSize.Hairline
+            val end = shown.panel?.let { it + FrameSize.Hairline } ?: Space.None
             Box(Modifier.fillMaxSize().padding(start = start, end = end)) {
-                val width = playerWidth(fit.page, window)
-                PlayerBar(app, backdrop, Modifier.align(Alignment.BottomCenter).padding(bottom = FrameSize.PlayerGap).width(width).height(FrameSize.Player).part(parts, parts.player, app), compact = playerIsCompact(width))
+                val ends = playerWidth(shown.page, window)
+                val width = lerp(playerWidth(fit.page, window), playerWidth(listFit.page, window), swap)
+                PlayerBar(app, backdrop, Modifier.align(Alignment.BottomCenter).padding(bottom = FrameSize.PlayerGap).width(width).height(FrameSize.Player).part(parts, parts.player, app), compact = playerIsCompact(ends))
                 // Songs on their way: a small pill at the page's foot, level
                 // with the player where there is room beside it, else just
                 // above it, so it never covers the player.
-                val beside = (fit.page - width) / 2 >= DownloadsPillRoom
+                val beside = (shown.page - ends) / 2 >= DownloadsPillRoom
                 val pillBottom = if (beside) FrameSize.PlayerGap + (FrameSize.Player - DownloadsPillHeight) / 2 else FrameSize.PlayerGap + FrameSize.Player + Space.M
                 DownloadsPill(app, backdrop, Modifier.align(Alignment.BottomEnd).padding(end = Space.Page, bottom = pillBottom))
             }
@@ -391,13 +524,14 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus)
 // What the open search box lays over the page: its list, under the field
 // and lined up with its start, reaching over the page as far as the window
 // allows. With the sidebar folded to a rail, the field floats beside the
-// rail's search button too.
+// rail's search button too, and beside Settings' title while its list
+// holds the sidebar's place.
 @Composable
 private fun OmniboxOver(app: AppState, backdrop: HazeState) {
     val box = app.omnibox
     val density = LocalDensity.current
     val window = LocalWindowInfo.current.containerSize.width
-    // The rail's search button marks where it is while the rail shows.
+    // The rail's search button, or Settings' title, marks where it is.
     if (box.trigger != IntRect.Zero) {
         val gap = with(density) { Space.M.roundToPx() }
         val inset = with(density) { Space.Xs.roundToPx() }

@@ -23,6 +23,24 @@ fun frameFit(window: Dp, sidebar: Dp, rail: Boolean, panel: Dp?): FrameFit {
     return FrameFit(rail || folds, side, fitted, window - side - fitted - lines)
 }
 
+// How wide Settings' list is in the sidebar's place, beside an app sidebar
+// `sidebar` wide, when its names need `needed`: the sidebar's own width
+// while they fit in it, else what they need, but never so wide that the
+// player loses the room its controls need; past that the names wrap.
+fun settingsListWidth(window: Dp, sidebar: Dp, needed: Dp): Dp {
+    if (needed <= sidebar) return sidebar
+    val most = window - (FrameSize.PlayerMin + FrameSize.PlayerGap * 2) - FrameSize.Hairline
+    return needed.coerceAtMost(most).coerceAtLeast(sidebar)
+}
+
+// How the frame shares the window while Settings holds the sidebar's place:
+// its list, never folded to a rail, and no side panel, which waits for
+// the way out.
+fun settingsFit(window: Dp, sidebar: Dp, needed: Dp): FrameFit {
+    val list = settingsListWidth(window, sidebar, needed)
+    return FrameFit(rail = false, sidebar = list, panel = null, page = window - list - FrameSize.Hairline)
+}
+
 // The floating player's width over a page `page` wide in a window `window`
 // wide: a third of the window, but at least what its controls need, and
 // never wider than the page leaves room for.

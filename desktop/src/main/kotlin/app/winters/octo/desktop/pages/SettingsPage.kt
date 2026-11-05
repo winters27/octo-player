@@ -69,9 +69,9 @@ import kotlin.math.roundToInt
 
 // Settings: the servers, how Octo looks, Home, playback, sound, listening,
 // lyrics, radio, Discord, how it fits into the system, the keyboard
-// shortcuts and the version, each a section of its own in the list beside
-// the page, the one shown kept in the app's SettingsUi. Every change is
-// saved at once.
+// shortcuts and the version, each a page of its own, picked in Settings'
+// list in the sidebar's place (SettingsNav.kt), the one shown kept in the
+// app's SettingsUi. Every change is saved at once.
 
 // The Radio section's key, for a link straight to it.
 const val RADIO_SECTION = SettingsKey.Radio
@@ -89,6 +89,7 @@ fun SettingsPage(app: AppState, visit: Visit) {
             ui.page = key
             ui.aim(null)
         },
+        list = false,
         sections = listOfNotNull(
             PageSection("servers", "Servers", OctoIcons.Servers, mark = if (serverUpdateWaits(app)) SERVER_UPDATE_MARK else null) { ServerRows(app) },
             PageSection("look", "Appearance", OctoIcons.Appearance) { AppearanceGroups(app, settings) },

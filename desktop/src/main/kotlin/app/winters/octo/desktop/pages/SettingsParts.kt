@@ -131,7 +131,9 @@ internal fun shownSection(keys: List<String>, remembered: String?): Int =
 // over the section, naming it and opening the others.
 // `detail` is a quiet word after the title (the output Sound is for).
 // With `onPick`, the caller keeps the section picked and gives it as
-// `shown`; without it the page remembers it by its title.
+// `shown`; without it the page remembers it by its title. Without `list`
+// the sections are picked elsewhere (Settings' own list, in the sidebar's
+// place): the section shown is the page, under its own name.
 @Composable
 internal fun SectionedPage(
     app: AppState,
@@ -141,12 +143,23 @@ internal fun SectionedPage(
     detail: String? = null,
     shown: String? = null,
     onPick: ((String) -> Unit)? = null,
+    list: Boolean = true,
 ) {
     val index = shownSection(sections.map { it.key }, if (onPick != null) shown else shownSections[title])
     val section = sections.getOrNull(index) ?: return
     fun pick(at: Int) {
         val key = sections[at].key
         if (onPick != null) onPick(key) else shownSections[title] = key
+    }
+    if (!list) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val side = maxOf(PageSide, (maxWidth - SettingsSize.Column) / 2 + Space.M)
+            Column(Modifier.fillMaxSize()) {
+                PageTitle(section.name, Modifier.padding(start = side, end = side, top = Space.Xxl), bottom = Space.Xs, trailing = section.trailing)
+                SectionColumn(section, Modifier.weight(1f), start = side - Space.M, end = side - Space.M)
+            }
+        }
+        return
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val withList = maxWidth >= PageSide * 2 + SettingsSize.Nav + Space.Wide + SettingsSize.ColumnMin

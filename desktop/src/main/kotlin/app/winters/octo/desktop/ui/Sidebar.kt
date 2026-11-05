@@ -4,7 +4,10 @@ import app.winters.octo.desktop.pages.serverUpdateWaits
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.focus.onFocusChanged
 import app.winters.octo.design.LocalFocusVisibility
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import app.winters.octo.design.scrollbar
 import app.winters.octo.design.LocalKeyboardHere
 import androidx.compose.ui.semantics.contentDescription
@@ -115,17 +118,28 @@ private val YourPlaces = listOf(
 // Folded to a rail (by the listener, or by a window too narrow for it
 // beside the side panel), it shows only icons and covers, each named in a
 // tooltip, and search is a button that floats the field out beside it.
+// `list` keeps its place across Settings, which takes the sidebar's place a
+// while; `film` is false where the frame lays the glass under it instead.
+// `settingsRow` and `soundRow` bring the keyboard back to those rows.
 @Composable
-fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, rail: Boolean = app.settings.current.frame.sidebarRail) {
+fun Sidebar(
+    app: AppState,
+    backdrop: HazeState,
+    modifier: Modifier = Modifier,
+    rail: Boolean = app.settings.current.frame.sidebarRail,
+    list: LazyListState = rememberLazyListState(),
+    film: Boolean = true,
+    settingsRow: FocusRequester? = null,
+    soundRow: FocusRequester? = null,
+) {
     val settings by app.settings.state.collectAsState()
     val frame = settings.frame
     val lit = app.navigator.sidebarItem
     val liveLists by app.liveLists.lists.collectAsState()
     fun go(page: Page) = app.navigator.go(page)
-    Column(modifier.chromeFilm(backdrop).padding(horizontal = Space.M, vertical = Space.M)) {
+    Column(modifier.then(if (film) Modifier.chromeFilm(backdrop) else Modifier).padding(horizontal = Space.M, vertical = Space.M)) {
         if (rail) RailSearch(app) else OmniField(app, Modifier.fillMaxWidth())
         Spacer(Modifier.height(Space.S))
-        val list = rememberLazyListState()
         LazyColumn(Modifier.weight(1f).fillMaxWidth().scrollbar(list), list) {
             item(key = "home") { NavRow("Home", OctoIcons.Home, lit == SidebarItem.Top(Page.Home), rail) { go(Page.Home) } }
             // The charts, from an Octo server that has them; asked once per server.
@@ -184,7 +198,7 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
         DownloadsRow(app, rail)
         // Sound opens Settings on its Sound page, and is lit while that shows.
         val onSound = app.inSettings && app.settingsUi.page == SettingsKey.Sound
-        NavRow("Sound", OctoIcons.Sound, onSound, rail) { app.openSettings(SettingsKey.Sound) }
+        NavRow("Sound", OctoIcons.Sound, onSound, rail, modifier = soundRow?.let { Modifier.focusRequester(it) } ?: Modifier) { app.openSettings(SettingsKey.Sound) }
         // A small dot while an update waits to go in, the news itself in
         // Settings > About, or while a newer Octo waits for the server, in Settings > Servers.
         val serverUpdate = serverUpdateWaits(app)
@@ -193,24 +207,39 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
             serverUpdate -> "server update available"
             else -> null
         }
-        NavRow("Settings", OctoIcons.Settings, lit == SidebarItem.Top(Page.Settings) && !onSound, rail, mark = mark) { app.openSettings() }
+        NavRow(
+            "Settings",
+            OctoIcons.Settings,
+            lit == SidebarItem.Top(Page.Settings) && !onSound,
+            rail,
+            modifier = settingsRow?.let { Modifier.focusRequester(it) } ?: Modifier,
+            mark = mark,
+        ) { app.openSettings() }
     }
 }
 
 private val ControlSize = RowHeight.Nav - Space.Xs
 
 // The rail's search: a button that opens the search field beside the rail,
-// or closes it again.
+// or closes it again. While Settings holds the sidebar's place its title
+// marks the spot instead, so the rail leaves the mark alone then, and lets
+// go of only its own.
 @Composable
 private fun RailSearch(app: AppState) {
     val box = app.omnibox
-    DisposableEffect(Unit) { onDispose { box.trigger = IntRect.Zero } }
+    val mine = remember { arrayOf(IntRect.Zero) }
+    DisposableEffect(Unit) { onDispose { if (mine[0] != IntRect.Zero && box.trigger == mine[0]) box.trigger = IntRect.Zero } }
     NavRow(
         if (app.mac) "Search (⌘K)" else "Search (Ctrl+K)",
         OctoIcons.Search,
         selected = box.open,
         rail = true,
-        modifier = Modifier.onGloballyPositioned { box.trigger = it.windowRect() },
+        modifier = Modifier.onGloballyPositioned {
+            if (app.inSettings) return@onGloballyPositioned
+            val at = it.windowRect()
+            mine[0] = at
+            box.trigger = at
+        },
     ) {
         if (box.open) box.open = false else app.openSearch()
     }

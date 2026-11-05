@@ -241,4 +241,10 @@ object SettingsSize {
     // tall it grows before it scrolls.
     val Sheet = 460.dp
     val SheetMax = 720.dp
+
+    // How far the sidebar and Settings' list slide as they trade places.
+    val SwapShift = 36.dp
+
+    // The account card's cover mosaic at the top of Settings' list.
+    val AccountArt = 40.dp
 }
