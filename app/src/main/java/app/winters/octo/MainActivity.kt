@@ -1,6 +1,7 @@
 package app.winters.octo
 
 import app.winters.octo.subsonic.parseFamilyLink
+import app.winters.octo.family.ClipReads
 import app.winters.octo.family.FamilyOpen
 import app.winters.octo.family.FamilyNotifier
 import app.winters.octo.family.FamilyHub
@@ -119,13 +120,19 @@ class MainActivity : ComponentActivity() {
     }
 
     // Coming to the front: a family link on the clipboard is offered once.
-    // Android lets only the app in front read the clipboard.
+    // Android lets only the app in front read the clipboard, and says so on
+    // every read, so only a new text clip is read (ClipReads).
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus) return
-        val clip = runCatching { getSystemService(android.content.ClipboardManager::class.java)?.primaryClip?.getItemAt(0)?.text?.toString() }.getOrNull()
+        val clipboard = getSystemService(android.content.ClipboardManager::class.java) ?: return
+        val about = runCatching { clipboard.primaryClipDescription }.getOrNull() ?: return
+        if (!clipReads.due(about.timestamp, about.hasMimeType("text/*"))) return
+        val clip = runCatching { clipboard.primaryClip?.getItemAt(0)?.text?.toString() }.getOrNull()
         family.offerClipboard(clip)
     }
+
+    private val clipReads by lazy { ClipReads(getSharedPreferences("clipboard", MODE_PRIVATE)) }
 
     // A family link (an invite, or a sign-in from another device, from a QR
     // code the camera read or a link tapped) opens the sign-in form filled
