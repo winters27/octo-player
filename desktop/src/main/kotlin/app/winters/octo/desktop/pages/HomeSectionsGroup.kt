@@ -29,8 +29,11 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
+import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
+import app.winters.octo.design.IconSize
+import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.SettingsSize
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FocusRing
 import app.winters.octo.design.GlazeCapsule
@@ -61,12 +64,12 @@ import app.winters.octo.home.moveListedHomeSection
 import app.winters.octo.home.toggleHomeSection
 import sh.calvin.reorderable.ReorderableColumn
 
-// Appearance's Home group: Home's shelves in their order, each row's handle
+// Settings' Home page: Home's shelves in their order, each row's handle
 // dragging it to a new place and its switch showing or hiding it on Home.
 // Every change is saved and reaches Home at once. Only the shelves this app
 // draws are listed; the others keep their places in the saved order, which
-// the phone shares. A quiet word on the group's line puts the usual order
-// back, after asking.
+// the phone shares. A quiet word on the card's title line puts the usual
+// order back, after asking.
 @Composable
 internal fun HomeSectionsGroup(app: AppState, stored: String?) {
     val entries = remember(stored) { homeSectionOrder(stored) }
@@ -75,7 +78,7 @@ internal fun HomeSectionsGroup(app: AppState, stored: String?) {
     val popups = LocalPopups.current
     Column(Modifier.fillMaxWidth()) {
         val changed = entries != DefaultHomeSections
-        Group("Home", action = {
+        SettingsCard("Shelves", OctoIcons.Home, trailing = {
             TextAction(RESET_HOME_SECTIONS, {
                 popups.showCentred { close ->
                     MenuTitle(RESET_HOME_SECTIONS_ASK)
@@ -120,6 +123,7 @@ internal fun HomeSectionsGroup(app: AppState, stored: String?) {
 private fun SectionRow(entry: HomeSectionEntry, change: (Boolean) -> Unit, handle: Modifier) {
     Row(
         Modifier
+            .settingsRow(entry.section.title, stable = "[each Home shelf]", id = "shelf-${settingsSlug(entry.section.title)}")
             .fillMaxWidth()
             .hoverLift()
             .toggleable(value = entry.shown, interactionSource = null, indication = FocusRing(Corner.RowShape), role = Role.Switch, onValueChange = change)
@@ -137,14 +141,15 @@ private fun SectionRow(entry: HomeSectionEntry, change: (Boolean) -> Unit, handl
 // Two short lines to grab a row by.
 @Composable
 private fun Handle(modifier: Modifier) {
+    val ink = OctoColors.TextMuted
     Box(
-        modifier.size(32.dp).pointerHoverIcon(PointerIcon.Hand).semantics { contentDescription = "Reorder" },
+        modifier.size(ControlHeight.M).pointerHoverIcon(PointerIcon.Hand).semantics { contentDescription = "Reorder" },
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(width = 16.dp, height = 7.dp)) {
-            val stroke = 2.dp.toPx()
+        Canvas(Modifier.size(width = IconSize.Table, height = SettingsSize.HandleLines)) {
+            val stroke = SettingsSize.HandleStroke.toPx()
             listOf(stroke / 2, size.height - stroke / 2).forEach { y ->
-                drawLine(OctoColors.TextMuted, Offset(0f, y), Offset(size.width, y), stroke, StrokeCap.Round)
+                drawLine(ink, Offset(0f, y), Offset(size.width, y), stroke, StrokeCap.Round)
             }
         }
     }

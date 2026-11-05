@@ -234,8 +234,12 @@ object SettingsSize {
     val CurvePreviewWidth = 28.dp
     val CurvePreviewHeight = 16.dp
     val CurveLine = 1.5.dp
-    // The tile behind a section's icon at the top of its page.
-    val SectionIcon = 36.dp
+    // A picture choice: its picture's height, and the ring round the chosen one.
+    val PictureThumb = 78.dp
+    val PictureRing = 2.dp
+    // The handle a Home shelf is dragged by: its two lines' height and weight.
+    val HandleLines = 7.dp
+    val HandleStroke = 2.dp
 
     // A small form over Settings: adding a server, a new password, and how
     // tall it grows before it scrolls.

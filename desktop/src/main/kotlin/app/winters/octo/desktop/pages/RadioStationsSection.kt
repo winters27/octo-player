@@ -28,6 +28,7 @@ import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.IconSize
 import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.PopupPadding
 import app.winters.octo.design.SettingsSize
 import app.winters.octo.design.Space
@@ -68,7 +69,7 @@ data class StationDraft(val id: String?, val name: String, val streamUrl: String
 @Composable
 internal fun RadioRows(app: AppState, settings: AppSettings) {
     SongRadioRows(app, settings)
-    Group(LIVE_RADIO, footer = LIVE_RADIO_ABOUT) {
+    SettingsCard(LIVE_RADIO, OctoIcons.Globe, footer = LIVE_RADIO_ABOUT) {
         ActionRow(FIND_STATIONS_NEAR, "Stations on the air around a place, to play or keep.", "Open", { app.navigator.go(Page.LiveRadio) })
     }
     RadioStationRows(app)
@@ -80,7 +81,7 @@ internal fun RadioRows(app: AppState, settings: AppSettings) {
 @Composable
 private fun SongRadioRows(app: AppState, settings: AppSettings) {
     val playback = settings.playback
-    Group(SONG_RADIO, footer = SONG_RADIO_ABOUT) {
+    SettingsCard(SONG_RADIO, OctoIcons.Radio, footer = SONG_RADIO_ABOUT) {
         val discovery = discoveryRowLook(playback.radioDiscovery, settings.libraryOnly, where = "Playback")
         if (discovery.choosable) {
             ChoiceRow("Discovery", discovery.helper, RadioDiscovery.entries, playback.radioDiscovery, { it.label }) { d ->
@@ -111,7 +112,7 @@ private fun RadioStationRows(app: AppState) {
     val model = app.liveRadio
     val connection = app.connection
     if (connection == null) {
-        Group(STATIONS_ON_SERVER) {
+        SettingsCard(STATIONS_ON_SERVER, OctoIcons.Servers) {
             SettingRow("No server connected", "Connect a server to see the stations it keeps.", dim = true)
         }
         return
@@ -125,7 +126,7 @@ private fun RadioStationRows(app: AppState) {
     }
     val admin = model.admin == true
     val stations = model.serverStations
-    Group(STATIONS_ON_SERVER) {
+    SettingsCard(STATIONS_ON_SERVER, OctoIcons.Servers) {
         when {
             stations == null && failed -> SettingRow("Couldn't read the stations", "Your server didn't answer just now.") { RowAction("Try again", { round++ }) }
             stations == null -> SettingRow("Reading the stations", null) { Spinner(size = IconSize.Table) }
@@ -154,7 +155,9 @@ private fun RadioStationDetails.basic() = app.winters.octo.subsonic.RadioStation
 private fun StationRow(app: AppState, station: RadioStationDetails, own: Boolean, admin: Boolean, play: () -> Unit, changed: () -> Unit) {
     val detail = if (own) "Made by the server" else station.streamUrl.toHttpUrlOrNull()?.host ?: station.streamUrl
     Row(
-        Modifier.fillMaxWidth().padding(start = RowInset, top = Space.M, bottom = Space.M),
+        Modifier.settingsRow(station.name.ifBlank { station.streamUrl }, stable = "[each station]", id = "station-${settingsSlug(station.id)}")
+            .fillMaxWidth()
+            .padding(start = RowInset, top = Space.M, bottom = Space.M),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.L),
     ) {

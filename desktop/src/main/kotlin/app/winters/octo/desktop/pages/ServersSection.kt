@@ -82,18 +82,19 @@ import app.winters.octo.subsonic.shownAddress
 import app.winters.octo.serverupdate.upToDateLine
 import kotlinx.coroutines.launch
 
-// Settings > Servers: the servers kept on this computer, the one in use on
-// the darker pill, adding another, and what the one in use is and holds.
+// Settings > Servers: a newer Octo for the server in use, the servers kept
+// on this computer with the one in use on the darker pill, adding another,
+// what the one in use is and holds, and reading or scanning it again.
 
 @Composable
 internal fun ServerRows(app: AppState) {
     val settings by app.settings.state.collectAsState()
     val connection = app.connection
-    // Every server is asked how it is while the section is on screen, and
+    // Every server is asked how it is while the page is on screen, and
     // again once another is in use.
     LaunchedEffect(connection, settings.servers.size) { app.serverFacts.refresh() }
     if (connection?.isOcto == true) ServerUpdateCard(app)
-    Group("Your servers") {
+    SettingsCard("Your servers", OctoIcons.Servers) {
         settings.servers.forEach { server ->
             ServerRow(app, server, inUse = server.id == settings.activeServer)
         }
@@ -104,7 +105,7 @@ internal fun ServerRows(app: AppState) {
             { addServer(app) },
         )
     }
-    if (connection != null) Group("This server") { OverviewRows(app, connection) }
+    if (connection != null) OverviewCards(app, connection)
 }
 
 // The ink of the lines under the name of the server in use, and of its "In
@@ -118,7 +119,13 @@ internal val InUseSubtitle = OctoColors.TextPrimary.copy(alpha = 0.78f)
 private fun ServerRow(app: AppState, server: SavedServer, inUse: Boolean) {
     val switching = app.switching?.id == server.id
     val check = app.serverFacts.checks[server.id]
-    Box(Modifier.fillMaxWidth().heightIn(min = RowHeight.Roomy).semantics { selected = inUse }) {
+    Box(
+        Modifier
+            .settingsRow(server.name, stable = "[each saved server]", id = "server-${settingsSlug(server.id)}")
+            .fillMaxWidth()
+            .heightIn(min = RowHeight.Roomy)
+            .semantics { selected = inUse },
+    ) {
         ChosenFill(inUse, Modifier.matchParentSize().padding(CardFit.Fill), Corner.RowShape)
         Row(
             Modifier.fillMaxWidth().padding(horizontal = RowInset, vertical = Space.L),
@@ -187,10 +194,10 @@ private fun ServerMenuButton(app: AppState, server: SavedServer, inUse: Boolean)
     )
 }
 
-// What the server in use is, what it holds and offers, who is signed in,
-// and reading its library or its folders again.
+// What the server in use is, what it holds and offers and who is signed in,
+// then a card for reading its library or its folders again.
 @Composable
-private fun OverviewRows(app: AppState, connection: Connection) {
+private fun OverviewCards(app: AppState, connection: Connection) {
     val facts = app.serverFacts
     val state by (app.library?.state ?: return).collectAsState()
     val index = (state as? LibraryState.Ready)?.index
@@ -213,36 +220,40 @@ private fun OverviewRows(app: AppState, connection: Connection) {
     )
     // Octo that knows it runs the newest release says so.
     val kind = upToDateLine(update)?.takeIf { connection.isOcto } ?: overview.kind
-    SettingRow(kind, overview.offers ?: "Plays your music, with nothing beyond it.") {
-        overview.answer?.let { Txt(it, DesktopType.meta.copy(fontFeatureSettings = "tnum"), OctoColors.TextSecondary, Modifier.padding(end = RowValueEnd)) }
-    }
-    SettingRow("In your library", overview.counts ?: if (state is LibraryState.Failed) "Couldn't read the library just now." else "Reading the library.")
-    val kept = if (app.accounts.remembersSignIn) "Octo keeps you signed in on this computer." else "You'll sign in again the next time Octo opens."
-    SettingRow("Signed in as ${connection.client.username.ifEmpty { "API key" }}", overview.passwordNote ?: kept) {
-        if (overview.canChangePassword) RowAction("Change password", { changePassword(app) })
-    }
-    // Any account on a family server: a QR code another device scans to
-    // sign in with the same login.
-    if (connection.family) {
-        SettingRow(HANDOVER_TITLE, "Show a QR code to sign in on your phone or another computer, without typing your password.") {
-            RowAction("Show QR code", { showHandOver(app.popups, app, app.family) }, icon = OctoIcons.QrCode)
+    SettingsCard("This server", OctoIcons.Info) {
+        SettingRow(kind, overview.offers ?: "Plays your music, with nothing beyond it.", stable = "[the server's kind]", id = "kind") {
+            overview.answer?.let { Txt(it, DesktopType.meta.copy(fontFeatureSettings = "tnum"), OctoColors.TextSecondary, Modifier.padding(end = RowValueEnd)) }
         }
-    }
-    ActionRow("Read the library again", "When new music hasn't shown up yet.", "Read again", {
-        app.library?.load()
-        app.refreshPlaylists()
-    })
-    if (overview.canScan) {
-        val caption = facts.scanProblem ?: overview.scan ?: "Has the server look for music added to its folders."
-        SettingRow("Scan the server", caption) {
-            if (overview.scanning) {
-                Spinner(size = IconSize.Table)
-            } else {
-                RowAction("Scan", { facts.startScan { app.library?.load() } })
+        SettingRow("In your library", overview.counts ?: if (state is LibraryState.Failed) "Couldn't read the library just now." else "Reading the library.")
+        val kept = if (app.accounts.remembersSignIn) "Octo keeps you signed in on this computer." else "You'll sign in again the next time Octo opens."
+        SettingRow("Signed in as ${connection.client.username.ifEmpty { "API key" }}", overview.passwordNote ?: kept, stable = "Signed in as ...") {
+            if (overview.canChangePassword) RowAction("Change password", { changePassword(app) })
+        }
+        // Any account on a family server: a QR code another device scans to
+        // sign in with the same login.
+        if (connection.family) {
+            SettingRow(HANDOVER_TITLE, "Show a QR code to sign in on your phone or another computer, without typing your password.") {
+                RowAction("Show QR code", { showHandOver(app.popups, app, app.family) }, icon = OctoIcons.QrCode)
             }
         }
-    } else if (overview.scan != null) {
-        SettingRow("Its folders", overview.scan)
+    }
+    SettingsCard("Maintenance", OctoIcons.Library) {
+        ActionRow("Read the library again", "When new music hasn't shown up yet.", "Read again", {
+            app.library?.load()
+            app.refreshPlaylists()
+        })
+        if (overview.canScan) {
+            val caption = facts.scanProblem ?: overview.scan ?: "Has the server look for music added to its folders."
+            SettingRow("Scan the server", caption) {
+                if (overview.scanning) {
+                    Spinner(size = IconSize.Table)
+                } else {
+                    RowAction("Scan", { facts.startScan { app.library?.load() } })
+                }
+            }
+        } else if (overview.scan != null) {
+            SettingRow("Its folders", overview.scan)
+        }
     }
 }
 
@@ -527,13 +538,17 @@ fun askToRemove(app: AppState, server: SavedServer) {
                 if (forgetHere) "Its queue, play history and live lists on this computer go too." else "Off keeps its queue, play history and live lists on this computer, in case you add it again.",
                 forgetHere,
             ) { forgetHere = it }
-            Row(Modifier.fillMaxWidth().padding(top = Space.Xs, bottom = Space.Xs), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End)) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = Space.Xs, bottom = Space.Xs),
+                horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 GlazeCapsule(null, "Cancel", close, height = ControlHeight.L)
-                GlazeCapsule(OctoIcons.Delete, "Remove", {
+                DangerAction("Remove", {
                     close()
                     app.removeServer(server.id, forgetHere)
                     app.notice = "Removed ${server.name}."
-                }, lit = true, height = ControlHeight.L)
+                }, icon = OctoIcons.Delete)
             }
         }
     }

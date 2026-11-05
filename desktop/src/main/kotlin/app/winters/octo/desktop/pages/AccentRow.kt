@@ -19,11 +19,11 @@ import app.winters.octo.theme.accentHelp
 
 // The accent picker: a circle for each accent and one for the playing
 // cover's, the chosen one checked and ringed, each named on hover, and a
-// line naming the chosen one and saying what it colours.
+// line naming the chosen one and saying what it colors.
 @Composable
 internal fun AccentRow(chosen: AccentChoice, onPick: (AccentChoice) -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = RowInset, vertical = Space.L)) {
-        Txt(ACCENT_COLOR, DesktopType.body, OctoColors.TextPrimary)
+    Column(Modifier.settingsRow(ACCENT_COLOR).fillMaxWidth().padding(horizontal = RowInset, vertical = Space.L)) {
+        Txt(ACCENT_COLOR, RowTitleWords, OctoColors.TextPrimary)
         AccentSwatches(
             swatches = AccentChoice.entries.map { choice -> AccentSwatch(choice.label, choice.argb?.let(::Color), selected = choice == chosen) },
             onPick = { onPick(AccentChoice.entries[it]) },

@@ -3,9 +3,7 @@ package app.winters.octo.desktop.pages
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
@@ -21,22 +19,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntRect
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlassField
 import app.winters.octo.design.GlazeCapsule
-import app.winters.octo.design.GlazeSegments
 import app.winters.octo.design.MenuRow
 import app.winters.octo.design.MenuSeparator
 import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
-import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.PopupPadding
 import app.winters.octo.design.SettingsSize
 import app.winters.octo.design.Space
@@ -125,70 +118,68 @@ private val ReplayGainHelp = mapOf(
 private val FilterTypes = listOf(FilterType.Peak, FilterType.LowShelf, FilterType.HighShelf)
 
 // Settings' Sound page: which output it is for, the equalizer, loudness,
-// balance, crossfeed and a correction for headphones, one after another,
-// each under its name. Everything is heard as it moves and saved.
+// balance, crossfeed and a correction for headphones, each a titled card.
+// Everything is heard as it moves and saved. Without the sound engine the
+// page is one card saying so.
 @Composable
-internal fun SoundSections(app: AppState) {
+internal fun SoundCards(app: AppState) {
     val controller = app.sound
-    val playerState by app.player.state.collectAsState()
     val all by app.settings.state.collectAsState()
     if (controller == null) {
         Rows { SettingRow("Nothing to shape", "Octo's sound engine couldn't start on this computer.") }
         return
     }
     val eq by controller.current.collectAsState()
-    val device = playerState.playingOn?.name ?: "this computer"
-    listOf(
-        PageSection("output", "Output", OctoIcons.Speaker, detail = if (all.sound.perOutput) "These settings are for $device." else "These settings are for every output.") {
-            Rows {
-                SwitchRow(
-                    "Each output keeps its own sound",
-                    "Speakers, headphones and each USB device remember theirs.",
-                    all.sound.perOutput,
-                    controller::setPerOutput,
-                )
-            }
-        },
-        PageSection("eq", "Equalizer", OctoIcons.Equalizer, trailing = { OctoSwitch(eq.eqEnabled, { on -> controller.update { it.copy(eqEnabled = on) } }) }) {
-            Equalizer(app, controller)
-        },
-        PageSection("loudness", "Loudness", OctoIcons.Loudness) { LoudnessRows(controller) },
-        PageSection("balance", "Balance", OctoIcons.Balance) { BalanceRows(controller) },
-        PageSection("crossfeed", "Crossfeed", OctoIcons.Headphones, detail = CROSSFEED_ABOUT, trailing = {
-            OctoSwitch(eq.crossfeed.on, { on -> controller.update { it.copy(crossfeed = it.crossfeed.copy(on = on)) } })
-        }) { CrossfeedRows(controller) },
-        PageSection("correction", "Headphone correction", OctoIcons.Headphones) { CorrectionRows(controller) },
-    ).forEach { SoundPart(it) }
-}
-
-// One part of Sound: its name, with its switch at the end of that line,
-// its cards, and its line about it under them.
-@Composable
-private fun SoundPart(part: PageSection) {
-    Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().padding(bottom = Space.S), verticalAlignment = Alignment.CenterVertically) {
-            Txt(
-                part.name.uppercase(),
-                DesktopType.label,
-                OctoColors.TextMuted,
-                Modifier.weight(1f).padding(start = RowInset).semantics {
-                    heading()
-                    contentDescription = part.name
-                },
-            )
-            part.trailing?.invoke()
-        }
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.Xl)) { part.content(this) }
-        part.detail?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(start = RowInset, end = RowInset, top = Space.S), maxLines = 3) }
+    SettingsCard("Output", OctoIcons.Speaker, id = "output") {
+        SwitchRow(
+            "Each output keeps its own sound",
+            "Speakers, headphones and each USB device remember theirs.",
+            all.sound.perOutput,
+            change = controller::setPerOutput,
+        )
     }
+    SettingsCard("Equalizer", OctoIcons.Equalizer, id = "eq", toggle = TitleSwitch(eq.eqEnabled) { on -> controller.update { it.copy(eqEnabled = on) } }) {
+        Equalizer(app, controller)
+    }
+    SettingsCard("Loudness", OctoIcons.Loudness, id = "loudness") { LoudnessRows(controller) }
+    SettingsCard("Balance", OctoIcons.Balance, id = "balance") { BalanceRows(controller) }
+    SettingsCard(
+        "Crossfeed",
+        OctoIcons.Headphones,
+        id = "crossfeed",
+        footer = CROSSFEED_ABOUT,
+        toggle = TitleSwitch(eq.crossfeed.on) { on -> controller.update { it.copy(crossfeed = it.crossfeed.copy(on = on)) } },
+    ) { CrossfeedRows(controller) }
+    SettingsCard("Headphone correction", OctoIcons.Headphones, id = "correction") { CorrectionRows(controller) }
 }
 
-// Crossfade and speed, for Settings' Playback page, while the sound engine runs.
+// The line under the Sound page's title: the output its settings are for.
+@Composable
+internal fun soundLede(app: AppState): String {
+    val playerState by app.player.state.collectAsState()
+    val all by app.settings.state.collectAsState()
+    if (app.sound == null) return "How songs sound on this computer."
+    val device = playerState.playingOn?.name ?: "this computer"
+    return if (all.sound.perOutput) "These settings are for $device." else "These settings are for every output."
+}
+
+// Crossfade, with its switch on its title, and speed and pitch, for
+// Settings' Playback page, while the sound engine runs. They are the same
+// for every output.
 @Composable
 internal fun CrossfadeAndSpeed(app: AppState) {
     if (app.sound == null) return
     val all by app.settings.state.collectAsState()
-    SoundPart(PageSection("crossfade", "Crossfade and speed", OctoIcons.Crossfade) { PlaybackRows(app, all.playback) })
+    val playback = all.playback
+    fun change(edit: (PlaybackPrefs) -> PlaybackPrefs) = app.settings.update { it.copy(playback = edit(it.playback)) }
+    SettingsCard(
+        "Crossfade",
+        OctoIcons.Crossfade,
+        id = "crossfade",
+        footer = "Songs blend into the next. An album played in order runs straight on.",
+        toggle = TitleSwitch(playback.crossfadeSeconds > 0) { on -> change { it.copy(crossfadeSeconds = if (on) DEFAULT_BLEND_SECONDS else 0) } },
+    ) { CrossfadeRows(app, playback, ::change) }
+    SettingsCard("Speed and pitch", OctoIcons.Timer, id = "speed") { SpeedRows(playback, ::change) }
 }
 
 // Presets first, then the kind of curve, the curve itself, and the level
@@ -199,19 +190,6 @@ private fun Equalizer(app: AppState, sound: SoundController) {
     var chosen by remember { mutableIntStateOf(0) }
     val selected = chosen.coerceIn(0, (settings.filters.size - 1).coerceAtLeast(0))
     val parametric = settings.mode == EqMode.Parametric
-    Rows {
-        if (!parametric) {
-            SettingRow("Preset", null) { PresetButton(app, sound, settings) }
-        }
-        ChoiceRow(
-            "Bands",
-            if (parametric) "Filters placed anywhere, for correcting a room or headphones." else "Ten fixed bands, the simplest way.",
-            listOf(EqMode.Graphic, EqMode.Parametric),
-            settings.mode,
-            { if (it == EqMode.Graphic) "Ten bands" else "Free filters" },
-            { mode -> sound.update { withMode(it, mode) } },
-        )
-    }
     Card {
         EqCurve(
             settings,
@@ -229,14 +207,31 @@ private fun Equalizer(app: AppState, sound: SoundController) {
             Modifier.padding(horizontal = RowInset).padding(top = Space.S, bottom = Space.L),
         )
     }
-    if (parametric) FilterEditor(settings, selected, sound) { chosen = it }
-    Rows {
-        SwitchRow("Automatic preamp", "Lowers the level by the curve's top boost, so it never distorts.", settings.autoPreamp) { on ->
-            sound.update { it.copy(autoPreamp = on) }
-        }
-        if (!settings.autoPreamp) {
-            DbSlider("Preamp", "Lower it if a boosted curve distorts.", settings.preampDb, PreampRange, sound) { s, db -> s.copy(preampDb = db) }
-        }
+    if (!parametric) {
+        SettingRow("Preset", null) { PresetButton(app, sound, settings) }
+    } else {
+        HiddenRow("preset", by = "bands")
+    }
+    ChoiceRow(
+        "Bands",
+        if (parametric) "Filters placed anywhere, for correcting a room or headphones." else "Ten fixed bands, the simplest way.",
+        listOf(EqMode.Graphic, EqMode.Parametric),
+        settings.mode,
+        { if (it == EqMode.Graphic) "Ten bands" else "Free filters" },
+        onSelect = { mode -> sound.update { withMode(it, mode) } },
+    )
+    if (parametric) {
+        FilterEditor(settings, selected, sound) { chosen = it }
+    } else {
+        listOf("filter-n-of-m", "frequency", "gain", "width-q", "filters").forEach { HiddenRow(it, by = "bands") }
+    }
+    SwitchRow("Automatic preamp", "Lowers the level by the curve's top boost, so it never distorts.", settings.autoPreamp) { on ->
+        sound.update { it.copy(autoPreamp = on) }
+    }
+    if (!settings.autoPreamp) {
+        DbSlider("Preamp", "Lower it if a boosted curve distorts.", settings.preampDb, PreampRange, sound) { s, db -> s.copy(preampDb = db) }
+    } else {
+        HiddenRow("preamp", by = "automatic-preamp")
     }
 }
 
@@ -305,7 +300,7 @@ private fun FilterEditor(settings: SoundSettings, selected: Int, sound: SoundCon
         if (filter == null) {
             SettingRow("No filters yet", "Add one, then drag it on the curve.")
         } else {
-            ChoiceRow("Filter ${selected + 1} of ${settings.filters.size}", null, FilterTypes, filter.type, ::typeName) { type ->
+            ChoiceRow("Filter ${selected + 1} of ${settings.filters.size}", null, FilterTypes, filter.type, ::typeName, stable = "Filter n of m") { type ->
                 sound.update { edit(it, selected) { f -> f.copy(type = type) } }
             }
             val logHz = ln(MAX_HZ / MIN_HZ)
@@ -339,6 +334,7 @@ private fun FilterEditor(settings: SoundSettings, selected: Int, sound: SoundCon
         SettingRow(
             if (settings.filters.size < MAX_FILTERS) "Filters" else "Filters, all $MAX_FILTERS in use",
             null,
+            stable = "Filters",
         ) {
             RowAction("Add filter", {
                 val next = settings.filters.size
@@ -390,7 +386,7 @@ private fun LoudnessRows(sound: SoundController) {
                 ReplayGainMode.Album -> "Album"
                 ReplayGainMode.Smart -> "Smart"
             }
-        }, { mode -> sound.update { it.copy(replayGain = mode) } })
+        }, onSelect = { mode -> sound.update { it.copy(replayGain = mode) } })
         if (settings.replayGain != ReplayGainMode.Off) {
             DbSlider("Preamp", "Raise it if matched songs sound too quiet.", settings.replayGainPreampDb, ReplayGainPreampRange, sound) { s, db -> s.copy(replayGainPreampDb = db) }
             DbSlider("Songs without loudness info", "The level for songs that were never measured.", settings.replayGainFallbackDb, FallbackRange, sound) { s, db ->
@@ -399,6 +395,8 @@ private fun LoudnessRows(sound: SoundController) {
             SwitchRow("Prevent clipping", "Turns a song down rather than letting a boost distort it.", settings.preventClipping) { on ->
                 sound.update { it.copy(preventClipping = on) }
             }
+        } else {
+            listOf("preamp", "songs-without-loudness-info", "prevent-clipping").forEach { HiddenRow(it, by = "match-loudness") }
         }
         SwitchRow("Limiter", "Catches any peak that would still distort.", settings.limiter) { on ->
             sound.update { it.copy(limiter = on) }
@@ -439,67 +437,74 @@ private fun readBalance(balance: Float): String {
     }
 }
 
-// Crossfade, speed and pitch: for every output, not one at a time.
+// How songs blend, once crossfade is on; off, each row hands an ask for it
+// to the switch on the card's title.
 @Composable
-private fun PlaybackRows(app: AppState, playback: PlaybackPrefs) {
-    fun change(edit: (PlaybackPrefs) -> PlaybackPrefs) = app.settings.update { it.copy(playback = edit(it.playback)) }
-    Rows {
-        SwitchRow("Crossfade", "Songs blend into the next. An album played in order runs straight on.", playback.crossfadeSeconds > 0) { on ->
-            change { it.copy(crossfadeSeconds = if (on) DEFAULT_BLEND_SECONDS else 0) }
+private fun CrossfadeRows(app: AppState, playback: PlaybackPrefs, change: ((PlaybackPrefs) -> PlaybackPrefs) -> Unit) {
+    if (playback.crossfadeSeconds <= 0) {
+        listOf("longest-blend", "crossfade-curve", "smart-transitions", "filter-sweeps", "match-tempo").forEach { HiddenRow(it, by = "crossfade") }
+        return
+    }
+    val seconds = playback.crossfadeSeconds.coerceIn(SHORTEST_BLEND_SECONDS, LONGEST_BLEND_SECONDS)
+    val span = (LONGEST_BLEND_SECONDS - SHORTEST_BLEND_SECONDS).toFloat()
+    SliderRow(
+        "Longest blend",
+        "How long two songs may play over each other.",
+        "$seconds s",
+        (seconds - SHORTEST_BLEND_SECONDS) / span,
+        { x -> change { it.copy(crossfadeSeconds = SHORTEST_BLEND_SECONDS + (x * span).roundToInt()) } },
+        live = false,
+        wheelStep = 1f / span,
+    )
+    CurveRow(app, playback.crossfadeCurve, playback.smartTransitions) { curve -> change { it.copy(crossfadeCurve = curve) } }
+    SwitchRow(
+        "Smart transitions",
+        "Blends start on the beat or as a song winds down. Off, songs fade at the very end.",
+        playback.smartTransitions,
+    ) { on -> change { it.copy(smartTransitions = on) } }
+    if (playback.smartTransitions) {
+        SwitchRow("Filter sweeps", "The ending song thins out as the next comes in.", playback.filterSweeps) { on ->
+            change { it.copy(filterSweeps = on) }
         }
-        if (playback.crossfadeSeconds > 0) {
-            val seconds = playback.crossfadeSeconds.coerceIn(SHORTEST_BLEND_SECONDS, LONGEST_BLEND_SECONDS)
-            val span = (LONGEST_BLEND_SECONDS - SHORTEST_BLEND_SECONDS).toFloat()
-            SliderRow(
-                "Longest blend",
-                "How long two songs may play over each other.",
-                "$seconds s",
-                (seconds - SHORTEST_BLEND_SECONDS) / span,
-                { x -> change { it.copy(crossfadeSeconds = SHORTEST_BLEND_SECONDS + (x * span).roundToInt()) } },
-                live = false,
-                wheelStep = 1f / span,
-            )
-            CurveRow(app, playback.crossfadeCurve, playback.smartTransitions) { curve -> change { it.copy(crossfadeCurve = curve) } }
-            SwitchRow(
-                "Smart transitions",
-                "Each blend starts where the music allows, on the beat or as the song winds down. Off, songs fade at the very end.",
-                playback.smartTransitions,
-            ) { on -> change { it.copy(smartTransitions = on) } }
-            if (playback.smartTransitions) {
-                SwitchRow("Filter sweeps", "The song that is ending thins out as the next one comes in.", playback.filterSweeps) { on ->
-                    change { it.copy(filterSweeps = on) }
-                }
-                SwitchRow("Match tempo", "Nudges the next song's speed to the beat of this one while they blend.", playback.matchTempo) { on ->
-                    change { it.copy(matchTempo = on) }
-                }
-            }
+        SwitchRow("Match tempo", "Nudges the next song to this one's beat while they blend.", playback.matchTempo) { on ->
+            change { it.copy(matchTempo = on) }
         }
-        SliderRow(
-            "Speed",
-            "How fast music plays.",
-            speedLabel(playback.speed),
-            speedFraction(playback.speed),
-            { x -> change { it.copy(speed = speedAt(x)) } },
-            live = false,
-            wheelStep = 0.05f / (FASTEST_SPEED - SLOWEST_SPEED),
-        )
-        SwitchRow("Keep the pitch", "Off, voices rise and fall with the speed, like a record.", playback.keepPitch) { on ->
-            change { it.copy(keepPitch = on) }
-        }
-        SliderRow(
-            "Pitch",
-            "Shifts every song up or down, in semitones.",
-            semitonesLabel(playback.pitchSemitones),
-            semitonesFraction(playback.pitchSemitones),
-            { x -> change { it.copy(pitchSemitones = semitonesAt(x)) } },
-            live = false,
-            wheelStep = 1f / (2 * PITCH_RANGE_SEMITONES),
-        )
-        if (playback.speed != 1f || !playback.keepPitch || playback.pitchSemitones != 0) {
-            ActionRow("Speed or pitch changed", "Every song plays this way until it is set back.", "Back to normal", {
-                change { it.copy(speed = 1f, keepPitch = true, pitchSemitones = 0) }
-            })
-        }
+    } else {
+        HiddenRow("filter-sweeps", by = "smart-transitions")
+        HiddenRow("match-tempo", by = "smart-transitions")
+    }
+}
+
+// Speed and pitch, and a way back to normal once either has moved.
+@Composable
+private fun SpeedRows(playback: PlaybackPrefs, change: ((PlaybackPrefs) -> PlaybackPrefs) -> Unit) {
+    SliderRow(
+        "Speed",
+        "How fast music plays.",
+        speedLabel(playback.speed),
+        speedFraction(playback.speed),
+        { x -> change { it.copy(speed = speedAt(x)) } },
+        live = false,
+        wheelStep = 0.05f / (FASTEST_SPEED - SLOWEST_SPEED),
+    )
+    SwitchRow("Keep the pitch", "Off, voices rise and fall with the speed, like a record.", playback.keepPitch) { on ->
+        change { it.copy(keepPitch = on) }
+    }
+    SliderRow(
+        "Pitch",
+        "Shifts every song up or down, in semitones.",
+        semitonesLabel(playback.pitchSemitones),
+        semitonesFraction(playback.pitchSemitones),
+        { x -> change { it.copy(pitchSemitones = semitonesAt(x)) } },
+        live = false,
+        wheelStep = 1f / (2 * PITCH_RANGE_SEMITONES),
+    )
+    if (playback.speed != 1f || !playback.keepPitch || playback.pitchSemitones != 0) {
+        ActionRow("Speed or pitch changed", "Every song plays this way until it is set back.", "Back to normal", {
+            change { it.copy(speed = 1f, keepPitch = true, pitchSemitones = 0) }
+        })
+    } else {
+        HiddenRow("speed-or-pitch-changed", by = "speed")
     }
 }
 
@@ -517,21 +522,21 @@ private fun CorrectionRows(sound: SoundController) {
             SettingRow(
                 correction.name,
                 if (correction.source == ParametricEqFile.IMPORTED) "Imported from a file." else "Measured by ${correction.source}.",
+                stable = "[the loaded correction]",
+                id = "loaded",
             ) {
                 RowAction("Remove", { sound.update { it.copy(correction = null) } })
             }
         }
-        ActionRow(
-            if (correction == null) "Import a correction" else "Import another",
-            importProblem ?: "From a ParametricEQ.txt file made for your headphones.",
-            "Import",
-            {
-                val file = chooseFile("Choose a ParametricEQ.txt file", save = false) ?: return@ActionRow
+        val importTitle = if (correction == null) "Import a correction" else "Import another"
+        SettingRow(importTitle, importProblem ?: "From a ParametricEQ.txt file made for your headphones.", id = "import") {
+            RowAction("Import", {
+                val file = chooseFile("Choose a ParametricEQ.txt file", save = false) ?: return@RowAction
                 val read = runCatching { ParametricEqFile.correction(file.name, file.readText()) }.getOrNull()
                 importProblem = if (read == null) "That file has no filters Octo can read." else null
                 if (read != null) sound.update { it.copy(eqEnabled = true, correction = read) }
-            },
-        )
+            })
+        }
         ActionRow("Export my curve", exportProblem ?: "Saves the equalizer as a ParametricEQ.txt file.", "Export", {
             val file = chooseFile("Save the curve", save = true, suggested = "Octo ParametricEQ.txt") ?: return@ActionRow
             val on = settings.copy(eqEnabled = true)
@@ -644,6 +649,8 @@ private fun CrossfeedRows(sound: SoundController) {
                 onRelease = sound::settle,
                 wheelStep = 0.5f / span,
             )
+        } else {
+            listOf(CROSSFEED_CUT_TITLE, CROSSFEED_FEED_TITLE).forEach { HiddenRow(settingsSlug(it), by = "preset") }
         }
     }
 }

@@ -6,16 +6,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.unit.dp
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.pages.InfoRow
-import app.winters.octo.desktop.pages.Rows
+import app.winters.octo.desktop.pages.SettingsCard
 import app.winters.octo.desktop.pages.SwitchRow
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.design.IconAction
+import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.IconPath
 import app.winters.octo.design.IconSource
 
-// How Octo fits into the system: the tray, notifications, the window's
-// frame, and whether the media keys reach it. The mini player and Discord
-// have groups of their own below (MoreSystemRows.kt).
+// How Octo's window fits into the system: the tray, notifications, the
+// window's frame, and whether the media keys reach it. Startup and the mini
+// player have cards of their own after it (ShellSettings.kt,
+// MoreSystemRows.kt).
 @Composable
 fun SystemRows(app: AppState) {
     val system = LocalSystem.current
@@ -23,7 +25,7 @@ fun SystemRows(app: AppState) {
     val prefs = settings.system
     val mac = app.os == DesktopOs.Mac
     val tray = if (mac) "menu bar" else "tray"
-    Rows {
+    SettingsCard("Window", OctoIcons.System) {
         if (system?.trayAvailable == true) {
             SwitchRow(
                 "Keep playing when the window closes",
