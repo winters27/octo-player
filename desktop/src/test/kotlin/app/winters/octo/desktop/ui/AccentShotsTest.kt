@@ -9,7 +9,6 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.desktop.a11y.A11yScene
 import app.winters.octo.desktop.a11y.name
 import app.winters.octo.desktop.nav.Page
-import app.winters.octo.desktop.pages.showSection
 import app.winters.octo.theme.AccentChoice
 import app.winters.octo.theme.accentFromArt
 import org.jetbrains.skia.EncodedImageFormat
@@ -45,10 +44,7 @@ class AccentShotsTest {
     }
 
     private fun A11yScene.openAppearance() {
-        onUi {
-            showSection("Settings", "look")
-            app.navigator.go(Page.Settings)
-        }
+        onUi { app.openSettings("look") }
         render(6)
     }
 
