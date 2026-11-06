@@ -41,7 +41,7 @@ internal fun AboutRows(app: AppState, settings: AppSettings) {
     if (updates != null) {
         val prefs = settings.updates
         fun change(edit: (UpdatePrefs) -> UpdatePrefs) = app.settings.update { it.copy(updates = edit(it.updates)) }
-        SettingsCard("Updates", OctoIcons.Download) {
+        SettingsCard("Updates", OctoIcons.Upgrade) {
             if (ready != null) {
                 SettingRow("Update ready: ${ready.version}", updates.installHelp(ready), stable = "Update ready: ...", id = "update-ready") {
                     val system = LocalSystem.current

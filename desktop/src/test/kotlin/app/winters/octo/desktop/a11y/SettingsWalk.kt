@@ -23,6 +23,8 @@ import app.winters.octo.desktop.audio.SoundTarget
 import app.winters.octo.desktop.hotkeys.HotkeyAction
 import app.winters.octo.desktop.nav.SettingsKey
 import app.winters.octo.desktop.nav.settingsPages
+import app.winters.octo.desktop.pages.CardIcon
+import app.winters.octo.desktop.pages.CardIconInfo
 import app.winters.octo.desktop.pages.LocalSettingsAnchors
 import app.winters.octo.desktop.pages.RowId
 import app.winters.octo.desktop.pages.RowTitle
@@ -81,8 +83,13 @@ internal object SettingsWalk {
     // One row as drawn: its page, its title, and the id it is found by.
     class Drawn(val page: String, val title: RowTitleInfo, val id: String?)
 
-    // One window walked: what it has, and every row drawn in it.
-    class Window(val name: String, val here: SettingsHere, val rows: List<Drawn>)
+    // One card's title line as drawn: its page, its title and icon, and the
+    // card's id (a card whose title changes with the window keeps it).
+    class DrawnCard(val page: String, val card: CardIconInfo, val id: String?)
+
+    // One window walked: what it has, every row drawn in it, and every card
+    // title drawn with an icon.
+    class Window(val name: String, val here: SettingsHere, val rows: List<Drawn>, val cards: List<DrawnCard> = emptyList())
 
     val windows: List<Window> by lazy { walk() }
 
@@ -350,6 +357,7 @@ internal object SettingsWalk {
                 family = s.app.connection?.family == true,
             )
             val rows = mutableListOf<Drawn>()
+            val cards = mutableListOf<DrawnCard>()
             for (page in settingsPages(os == DesktopOs.Windows, here.discord)) {
                 if (only != null && page.key !in only) continue
                 s.onUi { s.app.openSettings(page.key) }
@@ -363,11 +371,12 @@ internal object SettingsWalk {
                     }
                 }
                 titles().forEach { (node, title) -> rows += Drawn(page.key, title, node.placeId()) }
+                s.nodes().forEach { node -> node.config.getOrNull(CardIcon)?.let { cards += DrawnCard(page.key, it, node.placeId()) } }
             }
             after()
             // Let the held answer reach the app before the server closes.
             s.render(2)
-            Window(name, here, rows)
+            Window(name, here, rows, cards)
         }
     }
 }

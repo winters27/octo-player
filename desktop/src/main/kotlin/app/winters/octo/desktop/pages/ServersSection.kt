@@ -226,7 +226,7 @@ private fun OverviewCards(app: AppState, connection: Connection) {
     )
     // Octo that knows it runs the newest release says so.
     val kind = upToDateLine(update)?.takeIf { connection.isOcto } ?: overview.kind
-    SettingsCard("This server", OctoIcons.Info) {
+    SettingsCard("This server", OctoIcons.Database) {
         SettingRow(kind, overview.offers ?: "Plays your music, with nothing beyond it.", stable = "[the server's kind]", id = "kind") {
             overview.answer?.let { Txt(it, DesktopType.meta.copy(fontFeatureSettings = "tnum"), OctoColors.TextSecondary, Modifier.padding(end = RowValueEnd)) }
         }

@@ -21,6 +21,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.SemanticsPropertyKey
@@ -45,6 +46,12 @@ data class RowTitleInfo(val title: String, val stable: String)
 
 // Every setting row and every card title holding a switch carries its title.
 val RowTitle = SemanticsPropertyKey<RowTitleInfo>("RowTitle")
+
+// A card's title and the icon its title line draws, which the tests read to
+// tell which cards share an icon.
+data class CardIconInfo(val title: String, val icon: ImageVector)
+
+val CardIcon = SemanticsPropertyKey<CardIconInfo>("CardIcon")
 
 // The row or card lit because it was asked for, by the ask's nonce; absent
 // while nothing is lit there.

@@ -117,6 +117,8 @@
     "sym_identification_card": { "icon": "identification-card", "weight": "regular" },
     "sym_hourglass": { "icon": "hourglass-medium", "weight": "regular" },
     "sym_wave_sine": { "icon": "wave-sine", "weight": "regular" },
-    "sym_power": { "icon": "power", "weight": "regular" }
+    "sym_power": { "icon": "power", "weight": "regular" },
+    "sym_square_half": { "icon": "square-half", "weight": "regular" },
+    "sym_arrow_circle_up": { "icon": "arrow-circle-up", "weight": "regular" }
   }
 }

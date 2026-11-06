@@ -110,6 +110,11 @@ object OctoIcons {
     val Wave by sym("sym_wave_sine")
     val Power by sym("sym_power")
 
+    // The window's background, what the server is, and Octo's own updates.
+    val Backdrop by sym("sym_square_half")
+    val Database by sym("sym_database")
+    val Upgrade by sym("sym_arrow_circle_up")
+
     // Back and forward through the pages, and opening the full player: the
     // chevron turned.
     val Back by lazy { loadIcon("sym_chevron_right").toImageVector(mirrored = true) }
@@ -160,4 +165,5 @@ val allIcons: List<Pair<String, () -> ImageVector>> = listOf(
     "SignOut" to { OctoIcons.SignOut }, "HardDrive" to { OctoIcons.HardDrive }, "Wrench" to { OctoIcons.Wrench },
     "LeftRight" to { OctoIcons.LeftRight }, "PictureInPicture" to { OctoIcons.PictureInPicture }, "Enlarge" to { OctoIcons.Enlarge },
     "Plan" to { OctoIcons.Plan }, "Hourglass" to { OctoIcons.Hourglass }, "Wave" to { OctoIcons.Wave }, "Power" to { OctoIcons.Power },
+    "Backdrop" to { OctoIcons.Backdrop }, "Database" to { OctoIcons.Database }, "Upgrade" to { OctoIcons.Upgrade },
 )

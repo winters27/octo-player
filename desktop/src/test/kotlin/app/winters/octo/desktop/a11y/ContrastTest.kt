@@ -228,6 +228,32 @@ class ContrastTest {
         check(spots, minimum = AccentChoice.entries.size * 6)
     }
 
+    // Settings' quiet action pills: their words over the pill on a glaze
+    // card, over the immersive wash of a white cover at full strength, in
+    // every accent.
+    @Test(timeout = 300_000)
+    fun settingsActionPillsReadOverAWhiteWashInEveryAccent() {
+        val immersive: (AppSettings) -> AppSettings = { it.copy(appearance = it.appearance.copy(ambientGlow = true, ambience = AmbienceStyle.Immersive, glowStrength = 1f)) }
+        val spots = A11yScene(folder.newFolder(), height = 1_200, cover = covers.getValue("white"), coverId = "cover-white-pills", look = immersive).use { s ->
+            s.onUi {
+                s.app.play(s.app.library!!.index!!.songs, 0)
+                s.app.player.togglePlay()
+                s.app.openSettings(SettingsKey.Servers)
+            }
+            s.settle(3_000).close()
+            AccentChoice.entries.flatMap { accent ->
+                s.onUi { s.app.settings.update { it.copy(appearance = it.appearance.copy(accent = accent)) } }
+                val image = s.settle(700)
+                keep(image, "contrast-settings-pills-white-${accent.name.lowercase()}")
+                s.spots(image, "white immersive, ${accent.label}", listOf(
+                    Triple("Add", "Add a server's pill", 4.5),
+                    Triple("Read again", "Read the library again's pill", 4.5),
+                ), { it.left > 300f && it.bottom < 1_080f })
+            }
+        }
+        check(spots, minimum = AccentChoice.entries.size * 2)
+    }
+
     @Test(timeout = 180_000)
     fun aMenuOverTheGlowReads() {
         val spots = A11yScene(folder.newFolder(), cover = yellow, look = { it.copy(appearance = it.appearance.copy(glowStrength = 1f)) }).use { s ->

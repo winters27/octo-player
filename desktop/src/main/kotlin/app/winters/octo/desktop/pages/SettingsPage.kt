@@ -166,7 +166,7 @@ private fun AppearanceCards(app: AppState, settings: AppSettings) {
             { size -> if (size == 0) "Like $system" else "$size%" },
         ) { size -> appearance { it.copy(textSize = size) } }
     }
-    SettingsCard("Window background", OctoIcons.System) {
+    SettingsCard("Window background", OctoIcons.Backdrop) {
         PictureChoiceRow("Ambience", ambienceHelp(chosen), listOf(null, AmbienceStyle.Glow, AmbienceStyle.Immersive), chosen, ::ambienceName, { style ->
             appearance { withAmbience(it, style) }
         }) { AmbiencePicture(it) }

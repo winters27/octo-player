@@ -18,7 +18,10 @@ import app.winters.octo.desktop.pages.LocalRowFlashMs
 import app.winters.octo.desktop.pages.RowFlash
 import app.winters.octo.desktop.pages.RowId
 import app.winters.octo.desktop.pages.RowTitle
+import app.winters.octo.desktop.pages.STATIONS_ON_SERVER
 import app.winters.octo.desktop.pages.SettingsHere
+import app.winters.octo.desktop.nav.settingsPages
+import app.winters.octo.desktop.pages.settingsPageIcon
 import app.winters.octo.desktop.pages.searchDesktopSettings
 import app.winters.octo.desktop.pages.settingsIconSize
 import app.winters.octo.desktop.settings.DesktopOs
@@ -275,6 +278,29 @@ class SettingsPolishTest {
         val window = searchDesktopSettings("keyboard", SettingsHere(os = DesktopOs.Windows)).first { it.entry.row == null && it.entry.page == SettingsKey.Keys }
         assertEquals("This computer", window.place)
     }
+
+    // No two cards on one page share an icon, and no card wears the icon of
+    // another page's item in Settings' list unless the card is about that
+    // page's subject, as every page, computer and build draws them.
+    @Test(timeout = 300_000)
+    fun everyCardKeepsAnIconOfItsOwn() {
+        val drawn = SettingsWalk.windows.flatMap { it.cards }.distinctBy { it.page to (it.id ?: it.card.title) }
+        assertTrue("cards with icons were drawn: ${drawn.size}", drawn.size >= 25)
+        val problems = mutableListOf<String>()
+        drawn.groupBy { it.page }.forEach { (page, cards) ->
+            cards.groupBy { it.card.icon }.values.filter { it.size > 1 }.forEach { same -> problems += "$page: ${same.map { it.card.title }} share an icon" }
+        }
+        for (card in drawn) {
+            for (item in settingsPages(windows = true, discord = true).map { it.key }) {
+                if (item == card.page || SameSubject[card.page to card.card.title] == item) continue
+                if (settingsPageIcon(item) === card.card.icon) problems += "${card.page}: \"${card.card.title}\" wears the $item item's icon"
+            }
+        }
+        assertTrue("cards sharing icons:\n" + problems.joinToString("\n"), problems.isEmpty())
+    }
+
+    // Cards about another page's subject, which may wear its item's icon.
+    private val SameSubject = mapOf((SettingsKey.Radio to STATIONS_ON_SERVER) to SettingsKey.Servers)
 
     // The server in use says what it is once, under the list, not in its
     // row too.

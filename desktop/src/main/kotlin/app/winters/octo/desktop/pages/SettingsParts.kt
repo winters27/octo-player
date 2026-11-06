@@ -340,6 +340,7 @@ private fun CardTitle(title: String, icon: ImageVector?, brand: Boolean, toggle:
         Modifier
             .fillMaxWidth()
             .then(if (toggle != null) Modifier.semantics { this[RowTitle] = RowTitleInfo(title, title) } else Modifier)
+            .then(if (icon != null) Modifier.semantics { this[CardIcon] = CardIconInfo(title, icon) } else Modifier)
             .padding(end = RowInset, bottom = Space.M)
             .heightIn(min = TitleLine),
         verticalAlignment = Alignment.CenterVertically,
