@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.dropShadow
@@ -21,7 +22,10 @@ import androidx.compose.ui.unit.sp
 // StreamNook's tooltip: its near black glass ink with a hairline of white
 // round it. StreamNook frosts what is behind at 80%; a pop-up here cannot,
 // so the ink is a little thicker to read as well.
-val TooltipFill = Color(0xFF09090B).copy(alpha = 0.92f)
+val TooltipFill: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = if (LocalOctoSurfaces.current.light) glassFilm(0.92f) else Color(0xFF09090B).copy(alpha = 0.92f)
 
 private val TooltipShape = OctoShapes.ChromeSmall
 
@@ -46,10 +50,10 @@ fun TooltipBubble(text: String, modifier: Modifier = Modifier) {
     Box(
         modifier
             .widthIn(max = 320.dp)
-            .dropShadow(TooltipShape, Shadow(radius = shadowBlur(25f), spread = (-5).dp, color = Color.Black.copy(alpha = 0.30f), offset = DpOffset(0.dp, 12.dp)))
+            .dropShadow(TooltipShape, Shadow(radius = shadowBlur(25f), spread = (-5).dp, color = shadowColor(0.30f), offset = DpOffset(0.dp, 12.dp)))
             .clip(TooltipShape)
             .background(TooltipFill)
-            .border(1.dp, Color.White.copy(alpha = 0.10f), TooltipShape)
+            .border(1.dp, glassRim(0.10f), TooltipShape)
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         BasicText(

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,14 +55,19 @@ fun DarkGlaze(
 // The film under the LCD glass, when it has nothing to frost.
 val LcdGlassFill = Color(0xFF161618).copy(alpha = 0.72f)
 
-private val LcdBlur by lazy { lcdBlur() }
+@Composable
+private fun LcdBlur(): HazeBlurStyle {
+    val page = OctoColors.Background
+    val card = OctoColors.BackgroundTertiary
+    return remember(page, card) { lcdBlur(page, card) }
+}
 
-private fun lcdBlur() = HazeBlurStyle {
-    backgroundColor(OctoColors.Background)
+private fun lcdBlur(page: Color, card: Color) = HazeBlurStyle {
+    backgroundColor(page)
     blurRadius(backdropBlur(GlazeFrost * 4f))
     noiseFactor(0f)
     colorEffects(listOf(HazeColorEffect.colorFilter(ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(1.2f) }))))
-    fallbackColorEffect(HazeColorEffect.tint(OctoColors.BackgroundTertiary))
+    fallbackColorEffect(HazeColorEffect.tint(card))
 }
 
 // LCD glass, for a compact player: a thick pane with a bright line round
@@ -77,7 +83,7 @@ fun LcdGlass(
     focused: Boolean = LocalWindowFocused.current,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val blur = LcdBlur
+    val blur = LcdBlur()
     Box(
         modifier.dropShadow(shape, Shadow(radius = shadowBlur(24f), color = Color.Black.copy(alpha = 0.35f), offset = DpOffset(0.dp, 8.dp))),
         contentAlignment = Alignment.Center,

@@ -76,13 +76,14 @@ fun GlassInput(
             .fillMaxWidth()
             .then(if (contentType != null) Modifier.semantics { this.contentType = contentType } else Modifier),
         decorationBox = { field ->
+            val accent = OctoColors.Accent
             Row(
                 Modifier
                     .fillMaxWidth()
                     .height(height)
                     .focusRing(InputShape, { depth.coerceIn(0f, 1f) }, width = 1.5.dp, color = OctoColors.Accent.copy(alpha = 0.60f))
                     .clip(InputShape)
-                    .drawBehind { drawRect(OctoColors.Accent.copy(alpha = 0.10f + 0.05f * depth.coerceIn(0f, 1f))) }
+                    .drawBehind { drawRect(accent.copy(alpha = 0.10f + 0.05f * depth.coerceIn(0f, 1f))) }
                     // The stylesheet uses a negative spread here, which Android
                     // ignores; a slightly smaller blur reaches the same depth.
                     .innerShadow(InputShape) {

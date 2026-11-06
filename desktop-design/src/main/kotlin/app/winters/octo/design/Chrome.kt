@@ -1,6 +1,9 @@
 package app.winters.octo.design
 
 import androidx.compose.foundation.background
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -17,23 +20,29 @@ import dev.chrisbanes.haze.blur.hazeBlur
 // frame rather than four floating panels. Dark enough that bright artwork
 // behind never washes out the words on it; clear enough that the colour
 // still shows.
-val ChromeFilm = Color.Black.copy(alpha = 0.46f)
+val ChromeFilm: Color @Composable @ReadOnlyComposable get() = glassFilm(0.46f)
 
 // The hairline where the frame meets the page.
-val ChromeEdge = Color.White.copy(alpha = 0.07f)
+val ChromeEdge: Color @Composable @ReadOnlyComposable get() = glassRim(0.07f)
 
-private val ChromeBlur by lazy {
-    HazeBlurStyle {
-        backgroundColor(OctoColors.Background)
-        blurRadius(backdropBlur(20f))
-        noiseFactor(0f)
-        colorEffects(listOf(HazeColorEffect.colorFilter(ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(1.2f) }))))
-        fallbackColorEffect(HazeColorEffect.tint(OctoColors.BackgroundTertiary))
+@Composable
+private fun ChromeBlur(): HazeBlurStyle {
+    val page = OctoColors.Background
+    val card = OctoColors.BackgroundTertiary
+    return remember(page, card) {
+        HazeBlurStyle {
+            backgroundColor(page)
+            blurRadius(backdropBlur(20f))
+            noiseFactor(0f)
+            colorEffects(listOf(HazeColorEffect.colorFilter(ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(1.2f) }))))
+            fallbackColorEffect(HazeColorEffect.tint(card))
+        }
     }
 }
 
 // Frosts what is behind (the window's colours) and lays the dark film on
 // it. With no backdrop, the film alone.
+@Composable
 fun Modifier.chromeFilm(backdrop: HazeState?): Modifier = this
-    .then(if (backdrop != null) Modifier.hazeBlur(input = HazeInput.Backdrop(backdrop), style = ChromeBlur) else Modifier)
+    .then(if (backdrop != null) Modifier.hazeBlur(input = HazeInput.Backdrop(backdrop), style = ChromeBlur()) else Modifier)
     .background(ChromeFilm)

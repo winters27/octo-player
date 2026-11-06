@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -42,8 +43,8 @@ val HoverFill = Color.White.copy(alpha = 0.06f)
 // A card of settings: a faint glaze of the words' own ink off the page, its
 // edge a hairline of the same. Read while composing, so a new palette
 // redraws them.
-val CardFill: Color get() = OctoColors.TextPrimary.copy(alpha = 0.045f)
-val CardEdge: Color get() = OctoColors.TextPrimary.copy(alpha = 0.085f)
+val CardFill: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.045f)
+val CardEdge: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.085f)
 
 // Text in the app's type, one line and cut with an ellipsis unless told
 // otherwise. A page's title and a section's name are headings, so a screen

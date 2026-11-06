@@ -53,11 +53,11 @@ fun AccentSwatches(
     }
 }
 
-// The dark ink on an accent, the page's own colour.
-private val SwatchInk = Color(0xFF0C0C0D)
-
 @Composable
 private fun Swatch(swatch: AccentSwatch, spectrum: List<Color>, onClick: () -> Unit) {
+    // The ink on an accent, and the ring round the chosen one.
+    val ink = OctoColors.OnAccent
+    val ring = OctoColors.TextPrimary
     Box(
         Modifier
             .size(48.dp)
@@ -69,7 +69,7 @@ private fun Swatch(swatch: AccentSwatch, spectrum: List<Color>, onClick: () -> U
     ) {
         Canvas(Modifier.size(42.dp)) {
             val radius = size.minDimension / 2
-            if (swatch.selected) drawCircle(Color.White, radius = radius - 1.dp.toPx(), style = Stroke(2.dp.toPx()))
+            if (swatch.selected) drawCircle(ring, radius = radius - 1.dp.toPx(), style = Stroke(2.dp.toPx()))
             val inner = radius - 5.dp.toPx()
             val color = swatch.color
             if (color != null) {
@@ -84,7 +84,7 @@ private fun Swatch(swatch: AccentSwatch, spectrum: List<Color>, onClick: () -> U
                     lineTo(center.x - s * 0.12f, center.y + s * 0.34f)
                     lineTo(center.x + s * 0.48f, center.y - s * 0.30f)
                 }
-                drawPath(check, SwatchInk, style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                drawPath(check, ink, style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
             }
         }
     }

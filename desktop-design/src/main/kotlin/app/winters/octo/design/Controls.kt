@@ -132,7 +132,7 @@ fun GlazeCapsule(
         Row(
             modifier
                 .height(height)
-                .buttonMotion(look, CircleShape)
+                .buttonMotion(look, CircleShape, OctoColors.FocusRing)
                 .alpha(if (enabled) 1f else OctoInk.DisabledAlpha)
                 .clip(CircleShape)
                 .background(Color.White.copy(alpha = if (held) 0.12f else 0.08f))
@@ -154,7 +154,7 @@ fun GlazeCapsule(
     Glaze(
         modifier
             .height(height)
-            .buttonMotion(look, CircleShape)
+            .buttonMotion(look, CircleShape, OctoColors.FocusRing)
             .alpha(if (enabled) 1f else OctoInk.DisabledAlpha)
             .hoverable(interaction)
             .pointerHoverIcon(PointerIcon.Hand)
@@ -194,7 +194,7 @@ fun GlazeRound(
     Glaze(
         modifier
             .size(size)
-            .buttonMotion(look, CircleShape)
+            .buttonMotion(look, CircleShape, OctoColors.FocusRing)
             .alpha(if (enabled) 1f else OctoInk.DisabledAlpha)
             .hoverable(interaction)
             .pointerHoverIcon(PointerIcon.Hand)

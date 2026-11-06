@@ -85,7 +85,7 @@ fun ChromeButton(
             scaleX = look.glass()
             scaleY = look.glass()
         }
-        .focusRing(CircleShape, look.ring)
+        .focusRing(CircleShape, look.ring, OctoColors.FocusRing)
         .alpha(if (enabled) 1f else OctoInk.DisabledAlpha)
         .hoverable(interaction, enabled = enabled)
         .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)

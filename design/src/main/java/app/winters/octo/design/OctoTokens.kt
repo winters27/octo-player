@@ -2,6 +2,8 @@ package app.winters.octo.design
 
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
@@ -31,19 +33,19 @@ object OctoInk {
     const val QuinaryAlpha = 0.05f
 
     // Titles and body.
-    val Primary = Color.White.copy(alpha = PrimaryAlpha)
+    val Primary: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.inkPrimary
 
     // Subtitles and details.
-    val Secondary = Color.White.copy(alpha = SecondaryAlpha)
+    val Secondary: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.inkSecondary
 
     // Disabled words and placeholders.
-    val Tertiary = Color.White.copy(alpha = TertiaryAlpha)
+    val Tertiary: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.inkTertiary
 
     // Hover fills and hairlines.
-    val Quaternary = Color.White.copy(alpha = QuaternaryAlpha)
+    val Quaternary: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.inkQuaternary
 
     // Resting fills and alternate rows.
-    val Quinary = Color.White.copy(alpha = QuinaryAlpha)
+    val Quinary: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.inkQuinary
 
     // How faint a control that cannot be used right now is.
     const val DisabledAlpha = 0.5f
@@ -94,24 +96,28 @@ object MenuRowHeight {
 }
 
 // A menu row under the finger or the pointer shows a quiet accent-tinted
-// pill, `strength` of the way in (0 to 1), read while drawing.
-fun Modifier.menuRowPress(shape: Shape, strength: () -> Float): Modifier = drawBehind {
+// pill in `color` (the theme's MenuPress, captured while composing),
+// `strength` of the way in (0 to 1), read while drawing.
+fun Modifier.menuRowPress(shape: Shape, color: Color, strength: () -> Float): Modifier = drawBehind {
     val s = strength()
-    if (s > 0f) drawOutline(shape.createOutline(size, layoutDirection, this), OctoColors.MenuPress, alpha = s)
+    if (s > 0f) drawOutline(shape.createOutline(size, layoutDirection, this), color, alpha = s)
 }
 
 // A picture or card raised well off the page, like a hero cover.
+@Composable
 fun Modifier.raisedShadow(shape: Shape): Modifier =
-    dropShadow(shape, Shadow(radius = shadowBlur(40f), color = Color.Black.copy(alpha = 0.55f), offset = DpOffset(0.dp, 8.dp)))
+    dropShadow(shape, Shadow(radius = shadowBlur(40f), color = shadowColor(0.55f), offset = DpOffset(0.dp, 8.dp)))
 
 // A small lift, like artwork in a grid.
+@Composable
 fun Modifier.liftShadow(shape: Shape): Modifier =
-    dropShadow(shape, Shadow(radius = shadowBlur(14f), color = Color.Black.copy(alpha = 0.10f), offset = DpOffset(0.dp, 4.dp)))
+    dropShadow(shape, Shadow(radius = shadowBlur(14f), color = shadowColor(0.10f), offset = DpOffset(0.dp, 4.dp)))
 
 // The shadow a chrome button or group casts.
+@Composable
 fun Modifier.chromeShadow(shape: Shape): Modifier = this
-    .dropShadow(shape, Shadow(radius = shadowBlur(12f), color = Color.Black.copy(alpha = 0.10f), offset = DpOffset(0.dp, 4.dp)))
-    .dropShadow(shape, Shadow(radius = shadowBlur(2f), color = Color.Black.copy(alpha = 0.02f), offset = DpOffset(0.dp, 1.dp)))
+    .dropShadow(shape, Shadow(radius = shadowBlur(12f), color = shadowColor(0.10f), offset = DpOffset(0.dp, 4.dp)))
+    .dropShadow(shape, Shadow(radius = shadowBlur(2f), color = shadowColor(0.02f), offset = DpOffset(0.dp, 1.dp)))
 
 // How light a colour looks, from 0 (black) to 1 (white), the way the eye
 // judges it rather than by its raw channels.
@@ -134,8 +140,8 @@ fun contentColorFor(fill: Color): Color =
 fun Modifier.focusRing(
     shape: Shape,
     strength: () -> Float,
+    color: Color,
     width: Dp = 2.dp,
-    color: Color = OctoColors.FocusRing,
 ): Modifier = drawWithContent {
     drawContent()
     val alpha = strength()

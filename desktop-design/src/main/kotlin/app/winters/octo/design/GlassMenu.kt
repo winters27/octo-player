@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -82,14 +83,14 @@ import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
 
 // The film under a menu: darker than a bar's, since text sits on it.
-val MenuFilm = Color.Black.copy(alpha = 0.52f)
+val MenuFilm: Color @Composable @ReadOnlyComposable get() = glassFilm(0.52f)
 
 // How hard a menu frosts what is behind it, as a CSS blur.
 const val MenuFrost = 24f
 
 // The floating player: lighter than a menu so the page reads through it as
 // frosted glass, dark enough that its words stay clear over bright covers.
-val IslandFilm = Color.Black.copy(alpha = 0.26f)
+val IslandFilm: Color @Composable @ReadOnlyComposable get() = glassFilm(0.26f)
 const val IslandFrost = 20f
 // How much the colours under it deepen, so a cover's hues show through.
 const val IslandSaturation = 1.4f
@@ -159,11 +160,17 @@ const val POPUP_TAG = "popup"
 const val POPUP_SHADE_TAG = "popup-shade"
 
 // How far the page behind a dialog blurs.
-private val ScrimBlur = HazeBlurStyle {
-    backgroundColor(OctoColors.Background)
-    blurRadius(18.dp)
-    noiseFactor(0f)
-    fallbackColorEffect(HazeColorEffect.tint(Color.Black.copy(alpha = 0.35f)))
+@Composable
+private fun ScrimBlur(): HazeBlurStyle {
+    val page = OctoColors.Background
+    return remember(page) {
+        HazeBlurStyle {
+            backgroundColor(page)
+            blurRadius(18.dp)
+            noiseFactor(0f)
+            fallbackColorEffect(HazeColorEffect.tint(Color.Black.copy(alpha = 0.35f)))
+        }
+    }
 }
 
 // How tall a menu may grow before it scrolls.
@@ -286,7 +293,7 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
             Modifier
                 .fillMaxSize()
                 .graphicsLayer { alpha = grow.value }
-                .hazeBlur(input = HazeInput.Backdrop(backdrop), style = ScrimBlur)
+                .hazeBlur(input = HazeInput.Backdrop(backdrop), style = ScrimBlur())
                 .background(Color.Black.copy(alpha = 0.55f)),
         )
     }
@@ -428,12 +435,13 @@ fun MenuRow(
     val hovered by interaction.collectIsHoveredAsState()
     val pressed by interaction.collectIsPressedAsState()
     val focused by interaction.collectIsFocusedAsState()
+    val press = OctoColors.MenuPress
     Row(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 6.dp)
             .then(if (selected) Modifier.background(OctoColors.AccentSelected, MenuRowShape) else Modifier)
-            .menuRowPress(MenuRowShape) { if ((hovered || pressed || focused) && enabled) 1f else 0f }
+            .menuRowPress(MenuRowShape, press) { if ((hovered || pressed || focused) && enabled) 1f else 0f }
             .hoverable(interaction, enabled = enabled)
             .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
             .clickable(

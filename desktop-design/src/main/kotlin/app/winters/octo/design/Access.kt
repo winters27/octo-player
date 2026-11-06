@@ -5,6 +5,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.FocusInteraction
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -58,7 +59,7 @@ import kotlinx.coroutines.launch
 // The ring's colour: Octo's accent, whole, which reads on the glass, the
 // page and the ambience. The hairline inside it keeps it apart from a
 // light cover or a white glyph.
-val FocusRingColor: Color get() = OctoColors.Accent
+val FocusRingColor: Color @Composable @ReadOnlyComposable get() = OctoColors.Accent
 val FocusEdgeColor = Color.Black.copy(alpha = 0.55f)
 
 // Whether the keyboard is what the listener is using: set by a key, cleared
@@ -92,12 +93,13 @@ class ArrowKeys {
 
 val LocalArrowKeys = staticCompositionLocalOf { ArrowKeys() }
 
-// Draws the ring just inside the edge of `shape`, so nothing clips it.
-fun DrawScope.drawFocusRing(shape: Shape) {
+// Draws the ring in `color` (FocusRingColor, captured while composing) just
+// inside the edge of `shape`, so nothing clips it.
+fun DrawScope.drawFocusRing(shape: Shape, color: Color) {
     val ring = Focus.Ring.toPx()
     val edge = Focus.Edge.toPx()
     val outer = shape.createOutline(Size(size.width - ring, size.height - ring), layoutDirection, this)
-    translate(ring / 2, ring / 2) { drawOutline(outer, FocusRingColor, style = Stroke(ring)) }
+    translate(ring / 2, ring / 2) { drawOutline(outer, color, style = Stroke(ring)) }
     val inset = ring + edge / 2
     if (size.width > inset * 2 && size.height > inset * 2) {
         val inner = shape.createOutline(Size(size.width - inset * 2, size.height - inset * 2), layoutDirection, this)
@@ -137,26 +139,27 @@ private class FocusRingNode(private val interactions: InteractionSource, private
 
     override fun ContentDrawScope.draw() {
         drawContent()
-        if (focused && currentValueOf(LocalFocusVisibility).keyboard) drawFocusRing(shape)
+        if (focused && currentValueOf(LocalFocusVisibility).keyboard) drawFocusRing(shape, currentValueOf(LocalOctoAccent).accent)
     }
 }
 
 // The ring for something focusable that is not a click (a list, a slider):
 // put it before the focusable, so it hears the focus below it.
-fun Modifier.focusOutline(shape: Shape, visibility: FocusVisibility): Modifier {
+fun Modifier.focusOutline(shape: Shape, visibility: FocusVisibility, color: Color): Modifier {
     var focused by mutableStateOf(false)
     return onFocusChanged { focused = it.isFocused }
         .drawWithContent {
             drawContent()
-            if (focused && visibility.keyboard) drawFocusRing(shape)
+            if (focused && visibility.keyboard) drawFocusRing(shape, color)
         }
 }
 
-// The same, reading the window's visibility itself.
+// The same, reading the window's visibility and the ring's color itself.
 @Composable
 fun Modifier.focusOutline(shape: Shape): Modifier {
     val visibility = LocalFocusVisibility.current
-    return then(remember(shape, visibility) { Modifier.focusOutline(shape, visibility) })
+    val color = FocusRingColor
+    return then(remember(shape, visibility, color) { Modifier.focusOutline(shape, visibility, color) })
 }
 
 // A value along a line, for the keyboard and screen readers: focusable,

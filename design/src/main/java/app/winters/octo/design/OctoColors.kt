@@ -1,6 +1,7 @@
 package app.winters.octo.design
 
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
 
 // Mixes two colors channel by channel, the way a stylesheet does.
@@ -10,77 +11,90 @@ fun mix(from: Color, to: Color, amount: Float) = Color(
     blue = from.blue + (to.blue - from.blue) * amount,
 )
 
-// Octo's own accent, a blue gray: the default accent, and the color of the
-// quieter words whatever accent is chosen.
+// Octo's own accent, a blue gray: the default accent in Octo's theme, for
+// code that names that color itself.
 val OctoAccent = Color(0xFF97B1B9)
-private val OctoAccentHover = Color(0xFFADC4CC)
 
-// The accent in use. Snapshot state, so whatever reads it while composing
-// or drawing follows a new choice.
-private val accentNow = mutableStateOf(OctoAccent)
-
-// Whether the glass takes the accent too. Off, it keeps Octo's blue gray
-// whatever accent is chosen.
-private val glassTintNow = mutableStateOf(false)
-
-// Winters' Glass, the palette the other apps share. Dark only.
+// Winters' Glass, the palette the other apps share. Every color here is the
+// one the theme being drawn gives it.
 object OctoColors {
-    val Background = Color(0xFF0C0C0D)
+    // Drawing code reads LocalOctoAccent.current's states, captured while composing.
+    val Background: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.page
+
     // A low-alpha wash that tints glass panels.
-    val BackgroundSecondary = Color.White.copy(alpha = 0.03f)
+    val BackgroundSecondary: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.backgroundSecondary
+
     // The solid surface under cards and glazed controls.
-    val BackgroundTertiary = Color(0xFF1A1A1B)
+    val BackgroundTertiary: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.card
 
-    // The accent chosen in Appearance: selected states, sliders, switches,
-    // focus rings and filled buttons.
-    val Accent: Color get() = accentNow.value
+    // The line round a card or a panel, where the theme draws one.
+    val Edge: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.edge
 
-    // Makes `color` the accent everywhere. Only a change redraws anything.
-    fun useAccent(color: Color) {
-        if (accentNow.value != color) accentNow.value = color
-    }
+    // The accent chosen in Appearance: switches, sliders, rings and icons.
+    val Accent: Color @Composable @ReadOnlyComposable get() = LocalOctoAccent.current.accent
+
+    // Words drawn in the accent: the accent, or the color solved for the
+    // selected row they sit in.
+    val AccentWords: Color
+        @Composable @ReadOnlyComposable
+        get() = LocalOctoSurfaces.current.accentWords ?: LocalOctoAccent.current.accent
 
     // The color lit into the glass: the bar, glazed buttons, tabs and
-    // sheets. The accent when the glass takes it, else Octo's blue gray.
-    val GlassAccent: Color get() = if (glassTintNow.value) Accent else OctoAccent
+    // sheets. The accent when the glass takes it, else the theme's own.
+    val GlassAccent: Color @Composable @ReadOnlyComposable get() = LocalOctoAccent.current.glassAccent
 
-    // Whether the glass takes the accent. Only a change redraws anything.
-    fun tintGlass(on: Boolean) {
-        if (glassTintNow.value != on) glassTintNow.value = on
-    }
+    // A raised surface for rows to read and change, a clear step up from the page.
+    val SurfaceRaised: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.raised
+    val AccentHover: Color @Composable @ReadOnlyComposable get() = LocalOctoAccent.current.hover
+    val TextPrimary: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.text
 
-    // A raised surface for rows to read and change: the solid gray with a
-    // touch of Octo's blue gray, a clear step up from the page.
-    val SurfaceRaised = mix(Color(0xFF1A1A1B), OctoAccent, 0.06f)
-    val AccentHover: Color get() = Accent.let { if (it == OctoAccent) OctoAccentHover else mix(it, Color.White, 0.22f) }
-    val TextPrimary = Color.White
-    // Words stay in Octo's blue gray whatever the accent, so a page reads
-    // the same in every color.
-    val TextSecondary = OctoAccent
-    // The quietest words: four fifths of the blue gray, 5.8:1 on the page
-    // and the glass, so they keep WCAG AA's 4.5:1 with room for the colors
-    // behind the page. At 60% they measured 3.7:1.
-    val TextMuted = OctoAccent.copy(alpha = 0.8f)
+    // Words stay in the theme's quiet color whatever the accent, so a page
+    // reads the same in every color.
+    val TextSecondary: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.secondary
+
+    // The quietest words, kept at WCAG AA's 4.5:1 on the page and the glass.
+    val TextMuted: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.muted
+
+    // The theme's second and third colors: playing bars, stars, empty art.
+    val Complement: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.complement
+    val Third: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.third
+
+    // The liked heart and the count pills: white in Octo, else the second color.
+    val Highlight: Color
+        @Composable @ReadOnlyComposable
+        get() {
+            val s = LocalOctoSurfaces.current
+            return if (s.page == OctoDarkSurfaces.page && s.card == OctoDarkSurfaces.card) s.text else s.complement
+        }
+
+    // The switch's track when it is off.
+    val OffTrack: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.offTrack
+
     val Error = Color(0xFFEF4444)
 
-    // The accent's family, each derived from the accent the same way:
+    // The accent's family, each derived from the accent by the theme:
 
-    // A standard button's resting fill: a tenth of the accent in a dark gray.
-    val AccentTonal: Color get() = mix(Color(0xFF1E1E1E), Accent, 0.10f)
+    // A standard button's resting fill.
+    val AccentTonal: Color @Composable @ReadOnlyComposable get() = LocalOctoAccent.current.tonal
 
-    // A selected list row: the accent 40% of the way out of black, so it is
-    // still the darker pill, only lightly tinted, and white text reads on it.
-    val AccentSelected: Color get() = mix(Color.Black, Accent, 0.40f)
+    // A selected list row, still the quieter pill, with the selected words on it.
+    val AccentSelected: Color @Composable @ReadOnlyComposable get() = LocalOctoAccent.current.selected
 
-    // The dark ink drawn on an accent fill: the page's own color.
-    val OnAccent = Color(0xFF0C0C0D)
+    // Secondary words inside a selected row.
+    val SelectedWords: Color @Composable @ReadOnlyComposable get() = LocalOctoAccent.current.selectedWords
+
+    // The ink drawn on the plain accent.
+    val OnAccent: Color @Composable @ReadOnlyComposable get() = LocalOctoAccent.current.onAccent
+
+    // The ink drawn on a filled accent button.
+    val OnAccentFill: Color @Composable @ReadOnlyComposable get() = LocalOctoAccent.current.onFill
 
     // The ring round a focused control.
-    val FocusRing: Color get() = Accent.copy(alpha = 0.70f)
+    val FocusRing: Color @Composable @ReadOnlyComposable get() = LocalOctoAccent.current.focusRing
 
     // A menu row under the finger or the pointer: the selected row's tint,
     // half as strong, so it is quieter than the chosen one.
-    val MenuPress: Color get() = AccentSelected.copy(alpha = 0.55f)
+    val MenuPress: Color @Composable @ReadOnlyComposable get() = LocalOctoAccent.current.menuPress
 
     // A destructive action's words: a soft red. Its icon stays white.
     val Destructive = Color(0xFFFF3B30).copy(alpha = 0.85f)

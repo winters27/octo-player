@@ -37,9 +37,11 @@ private val Offsets = floatArrayOf(0f, 0.3f, 0.65f)
 // while it plays, still and quiet while it is paused.
 @Composable
 fun NowPlayingBars(playing: Boolean, modifier: Modifier = Modifier) {
+    val lit = OctoColors.TextPrimary
+    val quiet = OctoColors.TextMuted
     // With motion reduced a playing song's bars rest, still lit.
     if (playing && motionScale().still) {
-        Canvas(modifier) { bars(OctoColors.TextPrimary, null) }
+        Canvas(modifier) { bars(lit, null) }
         return
     }
     if (playing) {
@@ -47,12 +49,12 @@ fun NowPlayingBars(playing: Boolean, modifier: Modifier = Modifier) {
         Box(modifier) {
             // The glow: the same bars, blurred, behind the sharp ones.
             Canvas(Modifier.matchParentSize().blur(4.dp, BlurredEdgeTreatment.Unbounded).alpha(0.7f)) {
-                bars(OctoColors.TextPrimary, phase)
+                bars(lit, phase)
             }
-            Canvas(Modifier.matchParentSize()) { bars(OctoColors.TextPrimary, phase) }
+            Canvas(Modifier.matchParentSize()) { bars(lit, phase) }
         }
     } else {
-        Canvas(modifier) { bars(OctoColors.TextMuted, null) }
+        Canvas(modifier) { bars(quiet, null) }
     }
 }
 

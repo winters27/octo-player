@@ -6,6 +6,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -15,8 +16,9 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.semantics.Role
 
-// The accent mixed into black, so white text stays readable on it.
-val AccentFill: Color get() = mix(OctoColors.Accent, Color.Black, 0.45f)
+// The filled button's color: the accent in the form the theme gives it, so
+// the words on it stay readable.
+val AccentFill: Color @Composable @ReadOnlyComposable get() = LocalOctoAccent.current.fill
 
 // The one filled button on a surface. Its words are black or white,
 // whichever reads on `fill`; pass `OctoColors.AccentTonal` for the quieter
@@ -42,7 +44,7 @@ fun AccentButton(
         shape = CircleShape,
         modifier = modifier
             .height(if (dense) size.dense else size.height)
-            .buttonMotion(look, CircleShape)
+            .buttonMotion(look, CircleShape, OctoColors.FocusRing)
             .alpha(if (enabled) 1f else OctoInk.DisabledAlpha)
             .hoverable(interaction, enabled = enabled && !loading)
             .pointerHoverIcon(if (enabled && !loading) PointerIcon.Hand else PointerIcon.Default)
@@ -55,6 +57,6 @@ fun AccentButton(
             ),
     ) {
         ButtonShades(look, CircleShape)
-        ButtonLabel(text, contentColorFor(fill), size, icon = icon, loading = loading)
+        ButtonLabel(text, if (fill == AccentFill) OctoColors.OnAccentFill else contentColorFor(fill), size, icon = icon, loading = loading)
     }
 }

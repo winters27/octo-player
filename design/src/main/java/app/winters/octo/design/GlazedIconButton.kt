@@ -81,7 +81,7 @@ fun GlazedIconButton(
                 scaleX = look.glass()
                 scaleY = look.glass()
             }
-            .focusRing(CircleShape, look.ring)
+            .focusRing(CircleShape, look.ring, OctoColors.FocusRing)
             .hoverable(interaction)
             .pointerHoverIcon(PointerIcon.Hand)
             .clickable(

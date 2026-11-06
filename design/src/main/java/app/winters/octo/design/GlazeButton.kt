@@ -37,7 +37,7 @@ fun GlazeButton(
     Glaze(
         modifier
             .height(size.height)
-            .buttonMotion(look, CircleShape)
+            .buttonMotion(look, CircleShape, OctoColors.FocusRing)
             .alpha(if (enabled) 1f else OctoInk.DisabledAlpha)
             .hoverable(interaction, enabled = enabled && !loading)
             .pointerHoverIcon(if (enabled && !loading) PointerIcon.Hand else PointerIcon.Default)

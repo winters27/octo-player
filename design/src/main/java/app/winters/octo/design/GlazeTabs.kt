@@ -83,6 +83,8 @@ fun GlazeTabs(
     // Where each tab starts and how wide it is, when tabs differ in width.
     var starts by remember { mutableStateOf(emptyList<Float>()) }
     var widths by remember { mutableStateOf(emptyList<Float>()) }
+    val pillColor = OctoColors.Accent
+    val gearColor = OctoColors.GlassAccent
 
     Glaze(
         modifier
@@ -131,23 +133,23 @@ fun GlazeTabs(
                         val part = (at - from).coerceIn(0f, 1f)
                         val left = starts[from] + (starts[to] - starts[from]) * part
                         val wide = widths[from] + (widths[to] - widths[from]) * part
-                        drawRoundRect(OctoColors.Accent, Offset(left, 0f), Size(wide, size.height), corner)
+                        drawRoundRect(pillColor, Offset(left, 0f), Size(wide, size.height), corner)
                         for (index in 0 until count) {
                             val tint = if (pill.isRunning) gearShiftTint(index, at, selected) else 0f
                             if (tint > 0f) {
-                                drawRoundRect(OctoColors.GlassAccent.copy(alpha = tint), Offset(starts[index], 0f), Size(widths[index], size.height), corner)
+                                drawRoundRect(gearColor.copy(alpha = tint), Offset(starts[index], 0f), Size(widths[index], size.height), corner)
                             }
                         }
                         return@drawBehind
                     }
                     if (cell <= 0f) return@drawBehind
                     val left = at * cell
-                    drawRoundRect(OctoColors.Accent, Offset(left, 0f), Size(cell, size.height), corner)
+                    drawRoundRect(pillColor, Offset(left, 0f), Size(cell, size.height), corner)
                     // Gears going by.
                     for (index in 0 until count) {
                         val tint = if (pill.isRunning) gearShiftTint(index, at, selected) else 0f
                         if (tint > 0f) {
-                            drawRoundRect(OctoColors.GlassAccent.copy(alpha = tint), Offset(index * cell, 0f), Size(cell, size.height), corner)
+                            drawRoundRect(gearColor.copy(alpha = tint), Offset(index * cell, 0f), Size(cell, size.height), corner)
                         }
                     }
                 },

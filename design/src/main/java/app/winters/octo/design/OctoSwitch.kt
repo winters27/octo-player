@@ -57,10 +57,6 @@ fun switchThumb(track: Float, thumb: Float, padding: Float, position: Float, str
     return SwitchThumb(x, width)
 }
 
-// The track off: a recessed white, strong enough to read as a switch on a
-// raised panel and not only as its thumb.
-private val OffTrack = Color.White.copy(alpha = 0.18f)
-
 // The on/off switch for settings rows: the accent, glowing faintly, when on;
 // a faint recessed pill when off. The thumb slides on the default curve and
 // squashes toward where it is going while held.
@@ -87,12 +83,18 @@ fun OctoSwitch(
     val hover by animateFloatAsState(if (hovered && enabled) 0.07f else 0f, octoTween(motion, OctoDuration.Fill), label = "switch hover")
     val ring by animateFloatAsState(if (focused) 1f else 0f, octoTween(motion, OctoDuration.Neutral), label = "switch ring")
     val thumbSize = size.thumb
+    // The track off is strong enough to read as a switch on a raised panel
+    // and not only as its thumb.
+    val offTrack = OctoColors.OffTrack
+    val accent = OctoColors.Accent
+    val thumbShade = shadowColor(0.18f)
+    val thumbDrop = shadowColor(0.12f)
 
     Box(
         modifier
             .size(size.width, size.height)
             .alpha(if (enabled) 1f else OctoInk.DisabledAlpha)
-            .focusRing(CircleShape, { ring })
+            .focusRing(CircleShape, { ring }, OctoColors.FocusRing)
             // The glow under the track when it is on: tight and faint, since
             // glow is garnish. (The reference pulls it in with a negative
             // spread, which is not drawn the same everywhere; a smaller blur
@@ -100,15 +102,15 @@ fun OctoSwitch(
             .dropShadow(CircleShape) {
                 radius = shadowBlur(5f).toPx()
                 offset = Offset(0f, 1.dp.toPx())
-                color = OctoColors.Accent
+                color = accent
                 alpha = 0.30f * on
             }
             // A faint light drop along the bottom edge.
-            .dropShadow(CircleShape, Shadow(radius = 0.dp, color = Color.White.copy(alpha = 0.05f), offset = DpOffset(0.dp, 0.5.dp)))
+            .dropShadow(CircleShape, Shadow(radius = 0.dp, color = glassRim(0.05f), offset = DpOffset(0.dp, 0.5.dp)))
             .drawBehind {
                 val corner = CornerRadius(this.size.height / 2f)
-                drawRoundRect(OffTrack, cornerRadius = corner, alpha = 1f - on)
-                drawRoundRect(OctoColors.Accent, cornerRadius = corner, alpha = on)
+                drawRoundRect(offTrack, cornerRadius = corner, alpha = 1f - on)
+                drawRoundRect(accent, cornerRadius = corner, alpha = on)
                 // Under the pointer the track takes in a little white.
                 drawRoundRect(Color.White, cornerRadius = corner, alpha = hover)
             }
@@ -120,7 +122,7 @@ fun OctoSwitch(
                 alpha = 0.22f * (1f - on)
             }
             // A faint glaze rim.
-            .innerShadow(CircleShape, Shadow(radius = 0.dp, spread = 0.5.dp, color = Color.White.copy(alpha = 0.06f)))
+            .innerShadow(CircleShape, Shadow(radius = 0.dp, spread = 0.5.dp, color = glassRim(0.06f)))
             .hoverable(interaction, enabled = enabled)
             .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
             .toggleable(
@@ -142,8 +144,8 @@ fun OctoSwitch(
                     val t = switchThumb(this.size.width, d, pad, on, stretch)
                     val top = (this.size.height - d) / 2f
                     val corner = CornerRadius(d / 2f)
-                    drawRoundRect(Color.Black.copy(alpha = 0.18f), Offset(t.x, top + 0.5.dp.toPx()), Size(t.width, d), corner)
-                    drawRoundRect(Color.Black.copy(alpha = 0.12f), Offset(t.x, top + 1.dp.toPx()), Size(t.width, d), corner)
+                    drawRoundRect(thumbShade, Offset(t.x, top + 0.5.dp.toPx()), Size(t.width, d), corner)
+                    drawRoundRect(thumbDrop, Offset(t.x, top + 1.dp.toPx()), Size(t.width, d), corner)
                     drawRoundRect(Color.White, Offset(t.x, top), Size(t.width, d), corner)
                 },
         )

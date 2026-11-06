@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -69,7 +70,7 @@ class GlazeLight(
 // page, or a song's colours) shows through in its own colour without
 // glaring when it is bright. The bar can lay a trace of the song's colour
 // over it.
-val GlazeTint = Color.Black.copy(alpha = 0.16f)
+val GlazeTint: Color @Composable @ReadOnlyComposable get() = glassFilm(0.16f)
 
 // The film for glass over one smooth field of colour, like the player's
 // background: none at all. With no detail behind to blur, a dim reads as a
@@ -78,7 +79,7 @@ val GlazeClearFilm = Color.Transparent
 
 // The darker pill that marks the chosen item inside a glaze, like the
 // selected tab: a plain shade, with none of the glaze's lighting.
-private val GlazeSelectedFill = Color.Black.copy(alpha = 0.72f)
+private val GlazeSelectedFill: Color @Composable @ReadOnlyComposable get() = glassFilm(0.72f)
 
 // The specular fades out toward both ends. A rim bright all the way round
 // reads as a drawn border; one bright only where light would catch reads as
@@ -100,17 +101,22 @@ const val GlazeSaturation = 1.1f
 // its specular and its lit rim, as glass out of the light does.
 val LocalWindowFocused = compositionLocalOf { true }
 
-private fun glazeBlur(frost: Float, saturation: Float, fades: Boolean = false) = HazeBlurStyle {
-    backgroundColor(OctoColors.Background)
+private fun glazeBlur(frost: Float, saturation: Float, page: Color, card: Color, fades: Boolean = false) = HazeBlurStyle {
+    backgroundColor(page)
     blurRadius(backdropBlur(frost))
     noiseFactor(0f)
     colorEffects(listOf(HazeColorEffect.colorFilter(saturation(saturation))))
-    fallbackColorEffect(HazeColorEffect.tint(OctoColors.BackgroundTertiary))
+    fallbackColorEffect(HazeColorEffect.tint(card))
     // Full at the top, gone at the bottom.
     if (fades) mask(Brush.verticalGradient(listOf(Color.Black, Color.Transparent)))
 }
 
-private val StatusBlur by lazy { glazeBlur(GlazeFrost, GlazeSaturation, fades = true) }
+@Composable
+private fun StatusBlur(): HazeBlurStyle {
+    val page = OctoColors.Background
+    val card = OctoColors.BackgroundTertiary
+    return remember(page, card) { glazeBlur(GlazeFrost, GlazeSaturation, page, card, fades = true) }
+}
 
 // The status bar's own glass at the top of every page: what scrolls up under the clock is
 // frosted, the frost fading out at the bar's bottom, so rows never run through the clock.
@@ -120,15 +126,21 @@ fun StatusGlaze(backdrop: HazeState, modifier: Modifier = Modifier) {
         modifier
             .fillMaxWidth()
             .windowInsetsTopHeight(WindowInsets.statusBars)
-            .hazeBlur(input = HazeInput.Backdrop(backdrop), style = StatusBlur),
+            .hazeBlur(input = HazeInput.Backdrop(backdrop), style = StatusBlur()),
     )
 }
 
-private val GlazeBlur by lazy { glazeBlur(GlazeFrost, GlazeSaturation) }
+@Composable
+private fun GlazeBlur(): HazeBlurStyle {
+    val page = OctoColors.Background
+    val card = OctoColors.BackgroundTertiary
+    return remember(page, card) { glazeBlur(GlazeFrost, GlazeSaturation, page, card) }
+}
 
 private fun saturation(amount: Float) =
     ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(amount) })
 
+@Composable
 private fun accent(alpha: Float) = OctoColors.GlassAccent.copy(alpha = alpha)
 
 // What lies behind a glass when it is a picture the glass can draw itself
@@ -172,18 +184,22 @@ fun Glaze(
     picture: GlassBackdrop? = null,
     content: @Composable BoxScope.() -> Unit = {},
 ) {
-    val blur = remember(frost, saturation) {
-        if (frost == GlazeFrost && saturation == GlazeSaturation) GlazeBlur else glazeBlur(frost, saturation)
+    val page = OctoColors.Background
+    val card = OctoColors.BackgroundTertiary
+    val blur = if (frost == GlazeFrost && saturation == GlazeSaturation) {
+        GlazeBlur()
+    } else {
+        remember(frost, saturation, page, card) { glazeBlur(frost, saturation, page, card) }
     }
     Box(
         modifier
             // A half-pixel dark contour, so the capsule separates from
             // anything bright behind it.
-            .dropShadow(shape, Shadow(radius = 0.dp, spread = 0.5.dp, color = Color.Black.copy(alpha = 0.38f)))
+            .dropShadow(shape, Shadow(radius = 0.dp, spread = 0.5.dp, color = shadowColor(0.38f)))
             // A contact line and a small drop: an object resting on the
             // surface, not a hole cut through it.
-            .dropShadow(shape, Shadow(radius = 0.dp, color = Color.Black.copy(alpha = 0.05f), offset = DpOffset(0.dp, 1.dp)))
-            .dropShadow(shape, Shadow(radius = shadowBlur(3f), color = Color.Black.copy(alpha = 0.10f), offset = DpOffset(0.dp, 1.dp))),
+            .dropShadow(shape, Shadow(radius = 0.dp, color = shadowColor(0.05f), offset = DpOffset(0.dp, 1.dp)))
+            .dropShadow(shape, Shadow(radius = shadowBlur(3f), color = shadowColor(0.10f), offset = DpOffset(0.dp, 1.dp))),
         contentAlignment = Alignment.Center,
     ) {
         // Fill and edge.
@@ -219,6 +235,7 @@ private fun Modifier.drawsBehind(picture: GlassBackdrop, saturation: Float): Mod
 }
 
 // The lit edges of the glaze.
+@Composable
 private fun Modifier.litRim(shape: Shape, light: GlazeLight): Modifier = this
     // Light along the top edge only.
     .innerShadow(shape, Shadow(radius = 0.dp, color = accent(light.ring), offset = DpOffset(0.dp, 1.dp)))
@@ -226,7 +243,7 @@ private fun Modifier.litRim(shape: Shape, light: GlazeLight): Modifier = this
     .innerShadow(shape, Shadow(radius = shadowBlur(6f), spread = 1.dp, color = accent(light.inner)))
     // Light thrown back up along the bottom inside edge. It is most of what
     // stops a translucent shape reading as a hole.
-    .innerShadow(shape, Shadow(radius = 0.dp, color = Color.White.copy(alpha = 0.10f), offset = DpOffset(0.dp, (-0.5).dp)))
+    .innerShadow(shape, Shadow(radius = 0.dp, color = glassRim(0.10f), offset = DpOffset(0.dp, (-0.5).dp)))
 
 // A brighter rim, bright only across the middle of the shape: a curved
 // surface catching the light, not a drawn border.
@@ -268,7 +285,7 @@ fun FloatingGlaze(
 ) {
     Box(modifier) {
         if (halo) {
-            Box(Modifier.matchParentSize().dropShadow(shape, Shadow(radius = shadowBlur(20f), color = Color.Black.copy(alpha = 0.5f))))
+            Box(Modifier.matchParentSize().dropShadow(shape, Shadow(radius = shadowBlur(20f), color = shadowColor(0.5f))))
         }
         // The shadow is cast by a shape 12dp smaller on every side, so it
         // pools under the glass instead of haloing around it.
@@ -278,12 +295,12 @@ fun FloatingGlaze(
                 .padding(12.dp)
                 .dropShadow(
                     shape,
-                    Shadow(radius = shadowBlur(24f), color = Color.Black.copy(alpha = 0.45f), offset = DpOffset(0.dp, 8.dp)),
+                    Shadow(radius = shadowBlur(24f), color = shadowColor(0.45f), offset = DpOffset(0.dp, 8.dp)),
                 ),
         )
         Glaze(Modifier.matchParentSize(), shape = shape, backdrop = backdrop, film = film, frost = frost, saturation = saturation, seesAll = seesAll, picture = picture)
         if (halo) {
-            Box(Modifier.matchParentSize().innerShadow(shape, Shadow(radius = 0.dp, spread = 1.dp, color = Color.White.copy(alpha = 0.06f))))
+            Box(Modifier.matchParentSize().innerShadow(shape, Shadow(radius = 0.dp, spread = 1.dp, color = glassRim(0.06f))))
         }
         content()
     }
@@ -305,8 +322,8 @@ fun SelectedRow(modifier: Modifier = Modifier, shape: Shape = OctoShapes.Row) {
         modifier
             .clip(shape)
             .background(OctoColors.AccentSelected)
-            .innerShadow(shape, Shadow(radius = 0.dp, color = Color.White.copy(alpha = 0.28f), offset = DpOffset(0.dp, 1.dp)))
-            .innerShadow(shape, Shadow(radius = 0.dp, color = Color.White.copy(alpha = 0.12f), offset = DpOffset(0.dp, 2.dp)))
-            .innerShadow(shape, Shadow(radius = 0.dp, color = Color.Black.copy(alpha = 0.14f), offset = DpOffset(0.dp, (-1).dp))),
+            .innerShadow(shape, Shadow(radius = 0.dp, color = glassRim(0.28f), offset = DpOffset(0.dp, 1.dp)))
+            .innerShadow(shape, Shadow(radius = 0.dp, color = glassRim(0.12f), offset = DpOffset(0.dp, 2.dp)))
+            .innerShadow(shape, Shadow(radius = 0.dp, color = shadowColor(0.14f), offset = DpOffset(0.dp, (-1).dp))),
     )
 }

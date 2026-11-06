@@ -2,6 +2,12 @@ package app.winters.octo.design
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import app.winters.octo.theme.AccentChoice
+import app.winters.octo.theme.FixedAccents
+import app.winters.octo.theme.ThemeChoice
+import app.winters.octo.theme.base
+import app.winters.octo.theme.contrastOn
+import app.winters.octo.theme.resolvePalette
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -77,29 +83,38 @@ class TokensTest {
         assertEquals(Color.White, contentColorFor(Color.Black))
         // Octo's accent is light enough for black words; the accent button's
         // darker fill and the tonal fill take white.
-        assertEquals(Color.Black, contentColorFor(OctoColors.Accent))
-        assertEquals(Color.White, contentColorFor(AccentFill))
-        assertEquals(Color.White, contentColorFor(OctoColors.AccentTonal))
+        val octo = OctoDefaultPalette.accents
+        assertEquals(Color.Black, contentColorFor(Color(octo.accent)))
+        assertEquals(Color.White, contentColorFor(Color(octo.fill)))
+        assertEquals(Color.White, contentColorFor(Color(octo.tonal)))
+    }
+
+    // A sample cover color for the accent taken from the album art.
+    private val sampleArt = 0xFF3A8FB7.toInt()
+
+    @Test
+    fun secondaryWordsAreTheThemesForEveryAccent() {
+        for (theme in ThemeChoice.entries) {
+            for (choice in AccentChoice.entries) {
+                for (tint in listOf(false, true)) {
+                    val p = resolvePalette(theme, choice, sampleArt, tint)
+                    assertEquals("${theme.label} ${choice.label}", Color(theme.base.secondary), surfacesOf(p).secondary)
+                }
+            }
+        }
     }
 
     @Test
-    fun everyAccentKeepsTheSameWordsAndOnlyTheAccentFamilyMoves() {
-        try {
-            for (choice in app.winters.octo.theme.FixedAccents) {
-                OctoColors.useAccent(Color(choice.argb!!))
-                assertEquals(choice.label, Color(choice.argb!!), OctoColors.Accent)
-                assertEquals(choice.label, Color.Black, contentColorFor(OctoColors.Accent))
-                assertEquals(choice.label, Color.White, contentColorFor(AccentFill))
-                assertEquals(choice.label, Color.White, contentColorFor(OctoColors.AccentTonal))
-                assertEquals(choice.label, Color.White, contentColorFor(OctoColors.AccentSelected))
-                // The words stay in Octo's blue grey whatever the accent.
-                assertEquals(OctoAccent, OctoColors.TextSecondary)
-                assertEquals(OctoAccent.copy(alpha = 0.8f), OctoColors.TextMuted)
-            }
-        } finally {
-            OctoColors.useAccent(OctoAccent)
+    fun everyFixedAccentKeepsOctosWordsOnItsFamily() {
+        for (choice in FixedAccents) {
+            val family = resolvePalette(ThemeChoice.Octo, choice, null, false).accents
+            assertEquals(choice.label, Color(choice.argb!!), Color(family.accent))
+            assertEquals(choice.label, Color.Black, contentColorFor(Color(family.accent)))
+            assertEquals(choice.label, Color.White, contentColorFor(Color(family.fill)))
+            assertEquals(choice.label, Color.White, contentColorFor(Color(family.tonal)))
+            assertEquals(choice.label, Color.White, contentColorFor(Color(family.selected)))
         }
-        assertEquals(Color(0xFFADC4CC), OctoColors.AccentHover)
+        assertEquals(Color(0xFFADC4CC), Color(OctoDefaultPalette.accents.hover))
     }
 
     @Test
@@ -116,28 +131,53 @@ class TokensTest {
 
     @Test
     fun theAccentFamilyIsDerivedFromTheAccent() {
-        val accent = OctoColors.Accent
+        val family = OctoDefaultPalette.accents
+        val accent = Color(family.accent)
+        val selected = Color(family.selected)
         // Selected row: 40% of the accent out of black.
-        assertEquals(accent.red * 0.4f, OctoColors.AccentSelected.red, Byte)
-        assertEquals(accent.green * 0.4f, OctoColors.AccentSelected.green, Byte)
-        assertEquals(accent.blue * 0.4f, OctoColors.AccentSelected.blue, Byte)
+        assertEquals(accent.red * 0.4f, selected.red, Byte)
+        assertEquals(accent.green * 0.4f, selected.green, Byte)
+        assertEquals(accent.blue * 0.4f, selected.blue, Byte)
         // Tonal: a tenth of the accent in rgb(30 30 30).
         val grey = 30f / 255f
-        assertEquals(grey + (accent.red - grey) * 0.1f, OctoColors.AccentTonal.red, Byte)
-        assertEquals(grey + (accent.blue - grey) * 0.1f, OctoColors.AccentTonal.blue, Byte)
+        val tonal = Color(family.tonal)
+        assertEquals(grey + (accent.red - grey) * 0.1f, tonal.red, Byte)
+        assertEquals(grey + (accent.blue - grey) * 0.1f, tonal.blue, Byte)
         // The ring is the accent at 70%, the menu press the selected row at 55%.
-        assertEquals(accent.copy(alpha = 0.7f), OctoColors.FocusRing)
-        assertEquals(OctoColors.AccentSelected.copy(alpha = 0.55f), OctoColors.MenuPress)
+        val ring = Color(family.focusRing)
+        assertEquals(accent.red, ring.red, Byte)
+        assertEquals(0.7f, ring.alpha, 0.003f)
+        val press = Color(family.menuPress)
+        assertEquals(selected.red, press.red, Byte)
+        assertEquals(0.55f, press.alpha, 0.003f)
         // The destructive words are the signal red, softened.
         assertEquals(OctoColors.SignalRed.copy(alpha = 0.85f), OctoColors.Destructive)
     }
 
     @Test
-    fun theTextHierarchyIsWhiteAtFallingOpacities() {
-        val levels = listOf(OctoInk.Primary, OctoInk.Secondary, OctoInk.Tertiary, OctoInk.Quaternary, OctoInk.Quinary)
+    fun octosMutedWordsAreItsSecondaryAtEightyPercent() {
+        val octo = surfacesOf(OctoDefaultPalette)
+        assertEquals(octo.secondary.red, octo.muted.red, Byte)
+        assertEquals(octo.secondary.green, octo.muted.green, Byte)
+        assertEquals(octo.secondary.blue, octo.muted.blue, Byte)
+        assertEquals(0.8f, octo.muted.alpha, 0.003f)
+    }
+
+    @Test
+    fun theTextHierarchyIsOctosWhiteAtFallingOpacitiesAndEveryThemesReads() {
+        val octo = ThemeChoice.Octo
+        val p = resolvePalette(octo, AccentChoice.Octo, null, false)
         // Colours keep their opacity to 1/255.
-        listOf(0.85f, 0.55f, 0.25f, 0.10f, 0.05f).zip(levels).forEach { (want, color) -> assertEquals(want, color.alpha, 0.003f) }
-        assertTrue(levels.all { it.red == 1f && it.green == 1f && it.blue == 1f })
+        val alphas = listOf(p.inkPrimary, p.inkSecondary, p.inkTertiary, p.inkQuaternary, p.inkQuinary).map { it ushr 24 }
+        assertEquals(listOf(217, 140, 64, 26, 13), alphas)
+        assertTrue(listOf(p.inkPrimary, p.inkSecondary, p.inkTertiary, p.inkQuaternary, p.inkQuinary).all { it and 0xFFFFFF == 0xFFFFFF })
+        for (theme in ThemeChoice.entries) {
+            val t = resolvePalette(theme, AccentChoice.Octo, null, false)
+            for (layer in listOf(t.page, t.card)) {
+                assertTrue("${theme.label} primary on ${layer.toString(16)}", contrastOn(t.inkPrimary, layer) >= 7.0)
+                assertTrue("${theme.label} secondary on ${layer.toString(16)}", contrastOn(t.inkSecondary, layer) >= 4.5)
+            }
+        }
     }
 
     @Test

@@ -108,14 +108,15 @@ fun rememberPressSqueeze(interaction: InteractionSource): State<Float> {
     )
 }
 
-// Moves a button by its look: pressed in, risen, and ringed when focused.
-fun Modifier.buttonMotion(look: ButtonLook, shape: Shape): Modifier = this
+// Moves a button by its look: pressed in, risen, and ringed in `ring` when
+// focused.
+fun Modifier.buttonMotion(look: ButtonLook, shape: Shape, ring: Color): Modifier = this
     .graphicsLayer {
         scaleX = look.scale
         scaleY = look.scale
         translationY = -look.lift.toPx()
     }
-    .focusRing(shape, { look.ring })
+    .focusRing(shape, { look.ring }, ring)
 
 // The hover and press shades over a button's fill: white under the
 // pointer, black under the finger.
