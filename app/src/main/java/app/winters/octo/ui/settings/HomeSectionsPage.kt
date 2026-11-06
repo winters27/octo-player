@@ -156,7 +156,7 @@ fun HomeSectionsPage(onBack: () -> Unit, vm: HomeSectionsViewModel = hiltViewMod
             Text(
                 RESET_HOME_SECTIONS,
                 style = OctoType.body,
-                color = if (changed) OctoColors.Accent else OctoColors.TextMuted,
+                color = if (changed) OctoColors.AccentWords else OctoColors.TextMuted,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(enabled = changed, role = Role.Button) { askingReset = true }

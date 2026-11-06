@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.heading
@@ -40,12 +41,6 @@ private val BodyStyle = OctoType.bodySmall.copy(lineHeight = 21.sp)
 private val Heading1 = OctoType.headline.copy(lineHeight = 26.sp)
 private val Heading2 = OctoType.body.copy(fontWeight = FontWeight.Bold, lineHeight = 22.sp)
 private val Heading3 = OctoType.label.copy(lineHeight = 19.sp)
-
-private val CodeStyle = SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, background = Color.White.copy(alpha = 0.08f))
-
-private val LinkStyle = TextLinkStyles(SpanStyle(color = OctoColors.TextPrimary, textDecoration = TextDecoration.Underline))
-
-private val LineColour = OctoColors.TextPrimary.copy(alpha = 0.08f)
 
 // A page of markdown in Octo's type: headings in white, the body in the
 // quieter secondary ink with bold words lit white, soft dots for bullets,
@@ -97,7 +92,7 @@ fun MarkdownText(blocks: List<Block>, modifier: Modifier = Modifier) {
                         .padding(vertical = 18.dp)
                         .fillMaxWidth()
                         .height(1.dp)
-                        .background(LineColour),
+                        .background(OctoColors.TextPrimary.copy(alpha = 0.08f)),
                 )
             }
         }
@@ -115,16 +110,24 @@ private fun BulletLine(text: List<Span>, style: TextStyle, dot: Dp, dotColour: C
 
 // The runs as styled text: bold is white and heavier, italic slants, code
 // is set in a fixed-width face on a faint patch, and links are underlined.
-private fun annotated(spans: List<Span>): AnnotatedString = buildAnnotatedString {
+@Composable
+private fun annotated(spans: List<Span>): AnnotatedString {
+    val strong = OctoColors.TextPrimary
+    return remember(spans, strong) { annotated(spans, strong) }
+}
+
+private fun annotated(spans: List<Span>, strong: Color): AnnotatedString = buildAnnotatedString {
+    val code = SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, background = strong.copy(alpha = 0.08f))
+    val links = TextLinkStyles(SpanStyle(color = strong, textDecoration = TextDecoration.Underline))
     spans.forEach { span ->
         val style = SpanStyle(
-            color = if (span.bold || span.link != null) OctoColors.TextPrimary else Color.Unspecified,
+            color = if (span.bold || span.link != null) strong else Color.Unspecified,
             fontWeight = if (span.bold) FontWeight.SemiBold else null,
             fontStyle = if (span.italic) FontStyle.Italic else null,
-        ).let { if (span.code) it.merge(CodeStyle) else it }
+        ).let { if (span.code) it.merge(code) else it }
         val link = span.link
         if (link != null) {
-            withLink(LinkAnnotation.Url(link, LinkStyle)) { withStyle(style) { append(span.text) } }
+            withLink(LinkAnnotation.Url(link, links)) { withStyle(style) { append(span.text) } }
         } else {
             withStyle(style) { append(span.text) }
         }

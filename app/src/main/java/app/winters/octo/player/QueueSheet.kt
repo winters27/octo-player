@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,10 +72,10 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 private val RowShape = RoundedCornerShape(12.dp)
 
 // The sheet's own colour, so a row hides what is under it while it moves.
-private val RowFill: Color get() = mix(OctoColors.Background, OctoColors.Accent, 0.05f)
+private val RowFill: Color @Composable @ReadOnlyComposable get() = mix(OctoColors.Background, OctoColors.Accent, 0.05f)
 
 // The song that is on, lit a little brighter than the sheet.
-private val CurrentFill: Color get() = mix(OctoColors.BackgroundTertiary, OctoColors.Accent, 0.12f)
+private val CurrentFill: Color @Composable @ReadOnlyComposable get() = mix(OctoColors.BackgroundTertiary, OctoColors.Accent, 0.12f)
 
 // Songs already played sit above the current one, dimmed.
 private const val PLAYED_ALPHA = 0.5f

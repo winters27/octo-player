@@ -144,9 +144,9 @@ private fun PlayCapsule(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
                     if (loading) {
-                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                        CircularProgressIndicator(color = OctoColors.TextPrimary, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
                     } else {
-                        Icon(painterResource(icon), contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                        Icon(painterResource(icon), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(22.dp))
                     }
                 }
                 Text(text, style = OctoType.body, color = OctoColors.TextPrimary, maxLines = 1)
@@ -187,7 +187,7 @@ fun GlassIconButton(
             light = if (lit || pressed) GlazeLight.Lifted else GlazeLight.Rest,
         ) {
             Crossfade(icon, animationSpec = tween(OctoDuration.Swap), label = "glass button icon") { shown ->
-                Icon(painterResource(shown), contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+                Icon(painterResource(shown), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(17.dp))
             }
         }
     }
@@ -217,7 +217,7 @@ fun QuietIconAction(
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(icon), contentDescription = null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(22.dp))
+        Icon(painterResource(icon), contentDescription = null, tint = OctoColors.TextPrimary.copy(alpha = 0.8f), modifier = Modifier.size(22.dp))
     }
 }
 

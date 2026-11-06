@@ -428,6 +428,7 @@ private fun Modifier.entrance(shown: Animatable<Float, *>, rise: Float, still: B
 @Composable
 private fun OctoMark(shown: Animatable<Float, *>, still: Boolean) {
     val rise = with(LocalDensity.current) { 12.dp.toPx() }
+    val glow = OctoColors.Accent
     Box(Modifier.size(MarkRoom), contentAlignment = Alignment.Center) {
         Box(
             Modifier
@@ -437,8 +438,8 @@ private fun OctoMark(shown: Animatable<Float, *>, still: Boolean) {
                     val radius = size.minDimension * 0.42f
                     drawCircle(
                         Brush.radialGradient(
-                            0f to OctoColors.Accent.copy(alpha = 0.30f),
-                            0.55f to OctoColors.Accent.copy(alpha = 0.10f),
+                            0f to glow.copy(alpha = 0.30f),
+                            0.55f to glow.copy(alpha = 0.10f),
                             1f to Color.Transparent,
                             center = center,
                             radius = radius,
@@ -537,7 +538,7 @@ private fun RevealToggle(revealed: Boolean, onClick: () -> Unit) {
     Text(
         if (revealed) "Hide" else "Show",
         style = OctoType.label,
-        color = OctoColors.Accent,
+        color = OctoColors.AccentWords,
         modifier = Modifier
             .clickable(role = Role.Button, onClick = onClick)
             .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
@@ -633,7 +634,7 @@ private fun Advanced(vm: SignInViewModel) {
                             Text(
                                 "Remove",
                                 style = OctoType.label,
-                                color = OctoColors.Accent,
+                                color = OctoColors.AccentWords,
                                 modifier = Modifier
                                     .clickable(role = Role.Button) { vm.removeHeader(index) }
                                     .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
@@ -666,7 +667,7 @@ private fun ClientCertificate(vm: SignInViewModel) {
                 Text(
                     "Remove",
                     style = OctoType.label,
-                    color = OctoColors.Accent,
+                    color = OctoColors.AccentWords,
                     modifier = Modifier
                         .clickable(role = Role.Button) { vm.clientCert = null }
                         .padding(8.dp),

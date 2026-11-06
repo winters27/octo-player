@@ -55,6 +55,7 @@ import app.winters.octo.ambient.LocalPageArtworks
 import app.winters.octo.ambient.PageArtworks
 import app.winters.octo.ambient.rememberBarFilm
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OverArt
 import app.winters.octo.design.StatusGlaze
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.playback.PlaybackConnection
@@ -358,31 +359,38 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                     enter = fadeIn(tween(400)),
                     exit = fadeOut(tween(300)),
                 ) {
-                    PlayerOverlay(
-                        backdrop = playerHaze,
-                        onCovers = { playerCovers = it },
-                        artModifier = Modifier.sharedElement(rememberSharedContentState(ArtKey), this),
-                        onClose = { playerOpen = false },
-                        onOpenArtist = { id ->
-                            playerOpen = false
-                            stack.add(ArtistRoute(id))
-                        },
-                        onOpenAlbum = { id ->
-                            playerOpen = false
-                            stack.add(AlbumRoute(id))
-                        },
-                    )
+                    // The player sits over its cover, so it keeps Octo's dark look in every theme.
+                    OverArt {
+                        PlayerOverlay(
+                            backdrop = playerHaze,
+                            onCovers = { playerCovers = it },
+                            artModifier = Modifier.sharedElement(rememberSharedContentState(ArtKey), this),
+                            onClose = { playerOpen = false },
+                            onOpenArtist = { id ->
+                                playerOpen = false
+                                stack.add(ArtistRoute(id))
+                            },
+                            onOpenAlbum = { id ->
+                                playerOpen = false
+                                stack.add(AlbumRoute(id))
+                            },
+                        )
+                    }
                 }
-                // Over the player, the menus frost the player rather than the page.
-                SongMenuHost(songMenu, onOpen = openFromMenu, backdrop = if (playerOpen && hasTrack) playerHaze else haze)
-                PlaylistSheetsHost(playlistSheets)
-                DisconnectSheetHost(disconnectPrompt)
-                ChoiceSheetHost(choiceSheet)
-                ShareSheetHost(shareSheet)
-                FamilyRequestSheetHost()
-                app.winters.octo.ui.downloads.ServerDownloadsHost()
-                // Above the sheets, so an undo stays reachable while one is open.
-                FeedbackHost(feedback)
+                // While the player is open, what opens over it takes its dark
+                // look; each sheet and menu keeps the look it opened with.
+                OverArt(enabled = playerOpen && hasTrack) {
+                    // Over the player, the menus frost the player rather than the page.
+                    SongMenuHost(songMenu, onOpen = openFromMenu, backdrop = if (playerOpen && hasTrack) playerHaze else haze)
+                    PlaylistSheetsHost(playlistSheets)
+                    DisconnectSheetHost(disconnectPrompt)
+                    ChoiceSheetHost(choiceSheet)
+                    ShareSheetHost(shareSheet)
+                    FamilyRequestSheetHost()
+                    app.winters.octo.ui.downloads.ServerDownloadsHost()
+                    // Above the sheets, so an undo stays reachable while one is open.
+                    FeedbackHost(feedback)
+                }
             }
         }
     }

@@ -31,6 +31,7 @@ import app.winters.octo.sort.SortSettings
 import app.winters.octo.sound.EqPreset
 import app.winters.octo.sound.SoundEngine
 import app.winters.octo.sound.UserPresets
+import app.winters.octo.theme.ThemeStore
 import app.winters.octo.home.encodeHomeSections
 import app.winters.octo.home.homeSectionOrder
 import app.winters.octo.ui.home.HomePrefs
@@ -73,6 +74,7 @@ class Backups @Inject constructor(
     private val listenBrainz: ListenBrainzStore,
     private val sorts: SortSettings,
     private val home: HomePrefs,
+    private val themes: ThemeStore,
     liveRadioStore: LiveRadioStore,
 ) {
     private val liveRadio = LiveRadioBackup(liveRadioStore)
@@ -86,9 +88,10 @@ class Backups @Inject constructor(
         val artists = catalog.artists().first().associateBy { it.id }
         val playlistNames = userDao.playlists().first().associate { it.id to it.name }
         val tracks = catalog.tracks().first().associateBy { it.id }
+        val look = themes.settings.value
         Backup(
             createdAt = now,
-            player = playerPrefs,
+            player = PlayerBackup(playerPrefs, look.theme.name, look.light.name, look.dark.name, look.match),
             streaming = streamPrefs,
             sound = SoundBackup(perOutput, profiles),
             presets = presets.saved().map { PresetBackup(it.name, it.gains) },
@@ -168,12 +171,13 @@ class Backups @Inject constructor(
     // ratings as planned. Songs go through the same stores as when the
     // listener does it, so a connected server follows as usual.
     suspend fun restore(backup: Backup, plan: RestorePlan) = withContext(Dispatchers.IO) {
-        val playerPrefs = backup.player
+        val playerPrefs = backup.player?.prefs
         val streamPrefs = backup.streaming
         if (playerPrefs != null || streamPrefs != null) {
             val (currentPlayer, currentStream) = player.snapshot()
             player.restore(playerPrefs ?: currentPlayer, streamPrefs ?: currentStream)
         }
+        backup.player?.let { themes.write(it.themes()) }
         backup.sound?.let { sound.restore(it.perOutput, it.profiles) }
         presets.restore(backup.presets.map { EqPreset(it.name, it.gains) })
         backup.library?.let { library ->

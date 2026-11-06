@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +44,7 @@ private val RemoveFill = OctoColors.Error.copy(alpha = 0.25f)
 // Two short lines, the grip a row is dragged by.
 @Composable
 fun DragHandle(modifier: Modifier) {
+    val ink = OctoColors.TextMuted
     Box(
         modifier.size(40.dp).semantics { contentDescription = "Reorder" },
         contentAlignment = Alignment.Center,
@@ -50,7 +52,7 @@ fun DragHandle(modifier: Modifier) {
         Canvas(Modifier.size(width = 18.dp, height = 8.dp)) {
             val stroke = 2.dp.toPx()
             listOf(stroke / 2, size.height - stroke / 2).forEach { y ->
-                drawLine(OctoColors.TextMuted, Offset(0f, y), Offset(size.width, y), stroke, StrokeCap.Round)
+                drawLine(ink, Offset(0f, y), Offset(size.width, y), stroke, StrokeCap.Round)
             }
         }
     }
@@ -58,7 +60,7 @@ fun DragHandle(modifier: Modifier) {
 
 // What is behind a song as it is swiped right, to play it next or add it
 // to the queue.
-private val QueueSwipeFill: Color get() = OctoColors.Accent.copy(alpha = 0.22f)
+private val QueueSwipeFill: Color @Composable @ReadOnlyComposable get() = OctoColors.Accent.copy(alpha = 0.22f)
 
 // Shown behind a row being swiped right, over the strip the row has moved
 // off (`revealed`, in pixels): a wash of the accent, and what the swipe does

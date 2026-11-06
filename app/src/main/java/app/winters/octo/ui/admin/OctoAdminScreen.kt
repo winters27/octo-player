@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -71,7 +72,7 @@ private const val RecentDownloads = 30
 // Status dots: calm, never lit.
 private val DotOk = Color(0xFF8FBFA0)
 private val DotWarning = Color(0xFFE3B35B)
-private val DotNotSetUp: Color get() = OctoColors.Accent.copy(alpha = 0.3f)
+private val DotNotSetUp: Color @Composable @ReadOnlyComposable get() =OctoColors.Accent.copy(alpha = 0.3f)
 
 // QuietButton's own side padding.
 private val QuietInset = 10.dp

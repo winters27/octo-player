@@ -246,9 +246,17 @@ object SettingsIndex {
         "playlist_covers", SettingsPage.Appearance, PLAYLIST_COVERS_SETTING, "Designed covers, or the covers of their albums",
         listOf("playlist", "cover", "artwork", "mosaic", "picture", "designed"), section = "Playlists",
     )
+    val Theme = add(
+        "theme", SettingsPage.Appearance, "Theme", "The colors every screen is drawn in",
+        listOf("theme", "light mode", "dark mode", "night", "day", "colors", "palette", "appearance"), section = "Theme",
+    )
+    val MatchSystem = add(
+        "theme_match", SettingsPage.Appearance, "Match the system", "A light theme by day and a dark one by night, as the phone is set",
+        listOf("match", "system", "automatic", "day", "night"), section = "Theme",
+    )
     val AccentColor = add(
         "accent_color", SettingsPage.Appearance, "Accent color", "The color of selections, sliders, switches and buttons",
-        listOf("accent", "color", "colour", "theme", "tint", "highlight", "palette", "album art", "cover", "personalize"), section = "Accent color",
+        listOf("accent", "color", "colour", "tint", "highlight", "album art", "cover", "personalize"), section = "Accent color",
     )
     val GlassTint = add(
         "accent_glass", SettingsPage.Appearance, "Color the glass", "The bar, glass buttons and sheets take the accent too",

@@ -513,7 +513,7 @@ private fun TextAction(text: String, modifier: Modifier = Modifier, onClick: () 
     Text(
         text,
         style = OctoType.label,
-        color = OctoColors.Accent,
+        color = OctoColors.AccentWords,
         modifier = modifier
             .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = onClick)
             .padding(vertical = 6.dp),

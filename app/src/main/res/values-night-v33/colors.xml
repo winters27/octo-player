@@ -1,0 +1,9 @@
+<resources>
+    <!-- The launch page of each Match pair by night: the dark theme's page. -->
+    <color name="splash_daylight_octo">#FF0C0C0D</color>
+    <color name="splash_daylight_moss">#FF0E1512</color>
+    <color name="splash_daylight_dusk">#FF120E18</color>
+    <color name="splash_paper_octo">#FF0C0C0D</color>
+    <color name="splash_paper_moss">#FF0E1512</color>
+    <color name="splash_paper_dusk">#FF120E18</color>
+</resources>

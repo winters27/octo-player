@@ -345,6 +345,7 @@ private fun TrackLine(track: ImportTrack, action: (@Composable () -> Unit)? = nu
 // The button that gets an opened list's missing songs now.
 fun getNowLabel(count: Int): String = if (count == 1) "Get 1 song" else "Get $count songs"
 
+@Composable
 private fun stateColor(state: ImportTrackState) = when (state) {
     ImportTrackState.Have, ImportTrackState.Done -> OctoColors.SignalGreen
     ImportTrackState.NotFound, ImportTrackState.Skipped -> OctoColors.SignalOrange

@@ -1,0 +1,61 @@
+<resources>
+    <!-- The launch screen for each theme, picked at run time: the theme's page
+         behind the logo's octopus. The Match styles name a light and a dark
+         theme; their page color changes with the night mode. -->
+    <style name="Theme.Octo.Splash.Octo" parent="Theme.Octo">
+        <item name="android:windowBackground">#FF0C0C0D</item>
+        <item name="android:windowSplashScreenBackground">#FF0C0C0D</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_octopus</item>
+    </style>
+    <style name="Theme.Octo.Splash.Moss" parent="Theme.Octo">
+        <item name="android:windowBackground">#FF0E1512</item>
+        <item name="android:windowSplashScreenBackground">#FF0E1512</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_octopus</item>
+    </style>
+    <style name="Theme.Octo.Splash.Dusk" parent="Theme.Octo">
+        <item name="android:windowBackground">#FF120E18</item>
+        <item name="android:windowSplashScreenBackground">#FF120E18</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_octopus</item>
+    </style>
+    <style name="Theme.Octo.Splash.Daylight" parent="Theme.Octo">
+        <item name="android:windowBackground">#FFE7ECEF</item>
+        <item name="android:windowSplashScreenBackground">#FFE7ECEF</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_octopus</item>
+    </style>
+    <style name="Theme.Octo.Splash.Paper" parent="Theme.Octo">
+        <item name="android:windowBackground">#FFEBE2D2</item>
+        <item name="android:windowSplashScreenBackground">#FFEBE2D2</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_octopus</item>
+    </style>
+
+    <style name="Theme.Octo.Splash.DaylightOcto" parent="Theme.Octo">
+        <item name="android:windowBackground">@color/splash_daylight_octo</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_daylight_octo</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_octopus</item>
+    </style>
+    <style name="Theme.Octo.Splash.DaylightMoss" parent="Theme.Octo">
+        <item name="android:windowBackground">@color/splash_daylight_moss</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_daylight_moss</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_octopus</item>
+    </style>
+    <style name="Theme.Octo.Splash.DaylightDusk" parent="Theme.Octo">
+        <item name="android:windowBackground">@color/splash_daylight_dusk</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_daylight_dusk</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_octopus</item>
+    </style>
+    <style name="Theme.Octo.Splash.PaperOcto" parent="Theme.Octo">
+        <item name="android:windowBackground">@color/splash_paper_octo</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_paper_octo</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_octopus</item>
+    </style>
+    <style name="Theme.Octo.Splash.PaperMoss" parent="Theme.Octo">
+        <item name="android:windowBackground">@color/splash_paper_moss</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_paper_moss</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_octopus</item>
+    </style>
+    <style name="Theme.Octo.Splash.PaperDusk" parent="Theme.Octo">
+        <item name="android:windowBackground">@color/splash_paper_dusk</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_paper_dusk</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_octopus</item>
+    </style>
+</resources>

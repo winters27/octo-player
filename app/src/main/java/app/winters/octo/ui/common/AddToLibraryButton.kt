@@ -25,6 +25,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.design.GlowIcon
+import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.discovery.DownloadPhase
 import app.winters.octo.discovery.Downloads
@@ -102,7 +103,7 @@ private fun SaveHeart(track: TrackEntity, family: FamilyHub, modifier: Modifier,
     ) {
         GlowIcon(
             painterResource(if (saved) OctoIcons.Liked else OctoIcons.Like),
-            tint = if (saved) Color.White else Color.White.copy(alpha = 0.6f),
+            tint = if (saved) OctoColors.Highlight else OctoColors.TextPrimary.copy(alpha = 0.6f),
             lit = saved,
             modifier = Modifier.size(iconSize),
         )
@@ -165,7 +166,7 @@ fun AddToLibraryButton(
             when (phase) {
                 DownloadPhase.None -> GlowIcon(
                     painterResource(OctoIcons.AddToLibrary),
-                    tint = Color.White.copy(alpha = 0.6f),
+                    tint = OctoColors.TextPrimary.copy(alpha = 0.6f),
                     lit = false,
                     modifier = Modifier.size(iconSize),
                 )

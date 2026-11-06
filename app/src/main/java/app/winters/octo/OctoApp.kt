@@ -17,6 +17,8 @@ import app.winters.octo.playback.ServerSwitch
 import app.winters.octo.server.ServerArtworkFetcher
 import app.winters.octo.server.ServerArtworkKeyer
 import app.winters.octo.server.ServerSync
+import app.winters.octo.theme.ThemeApplier
+import app.winters.octo.theme.ThemeStore
 import app.winters.octo.update.AppUpdates
 import coil3.ImageLoader
 import coil3.PlatformContext
@@ -24,6 +26,10 @@ import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import javax.inject.Inject
@@ -50,9 +56,19 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var family: FamilyHub
     @Inject lateinit var serverUpdates: ServerUpdates
     @Inject lateinit var animatedArts: AnimatedArts
+    @Inject lateinit var themes: ThemeStore
+
+    // Whether a main screen has been created in this process yet, for the
+    // launch fade that only a cold start gets.
+    var screenCreated = false
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     override fun onCreate() {
         super.onCreate()
+        // The system's night mode follows the theme, now and on every change.
+        ThemeApplier.applyNightMode(this, themes.settings.value)
+        scope.launch { themes.settings.collect { ThemeApplier.applyNightMode(this@OctoApp, it) } }
         // Keep the library in step with the music on the phone.
         deviceLibrary.start()
         // And with the server's, when one is connected.

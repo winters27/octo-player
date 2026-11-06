@@ -11,6 +11,7 @@ import app.winters.octo.offline.OfflinePrefs
 import app.winters.octo.playback.StreamQuality
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.StreamPrefs
+import app.winters.octo.theme.ThemeChoice
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -36,9 +37,9 @@ class SettingsSummariesTest {
 
     @Test
     fun appearance() {
-        assertEquals("Subtle glow · Live background", appearanceSummary(AmbientPrefs(), liveBackground = true))
-        assertEquals("No glow", appearanceSummary(AmbientPrefs(strength = AmbientStrength.Off), liveBackground = false))
-        assertEquals("Rich glow", appearanceSummary(AmbientPrefs(strength = AmbientStrength.Rich), liveBackground = false))
+        assertEquals("Octo · Subtle glow · Live background", appearanceSummary(ThemeChoice.Octo, AmbientPrefs(), liveBackground = true))
+        assertEquals("Moss · No glow", appearanceSummary(ThemeChoice.Moss, AmbientPrefs(strength = AmbientStrength.Off), liveBackground = false))
+        assertEquals("Paper · Rich glow", appearanceSummary(ThemeChoice.Paper, AmbientPrefs(strength = AmbientStrength.Rich), liveBackground = false))
     }
 
     @Test

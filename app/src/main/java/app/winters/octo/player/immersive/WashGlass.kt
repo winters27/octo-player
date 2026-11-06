@@ -14,10 +14,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.LayoutCoordinates
 import app.winters.octo.design.GlassBackdrop
-import app.winters.octo.design.OctoColors
 
 // The player's glasses' view of the moving background, while it is drawn
 // from its pictures: each glass draws the part of the picture behind it,
@@ -35,6 +33,9 @@ class WashGlass : GlassBackdrop {
     // How much of the background shows over the player's base, as its
     // layer draws it.
     var show: () -> Float = { 1f }
+
+    // The page color under the picture, which the player sets while it draws.
+    var base: Int = 0
 
     private var hasPicture by mutableStateOf(false)
     override val ready: Boolean get() = hasPicture
@@ -73,7 +74,7 @@ class WashGlass : GlassBackdrop {
         drawIntoCanvas { canvas ->
             val c = canvas.nativeCanvas
             c.saveLayer(0f, 0f, size.width, size.height, deepened)
-            c.drawColor(OctoColors.Background.toArgb())
+            c.drawColor(base)
             c.translate(-at.x, -at.y)
             renderer.drawPicture(c, area.size.width, area.size.height, zoom(), fade() * show())
             c.restore()

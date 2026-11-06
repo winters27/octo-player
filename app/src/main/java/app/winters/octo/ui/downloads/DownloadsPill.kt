@@ -20,7 +20,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -153,9 +152,9 @@ fun DownloadsPill(haze: HazeState, modifier: Modifier = Modifier, vm: DownloadsP
                 Text(
                     "+$more",
                     style = OctoType.caption,
-                    color = OctoColors.TextPrimary,
+                    color = OctoColors.Highlight,
                     maxLines = 1,
-                    modifier = Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.12f)).padding(horizontal = 7.dp, vertical = 2.dp),
+                    modifier = Modifier.clip(CircleShape).background(OctoColors.TextPrimary.copy(alpha = 0.12f)).padding(horizontal = 7.dp, vertical = 2.dp),
                 )
             }
         }

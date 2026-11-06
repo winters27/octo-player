@@ -33,6 +33,7 @@ import androidx.lifecycle.viewModelScope
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.SelectedFill
 import app.winters.octo.output.DeviceShape
 import app.winters.octo.output.OutputChoice
 import app.winters.octo.output.OutputDevice
@@ -172,25 +173,27 @@ private fun DeviceRow(@DrawableRes icon: Int, label: String, selected: Boolean, 
         contentAlignment = Alignment.CenterStart,
     ) {
         if (selected) Box(Modifier.matchParentSize().background(OctoColors.AccentSelected, RowShape))
-        Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Icon(
-                painterResource(icon),
-                contentDescription = null,
-                tint = if (selected) Color.White else OctoColors.TextSecondary,
-                modifier = Modifier.size(20.dp),
-            )
-            Column(Modifier.weight(1f)) {
-                Text(label, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
-                detail?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
-            }
-            if (selected) {
-                Icon(painterResource(OctoIcons.Check), contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-            } else {
-                Spacer(Modifier.size(18.dp))
+        SelectedFill(selected) {
+            Row(
+                Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(
+                    painterResource(icon),
+                    contentDescription = null,
+                    tint = if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary,
+                    modifier = Modifier.size(20.dp),
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(label, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
+                    detail?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
+                }
+                if (selected) {
+                    Icon(painterResource(OctoIcons.Check), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(18.dp))
+                } else {
+                    Spacer(Modifier.size(18.dp))
+                }
             }
         }
     }

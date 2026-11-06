@@ -13,6 +13,7 @@ import app.winters.octo.playback.speedLabel
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.StreamPrefs
 import app.winters.octo.radio.RadioDiscovery
+import app.winters.octo.theme.ThemeChoice
 
 // The one line under each category on the front page, saying how it is set
 // now. Parts are joined with a middle dot, and the most telling come first.
@@ -48,7 +49,8 @@ fun radioSummary(prefs: PlayerPrefs): String = line(
     "Live radio",
 )
 
-fun appearanceSummary(ambient: AmbientPrefs, liveBackground: Boolean): String = line(
+fun appearanceSummary(theme: ThemeChoice, ambient: AmbientPrefs, liveBackground: Boolean): String = line(
+    theme.label,
     when (ambient.strength) {
         AmbientStrength.Off -> "No glow"
         AmbientStrength.Subtle -> "Subtle glow"

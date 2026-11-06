@@ -19,6 +19,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.winters.octo.design.GlowIcon
 import app.winters.octo.design.IconAccent
+import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.rememberIconAccent
 import app.winters.octo.favourites.FavouriteStore
@@ -52,7 +53,7 @@ fun FavouriteHeart(kind: FavouriteKind, id: String, modifier: Modifier = Modifie
     ) {
         GlowIcon(
             painterResource(if (on) OctoIcons.Liked else OctoIcons.Like),
-            tint = if (on) Color.White else Color.White.copy(alpha = 0.6f),
+            tint = if (on) OctoColors.Highlight else OctoColors.TextPrimary.copy(alpha = 0.6f),
             lit = on,
             modifier = Modifier.size(24.dp),
             accent = pulse,

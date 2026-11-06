@@ -20,10 +20,15 @@ import app.winters.octo.sound.CrossfeedPreset
 import app.winters.octo.sound.EqMode
 import app.winters.octo.sound.SoundSettings
 import app.winters.octo.theme.AccentChoice
+import app.winters.octo.theme.ThemeChoice
+import app.winters.octo.theme.ThemeSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+
+// A backup holding these player settings and no theme.
+private fun Backup(player: PlayerPrefs) = Backup(player = PlayerBackup(player))
 
 class BackupTest {
     private fun track(id: String, title: String, artist: String, album: String = "Album", ms: Long = 200_000, relink: String = "") = TrackEntity(
@@ -34,7 +39,10 @@ class BackupTest {
 
     private val full = Backup(
         createdAt = 1_758_000_000_000,
-        player = PlayerPrefs(crossfade = true, crossfadeSeconds = 4, crossfadeCurve = FadeCurve.SCurve, speed = 1.25f, keepPitch = false, skipSilence = true, resumeBluetooth = true, accent = AccentChoice.Coral),
+        player = PlayerBackup(
+            PlayerPrefs(crossfade = true, crossfadeSeconds = 4, crossfadeCurve = FadeCurve.SCurve, speed = 1.25f, keepPitch = false, skipSilence = true, resumeBluetooth = true, accent = AccentChoice.Coral),
+            theme = "Dusk", themeLight = "Paper", themeDark = "Dusk", themeMatch = true,
+        ),
         streaming = StreamPrefs(CopyPreference.BestQuality, StreamQuality.Kbps320, StreamQuality.Kbps128),
         sound = SoundBackup(
             perOutput = true,
@@ -87,36 +95,71 @@ class BackupTest {
     fun anUnknownCrossfadeCurveReadsAsTheDefault() {
         val text = encodeBackup(Backup(player = PlayerPrefs(crossfadeCurve = FadeCurve.Linear))).replace("\"Linear\"", "\"Bungee\"")
         val read = decodeBackup(text) as BackupRead.Read
-        assertEquals(FadeCurve.EqualPower, read.backup.player?.crossfadeCurve)
+        assertEquals(FadeCurve.EqualPower, read.backup.player?.prefs?.crossfadeCurve)
     }
 
     @Test
     fun theAccentColorIsKept() {
         for (accent in AccentChoice.entries) {
             val read = decodeBackup(encodeBackup(Backup(player = PlayerPrefs(accent = accent)))) as BackupRead.Read
-            assertEquals(accent, read.backup.player?.accent)
+            assertEquals(accent, read.backup.player?.prefs?.accent)
         }
         assertTrue(encodeBackup(Backup(player = PlayerPrefs(accent = AccentChoice.FromArt))).contains("\"accent\": \"FromArt\""))
         // One this app does not know, from a newer Octo, reads as Octo's own.
         val newer = encodeBackup(Backup(player = PlayerPrefs(accent = AccentChoice.Mint))).replace("\"Mint\"", "\"Chartreuse\"")
-        assertEquals(AccentChoice.Octo, (decodeBackup(newer) as BackupRead.Read).backup.player?.accent)
+        assertEquals(AccentChoice.Octo, (decodeBackup(newer) as BackupRead.Read).backup.player?.prefs?.accent)
         // A backup from before accents leaves Octo's own.
-        assertEquals(AccentChoice.Octo, (decodeBackup("{\"kind\": \"octo-settings\", \"player\": {}}") as BackupRead.Read).backup.player?.accent)
+        assertEquals(AccentChoice.Octo, (decodeBackup("{\"kind\": \"octo-settings\", \"player\": {}}") as BackupRead.Read).backup.player?.prefs?.accent)
+    }
+
+    @Test
+    fun theThemeIsKept() {
+        val text = encodeBackup(full)
+        // Beside the player's own settings, in the same object.
+        assertTrue(text.contains("\"theme\": \"Dusk\""))
+        assertTrue(text.contains("\"themeLight\": \"Paper\""))
+        assertTrue(text.contains("\"themeDark\": \"Dusk\""))
+        assertTrue(text.contains("\"themeMatch\": true"))
+        val read = (decodeBackup(text) as BackupRead.Read).backup.player!!
+        assertEquals(ThemeSettings(ThemeChoice.Dusk, ThemeChoice.Paper, ThemeChoice.Dusk, true), read.themes())
+        assertEquals(AccentChoice.Coral, read.prefs.accent)
+        // One this app does not know, from a newer Octo, reads as that field's default.
+        val newer = text.replace("\"Dusk\"", "\"Aurora\"").replace("\"Paper\"", "\"Mirror\"")
+        assertEquals(
+            ThemeSettings(ThemeChoice.Octo, ThemeChoice.Daylight, ThemeChoice.Octo, true),
+            (decodeBackup(newer) as BackupRead.Read).backup.player!!.themes(),
+        )
+        // A light theme in the dark slot reads as the slot's default.
+        val crossed = text.replace("\"themeDark\": \"Dusk\"", "\"themeDark\": \"Paper\"")
+        assertEquals(ThemeChoice.Octo, (decodeBackup(crossed) as BackupRead.Read).backup.player!!.themes().dark)
+    }
+
+    @Test
+    fun anOldBackupKeepsOcto() {
+        val old = decodeBackup("{\"kind\": \"octo-settings\", \"player\": {\"crossfade\": true}}") as BackupRead.Read
+        assertEquals(ThemeSettings(), old.backup.player!!.themes())
+        assertEquals(ThemeChoice.Octo, old.backup.player!!.themes().theme)
+        assertEquals(false, old.backup.player!!.themes().match)
+        assertEquals(PlayerPrefs(crossfade = true), old.backup.player!!.prefs)
+        // A backup made with no theme set writes none of the four names.
+        val written = encodeBackup(Backup(player = PlayerPrefs()))
+        assertFalse(written.contains("themeLight"))
+        assertFalse(written.contains("themeMatch"))
     }
 
     @Test
     fun theSwipeChoiceIsKept() {
         for (action in SwipeAction.entries) {
             val read = decodeBackup(encodeBackup(Backup(player = PlayerPrefs(swipeAction = action)))) as BackupRead.Read
-            assertEquals(action, read.backup.player?.swipeAction)
+            assertEquals(action, read.backup.player?.prefs?.swipeAction)
         }
         // By name, as the other apps write it.
         assertTrue(encodeBackup(Backup(player = PlayerPrefs(swipeAction = SwipeAction.AddToQueue))).contains("\"swipeAction\": \"AddToQueue\""))
         // One this app does not know, from a newer Octo, plays next.
         val newer = encodeBackup(Backup(player = PlayerPrefs(swipeAction = SwipeAction.AddToQueue))).replace("\"AddToQueue\"", "\"Nothing\"")
-        assertEquals(SwipeAction.PlayNext, (decodeBackup(newer) as BackupRead.Read).backup.player?.swipeAction)
+        assertEquals(SwipeAction.PlayNext, (decodeBackup(newer) as BackupRead.Read).backup.player?.prefs?.swipeAction)
         // A backup from before the choice plays next.
-        assertEquals(SwipeAction.PlayNext, (decodeBackup("{\"kind\": \"octo-settings\", \"player\": {}}") as BackupRead.Read).backup.player?.swipeAction)
+        assertEquals(SwipeAction.PlayNext, (decodeBackup("{\"kind\": \"octo-settings\", \"player\": {}}") as BackupRead.Read).backup.player?.prefs?.swipeAction)
     }
 
     @Test
@@ -124,12 +167,12 @@ class BackupTest {
         val text = encodeBackup(Backup(player = PlayerPrefs(animatedArt = AnimatedArtSetting.FullScreen)))
         // By the setting's key, as the other apps write it.
         assertTrue(text.contains("\"animatedArt\": \"full_screen\""))
-        assertEquals(AnimatedArtSetting.FullScreen, (decodeBackup(text) as BackupRead.Read).backup.player?.animatedArt)
+        assertEquals(AnimatedArtSetting.FullScreen, (decodeBackup(text) as BackupRead.Read).backup.player?.prefs?.animatedArt)
         val off = decodeBackup("{\"kind\": \"octo-settings\", \"player\": {\"animatedArt\": \"off\"}}") as BackupRead.Read
-        assertEquals(AnimatedArtSetting.Off, off.backup.player?.animatedArt)
+        assertEquals(AnimatedArtSetting.Off, off.backup.player?.prefs?.animatedArt)
         // One this app does not know reads as the default, Square.
         val unknown = decodeBackup(text.replace("\"full_screen\"", "\"hologram\"")) as BackupRead.Read
-        assertEquals(AnimatedArtSetting.Square, unknown.backup.player?.animatedArt)
+        assertEquals(AnimatedArtSetting.Square, unknown.backup.player?.prefs?.animatedArt)
         // A backup from before the setting has it at Square.
         assertEquals(AnimatedArtSetting.Square, PlayerPrefs().animatedArt)
     }
@@ -160,7 +203,7 @@ class BackupTest {
     fun anOlderOrSmallerBackupStillReads() {
         val read = decodeBackup(BYTE_ORDER_MARK + "{\"kind\": \"octo-settings\", \"version\": 1, \"player\": {\"crossfade\": true}, \"extra\": 5}")
         val backup = (read as BackupRead.Read).backup
-        assertEquals(PlayerPrefs(crossfade = true), backup.player)
+        assertEquals(PlayerBackup(PlayerPrefs(crossfade = true)), backup.player)
         assertEquals(null, backup.sound)
         assertTrue(backup.playlists.isEmpty())
     }

@@ -36,6 +36,7 @@ import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.SelectedFill
 import app.winters.octo.design.Spinner
 import app.winters.octo.playback.SwitchOutcome
 import app.winters.octo.server.ServerCheck
@@ -158,55 +159,57 @@ private fun ServerRow(
     val sheet = LocalChoiceSheet.current
     Box(Modifier.fillMaxWidth().semantics { selected = inUse }) {
         if (inUse) Box(Modifier.matchParentSize().padding(horizontal = 6.dp, vertical = 4.dp).background(OctoColors.AccentSelected, PillShape))
-        RowFrame(searchEntry, minHeight = 64.dp) {
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SelectedFill(inUse) {
+            RowFrame(searchEntry, minHeight = 64.dp) {
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            server.name,
+                            style = OctoType.body,
+                            color = if (server.signedOut) OctoColors.TextSecondary else OctoColors.TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (inUse) Text("In use", style = OctoType.caption, color = OctoColors.TextSecondary)
+                    }
                     Text(
-                        server.name,
-                        style = OctoType.body,
-                        color = if (server.signedOut) OctoColors.TextSecondary else OctoColors.TextPrimary,
+                        accountLine(server.username, server.serverUrl),
+                        style = OctoType.caption,
+                        color = OctoColors.TextMuted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
                     )
-                    if (inUse) Text("In use", style = OctoType.caption, color = OctoColors.TextSecondary)
+                    Text(
+                        statusLine(server.serverType, server.serverVersion, server.signedOut, check, switching, inUse),
+                        style = OctoType.caption,
+                        color = if (!inUse && check.isWarning()) OctoColors.SignalOrange else OctoColors.TextMuted,
+                    )
                 }
-                Text(
-                    accountLine(server.username, server.serverUrl),
-                    style = OctoType.caption,
-                    color = OctoColors.TextMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    statusLine(server.serverType, server.serverVersion, server.signedOut, check, switching, inUse),
-                    style = OctoType.caption,
-                    color = if (!inUse && check.isWarning()) OctoColors.SignalOrange else OctoColors.TextMuted,
-                )
-            }
-            when {
-                switching -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Spinner(size = 16.dp, color = OctoColors.TextSecondary)
-                    Text("Switching", style = OctoType.caption, color = OctoColors.TextSecondary)
+                when {
+                    switching -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Spinner(size = 16.dp, color = OctoColors.TextSecondary)
+                        Text("Switching", style = OctoType.caption, color = OctoColors.TextSecondary)
+                    }
+                    !inUse -> Text(
+                        if (server.signedOut) "Sign in" else "Switch",
+                        style = OctoType.label,
+                        color = if (anySwitching) OctoColors.TextMuted else OctoColors.AccentWords,
+                        modifier = Modifier
+                            .clickable(enabled = !anySwitching, role = Role.Button, onClick = onSwitch)
+                            .padding(horizontal = 4.dp, vertical = 10.dp),
+                    )
                 }
-                !inUse -> Text(
-                    if (server.signedOut) "Sign in" else "Switch",
-                    style = OctoType.label,
-                    color = if (anySwitching) OctoColors.TextMuted else OctoColors.Accent,
-                    modifier = Modifier
-                        .clickable(enabled = !anySwitching, role = Role.Button, onClick = onSwitch)
-                        .padding(horizontal = 4.dp, vertical = 10.dp),
-                )
-            }
-            val more = "More for ${server.name}"
-            Box(
-                Modifier
-                    .choiceAnchor(sheet)
-                    .clickable(role = Role.Button, onClick = onMenu)
-                    .semantics { contentDescription = more }
-                    .padding(8.dp),
-            ) {
-                Icon(painterResource(OctoIcons.More), contentDescription = null, tint = OctoColors.TextSecondary, modifier = Modifier.size(20.dp))
+                val more = "More for ${server.name}"
+                Box(
+                    Modifier
+                        .choiceAnchor(sheet)
+                        .clickable(role = Role.Button, onClick = onMenu)
+                        .semantics { contentDescription = more }
+                        .padding(8.dp),
+                ) {
+                    Icon(painterResource(OctoIcons.More), contentDescription = null, tint = OctoColors.TextSecondary, modifier = Modifier.size(20.dp))
+                }
             }
         }
     }

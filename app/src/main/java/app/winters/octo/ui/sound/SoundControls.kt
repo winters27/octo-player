@@ -244,6 +244,7 @@ internal fun BalanceSlider(value: Float, onChange: (Float) -> Unit, modifier: Mo
     val thumb by animateDpAsState(if (dragging) 9.dp else 4.dp, spring(0.5f, 200f), label = "balance thumb")
     val glowAlpha by animateFloatAsState(if (dragging) 0.8f else 0.4f, spring(1f, 200f), label = "balance glow")
     val glowPaint = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { strokeCap = android.graphics.Paint.Cap.ROUND } }
+    val ink = OctoColors.TextPrimary
 
     // A position on the line as a balance, snapping to the centre, with a
     // tick as it lands there.
@@ -291,21 +292,21 @@ internal fun BalanceSlider(value: Float, onChange: (Float) -> Unit, modifier: Mo
                     val stroke = thickness.toPx()
                     val centre = size.width / 2
                     val end = centre + (if (dragging) dragValue else current) * centre
-                    drawLine(Color.White.copy(alpha = 0.24f), Offset(0f, y), Offset(size.width, y), stroke, StrokeCap.Round)
+                    drawLine(ink.copy(alpha = 0.24f), Offset(0f, y), Offset(size.width, y), stroke, StrokeCap.Round)
                     if (end != centre) {
                         drawIntoCanvas { canvas ->
                             for (spread in floatArrayOf(2.5f, 1f, 0.3f)) {
-                                glowPaint.color = Color.White.copy(alpha = glowAlpha / 3f).toArgb()
+                                glowPaint.color = ink.copy(alpha = glowAlpha / 3f).toArgb()
                                 glowPaint.strokeWidth = stroke
                                 glowPaint.maskFilter = BlurMaskFilter(12f * spread, BlurMaskFilter.Blur.NORMAL)
                                 canvas.nativeCanvas.drawLine(centre, y, end, y, glowPaint)
                             }
                         }
-                        drawLine(Color.White, Offset(centre, y), Offset(end, y), stroke, StrokeCap.Round)
+                        drawLine(ink, Offset(centre, y), Offset(end, y), stroke, StrokeCap.Round)
                     }
                     // The centre mark.
-                    drawLine(Color.White.copy(alpha = 0.5f), Offset(centre, y - 7.dp.toPx()), Offset(centre, y + 7.dp.toPx()), 1.dp.toPx())
-                    drawCircle(Color.White, thumb.toPx(), Offset(end, y))
+                    drawLine(ink.copy(alpha = 0.5f), Offset(centre, y - 7.dp.toPx()), Offset(centre, y + 7.dp.toPx()), 1.dp.toPx())
+                    drawCircle(ink, thumb.toPx(), Offset(end, y))
                 },
         )
         Text("R", style = OctoType.caption, color = OctoColors.TextMuted)

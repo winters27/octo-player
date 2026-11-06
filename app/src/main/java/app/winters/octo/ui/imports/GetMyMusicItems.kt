@@ -151,7 +151,6 @@ private fun StepRow(title: String, line: String, control: @Composable () -> Unit
 }
 
 private val TileShape = RoundedCornerShape(14.dp)
-private val OnAccent = Color(0xFF0C0C0D)
 
 // The services, two to a row on a phone.
 @OptIn(ExperimentalLayoutApi::class)
@@ -171,7 +170,7 @@ private fun ServiceGrid(services: List<ImportServiceLink>, chosen: String?, enab
 @Composable
 private fun ServiceTile(service: ImportServiceLink, chosen: Boolean, enabled: Boolean, modifier: Modifier, onPick: () -> Unit) {
     val fill by animateColorAsState(if (chosen) OctoColors.Accent else OctoColors.Accent.copy(alpha = 0.06f), label = "tile fill")
-    val ink by animateColorAsState(if (chosen) OnAccent else OctoColors.TextPrimary, label = "tile ink")
+    val ink by animateColorAsState(if (chosen) OctoColors.OnAccent else OctoColors.TextPrimary, label = "tile ink")
     Box(
         modifier
             .heightIn(min = 56.dp)

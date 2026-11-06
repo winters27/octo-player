@@ -16,8 +16,21 @@ import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.StreamPrefs
 import app.winters.octo.playlists.BYTE_ORDER_MARK
 import app.winters.octo.sound.SoundSettings
+import app.winters.octo.theme.ThemeSettings
+import app.winters.octo.theme.themeSettings
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonEncoder
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonObject
 import java.net.URI
 import kotlin.math.abs
 
@@ -145,6 +158,50 @@ data class ListenBrainzBackup(
 @Serializable
 data class ServerBackup(val address: String, val username: String)
 
+// The player's settings with the theme beside them: one JSON object, the
+// player's fields as they always were, then `theme`, `themeLight`,
+// `themeDark` and `themeMatch`. A backup from before themes has none of the
+// four and reads as Octo's.
+@Serializable(with = PlayerBackupSerializer::class)
+data class PlayerBackup(
+    val prefs: PlayerPrefs = PlayerPrefs(),
+    val theme: String? = null,
+    val themeLight: String? = null,
+    val themeDark: String? = null,
+    val themeMatch: Boolean? = null,
+) {
+    // The theme settings this holds, a name this app does not know read as
+    // that field's default.
+    fun themes(): ThemeSettings = themeSettings(theme, themeLight, themeDark, themeMatch ?: false)
+}
+
+object PlayerBackupSerializer : KSerializer<PlayerBackup> {
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("PlayerBackup")
+
+    override fun serialize(encoder: Encoder, value: PlayerBackup) {
+        val json = encoder as JsonEncoder
+        val fields = json.json.encodeToJsonElement(PlayerPrefs.serializer(), value.prefs).jsonObject.toMutableMap()
+        value.theme?.let { fields["theme"] = JsonPrimitive(it) }
+        value.themeLight?.let { fields["themeLight"] = JsonPrimitive(it) }
+        value.themeDark?.let { fields["themeDark"] = JsonPrimitive(it) }
+        value.themeMatch?.let { fields["themeMatch"] = JsonPrimitive(it) }
+        json.encodeJsonElement(JsonObject(fields))
+    }
+
+    override fun deserialize(decoder: Decoder): PlayerBackup {
+        val json = decoder as JsonDecoder
+        val fields = json.decodeJsonElement().jsonObject
+        fun text(key: String) = (fields[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        return PlayerBackup(
+            prefs = json.json.decodeFromJsonElement(PlayerPrefs.serializer(), fields),
+            theme = text("theme"),
+            themeLight = text("themeLight"),
+            themeDark = text("themeDark"),
+            themeMatch = (fields["themeMatch"] as? JsonPrimitive)?.booleanOrNull,
+        )
+    }
+}
+
 // Everything a backup holds. Every part is optional, so a backup from an
 // older app with fewer settings still reads.
 @Serializable
@@ -152,7 +209,7 @@ data class Backup(
     val kind: String = BACKUP_KIND,
     val version: Int = BACKUP_VERSION,
     val createdAt: Long = 0,
-    val player: PlayerPrefs? = null,
+    val player: PlayerBackup? = null,
     val streaming: StreamPrefs? = null,
     val sound: SoundBackup? = null,
     val presets: List<PresetBackup> = emptyList(),

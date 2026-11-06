@@ -15,6 +15,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
@@ -34,6 +35,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import app.winters.octo.design.OctoColors
 import app.winters.octo.discovery.DownloadPhase
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -60,7 +62,7 @@ private const val WAITING_SWEEP = 90f
 private const val PLUS_ARM = 0.18f
 
 private val Stroke2 = 2.dp
-private val Track = Color.White.copy(alpha = 0.2f)
+private val Track: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.2f)
 
 // A song on its way into the library, drawn as a thin ring around a small
 // plus: turning while it waits, filling as it downloads, full and pulsing
@@ -122,6 +124,8 @@ internal fun DownloadRing(phase: DownloadPhase, calm: Boolean, modifier: Modifie
         label = "download fill",
     )
 
+    val ink = OctoColors.TextPrimary
+    val track = Track
     Box(modifier) {
         Canvas(Modifier.matchParentSize()) {
             val fade = 1f - morph.value
@@ -129,10 +133,10 @@ internal fun DownloadRing(phase: DownloadPhase, calm: Boolean, modifier: Modifie
             val stroke = Stroke2.toPx()
             val topLeft = Offset(stroke / 2, stroke / 2)
             val arcSize = Size(size.width - stroke, size.height - stroke)
-            drawCircle(Track.copy(alpha = Track.alpha * fade), radius = (size.minDimension - stroke) / 2, style = Stroke(stroke))
+            drawCircle(track.copy(alpha = track.alpha * fade), radius = (size.minDimension - stroke) / 2, style = Stroke(stroke))
             if (waiting) {
                 drawArc(
-                    Color.White.copy(alpha = fade),
+                    ink.copy(alpha = fade),
                     startAngle = (turn?.value ?: 0f) - 90f,
                     sweepAngle = WAITING_SWEEP,
                     useCenter = false,
@@ -142,7 +146,7 @@ internal fun DownloadRing(phase: DownloadPhase, calm: Boolean, modifier: Modifie
                 )
             } else if (fill > 0f) {
                 drawArc(
-                    Color.White.copy(alpha = fade * (pulse?.value ?: 1f)),
+                    ink.copy(alpha = fade * (pulse?.value ?: 1f)),
                     startAngle = -90f,
                     sweepAngle = 360f * fill,
                     useCenter = false,
@@ -154,7 +158,7 @@ internal fun DownloadRing(phase: DownloadPhase, calm: Boolean, modifier: Modifie
             // The plus the button showed, small inside the ring, so it is
             // still the same action on its way. It fades as the check comes.
             val arm = size.minDimension * PLUS_ARM
-            val plus = Color.White.copy(alpha = fade)
+            val plus = ink.copy(alpha = fade)
             drawLine(plus, center - Offset(arm, 0f), center + Offset(arm, 0f), strokeWidth = stroke, cap = StrokeCap.Round)
             drawLine(plus, center - Offset(0f, arm), center + Offset(0f, arm), strokeWidth = stroke, cap = StrokeCap.Round)
         }
@@ -169,6 +173,7 @@ private fun DrawnCheck(drawn: () -> Float, glow: () -> Float, modifier: Modifier
     val path = remember { Path() }
     val part = remember { Path() }
     val measure = remember { PathMeasure() }
+    val ink = OctoColors.TextPrimary
     val draw: DrawScope.() -> Unit = {
         path.reset()
         path.moveTo(size.width * 0.24f, size.height * 0.52f)
@@ -177,7 +182,7 @@ private fun DrawnCheck(drawn: () -> Float, glow: () -> Float, modifier: Modifier
         measure.setPath(path, false)
         part.reset()
         measure.getSegment(0f, measure.length * drawn().coerceIn(0f, 1f), part, true)
-        drawPath(part, Color.White, style = Stroke(Stroke2.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(part, ink, style = Stroke(Stroke2.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
     Box(modifier) {
         if (glow() > 0f) {
@@ -191,17 +196,18 @@ private fun DrawnCheck(drawn: () -> Float, glow: () -> Float, modifier: Modifier
 // A download that failed: a small circle with an exclamation mark.
 @Composable
 internal fun DownloadAlert(modifier: Modifier = Modifier) {
+    val ink = OctoColors.TextPrimary
     Canvas(modifier) {
         val stroke = Stroke2.toPx()
         val radius = size.minDimension * 0.42f - stroke / 2
-        drawCircle(Color.White, radius = radius, style = Stroke(stroke))
+        drawCircle(ink, radius = radius, style = Stroke(stroke))
         drawLine(
-            Color.White,
+            ink,
             start = Offset(center.x, center.y - radius * 0.5f),
             end = Offset(center.x, center.y + radius * 0.1f),
             strokeWidth = stroke,
             cap = StrokeCap.Round,
         )
-        drawCircle(Color.White, radius = stroke * 0.7f, center = Offset(center.x, center.y + radius * 0.48f))
+        drawCircle(ink, radius = stroke * 0.7f, center = Offset(center.x, center.y + radius * 0.48f))
     }
 }

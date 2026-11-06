@@ -86,9 +86,9 @@ fun driftFrameMs(alpha: Float): Long = if (alpha > ambientAlpha(AmbientStrength.
 
 // Toward the bottom the glow fades to 60%, so the lists and the bar sit on
 // the quietest part.
-private val BottomFade = Brush.verticalGradient(
+private fun bottomFade(page: Color) = Brush.verticalGradient(
     0.35f to Color.Transparent,
-    1f to OctoColors.Background.copy(alpha = 0.4f),
+    1f to page.copy(alpha = 0.4f),
 )
 
 // The settings and colours the glow is made from.
@@ -192,13 +192,14 @@ fun rememberBarFilm(now: NowPlaying, vm: AmbienceViewModel = hiltViewModel()): S
     val colors by produceState<PlayerColors?>(null, now.artwork, strength) {
         value = if (strength == null) null else vm.colorsFor(now.artwork)
     }
-    val target = colors?.let { c -> strength?.let { barFilm(c.mesh[0], it) } } ?: GlazeTint
+    val plain = GlazeTint
+    val target = colors?.let { c -> strength?.let { barFilm(c.mesh[0], it, plain) } } ?: plain
     return animateColorAsState(target, tween(CrossfadeMs), label = "bar film")
 }
 
-// A trace of a colour over the glass's usual dim film.
-fun barFilm(color: Color, strength: AmbientStrength): Color =
-    Color(ambientColor(color.toArgb())).copy(alpha = barTintAlpha(strength)).compositeOver(GlazeTint)
+// A trace of a colour over the glass's usual dim film, `plain`.
+fun barFilm(color: Color, strength: AmbientStrength, plain: Color): Color =
+    Color(ambientColor(color.toArgb())).copy(alpha = barTintAlpha(strength)).compositeOver(plain)
 
 // A strip in Settings showing the glow at a strength, with the song on now
 // written over it the way a page's text sits on it.
@@ -245,6 +246,8 @@ private fun AmbientField(colors: PlayerColors?, strength: Float, moving: Boolean
     val c3 = animateColorAsState(target[3], tween(CrossfadeMs), label = "ambient 3")
     val glow = animateFloatAsState(if (colors == null) 0f else strength, tween(CrossfadeMs), label = "ambient glow")
     val painter = remember { fieldPainter() }
+    val page = OctoColors.Background
+    val fade = remember(page) { bottomFade(page) }
 
     val time = remember { mutableFloatStateOf(0f) }
     if (moving && strength > 0f && painter.moves) {
@@ -272,7 +275,7 @@ private fun AmbientField(colors: PlayerColors?, strength: Float, moving: Boolean
                 val alpha = glow.value
                 if (alpha <= 0.002f) return@drawBehind
                 with(painter) { paint(c0.value, c1.value, c2.value, c3.value, time.floatValue, alpha) }
-                drawRect(BottomFade)
+                drawRect(fade)
             },
     )
 }

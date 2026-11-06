@@ -118,7 +118,7 @@ fun GlassMenuSwitch(item: MoreItem) {
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         if (item.icon != null) {
-            Icon(painterResource(item.icon), contentDescription = null, tint = if (item.enabled) Color.White else OctoColors.TextMuted, modifier = Modifier.size(20.dp))
+            Icon(painterResource(item.icon), contentDescription = null, tint = if (item.enabled) OctoColors.TextPrimary else OctoColors.TextMuted, modifier = Modifier.size(20.dp))
         }
         Column(Modifier.weight(1f)) {
             Text(item.label, style = OctoType.bodySmall, color = if (item.enabled) OctoColors.TextPrimary else OctoColors.TextMuted)

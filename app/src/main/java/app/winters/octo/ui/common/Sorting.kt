@@ -48,6 +48,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -76,10 +77,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.Glaze
+import app.winters.octo.design.SelectedFill
 import app.winters.octo.design.GlowIcon
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.glassFilm
 import app.winters.octo.sort.SortList
 import app.winters.octo.sort.SortOption
 import app.winters.octo.sort.SortOrder
@@ -90,7 +93,7 @@ import app.winters.octo.sort.sortScale
 private val SortCapsuleHeight = 34.dp
 
 // The marks either side of the sort name: white, a step quieter than it.
-private val SortMarkTint = Color.White.copy(alpha = 0.72f)
+private val SortMarkTint: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.72f)
 
 // Which way the sort button's arrow points, in degrees: the up arrow as
 // drawn for ascending, turned half round for descending. The turn is
@@ -221,7 +224,7 @@ internal fun SortChoices(request: SortRequest, close: () -> Unit) {
 }
 
 // The words and mark of the direction not chosen: white, well back.
-private val UnchosenTint = Color.White.copy(alpha = 0.45f)
+private val UnchosenTint: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.45f)
 
 // The two directions side by side in one glaze, named for what they mean
 // here ("A to Z", "Newest"). The chosen one is the accent-tinted pill with white
@@ -278,10 +281,10 @@ private fun DirectionPair(option: SortOption, descending: Boolean, modifier: Mod
 // The popup's card is padded 6dp, so a pill's corners follow its 20dp.
 private val OptionShape = RoundedCornerShape(14.dp)
 
-private val OptionLine = OctoColors.TextPrimary.copy(alpha = 0.08f)
+private val OptionLine: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.08f)
 
 // The options not chosen: a step back from the chosen one's white.
-private val OtherOptionTint = Color.White.copy(alpha = 0.7f)
+private val OtherOptionTint: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.7f)
 
 // What a list can be ordered by, one above the other with hairlines
 // between, as in the other glass menus. The chosen option sits in the
@@ -312,22 +315,24 @@ private fun SortOptions(options: List<SortOption>, selected: Int, onPick: (Int) 
                 contentAlignment = Alignment.CenterStart,
             ) {
                 if (chosen) Box(Modifier.matchParentSize().background(OctoColors.AccentSelected, OptionShape))
-                Row(
-                    Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(
-                        option.label,
-                        style = OctoType.bodySmall.copy(fontWeight = if (chosen) FontWeight.Medium else FontWeight.Normal),
-                        color = if (chosen) OctoColors.TextPrimary else OtherOptionTint,
-                        modifier = Modifier.weight(1f),
-                    )
-                    // The check's room is kept on every line.
-                    if (chosen) {
-                        Icon(painterResource(OctoIcons.Check), contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                    } else {
-                        Spacer(Modifier.size(18.dp))
+                SelectedFill(chosen) {
+                    Row(
+                        Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(
+                            option.label,
+                            style = OctoType.bodySmall.copy(fontWeight = if (chosen) FontWeight.Medium else FontWeight.Normal),
+                            color = if (chosen) OctoColors.TextPrimary else OtherOptionTint,
+                            modifier = Modifier.weight(1f),
+                        )
+                        // The check's room is kept on every line.
+                        if (chosen) {
+                            Icon(painterResource(OctoIcons.Check), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(18.dp))
+                        } else {
+                            Spacer(Modifier.size(18.dp))
+                        }
                     }
                 }
             }
@@ -400,7 +405,7 @@ private fun LetterHeading(letter: Char) {
             color = OctoColors.TextMuted,
             textAlign = TextAlign.Center,
             modifier = Modifier
-                .background(Color.Black.copy(alpha = 0.55f), CircleShape)
+                .background(glassFilm(0.55f), CircleShape)
                 .sizeIn(minWidth = 26.dp, minHeight = 26.dp)
                 .wrapContentHeight(Alignment.CenterVertically)
                 .padding(horizontal = 8.dp, vertical = 4.dp),

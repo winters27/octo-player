@@ -167,11 +167,12 @@ internal fun RowFrame(
             glow.animateTo(0f, tween(700))
         }
     }
+    val glowInk = OctoColors.Accent
     Row(
         Modifier
             .fillMaxWidth()
             .bringIntoViewRequester(requester)
-            .drawBehind { if (glow.value > 0f) drawRect(OctoColors.Accent.copy(alpha = 0.14f * glow.value)) }
+            .drawBehind { if (glow.value > 0f) drawRect(glowInk.copy(alpha = 0.14f * glow.value)) }
             .then(modifier)
             .heightIn(min = minHeight)
             .padding(horizontal = 16.dp, vertical = 12.dp),

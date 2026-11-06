@@ -27,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -46,6 +47,7 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.menuRowPress
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.SelectedFill
 
 // How one option in a glass menu is drawn: whether it is the chosen one, and
 // whether a line parts it from the option above. No line touches the chosen
@@ -62,7 +64,7 @@ fun menuRowLooks(count: Int, selected: Int): List<MenuRowLook> = List(count) { i
 // The card is padded 6dp, so the pill's corners follow the card's 20dp.
 private val OptionShape = RoundedCornerShape(14.dp)
 
-private val LineColour = OctoColors.TextPrimary.copy(alpha = 0.08f)
+private val LineColour: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.08f)
 
 // How wide a glass menu is, so its pages line up as it turns from one to
 // the next.
@@ -120,11 +122,12 @@ private fun rowHeld(interaction: MutableInteractionSource): Boolean {
 private fun MenuOption(option: Choice, selected: Boolean, pickable: Boolean, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val held = rowHeld(interaction)
+    val press = OctoColors.MenuPress
     Box(
         Modifier
             .fillMaxWidth()
             .heightIn(min = MenuRowHeight.Touch)
-            .menuRowPress(OptionShape) { if (held && !selected) 1f else 0f }
+            .menuRowPress(OptionShape, press) { if (held && !selected) 1f else 0f }
             .clip(OptionShape)
             .hoverable(interaction)
             .then(
@@ -137,22 +140,24 @@ private fun MenuOption(option: Choice, selected: Boolean, pickable: Boolean, onC
         contentAlignment = Alignment.CenterStart,
     ) {
         if (selected) Box(Modifier.matchParentSize().background(OctoColors.AccentSelected, OptionShape))
-        Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            option.leading?.invoke()
-            Column(Modifier.weight(1f)) {
-                Text(option.label, style = OctoType.bodySmall.copy(fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal), color = if (option.enabled) OctoColors.TextPrimary else OctoColors.TextMuted)
-                option.detail?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
-            }
-            // The check's room is kept on every line, so the menu's width
-            // does not depend on which one is chosen.
-            if (selected) {
-                Icon(painterResource(OctoIcons.Check), contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-            } else if (pickable) {
-                Spacer(Modifier.size(18.dp))
+        SelectedFill(selected) {
+            Row(
+                Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                option.leading?.invoke()
+                Column(Modifier.weight(1f)) {
+                    Text(option.label, style = OctoType.bodySmall.copy(fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal), color = if (option.enabled) OctoColors.TextPrimary else OctoColors.TextMuted)
+                    option.detail?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
+                }
+                // The check's room is kept on every line, so the menu's width
+                // does not depend on which one is chosen.
+                if (selected) {
+                    Icon(painterResource(OctoIcons.Check), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(18.dp))
+                } else if (pickable) {
+                    Spacer(Modifier.size(18.dp))
+                }
             }
         }
     }
@@ -213,11 +218,12 @@ fun GlassMenuAction(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val held = rowHeld(interaction)
+    val press = OctoColors.MenuPress
     Row(
         modifier
             .fillMaxWidth()
             .heightIn(min = MenuRowHeight.Touch)
-            .menuRowPress(OptionShape) { if (held && enabled) 1f else 0f }
+            .menuRowPress(OptionShape, press) { if (held && enabled) 1f else 0f }
             .clip(OptionShape)
             .hoverable(interaction, enabled = enabled)
             .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
@@ -229,7 +235,7 @@ fun GlassMenuAction(
             Icon(
                 painterResource(icon),
                 contentDescription = null,
-                tint = if (enabled) Color.White else OctoColors.TextMuted,
+                tint = if (enabled) OctoColors.TextPrimary else OctoColors.TextMuted,
                 modifier = Modifier.size(20.dp),
             )
         }
@@ -282,11 +288,12 @@ fun GlassMenuHeader(title: String, subtitle: String?, picture: @Composable () ->
 fun GlassMenuBack(title: String, onBack: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val held = rowHeld(interaction)
+    val press = OctoColors.MenuPress
     Row(
         Modifier
             .fillMaxWidth()
             .heightIn(min = MenuRowHeight.Touch)
-            .menuRowPress(OptionShape) { if (held) 1f else 0f }
+            .menuRowPress(OptionShape, press) { if (held) 1f else 0f }
             .clip(OptionShape)
             .hoverable(interaction)
             .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClickLabel = "Back", onClick = onBack)
@@ -294,7 +301,7 @@ fun GlassMenuBack(title: String, onBack: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Icon(painterResource(OctoIcons.ChevronBack), contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+        Icon(painterResource(OctoIcons.ChevronBack), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(18.dp))
         Text(
             title,
             style = OctoType.label,

@@ -3,6 +3,7 @@ package app.winters.octo.ambient
 import androidx.navigation3.runtime.NavKey
 import app.winters.octo.backup.Backup
 import app.winters.octo.backup.BackupRead
+import app.winters.octo.backup.PlayerBackup
 import app.winters.octo.backup.decodeBackup
 import app.winters.octo.backup.encodeBackup
 import app.winters.octo.player.PlayerPrefs
@@ -217,16 +218,16 @@ class AmbienceTest {
     @Test
     fun aBackupKeepsTheAmbientSettings() {
         val ambient = AmbientPrefs(strength = AmbientStrength.Rich, search = false, bar = false, pageArtwork = false)
-        val backup = Backup(player = PlayerPrefs(ambient = ambient))
+        val backup = Backup(player = PlayerBackup(PlayerPrefs(ambient = ambient)))
         assertEquals(BackupRead.Read(backup), decodeBackup(encodeBackup(backup)))
     }
 
     @Test
     fun anUnknownStrengthInABackupFallsBackToTheDefault() {
-        val text = encodeBackup(Backup(player = PlayerPrefs(ambient = AmbientPrefs(strength = AmbientStrength.Rich))))
+        val text = encodeBackup(Backup(player = PlayerBackup(PlayerPrefs(ambient = AmbientPrefs(strength = AmbientStrength.Rich)))))
             .replace("\"Rich\"", "\"Blinding\"")
         val read = decodeBackup(text) as BackupRead.Read
-        assertEquals(AmbientStrength.Subtle, read.backup.player?.ambient?.strength)
+        assertEquals(AmbientStrength.Subtle, read.backup.player?.prefs?.ambient?.strength)
     }
 
     @Test

@@ -237,6 +237,8 @@ private fun CurveRow(curve: FadeCurve, smart: Boolean, onPick: (FadeCurve) -> Un
 // rising.
 @Composable
 private fun CurvePreview(curve: FadeCurve) {
+    val outInk = OctoColors.TextMuted
+    val inInk = OctoColors.TextPrimary
     Canvas(Modifier.size(width = 32.dp, height = 20.dp)) {
         val steps = 24
         val stroke = 1.5.dp.toPx()
@@ -251,7 +253,7 @@ private fun CurvePreview(curve: FadeCurve) {
             drawPath(path, color, style = Stroke(stroke))
         }
         // An 8 second blend, so mix only shows its short edges.
-        line({ fadeOutGain(curve, it, 8_000.0) }, OctoColors.TextMuted)
-        line({ fadeInGain(curve, it, 8_000.0) }, OctoColors.TextPrimary)
+        line({ fadeOutGain(curve, it, 8_000.0) }, outInk)
+        line({ fadeInGain(curve, it, 8_000.0) }, inInk)
     }
 }

@@ -92,8 +92,9 @@ fun PlaylistArtwork(
     LaunchedEffect(key) {
         if (spec != null && ready == null) shown = art.art(spec, side)
     }
-    val ground = remember(spec?.id, palette) {
-        spec?.let { s -> Color(backgroundColour(chooseBackground(s.id, s.palette))) } ?: OctoColors.BackgroundTertiary
+    val fallback = OctoColors.BackgroundTertiary
+    val ground = remember(spec?.id, palette, fallback) {
+        spec?.let { s -> Color(backgroundColour(chooseBackground(s.id, s.palette))) } ?: fallback
     }
     Box(modifier.size(size).clip(shape).background(ground)) {
         (ready ?: shown)?.let {

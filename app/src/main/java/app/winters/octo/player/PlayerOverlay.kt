@@ -1,8 +1,5 @@
 package app.winters.octo.player
 
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
@@ -90,7 +87,6 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -108,7 +104,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
-import androidx.core.view.WindowCompat
+import app.winters.octo.theme.BarWish
+import app.winters.octo.theme.LocalBarRequest
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
@@ -146,6 +143,7 @@ import app.winters.octo.design.Glaze
 import app.winters.octo.design.IconAccent
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.rememberIconAccent
+import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.elevation3
@@ -233,7 +231,7 @@ fun AnimatedVisibilityScope.PlayerOverlay(
     val ticker = remember { FrameTicker() }
     // What the glasses over the background draw from while the wash is a
     // picture.
-    val glass = remember { WashGlass() }
+    val glass = remember { WashGlass() }.also { it.base = OctoColors.Background.toArgb() }
     val close by rememberUpdatedState(onClose)
     val scope = rememberCoroutineScope()
     // How far the player has been pulled down, in pixels.
@@ -1433,34 +1431,16 @@ private fun SleepCircle(model: PlayerViewModel, onClick: () -> Unit) {
 }
 
 // Light status and navigation icons while the player is open (dark ones
-// over a light background), whatever the rest of the app uses, put back
-// as they were when it closes. The status icons can follow something else
-// at the top (`darkStatus`, a tall loop's top).
+// over a light background), whatever the rest of the app uses, given up
+// when it closes. The root draws the bars; this only asks. The status icons
+// can follow something else at the top (`darkStatus`, a tall loop's top).
 @Composable
 private fun LightOnDarkBars(darkIcons: Boolean, darkStatus: Boolean = darkIcons) {
-    val view = LocalView.current
-    DisposableEffect(view) {
-        val window = view.context.findActivity()?.window ?: return@DisposableEffect onDispose { }
-        val bars = WindowCompat.getInsetsController(window, view)
-        val status = bars.isAppearanceLightStatusBars
-        val navigation = bars.isAppearanceLightNavigationBars
-        onDispose {
-            bars.isAppearanceLightStatusBars = status
-            bars.isAppearanceLightNavigationBars = navigation
-        }
+    val request = LocalBarRequest.current
+    DisposableEffect(darkIcons, darkStatus) {
+        request.value = BarWish(statusLight = darkStatus, navigationLight = darkIcons)
+        onDispose { request.value = null }
     }
-    LaunchedEffect(view, darkIcons, darkStatus) {
-        val window = view.context.findActivity()?.window ?: return@LaunchedEffect
-        val bars = WindowCompat.getInsetsController(window, view)
-        bars.isAppearanceLightStatusBars = darkStatus
-        bars.isAppearanceLightNavigationBars = darkIcons
-    }
-}
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
 }
 
 // The song's name in the player.

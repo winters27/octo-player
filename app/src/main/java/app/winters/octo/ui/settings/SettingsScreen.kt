@@ -63,6 +63,7 @@ import app.winters.octo.server.LastSync
 import app.winters.octo.server.ServerSync
 import app.winters.octo.sound.SoundEngine
 import app.winters.octo.sound.SoundSettings
+import app.winters.octo.theme.LocalActiveTheme
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.nav.SettingsPageRoute
@@ -309,7 +310,7 @@ private fun Categories(onOpen: (NavKey) -> Unit, vm: SettingsViewModel) {
         CategoryRow(
             OctoIcons.Appearance,
             SettingsPage.Appearance.title,
-            appearanceSummary(player.ambient, player.liveBackground && LiveBackgroundSupported),
+            appearanceSummary(LocalActiveTheme.current, player.ambient, player.liveBackground && LiveBackgroundSupported),
         ) { open(SettingsPage.Appearance) }
     }
     SettingsGroup(title = "Your music", separatorInset = IconRowInset) {

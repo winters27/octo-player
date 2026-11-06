@@ -52,6 +52,7 @@ import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.OverArt
 import app.winters.octo.subsonic.FamilyLink
 import java.util.concurrent.Executors
 
@@ -69,6 +70,11 @@ internal fun readFrame(image: ImageProxy): String? {
 // goes on. Asks for the camera first, and says plainly when it cannot.
 @Composable
 fun QrScanner(onFound: (FamilyLink) -> Unit, onClose: () -> Unit) {
+    OverArt { ScannerView(onFound, onClose) }
+}
+
+@Composable
+private fun ScannerView(onFound: (FamilyLink) -> Unit, onClose: () -> Unit) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
     var allowed by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }

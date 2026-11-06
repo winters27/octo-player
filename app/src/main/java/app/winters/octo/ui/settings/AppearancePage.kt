@@ -25,6 +25,9 @@ import androidx.navigation3.runtime.NavKey
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.playlists.PlaylistArtSettings
+import app.winters.octo.theme.LocalActiveTheme
+import app.winters.octo.theme.LocalDeviceDark
+import app.winters.octo.theme.LocalThemeStore
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.LocalChoiceSheet
@@ -41,9 +44,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 private val StrengthChoices = mapOf(
-    AmbientStrength.Off to Choice("Off", "The plain dark background everywhere."),
+    AmbientStrength.Off to Choice("Off", "The plain background everywhere."),
     AmbientStrength.Subtle to Choice("Subtle", "A faint glow of the artwork's colors behind the pages."),
-    AmbientStrength.Rich to Choice("Rich", "A fuller glow, still kept dark enough for text."),
+    AmbientStrength.Rich to Choice("Rich", "A fuller glow, still kept soft enough for text."),
 )
 
 // Whether playlists show designed covers or their album mosaics.
@@ -66,7 +69,7 @@ class MotionViewModel @Inject constructor(private val settings: PlayerSettings) 
     }
 }
 
-// How the app looks: the accent, the artwork's colours glowing behind the
+// How the app looks: the theme, the accent, the artwork's colours glowing behind the
 // pages, how strongly and where, Home's sections, the player's background, and how
 // much moves.
 @Composable
@@ -85,9 +88,14 @@ fun AppearancePage(
     val coverStyle by covers.style.collectAsStateWithLifecycle()
     val sheet = LocalChoiceSheet.current
 
+    val themes = LocalThemeStore.current
+
     SettingsPageFrame("Appearance", onBack, highlight) {
+        if (themes != null) {
+            SettingsGroup { ThemePicker(themes, LocalDeviceDark.current) }
+        }
         SettingsGroup {
-            AccentPicker()
+            AccentPicker(LocalActiveTheme.current)
             GlassTintRow()
         }
         AmbientPreview(prefs.strength, Modifier.padding(horizontal = 16.dp))

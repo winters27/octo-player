@@ -59,6 +59,8 @@ import app.winters.octo.design.NowPlayingBars
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.OverArt
+import app.winters.octo.design.SelectedFill
 import app.winters.octo.design.SelectedRow
 import app.winters.octo.design.rememberPressSqueeze
 import app.winters.octo.discovery.OnlineAlbum
@@ -379,7 +381,7 @@ private fun SongLine(
             contentAlignment = Alignment.CenterStart,
         ) {
             if (swap == null) {
-                face(song)
+                SelectedFill(picked) { face(song) }
             } else {
                 // The find and its check hold still; only the turn into the
                 // library song fades.
@@ -388,7 +390,7 @@ private fun SongLine(
                     transitionSpec = { fadeIn(tween(swap.fadeMs)) togetherWith fadeOut(tween(swap.fadeMs)) using null },
                     label = "find to library song",
                     contentKey = { it.id },
-                ) { shown -> face(shown) }
+                ) { shown -> SelectedFill(picked) { face(shown) } }
             }
         }
     }
@@ -469,7 +471,7 @@ private fun SongFace(
                         Icon(
                             painterResource(OctoIcons.StarFilled),
                             contentDescription = "Most popular",
-                            tint = OctoColors.Accent,
+                            tint = OctoColors.Star,
                             modifier = Modifier.padding(end = 6.dp).size(14.dp),
                         )
                     }
@@ -496,7 +498,7 @@ private val LeadShade = Color.Black.copy(alpha = 0.5f)
 
 @Composable
 private fun LeadMark(mark: @Composable () -> Unit) {
-    Box(Modifier.size(44.dp).background(LeadShade, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) { mark() }
+    Box(Modifier.size(44.dp).background(LeadShade, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) { OverArt { mark() } }
 }
 
 @Composable

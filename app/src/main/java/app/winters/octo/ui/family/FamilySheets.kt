@@ -62,6 +62,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -102,6 +103,7 @@ import app.winters.octo.design.MonoFontFamily
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoDuration
 import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.OctoInk
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.SheetFill
 import app.winters.octo.design.motionScale
@@ -118,9 +120,9 @@ import java.time.Instant
 // navigation bar, and when the rest still can't fit, a fade and a "More
 // below" button say so.
 
-private val Hairline = Color.White.copy(alpha = 0.08f)
-private val Fill = Color.White.copy(alpha = 0.04f)
-private val Edge = Color.White.copy(alpha = 0.08f)
+private val Hairline: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.08f)
+private val Fill: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.04f)
+private val Edge: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.08f)
 private val CardShape = RoundedCornerShape(14.dp)
 private val WellShape = RoundedCornerShape(20.dp)
 private val PillShape = RoundedCornerShape(50)
@@ -578,7 +580,7 @@ private fun Header(name: String, title: String, subtitle: String, subtitleColor:
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         val initial = name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
-        if (avatar) Box(Modifier.size(40.dp).background(OctoColors.AccentSelected, CircleShape).border(1.dp, Color.White.copy(alpha = 0.10f), CircleShape), contentAlignment = Alignment.Center) {
+        if (avatar) Box(Modifier.size(40.dp).background(OctoColors.AccentSelected, CircleShape).border(1.dp, OctoInk.Quaternary, CircleShape), contentAlignment = Alignment.Center) {
             Text(initial, style = OctoType.body.copy(fontWeight = FontWeight.Bold), color = OctoColors.TextPrimary)
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
@@ -640,7 +642,7 @@ fun ReachChooser(question: String, reach: LinkReach, options: LinkOptions, owner
 private fun ReachOption(reach: LinkReach, icon: Int, chosen: Boolean, locked: Boolean, modifier: Modifier, onPick: () -> Unit) {
     val motion = motionScale()
     val fill by animateColorAsState(if (chosen) OctoColors.Accent else Color.Transparent, octoTween(motion, OctoDuration.Fill), label = "reach fill")
-    val ink by animateColorAsState(if (chosen) OnAccent else OctoColors.TextSecondary, octoTween(motion, OctoDuration.Fill), label = "reach ink")
+    val ink by animateColorAsState(if (chosen) OctoColors.OnAccent else OctoColors.TextSecondary, octoTween(motion, OctoDuration.Fill), label = "reach ink")
     val shape = RoundedCornerShape(14.dp)
     Box(
         modifier
@@ -674,9 +676,6 @@ private fun ReachOption(reach: LinkReach, icon: Int, chosen: Boolean, locked: Bo
 }
 
 private val ChoiceType = OctoType.body.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-
-// Words on the accent fill.
-private val OnAccent = Color(0xFF0C0C0D)
 
 @Composable
 private fun QrWell(link: String, label: String, side: Dp, dim: Boolean, overlay: @Composable () -> Unit = {}) {
@@ -820,7 +819,7 @@ private fun SkeletonBlock(width: Dp, height: Dp, corner: Dp, modifier: Modifier 
         modifier
             .then(if (width == Dp.Unspecified) Modifier.fillMaxWidth() else Modifier.width(width))
             .height(height)
-            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(corner)),
+            .background(OctoColors.TextPrimary.copy(alpha = 0.06f), RoundedCornerShape(corner)),
     )
 }
 

@@ -172,7 +172,7 @@ fun HeaderButton(
             modifier = Modifier.alpha(if (enabled && !loading) 1f else OctoInk.DisabledAlpha),
             size = HeaderButtonSize,
         )
-        if (loading) CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(HeaderButtonSize - 12.dp))
+        if (loading) CircularProgressIndicator(color = OctoColors.TextPrimary, strokeWidth = 2.dp, modifier = Modifier.size(HeaderButtonSize - 12.dp))
     }
 }
 

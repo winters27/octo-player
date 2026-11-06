@@ -31,7 +31,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -55,6 +54,7 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.Spinner
+import app.winters.octo.design.glassFilm
 import app.winters.octo.markdown.MarkdownText
 import app.winters.octo.serverupdate.CONFIRM_TITLE
 import app.winters.octo.serverupdate.ServerRelease
@@ -234,7 +234,7 @@ private fun Command(command: String, context: Context) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+            .background(glassFilm(0.25f), RoundedCornerShape(10.dp))
             .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

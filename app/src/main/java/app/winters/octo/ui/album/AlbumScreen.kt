@@ -413,9 +413,11 @@ fun AlbumHeader(
 @Composable
 private fun AlbumByline(artist: String, details: String, onArtist: (() -> Unit)?, modifier: Modifier = Modifier) {
     val open by rememberUpdatedState(onArtist)
-    val line = remember(artist, details, onArtist != null) {
+    val linkInk = OctoColors.AccentWords
+    val quietInk = OctoColors.TextSecondary
+    val line = remember(artist, details, onArtist != null, linkInk, quietInk) {
         buildAnnotatedString {
-            val name = SpanStyle(color = if (onArtist != null) OctoColors.Accent else OctoColors.TextSecondary)
+            val name = SpanStyle(color = if (onArtist != null) linkInk else quietInk)
             if (onArtist != null) {
                 withLink(LinkAnnotation.Clickable("artist", TextLinkStyles(name)) { open?.invoke() }) { append(artist) }
             } else {

@@ -45,6 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -87,6 +88,7 @@ import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoDuration
 import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.OctoInk
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.SheetFill
 import app.winters.octo.design.Spinner
@@ -445,10 +447,11 @@ private fun Steps(row: DownloadRow, at: Int) {
             }
             val shown by animateFloatAsState(target, octoTween(motion, OctoDuration.Neutral), label = "step")
             val alpha = if (index == at && !row.finished) pulse else 1f
+            val track = Track
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Canvas(Modifier.fillMaxWidth().height(4.dp)) {
                     val round = CornerRadius(size.height / 2)
-                    drawRoundRect(Track, cornerRadius = round)
+                    drawRoundRect(track, cornerRadius = round)
                     if (shown > 0f) drawRoundRect(fill.copy(alpha = alpha), size = Size(size.width * shown, size.height), cornerRadius = round)
                 }
                 Text(
@@ -548,12 +551,14 @@ private fun markIcon(mark: LogMark): Int = when (mark) {
     LogMark.Note -> OctoIcons.Info
 }
 
+@Composable
 private fun markTint(mark: LogMark): Color = when (mark) {
     LogMark.Done -> OctoColors.SignalGreen
     LogMark.Failed -> OctoColors.SignalOrange
     else -> OctoColors.TextSecondary
 }
 
+@Composable
 private fun markFill(mark: LogMark): Color = when (mark) {
     LogMark.Done -> OctoColors.SignalGreen.copy(alpha = 0.16f)
     LogMark.Failed -> OctoColors.SignalOrange.copy(alpha = 0.16f)
@@ -883,12 +888,13 @@ private fun Ring(fraction: Float?, size: Dp) {
         Spinner(size = size, color = OctoColors.TextSecondary)
         return
     }
+    val ink = OctoColors.TextPrimary
     Canvas(Modifier.size(size)) {
         val stroke = this.size.minDimension * 0.12f
         val inset = Offset(stroke / 2, stroke / 2)
         val box = Size(this.size.width - stroke, this.size.height - stroke)
-        drawArc(Color.White.copy(alpha = 0.18f), 0f, 360f, false, inset, box, style = Stroke(stroke))
-        drawArc(Color.White, -90f, 360f * fraction.coerceIn(0f, 1f), false, inset, box, style = Stroke(stroke, cap = StrokeCap.Round))
+        drawArc(ink.copy(alpha = 0.18f), 0f, 360f, false, inset, box, style = Stroke(stroke))
+        drawArc(ink, -90f, 360f * fraction.coerceIn(0f, 1f), false, inset, box, style = Stroke(stroke, cap = StrokeCap.Round))
     }
 }
 
@@ -900,12 +906,12 @@ private fun ProgressLine(fraction: Float?) {
     }
 }
 
-private val Chip = Color.White.copy(alpha = 0.08f)
-private val Thread = Color.White.copy(alpha = 0.10f)
-private val Track = Color.White.copy(alpha = 0.14f)
-private val LosslessChip = Color.White.copy(alpha = 0.16f)
-private val Card = Color.White.copy(alpha = 0.05f)
-private val LiveFill = Color.White.copy(alpha = 0.14f)
+private val Chip: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.08f)
+private val Thread: Color @Composable @ReadOnlyComposable get() = OctoInk.Quaternary
+private val Track: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.14f)
+private val LosslessChip: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.16f)
+private val Card: Color @Composable @ReadOnlyComposable get() = OctoInk.Quinary
+private val LiveFill: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.14f)
 
 // A list row's cover, and where its words start: past the row's edge, the
 // cover and the gap.

@@ -397,6 +397,7 @@ private fun ItemLine(title: String, line: String, state: FamilyRequest? = null, 
     }
 }
 
+@Composable
 private fun stateColor(state: FamilyRequestState) = when (state) {
     FamilyRequestState.Done -> OctoColors.SignalGreen
     FamilyRequestState.Declined, FamilyRequestState.Failed -> OctoColors.SignalOrange

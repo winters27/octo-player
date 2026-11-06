@@ -53,9 +53,25 @@ class SettingsIndexTest {
     @Test
     fun searchFindsTheAccentColor() {
         assertEquals("Accent color", titles("accent").first())
-        assertTrue("Accent color" in titles("theme"))
         assertTrue("Accent color" in titles("colour"))
         assertEquals(SettingsPage.Appearance, SettingsIndex.AccentColor.page)
+        // The theme words belong to the theme now.
+        assertTrue("Accent color" !in titles("palette"))
+    }
+
+    @Test
+    fun searchFindsTheTheme() {
+        assertEquals("Theme", titles("theme").first())
+        listOf("light mode", "dark mode", "night", "day", "colors", "palette", "appearance").forEach { word ->
+            assertTrue("$word finds the theme", "Theme" in titles(word))
+        }
+        assertEquals("Theme", titles("palette").first())
+        assertEquals(SettingsPage.Appearance, SettingsIndex.Theme.page)
+        listOf("match", "system", "automatic", "night").forEach { word ->
+            assertTrue("$word finds Match the system", "Match the system" in titles(word))
+        }
+        assertEquals("Match the system", titles("match the system").first())
+        assertEquals(SettingsPage.Appearance, SettingsIndex.MatchSystem.page)
     }
 
     @Test

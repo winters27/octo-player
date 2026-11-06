@@ -23,6 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +57,7 @@ import app.winters.octo.design.rememberPopupPages
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.SelectedFill
 import app.winters.octo.lyrics.CandidateOrigin
 import app.winters.octo.lyrics.CandidateSearch
 import app.winters.octo.lyrics.LyricsCandidate
@@ -378,7 +380,7 @@ private fun TimingControl(trackId: String, model: LyricsMenuViewModel) {
 }
 
 private val RowShape = RoundedCornerShape(14.dp)
-private val LineColour = OctoColors.TextPrimary.copy(alpha = 0.08f)
+private val LineColour: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.08f)
 
 // The lyrics to choose from for the song playing, as the lines of a glass
 // sheet: a search by hand at the top, for a song whose title or artist is
@@ -548,30 +550,32 @@ private fun CandidateRow(
         contentAlignment = Alignment.CenterStart,
     ) {
         if (showing) Box(Modifier.matchParentSize().background(OctoColors.AccentSelected, RowShape))
-        Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(candidateLabel(candidate), style = OctoType.bodySmall, color = OctoColors.TextPrimary)
-                if (detail.isNotEmpty()) {
-                    Text(detail, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        SelectedFill(showing) {
+            Row(
+                Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(candidateLabel(candidate), style = OctoType.bodySmall, color = OctoColors.TextPrimary)
+                    if (detail.isNotEmpty()) {
+                        Text(detail, style = OctoType.caption, color = OctoColors.TextMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    val preview = if (candidate.kind == LyricsKind.Instrumental) listOf("Instrumental") else candidate.preview
+                    if (preview.isNotEmpty()) {
+                        Text(
+                            preview.joinToString("\n"),
+                            style = OctoType.caption,
+                            color = OctoColors.TextSecondary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
                 }
-                val preview = if (candidate.kind == LyricsKind.Instrumental) listOf("Instrumental") else candidate.preview
-                if (preview.isNotEmpty()) {
-                    Text(
-                        preview.joinToString("\n"),
-                        style = OctoType.caption,
-                        color = OctoColors.TextSecondary,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
+                if (showing) {
+                    Icon(painterResource(OctoIcons.Check), contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                 }
-            }
-            if (showing) {
-                Icon(painterResource(OctoIcons.Check), contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
             }
         }
     }
