@@ -144,8 +144,11 @@ class PopupRequest(
     // only gives it the room there is.
     val scrollsItself: Boolean = false,
     // A question about one part of the window (a page): that part is
-    // shaded while it is open, and it sits in the middle of it.
+    // shaded while it is open, and it sits in the middle of it, frosted in
+    // the page's own card color so it stands above the shade.
     val over: IntRect? = null,
+    // What takes the keyboard first as it opens, rather than its first row.
+    val first: FocusRequester? = null,
 )
 
 // How dark the shade over the part of the window a question is about.
@@ -187,16 +190,17 @@ class PopupHost {
 
     // Opens in the middle of the window, for a small form, or of `over`
     // with that part shaded, for a question about it. A taller form may ask
-    // for more room before it scrolls.
+    // for more room before it scrolls; `first` takes the keyboard first.
     fun showCentred(
         width: Dp? = 380.dp,
         maxHeight: Dp = PopupMaxHeight,
         scrim: Boolean = false,
         scrollsItself: Boolean = false,
         over: IntRect? = null,
+        first: FocusRequester? = null,
         content: @Composable ColumnScope.(close: () -> Unit) -> Unit,
     ) {
-        request = PopupRequest(null, null, width, content, maxHeight, scrim, scrollsItself, over)
+        request = PopupRequest(null, null, width, content, maxHeight, scrim, scrollsItself, over, first)
     }
 
     fun close() {
@@ -236,6 +240,7 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
         }
     }
     if (request == null) return
+    val raised = CardFill
     val motion = motionScale()
     val grow = remember(request) { Animatable(0f) }
     val focus = remember(request) { FocusRequester() }
@@ -261,8 +266,14 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
         }
         held = request
         takeKeyboard(rows = false)
-        // Opened from the keyboard, its first row takes it once laid out.
-        if (keyboard) {
+        // Opened from the keyboard, its first row takes it once laid out;
+        // a card naming what goes first gives it the keyboard however it
+        // was opened (its ring still shows only for the keyboard).
+        val first = request.first
+        if (first != null) {
+            withFrameNanos { }
+            runCatching { first.requestFocus() }
+        } else if (keyboard) {
             withFrameNanos { }
             runCatching { card.requestFocus(FocusDirection.Enter) }
         }
@@ -293,10 +304,13 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
         content = {
             // The menu plate's halo and inner hairline keep its words
             // legible over a busy page, on the same floating glass.
+            // A question over a shaded page is frosted from the page as it is
+            // unshaded under a card's own film, so it stands as a solid card
+            // of the page's card color above the shade.
             FloatingGlaze(
                 backdrop = backdrop,
                 shape = MenuShape,
-                film = MenuFilm,
+                film = if (request.over != null) raised else MenuFilm,
                 frost = MenuFrost,
                 halo = true,
                 modifier = Modifier

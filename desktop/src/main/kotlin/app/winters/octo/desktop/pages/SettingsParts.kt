@@ -51,6 +51,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -79,6 +80,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntRect
 import app.winters.octo.design.CardEdge
 import app.winters.octo.design.CardFill
+import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FitOrElse
@@ -104,6 +106,7 @@ import app.winters.octo.design.Txt
 import app.winters.octo.design.crispPainter
 import app.winters.octo.design.exactPainter
 import app.winters.octo.design.hoverLift
+import app.winters.octo.design.mix
 import app.winters.octo.design.scrollbar
 import app.winters.octo.design.tabStop
 import app.winters.octo.design.topFade
@@ -240,7 +243,7 @@ internal fun SectionPick(section: PageSection, chosen: Boolean, onPick: () -> Un
         if (chosen) PlaceFill(Modifier.matchParentSize())
         Row(Modifier.fillMaxWidth().padding(horizontal = Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M)) {
             section.icon?.let { SectionIcon(it, section.brand, settingsIconSize(), if (chosen) OctoColors.AccentHover else OctoColors.Accent) }
-            Txt(section.name, if (chosen) ChosenWords else DesktopType.body, if (chosen) OctoColors.TextPrimary else OctoColors.TextSecondary)
+            Txt(section.name, DesktopType.body, if (chosen) OctoColors.TextPrimary else mix(OctoColors.TextSecondary, OctoColors.TextPrimary, 0.6f))
             section.mark?.let { what ->
                 Box(Modifier.size(FrameSize.NavMark).background(OctoColors.Accent, CircleShape).semantics { contentDescription = what })
             }
@@ -364,6 +367,13 @@ private fun CardTitle(title: String, icon: ImageVector?, brand: Boolean, toggle:
 
 // The height of a card's title line, whatever ends it.
 private val TitleLine = Space.Xxl
+
+// A card with no title on a page, its glaze as far under the card above as
+// a titled card's is, so it reads as a card of its own.
+@Composable
+internal fun UntitledCard(content: @Composable () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(top = TitleLine + Space.M)) { Rows(content = content) }
+}
 
 // A control on a title's line, measured as tall as it likes but taking no
 // more of the line's height than the line has: it is drawn centered on the
@@ -634,25 +644,27 @@ internal fun ActionRow(title: String, caption: String?, action: String, onClick:
 }
 
 // An action at a row's end: a quiet pill, a faint fill of the words' ink
-// with the action in the accent (in red for a `danger` one), ending on the
-// row's value edge.
+// with the action in the accent (in a lighter red for a `danger` one),
+// ending on the row's value edge. It has the dropdowns' and the segments'
+// shape: as tall, fully round, the same room either side of its words.
 @Composable
 internal fun RowAction(text: String, onClick: () -> Unit, enabled: Boolean = true, icon: ImageVector? = null, danger: Boolean = false) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
-    val ink = if (danger) OctoColors.Error else OctoColors.Accent
+    val ink = if (danger) dangerOnPill() else OctoColors.Accent
     val fill = OctoColors.TextPrimary.copy(alpha = if (hovered && enabled) PILL_HOVER else PILL_REST)
     Row(
         Modifier
             .alpha(if (enabled) 1f else DISABLED)
-            .clip(Corner.ControlShape)
-            .background(fill, Corner.ControlShape)
+            .height(ControlHeight.L)
+            .clip(CircleShape)
+            .background(fill, CircleShape)
             .hoverable(interaction, enabled = enabled)
             .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
             .tabStop(LocalTabStops.current)
-            .clickable(interactionSource = interaction, indication = FocusRing(Corner.ControlShape), enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(interactionSource = interaction, indication = FocusRing(CircleShape), enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = text }
-            .padding(horizontal = Space.L, vertical = Space.S),
+            .padding(horizontal = PillSide),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.S),
     ) {
@@ -664,8 +676,18 @@ internal fun RowAction(text: String, onClick: () -> Unit, enabled: Boolean = tru
 private const val PILL_REST = 0.06f
 private const val PILL_HOVER = 0.10f
 
+// The room either side of a pill's words.
+private val PillSide = Space.L + Space.Xxs
+
+// The danger red lifted toward the words' ink, so it reads on a quiet pill
+// on any row; a danger action in plain words keeps the red itself.
+@Composable
+internal fun dangerOnPill(): Color = lerp(OctoColors.Error, OctoColors.TextPrimary, DANGER_LIFT)
+
+private const val DANGER_LIFT = 0.5f
+
 // The one action a card most wants taken: a pill of the accent with the
-// page's dark words, lighter under the pointer.
+// page's dark words, lighter under the pointer, in a row action's shape.
 @Composable
 internal fun AccentPill(text: String, onClick: () -> Unit, enabled: Boolean = true) {
     val interaction = remember { MutableInteractionSource() }
@@ -674,14 +696,15 @@ internal fun AccentPill(text: String, onClick: () -> Unit, enabled: Boolean = tr
     Row(
         Modifier
             .alpha(if (enabled) 1f else DISABLED)
-            .clip(Corner.ControlShape)
-            .background(fill, Corner.ControlShape)
+            .height(ControlHeight.L)
+            .clip(CircleShape)
+            .background(fill, CircleShape)
             .hoverable(interaction, enabled = enabled)
             .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
             .tabStop(LocalTabStops.current)
-            .clickable(interactionSource = interaction, indication = FocusRing(Corner.ControlShape), enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(interactionSource = interaction, indication = FocusRing(CircleShape), enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = text }
-            .padding(horizontal = Space.L, vertical = Space.S),
+            .padding(horizontal = PillSide),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Txt(text, OctoType.label, OctoColors.Background)

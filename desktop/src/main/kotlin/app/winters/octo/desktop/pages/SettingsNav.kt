@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
@@ -168,6 +169,15 @@ private val ListFade = Space.Page
 // The room under the list's last page.
 private val ListFoot = RowHeight.Nav + Space.M
 
+// The least move worth scrolling the list for.
+private val ListNudge = Space.L
+
+// The account card's slot for its server's status, before the name.
+private val StatusSlot = Space.M + Space.Xxs
+
+// What the tests call a list item's icon.
+internal fun itemIconTag(page: String) = "settings-item-icon:$page"
+
 // Where the page shown sits in the list's scrolling content.
 internal data class ItemSpot(val page: String, val top: Int, val height: Int)
 
@@ -229,25 +239,34 @@ internal fun SettingsList(app: AppState, chosen: FocusRequester, live: Boolean, 
         var view by remember { mutableIntStateOf(0) }
         var spot by remember { mutableStateOf<ItemSpot?>(null) }
         val fade = with(LocalDensity.current) { ListFade.roundToPx() }
+        val nudge = with(LocalDensity.current) { ListNudge.roundToPx() }
         val still = LocalReduceMotion.current
         // The page shown comes into view, opening Settings and on each pick,
         // with an item's room under it and clear of the faded top; again
         // whenever the list is laid out anew under it (as it settles in, or
-        // the window or text size changes), never as it is scrolled.
+        // the window or text size changes), never as it is scrolled. About
+        // Octo lives in the foot and needs none, and a move smaller than a
+        // nudge is not worth the motion.
         LaunchedEffect(ui.page, query.isBlank()) {
-            if (query.isNotBlank()) return@LaunchedEffect
-            snapshotFlow { spot?.takeIf { it.page == ui.page && view > 0 }?.let { it to view } }.filterNotNull().collect { (at, shown) ->
+            if (query.isNotBlank() || ui.page == SettingsKey.About) return@LaunchedEffect
+            // Its place, the view's height and how far the list can scroll,
+            // so a list grown back (the search cleared) is heard too.
+            snapshotFlow { spot?.takeIf { it.page == ui.page && view > 0 }?.let { Triple(it, view, scroll.maxValue) } }.filterNotNull().collect { (at, shown, _) ->
                 val goal = when {
                     at.top + at.height * 2 > scroll.value + shown -> at.top + at.height * 2 - shown
                     at.top - fade < scroll.value -> at.top - fade
                     else -> return@collect
                 }.coerceIn(0, scroll.maxValue)
+                if (kotlin.math.abs(goal - scroll.value) < nudge) return@collect
                 if (still) scroll.scrollTo(goal) else scroll.animateScrollTo(goal)
             }
         }
-        // Its ends fade while more of it is that way; the bar shows on hover.
-        Column(Modifier.weight(1f).fillMaxWidth().onSizeChanged { view = it.height }.scrollbar(scroll).scrollFades(scroll, ListFade, eased = true).verticalScroll(scroll)) {
-            Spacer(Modifier.height(Space.S))
+        // A clear band under the header before the faded top begins.
+        Spacer(Modifier.height(Space.M))
+        // Its ends fade while more of it is that way; while it does not fit,
+        // a faint thumb says so at rest, brighter on hover. It ends at the
+        // line over About Octo.
+        Column(Modifier.weight(1f).fillMaxWidth().onSizeChanged { view = it.height }.scrollbar(scroll, resting = true).scrollFades(scroll, ListFade, eased = true).verticalScroll(scroll)) {
             AccountCard(app) { pick(SettingsKey.Servers) }
             Spacer(Modifier.height(Space.L))
             SettingsSearch(app, live, onMove = { step -> if (hits.isNotEmpty()) at = (at + step).coerceIn(0, hits.lastIndex) }, onOpen = { open(at) })
@@ -271,7 +290,7 @@ internal fun SettingsList(app: AppState, chosen: FocusRequester, live: Boolean, 
             Spacer(Modifier.height(ListFoot))
         }
         pages.firstOrNull { it.key == SettingsKey.About }?.let { about ->
-            Separator(Modifier.padding(vertical = Space.S))
+            Separator(Modifier.padding(bottom = Space.S))
             val mark = if (app.updates?.ready != null) "update ready" else null
             SettingsItem(about, ui.page == about.key, chosen, mark = mark, detail = appVersion()) { pick(about.key) }
         }
@@ -355,10 +374,14 @@ private fun AccountCard(app: AppState, onOpen: () -> Unit) {
         Column(Modifier.weight(1f)) {
             Txt(server.username, DesktopType.emphasis, OctoColors.TextPrimary, maxLines = 2)
             Row(Modifier.padding(top = Space.Xxs), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
-                when {
-                    switching != null -> Spinner(size = IconSize.Mark, color = OctoColors.TextSecondary)
-                    check == null -> Unit
-                    else -> Box(Modifier.size(FrameSize.NavMark).background(if (cantReach) OctoColors.SignalOrange else OctoColors.SignalGreen, CircleShape))
+                // One slot for how it stands, kept in every state, so the
+                // name never moves as a check answers or a switch starts.
+                Box(Modifier.size(StatusSlot), contentAlignment = Alignment.Center) {
+                    when {
+                        switching != null -> Spinner(size = StatusSlot, color = OctoColors.TextSecondary)
+                        check == null -> Unit
+                        else -> Box(Modifier.size(FrameSize.NavMark).background(if (cantReach) OctoColors.SignalOrange else OctoColors.SignalGreen, CircleShape))
+                    }
                 }
                 Txt(server.name, DesktopType.meta, OctoColors.TextSecondary, Modifier.weight(1f, fill = false), maxLines = 2)
                 if (cantReach) Txt("Can't reach", DesktopType.meta, OctoColors.SignalOrange)
@@ -536,19 +559,30 @@ private fun SettingsItem(
         contentAlignment = Alignment.CenterStart,
     ) {
         if (shown) PlaceFill(Modifier.matchParentSize())
+        // The icon and the dot sit on the name's first line, however many
+        // lines the name and the word after it take. The line with a word
+        // after its name keeps the dot's room when there is no dot, so the
+        // word does not slide as one comes or goes.
         Row(
             Modifier.fillMaxWidth().padding(horizontal = ItemInset, vertical = Space.S),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(ItemGap),
         ) {
+            val line = firstLine(DesktopType.body)
             val icon = settingsPageIcon(page.key)
             val size = if (biggerIcons()) IconSize.Transport else IconSize.Toolbar
-            // A brand's mark keeps its own shape and colors.
-            if (page.key == SettingsKey.Discord) Image(exactPainter(icon), null, Modifier.size(size))
-            else Glyph(icon, size = size, tint = if (shown) OctoColors.AccentHover else accent)
+            Box(Modifier.height(line).testTag(itemIconTag(page.key)), contentAlignment = Alignment.Center) {
+                // A brand's mark keeps its own shape and colors.
+                if (page.key == SettingsKey.Discord) Image(exactPainter(icon), null, Modifier.size(size))
+                else Glyph(icon, size = size, tint = if (shown) OctoColors.AccentHover else accent)
+            }
             if (detail == null) Txt(page.name, DesktopType.body, words, Modifier.weight(1f), maxLines = 3)
             else NameAndDetail(Modifier.weight(1f), { Txt(page.name, DesktopType.body, words, maxLines = 3) }, { Txt(detail, AboutDetail, OctoColors.TextMuted) })
-            if (mark != null) Box(Modifier.size(FrameSize.NavMark).background(accent, CircleShape))
+            if (mark != null || detail != null) {
+                Box(Modifier.height(line).width(FrameSize.NavMark), contentAlignment = Alignment.Center) {
+                    if (mark != null) Box(Modifier.size(FrameSize.NavMark).background(accent, CircleShape))
+                }
+            }
         }
     }
 }

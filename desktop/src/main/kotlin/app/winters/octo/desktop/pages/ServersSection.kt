@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.hideFromAccessibility
@@ -526,7 +527,9 @@ private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, clo
 // Asks before a server leaves the list, saying what goes and what stays.
 fun askToRemove(app: AppState, server: SavedServer) {
     val opening = Any()
-    app.popups.showCentred(width = SettingsSize.Sheet, over = app.settingsColumn()) { close ->
+    // Cancel takes the keyboard first, so Enter never lets go by itself.
+    val cancel = FocusRequester()
+    app.popups.showCentred(width = SettingsSize.Sheet, over = app.settingsColumn(), first = cancel) { close ->
         var forgetHere by remember(opening) { mutableStateOf(false) }
         val inUse = server.id == app.connection?.server?.id
         PopupPadding {
@@ -546,7 +549,7 @@ fun askToRemove(app: AppState, server: SavedServer) {
                 horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                GlazeCapsule(null, "Cancel", close, height = ControlHeight.L)
+                GlazeCapsule(null, "Cancel", close, Modifier.focusRequester(cancel), height = ControlHeight.L)
                 DangerAction("Remove", {
                     close()
                     app.removeServer(server.id, forgetHere)

@@ -97,7 +97,7 @@ fun DiscordRows(app: AppState) {
         ChoiceRow("Badge", null, DiscordBadge.entries, prefs.badge, ::badgeLabel) { v -> update { it.copy(badge = v) } }
         SwitchRow("Album name on the cover", null, prefs.albumName) { on -> update { it.copy(albumName = on) } }
     }
-    SettingsCard("More", OctoIcons.More) {
+    SettingsCard("More", OctoIcons.Switches) {
         SwitchRow("Keep showing while paused", "With a pause badge. Off, your status clears on pause.", prefs.whilePaused) { on -> update { it.copy(whilePaused = on) } }
         SwitchRow("Link to Last.fm", "Friends get an Open on Last.fm button.", prefs.lastFmLinks) { on -> update { it.copy(lastFmLinks = on) } }
     }

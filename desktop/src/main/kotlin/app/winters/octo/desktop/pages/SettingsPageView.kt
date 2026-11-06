@@ -91,6 +91,11 @@ internal fun SettingsPageView(
                 withFrameNanos { }
                 anchors.found(asked.row) ?: anchors.cardFor(asked.row)
             } ?: return@collectLatest
+            // The keyboard goes to what was asked for first, so it can be
+            // changed at once; the scroll below comes after the move it
+            // makes to show its control, and has the last word.
+            anchors.focus(id)
+            withFrameNanos { }
             anchors.placeOf(id)?.let { place ->
                 val (foot, margin) = room
                 val shown = viewport.intValue - foot
@@ -108,9 +113,6 @@ internal fun SettingsPageView(
                 }
             }
             anchors.flash = SettingsFlash(id, asked.nonce)
-            // The keyboard goes to what was asked for, so it can be changed
-            // at once.
-            anchors.focus(id)
             delay(flashMs)
             if (anchors.flash?.nonce == asked.nonce) anchors.flash = null
         }

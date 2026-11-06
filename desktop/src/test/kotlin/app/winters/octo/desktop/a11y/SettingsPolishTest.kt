@@ -13,8 +13,18 @@ import androidx.compose.ui.semantics.getOrNull
 import app.winters.octo.design.IconSize
 import app.winters.octo.design.POPUP_SHADE_TAG
 import app.winters.octo.design.POPUP_TAG
+import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.nav.SettingsKey
+import app.winters.octo.desktop.nav.Shortcut
 import app.winters.octo.desktop.pages.LocalRowFlashMs
+import app.winters.octo.desktop.pages.appVersion
+import app.winters.octo.desktop.pages.askToRemove
+import app.winters.octo.desktop.pages.askToRemoveAll
+import app.winters.octo.desktop.pages.itemIconTag
+import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.desktop.settings.name
+import app.winters.octo.desktop.update.DesktopUpdates
+import app.winters.octo.desktop.update.FakeReleases
 import app.winters.octo.desktop.pages.RowFlash
 import app.winters.octo.desktop.pages.RowId
 import app.winters.octo.desktop.pages.RowTitle
@@ -51,6 +61,8 @@ class SettingsPolishTest {
         textScale: Float = 1f,
         crossfade: Int = 6,
         saved: Boolean = false,
+        serve: (FakeServer) -> Unit = {},
+        updates: ((SettingsStore) -> DesktopUpdates)? = null,
     ) = A11yScene(
         folder.newFolder(),
         reduceMotion = true,
@@ -60,6 +72,8 @@ class SettingsPolishTest {
         player = SettingsWalk.ShapingPlayer(),
         withSystem = true,
         saved = saved,
+        serve = serve,
+        updates = updates,
         look = { it.copy(playback = it.playback.copy(crossfadeSeconds = crossfade)) },
         wrap = { content -> CompositionLocalProvider(LocalRowFlashMs provides 60_000L) { content() } },
     )
@@ -106,8 +120,8 @@ class SettingsPolishTest {
                 val shown = tabs.firstOrNull { it.config.getOrNull(SemanticsProperties.Selected) == true } ?: continue
                 val about = tabs.first { it.name().startsWith("About Octo") }.whole
                 val item = shown.whole
-                // The list's view ends above the line over About Octo.
-                val end = about.top - 13f
+                // The list's view ends at the line over About Octo.
+                val end = about.top - 7f
                 val list = s.nodes().filter { it.boundsInRoot.right < 400f }.firstNotNullOfOrNull { it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) }
                 assertTrue("$page: ${item.bottom} + ${item.height} under ${end + 1}, list at ${list?.value?.invoke()} of ${list?.maxValue?.invoke()}", item.bottom + item.height <= end + 1f)
                 assertTrue("$page is in view: ${item.top}", item.top >= 0f)
@@ -301,6 +315,179 @@ class SettingsPolishTest {
 
     // Cards about another page's subject, which may wear its item's icon.
     private val SameSubject = mapOf((SettingsKey.Radio to STATIONS_ON_SERVER) to SettingsKey.Servers)
+
+    // Settings' list, when it does not fit: its view ends at the line over
+    // About Octo, and a faint thumb says there is more while the pointer
+    // is nowhere near.
+    @Test(timeout = 120_000)
+    fun aListThatDoesNotFitEndsAtItsLineAndShowsItsThumbAtRest() {
+        scene(width = 960, height = 640, textScale = 1.3f).use { s ->
+            s.open(SettingsKey.Playback)
+            val image = Bitmap.makeFromImage(s.settle(2_000))
+            val list = s.list()
+            val about = s.nodes(merged = true).first { it.config.getOrNull(SemanticsProperties.Role) == Role.Tab && it.name().startsWith("About Octo") }.boundsInRoot
+            assertTrue("the view ends ${about.top - list.bottom} above About Octo", about.top - list.bottom <= 7.5f)
+            val y = list.top.toInt() + 12
+            val thumb = image.getColor(list.right.toInt() - 5, y)
+            val beside = image.getColor(list.right.toInt() - 12, y)
+            fun sum(c: Int) = (c shr 16 and 0xFF) + (c shr 8 and 0xFF) + (c and 0xFF)
+            assertTrue("a thumb at rest: ${Integer.toHexString(thumb)} beside ${Integer.toHexString(beside)}", sum(thumb) - sum(beside) >= 30)
+        }
+    }
+
+    // Settings' list's own scrolling view.
+    private fun A11yScene.list(): Rect = nodes().first { node ->
+        node.boundsInRoot.right < 400f && node.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null
+    }.boundsInRoot
+
+    private fun A11yScene.listScroll(): Float = nodes().first { node ->
+        node.boundsInRoot.right < 400f && node.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null
+    }.config[SemanticsProperties.VerticalScrollAxisRange].value()
+
+    // Both sheets give Cancel the keyboard first; opened with the mouse,
+    // the keyboard is still Cancel's but no ring shows.
+    @Test(timeout = 120_000)
+    fun theSheetsGiveCancelTheKeyboardFirst() {
+        scene(saved = true).use { s ->
+            s.open(SettingsKey.Servers)
+            s.onUi { askToRemove(s.app, s.app.connection!!.server) }
+            s.render(6)
+            assertEquals("Remove server, from the keyboard", "Cancel", s.focused()?.name())
+            s.onUi { s.app.popups.close() }
+            s.render(4)
+            val more = s.nodes(merged = true).first { it.name().startsWith("More for ") && it.clickable }
+            s.press(more.boundsInRoot.center)
+            val remove = s.nodes(merged = true).last { it.name() == "Remove" && it.clickable }
+            s.press(remove.boundsInRoot.center)
+            assertEquals("Remove server, from the mouse", "Cancel", s.focused()?.name())
+            assertTrue("no ring after a mouse open", !s.keyboard.keyboard)
+            s.onUi { s.app.popups.close() }
+            s.render(4)
+            s.onUi {
+                s.keyboard.keyboard = true
+                s.app.offline.keepLiked(true)
+                s.app.openSettings(SettingsKey.Offline)
+            }
+            s.render(6)
+            s.onUi { askToRemoveAll(s.app) }
+            s.render(6)
+            assertEquals("Remove all, from the keyboard", "Cancel", s.focused()?.name())
+        }
+    }
+
+    // A search hit lands as a deep link does: its card's title in view.
+    @Test(timeout = 120_000)
+    fun aSearchHitComesInUnderItsCardsTitle() {
+        scene().use { s ->
+            s.open(SettingsKey.Playback)
+            s.onUi { s.app.perform(Shortcut.Filter) }
+            s.render(2)
+            s.onUi { s.app.settingsUi.query = "brightness cap" }
+            s.render(4)
+            s.press(Key.Enter)
+            // As long as the keyboard's arrival and anything it moves take.
+            s.settle(1_200).close()
+            assertEquals(SettingsKey.Look, s.app.settingsUi.page)
+            val view = s.page().boundsInRoot
+            val title = s.byId("full-player").under().first { it.config.getOrNull(SemanticsProperties.Heading) != null }.whole
+            assertTrue("the card's title ${title.top} is in view from ${view.top}", title.top >= view.top - 0.5f)
+        }
+    }
+
+    // The account card's server name stays put as its check answers, and
+    // when the server cannot be reached.
+    @Test(timeout = 120_000)
+    fun theAccountCardsServerNameStaysPut() {
+        val held = java.util.concurrent.atomic.AtomicReference<java.util.concurrent.CountDownLatch?>(null)
+        val down = java.util.concurrent.atomic.AtomicBoolean(false)
+        val gate = java.util.concurrent.CountDownLatch(1)
+        scene(saved = true, serve = { server ->
+            server.answerBy("ping") {
+                held.get()?.await(10, java.util.concurrent.TimeUnit.SECONDS)
+                if (down.get()) server.failed(0, "Connection refused") else server.ok()
+            }
+        }).use { s ->
+            fun nameAt(): Float = s.nodes().first { it.words() == s.app.connection!!.server.name && it.boundsInRoot.right < 300f && it.boundsInRoot.top < 200f }.boundsInRoot.left
+            held.set(gate)
+            s.open(SettingsKey.Playback)
+            val unchecked = nameAt()
+            held.set(null)
+            gate.countDown()
+            s.waitFor { s.app.serverFacts.checks[s.app.connection!!.server.id] != null }
+            s.render(4)
+            val connected = nameAt()
+            down.set(true)
+            kotlinx.coroutines.runBlocking { s.app.serverFacts.refresh() }
+            s.render(4)
+            val cantReach = nameAt()
+            assertEquals("connected against unchecked", unchecked, connected, 0.5f)
+            assertEquals("can't reach against unchecked", unchecked, cantReach, 0.5f)
+        }
+    }
+
+    // A list item's icon sits on its name's first line, however many lines
+    // the name takes, and About Octo's on its name above its version.
+    @Test(timeout = 120_000)
+    fun aListItemsIconSitsOnItsNamesFirstLine() {
+        scene(width = 960, height = 640, textScale = 1.3f).use { s ->
+            s.open(SettingsKey.Offline)
+            s.settle(600).close()
+            for ((page, name) in listOf(SettingsKey.Offline to "Streaming and downloads", SettingsKey.About to "About Octo")) {
+                val icon = s.nodes().first { it.config.getOrNull(SemanticsProperties.TestTag) == itemIconTag(page) }.whole
+                val words = s.nodes().first { it.words() == name && it.boundsInRoot.right < 400f }
+                val laid = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+                s.onUi { words.config[SemanticsActions.GetTextLayoutResult].action?.invoke(laid) }
+                val first = laid.first()
+                val middle = words.whole.top + (first.getLineTop(0) + first.getLineBottom(0)) / 2
+                assertEquals("$name's icon on its first line (lines ${first.lineCount})", middle, icon.center.y, 1f)
+            }
+        }
+    }
+
+    // Picking About Octo, in the list's foot, leaves the list where it is,
+    // and so does a page shown that is under a nudge from where it should
+    // sit.
+    @Test(timeout = 120_000)
+    fun theListStaysForAboutAndForANudge() {
+        scene(width = 960, height = 640, textScale = 1.3f).use { s ->
+            s.open(SettingsKey.Playback)
+            s.settle(600).close()
+            val before = s.listScroll()
+            val about = s.nodes(merged = true).first { it.config.getOrNull(SemanticsProperties.Role) == Role.Tab && it.name().startsWith("About Octo") }
+            s.press(about.boundsInRoot.center)
+            s.settle(800).close()
+            assertEquals(SettingsKey.About, s.app.settingsUi.page)
+            assertEquals("About leaves the list", before, s.listScroll(), 0.5f)
+            // Keyboard shown at the list's end, Window and startup picked (in
+            // view with room), the list moved up 6 px, then Keyboard picked
+            // again: the 6 px it would need are left.
+            s.open(SettingsKey.Keys)
+            s.settle(800).close()
+            val keys = s.listScroll()
+            s.onUi { s.app.settingsUi.page = SettingsKey.System }
+            s.settle(800).close()
+            val system = s.listScroll()
+            val list = s.nodes().first { it.boundsInRoot.right < 400f && it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null }
+            s.onUi { list.config[SemanticsActions.ScrollBy].action?.invoke(0f, -6f) }
+            s.settle(400).close()
+            val nudged = s.listScroll()
+            s.onUi { s.app.settingsUi.page = SettingsKey.Keys }
+            s.settle(800).close()
+            assertEquals("a 6 px move is left (Keyboard $keys, Window $system, moved $nudged)", nudged, s.listScroll(), 0.5f)
+        }
+    }
+
+    // About Octo's version stays where it is whether or not an update's dot
+    // is beside it.
+    @Test(timeout = 120_000)
+    fun aboutsVersionStaysPutWithAndWithoutItsDot() {
+        fun versionAt(s: A11yScene): Float = s.nodes().first { it.words() == appVersion() && it.boundsInRoot.right < 400f }.boundsInRoot.left
+        val without = scene().use { s -> s.open(SettingsKey.Playback); versionAt(s) }
+        val with = FakeReleases().use { github ->
+            scene(updates = SettingsWalk.readyUpdates(github, folder.newFolder())).use { s -> s.open(SettingsKey.Playback); versionAt(s) }
+        }
+        assertEquals("the version with the dot and without", without, with, 0.5f)
+    }
 
     // The server in use says what it is once, under the list, not in its
     // row too.

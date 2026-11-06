@@ -44,9 +44,12 @@ fun Modifier.scrollbar(state: LazyListState, bottom: Dp = 0.dp): Modifier = comp
 
 fun Modifier.scrollbar(state: LazyGridState, bottom: Dp = 0.dp): Modifier = composed { scrollbar(state, rememberScrollbarAdapter(state), bottom) }
 
-fun Modifier.scrollbar(state: ScrollState, bottom: Dp = 0.dp): Modifier = composed { scrollbar(state, rememberScrollbarAdapter(state), bottom) }
+// A `resting` one keeps a thinner, fainter thumb while what scrolls does
+// not fit, so a list cut off at its foot says there is more.
+fun Modifier.scrollbar(state: ScrollState, bottom: Dp = 0.dp, resting: Boolean = false): Modifier = composed { scrollbar(state, rememberScrollbarAdapter(state), bottom, resting) }
 
-private fun Modifier.scrollbar(state: ScrollableState, adapter: ScrollbarAdapter, bottom: Dp): Modifier = composed {
+private fun Modifier.scrollbar(state: ScrollableState, adapter: ScrollbarAdapter, bottom: Dp, resting: Boolean = false): Modifier = composed {
+    val rest = OctoColors.TextPrimary.copy(alpha = ScrollbarRestAlpha)
     val bar = remember { Bar() }
     val scope = rememberCoroutineScope()
     val motion = motionScale()
@@ -118,9 +121,19 @@ private fun Modifier.scrollbar(state: ScrollableState, adapter: ScrollbarAdapter
         .drawWithContent {
             drawContent()
             val shown = seen.value
-            if (shown <= 0f || state.fits()) return@drawWithContent
+            if (state.fits()) return@drawWithContent
             val track = Track(size.width, size.height, this, bottom)
             val thumb = track.thumbAt(adapter) ?: return@drawWithContent
+            if (resting && shown < 1f) {
+                val thin = ScrollbarResting.toPx()
+                drawRoundRect(
+                    rest.copy(alpha = rest.alpha * (1f - shown)),
+                    topLeft = Offset(track.end - thin, thumb.top),
+                    size = Size(thin, thumb.height),
+                    cornerRadius = CornerRadius(thin / 2),
+                )
+            }
+            if (shown <= 0f) return@drawWithContent
             val lit = wide.value
             val thickness = (ScrollbarThin + (ScrollbarWide - ScrollbarThin) * lit).toPx()
             val ink = lerpAlpha(ScrollbarInk, ScrollbarInkLit, lit)
@@ -194,6 +207,10 @@ private val ScrollbarThin = 6.dp
 private val ScrollbarWide = 9.dp
 private val ScrollbarInset = 3.dp
 private val ScrollbarMinLength = 36.dp
+
+// The resting thumb: thinner, and the words' ink faint.
+private val ScrollbarResting = 4.dp
+private const val ScrollbarRestAlpha = 0.18f
 
 // The room a scrolling list keeps at its end so a row's fill stops before
 // the bar at its widest, with a little air.

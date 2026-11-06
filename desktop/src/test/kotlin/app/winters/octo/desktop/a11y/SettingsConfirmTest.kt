@@ -77,10 +77,10 @@ class SettingsConfirmTest {
             }
             s.render(4)
             // On the page, the row's name is plain and its button, Remove,
-            // is red.
+            // is in the lighter red a quiet pill takes.
             val page = Bitmap.makeFromImage(s.settle(600))
             val onPage = s.button("Remove")
-            assertTrue("Remove on the page is red", redness(page, onPage.boundsInRoot) >= 120)
+            assertTrue("Remove on the page is red: ${redness(page, onPage.boundsInRoot)}", redness(page, onPage.boundsInRoot) >= 60)
             val name = s.nodes().first { it.config.getOrNull(SemanticsProperties.Text)?.joinToString("") { t -> t.text } == "Remove all" }
             assertTrue("the row's name is not red: ${redness(page, name.boundsInRoot)}", redness(page, name.boundsInRoot) < 40)
             s.click(onPage)

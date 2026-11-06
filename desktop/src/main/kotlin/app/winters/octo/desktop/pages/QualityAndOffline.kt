@@ -9,6 +9,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FitOrElse
@@ -180,7 +182,7 @@ internal fun OfflineRows(app: AppState, settings: AppSettings) {
         }
     }
     if (status.kept > 0 || choices.byHand.isNotEmpty() || choices.liked || choices.playlists.isNotEmpty()) {
-        Rows { ActionRow(REMOVE_ALL, "Lets every kept song go and stops keeping any.", "Remove", { askToRemoveAll(app) }, danger = true) }
+        UntitledCard { ActionRow(REMOVE_ALL, "Lets every kept song go and stops keeping any.", "Remove", { askToRemoveAll(app) }, danger = true) }
     }
 }
 
@@ -189,7 +191,9 @@ private const val REMOVE_ALL = "Remove all"
 // Asks before every kept song goes, saying what goes and what stays.
 internal fun askToRemoveAll(app: AppState) {
     val opening = Any()
-    app.popups.showCentred(width = SettingsSize.Sheet, over = app.settingsColumn()) { close ->
+    // Cancel takes the keyboard first, so Enter never lets go by itself.
+    val cancel = FocusRequester()
+    app.popups.showCentred(width = SettingsSize.Sheet, over = app.settingsColumn(), first = cancel) { close ->
         key(opening) {
             PopupPadding {
                 SheetQuestion(
@@ -201,7 +205,7 @@ internal fun askToRemoveAll(app: AppState) {
                     horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    GlazeCapsule(null, "Cancel", close, height = ControlHeight.L)
+                    GlazeCapsule(null, "Cancel", close, Modifier.focusRequester(cancel), height = ControlHeight.L)
                     DangerAction(REMOVE_ALL, {
                         close()
                         app.offline.removeAll()

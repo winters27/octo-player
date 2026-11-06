@@ -254,6 +254,42 @@ class ContrastTest {
         check(spots, minimum = AccentChoice.entries.size * 2)
     }
 
+    // A danger action's words on its quiet pill (Remove all's Remove), on a
+    // plain row and on the same row lit as asked for, in every accent.
+    @Test(timeout = 300_000)
+    fun settingsDangerPillWordsReadPlainAndLitInEveryAccent() {
+        val spots = A11yScene(
+            folder.newFolder(),
+            height = 1_200,
+            wrap = { content -> androidx.compose.runtime.CompositionLocalProvider(app.winters.octo.desktop.pages.LocalRowFlashMs provides 600_000L) { content() } },
+        ).use { s ->
+            s.onUi {
+                s.app.offline.keepLiked(true)
+                s.app.openSettings(SettingsKey.Offline)
+            }
+            s.settle(1_000).close()
+            fun round(state: String) = AccentChoice.entries.flatMap { accent ->
+                s.onUi { s.app.settings.update { it.copy(appearance = it.appearance.copy(accent = accent)) } }
+                val image = s.settle(500)
+                keep(image, "contrast-settings-danger-$state-${accent.name.lowercase()}")
+                s.spots(image, "$state row, ${accent.label}", listOf(Triple("Remove", "Remove all's pill", 4.5)), { it.left > 300f })
+            }
+            val plain = round("plain")
+            s.onUi { s.app.openSettings(SettingsKey.Offline, "remove-all") }
+            s.until { s.nodes().any { it.config.getOrNull(app.winters.octo.desktop.pages.RowFlash) != null } }
+            plain + round("lit")
+        }
+        check(spots, minimum = AccentChoice.entries.size * 2)
+    }
+
+    private fun A11yScene.until(what: () -> Boolean) {
+        val end = System.currentTimeMillis() + 10_000
+        while (!what()) {
+            kotlin.check(System.currentTimeMillis() < end) { "waited too long" }
+            render(2)
+        }
+    }
+
     @Test(timeout = 180_000)
     fun aMenuOverTheGlowReads() {
         val spots = A11yScene(folder.newFolder(), cover = yellow, look = { it.copy(appearance = it.appearance.copy(glowStrength = 1f)) }).use { s ->

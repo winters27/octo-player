@@ -104,16 +104,19 @@ object OctoIcons {
     val Wrench by sym("sym_wrench")
     val LeftRight by sym("sym_arrows_left_right")
     val PictureInPicture by sym("sym_picture_in_picture")
-    val Enlarge by sym("sym_arrows_out_simple")
+    val Enlarge by sym("sym_arrows_out")
     val Plan by sym("sym_identification_card")
     val Hourglass by sym("sym_hourglass")
-    val Wave by sym("sym_wave_sine")
+    val Wave by sym("sym_waves")
     val Power by sym("sym_power")
 
     // The window's background, what the server is, and Octo's own updates.
     val Backdrop by sym("sym_square_half")
     val Database by sym("sym_database")
     val Upgrade by sym("sym_arrow_circle_up")
+
+    // More switches, for a card that holds a few of them.
+    val Switches by sym("sym_toggle_right")
 
     // Back and forward through the pages, and opening the full player: the
     // chevron turned.
@@ -166,4 +169,5 @@ val allIcons: List<Pair<String, () -> ImageVector>> = listOf(
     "LeftRight" to { OctoIcons.LeftRight }, "PictureInPicture" to { OctoIcons.PictureInPicture }, "Enlarge" to { OctoIcons.Enlarge },
     "Plan" to { OctoIcons.Plan }, "Hourglass" to { OctoIcons.Hourglass }, "Wave" to { OctoIcons.Wave }, "Power" to { OctoIcons.Power },
     "Backdrop" to { OctoIcons.Backdrop }, "Database" to { OctoIcons.Database }, "Upgrade" to { OctoIcons.Upgrade },
+    "Switches" to { OctoIcons.Switches },
 )
