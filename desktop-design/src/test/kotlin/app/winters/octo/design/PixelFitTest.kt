@@ -61,7 +61,10 @@ class PixelFitTest {
                 if (outlines.fitted == null) keptPlain++
                 val where = "${icon.name} at $px px"
                 assertTrue("$where is softer: ${drawn.share} against ${plain.share}", drawn.share >= plain.share)
-                assertTrue("$where changes its ink by ${drawn.ink / plain.ink - 1}", abs(drawn.ink / plain.ink - 1) <= 0.15)
+                // A fitted icon's ink is held to its ink as written or to its
+                // ink with its lines on whole pixels.
+                val whole = wholePixelInk(plain, icon.stroke, icon.viewportWidth, px, IconList.lined(icon.name))
+                assertTrue("$where changes its ink by ${drawn.ink / plain.ink - 1}", abs(drawn.ink / plain.ink - 1) <= 0.15 || abs(drawn.ink / whole - 1) <= 0.15)
                 assertTrue("$where moves its middle across", abs(drawn.middleX - plain.middleX) <= 0.5)
                 assertTrue("$where moves its middle down", abs(drawn.middleY - plain.middleY) <= 0.5)
                 plainSolid += plain.solid
@@ -113,7 +116,79 @@ class PixelFitTest {
         }
         assertTrue("lines close up:\n" + closed.distinct().joinToString("\n"), closed.isEmpty())
         val keyboard = listed.first { it.name == "sym_keyboard" }
-        for (px in listOf(16, 18)) assertNotNull("the keyboard is fitted at $px px", pixelOutlines(keyboard, px).fitted)
+        for (px in listOf(16, 18, 20)) assertNotNull("the keyboard is fitted at $px px", pixelOutlines(keyboard, px).fitted)
+    }
+
+    // The guard measures a fit's ink against the icon's with its lines on
+    // whole pixels: every icon it now keeps that measuring against the
+    // drawing as written refused is an icon of lines whose lines change
+    // width on whole pixels, with ink within 15% of that. A fit of the
+    // keyboard at 20 px with a gap between its rows closed is refused.
+    @Test
+    fun theGuardMeasuresInkAgainstWholePixelLines() {
+        val gained = mutableListOf<String>()
+        for (px in sizes) {
+            for (icon in listed) {
+                val stroke = icon.stroke ?: continue
+                val plain = outlinesOf(icon)
+                val fitted = fitOutlines(plain, icon.viewportWidth, px, stroke)
+                val before = inkStats(rasterize(plain, icon.viewportWidth, px), px)
+                val after = inkStats(rasterize(fitted, icon.viewportWidth, px), px)
+                val asWritten = fitKept(before, after)
+                val kept = judged(plain, fitted, icon.viewportWidth, px, stroke, IconList.lined(icon.name)) != null
+                val width = stroke.toDouble() / icon.viewportWidth * px
+                val whole = maxOf(1.0, Math.round(width).toDouble())
+                val where = "${icon.name} at $px px"
+                if (kept && !asWritten) {
+                    gained += where
+                    assertTrue("$where is kept but is not an icon of lines", IconList.lined(icon.name))
+                    assertTrue("$where is kept though whole pixels do not change its lines ($width px)", abs(whole / width - 1) > 0.05)
+                    assertTrue("$where is kept with ink off its whole-pixel lines'", abs(after.ink / (before.ink * whole / width) - 1) <= 0.15)
+                }
+            }
+        }
+        println("kept now, refused before: ${gained.size}\n" + gained.joinToString("\n"))
+        val keyboard = listed.first { it.name == "sym_keyboard" }
+        val px = 20
+        val outlines = pixelOutlines(keyboard, px)
+        val fitted = assertNotNullAndGet(outlines.fitted)
+        val unit = keyboard.viewportWidth.toDouble() / px
+        // The second row's top edge moved up a pixel, onto the first row.
+        val merged = outlines.plain.zip(fitted).map { (plain, fit) ->
+            Outline(
+                plain.steps.zip(fit.steps).map { (p, f) -> OutlineStep(f.kind, DoubleArray(f.values.size) { i -> if (i % 2 == 1 && abs(p.values[i] - 120.0) < 0.01) f.values[i] - unit else f.values[i] }) },
+                fit.evenOdd,
+            )
+        }
+        assertNull("a fit with a gap closed is refused", judged(outlines.plain, merged, keyboard.viewportWidth, px, keyboard.stroke, true))
+    }
+
+    // Nothing is lost: every fit the guard kept when it measured ink only
+    // against the drawing as written is still kept, at every size it
+    // fits icons to.
+    @Test
+    fun noFitKeptBeforeIsRefusedNow() {
+        val lost = mutableListOf<String>()
+        val pxs = (sizes + IconSize.Fitted.map { it.value.toInt() }).distinct().sorted()
+        for (px in pxs) {
+            for (icon in listed) {
+                val stroke = icon.stroke ?: continue
+                if (icon.viewportWidth != icon.viewportHeight) continue
+                val plain = outlinesOf(icon)
+                val fitted = fitOutlines(plain, icon.viewportWidth, px, stroke)
+                val before = inkStats(rasterize(plain, icon.viewportWidth, px), px)
+                val after = inkStats(rasterize(fitted, icon.viewportWidth, px), px)
+                val keptBefore = fitKept(before, after)
+                val keptNow = judged(plain, fitted, icon.viewportWidth, px, stroke, IconList.lined(icon.name)) != null
+                if (keptBefore && !keptNow) lost += "${icon.name} at $px px"
+            }
+        }
+        assertTrue("fits the old guard kept, refused now (${lost.size}):\n" + lost.joinToString("\n"), lost.isEmpty())
+    }
+
+    private fun <T : Any> assertNotNullAndGet(value: T?): T {
+        assertNotNull(value)
+        return value!!
     }
 
     // A straight edge along one axis: where it is as written and as drawn,
@@ -154,10 +229,11 @@ class PixelFitTest {
         val px = 18
         val (icon, fitted) = listed.firstNotNullOf { icon -> pixelOutlines(icon, px).fitted?.let { icon to it } }
         val plain = outlinesOf(icon)
-        assertNotNull(judged(plain, fitted, icon.viewportWidth, px))
+        val lined = IconList.lined(icon.name)
+        assertNotNull(judged(plain, fitted, icon.viewportWidth, px, icon.stroke, lined))
         val pixel = icon.viewportWidth / px
         val moved = fitted.map { outline -> outline.mapValues { i, v -> if (i % 2 == 0) v + pixel else v } }
-        assertNull("${icon.name} moved a pixel was kept", judged(plain, moved, icon.viewportWidth, px))
+        assertNull("${icon.name} moved a pixel was kept", judged(plain, moved, icon.viewportWidth, px, icon.stroke, lined))
     }
 
     // At 2x and above an icon is drawn exactly as written, however it is

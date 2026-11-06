@@ -77,7 +77,7 @@ fun fittedOutlines(recipe: IconRecipe, px: Int): List<Outline>? {
     val source = recipe.source
     val shifted = outlinesOf(source).map { outline -> outline.mapValues { i, v -> if (i % 2 == 1) v + recipe.shiftY else v } }
     val fitted = fitOutlines(shifted, source.viewportWidth, px, source.stroke ?: return null)
-    val kept = judged(shifted, fitted, source.viewportWidth, px) ?: return null
+    val kept = judged(shifted, fitted, source.viewportWidth, px, source.stroke, IconList.lined(source.name)) ?: return null
     return kept.map { it.turned(recipe, source.viewportWidth / 2, source.viewportHeight / 2) }
 }
 

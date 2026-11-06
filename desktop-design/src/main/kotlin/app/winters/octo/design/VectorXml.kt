@@ -136,6 +136,10 @@ internal object IconList {
         }
     }
 
+    // Whether the file is drawn in lines (any weight but the filled one),
+    // so its ink follows its lines' width.
+    fun lined(file: String): Boolean = entries[file]?.first.let { it != null && it != "fill" }
+
     // The file's stroke on Phosphor's square, or null when the list does
     // not name it.
     fun strokeOf(file: String): Float? {

@@ -89,12 +89,25 @@ fun inkStats(pixels: ByteArray, px: Int): InkStats {
 }
 
 // Whether `fitted` may stand in for `plain` at `px`: no softer, ink within
-// 15 percent, and the ink's middle moved at most half a pixel each way.
-fun fitKept(plain: InkStats, fitted: InkStats): Boolean {
-    if (plain.ink <= 0.0) return false
+// 15 percent of its ink as written or of `whole` (the ink the icon has with
+// its lines on whole pixels), and the ink's middle moved at most half a
+// pixel each way.
+fun fitKept(plain: InkStats, fitted: InkStats, whole: Double = plain.ink): Boolean {
+    if (plain.ink <= 0.0 || whole <= 0.0) return false
     if (fitted.share < plain.share) return false
-    if (abs(fitted.ink / plain.ink - 1) > 0.15) return false
+    if (abs(fitted.ink / plain.ink - 1) > 0.15 && abs(fitted.ink / whole - 1) > 0.15) return false
     return abs(fitted.middleX - plain.middleX) <= 0.5 && abs(fitted.middleY - plain.middleY) <= 0.5
+}
+
+// The ink an icon of lines would have at `px` with each line's width
+// rounded to whole pixels (never under one): its ink as written, times the
+// whole width over the written one. A filled icon, or one with no line
+// width, keeps its ink as written.
+fun wholePixelInk(plain: InkStats, stroke: Float?, viewport: Float, px: Int, lined: Boolean): Double {
+    if (!lined || stroke == null || viewport <= 0f) return plain.ink
+    val width = stroke.toDouble() / viewport * px
+    if (width <= 0.0) return plain.ink
+    return plain.ink * max(1.0, Math.round(width).toDouble()) / width
 }
 
 // The icon's outlines for `px` pixels a side: fitted when the icon has a
@@ -109,12 +122,66 @@ fun pixelOutlines(source: IconSource, px: Int): PixelOutlines {
     val stroke = source.stroke
     if (stroke == null || source.viewportWidth != source.viewportHeight || px <= 0) return PixelOutlines(plain, null)
     val fitted = fitOutlines(plain, source.viewportWidth, px, stroke)
-    return PixelOutlines(plain, judged(plain, fitted, source.viewportWidth, px))
+    return PixelOutlines(plain, judged(plain, fitted, source.viewportWidth, px, stroke, IconList.lined(source.name)))
 }
 
-// `fitted` when the guard keeps it against `plain`, else null.
-fun judged(plain: List<Outline>, fitted: List<Outline>, viewport: Float, px: Int): List<Outline>? {
+// `fitted` when the guard keeps it against `plain`, else null: its ink
+// measured against the drawing as written and, for an icon of lines with
+// `stroke` given, against its lines on whole pixels; and no line or gap
+// between lines closed.
+fun judged(plain: List<Outline>, fitted: List<Outline>, viewport: Float, px: Int, stroke: Float? = null, lined: Boolean = false): List<Outline>? {
     val before = inkStats(rasterize(plain, viewport, px), px)
     val after = inkStats(rasterize(fitted, viewport, px), px)
-    return fitted.takeIf { fitKept(before, after) }
+    if (!fitKept(before, after, wholePixelInk(before, stroke, viewport, px, lined))) return null
+    return fitted.takeIf { linesKept(plain, it, viewport.toDouble() / px) }
+}
+
+// Whether every straight edge facing another at least half a pixel apart
+// as written (a gap between lines, or a line's two sides, over the same
+// stretch) is still at least a whole pixel from it in `fitted`.
+fun linesKept(plain: List<Outline>, fitted: List<Outline>, unit: Double): Boolean {
+    if (plain.size != fitted.size) return false
+    val g = orientation(plain)
+    for (axis in 0..1) {
+        val found = plain.zip(fitted).flatMap { (p, f) -> straightEdges(p, f, axis, g) }
+        for (first in found) {
+            val next = found.filter { it.start != first.start && it.at > first.at && it.overlaps(first, unit) }.minByOrNull { it.at } ?: continue
+            if (found.any { it !== first && it.start == first.start && it.at > first.at && it.at < next.at && it.overlaps(first, unit) }) continue
+            if (next.at - first.at >= unit / 2 && next.drawnAt - first.drawnAt < unit - 1e-6) return false
+        }
+    }
+    return true
+}
+
+// A straight edge along one axis: where it is as written and as drawn,
+// whether the ink lies after it, and what stretch of the other axis it
+// covers.
+internal class StraightEdge(val at: Double, val drawnAt: Double, val start: Boolean, val from: Double, val to: Double) {
+    fun overlaps(other: StraightEdge, unit: Double): Boolean = minOf(to, other.to) - maxOf(from, other.from) >= unit
+}
+
+// The straight edges along `axis` of one outline, written and drawn.
+internal fun straightEdges(plain: Outline, fitted: Outline, axis: Int, g: Int): List<StraightEdge> {
+    val sides = inkSides(plain, g)
+    val other = 1 - axis
+    val out = mutableListOf<StraightEdge>()
+    var prev: DoubleArray? = null
+    var shape = -1
+    for ((step, fit) in plain.steps.zip(fitted.steps)) {
+        if (step.kind == OutlineStep.Kind.Move) shape++
+        val side = sides.getOrElse(shape.coerceAtLeast(0)) { 1 }
+        if (step.kind != OutlineStep.Kind.Move && step.kind != OutlineStep.Kind.Line) {
+            if (step.kind == OutlineStep.Kind.Cubic) prev = step.values.copyOfRange(4, 6)
+            continue
+        }
+        val p = step.values
+        val q = prev
+        if (q != null && step.kind == OutlineStep.Kind.Line && abs(p[axis] - q[axis]) < 0.05 && abs(p[other] - q[other]) > 0.5) {
+            val travel = p[other] - q[other]
+            val start = if (axis == 0) travel * side < 0 else travel * side > 0
+            out += StraightEdge(p[axis], fit.values[axis], start, minOf(p[other], q[other]), maxOf(p[other], q[other]))
+        }
+        prev = p
+    }
+    return out
 }
