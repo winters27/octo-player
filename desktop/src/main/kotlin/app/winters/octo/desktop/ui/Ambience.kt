@@ -8,6 +8,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -16,6 +18,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import app.winters.octo.desktop.AppState
@@ -23,17 +26,31 @@ import app.winters.octo.desktop.player.wash.ImmersiveWash
 import app.winters.octo.desktop.player.wash.WashCover
 import app.winters.octo.desktop.player.wash.WashCovers
 import app.winters.octo.desktop.settings.AmbienceMotion
+import app.winters.octo.desktop.settings.AmbienceStyle
+import app.winters.octo.desktop.settings.Appearance
 import app.winters.octo.desktop.settings.WashPrefs
+import app.winters.octo.design.LocalOctoSurfaces
 import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.OctoColors
 import app.winters.octo.player.immersive.CoverFadeMs
+import app.winters.octo.player.immersive.FinalGain
 import app.winters.octo.player.immersive.FpsChoices
+import app.winters.octo.player.immersive.WashSize
 import app.winters.octo.player.immersive.WashTuning
+import app.winters.octo.player.immersive.overlay
 import app.winters.octo.player.immersive.paceBpm
 import app.winters.octo.player.immersive.readableAlpha
+import app.winters.octo.theme.ResolvedPalette
+import app.winters.octo.theme.ThemeChoice
+import app.winters.octo.theme.contrastOn
+import app.winters.octo.theme.glowForCover
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.jetbrains.skia.ColorAlphaType
+import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.Image
+import org.jetbrains.skia.ImageInfo
+import kotlin.math.roundToInt
 
 // Octo's own colour, the violet of its icon: the key colour while no song
 // gives one.
@@ -53,8 +70,160 @@ fun keyColour(argb: Int): Color {
     return Color(rgb or (0xFF shl 24))
 }
 
-// The glass's rim with a fifth of the key colour in it.
-fun keyRim(key: Color, alpha: Float = 0.12f): Color = lerp(Color.White, key, 0.2f).copy(alpha = alpha)
+// The glass's rim with a fifth of the key colour in it, mixed from white on
+// a dark theme and from the edge color on a light one.
+@Composable
+@ReadOnlyComposable
+fun keyRim(key: Color, alpha: Float = 0.12f): Color {
+    val s = LocalOctoSurfaces.current
+    return lerp(if (s.light) s.edge else Color.White, key, 0.2f).copy(alpha = alpha)
+}
+
+// The colors of a page's words as ARGB, and the page under them: main,
+// secondary and muted words, and the accent, complement and third.
+@Immutable
+data class PageWords(val page: Int, val light: Boolean, val text: Int, val secondary: Int, val muted: Int, val accents: List<Int>) {
+    // Whether every word reads over `under`: main and secondary words at
+    // 7:1, muted words and the accents at 4.5:1.
+    fun readOver(under: Int): Boolean =
+        contrastOn(text, under) >= SecondaryContrast && contrastOn(secondary, under) >= SecondaryContrast &&
+            contrastOn(muted, under) >= 4.5 && accents.all { contrastOn(it, under) >= 4.5 }
+
+    // The page color laid over a wash on a light theme, so every word reads
+    // over each of its `patches` (its darkest, and its brightest, which a
+    // mix in the screen's colors can leave darker still) shown at
+    // `opacity`: from 0.50 up in 0.01 steps until they do. None on a dark
+    // theme.
+    fun veil(patches: List<Int>, opacity: Float): Float {
+        if (!light) return 0f
+        val washes = patches.map { overlay(it, opacity, page) }
+        for (k in 50..100) {
+            val veil = k / 100f
+            if (washes.all { readOver(overlay(page, veil, it)) }) return veil
+        }
+        return 1f
+    }
+}
+
+// The words of a page in `p`.
+fun pageWords(p: ResolvedPalette) = PageWords(p.page, p.light, p.text, p.secondary, p.muted, listOf(p.accents.accent, p.complement, p.third))
+
+// The words of the page in the theme being drawn.
+@Composable
+@ReadOnlyComposable
+fun currentPageWords(): PageWords {
+    val s = LocalOctoSurfaces.current
+    return PageWords(
+        s.page.toArgb(), s.light, s.text.toArgb(), s.secondary.toArgb(), s.muted.toArgb(),
+        listOf(OctoColors.Accent.toArgb(), s.complement.toArgb(), s.third.toArgb()),
+    )
+}
+
+// The darkest a prepared cover's wash gets as drawn: its darkest patch,
+// dimmed as the final pass dims it (never brightened, which only helps).
+val WashCover.darkest: Int get() = range.scaled(minOf(FinalGain, 1f)).low
+
+// The patches a light theme's veil is measured over: for the wash, its
+// darkest and its brightest as drawn; for the glow, its darkest and the
+// cover's own brightest.
+val WashCover.washPatches: List<Int> get() = listOf(darkest, peak)
+val WashCover.glowPatches: List<Int> get() = listOf(darkest, glowPeak)
+
+// The theme's own colors as a still wash, for a theme that has them: its
+// glow colors (accent, complement, third and accent again, one to a
+// corner), each kept readable at `alpha` over the page as a cover's glow
+// is. Made once for each set of colors, untouched by the wash's tuning.
+internal object ThemeArt {
+    private val untouched = WashTuning(contrast = 1f, saturation = 1f, brightnessCap = 1f)
+    @Volatile private var made: WashCover? = null
+
+    fun corners(theme: ThemeChoice, glow: List<Int>, alpha: Float): List<Int> {
+        val perMille = kotlin.math.floor(alpha * 1000.0 + 0.5).toInt()
+        return listOf(glow[0], glow[1], glow[2], glow[0]).map { glowForCover(theme, it, perMille) }
+    }
+
+    @Synchronized
+    fun cover(theme: ThemeChoice, glow: List<Int>, alpha: Float): WashCover {
+        val corners = corners(theme, glow, alpha)
+        val key = "theme|" + corners.joinToString("|") { "%08X".format(it) }
+        made?.takeIf { it.key == key }?.let { return it }
+        val image = picture(corners)
+        return try {
+            WashCovers.prepared(key, image, untouched).also { next ->
+                // Whoever draws the one before draws from a hold of their own.
+                made?.retire()
+                made = next
+            }
+        } finally {
+            image.close()
+        }
+    }
+
+    // The four colors blended corner to corner across the wash's square.
+    private fun picture(corners: List<Int>): Image {
+        val side = WashSize
+        val bytes = ByteArray(side * side * 4)
+        for (y in 0 until side) for (x in 0 until side) {
+            val u = x / (side - 1f)
+            val v = y / (side - 1f)
+            fun channel(shift: Int): Byte {
+                fun c(i: Int) = (corners[i] shr shift and 0xFF).toFloat()
+                val top = c(0) + (c(1) - c(0)) * u
+                val bottom = c(2) + (c(3) - c(2)) * u
+                return (top + (bottom - top) * v).roundToInt().coerceIn(0, 255).toByte()
+            }
+            val o = (y * side + x) * 4
+            // BGRA in memory.
+            bytes[o] = channel(0)
+            bytes[o + 1] = channel(8)
+            bytes[o + 2] = channel(16)
+            bytes[o + 3] = 0xFF.toByte()
+        }
+        return Image.makeRaster(ImageInfo(side, side, ColorType.BGRA_8888, ColorAlphaType.PREMUL), bytes, side * 4)
+    }
+}
+
+// What the window shows behind everything.
+enum class WindowGlow { None, SignIn, Immersive, Quiet, Cover }
+
+// What the window shows behind everything for `look`: Octo's own moving
+// colours behind the sign-in; nothing with the glow off; the immersive
+// wash; the stand-in colours while nothing with a cover plays; or the
+// cover's glow.
+fun windowGlow(look: Appearance, signedIn: Boolean, cover: String?): WindowGlow = when {
+    !signedIn -> WindowGlow.SignIn
+    !look.ambientGlow -> WindowGlow.None
+    look.ambience == AmbienceStyle.Immersive -> WindowGlow.Immersive
+    cover == null -> WindowGlow.Quiet
+    else -> WindowGlow.Cover
+}
+
+// What stands in while nothing with a cover plays: the theme's own colors
+// (`glow`, kept readable at `quietOpacity`), or Octo's icon for a theme
+// with none.
+internal fun quietCover(theme: ThemeChoice, glow: List<Int>, strength: Float, tuning: WashTuning): WashCover =
+    if (glow.size >= 3) ThemeArt.cover(theme, glow, quietOpacity(strength)) else OctoArt.cover(tuning)
+
+// The veil over the glow of the cover `coverId` on a light theme, worked
+// out from the same prepared copy the page's shade reads, as if black
+// until it is ready; none on a dark theme.
+@Composable
+internal fun rememberGlowVeil(app: AppState, coverId: String?): Float {
+    val words = currentPageWords()
+    val settings by app.settings.state.collectAsState()
+    val wash = settings.appearance.wash
+    val tuning = WashTuning(wash.contrast, wash.saturation / 100f, wash.brightnessCap / 100f)
+    val connection = app.connection
+    val cover by produceState<WashCover?>(null, coverId, connection, tuning, words.light) {
+        value = null
+        if (words.light && coverId != null && connection != null) {
+            app.washCovers.follow(connection.client, coverId, tuning).collect { value = it }
+        }
+    }
+    val target = words.veil(cover?.glowPatches ?: listOf(0xFF000000.toInt()), glowOpacity(1f))
+    val veil by animateFloatAsState(target, tween(motionScale().ms(CoverFadeMs.toInt())), label = "glow veil")
+    return if (words.light) veil else 0f
+}
 
 // Octo's icon (drawn from the vector at OCTO_ART_PX) made ready for the
 // wash, once for the whole run.
@@ -75,15 +244,24 @@ internal object OctoArt {
 
 // Octo's own colours as a slow wash, for when there is no cover to show:
 // behind the sign-in, and very dim behind the pages while nothing plays.
-// It is the full player's background seeded with the app's icon. With
-// motion reduced, `moving` off, or the window minimised or in the tray, it
-// holds still. `veil` is how much of the page colour lies over it.
+// It is the full player's background seeded with the app's icon, or in a
+// theme with colours of its own, with those. With motion reduced, `moving`
+// off, or the window minimised or in the tray, it holds still. `veil` is
+// how much of the page colour lies over it; a light theme lays more over
+// that, as far as its words need.
 @Composable
 fun OctoAmbience(app: AppState, moving: Boolean, veil: Float, modifier: Modifier = Modifier) {
     val settings by app.settings.state.collectAsState()
-    val wash = settings.appearance.wash
+    val look = settings.appearance
+    val wash = look.wash
     val tuning = WashTuning(wash.contrast, wash.saturation / 100f, wash.brightnessCap / 100f)
-    val cover by produceState<WashCover?>(null, tuning) { value = withContext(Dispatchers.Default) { OctoArt.cover(tuning) } }
+    val theme = app.palette.collectAsState().value.theme
+    val glow = LocalOctoSurfaces.current.glow.map { it.toArgb() }
+    val cover by produceState<WashCover?>(null, tuning, theme, glow, look.glowStrength) {
+        value = withContext(Dispatchers.Default) { quietCover(theme, glow, look.glowStrength, tuning) }
+    }
+    val words = currentPageWords()
+    val light = cover?.let { words.veil(it.washPatches, glowOpacity(1f)) } ?: 0f
     Box(modifier.fillMaxSize().background(OctoColors.Background)) {
         ImmersiveWash(
             cover,
@@ -95,6 +273,7 @@ fun OctoAmbience(app: AppState, moving: Boolean, veil: Float, modifier: Modifier
             dolly = { 1f },
         )
         Box(Modifier.fillMaxSize().alpha(veil).background(OctoColors.Background))
+        if (light > 0f) Box(Modifier.fillMaxSize().alpha(light).background(OctoColors.Background))
     }
 }
 
@@ -119,10 +298,14 @@ fun immersiveOpacity(strength: Float): Float = 0.3f + 0.6f * strength.coerceIn(0
 // shows of them, a fifth to a half.
 fun quietOpacity(strength: Float): Float = 0.2f + 0.3f * strength.coerceIn(0f, 1f)
 
+// The contrast main and secondary words keep over what is behind them.
+const val SecondaryContrast = 7.0
+
 // The contrast the pages' quieter words (the accent colour, used for
 // subtitles and details) keep over the wash's brightest part, the usual
-// minimum for reading. The quietest words (TextMuted) are kept readable
-// by the page's own shade (PageShade.kt), so the colours stay rich.
+// minimum for reading. The quietest and the secondary words are brought
+// up to theirs by the page's own shade (PageShade.kt), so the colours stay
+// rich.
 const val PageContrast = 4.5
 
 // How much of this cover's wash shows behind the pages: as much as the
@@ -172,9 +355,11 @@ fun ImmersiveAmbience(app: AppState, modifier: Modifier = Modifier) {
     val state by app.player.state.collectAsState()
     val song = state.current?.song
     val connection = app.connection
-    val cover by produceState<WashCover?>(null, song?.coverArt, song == null, connection, tuning) {
+    val theme = app.palette.collectAsState().value.theme
+    val glow = LocalOctoSurfaces.current.glow.map { it.toArgb() }
+    val cover by produceState<WashCover?>(null, song?.coverArt, song == null, connection, tuning, theme, glow, look.glowStrength) {
         if (song == null || connection == null) {
-            value = withContext(Dispatchers.Default) { OctoArt.cover(tuning) }
+            value = withContext(Dispatchers.Default) { quietCover(theme, glow, look.glowStrength, tuning) }
         } else {
             app.washCovers.follow(connection.client, song.coverArt, tuning).collect { value = it }
         }
@@ -192,8 +377,10 @@ fun ImmersiveAmbience(app: AppState, modifier: Modifier = Modifier) {
 
 // The wash behind the pages over the page colour, as much of it showing as
 // the strength asks and the cover allows (`pageOpacity`), easing between
-// covers. `quiet` (nothing playing, Octo's own colours) keeps it as dim as
-// the glow keeps them.
+// covers. `quiet` (nothing playing, the stand-in colours) keeps it as dim
+// as the glow keeps them. On a light theme a veil of the page colour lies
+// over it, as far as the words need over its darkest patch at full
+// strength.
 @Composable
 internal fun ImmersiveBackdrop(
     cover: WashCover?,
@@ -209,7 +396,10 @@ internal fun ImmersiveBackdrop(
     val most = cover?.pageOpacity(strength, page, OctoColors.TextSecondary) ?: 0f
     val target = if (quiet) minOf(most, quietOpacity(strength)) else most
     val opacity by animateFloatAsState(target, tween(motionScale().ms(CoverFadeMs.toInt())), label = "ambience")
+    val words = currentPageWords()
+    val veil by animateFloatAsState(cover?.let { words.veil(it.washPatches, immersiveOpacity(1f)) } ?: 0f, tween(motionScale().ms(CoverFadeMs.toInt())), label = "ambience veil")
     Box(modifier.fillMaxSize().background(page)) {
         ImmersiveWash(cover, bpm, fps, speed, moving, dolly = { 1f }, opacity = { opacity })
+        if (words.light) Box(Modifier.fillMaxSize().graphicsLayer { alpha = veil }.background(page))
     }
 }

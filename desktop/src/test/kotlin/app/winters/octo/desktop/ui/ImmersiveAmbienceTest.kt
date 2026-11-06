@@ -71,11 +71,14 @@ class ImmersiveAmbienceTest {
             val ratio = contrastRatio(accent, brightest)
             // The grain adds a level either way, so a hair under 4.5 is the same.
             assertTrue("accent words over the $name wash: $ratio to 1", ratio >= 4.4)
-            // The quietest words (times, counts) read once the page's shade,
-            // worked out from that colour, lies under them.
-            val shaded = overlay(0xFF000000.toInt(), shadeFor(brightest, OctoLook.muted), brightest)
+            // The quietest words (times, counts) and the secondary ones read
+            // at theirs once the page's shade, worked out from that colour,
+            // lies under them.
+            val shaded = overlay(0xFF000000.toInt(), shadeFor(brightest, OctoLook.muted, OctoLook.secondary), brightest)
             val quiet = contrastRatio(OctoLook.muted.compositeOver(Color(shaded)).toArgb(), shaded)
             assertTrue("quiet words over the shaded $name wash: $quiet to 1", quiet >= 4.5)
+            val secondary = contrastRatio(accent, shaded)
+            assertTrue("secondary words over the shaded $name wash: $secondary to 1", secondary >= 7.0)
         }
     }
 

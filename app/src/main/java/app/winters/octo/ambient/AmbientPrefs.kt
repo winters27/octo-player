@@ -1,5 +1,7 @@
 package app.winters.octo.ambient
 
+import app.winters.octo.theme.ThemeChoice
+import app.winters.octo.theme.glowForCover
 import kotlinx.serialization.Serializable
 import kotlin.math.abs
 import kotlin.math.max
@@ -76,6 +78,44 @@ fun composite(argb: Int, alpha: Float, over: Int = AmbientBase): Int {
     }
     return (0xFF shl 24) or (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
 }
+
+// An opacity in thousandths, rounded half up.
+fun perMille(alpha: Float): Int = kotlin.math.floor(alpha * 1000.0 + 0.5).toInt()
+
+// A cover's color as it glows behind the pages in `theme` at `alpha`: on a
+// dark theme held dark and soft first, then on any theme kept so every word
+// on the page still reads over it (glowForCover).
+fun coverGlow(theme: ThemeChoice, argb: Int, alpha: Float): Int =
+    glowForCover(theme, if (theme.light) argb else ambientColor(argb), perMille(alpha))
+
+// The theme's own colors at rest: its glow colors in the order accent,
+// complement, third and accent again, each kept readable at `alpha` as a
+// cover's is. Empty for a theme with none (Octo).
+fun restingGlow(theme: ThemeChoice, glow: List<Int>, alpha: Float): List<Int> =
+    if (glow.size < 3) emptyList() else listOf(glow[0], glow[1], glow[2], glow[0]).map { glowForCover(theme, it, perMille(alpha)) }
+
+// What the glow behind a page draws: its four colors (null for none known
+// yet), how strongly, and whether they are the theme's own at rest.
+data class AmbientLook(val mesh: List<Int>?, val alpha: Float, val rests: Boolean)
+
+// The glow for the page in `area`: the cover's colors (`cover`, the song's
+// or the page's own) while `source` names one; the theme's own colors, held
+// still, where the glow is on for the area and nothing with artwork feeds
+// it; otherwise none, with the last colors kept so they fade out as they
+// are.
+fun ambientLook(prefs: AmbientPrefs?, area: AmbientArea?, source: AmbientSource, theme: ThemeChoice, glow: List<Int>, cover: List<Int>?): AmbientLook {
+    val alpha = ambientAlpha(prefs?.strength ?: AmbientStrength.Off)
+    val mesh = cover?.map { coverGlow(theme, it, alpha) }
+    if (source != AmbientSource.None) return AmbientLook(mesh, alpha, rests = false)
+    val resting = restingGlow(theme, glow, alpha)
+    val shown = prefs != null && area != null && prefs.shows(area)
+    return if (shown && resting.isNotEmpty()) AmbientLook(resting, alpha, rests = true) else AmbientLook(mesh, 0f, rests = false)
+}
+
+// Whether the glow drifts: only while music plays, the app is in view and
+// nothing covers it, never with motion reduced, and never at rest.
+fun ambientMoves(awake: Boolean, playing: Boolean, reduceMotion: Boolean, rests: Boolean): Boolean =
+    awake && playing && !reduceMotion && !rests
 
 // Relative luminance, as WCAG defines it.
 fun luminance(argb: Int): Double {

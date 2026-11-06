@@ -52,6 +52,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
 import app.winters.octo.design.GlazeTint
+import app.winters.octo.design.LocalOctoSurfaces
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.playback.NowPlaying
@@ -60,6 +61,9 @@ import app.winters.octo.player.ArtworkPalette
 import app.winters.octo.player.MESH
 import app.winters.octo.player.PlayerColors
 import app.winters.octo.player.PlayerSettings
+import app.winters.octo.theme.LocalActiveTheme
+import app.winters.octo.theme.ThemeChoice
+import app.winters.octo.theme.glowForCover
 import app.winters.octo.ui.common.rememberSystemReduceMotion
 import app.winters.octo.ui.common.delayToNextTick
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -155,10 +159,11 @@ fun PageArtwork(route: NavKey, artwork: String?) {
     }
 }
 
-// The glow behind every page: the artwork's colours, faint and dark, above
-// the plain background and under the page. It drifts only while music plays,
-// the app is in view and nothing covers it (awake), and never when the
-// phone's animations are off.
+// The glow behind every page: the artwork's colours, faint and kept
+// readable, above the plain background and under the page. It drifts only
+// while music plays, the app is in view and nothing covers it (awake), and
+// never when the phone's animations are off. With nothing with artwork to
+// feed it, the theme's own colours rest there, still.
 @Composable
 fun AmbientBackdrop(
     route: NavKey?,
@@ -177,10 +182,14 @@ fun AmbientBackdrop(
             is AmbientSource.Page -> value = vm.colorsFor(source.artwork)
         }
     }
-    val strength = if (source == AmbientSource.None) 0f else ambientAlpha(prefs?.strength ?: AmbientStrength.Off)
+    val theme = LocalActiveTheme.current
+    val glow = LocalOctoSurfaces.current.glow
+    val look = remember(prefs, route, source, theme, glow, colors) {
+        ambientLook(prefs, areaOf(route), source, theme, glow.map { it.toArgb() }, colors?.mesh?.map { it.toArgb() })
+    }
     val appCalm by vm.reduceMotion.collectAsStateWithLifecycle()
     val reduceMotion = rememberSystemReduceMotion() || appCalm
-    AmbientField(colors, strength, moving = awake && now.isPlaying && !reduceMotion)
+    AmbientField(look.mesh, look.alpha, moving = ambientMoves(awake, now.isPlaying, reduceMotion, look.rests))
 }
 
 // The film for the floating bar's glass: the plain one, or with a trace of
@@ -193,13 +202,18 @@ fun rememberBarFilm(now: NowPlaying, vm: AmbienceViewModel = hiltViewModel()): S
         value = if (strength == null) null else vm.colorsFor(now.artwork)
     }
     val plain = GlazeTint
-    val target = colors?.let { c -> strength?.let { barFilm(c.mesh[0], it, plain) } } ?: plain
+    val theme = LocalActiveTheme.current
+    val target = colors?.let { c -> strength?.let { barFilm(c.mesh[0], it, plain, theme) } } ?: plain
     return animateColorAsState(target, tween(CrossfadeMs), label = "bar film")
 }
 
-// A trace of a colour over the glass's usual dim film, `plain`.
-fun barFilm(color: Color, strength: AmbientStrength, plain: Color): Color =
-    Color(ambientColor(color.toArgb())).copy(alpha = barTintAlpha(strength)).compositeOver(plain)
+// A trace of a colour over the glass's usual dim film, `plain`: held dark
+// and soft on a dark theme; on a light one kept readable as the glow is.
+fun barFilm(color: Color, strength: AmbientStrength, plain: Color, theme: ThemeChoice = ThemeChoice.Octo): Color {
+    val alpha = barTintAlpha(strength)
+    val tint = if (theme.light) glowForCover(theme, color.toArgb(), perMille(alpha)) else ambientColor(color.toArgb())
+    return Color(tint).copy(alpha = alpha).compositeOver(plain)
+}
 
 // A strip in Settings showing the glow at a strength, with the song on now
 // written over it the way a page's text sits on it.
@@ -207,6 +221,15 @@ fun barFilm(color: Color, strength: AmbientStrength, plain: Color): Color =
 fun AmbientPreview(strength: AmbientStrength, modifier: Modifier = Modifier, vm: AmbienceViewModel = hiltViewModel()) {
     val now by vm.now.collectAsStateWithLifecycle()
     val colors by produceState<PlayerColors?>(null, now.artwork) { value = vm.colorsFor(now.artwork) }
+    val theme = LocalActiveTheme.current
+    val glow = LocalOctoSurfaces.current.glow
+    val alpha = ambientAlpha(strength)
+    // With nothing playing the theme's own colours show, or the quiet ones
+    // for a theme with none.
+    val mesh = remember(colors, theme, glow, alpha, now.trackId == null) {
+        val resting = if (now.trackId == null) restingGlow(theme, glow.map { it.toArgb() }, alpha) else emptyList()
+        resting.ifEmpty { null } ?: colors?.mesh?.map { coverGlow(theme, it.toArgb(), alpha) }
+    }
     Box(
         modifier
             .fillMaxWidth()
@@ -214,7 +237,7 @@ fun AmbientPreview(strength: AmbientStrength, modifier: Modifier = Modifier, vm:
             .clip(RoundedCornerShape(14.dp))
             .background(OctoColors.Background),
     ) {
-        AmbientField(colors, ambientAlpha(strength), moving = false)
+        AmbientField(mesh, alpha, moving = false)
         Column(Modifier.align(Alignment.CenterStart).padding(horizontal = 16.dp)) {
             Text(
                 now.title ?: "Nothing playing",
@@ -224,10 +247,10 @@ fun AmbientPreview(strength: AmbientStrength, modifier: Modifier = Modifier, vm:
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                if (now.title != null) now.artist.orEmpty() else "The glow takes its colors from the song on now.",
+                if (now.title != null) now.artist.orEmpty() else "The glow takes its colors from the song on now, or the theme's while nothing plays.",
                 style = OctoType.caption,
                 color = OctoColors.TextSecondary,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
@@ -238,13 +261,13 @@ fun AmbientPreview(strength: AmbientStrength, modifier: Modifier = Modifier, vm:
 // this layer, and only its drawing reads the moving values, so the page over
 // it is never recomposed or redrawn for it.
 @Composable
-private fun AmbientField(colors: PlayerColors?, strength: Float, moving: Boolean, modifier: Modifier = Modifier) {
-    val target = remember(colors) { (colors ?: PlayerColors.Quiet).mesh.map { Color(ambientColor(it.toArgb())) } }
+private fun AmbientField(mesh: List<Int>?, strength: Float, moving: Boolean, modifier: Modifier = Modifier) {
+    val target = remember(mesh) { mesh?.map(::Color) ?: PlayerColors.Quiet.mesh.map { Color(ambientColor(it.toArgb())) } }
     val c0 = animateColorAsState(target[0], tween(CrossfadeMs), label = "ambient 0")
     val c1 = animateColorAsState(target[1], tween(CrossfadeMs), label = "ambient 1")
     val c2 = animateColorAsState(target[2], tween(CrossfadeMs), label = "ambient 2")
     val c3 = animateColorAsState(target[3], tween(CrossfadeMs), label = "ambient 3")
-    val glow = animateFloatAsState(if (colors == null) 0f else strength, tween(CrossfadeMs), label = "ambient glow")
+    val glow = animateFloatAsState(if (mesh == null) 0f else strength, tween(CrossfadeMs), label = "ambient glow")
     val painter = remember { fieldPainter() }
     val page = OctoColors.Background
     val fade = remember(page) { bottomFade(page) }

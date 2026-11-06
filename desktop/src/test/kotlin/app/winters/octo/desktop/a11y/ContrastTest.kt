@@ -38,7 +38,8 @@ import kotlin.math.pow
 // riskiest backgrounds: a bright yellow cover glowing across the top at
 // full strength, the same cover as the immersive wash, the player's glass
 // over it, the frame's glass, a menu, and the full player. The words must
-// reach WCAG AA: 4.5:1 for small text, 3:1 for large.
+// reach WCAG AA: 4.5:1 for small text, 3:1 for large, and the page's main
+// and secondary words 7:1.
 class ContrastTest {
     @get:Rule val folder = TemporaryFolder()
 
@@ -144,8 +145,8 @@ class ContrastTest {
             s.spots(image, "$label page", listOf(
                 Triple("Songs", "title", 3.0),
                 Triple("5 songs...", "header line (muted)", 4.5),
-                Triple("Airbag", "song title", 4.5),
-                Triple("Radiohead", "artist (secondary)", 4.5),
+                Triple("Airbag", "song title", 7.0),
+                Triple("Radiohead", "artist (secondary)", 7.0),
                 Triple("4:21", "length (muted)", 4.5),
                 Triple("ARTIST", "column heading (muted)", 4.5),
             ), page) +
@@ -218,7 +219,7 @@ class ContrastTest {
                     Triple("Like Windows follows...", "text size caption (muted)", 4.5),
                     Triple("The cover's colors behind the whole window.", "ambience caption (muted)", 4.5),
                     Triple("Lower it if bright covers make words hard to read.", "brightness cap caption (muted)", 4.5),
-                    Triple("How Octo looks: colors, backgrounds and text.", "page line (secondary)", 4.5),
+                    Triple("How Octo looks: colors, backgrounds and text.", "page line (secondary)", 7.0),
                     Triple("Window background", "card title (primary)", 4.5),
                 ), page) + s.spots(image, "$label list", listOf(
                     Triple("LISTENING", "group name (muted)", 4.5),

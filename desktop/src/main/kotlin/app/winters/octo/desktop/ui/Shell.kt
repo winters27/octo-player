@@ -74,6 +74,8 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.toArgb
+import app.winters.octo.theme.keyForTheme
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isBackPressed
@@ -143,7 +145,6 @@ import app.winters.octo.desktop.pages.SearchPage
 import app.winters.octo.desktop.pages.SettingsPage
 import app.winters.octo.desktop.pages.SignInPage
 import app.winters.octo.desktop.pages.SongsPage
-import app.winters.octo.desktop.settings.AmbienceStyle
 import app.winters.octo.desktop.search.omniPanelPlace
 import app.winters.octo.desktop.search.railFieldPlace
 import app.winters.octo.desktop.window.Frame
@@ -674,11 +675,13 @@ private fun PageHost(app: AppState) {
 }
 
 // The key colour: the main colour of the playing song's cover, or Octo's
-// own while nothing with a cover plays.
+// own while nothing with a cover plays, in the theme's form for it. The
+// sign-in, drawn in Octo's dark look, keeps it as it is.
 @Composable
 private fun rememberKeyColour(app: AppState): Color {
     val state by app.player.state.collectAsState()
     val settings by app.settings.state.collectAsState()
+    val palette by app.palette.collectAsState()
     val coverId = state.current?.song?.coverArt
     val connection = app.connection
     val wash = settings.appearance.wash
@@ -687,42 +690,40 @@ private fun rememberKeyColour(app: AppState): Color {
         if (coverId == null || connection == null) value = OctoKey
         else app.washCovers.follow(connection.client, coverId, tuning).collect { value = it.keyColour() }
     }
-    return key
+    return if (connection == null) key else Color(keyForTheme(palette.theme, key.toArgb()))
 }
 
 // The window's colours, behind everything. The glow: a soft wash of the
 // playing song's colours across the top of the window, its cover blurred
 // far past recognition and kept faint. Garnish, and off when the listener
-// turns it off. With no cover to show, Octo's own colours stand in, still
-// and very dim, so the glass has something behind it. Before signing in
-// they move, behind the sign-in card. Immersive instead lays the full
-// player's moving wash behind the whole window.
+// turns it off. With no cover to show, Octo's own colours (or the theme's,
+// in a theme with its own) stand in, still and very dim, so the glass has
+// something behind it. Before signing in Octo's move, behind the sign-in
+// card. Immersive instead lays the full player's moving wash behind the
+// whole window. On a light theme a veil of the page colour lies over the
+// cover's glow, as far as the words need.
 @Composable
 private fun BoxScope.AmbientGlow(app: AppState) {
     val settings by app.settings.state.collectAsState()
     val look = settings.appearance
     val state by app.player.state.collectAsState()
     val cover = state.current?.song?.coverArt
-    if (app.connection == null) {
-        OctoAmbience(app, moving = true, veil = 0.2f)
-        return
+    val shown = windowGlow(look, app.connection != null, cover)
+    val veil = rememberGlowVeil(app, cover.takeIf { shown == WindowGlow.Cover })
+    when (shown) {
+        WindowGlow.SignIn -> OctoAmbience(app, moving = true, veil = 0.2f)
+        WindowGlow.None -> Unit
+        WindowGlow.Immersive -> ImmersiveAmbience(app)
+        WindowGlow.Quiet -> OctoAmbience(app, moving = false, veil = 1f - quietOpacity(look.glowStrength))
+        WindowGlow.Cover -> if (cover != null) CoverGlow(look.glowStrength, veil) { blurred -> Cover(cover, blurred, shape = RectangleShape) }
     }
-    if (!look.ambientGlow) return
-    if (look.ambience == AmbienceStyle.Immersive) {
-        ImmersiveAmbience(app)
-        return
-    }
-    if (cover == null) {
-        OctoAmbience(app, moving = false, veil = 1f - quietOpacity(look.glowStrength))
-        return
-    }
-    CoverGlow(look.glowStrength) { blurred -> Cover(cover, blurred, shape = RectangleShape) }
 }
 
 // The glow itself: `picture` draws the cover into the blurred modifier it
-// is given, faint and fading into the page below.
+// is given, faint and fading into the page below, with `veil` of the page
+// colour over it.
 @Composable
-internal fun CoverGlow(strength: Float, picture: @Composable (Modifier) -> Unit) {
+internal fun CoverGlow(strength: Float, veil: Float = 0f, picture: @Composable (Modifier) -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
@@ -730,6 +731,7 @@ internal fun CoverGlow(strength: Float, picture: @Composable (Modifier) -> Unit)
             .alpha(glowOpacity(strength)),
     ) {
         picture(Modifier.fillMaxSize().blur(Ambience.Blur, BlurredEdgeTreatment.Unbounded))
+        if (veil > 0f) Box(Modifier.fillMaxSize().alpha(veil).background(OctoColors.Background))
         // Fades into the page below, so there is no edge.
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, OctoColors.Background))))
     }
