@@ -174,22 +174,25 @@ final class AmbientDrift {
 }
 
 /// The mesh a cover's colors glow with on `palette`'s page, as `0xAARRGGBB`. On a dark page each is
-/// held dark and soft; on a light page each passes through `glowForCover` at the glow's own
-/// opacity, so every word still reads over it. Done as the glow is drawn, never kept with the
-/// cover's colors.
+/// held dark and soft first; on a light page the cover's own color goes in. Either way it then
+/// passes through `glowForCover` at the glow's own opacity, so every word still reads over it.
+/// Done as the glow is drawn, never kept with the cover's colors.
 func glowMesh(_ colors: ArtworkColors, palette: ResolvedPalette, alpha: Double) -> [UInt32] {
     let perMille = Int((alpha * 1000).rounded())
     return colors.mesh.prefix(4).map { color in
         let argb = 0xFF00_0000 | color
-        return palette.light ? glowForCover(palette.theme, argb, perMille) : ambientColor(argb)
+        return glowForCover(palette.theme, palette.light ? argb : ambientColor(argb), perMille)
     }
 }
 
-/// The glow a theme rests in: its accent, complement, third and accent again; empty for a theme
-/// with none.
-func restingMesh(_ palette: ResolvedPalette) -> [UInt32] {
+/// The glow a theme rests in: its accent, complement, third and accent again, each through
+/// `glowForCover` at `alpha` so every word still reads over it; empty for a theme with none.
+func restingMesh(_ palette: ResolvedPalette, alpha: Double) -> [UInt32] {
     guard palette.glow.count >= 3 else { return [] }
-    return [palette.glow[0], palette.glow[1], palette.glow[2], palette.glow[0]]
+    let perMille = Int((alpha * 1000).rounded())
+    return [palette.glow[0], palette.glow[1], palette.glow[2], palette.glow[0]].map {
+        glowForCover(palette.theme, $0, perMille)
+    }
 }
 
 /// The glow behind every page: the artwork's colors, faint and soft, above the plain background
@@ -219,9 +222,10 @@ struct AmbientBackdrop: View {
         // Kept through a turn to none, so the old colors fade out as they are.
         let colors = found ?? held
         let alpha = ambientAlpha(prefs.strength)
-        let rests = source == .none && !restingMesh(palette).isEmpty && (areaOf(page).map { prefs.shows($0) } ?? false)
+        let resting = restingMesh(palette, alpha: alpha)
+        let rests = source == .none && !resting.isEmpty && (areaOf(page).map { prefs.shows($0) } ?? false)
         let paint: AmbientPaint = if rests {
-            AmbientPaint(mesh: restingMesh(palette), strength: alpha)
+            AmbientPaint(mesh: resting, strength: alpha)
         } else {
             AmbientPaint(mesh: glowMesh(colors ?? .quiet, palette: palette, alpha: alpha),
                          strength: source == .none || colors == nil ? 0 : alpha)
@@ -362,8 +366,9 @@ struct AmbientPreview: View {
     /// The theme's own colors while nothing plays, else the song's.
     private func previewPaint(cover: String?) -> AmbientPaint {
         let alpha = ambientAlpha(strength)
-        if player.current == nil && !restingMesh(palette).isEmpty {
-            return AmbientPaint(mesh: restingMesh(palette), strength: alpha)
+        let resting = restingMesh(palette, alpha: alpha)
+        if player.current == nil && !resting.isEmpty {
+            return AmbientPaint(mesh: resting, strength: alpha)
         }
         let colors: ArtworkColors? = cover == nil ? .quiet : store.colors(for: cover)
         return AmbientPaint(mesh: glowMesh(colors ?? .quiet, palette: palette, alpha: alpha), strength: colors == nil ? 0 : alpha)
