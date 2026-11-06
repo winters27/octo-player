@@ -57,7 +57,13 @@ import app.winters.octo.desktop.queue.queueNameFor
 import app.winters.octo.desktop.search.COMMAND_MARK
 import app.winters.octo.playback.QueueSource
 import app.winters.octo.playback.queueAddWords
+import app.winters.octo.desktop.system.PortalWatcher
+import app.winters.octo.desktop.ui.ThemeState
+import app.winters.octo.desktop.ui.coverSeed
+import app.winters.octo.theme.ResolvedPalette
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import app.winters.octo.desktop.search.Fetches
 import app.winters.octo.desktop.upgrade.UpgradeModel
@@ -172,6 +178,10 @@ class AppState(
     browse: (String) -> Unit = { openInBrowser(it) },
     // The live radio catalog; tests give one at a pretend address.
     radioCatalog: RadioBrowser = RadioBrowser(catalogHttp(http), liveRadioAgent()),
+    // Whether the computer is in dark mode, as read before the window
+    // opened, and the desktop portal's watcher on Linux.
+    deviceDark: MutableStateFlow<Boolean> = MutableStateFlow(true),
+    val portal: PortalWatcher? = null,
 ) {
     // Opens a web page in the listener's browser.
     val openUrl: (String) -> Unit = browse
@@ -397,6 +407,10 @@ class AppState(
 
     // Covers made ready for the full player's background.
     val washCovers = WashCovers(http, images = { coverImages?.invoke() })
+
+    // The theme and accent every window is drawn in.
+    val theme = ThemeState(settings.state, deviceDark, coverSeed(settings.state, player.state, { connection }, washCovers), scope)
+    val palette: StateFlow<ResolvedPalette> get() = theme.palette
 
     // Playlists' designed covers; Main gives them a folder in the cache.
     val playlistArt = PlaylistArtStore(http)

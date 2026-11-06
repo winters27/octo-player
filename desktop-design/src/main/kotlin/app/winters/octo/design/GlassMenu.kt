@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -436,45 +437,55 @@ fun MenuRow(
     val pressed by interaction.collectIsPressedAsState()
     val focused by interaction.collectIsFocusedAsState()
     val press = OctoColors.MenuPress
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 6.dp)
-            .then(if (selected) Modifier.background(OctoColors.AccentSelected, MenuRowShape) else Modifier)
-            .menuRowPress(MenuRowShape, press) { if ((hovered || pressed || focused) && enabled) 1f else 0f }
-            .hoverable(interaction, enabled = enabled)
-            .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
-            .clickable(
-                interactionSource = interaction,
-                indication = FocusRing(MenuRowShape),
-                enabled = enabled,
-                role = Role.Button,
-                onClick = onClick,
+    SelectedFill(selected) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp)
+                .then(if (selected) Modifier.background(OctoColors.AccentSelected, MenuRowShape) else Modifier)
+                .menuRowPress(MenuRowShape, press) { if ((hovered || pressed || focused) && enabled) 1f else 0f }
+                .hoverable(interaction, enabled = enabled)
+                .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
+                .clickable(
+                    interactionSource = interaction,
+                    indication = FocusRing(MenuRowShape),
+                    enabled = enabled,
+                    role = Role.Button,
+                    onClick = onClick,
+                )
+                .semantics {
+                    if (checked || selected) this.selected = true
+                    if (more) stateDescription = "Opens more"
+                }
+                .height(MenuRowHeight.Pointer)
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (leading != null) leading() else if (icon != null) Glyph(icon, size = IconSize.Table, tint = if (enabled) OctoColors.TextPrimary else OctoColors.TextMuted)
+            Txt(
+                text,
+                if (selected) OctoType.bodySmall.copy(fontWeight = FontWeight.Medium) else OctoType.bodySmall,
+                when {
+                    !enabled -> OctoColors.TextMuted
+                    destructive -> OctoColors.Destructive
+                    else -> OctoColors.TextPrimary
+                },
+                Modifier.weight(1f),
             )
-            .semantics {
-                if (checked || selected) this.selected = true
-                if (more) stateDescription = "Opens more"
-            }
-            .height(MenuRowHeight.Pointer)
-            .padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        if (leading != null) leading() else if (icon != null) Glyph(icon, size = IconSize.Table, tint = if (enabled) Color.White else OctoColors.TextMuted)
-        Txt(
-            text,
-            if (selected) OctoType.bodySmall.copy(fontWeight = FontWeight.Medium) else OctoType.bodySmall,
-            when {
-                !enabled -> OctoColors.TextMuted
-                destructive -> OctoColors.Destructive
-                else -> OctoColors.TextPrimary
-            },
-            Modifier.weight(1f),
-        )
-        if (detail != null) Txt(detail, OctoType.caption, OctoColors.TextMuted)
-        if (checked || selected) Glyph(OctoIcons.Check, size = IconSize.Table, tint = OctoColors.TextPrimary)
-        if (more) Glyph(OctoIcons.Chevron, size = IconSize.Table, tint = OctoColors.TextMuted)
+            if (detail != null) Txt(detail, OctoType.caption, OctoColors.TextMuted)
+            if (checked || selected) Glyph(OctoIcons.Check, size = IconSize.Table, tint = OctoColors.TextPrimary)
+            if (more) Glyph(OctoIcons.Chevron, size = IconSize.Table, tint = OctoColors.TextMuted)
+        }
     }
+}
+
+// The words of a selected row's contents, in the colors solved for its
+// fill, keeping the Row's scope; any other row's as they are.
+@Composable
+fun RowScope.SelectedRowWords(selected: Boolean, content: @Composable RowScope.() -> Unit) {
+    val row = this
+    SelectedFill(selected) { row.content() }
 }
 
 // A heading inside a menu or pop-up.

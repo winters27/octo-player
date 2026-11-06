@@ -69,8 +69,8 @@ fun LineSlider(
     modifier: Modifier = Modifier,
     live: Boolean = false,
     wheelStep: Float? = null,
-    color: Color = Color.White,
-    trackColor: Color = Color.White.copy(alpha = 0.22f),
+    color: Color = OctoColors.TextPrimary,
+    trackColor: Color = OctoColors.TextPrimary.copy(alpha = 0.22f),
     onRelease: () -> Unit = {},
     hoverLabel: ((Float) -> String)? = null,
     look: SliderLook = SliderLook.Glow,
@@ -204,14 +204,14 @@ fun LineSlider(
                 val at = if (dragging) dragFraction else pointerFraction
                 val words = hoverWords
                 if (words != null && at >= 0f && (hovered || dragging)) {
-                    val text = measurer.measure(words(at), OctoType.caption.copy(fontSize = 11.sp, color = Color.White, fontFeatureSettings = "tnum"))
+                    val text = measurer.measure(words(at), OctoType.caption.copy(fontSize = 11.sp, color = bubbleWords, fontFeatureSettings = "tnum"))
                     val padX = 7.dp.toPx()
                     val padY = 2.dp.toPx()
                     val w = text.size.width + padX * 2
                     val h = text.size.height + padY * 2
                     val left = (size.width * at - w / 2).coerceIn(-w / 2, size.width - w / 2)
                     val top = y - 10.dp.toPx() - h
-                    drawRoundRect(Color.Black.copy(alpha = 0.72f), Offset(left, top), Size(w, h), CornerRadius(h / 2))
+                    drawRoundRect(bubbleFill, Offset(left, top), Size(w, h), CornerRadius(h / 2))
                     drawText(text, topLeft = Offset(left + padX, top + padY))
                 }
             },

@@ -61,7 +61,8 @@ fun commandsFor(app: AppState): List<Command> = buildList {
     settingsPages(app.os == DesktopOs.Windows, discordAppId() != null).forEach { page -> setting(page.name, "Settings", page.words, page.key) }
     setting("Crossfade", "Settings", "blend transitions automix fade songs together", SettingsKey.Playback, "crossfade")
     setting("Equalizer", "Settings", "eq bass treble presets bands", SettingsKey.Sound, "eq")
-    setting("Accent color", "Settings", "theme colour tint highlight palette appearance album art cover", SettingsKey.Look)
+    setting("Theme", "Settings", "light mode dark mode night day colors colours palette appearance moss dusk daylight paper match system", SettingsKey.Look, "theme")
+    setting("Accent color", "Settings", "colour tint highlight appearance album art cover", SettingsKey.Look)
     setting("Song radio settings", go, "radio start radio autoplay discovery adventure artist variety favorites more often tuning similar songs", SettingsKey.Radio)
     setting(STATIONS_ON_SERVER, go, "radio live radio internet radio stations streams add a station edit fm", SettingsKey.Radio)
     setting(AnimatedArtSetting.TITLE, go, "animated covers album art loops apple music full screen square still", SettingsKey.Look)

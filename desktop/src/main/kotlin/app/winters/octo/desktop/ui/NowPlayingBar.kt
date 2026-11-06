@@ -232,7 +232,7 @@ private fun SongZone(app: AppState, song: Song?) {
             FetchButton(app, song, ControlHeight.M, IconSize.Toolbar, tint = OctoColors.TextPrimary)
         } else if (song != null) {
             val starred = app.isStarred(song)
-            IconAction(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favorites" else "Add to favorites", { app.setStarred(listOf(song), !starred) }, size = ControlHeight.M, iconSize = IconSize.Toolbar)
+            IconAction(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favorites" else "Add to favorites", { app.setStarred(listOf(song), !starred) }, size = ControlHeight.M, iconSize = IconSize.Toolbar, tint = if (starred) OctoColors.Highlight else OctoColors.TextPrimary)
         }
     }
 }

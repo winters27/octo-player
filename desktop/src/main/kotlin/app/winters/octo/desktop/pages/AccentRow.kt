@@ -15,23 +15,27 @@ import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 import app.winters.octo.theme.AccentChoice
 import app.winters.octo.theme.FixedAccents
+import app.winters.octo.theme.ThemeChoice
 import app.winters.octo.theme.accentHelp
+import app.winters.octo.theme.themedAccent
 
 // The accent picker: a circle for each accent and one for the playing
 // cover's, the chosen one checked and ringed, each named on hover, and a
 // line naming the chosen one and saying what it colors.
 @Composable
-internal fun AccentRow(chosen: AccentChoice, onPick: (AccentChoice) -> Unit) {
+internal fun AccentRow(chosen: AccentChoice, active: ThemeChoice, onPick: (AccentChoice) -> Unit) {
     Column(Modifier.settingsRow(ACCENT_COLOR).fillMaxWidth().padding(horizontal = RowInset, vertical = Space.L)) {
         Txt(ACCENT_COLOR, RowTitleWords, OctoColors.TextPrimary)
         AccentSwatches(
-            swatches = AccentChoice.entries.map { choice -> AccentSwatch(choice.label, choice.argb?.let(::Color), selected = choice == chosen) },
+            swatches = AccentChoice.entries.map { choice ->
+                AccentSwatch(choice.label, choice.argb?.let { Color(themedAccent(active, choice, null)) }, selected = choice == chosen)
+            },
             onPick = { onPick(AccentChoice.entries[it]) },
             spectrum = FixedAccents.drop(1).map { Color(it.argb!!) },
             modifier = Modifier.fillMaxWidth().padding(top = Space.S),
             wrap = { label, content -> OctoTooltip(label) { content() } },
         )
-        Txt("${chosen.label}: ${accentHelp(chosen)}", DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xs), maxLines = 3)
+        Txt("${chosen.label}: ${accentHelp(chosen, active)}", DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xs), maxLines = 3)
     }
 }
 

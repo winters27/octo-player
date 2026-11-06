@@ -155,8 +155,10 @@ private fun AppearanceCards(app: AppState, settings: AppSettings) {
     fun appearance(edit: (Appearance) -> Appearance) = app.settings.update { it.copy(appearance = edit(it.appearance)) }
     fun wash(edit: (WashPrefs) -> WashPrefs) = appearance { it.copy(wash = edit(it.wash)) }
     val chosen = ambienceOf(look)
+    val showing by app.palette.collectAsState()
+    SettingsCard("Theme", OctoIcons.Switches) { ThemeRows(app, settings) }
     SettingsCard("Accent and text", OctoIcons.Appearance) {
-        AccentRow(look.accent) { accent -> appearance { it.copy(accent = accent) } }
+        AccentRow(look.accent, showing.theme) { accent -> appearance { it.copy(accent = accent) } }
         val system = if (app.os == DesktopOs.Windows) "Windows" else "your system"
         ChoiceRow(
             "Text size",
@@ -342,7 +344,7 @@ private fun ambienceName(style: AmbienceStyle?): String = when (style) {
 
 // When each ambience choice is the one to pick.
 private fun ambienceHelp(style: AmbienceStyle?): String = when (style) {
-    null -> "The plain dark background."
+    null -> "The plain background."
     AmbienceStyle.Glow -> "The song's colors glow across the top of the window."
     AmbienceStyle.Immersive -> "The cover's colors behind the whole window."
 }

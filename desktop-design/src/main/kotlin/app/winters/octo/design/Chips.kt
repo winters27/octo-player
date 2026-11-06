@@ -29,18 +29,16 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
-// The words on an accent fill: near black, as on the other accent pills.
-private val OnAccent = Color(0xFF0C0C0D)
-
 // One choice of many that can be scrolled through (the Charts page's
 // genres): a pill, filled with the accent when it is the chosen one, with
 // a `count` after its words in a softer ink when it has one.
 @Composable
 fun GlazeChip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, count: String? = null) {
+    val onAccent = OctoColors.OnAccent
     Row(
         modifier
             .clip(CircleShape)
-            .background(if (selected) OctoColors.Accent else Color.White.copy(alpha = 0.08f))
+            .background(if (selected) OctoColors.Accent else OctoColors.TextPrimary.copy(alpha = 0.08f))
             .semantics { this.selected = selected }
             .clickable(role = Role.Tab, onClick = onClick)
             .pointerHoverIcon(PointerIcon.Hand)
@@ -48,8 +46,8 @@ fun GlazeChip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Mo
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Txt(text, OctoType.label, if (selected) OnAccent else OctoColors.TextSecondary)
-        if (count != null) Txt(count, OctoType.label, if (selected) OnAccent.copy(alpha = 0.62f) else OctoColors.TextMuted)
+        Txt(text, OctoType.label, if (selected) onAccent else OctoColors.TextSecondary)
+        if (count != null) Txt(count, OctoType.label, if (selected) onAccent.copy(alpha = 0.62f) else OctoColors.TextMuted)
     }
 }
 

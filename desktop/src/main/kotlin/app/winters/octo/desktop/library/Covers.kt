@@ -335,7 +335,7 @@ fun Cover(
         val px = with(LocalDensity.current) { maxOf(maxWidth, maxHeight).roundToPx() }
         // The glyph sits under the picture, so a cover the server has none
         // for (or that fails) still shows what it stands for.
-        Glyph(placeholder, size = (maxWidth * 0.36f).coerceIn(12.dp, 64.dp), tint = OctoColors.TextMuted, exact = true)
+        Glyph(placeholder, size = (maxWidth * 0.36f).coerceIn(12.dp, 64.dp), tint = OctoColors.Third.copy(alpha = 0.8f), exact = true)
         if (coverId != null && client != null) {
             val bucket = coverBucket(coverFetchPx(px))
             val key = coverKey(client.primaryUrl.host, coverId, bucket, online)

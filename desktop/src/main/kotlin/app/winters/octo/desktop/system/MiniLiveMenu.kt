@@ -38,6 +38,7 @@ import app.winters.octo.design.Space
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.player.LiveNow
 import app.winters.octo.desktop.ui.LiveMenuRows
+import app.winters.octo.desktop.ui.OverArtWindow
 import app.winters.octo.desktop.ui.StationInfoCard
 import app.winters.octo.desktop.window.roundWindowsCorners
 import app.winters.octo.desktop.window.systemRoundsWindows
@@ -120,19 +121,21 @@ fun MiniLiveMenu(
             window.addWindowFocusListener(focus)
             onDispose { window.removeWindowFocusListener(focus) }
         }
-        ProvideWindowLook(reduceMotion = reduceMotion, focus = keyboard) {
-            Box(
-                Modifier
-                    .width(width)
-                    .background(OctoColors.Background, shape)
-                    .background(MenuFilm, shape)
-                    .border(FrameSize.Hairline, ChromeEdge, shape),
-            ) {
-                Column(Modifier.padding(vertical = Space.Xs)) {
-                    if (info) {
-                        StationInfoCard(app, live, close)
-                    } else {
-                        LiveMenuRows(app, live, stationId, close, info = { info = true }, find = find)
+        OverArtWindow(app) {
+            ProvideWindowLook(reduceMotion = reduceMotion, focus = keyboard) {
+                Box(
+                    Modifier
+                        .width(width)
+                        .background(OctoColors.Background, shape)
+                        .background(MenuFilm, shape)
+                        .border(FrameSize.Hairline, ChromeEdge, shape),
+                ) {
+                    Column(Modifier.padding(vertical = Space.Xs)) {
+                        if (info) {
+                            StationInfoCard(app, live, close)
+                        } else {
+                            LiveMenuRows(app, live, stationId, close, info = { info = true }, find = find)
+                        }
                     }
                 }
             }

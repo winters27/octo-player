@@ -21,6 +21,7 @@ import app.winters.octo.design.IconSize
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.allIcons
+import app.winters.octo.desktop.OctoLook
 import org.jetbrains.skia.EncodedImageFormat
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -38,7 +39,7 @@ class IconSheetShotsTest {
     fun theWholeSet() {
         assumeTrue(System.getenv("OCTO_SHOTS") == "1")
         val sizes = listOf(IconSize.Inline, IconSize.Table, IconSize.Toolbar, IconSize.Transport, 24.dp)
-        val label = TextStyle(color = OctoColors.TextSecondary, fontSize = 11.sp)
+        val label = TextStyle(color = OctoLook.secondary, fontSize = 11.sp)
         val columns = allIcons.chunked((allIcons.size + 1) / 2)
         for (density in listOf(1f, 2f)) {
             val width = 860

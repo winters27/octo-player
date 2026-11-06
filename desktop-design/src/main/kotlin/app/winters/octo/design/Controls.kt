@@ -69,7 +69,7 @@ fun IconAction(
     iconSize: Dp = IconSize.Transport,
     enabled: Boolean = true,
     active: Boolean = false,
-    tint: Color = Color.White,
+    tint: Color = OctoColors.TextPrimary,
     toggled: Boolean? = null,
     tooltip: String = description,
     exact: Boolean = false,
@@ -135,7 +135,7 @@ fun GlazeCapsule(
                 .buttonMotion(look, CircleShape, OctoColors.FocusRing)
                 .alpha(if (enabled) 1f else OctoInk.DisabledAlpha)
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = if (held) 0.12f else 0.08f))
+                .background(OctoColors.TextPrimary.copy(alpha = if (held) 0.12f else 0.08f))
                 .hoverable(interaction)
                 .pointerHoverIcon(PointerIcon.Hand)
                 .tabStop(LocalTabStops.current)
@@ -325,8 +325,9 @@ val SegmentCheckGap = 4.dp
 // A ring that fills as something downloads; with no fraction known it turns.
 @Composable
 fun ProgressRing(fraction: Float?, modifier: Modifier = Modifier, size: Dp = 22.dp) {
+    val ink = OctoColors.TextPrimary
     if (fraction == null) {
-        Spinner(modifier, size, Color.White.copy(alpha = 0.8f))
+        Spinner(modifier, size, ink.copy(alpha = 0.8f))
         return
     }
     val shown by animateFloatAsState(fraction.coerceIn(0f, 1f), octoTween(motionScale(), OctoDuration.Neutral), label = "ring")
@@ -334,8 +335,8 @@ fun ProgressRing(fraction: Float?, modifier: Modifier = Modifier, size: Dp = 22.
         val stroke = this.size.minDimension * 0.12f
         val inset = Offset(stroke / 2, stroke / 2)
         val box = Size(this.size.width - stroke, this.size.height - stroke)
-        drawArc(Color.White.copy(alpha = 0.18f), 0f, 360f, false, inset, box, style = Stroke(stroke))
-        drawArc(Color.White, -90f, 360f * shown, false, inset, box, style = Stroke(stroke, cap = StrokeCap.Round))
+        drawArc(ink.copy(alpha = 0.18f), 0f, 360f, false, inset, box, style = Stroke(stroke))
+        drawArc(ink, -90f, 360f * shown, false, inset, box, style = Stroke(stroke, cap = StrokeCap.Round))
     }
 }
 
@@ -345,10 +346,11 @@ fun ProgressRing(fraction: Float?, modifier: Modifier = Modifier, size: Dp = 22.
 @Composable
 fun MeterLine(fraction: Float?, modifier: Modifier = Modifier) {
     val shown by animateFloatAsState((fraction ?: 0f).coerceIn(0f, 1f), octoTween(motionScale(), OctoDuration.Neutral), label = "line")
+    val ink = OctoColors.TextPrimary
     Canvas(modifier.fillMaxWidth().height(MeterLineHeight)) {
         val round = CornerRadius(size.height / 2)
-        drawRoundRect(Color.White.copy(alpha = 0.18f), cornerRadius = round)
-        if (fraction != null && shown > 0f) drawRoundRect(Color.White, size = Size(size.width * shown, size.height), cornerRadius = round)
+        drawRoundRect(ink.copy(alpha = 0.18f), cornerRadius = round)
+        if (fraction != null && shown > 0f) drawRoundRect(ink, size = Size(size.width * shown, size.height), cornerRadius = round)
     }
 }
 

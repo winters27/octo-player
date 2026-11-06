@@ -2,6 +2,8 @@ package app.winters.octo.desktop.a11y
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.InternalComposeUiApi
@@ -17,6 +19,7 @@ import androidx.compose.ui.unit.Density
 import app.winters.octo.design.ArrowKeys
 import app.winters.octo.design.FocusVisibility
 import app.winters.octo.design.LocalTyping
+import app.winters.octo.design.ProvideOctoTheme
 import app.winters.octo.design.ProvideWindowLook
 import app.winters.octo.design.TypingState
 import app.winters.octo.desktop.AppState
@@ -139,12 +142,15 @@ class A11yScene(
         }
         waitFor { app.library?.index != null }
         scene = ImageComposeScene(width, height, Density(1f)) {
-            ProvideWindowLook(reduceMotion = reduceMotion, focus = keyboard, arrows = arrows) {
-                CompositionLocalProvider(
-                    LocalTyping provides TypingState(),
-                    LocalDensity provides Density(1f, textScale),
-                    LocalSystem provides system,
-                ) { wrap { Shell(app, null) {} } }
+            val palette by app.palette.collectAsState()
+            ProvideOctoTheme(palette) {
+                ProvideWindowLook(reduceMotion = reduceMotion, focus = keyboard, arrows = arrows) {
+                    CompositionLocalProvider(
+                        LocalTyping provides TypingState(),
+                        LocalDensity provides Density(1f, textScale),
+                        LocalSystem provides system,
+                    ) { wrap { Shell(app, null) {} } }
+                }
             }
         }
         render(4)

@@ -81,8 +81,9 @@ fun DesignedCover(app: AppState, order: CoverOrder, modifier: Modifier, shape: S
         LaunchedEffect(key) {
             if (spec != null && ready == null) shown = store.art(spec, side)
         }
-        val ground = remember(spec?.id, palette) {
-            spec?.let { s -> Color(backgroundColour(chooseBackground(s.id, s.palette))) } ?: OctoColors.BackgroundTertiary
+        val bare = OctoColors.BackgroundTertiary
+        val ground = remember(spec?.id, palette, bare) {
+            spec?.let { s -> Color(backgroundColour(chooseBackground(s.id, s.palette))) } ?: bare
         }
         Box(Modifier.matchParentSize().background(ground))
         (ready ?: shown)?.let {

@@ -88,6 +88,7 @@ import app.winters.octo.design.Focus
 import app.winters.octo.design.FocusRing
 import app.winters.octo.design.FocusRingColor
 import app.winters.octo.design.LocalFocusVisibility
+import app.winters.octo.design.LocalOctoSurfaces
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlazeSegments
 import app.winters.octo.design.Glyph
@@ -105,6 +106,7 @@ import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 import app.winters.octo.design.crispPainter
 import app.winters.octo.design.exactPainter
+import app.winters.octo.design.glassRim
 import app.winters.octo.design.hoverLift
 import app.winters.octo.design.mix
 import app.winters.octo.design.scrollbar
@@ -427,6 +429,7 @@ internal fun Card(modifier: Modifier = Modifier, content: @Composable ColumnScop
 private fun Modifier.cardSurface(flash: SettingsFlash? = null): Modifier {
     val fill = CardFill
     val edge = CardEdge
+    val top = glassRim(TOP_LIGHT)
     return this
         .drawBehind {
             if (size.height <= 0f) return@drawBehind
@@ -435,7 +438,7 @@ private fun Modifier.cardSurface(flash: SettingsFlash? = null): Modifier {
             drawRoundRect(fill, cornerRadius = radius)
             drawRoundRect(edge, topLeft = Offset(line / 2, line / 2), size = Size(size.width - line, size.height - line), cornerRadius = radius, style = Stroke(line))
         }
-        .innerShadow(Corner.PanelShape, Shadow(radius = Space.None, color = Color.White.copy(alpha = TOP_LIGHT), offset = DpOffset(Space.None, FrameSize.Hairline)))
+        .innerShadow(Corner.PanelShape, Shadow(radius = Space.None, color = top, offset = DpOffset(Space.None, FrameSize.Hairline)))
         .flashFill(flash, inset = false)
         .clip(Corner.PanelShape)
 }
@@ -646,19 +649,25 @@ internal fun ActionRow(title: String, caption: String?, action: String, onClick:
 // An action at a row's end: a quiet pill, a faint fill of the words' ink
 // with the action in the accent (in a lighter red for a `danger` one),
 // ending on the row's value edge. It has the dropdowns' and the segments'
-// shape: as tall, fully round, the same room either side of its words.
+// shape: as tall, fully round, the same room either side of its words. On a
+// light theme a darker fill would dim the words, so the pill takes the raised
+// surface and shows a hover with its edge line instead.
 @Composable
 internal fun RowAction(text: String, onClick: () -> Unit, enabled: Boolean = true, icon: ImageVector? = null, danger: Boolean = false) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
-    val ink = if (danger) dangerOnPill() else OctoColors.Accent
-    val fill = OctoColors.TextPrimary.copy(alpha = if (hovered && enabled) PILL_HOVER else PILL_REST)
+    val ink = if (danger) dangerOnPill() else OctoColors.AccentWords
+    val light = LocalOctoSurfaces.current.light
+    val lit = hovered && enabled
+    val fill = if (light) OctoColors.SurfaceRaised else OctoColors.TextPrimary.copy(alpha = if (lit) PILL_HOVER else PILL_REST)
+    val edge = if (light && lit) OctoColors.Edge else Color.Transparent
     Row(
         Modifier
             .alpha(if (enabled) 1f else DISABLED)
             .height(ControlHeight.L)
             .clip(CircleShape)
             .background(fill, CircleShape)
+            .border(FrameSize.Hairline, edge, CircleShape)
             .hoverable(interaction, enabled = enabled)
             .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
             .tabStop(LocalTabStops.current)

@@ -33,6 +33,7 @@ import app.winters.octo.design.TextAction
 import app.winters.octo.design.IconSize
 import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.glassFilm
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.PopupPadding
 import app.winters.octo.design.SettingsSize
@@ -176,7 +177,7 @@ private fun Command(app: AppState, command: String) {
             .fillMaxWidth()
             .padding(top = Space.Xs)
             .clip(Corner.ControlShape)
-            .background(Color.Black.copy(alpha = 0.25f))
+            .background(glassFilm(0.25f))
             .padding(start = Space.L, end = Space.S, top = Space.S, bottom = Space.S),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.M),

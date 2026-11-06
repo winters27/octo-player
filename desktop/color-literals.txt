@@ -1,0 +1,45 @@
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/LoopArt.kt | Color(0xFF000000.toInt() or rgb) | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/LoopArt.kt | Color.White | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/TallBackdrop.kt | Color.White | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/TallBackdrop.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/TallBackdrop.kt | Color.White | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/TallBackdrop.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/TallBackdrop.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/TallBackdrop.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/TallBackdrop.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/TallBackdrop.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/TallBackdrop.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/TallBackdrop.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/TallBackdrop.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/TallBackdrop.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/TallBackdrop.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/TallBackdrop.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/animated/TallBackdrop.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/discord/DiscordMark.kt | Color(0xFF5865F2) | signal
+desktop/src/main/kotlin/app/winters/octo/desktop/family/DesktopQr.kt | Color.White | scanner
+desktop/src/main/kotlin/app/winters/octo/desktop/family/DesktopQr.kt | Color.Black | scanner
+desktop/src/main/kotlin/app/winters/octo/desktop/lyrics/FlowingLyrics.kt | Color(0x52121214) | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/lyrics/FlowingLyrics.kt | Color.White | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/lyrics/FlowingLyrics.kt | Color.White | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/lyrics/FlowingLyrics.kt | Color.White | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/lyrics/FlowingLyrics.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/lyrics/FlowingLyrics.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/lyrics/FlowingLyrics.kt | Color.White | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/pages/SettingsPictures.kt | Color(0xFF5B7FA3) | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/pages/SettingsPictures.kt | Color(0xFFB0627D) | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/pages/SettingsPictures.kt | Color(0xFFD7A35E) | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/pages/SettingsPictures.kt | Color.White | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/pages/SettingsPictures.kt | Color.White | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/pages/SignInPage.kt | Color(0xFF1A1A1E) | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/pages/SignInPage.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/sound/EqCurve.kt | Color.White | self-contained pill
+desktop/src/main/kotlin/app/winters/octo/desktop/sound/EqCurve.kt | Color.Black | self-contained pill
+desktop/src/main/kotlin/app/winters/octo/desktop/system/MiniPlayer.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/ui/FullPlayer.kt | Color.White | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/ui/FullPlayer.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/ui/FullPlayer.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/ui/FullPlayer.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/ui/LivePlayerParts.kt | Color(0xFFFF8A80) | signal
+desktop/src/main/kotlin/app/winters/octo/desktop/ui/LiveRadioParts.kt | Color.White | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/window/Frame.kt | Color(0xFFC42B1C) | signal
+desktop/src/main/kotlin/app/winters/octo/desktop/window/Frame.kt | Color.White | signal

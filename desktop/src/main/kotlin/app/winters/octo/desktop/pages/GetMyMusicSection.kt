@@ -177,7 +177,6 @@ private fun Buttons(content: @Composable () -> Unit) {
 private val TileMin = 150.dp
 private val TileShape = RoundedCornerShape(12.dp)
 private val TileType = DesktopType.emphasis.copy(fontSize = 15.sp)
-private val OnAccent = Color(0xFF0C0C0D)
 
 // The services, as many to a row as fit, every tile the same width.
 @Composable
@@ -205,7 +204,7 @@ private fun ServiceGrid(services: List<ImportServiceLink>, chosen: String?, enab
 private fun ServiceTile(service: ImportServiceLink, chosen: Boolean, enabled: Boolean, modifier: Modifier, onPick: () -> Unit) {
     val motion = motionScale()
     val fill by animateColorAsState(if (chosen) OctoColors.Accent else Color.Transparent, octoTween(motion, OctoDuration.Fill), label = "tile fill")
-    val ink by animateColorAsState(if (chosen) OnAccent else OctoColors.TextPrimary, octoTween(motion, OctoDuration.Fill), label = "tile ink")
+    val ink by animateColorAsState(if (chosen) OctoColors.OnAccent else OctoColors.TextPrimary, octoTween(motion, OctoDuration.Fill), label = "tile ink")
     Box(
         modifier
             .heightIn(min = 56.dp)

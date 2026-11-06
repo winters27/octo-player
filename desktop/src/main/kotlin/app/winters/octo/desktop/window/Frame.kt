@@ -272,7 +272,7 @@ private fun WindowButton(
             .background(
                 when {
                     hovered && danger -> Color(0xFFC42B1C)
-                    hovered -> (ink ?: Color.White).copy(alpha = 0.08f)
+                    hovered -> (ink ?: OctoColors.TextPrimary).copy(alpha = 0.08f)
                     else -> Color.Transparent
                 },
             )
@@ -287,7 +287,7 @@ private fun WindowButton(
         val tint = when {
             hovered && danger -> Color.White
             ink != null -> ink.copy(alpha = if (hovered) 1f else 0.7f)
-            hovered -> Color.White
+            hovered -> OctoColors.TextPrimary
             else -> OctoColors.TextSecondary
         }
         Glyph(icon, size = IconSize.Table, tint = tint)

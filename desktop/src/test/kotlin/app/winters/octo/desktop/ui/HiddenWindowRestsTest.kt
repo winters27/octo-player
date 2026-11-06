@@ -7,8 +7,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.Density
-import app.winters.octo.design.OctoColors
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.OctoLook
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.settings.DesktopOs
@@ -81,7 +81,7 @@ class HiddenWindowRestsTest {
             }
             return asked
         }
-        val plain = OctoColors.Background.toArgb()
+        val plain = OctoLook.page.toArgb()
         fun Bitmap.colored(): Boolean = (0 until 100 step 10).any { y -> (0 until 160 step 10).any { x -> getColor(x, y) != plain } }
 
         // The colors arrive and fade in first. Hidden, the frames that

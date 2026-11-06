@@ -126,6 +126,7 @@ import app.winters.octo.desktop.window.screenAreas
 import app.winters.octo.player.immersive.WashTuning
 import app.winters.octo.desktop.player.wash.WashCover
 import app.winters.octo.desktop.ui.OctoArt
+import app.winters.octo.desktop.ui.OverArtWindow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
@@ -315,19 +316,21 @@ fun MiniPlayerWindow(
                     if (position is WindowPosition.Absolute) onMoved(WindowSpot(position.x.value, position.y.value, size.width.value, size.height.value))
                 }
         }
-        ProvideWindowLook(reduceMotion = reduceMotion, focus = keyboard) {
-            CompositionLocalProvider(LocalCovers provides app.connection?.client) {
-                Box(Modifier.fillMaxSize()) {
-                    MiniPlayerView(
-                        app,
-                        panel = prefs.miniPlayerPanel.toMiniPanel(),
-                        pinned = prefs.miniPlayerPinned,
-                        actions = actions,
-                        note = pinNote,
-                        shape = if (systemRounds) RectangleShape else MenuShape,
-                        dragArea = { modifier -> if (!prefs.miniPlayerPinned) WindowDraggableArea(modifier) {} },
-                    )
-                    if (!prefs.miniPlayerPinned) ResizeEdges(frame, thickness = Space.Xs)
+        OverArtWindow(app) {
+            ProvideWindowLook(reduceMotion = reduceMotion, focus = keyboard) {
+                CompositionLocalProvider(LocalCovers provides app.connection?.client) {
+                    Box(Modifier.fillMaxSize()) {
+                        MiniPlayerView(
+                            app,
+                            panel = prefs.miniPlayerPanel.toMiniPanel(),
+                            pinned = prefs.miniPlayerPinned,
+                            actions = actions,
+                            note = pinNote,
+                            shape = if (systemRounds) RectangleShape else MenuShape,
+                            dragArea = { modifier -> if (!prefs.miniPlayerPinned) WindowDraggableArea(modifier) {} },
+                        )
+                        if (!prefs.miniPlayerPinned) ResizeEdges(frame, thickness = Space.Xs)
+                    }
                 }
             }
         }

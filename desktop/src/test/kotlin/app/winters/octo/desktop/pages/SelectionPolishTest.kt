@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.GlazeSegments
 import app.winters.octo.design.OctoColors
+import app.winters.octo.desktop.OctoLook
 import app.winters.octo.design.ProvideWindowLook
 import app.winters.octo.design.ScrollbarGutter
 import app.winters.octo.discovery.CountryRow
@@ -62,8 +63,8 @@ class SelectionPolishTest {
             Box(Modifier.padding(8.dp)) { GlazeSegments(listOf("Low", "High"), "Low", { it }, {}) }
         }
         // The left cell: the accent pill with the check and the word on it.
-        assertTrue(anyPixel(bitmap, 14..70, 16..44) { near(OctoColors.Accent.toArgb(), it) })
-        assertTrue(anyPixel(bitmap, 14..70, 16..44) { near(OctoColors.OnAccent.toArgb(), it, within = 40) })
+        assertTrue(anyPixel(bitmap, 14..70, 16..44) { near(OctoLook.accent.toArgb(), it) })
+        assertTrue(anyPixel(bitmap, 14..70, 16..44) { near(OctoLook.onAccent.toArgb(), it, within = 40) })
         assertFalse(anyPixel(bitmap, 14..70, 16..44) { (it and 0xFF) > 235 && ((it shr 8) and 0xFF) > 235 && ((it shr 16) and 0xFF) > 235 })
     }
 
@@ -74,7 +75,7 @@ class SelectionPolishTest {
             Column(Modifier.height(360.dp)) { CountryMenu(rows, {}, {}) }
         }
         // The accent fill of the chosen row shows inside the list's window.
-        assertTrue(anyPixel(bitmap, 100..300, 60..350) { near(OctoColors.AccentSelected.toArgb(), it) })
+        assertTrue(anyPixel(bitmap, 100..300, 60..350) { near(OctoLook.accentSelected.toArgb(), it) })
     }
 
     @Test

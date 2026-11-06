@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -115,7 +117,7 @@ internal fun ServerRows(app: AppState) {
 // The ink of the lines under the name of the server in use, and of its "In
 // use" mark: white eased back so it stays quieter than the name, yet over
 // 4.5:1 on the chosen fill, where the muted ink is under it.
-internal val InUseSubtitle = OctoColors.TextPrimary.copy(alpha = 0.78f)
+internal val InUseSubtitle: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.78f)
 
 // One kept server: its name, who is signed in where, and how it answered;
 // Switch (or Sign in) and its menu on the right.

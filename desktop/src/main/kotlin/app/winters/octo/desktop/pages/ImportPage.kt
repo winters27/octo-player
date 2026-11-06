@@ -303,6 +303,7 @@ private fun TrackRow(track: ImportTrack, action: (@Composable () -> Unit)? = nul
     }
 }
 
+@Composable
 private fun stateColor(state: ImportTrackState) = when (state) {
     ImportTrackState.Have, ImportTrackState.Done -> OctoColors.SignalGreen
     ImportTrackState.NotFound, ImportTrackState.Skipped -> OctoColors.SignalOrange

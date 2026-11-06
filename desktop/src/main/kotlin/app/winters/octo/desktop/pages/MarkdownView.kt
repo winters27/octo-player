@@ -37,9 +37,11 @@ import app.winters.octo.design.Space
 import app.winters.octo.markdown.Block
 import app.winters.octo.markdown.Span
 
-private val LinkStyle = TextLinkStyles(SpanStyle(color = OctoColors.TextPrimary, textDecoration = TextDecoration.Underline))
+private val LinkStyle: TextLinkStyles
+    @Composable get() = TextLinkStyles(SpanStyle(color = OctoColors.TextPrimary, textDecoration = TextDecoration.Underline))
 
-private val CodeStyle = SpanStyle(fontFamily = FontFamily.Monospace, background = Color.White.copy(alpha = 0.08f))
+private val CodeStyle: SpanStyle
+    @Composable get() = SpanStyle(fontFamily = FontFamily.Monospace, background = OctoColors.TextPrimary.copy(alpha = 0.08f))
 
 // A page of markdown, like a release's notes, in the window's type: headings
 // in white, the body in the quieter ink with bold words lit, soft dots for
@@ -76,7 +78,8 @@ internal fun MarkdownView(blocks: List<Block>, open: (String) -> Unit, modifier:
     }
 }
 
-private val Body = DesktopType.body.copy(color = OctoColors.TextSecondary)
+private val Body: TextStyle
+    @Composable get() = DesktopType.body.copy(color = OctoColors.TextSecondary)
 
 @Composable
 private fun Bullet(text: List<Span>, open: (String) -> Unit, dot: Dp, color: Color) {
@@ -93,6 +96,7 @@ private fun Line(text: List<Span>, style: TextStyle, open: (String) -> Unit, mod
 
 // The runs as styled text: bold lit white, italic slanted, code in a fixed
 // face on a faint patch, and links underlined.
+@Composable
 private fun annotated(spans: List<Span>, open: (String) -> Unit): AnnotatedString = buildAnnotatedString {
     spans.forEach { span ->
         val look = SpanStyle(

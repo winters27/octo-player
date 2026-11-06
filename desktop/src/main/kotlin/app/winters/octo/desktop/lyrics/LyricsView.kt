@@ -64,7 +64,7 @@ import java.io.IOException
 // clock, with the song's and the output's timing on top of the screen's
 // lead, as on the phone.
 @Composable
-fun LyricsView(app: AppState, modifier: Modifier = Modifier, textColor: Color = Color.White) {
+fun LyricsView(app: AppState, modifier: Modifier = Modifier, textColor: Color = OctoColors.TextPrimary) {
     val model = app.lyrics
     val shown by model.state.collectAsState()
     val player by app.player.state.collectAsState()
@@ -135,7 +135,7 @@ private fun PlainLyrics(lines: List<String>, color: Color) {
 // choose, the timing, and hiding them for this song or showing them again,
 // in glass pop-ups.
 @Composable
-fun LyricsMenuButton(app: AppState, tint: Color = Color.White) {
+fun LyricsMenuButton(app: AppState, tint: Color = OctoColors.TextPrimary) {
     var anchor by remember { mutableStateOf(IntRect.Zero) }
     val shown by app.lyrics.state.collectAsState()
     val song = shown.song ?: return
@@ -335,7 +335,7 @@ private fun OptionRow(option: LyricsOption, showing: Boolean, onClick: () -> Uni
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Txt(option.from, OctoType.label, modifier = Modifier.weight(1f))
-            if (showing) Txt("Showing", OctoType.caption, OctoColors.Accent)
+            if (showing) Txt("Showing", OctoType.caption, OctoColors.AccentWords)
         }
         val about = listOf(option.detail, option.kind.label).filter(String::isNotBlank).joinToString(" · ")
         if (about.isNotEmpty()) Txt(about, OctoType.caption, OctoColors.TextMuted, maxLines = 2)

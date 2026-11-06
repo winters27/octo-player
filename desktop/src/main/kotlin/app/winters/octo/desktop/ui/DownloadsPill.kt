@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -113,11 +114,11 @@ fun DownloadsPill(app: AppState, backdrop: HazeState, modifier: Modifier = Modif
                 ) { words -> Txt(words, DesktopType.meta, OctoColors.TextPrimary) }
                 Txt(lead.title, DesktopType.meta, OctoColors.TextSecondary, Modifier.weight(1f, fill = false))
                 if (more > 0) {
-                    Txt("+$more", DesktopType.meta, OctoColors.TextPrimary, Modifier.clip(CircleShape).background(MoreChip).padding(horizontal = Space.S, vertical = Space.Xxs))
+                    Txt("+$more", DesktopType.meta, OctoColors.Highlight, Modifier.clip(CircleShape).background(MoreChip).padding(horizontal = Space.S, vertical = Space.Xxs))
                 }
             }
         }
     }
 }
 
-private val MoreChip = Color.White.copy(alpha = 0.12f)
+private val MoreChip: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.12f)

@@ -128,8 +128,9 @@ const val PageContrast = 4.5
 // How much of this cover's wash shows behind the pages: as much as the
 // strength asks, less when the cover is bright enough to wash out the
 // words. The page's words stay light, so a bright cover shows fainter.
-fun WashCover.pageOpacity(strength: Float): Float =
-    readableAlpha(peak, OctoColors.Background.toArgb(), OctoColors.TextSecondary.toArgb(), PageContrast, immersiveOpacity(strength))
+// `page` is the page color and `words` the quieter words' color.
+fun WashCover.pageOpacity(strength: Float, page: Color, words: Color): Float =
+    readableAlpha(peak, page.toArgb(), words.toArgb(), PageContrast, immersiveOpacity(strength))
 
 // How much of the glow shows: a little more than a tenth up to a half, by
 // the strength.
@@ -204,10 +205,11 @@ internal fun ImmersiveBackdrop(
     modifier: Modifier = Modifier,
     quiet: Boolean = false,
 ) {
-    val most = cover?.pageOpacity(strength) ?: 0f
+    val page = OctoColors.Background
+    val most = cover?.pageOpacity(strength, page, OctoColors.TextSecondary) ?: 0f
     val target = if (quiet) minOf(most, quietOpacity(strength)) else most
     val opacity by animateFloatAsState(target, tween(motionScale().ms(CoverFadeMs.toInt())), label = "ambience")
-    Box(modifier.fillMaxSize().background(OctoColors.Background)) {
+    Box(modifier.fillMaxSize().background(page)) {
         ImmersiveWash(cover, bpm, fps, speed, moving, dolly = { 1f }, opacity = { opacity })
     }
 }

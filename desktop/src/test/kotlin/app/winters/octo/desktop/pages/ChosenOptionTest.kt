@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.ProvideWindowLook
 import app.winters.octo.design.mix
+import app.winters.octo.desktop.OctoLook
 import org.jetbrains.skia.Bitmap
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -63,7 +64,7 @@ class ChosenOptionTest {
     }
 
     // The accent laid over the page at `alpha`, as the place's fill draws it.
-    private fun accentAt(alpha: Float): Int = mix(OctoColors.Background, OctoColors.Accent, alpha).toArgb()
+    private fun accentAt(alpha: Float): Int = mix(OctoLook.page, OctoLook.accent, alpha).toArgb()
 
     // A section on Family and Import marks a place, as Settings' list does:
     // the lit accent fill, fading across, and no check.
@@ -78,7 +79,7 @@ class ChosenOptionTest {
     @Test
     fun anotherSectionHasNeitherFillNorCheck() {
         val bitmap = section(chosen = false)
-        assertTrue(near(OctoColors.Background.toArgb(), bitmap.getColor(width - 4, height / 2), within = 3))
+        assertTrue(near(OctoLook.page.toArgb(), bitmap.getColor(width - 4, height / 2), within = 3))
         assertFalse(checkShown(bitmap))
     }
 
@@ -116,12 +117,12 @@ class ChosenOptionTest {
     fun theChosenPictureIsTheAccentFillAndRingWithACheck() {
         val chosen = pictureChoice(chosen = true)
         // Between the name and the check, on the tile's own fill.
-        assertTrue("the accent fill", near(OctoColors.AccentSelected.toArgb(), chosen.getColor(tile / 2, 112)))
-        assertTrue("the accent ring", near(OctoColors.Accent.toArgb(), chosen.getColor(0, 60), within = 12))
+        assertTrue("the accent fill", near(OctoLook.accentSelected.toArgb(), chosen.getColor(tile / 2, 112)))
+        assertTrue("the accent ring", near(OctoLook.accent.toArgb(), chosen.getColor(0, 60), within = 12))
         assertTrue("the check", pictureCheck(chosen))
         val other = pictureChoice(chosen = false)
-        assertFalse(near(OctoColors.AccentSelected.toArgb(), other.getColor(tile / 2, 112)))
-        assertFalse(near(OctoColors.Accent.toArgb(), other.getColor(0, 60), within = 12))
+        assertFalse(near(OctoLook.accentSelected.toArgb(), other.getColor(tile / 2, 112)))
+        assertFalse(near(OctoLook.accent.toArgb(), other.getColor(0, 60), within = 12))
         assertFalse(pictureCheck(other))
     }
 
@@ -129,8 +130,8 @@ class ChosenOptionTest {
     fun theServerInUseIsTheAccentFillAndOthersAreNot() {
         val used = picture { ChosenFill(true, Modifier.fillMaxSize()) }
         val other = picture { ChosenFill(false, Modifier.fillMaxSize()) }
-        assertTrue(near(OctoColors.AccentSelected.toArgb(), used.getColor(100, height / 2)))
-        assertFalse(near(OctoColors.AccentSelected.toArgb(), other.getColor(100, height / 2)))
+        assertTrue(near(OctoLook.accentSelected.toArgb(), used.getColor(100, height / 2)))
+        assertFalse(near(OctoLook.accentSelected.toArgb(), other.getColor(100, height / 2)))
     }
 
     @Test

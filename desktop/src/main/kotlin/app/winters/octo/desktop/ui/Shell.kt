@@ -93,6 +93,7 @@ import app.winters.octo.design.Corner
 import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlassField
+import app.winters.octo.design.HoldLook
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
 import app.winters.octo.design.LocalPopups
@@ -103,6 +104,7 @@ import app.winters.octo.design.MenuShape
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.OverArt
 import app.winters.octo.design.PopupLayer
 import app.winters.octo.design.Space
 import app.winters.octo.design.TextAction
@@ -173,7 +175,6 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
     val focus = LocalFocusManager.current
     val connection = app.connection
     val key = rememberKeyColour(app)
-    KeepAccent(app)
     val keyboard = LocalFocusVisibility.current
     val parts = remember { FrameFocus() }
     // What had the keyboard before a pop-up opened gets it back after: the
@@ -194,7 +195,7 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
         Box(
             Modifier
                 .fillMaxSize()
-                .background(OctoColors.Background)
+                .background(if (connection == null) OverArtPage else OctoColors.Background)
                 // Where the pointer is, for menus, and the mouse's back and
                 // forward buttons, before anything else hears them.
                 .onPointerEvent(PointerEventType.Move, PointerEventPass.Initial) { pointer.position = it.changes.first().position }
@@ -218,30 +219,34 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
             val player = remember { MutableTransitionState(false) }
             player.targetState = connection != null && app.fullPlayer
             val covered = player.isIdle && player.currentState
+            // The title bar and the pop-ups sit over the full player or the sign-in
+            // page's backdrop, which keep Octo's dark look in every theme.
+            val overArt = app.fullPlayer || connection == null
             val shown = LocalWindowShown.current && !covered
             CompositionLocalProvider(LocalWindowShown provides shown) {
                 // The colours the glass frosts. Only these: the page is not under
                 // glass, so scrolling never makes the frame blur again.
-                Box(Modifier.fillMaxSize().drawnUnless(covered).hazeSource(backdrop)) { AmbientGlow(app) }
+                Box(Modifier.fillMaxSize().drawnUnless(covered).hazeSource(backdrop)) { OverArt(enabled = connection == null) { AmbientGlow(app) } }
             }
             // Everything but the pop-ups, as one group the keyboard can come back to.
             Box(Modifier.fillMaxSize().focusRequester(parts.window).focusGroup()) {
                 if (connection == null) {
                     // The sign-in card frosts the colours behind it.
-                    Box(Modifier.fillMaxSize().padding(top = FrameSize.TitleBar)) { SignInPage(app, backdrop) }
+                    Box(Modifier.fillMaxSize().padding(top = FrameSize.TitleBar)) { OverArt { SignInPage(app, backdrop) } }
                 } else {
                     CompositionLocalProvider(LocalWindowShown provides shown) {
                         Box(Modifier.fillMaxSize().drawnUnless(covered)) { SignedInFrame(app, backdrop, parts) }
                     }
                     AnimatedVisibility(player, enter = fadeIn(motionFade()), exit = fadeOut(motionFade())) {
-                        FullPlayer(app, Modifier.fillMaxSize().part(parts, parts.full, app), top = FrameSize.TitleBar)
+                        OverArt { FullPlayer(app, Modifier.fillMaxSize().part(parts, parts.full, app), top = FrameSize.TitleBar) }
                     }
                 }
                 if (connection != null && app.omnibox.open && !app.fullPlayer) OmniboxOver(app, backdrop)
-                Box(Modifier.part(parts, parts.title, app)) { TitleBar(app, frame, onClose) }
+                OverArt(enabled = overArt) { Box(Modifier.part(parts, parts.title, app)) { TitleBar(app, frame, onClose) } }
             }
-            PopupLayer(app.popups, backdrop)
-            DragLabel(drag)
+            // A pop-up keeps the look it opened with until it closes.
+            OverArt(enabled = overArt) { HoldLook(app.popups.open) { PopupLayer(app.popups, backdrop) } }
+            OverArt(enabled = connection == null) { DragLabel(drag) }
             if (frame != null) ResizeEdges(frame)
         }
     }
@@ -574,8 +579,8 @@ private fun TitleBar(app: AppState, frame: Frame?, onClose: () -> Unit) {
             // In Settings it is always the way out, to Home when Settings
             // was the first page shown.
             val back = { if (app.inSettings) app.leaveSettings() else app.navigator.back() }
-            IconAction(OctoIcons.Back, "Back", { back() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.inSettings || app.navigator.canGoBack, tint = ink ?: Color.White)
-            IconAction(OctoIcons.Forward, "Forward", { app.navigator.forward() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.navigator.canGoForward, tint = ink ?: Color.White)
+            IconAction(OctoIcons.Back, "Back", { back() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.inSettings || app.navigator.canGoBack, tint = ink ?: OctoColors.TextPrimary)
+            IconAction(OctoIcons.Forward, "Forward", { app.navigator.forward() }, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = app.navigator.canGoForward, tint = ink ?: OctoColors.TextPrimary)
             val settings by app.settings.state.collectAsState()
             IconAction(
                 OctoIcons.Library,
@@ -584,7 +589,7 @@ private fun TitleBar(app: AppState, frame: Frame?, onClose: () -> Unit) {
                 size = ControlHeight.S,
                 iconSize = IconSize.Toolbar,
                 active = settings.libraryOnly,
-                tint = ink ?: Color.White,
+                tint = ink ?: OctoColors.TextPrimary,
                 toggled = settings.libraryOnly,
             )
         }

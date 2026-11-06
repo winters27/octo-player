@@ -25,6 +25,8 @@ import androidx.compose.ui.draganddrop.dragData
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.glassFilm
+import app.winters.octo.design.glassRim
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.Txt
 import com.sun.jna.Library
@@ -86,8 +88,8 @@ fun AudioDropZone(onFiles: (List<File>) -> Unit, content: @Composable () -> Unit
                 Modifier
                     .fillMaxSize()
                     .padding(12.dp)
-                    .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(18.dp))
-                    .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(18.dp)),
+                    .background(glassFilm(0.45f), RoundedCornerShape(18.dp))
+                    .border(1.dp, glassRim(0.25f), RoundedCornerShape(18.dp)),
                 contentAlignment = Alignment.Center,
             ) {
                 Txt("Drop to play", OctoType.headline, OctoColors.TextPrimary)

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -165,7 +166,7 @@ fun DragLabel(drag: DragState) {
 }
 
 // A place lit while songs are held over it: a wash of the accent.
-val DropLit: Color get() = OctoColors.Accent.copy(alpha = 0.14f)
+val DropLit: Color @Composable @ReadOnlyComposable get() = OctoColors.Accent.copy(alpha = 0.14f)
 
 // Where songs held over the row `id` would land: a line along its top, or
 // its foot when the pointer is in its lower half.

@@ -5,7 +5,6 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import app.winters.octo.design.OctoAccent
-import app.winters.octo.design.OctoColors
 import app.winters.octo.desktop.a11y.A11yScene
 import app.winters.octo.desktop.a11y.name
 import app.winters.octo.desktop.nav.Page
@@ -14,7 +13,6 @@ import app.winters.octo.theme.accentFromArt
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Surface
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -29,8 +27,8 @@ import java.io.File
 class AccentShotsTest {
     @get:Rule val folder = TemporaryFolder()
 
-    @After
-    fun backToOctosOwn() = OctoColors.useAccent(OctoAccent)
+    // The accent the app is drawn in now.
+    private fun A11yScene.accent() = Color(app.palette.value.accents.accent)
 
     private fun keep(scene: A11yScene, name: String, ms: Long = 1_500) {
         val image = scene.settle(ms)
@@ -53,7 +51,7 @@ class AccentShotsTest {
         A11yScene(folder.newFolder(), look = { it.copy(appearance = it.appearance.copy(accent = AccentChoice.Coral)) }).use { s ->
             s.openAppearance()
             keep(s, "accent-settings-coral")
-            assertEquals(Color(AccentChoice.Coral.argb!!), OctoColors.Accent)
+            assertEquals(Color(AccentChoice.Coral.argb!!), s.accent())
             assertEquals(true, s.swatch("Coral").config.getOrNull(SemanticsProperties.Selected))
             assertEquals(false, s.swatch(AccentChoice.Octo.label).config.getOrNull(SemanticsProperties.Selected))
             val words = s.nodes().map { it.name() }
@@ -62,7 +60,7 @@ class AccentShotsTest {
             s.onUi { s.swatch("Mint").config[SemanticsActions.OnClick].action?.invoke() }
             s.render(4)
             assertEquals(AccentChoice.Mint, s.app.settings.current.appearance.accent)
-            assertEquals(Color(AccentChoice.Mint.argb!!), OctoColors.Accent)
+            assertEquals(Color(AccentChoice.Mint.argb!!), s.accent())
             assertEquals(true, s.swatch("Mint").config.getOrNull(SemanticsProperties.Selected))
             keep(s, "accent-settings-mint")
 
@@ -87,11 +85,11 @@ class AccentShotsTest {
         A11yScene(folder.newFolder(), cover = red, coverId = "accent-red", look = { it.copy(appearance = it.appearance.copy(accent = AccentChoice.FromArt)) }).use { s ->
             // Nothing playing: Octo's own.
             s.render(4)
-            assertEquals(OctoAccent, OctoColors.Accent)
+            assertEquals(OctoAccent, s.accent())
             s.onUi { s.app.play(s.app.library!!.index!!.songs, 0) }
             val until = System.currentTimeMillis() + 15_000
-            while (OctoColors.Accent == OctoAccent && System.currentTimeMillis() < until) s.render(2)
-            val accent = OctoColors.Accent
+            while (s.accent() == OctoAccent && System.currentTimeMillis() < until) s.render(2)
+            val accent = s.accent()
             val expected = accentFromArt(0xFFC81E2C.toInt())!!
             // A red cover gives a light red accent, readable on the page.
             assertTrue("accent $accent", accent.red > accent.green && accent.red > accent.blue)

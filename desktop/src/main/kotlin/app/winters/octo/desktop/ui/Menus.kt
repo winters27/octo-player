@@ -263,7 +263,7 @@ private fun Stars(lit: Int) {
     Row(horizontalArrangement = Arrangement.spacedBy(Space.Xxs), verticalAlignment = Alignment.CenterVertically) {
         for (star in 1..5) {
             val on = star <= lit
-            Glyph(if (on) OctoIcons.StarFilled else OctoIcons.Star, size = IconSize.Inline, tint = if (on) OctoColors.TextPrimary else OctoColors.TextMuted)
+            Glyph(if (on) OctoIcons.StarFilled else OctoIcons.Star, size = IconSize.Inline, tint = if (on) OctoColors.Highlight else OctoColors.TextMuted)
         }
     }
 }

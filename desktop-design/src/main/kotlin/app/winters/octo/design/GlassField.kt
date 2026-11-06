@@ -91,7 +91,7 @@ fun GlassField(
     // The whole field is the target: a click on its edge puts the caret in too.
     val inner = focusRequester ?: remember { FocusRequester() }
     GlazeInset(
-        fill = Color.Black.copy(alpha = 0.30f),
+        fill = glassFilm(0.30f),
         shape = FieldShape,
         modifier = modifier
             .height(if (single) 40.dp else (lines * 20 + 20).dp)
@@ -117,7 +117,7 @@ fun GlassField(
                     enabled = enabled,
                     singleLine = single,
                     textStyle = OctoType.bodySmall.copy(color = OctoColors.TextPrimary),
-                    cursorBrush = SolidColor(Color.White),
+                    cursorBrush = SolidColor(OctoColors.TextPrimary),
                     visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
                     keyboardOptions = KeyboardOptions(
                         keyboardType = if (password) KeyboardType.Password else KeyboardType.Text,

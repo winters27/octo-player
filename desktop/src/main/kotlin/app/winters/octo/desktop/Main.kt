@@ -4,6 +4,8 @@ import app.winters.octo.animated.LoopShelf
 import app.winters.octo.desktop.animated.LOOP_SHELF_BYTES
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -26,6 +28,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.awt.ComposeWindow
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
@@ -35,6 +38,7 @@ import app.winters.octo.design.ArrowKeys
 import app.winters.octo.design.WarmCrispIcons
 import app.winters.octo.design.FocusVisibility
 import app.winters.octo.design.LocalTyping
+import app.winters.octo.design.ProvideOctoTheme
 import app.winters.octo.design.ProvideWindowLook
 import app.winters.octo.design.TypingState
 import app.winters.octo.desktop.audio.CHECK_PLAY
@@ -55,7 +59,9 @@ import app.winters.octo.desktop.settings.systemReducesMotion
 import app.winters.octo.desktop.settings.systemTextScale
 import app.winters.octo.desktop.settings.textScale
 import app.winters.octo.desktop.system.AudioDropZone
+import app.winters.octo.desktop.system.DeviceMode
 import app.winters.octo.desktop.system.LocalSystem
+import app.winters.octo.desktop.system.PortalWatcher
 import app.winters.octo.desktop.system.MemoryLog
 import app.winters.octo.desktop.system.logFolder
 import app.winters.octo.desktop.system.SOAK_RUN
@@ -76,8 +82,15 @@ import app.winters.octo.desktop.ui.LocalSoftwareDrawing
 import app.winters.octo.desktop.ui.LocalWindowShown
 import app.winters.octo.desktop.ui.Opening
 import app.winters.octo.desktop.ui.Shell
+import app.winters.octo.desktop.ui.chromeDark
+import app.winters.octo.desktop.ui.paletteFor
 import app.winters.octo.desktop.update.DesktopUpdates
 import app.winters.octo.desktop.window.Frame
+import app.winters.octo.desktop.window.darkTitleBar
+import app.winters.octo.desktop.window.gtkVariant
+import app.winters.octo.desktop.window.macAppearance
+import app.winters.octo.theme.ResolvedPalette
+import kotlinx.coroutines.flow.MutableStateFlow
 import app.winters.octo.desktop.window.MIN_HEIGHT
 import app.winters.octo.desktop.window.MIN_WIDTH
 import app.winters.octo.desktop.window.keepsSpot
@@ -152,6 +165,11 @@ fun main(args: Array<String>) {
     // and the rest) starts now on threads of its own; the window shows
     // while it runs, and the app is made once it is in.
     val startup = Startup(settings, places, os)
+    // Whether the computer is in dark mode, known before any window so the
+    // first frame is already in the right theme. Linux asks the desktop
+    // portal, and the launch waits for its answer only with Match on.
+    val portal = if (os == DesktopOs.Linux) PortalWatcher().also { it.start() } else null
+    val deviceDark = MutableStateFlow(DeviceMode.seed(os, portal, waitForPortal = settings.current.appearance.themeMatch))
     // The system's own "Animation effects" (or Reduce motion), read again
     // whenever the window comes forward, so a change applies without a restart.
     var systemCalm by mutableStateOf(false)
@@ -231,7 +249,7 @@ fun main(args: Array<String>) {
                 kept = { id -> made?.offline?.localFile(id) },
                 opened = parts.engine,
             )
-            val app = AppState(settings, parts.accounts, parts.http, scope, os, player.player, restored = parts.restored, listeningRoot = places.config, updates = parts.updates, homeShelves = File(places.cache, "home")).also {
+            val app = AppState(settings, parts.accounts, parts.http, scope, os, player.player, restored = parts.restored, listeningRoot = places.config, updates = parts.updates, homeShelves = File(places.cache, "home"), deviceDark = deviceDark, portal = portal).also {
                 made = it
                 player.problem?.let { problem -> it.notice = problem }
             }
@@ -404,6 +422,13 @@ fun main(args: Array<String>) {
                 check()
                 window.onRenderApiChanged(::check)
             }
+            // The theme this window is drawn in: the app's once it is made,
+            // the one the settings name until then.
+            val startPalette = remember { paletteFor(settings.current, deviceDark.value) }
+            val palette = ready?.app?.palette?.collectAsState()?.value ?: startPalette
+            KeepDeviceMode(os, deviceDark, portal)
+            KeepChrome(window, os, custom, palette, ready?.app)
+            ProvideOctoTheme(palette) {
             Box(Modifier.fillMaxSize()) {
             if (ready != null) {
                 val app = ready.app
@@ -430,8 +455,36 @@ fun main(args: Array<String>) {
                 Opening(octopus, calm = calmStart, leaving = ready != null, onEntered = { entered = true }, onGone = { openingGone = true })
             }
             }
+            }
         }
         if (ready != null) with(ready.system) { Surfaces(null) }
+    }
+}
+
+// Keeps the app's idea of the computer's dark or light mode current: the
+// window system's on Windows and macOS, the desktop portal's on Linux.
+// Placed in the main window, which stays composed while it is hidden.
+@Composable
+private fun KeepDeviceMode(os: DesktopOs, deviceDark: MutableStateFlow<Boolean>, portal: PortalWatcher?) {
+    if (os == DesktopOs.Linux) {
+        LaunchedEffect(portal) { portal?.dark?.collect { deviceDark.value = it } }
+    } else {
+        val dark = isSystemInDarkTheme()
+        LaunchedEffect(dark) { deviceDark.value = dark }
+    }
+}
+
+// Draws the window's own frame (the system title bar, the traffic lights,
+// the GTK title bar) dark or light to match what is under it.
+@Composable
+private fun KeepChrome(window: ComposeWindow, os: DesktopOs, ownFrame: Boolean, palette: ResolvedPalette, app: AppState?) {
+    val dark = chromeDark(palette, app?.fullPlayer == true, app != null && app.connection == null)
+    LaunchedEffect(dark) {
+        when (os) {
+            DesktopOs.Windows -> if (!ownFrame) darkTitleBar(window, dark)
+            DesktopOs.Mac -> macAppearance(window, dark)
+            DesktopOs.Linux -> if (!ownFrame) gtkVariant(window, dark)
+        }
     }
 }
 

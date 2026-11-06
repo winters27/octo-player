@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.shadowColor
 import app.winters.octo.sound.EqMode
 import app.winters.octo.sound.GAIN_RANGE_DB
 import app.winters.octo.sound.GraphicBands
@@ -91,9 +92,6 @@ private const val WheelStepDb = 0.5f
 // A second press this soon after the first, on the same node, puts it
 // back to 0 dB.
 private const val DoubleClickMs = 400L
-
-// The curve and nodes when the equalizer is off.
-private val Muted = Color(0xFF6B7075)
 
 private val GridHz = listOf(100f, 1_000f, 10_000f)
 private val EdgeLabelsHz = listOf(20f, 100f, 1_000f, 10_000f, 20_000f)
@@ -180,7 +178,11 @@ fun EqCurve(
     val nodeDb = remember(filters, nodes) { nodes.map { ResponseCurve.gainDb(filters, it.hz) } }
     val parametric = settings.mode == EqMode.Parametric
     val lit by animateFloatAsState(if (settings.eqEnabled) 1f else 0f, tween(250), label = "curve light")
-    val line = lerp(Muted, Color.White, lit)
+    // The words' ink lights the curve; muted words draw it and its labels while the equalizer is off.
+    val ink = OctoColors.TextPrimary
+    val off = OctoColors.TextMuted
+    val rim = shadowColor(0.45f)
+    val line = lerp(off, ink, lit)
 
     BoxWithConstraints(modifier.fillMaxWidth().height(plotHeight + LabelBand)) {
         val density = androidx.compose.ui.platform.LocalDensity.current
@@ -248,10 +250,10 @@ fun EqCurve(
                     }
                 },
         ) {
-            grid(plot)
-            curve(plot, curve, line, lit)
-            points.forEachIndexed { i, point -> node(point, line, lit, big = i == active) }
-            labels(plot, measurer, if (parametric) EdgeLabelsHz else GraphicBands)
+            grid(plot, ink)
+            curve(plot, curve, line, lit, ink)
+            points.forEachIndexed { i, point -> node(point, line, lit, big = i == active, halo = ink, rim = rim) }
+            labels(plot, measurer, if (parametric) EdgeLabelsHz else GraphicBands, off)
             (held ?: hovered)?.let { i ->
                 val node = nodes.getOrNull(i) ?: return@let
                 reading(measurer, "${readHz(node.hz)}   ${readDb(node.gainDb)}", points[i])
@@ -275,13 +277,13 @@ private class LastClick {
 }
 
 // Faint lines at 100 Hz, 1 kHz and 10 kHz, and a clearer one at 0 dB.
-private fun DrawScope.grid(plot: Plot) {
+private fun DrawScope.grid(plot: Plot, ink: Color) {
     GridHz.forEach { hz ->
         val x = plot.x(hz)
-        drawLine(Color.White.copy(alpha = 0.06f), Offset(x, plot.top), Offset(x, plot.bottom), 1f)
+        drawLine(ink.copy(alpha = 0.06f), Offset(x, plot.top), Offset(x, plot.bottom), 1f)
     }
     val zero = plot.y(0f)
-    drawLine(Color.White.copy(alpha = 0.14f), Offset(plot.left, zero), Offset(plot.right, zero), 1f)
+    drawLine(ink.copy(alpha = 0.14f), Offset(plot.left, zero), Offset(plot.right, zero), 1f)
 }
 
 private val glowPaint = org.jetbrains.skia.Paint().apply {
@@ -291,7 +293,7 @@ private val glowPaint = org.jetbrains.skia.Paint().apply {
     strokeJoin = PaintStrokeJoin.ROUND
 }
 
-private fun DrawScope.curve(plot: Plot, gains: List<Float>, color: Color, lit: Float) {
+private fun DrawScope.curve(plot: Plot, gains: List<Float>, color: Color, lit: Float, glow: Color) {
     if (gains.isEmpty()) return
     val path = Path()
     val step = (plot.right - plot.left) / (gains.size - 1)
@@ -314,7 +316,7 @@ private fun DrawScope.curve(plot: Plot, gains: List<Float>, color: Color, lit: F
     if (lit > 0f) {
         drawIntoCanvas { canvas ->
             for (spread in floatArrayOf(2.5f, 1f, 0.3f)) {
-                glowPaint.color = Color.White.copy(alpha = 0.4f * lit / 3f).toArgb()
+                glowPaint.color = glow.copy(alpha = 0.4f * lit / 3f).toArgb()
                 glowPaint.strokeWidth = stroke
                 glowPaint.maskFilter = MaskFilter.makeBlur(FilterBlurMode.NORMAL, 6f * spread)
                 canvas.skiaCanvas.drawPath(path.asSkiaPath(), glowPaint)
@@ -324,16 +326,16 @@ private fun DrawScope.curve(plot: Plot, gains: List<Float>, color: Color, lit: F
     drawPath(path, color, style = Stroke(stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
 }
 
-private fun DrawScope.node(at: Offset, color: Color, lit: Float, big: Boolean) {
+private fun DrawScope.node(at: Offset, color: Color, lit: Float, big: Boolean, halo: Color, rim: Color) {
     val radius = (if (big) ActiveRadius else NodeRadius).toPx()
-    if (big && lit > 0f) drawCircle(Color.White.copy(alpha = 0.18f * lit), radius * 2f, at)
+    if (big && lit > 0f) drawCircle(halo.copy(alpha = 0.18f * lit), radius * 2f, at)
     // A dark edge so a node stands out against the line through it.
-    drawCircle(Color.Black.copy(alpha = 0.45f), radius + 1.5f, at)
+    drawCircle(rim, radius + 1.5f, at)
     drawCircle(color, radius, at)
 }
 
-private fun DrawScope.labels(plot: Plot, measurer: TextMeasurer, frequencies: List<Float>) {
-    val style = OctoType.caption.copy(fontSize = 10.sp, color = OctoColors.TextMuted, fontFeatureSettings = "tnum")
+private fun DrawScope.labels(plot: Plot, measurer: TextMeasurer, frequencies: List<Float>, color: Color) {
+    val style = OctoType.caption.copy(fontSize = 10.sp, color = color, fontFeatureSettings = "tnum")
     val y = plot.bottom + PadUpDown.toPx() + 4.dp.toPx()
     frequencies.forEach { hz ->
         val text = measurer.measure(shortHz(hz), style)

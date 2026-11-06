@@ -12,6 +12,7 @@ import app.winters.octo.design.LocalFocusVisibility
 import app.winters.octo.design.scrollbar
 import app.winters.octo.design.LocalKeyboardHere
 import app.winters.octo.design.LocalTabStops
+import app.winters.octo.design.FocusRingColor
 import app.winters.octo.design.drawFocusRing
 import app.winters.octo.design.menuKey
 import androidx.compose.foundation.background
@@ -516,6 +517,7 @@ private fun QueueRow(
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     val keyColour = LocalKeyColour.current
+    val ring = FocusRingColor
     Box(
         modifier
             .fillMaxWidth()
@@ -542,7 +544,7 @@ private fun QueueRow(
             hovered -> Box(Modifier.matchParentSize().background(HoverFill, Corner.RowShape))
         }
         if (focused) {
-            if (ringed) Box(Modifier.matchParentSize().drawBehind { drawFocusRing(Corner.RowShape) })
+            if (ringed) Box(Modifier.matchParentSize().drawBehind { drawFocusRing(Corner.RowShape, ring) })
             else Box(Modifier.matchParentSize().border(FocusLine, OctoColors.FocusRing, Corner.RowShape))
         }
         Row(

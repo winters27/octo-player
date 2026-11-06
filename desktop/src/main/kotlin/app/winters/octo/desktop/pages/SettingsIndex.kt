@@ -264,8 +264,12 @@ val DesktopSettingsIndex: List<SettingsIndexEntry> = index {
         }
     }
     page(SettingsKey.Look) {
+        card("Theme", listed = false) {
+            row(THEME_CHOICE, listOf("theme", "light mode", "dark mode", "night", "day", "colors", "colours", "palette", "appearance", "octo", "moss", "dusk", "daylight", "paper"), "Octo, Moss, Dusk, Daylight or Paper")
+            row(MATCH_THE_SYSTEM, listOf("match", "system", "automatic", "day", "night", "light mode", "dark mode"), "Day and night themes follow your computer")
+        }
         card("Accent and text", listed = false) {
-            row(ACCENT_COLOR, listOf("accent", "color", "colour", "theme", "tint", "highlight", "palette", "dark", "personalize"), "The color of selections, sliders, switches and buttons")
+            row(ACCENT_COLOR, listOf("accent", "color", "colour", "tint", "highlight", "dark", "personalize"), "The color of selections, sliders, switches and buttons")
             row("Text size", listOf("font", "bigger", "smaller", "zoom", "scale", "accessibility", "large text"), "Like your system, or larger")
         }
         card("Window background", listed = false) {

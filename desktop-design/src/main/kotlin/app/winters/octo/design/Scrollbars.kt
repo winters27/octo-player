@@ -50,6 +50,8 @@ fun Modifier.scrollbar(state: ScrollState, bottom: Dp = 0.dp, resting: Boolean =
 
 private fun Modifier.scrollbar(state: ScrollableState, adapter: ScrollbarAdapter, bottom: Dp, resting: Boolean = false): Modifier = composed {
     val rest = OctoColors.TextPrimary.copy(alpha = ScrollbarRestAlpha)
+    val inkRest = OctoColors.TextPrimary.copy(alpha = ScrollbarInkAlpha)
+    val inkLit = OctoColors.TextPrimary.copy(alpha = ScrollbarInkLitAlpha)
     val bar = remember { Bar() }
     val scope = rememberCoroutineScope()
     val motion = motionScale()
@@ -136,7 +138,7 @@ private fun Modifier.scrollbar(state: ScrollableState, adapter: ScrollbarAdapter
             if (shown <= 0f) return@drawWithContent
             val lit = wide.value
             val thickness = (ScrollbarThin + (ScrollbarWide - ScrollbarThin) * lit).toPx()
-            val ink = lerpAlpha(ScrollbarInk, ScrollbarInkLit, lit)
+            val ink = lerpAlpha(inkRest, inkLit, lit)
             drawRoundRect(
                 ink.copy(alpha = ink.alpha * shown),
                 topLeft = Offset(track.end - thickness, thumb.top),
@@ -216,7 +218,7 @@ private const val ScrollbarRestAlpha = 0.18f
 // the bar at its widest, with a little air.
 val ScrollbarGutter = ScrollbarWide + 3.dp
 
-// White, quiet at rest and brighter under the pointer, so it reads on any
-// cover's colours without taking the eye.
-private val ScrollbarInk = Color.White.copy(alpha = 0.28f)
-private val ScrollbarInkLit = Color.White.copy(alpha = 0.55f)
+// The words' ink, quiet at rest and brighter under the pointer, so it reads
+// on any cover's colours without taking the eye.
+private const val ScrollbarInkAlpha = 0.28f
+private const val ScrollbarInkLitAlpha = 0.55f

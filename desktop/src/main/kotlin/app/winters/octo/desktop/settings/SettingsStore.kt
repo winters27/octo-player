@@ -19,6 +19,11 @@ import app.winters.octo.server.settleServers
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.update.UpdatePrefs
 import app.winters.octo.theme.AccentChoice
+import app.winters.octo.theme.ThemeChoice
+import app.winters.octo.theme.ThemeSettings
+import app.winters.octo.theme.pickTheme
+import app.winters.octo.theme.setMatch
+import app.winters.octo.theme.themeSettings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.SerialName
@@ -305,6 +310,12 @@ data class Appearance(
     @SerialName(HOME_SECTIONS_KEY) val homeSections: String? = null,
     // The accent the app is drawn in, or the playing cover's.
     val accent: AccentChoice = AccentChoice.Octo,
+    // The theme the app is drawn in, the light and the dark theme Match
+    // chooses between, and whether Match follows the system's own mode.
+    val theme: ThemeChoice = ThemeChoice.Octo,
+    val themeLight: ThemeChoice = ThemeChoice.Daylight,
+    val themeDark: ThemeChoice = ThemeChoice.Octo,
+    val themeMatch: Boolean = false,
     // Animated album covers on Octo servers that offer them: "square" in
     // place of the cover, "full_screen" behind the player, or "off"
     // (AnimatedArtSetting's keys; anything else reads as the default).
@@ -313,6 +324,19 @@ data class Appearance(
 
 // The Animated art choice.
 val Appearance.animatedArtSetting: AnimatedArtSetting get() = AnimatedArtSetting.fromKey(animatedArt)
+
+// The four theme fields as the shared theme rules take them.
+val Appearance.themes: ThemeSettings get() = ThemeSettings(theme, themeLight, themeDark, themeMatch)
+
+private fun Appearance.withThemes(next: ThemeSettings): Appearance =
+    copy(theme = next.theme, themeLight = next.light, themeDark = next.dark, themeMatch = next.match)
+
+// The settings with the theme fields read the way every app reads them: a
+// theme of the wrong kind in a Day or Night slot is that slot's default.
+internal fun AppSettings.settledThemes(): AppSettings {
+    val read = themeSettings(appearance.theme.name, appearance.themeLight.name, appearance.themeDark.name, appearance.themeMatch)
+    return if (read == appearance.themes) this else copy(appearance = appearance.withThemes(read))
+}
 
 // The window's colours: the playing cover blurred into a glow across the
 // top, or the full player's moving wash of it behind the whole window.
@@ -400,7 +424,7 @@ private val json = Json {
 // app ends.
 class SettingsStore(private val file: File, private val writeDelayMs: Long = 0) {
     private val lock = Any()
-    private val _state = MutableStateFlow(read().settledServers())
+    private val _state = MutableStateFlow(read().settledServers().settledThemes())
 
     val state: StateFlow<AppSettings> = _state
 
@@ -435,6 +459,18 @@ class SettingsStore(private val file: File, private val writeDelayMs: Long = 0) 
             unsaved = next
             if (!waiting) writer.schedule(::flush, writeDelayMs, TimeUnit.MILLISECONDS)
         }
+    }
+
+    // Makes `choice` the theme and fills the Day or Night slot of its kind, in
+    // one change.
+    fun pickTheme(choice: ThemeChoice) {
+        update { it.copy(appearance = it.appearance.withThemes(pickTheme(it.appearance.themes, choice))) }
+    }
+
+    // Turns Match on or off. Turning it off keeps the theme showing for
+    // `deviceDark`.
+    fun setThemeMatch(on: Boolean, deviceDark: Boolean) {
+        update { it.copy(appearance = it.appearance.withThemes(setMatch(it.appearance.themes, on, deviceDark))) }
     }
 
     // Writes what is waiting now. A write that fails is tried again later.

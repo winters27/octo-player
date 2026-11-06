@@ -46,6 +46,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -495,9 +496,10 @@ private fun Steps(row: DownloadRow, at: Int) {
             val shown by animateFloatAsState(target, octoTween(motionScale(), OctoDuration.Neutral), label = "step")
             val alpha = if (index == at && !row.finished) pulse else 1f
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xs)) {
+                val track = OctoColors.TextPrimary.copy(alpha = 0.14f)
                 Canvas(Modifier.fillMaxWidth().height(StepLine)) {
                     val round = CornerRadius(size.height / 2)
-                    drawRoundRect(Color.White.copy(alpha = 0.14f), cornerRadius = round)
+                    drawRoundRect(track, cornerRadius = round)
                     if (shown > 0f) drawRoundRect(fill.copy(alpha = alpha), size = Size(size.width * shown, size.height), cornerRadius = round)
                 }
                 Txt(
@@ -597,12 +599,14 @@ private fun markIcon(mark: LogMark): ImageVector = when (mark) {
     LogMark.Note -> OctoIcons.Info
 }
 
+@Composable
 private fun markTint(mark: LogMark): Color = when (mark) {
     LogMark.Done -> OctoColors.SignalGreen
     LogMark.Failed -> OctoColors.SignalOrange
     else -> OctoColors.TextSecondary
 }
 
+@Composable
 private fun markFill(mark: LogMark): Color = when (mark) {
     LogMark.Done -> OctoColors.SignalGreen.copy(alpha = 0.16f)
     LogMark.Failed -> OctoColors.SignalOrange.copy(alpha = 0.16f)
@@ -943,7 +947,7 @@ private fun MoreBelow(scroll: ScrollState, modifier: Modifier) {
 }
 
 private val PillShape = RoundedCornerShape(50)
-private val MoreBelowFade = Color(0xF0141416)
+private val MoreBelowFade: Color @Composable @ReadOnlyComposable get() = OctoColors.Background.copy(alpha = 0.94f)
 private val LineCover = RowHeight.Regular
 private val HeadCover = FrameSize.PlayerCover + Space.Xs
 
@@ -957,7 +961,7 @@ private val ControlLineLift = Space.Xs
 
 private val MarkSize = IconSize.Transport + Space.Xxs
 private val StepLine = Space.Xs
-private val Chip = Color.White.copy(alpha = 0.08f)
-private val LosslessChip = Color.White.copy(alpha = 0.16f)
-private val Card = Color.White.copy(alpha = 0.05f)
-private val LiveFill = Color.White.copy(alpha = 0.14f)
+private val Chip: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.08f)
+private val LosslessChip: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.16f)
+private val Card: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.05f)
+private val LiveFill: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.14f)

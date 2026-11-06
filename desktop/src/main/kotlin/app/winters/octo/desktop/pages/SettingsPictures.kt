@@ -42,6 +42,7 @@ import app.winters.octo.design.SeparatorColor
 import app.winters.octo.design.SettingsSize
 import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
+import app.winters.octo.design.glassFilm
 import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.settings.AmbienceStyle
 
@@ -82,11 +83,11 @@ private const val PICTURES_ACROSS = 3
 @Composable
 internal fun PictureChoice(text: String, chosen: Boolean, onPick: () -> Unit, modifier: Modifier = Modifier, picture: @Composable () -> Unit) {
     val ring = if (chosen) OctoColors.Accent else SeparatorColor
-    val fill = if (chosen) OctoColors.AccentSelected else Color.Black.copy(alpha = RESTING_SHADE)
+    val fill = if (chosen) OctoColors.AccentSelected else glassFilm(RESTING_SHADE)
     Column(
         modifier
             .testTag(pictureTag(text))
-            .ringOutside(Corner.Panel, Color.White)
+            .ringOutside(Corner.Panel, OctoColors.TextPrimary)
             .clip(Corner.PanelShape)
             .background(fill, Corner.PanelShape)
             .border(if (chosen) SettingsSize.PictureRing else FrameSize.Hairline, ring, Corner.PanelShape)
@@ -114,16 +115,16 @@ private val PictureWords = DesktopType.meta.copy(fontWeight = FontWeight.Medium)
 private const val RESTING_SHADE = 0.2f
 
 // The colors the drawings borrow from an example cover.
-private class Example(val page: Color) {
+private class Example(val page: Color, ink: Color) {
     val blue = Color(0xFF5B7FA3)
     val rose = Color(0xFFB0627D)
     val amber = Color(0xFFD7A35E)
-    val line = Color.White.copy(alpha = 0.12f)
-    val bar = Color.White.copy(alpha = 0.10f)
+    val line = ink.copy(alpha = 0.12f)
+    val bar = ink.copy(alpha = 0.10f)
 }
 
 @Composable
-private fun example() = Example(OctoColors.Background)
+private fun example() = Example(OctoColors.Background, OctoColors.TextPrimary)
 
 // The window's background: plain, a glow across the top, or the cover's
 // colors behind everything.

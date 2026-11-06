@@ -26,6 +26,7 @@ import androidx.compose.ui.draganddrop.dragData
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.glassFilm
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.Txt
 import app.winters.octo.desktop.settings.DesktopOs
@@ -142,7 +143,7 @@ fun ImportDropZone(enabled: Boolean, onFile: (File) -> Unit, content: @Composabl
                 Modifier
                     .fillMaxSize()
                     .padding(12.dp)
-                    .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(18.dp))
+                    .background(glassFilm(0.45f), RoundedCornerShape(18.dp))
                     .border(1.dp, OctoColors.Accent.copy(alpha = 0.6f), RoundedCornerShape(18.dp)),
                 contentAlignment = Alignment.Center,
             ) {

@@ -35,10 +35,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 // The hairline between rows and sections: one pixel, faint.
-val SeparatorColor = Color.White.copy(alpha = 0.08f)
+val SeparatorColor: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.08f)
 
 // What a row or button shows under the pointer: a faint lift, never a border.
-val HoverFill = Color.White.copy(alpha = 0.06f)
+val HoverFill: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.06f)
 
 // A card of settings: a faint glaze of the words' own ink off the page, its
 // edge a hairline of the same. Read while composing, so a new palette
@@ -71,11 +71,11 @@ fun Txt(
 fun isHeading(style: TextStyle): Boolean =
     style === DesktopType.pageTitle || style === DesktopType.section || style === OctoType.title || style === OctoType.headline || style === OctoType.section
 
-// An icon, white unless tinted. At one of the IconSize sizes it is drawn on
+// An icon, in the words' color unless tinted. At one of the IconSize sizes it is drawn on
 // whole pixels; `exact` draws it as written whatever the size, for an icon
 // whose size is worked out (a share of a cover) rather than a token.
 @Composable
-fun Glyph(icon: ImageVector, modifier: Modifier = Modifier, size: Dp = IconSize.Transport, tint: Color = Color.White, exact: Boolean = false) {
+fun Glyph(icon: ImageVector, modifier: Modifier = Modifier, size: Dp = IconSize.Transport, tint: Color = OctoColors.TextPrimary, exact: Boolean = false) {
     Image(
         if (exact) exactPainter(icon) else crispPainter(icon),
         contentDescription = null,

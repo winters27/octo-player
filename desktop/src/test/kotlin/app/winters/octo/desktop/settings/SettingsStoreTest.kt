@@ -10,6 +10,11 @@ import app.winters.octo.sound.SoundSettings
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.update.InstallWhen
 import app.winters.octo.update.UpdatePrefs
+import app.winters.octo.theme.ThemeChoice
+import app.winters.octo.theme.ThemeSettings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -296,5 +301,57 @@ class SettingsStoreTest {
         assertTrue(file().readText().contains("\"home_sections\": \"$stored\"") || file().readText().contains("\"home_sections\":\"$stored\""))
         assertEquals(stored, SettingsStore(file()).current.appearance.homeSections)
         assertNull(AppSettings().appearance.homeSections)
+    }
+
+    // Picking a theme makes it the theme and fills its kind's Day or Night
+    // slot in one write, so no reader of the state ever sees them disagree.
+    @Test
+    fun pickingAThemeFillsItsSlot() {
+        val store = SettingsStore(file())
+        val seen = mutableListOf<ThemeSettings>()
+        val collecting = CoroutineScope(Dispatchers.Unconfined).launch { store.state.collect { seen += it.appearance.themes } }
+        ThemeChoice.entries.forEach { choice ->
+            store.pickTheme(choice)
+            val now = store.current.appearance.themes
+            assertEquals(choice, now.theme)
+            assertEquals(choice, if (choice.light) now.light else now.dark)
+        }
+        collecting.cancel()
+        assertTrue("a read disagreed: $seen", seen.all { if (it.theme.light) it.light == it.theme else it.dark == it.theme })
+        assertEquals(ThemeChoice.Paper, SettingsStore(file()).current.appearance.theme)
+        assertEquals(ThemeChoice.Paper, SettingsStore(file()).current.appearance.themeLight)
+        assertEquals(ThemeChoice.Dusk, SettingsStore(file()).current.appearance.themeDark)
+    }
+
+    // Match off keeps the theme that was showing.
+    @Test
+    fun turningMatchOffKeepsWhatShows() {
+        val store = SettingsStore(file())
+        store.pickTheme(ThemeChoice.Paper)
+        store.pickTheme(ThemeChoice.Moss)
+        store.setThemeMatch(true, deviceDark = false)
+        assertTrue(store.current.appearance.themeMatch)
+        store.setThemeMatch(false, deviceDark = false)
+        assertEquals(ThemeChoice.Paper, store.current.appearance.theme)
+        assertFalse(store.current.appearance.themeMatch)
+    }
+
+    // Unknown names, and a theme of the wrong kind in a Day or Night slot,
+    // read as that field's default.
+    @Test
+    fun themeNamesCoerce() {
+        file().parentFile.mkdirs()
+        file().writeText("""{"appearance":{"theme":"Sunrise","themeLight":"Moss","themeDark":"Paper","themeMatch":true}}""")
+        val read = SettingsStore(file()).current.appearance
+        assertEquals(ThemeChoice.Octo, read.theme)
+        assertEquals(ThemeChoice.Daylight, read.themeLight)
+        assertEquals(ThemeChoice.Octo, read.themeDark)
+        assertTrue(read.themeMatch)
+        file().writeText("""{"appearance":{"themeLight":"Paper","themeDark":"Dusk"}}""")
+        val kept = SettingsStore(file()).current.appearance
+        assertEquals(ThemeChoice.Paper, kept.themeLight)
+        assertEquals(ThemeChoice.Dusk, kept.themeDark)
+        assertEquals(ThemeChoice.Octo, kept.theme)
+        assertFalse(kept.themeMatch)
     }
 }

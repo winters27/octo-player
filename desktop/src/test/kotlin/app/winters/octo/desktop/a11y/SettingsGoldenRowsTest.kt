@@ -4,6 +4,8 @@ import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.covers.PLAYLIST_COVERS_SETTING
 import app.winters.octo.desktop.liveradio.FIND_STATIONS_NEAR
 import app.winters.octo.desktop.pages.ACCENT_COLOR
+import app.winters.octo.desktop.pages.MATCH_THE_SYSTEM
+import app.winters.octo.desktop.pages.THEME_CHOICE
 import app.winters.octo.discovery.LIBRARY_ONLY_SETTING
 import app.winters.octo.home.HOME_SECTIONS_TITLE
 import app.winters.octo.playback.START_AFTER_SETTING
@@ -95,6 +97,10 @@ class SettingsGoldenRowsTest {
         val NeverInTheWindow = mapOf("No server connected" to "drawn only without a server, and without one the window shows the sign-in page, not Settings")
 
         // Rows the new pages draw that the old ones did not have, each with why.
-        val New = mapOf("[the server's kind]" to "This server's first row names the server's kind and what it offers")
+        val New = mapOf(
+            "[the server's kind]" to "This server's first row names the server's kind and what it offers",
+            THEME_CHOICE to "Appearance's Theme card offers the five themes",
+            MATCH_THE_SYSTEM to "the Theme card's switch for day and night themes that follow the computer",
+        )
     }
 }

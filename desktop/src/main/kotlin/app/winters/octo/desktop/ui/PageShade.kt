@@ -44,11 +44,11 @@ const val ShadeContrast = 4.6
 const val MaxShade = 0.85f
 
 // The black `under` (the brightest colour behind the words) needs over it
-// for the quietest words to read: 0 when they already do.
-fun shadeFor(under: Int): Float {
+// for the quietest words (`muted`) to read: 0 when they already do.
+fun shadeFor(under: Int, muted: Color): Float {
     fun reads(shade: Float): Boolean {
         val back = overlay(0xFF000000.toInt(), shade, under)
-        val ink = OctoColors.TextMuted.compositeOver(Color(back)).toArgb()
+        val ink = muted.compositeOver(Color(back)).toArgb()
         return contrastRatio(ink, back) >= ShadeContrast
     }
     if (reads(0f)) return 0f
@@ -81,32 +81,34 @@ private const val GlowSteps = 8
 
 // The shade for the glow: at each depth, what the glow's brightest colour
 // (`peak`, from the cover as it is) comes to there, faded as the glow
-// fades into the page (`glow` at the top, none at its foot).
-fun glowShade(peak: Int, glow: Float): PageShade {
-    val base = OctoColors.Background.toArgb()
+// fades into the page (`glow` at the top, none at its foot). `page` is the
+// page color and `muted` the quietest words'.
+fun glowShade(peak: Int, glow: Float, page: Color, muted: Color): PageShade {
+    val base = page.toArgb()
     val stops = (0..GlowSteps).map { i ->
         val t = i / GlowSteps.toFloat()
-        Ambience.Height * t to shadeFor(overlay(peak, glow * (1f - t), base))
+        Ambience.Height * t to shadeFor(overlay(peak, glow * (1f - t), base), muted)
     }
     return if (stops.all { it.second <= 0f }) PageShade.None else PageShade(stops)
 }
 
 // The shade for a wash lying evenly behind the page at `opacity`.
-fun evenShade(peak: Int, opacity: Float): PageShade =
-    PageShade.even(shadeFor(overlay(peak, opacity, OctoColors.Background.toArgb())))
+fun evenShade(peak: Int, opacity: Float, page: Color, muted: Color): PageShade =
+    PageShade.even(shadeFor(overlay(peak, opacity, page.toArgb()), muted))
 
 // The shade for the window's colours as they are now: the ambience's
 // style and strength and the cover it shows (`cover`, or Octo's own when
-// nothing plays).
-fun shadeFor(look: Appearance, cover: WashCover?, playing: Boolean): PageShade {
+// nothing plays). `page`, `muted` and `words` are the page, the quietest
+// words and the quieter words' colors.
+fun shadeFor(look: Appearance, cover: WashCover?, playing: Boolean, page: Color, muted: Color, words: Color): PageShade {
     if (!look.ambientGlow || cover == null) return PageShade.None
     return when {
         look.ambience == AmbienceStyle.Immersive -> {
-            val most = cover.pageOpacity(look.glowStrength)
-            evenShade(cover.peak, if (playing) most else minOf(most, quietOpacity(look.glowStrength)))
+            val most = cover.pageOpacity(look.glowStrength, page, words)
+            evenShade(cover.peak, if (playing) most else minOf(most, quietOpacity(look.glowStrength)), page, muted)
         }
-        playing -> glowShade(cover.glowPeak, glowOpacity(look.glowStrength))
-        else -> evenShade(cover.peak, quietOpacity(look.glowStrength))
+        playing -> glowShade(cover.glowPeak, glowOpacity(look.glowStrength), page, muted)
+        else -> evenShade(cover.peak, quietOpacity(look.glowStrength), page, muted)
     }
 }
 
@@ -129,7 +131,7 @@ fun rememberPageShade(app: AppState): PageShade {
             app.washCovers.follow(connection.client, coverId, tuning).collect { value = it }
         }
     }
-    val target = shadeFor(look, cover, playing)
+    val target = shadeFor(look, cover, playing, OctoColors.Background, OctoColors.TextMuted, OctoColors.TextSecondary)
     // The shape follows at once; how dark it is eases like the colours do.
     val most by animateFloatAsState(target.most, tween(motionScale().ms(CoverFadeMs.toInt())), label = "page shade")
     val top = target.most

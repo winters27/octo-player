@@ -8,7 +8,7 @@ import app.winters.octo.desktop.ui.glowShade
 import app.winters.octo.desktop.ui.glowOpacity
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.compositeOver
-import app.winters.octo.design.OctoColors
+import app.winters.octo.desktop.OctoLook
 import app.winters.octo.player.immersive.readableAlpha
 import app.winters.octo.player.immersive.WashTuning
 import app.winters.octo.desktop.player.wash.WashCovers
@@ -21,6 +21,7 @@ import app.winters.octo.desktop.nav.SettingsKey
 import app.winters.octo.desktop.settings.AmbienceStyle
 import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.theme.AccentChoice
+import app.winters.octo.theme.ThemeChoice
 import app.winters.octo.desktop.ui.SongMenu
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.EncodedImageFormat
@@ -165,16 +166,16 @@ class ContrastTest {
     // cap on the ambience (dropped for the page's shade) would have had it.
     private fun everyLook(name: String) {
         val prepared = WashCovers.prepared(name, Image.makeFromEncoded(covers.getValue(name)), WashTuning())
-        val base = OctoColors.Background.toArgb()
-        val quiet = OctoColors.TextMuted.compositeOver(OctoColors.Background).toArgb()
+        val base = OctoLook.page.toArgb()
+        val quiet = OctoLook.muted.compositeOver(OctoLook.page).toArgb()
         for (strength in listOf(0.5f, 1f)) {
             val glow = glowOpacity(strength)
             val capped = readableAlpha(prepared.glowPeak, base, quiet, PageContrast, glow)
-            println("AMBIENCE $name glow ${(strength * 100).toInt()}%: shows ${"%.2f".format(glow)} (capped it was ${"%.2f".format(capped)}), shade at the top ${"%.2f".format(glowShade(prepared.glowPeak, glow).most)}")
+            println("AMBIENCE $name glow ${(strength * 100).toInt()}%: shows ${"%.2f".format(glow)} (capped it was ${"%.2f".format(capped)}), shade at the top ${"%.2f".format(glowShade(prepared.glowPeak, glow, OctoLook.page, OctoLook.muted).most)}")
         }
-        val wash = prepared.pageOpacity(1f)
+        val wash = prepared.pageOpacity(1f, OctoLook.page, OctoLook.secondary)
         val capped = readableAlpha(prepared.peak, base, quiet, PageContrast, immersiveOpacity(1f))
-        println("AMBIENCE $name immersive 100%: shows ${"%.2f".format(wash)} (capped it was ${"%.2f".format(capped)}), shade ${"%.2f".format(evenShade(prepared.peak, wash).most)}")
+        println("AMBIENCE $name immersive 100%: shows ${"%.2f".format(wash)} (capped it was ${"%.2f".format(capped)}), shade ${"%.2f".format(evenShade(prepared.peak, wash, OctoLook.page, OctoLook.muted).most)}")
         check(pageSpots(AmbienceStyle.Glow, 0.5f, name) + pageSpots(AmbienceStyle.Glow, 1f, name) + pageSpots(AmbienceStyle.Immersive, 1f, name), minimum = 30)
     }
 
@@ -280,6 +281,54 @@ class ContrastTest {
             plain + round("lit")
         }
         check(spots, minimum = AccentChoice.entries.size * 2)
+    }
+
+    // Settings' quiet action pills and a danger action's words, plain and
+    // lit as asked for, on the plain page in every theme and accent.
+    @Test(timeout = 900_000)
+    fun settingsPillsAndDangerWordsReadInEveryThemeAndAccent() {
+        val plainPage: (AppSettings) -> AppSettings = { it.copy(appearance = it.appearance.copy(ambientGlow = false)) }
+        val pills = A11yScene(folder.newFolder(), height = 1_200, look = plainPage).use { s ->
+            s.onUi { s.app.openSettings(SettingsKey.Servers) }
+            s.settle(1_000).close()
+            ThemeChoice.entries.flatMap { theme ->
+                s.onUi { s.app.settings.pickTheme(theme) }
+                AccentChoice.entries.flatMap { accent ->
+                    s.onUi { s.app.settings.update { it.copy(appearance = it.appearance.copy(accent = accent)) } }
+                    val image = s.settle(400)
+                    s.spots(image, "${theme.name}, ${accent.label}", listOf(
+                        Triple("Add", "Add a server's pill", 4.5),
+                        Triple("Read again", "Read the library again's pill", 4.5),
+                    ), { it.left > 300f && it.bottom < 1_080f })
+                }
+            }
+        }
+        check(pills, minimum = ThemeChoice.entries.size * AccentChoice.entries.size * 2)
+        val danger = A11yScene(
+            folder.newFolder(),
+            height = 1_200,
+            look = plainPage,
+            wrap = { content -> androidx.compose.runtime.CompositionLocalProvider(app.winters.octo.desktop.pages.LocalRowFlashMs provides 600_000L) { content() } },
+        ).use { s ->
+            s.onUi {
+                s.app.offline.keepLiked(true)
+                s.app.openSettings(SettingsKey.Offline)
+            }
+            s.settle(1_000).close()
+            fun round(state: String) = ThemeChoice.entries.flatMap { theme ->
+                s.onUi { s.app.settings.pickTheme(theme) }
+                AccentChoice.entries.flatMap { accent ->
+                    s.onUi { s.app.settings.update { it.copy(appearance = it.appearance.copy(accent = accent)) } }
+                    val image = s.settle(400)
+                    s.spots(image, "$state row, ${theme.name}, ${accent.label}", listOf(Triple("Remove", "Remove all's pill", 4.5)), { it.left > 300f })
+                }
+            }
+            val plain = round("plain")
+            s.onUi { s.app.openSettings(SettingsKey.Offline, "remove-all") }
+            s.until { s.nodes().any { it.config.getOrNull(app.winters.octo.desktop.pages.RowFlash) != null } }
+            plain + round("lit")
+        }
+        check(danger, minimum = ThemeChoice.entries.size * AccentChoice.entries.size * 2)
     }
 
     private fun A11yScene.until(what: () -> Boolean) {

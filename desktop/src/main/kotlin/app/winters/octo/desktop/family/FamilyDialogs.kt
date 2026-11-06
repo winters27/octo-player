@@ -449,9 +449,6 @@ private val PillShape = RoundedCornerShape(50)
 private val ChoiceShape = RoundedCornerShape(12.dp)
 private val ChoiceType = DesktopType.emphasis.copy(fontSize = 15.sp)
 
-// Words on the accent fill.
-private val OnAccent = Color(0xFF0C0C0D)
-
 @Composable
 fun ColumnScope.InviteCard(invite: InviteSheet, server: String, newLink: () -> Unit, actions: SheetActions, copy: (String) -> Unit) {
     val focus = remember { FocusRequester() }
@@ -525,7 +522,7 @@ private fun MoreBelow(scroll: ScrollState, target: BringIntoViewRequester, modif
     val motion = motionScale()
     AnimatedVisibility(scroll.canScrollForward, modifier, enter = fadeIn(octoTween(motion, OctoDuration.Card)), exit = fadeOut(octoTween(motion, OctoDuration.Card))) {
         Box(
-            Modifier.fillMaxWidth().height(56.dp).background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xF0141416)))),
+            Modifier.fillMaxWidth().height(56.dp).background(Brush.verticalGradient(listOf(Color.Transparent, OctoColors.Background.copy(alpha = 0.94f)))),
             contentAlignment = Alignment.BottomCenter,
         ) {
             Row(
@@ -563,7 +560,7 @@ private fun Header(name: String, title: String, subtitle: String, subtitleColor:
     ) {
         val initial = name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
         Box(
-            Modifier.size(42.dp).background(OctoColors.AccentSelected, CircleShape).border(1.dp, Color.White.copy(alpha = 0.10f), CircleShape),
+            Modifier.size(42.dp).background(OctoColors.AccentSelected, CircleShape).border(1.dp, OctoColors.TextPrimary.copy(alpha = 0.10f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             Txt(initial, OctoType.section, OctoColors.TextPrimary)
@@ -630,7 +627,7 @@ private fun ReachChooser(question: String, reach: LinkReach, options: LinkOption
 private fun ReachOption(reach: LinkReach, icon: androidx.compose.ui.graphics.vector.ImageVector, chosen: Boolean, locked: Boolean, modifier: Modifier, onPick: () -> Unit) {
     val motion = motionScale()
     val fill by animateColorAsState(if (chosen) OctoColors.Accent else Color.Transparent, octoTween(motion, OctoDuration.Fill), label = "reach fill")
-    val ink by animateColorAsState(if (chosen) OnAccent else OctoColors.TextSecondary, octoTween(motion, OctoDuration.Fill), label = "reach ink")
+    val ink by animateColorAsState(if (chosen) OctoColors.OnAccent else OctoColors.TextSecondary, octoTween(motion, OctoDuration.Fill), label = "reach ink")
     Box(
         modifier
             .heightIn(min = 48.dp)
@@ -776,7 +773,7 @@ internal fun CopyButton(value: String, name: String, copy: (String) -> Unit) {
             },
             size = 34.dp,
             iconSize = IconSize.Toolbar,
-            tint = if (copied) OctoColors.SignalGreen else Color.White,
+            tint = if (copied) OctoColors.SignalGreen else OctoColors.TextPrimary,
         )
     }
 }
@@ -800,7 +797,7 @@ internal fun SkeletonBlock(width: Dp, height: Dp, corner: Dp, modifier: Modifier
         modifier
             .then(if (width == Dp.Unspecified) Modifier.fillMaxWidth() else Modifier.width(width))
             .height(height)
-            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(corner)),
+            .background(OctoColors.TextPrimary.copy(alpha = 0.06f), RoundedCornerShape(corner)),
     )
 }
 

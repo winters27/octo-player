@@ -6,10 +6,10 @@ import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.Density
+import app.winters.octo.desktop.OctoLook
 import app.winters.octo.desktop.player.wash.WashCovers
 import app.winters.octo.desktop.settings.AmbienceMotion
 import app.winters.octo.desktop.settings.WashPrefs
-import app.winters.octo.design.OctoColors
 import app.winters.octo.player.immersive.BaseBpm
 import app.winters.octo.player.immersive.WashTuning
 import app.winters.octo.player.immersive.contrastRatio
@@ -58,7 +58,7 @@ class ImmersiveAmbienceTest {
 
     @Test
     fun theQuieterWordsReadOverTheBrightestCovers() {
-        val accent = OctoColors.TextSecondary.toArgb()
+        val accent = OctoLook.secondary.toArgb()
         val covers = mapOf(
             "yellow" to cover(0xFFFFE000.toInt(), 0xFFFF8A00.toInt()),
             "green" to cover(0xFF00FF40.toInt(), 0xFFB0FF00.toInt()),
@@ -73,8 +73,8 @@ class ImmersiveAmbienceTest {
             assertTrue("accent words over the $name wash: $ratio to 1", ratio >= 4.4)
             // The quietest words (times, counts) read once the page's shade,
             // worked out from that colour, lies under them.
-            val shaded = overlay(0xFF000000.toInt(), shadeFor(brightest), brightest)
-            val quiet = contrastRatio(OctoColors.TextMuted.compositeOver(Color(shaded)).toArgb(), shaded)
+            val shaded = overlay(0xFF000000.toInt(), shadeFor(brightest, OctoLook.muted), brightest)
+            val quiet = contrastRatio(OctoLook.muted.compositeOver(Color(shaded)).toArgb(), shaded)
             assertTrue("quiet words over the shaded $name wash: $quiet to 1", quiet >= 4.5)
         }
     }
@@ -82,7 +82,7 @@ class ImmersiveAmbienceTest {
     @Test
     fun aDarkCoverShowsAsAWashNotAPlainPage() {
         val pixels = drawn(cover(0xFF101830.toInt(), 0xFF8A1C3C.toInt()))
-        val page = OctoColors.Background.toArgb()
+        val page = OctoLook.page.toArgb()
         val lifted = pixels.count { contrastRatio(it, page) > 1.3 }
         assertTrue("the wash shows: $lifted of ${pixels.size} pixels lifted", lifted > pixels.size / 2)
     }

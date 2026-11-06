@@ -49,6 +49,7 @@ import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.design.SelectedFill
 import app.winters.octo.design.Space
 import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
@@ -178,9 +179,11 @@ internal fun FilterPill(text: String, chevron: Boolean = false, modifier: Modifi
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.Xs),
     ) {
-        Txt(text, DesktopType.meta, OctoColors.TextPrimary)
-        val tint = if (hovered) OctoColors.TextPrimary else OctoColors.TextSecondary
-        if (chevron) Glyph(OctoIcons.Chevron, Modifier.rotate(90f), size = IconSize.Inline, tint = tint) else Glyph(OctoIcons.Close, size = IconSize.Inline, tint = tint)
+        SelectedFill {
+            Txt(text, DesktopType.meta, OctoColors.TextPrimary)
+            val tint = if (hovered) OctoColors.TextPrimary else OctoColors.TextSecondary
+            if (chevron) Glyph(OctoIcons.Chevron, Modifier.rotate(90f), size = IconSize.Inline, tint = tint) else Glyph(OctoIcons.Close, size = IconSize.Inline, tint = tint)
+        }
     }
 }
 

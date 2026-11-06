@@ -109,7 +109,7 @@ val DarkInk = Color(DarkInkArgb)
 // What the full player's words need over this cover's wash, drawn over the
 // page colour: dark or white, and how much of the wash shows so they read
 // on every part of it.
-fun WashCover.playerInk(): WashInk = inkOver(range.scaled(FinalGain), OctoColors.Background.toArgb())
+fun WashCover.playerInk(): WashInk = inkOver(range.scaled(FinalGain), OverArtPage.toArgb())
 
 // The words' colour for that.
 fun WashInk?.color(): Color = if (this?.dark == true) DarkInk else Color.White
@@ -120,7 +120,7 @@ fun WashInk?.color(): Color = if (this?.dark == true) DarkInk else Color.White
 // darkest under dark ones), more as far as reading needs.
 fun WashCover.titleIconAlpha(): Float {
     val drawn = range.scaled(FinalGain)
-    val page = OctoColors.Background.toArgb()
+    val page = OverArtPage.toArgb()
     val ink = inkOver(drawn, page)
     val under = if (ink.dark) drawn.low else overlay(drawn.high, ink.show, page)
     return quietAlpha(under, ink.color().toArgb(), TitleIconAlpha)

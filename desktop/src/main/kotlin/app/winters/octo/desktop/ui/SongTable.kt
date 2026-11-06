@@ -23,6 +23,7 @@ import app.winters.octo.design.LocalFocusVisibility
 import app.winters.octo.design.scrollbar
 import app.winters.octo.design.LocalKeyboardHere
 import app.winters.octo.design.LocalTabStops
+import app.winters.octo.design.FocusRingColor
 import app.winters.octo.design.drawFocusRing
 import app.winters.octo.design.menuKey
 import app.winters.octo.design.tabStop
@@ -673,16 +674,18 @@ private fun HeaderRow(
 // The tooltip on the mark column's heading.
 internal const val MarkHeading = "Which songs are in your library: a check is in it, a + adds a song found online"
 
-// Nearly solid, so rows passing under it do not show through as a ghost.
-private val StuckFill = OctoColors.Background.copy(alpha = 0.97f)
-
 // The stuck heading's plate: under the heading, and over the list's top and
-// side margins beside and above it.
-private fun Modifier.stuckPlate(margins: PaddingValues): Modifier = drawBehind {
-    val top = margins.calculateTopPadding().toPx()
-    val start = margins.calculateStartPadding(LayoutDirection.Ltr).toPx()
-    val end = margins.calculateEndPadding(LayoutDirection.Ltr).toPx()
-    drawRect(StuckFill, topLeft = Offset(-start, -top), size = Size(size.width + start + end, size.height + top))
+// side margins beside and above it. Nearly solid, so rows passing under it
+// do not show through as a ghost.
+@Composable
+private fun Modifier.stuckPlate(margins: PaddingValues): Modifier {
+    val fill = OctoColors.Background.copy(alpha = 0.97f)
+    return drawBehind {
+        val top = margins.calculateTopPadding().toPx()
+        val start = margins.calculateStartPadding(LayoutDirection.Ltr).toPx()
+        val end = margins.calculateEndPadding(LayoutDirection.Ltr).toPx()
+        drawRect(fill, topLeft = Offset(-start, -top), size = Size(size.width + start + end, size.height + top))
+    }
 }
 private val ColumnsMenuWidth = FrameSize.Menu
 
@@ -768,6 +771,7 @@ private fun SongRow(
     val dragCancel by rememberUpdatedState(onDragCancel)
     val hovered by interaction.collectIsHoveredAsState()
     val key = LocalKeyColour.current
+    val ring = FocusRingColor
     var moreAnchor by remember { mutableStateOf(IntRect.Zero) }
     Box(
         Modifier
@@ -815,7 +819,7 @@ private fun SongRow(
         // The keyboard's row wears the ring; while the mouse is in use it
         // keeps a quieter line, so the table still shows where it is.
         if (focused) {
-            if (ringed) Box(Modifier.matchParentSize().drawBehind { drawFocusRing(Corner.RowShape) })
+            if (ringed) Box(Modifier.matchParentSize().drawBehind { drawFocusRing(Corner.RowShape, ring) })
             else Box(Modifier.matchParentSize().border(FocusLine, OctoColors.FocusRing, Corner.RowShape))
         }
         drop?.let { DropLine(it.first) }
