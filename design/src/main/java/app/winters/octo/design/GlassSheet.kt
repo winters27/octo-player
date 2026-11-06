@@ -68,6 +68,17 @@ fun GlassSheet(
     scrolls: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    HoldLook(visible) { SheetBody(visible, onDismiss, tall, scrolls, content) }
+}
+
+@Composable
+private fun SheetBody(
+    visible: Boolean,
+    onDismiss: () -> Unit,
+    tall: Boolean,
+    scrolls: Boolean,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     val dismiss by rememberUpdatedState(onDismiss)
     BackHandler(enabled = visible) { dismiss() }
     val motion = motionScale()

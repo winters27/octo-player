@@ -87,6 +87,8 @@ fun OctoSwitch(
     // and not only as its thumb.
     val offTrack = OctoColors.OffTrack
     val accent = OctoColors.Accent
+    val hoverTint = OctoColors.TextPrimary
+    val recess = shadowColor(0.22f)
     val thumbShade = shadowColor(0.18f)
     val thumbDrop = shadowColor(0.12f)
 
@@ -112,14 +114,14 @@ fun OctoSwitch(
                 drawRoundRect(offTrack, cornerRadius = corner, alpha = 1f - on)
                 drawRoundRect(accent, cornerRadius = corner, alpha = on)
                 // Under the pointer the track takes in a little white.
-                drawRoundRect(Color.White, cornerRadius = corner, alpha = hover)
+                drawRoundRect(hoverTint, cornerRadius = corner, alpha = hover)
             }
             // Recessed while off: a shade along the top inside edge.
             .innerShadow(CircleShape) {
                 radius = shadowBlur(1.5f).toPx()
                 offset = Offset(0f, 0.5.dp.toPx())
-                color = Color.Black
-                alpha = 0.22f * (1f - on)
+                color = recess
+                alpha = 1f - on
             }
             // A faint glaze rim.
             .innerShadow(CircleShape, Shadow(radius = 0.dp, spread = 0.5.dp, color = glassRim(0.06f)))

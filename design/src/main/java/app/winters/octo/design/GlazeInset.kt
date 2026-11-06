@@ -32,10 +32,10 @@ fun GlazeInset(
     Box(
         modifier
             // A half-pixel dark contour against a bright surface.
-            .dropShadow(shape, Shadow(radius = 0.dp, spread = 0.5.dp, color = Color.Black.copy(alpha = 0.40f)))
+            .dropShadow(shape, Shadow(radius = 0.dp, spread = 0.5.dp, color = shadowColor(0.40f)))
             // The contact shadow: a hard line, then a soft one.
-            .dropShadow(shape, Shadow(radius = 0.dp, color = Color.Black.copy(alpha = 0.05f), offset = DpOffset(0.dp, 1.dp)))
-            .dropShadow(shape, Shadow(radius = shadowBlur(3f), color = Color.Black.copy(alpha = 0.10f), offset = DpOffset(0.dp, 1.dp))),
+            .dropShadow(shape, Shadow(radius = 0.dp, color = shadowColor(0.05f), offset = DpOffset(0.dp, 1.dp)))
+            .dropShadow(shape, Shadow(radius = shadowBlur(3f), color = shadowColor(0.10f), offset = DpOffset(0.dp, 1.dp))),
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -44,13 +44,13 @@ fun GlazeInset(
                 .clip(shape)
                 .background(fill)
                 // The inner rim, all round.
-                .innerShadow(shape, Shadow(radius = 0.dp, spread = 1.dp, color = Color.White.copy(alpha = if (focused) 0.10f else 0.05f)))
+                .innerShadow(shape, Shadow(radius = 0.dp, spread = 1.dp, color = glassRim(if (focused) 0.10f else 0.05f)))
                 // The light line along the bottom inside edge.
-                .innerShadow(shape, Shadow(radius = 0.dp, color = Color.White.copy(alpha = if (focused) 0.10f else 0.04f), offset = DpOffset(0.dp, (-0.5).dp))),
+                .innerShadow(shape, Shadow(radius = 0.dp, color = glassRim(if (focused) 0.10f else 0.04f), offset = DpOffset(0.dp, (-0.5).dp))),
         )
         // Specular, masked to the middle, at the three-quarter strength
         // nested components use.
-        if (focused) Specular(shape, Color.White.copy(alpha = 0.14f), Color.White.copy(alpha = 0.11f), strength = 0.75f)
+        if (focused) Specular(shape, glassRim(0.14f), glassRim(0.11f), strength = 0.75f)
         content()
     }
 }

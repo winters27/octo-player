@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
@@ -93,10 +94,22 @@ fun rememberFollowedFraction(fraction: () -> Float, dragging: Boolean): State<Fl
 // The value bubble's words, in `color`.
 fun bubbleText(color: Color) = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = color)
 
+// The jewel slider's track from its top to its bottom: a faint ink
+// deepening downward on a dark theme, the theme's off-track color on a
+// light one.
+val JewelTrackTop: Color
+    @Composable @ReadOnlyComposable
+    get() = if (LocalOctoSurfaces.current.light) OctoColors.OffTrack else OctoColors.TextPrimary.copy(alpha = 0.10f)
+val JewelTrackBottom: Color
+    @Composable @ReadOnlyComposable
+    get() = if (LocalOctoSurfaces.current.light) OctoColors.OffTrack else OctoColors.TextPrimary.copy(alpha = 0.14f)
+
 // Draws the jewel slider across the whole width, centred on `y`: the
-// recessed track in `track`, the accent fill to `fraction`, ticks for
-// `steps`, the thumb, and while dragging its ring, glow and value bubble
-// (a film of `bubbleFill` with words in `bubbleWords`).
+// recessed track from `track` down to `trackBottom`, the accent fill to
+// `fraction`, ticks for `steps`, the thumb, and while dragging its ring,
+// glow and value bubble (a film of `bubbleFill` with words in
+// `bubbleWords`). `shadow` is the color of the track's top shade and the
+// thumb's drop.
 fun DrawScope.drawJewelSlider(
     y: Float,
     fraction: Float,
@@ -108,6 +121,9 @@ fun DrawScope.drawJewelSlider(
     steps: Int,
     label: String?,
     measurer: TextMeasurer?,
+    trackBottom: Color = track,
+    shadow: Color = Color.Black,
+    trackTick: Color = Color.White.copy(alpha = 0.30f),
 ) {
     val trackHeight = 4.dp.toPx()
     val radius = look.thumb.dp.toPx() / 2f
@@ -120,8 +136,13 @@ fun DrawScope.drawJewelSlider(
 
     // The track, with a shade along its top edge so it reads as sunk into
     // the surface.
-    drawRoundRect(track, Offset(0f, top), Size(size.width, trackHeight), corner)
-    drawRoundRect(Color.Black.copy(alpha = 0.25f), Offset(0f, top), Size(size.width, 1.dp.toPx().coerceAtMost(trackHeight / 2f)), corner)
+    drawRoundRect(
+        Brush.verticalGradient(listOf(track, trackBottom), startY = top, endY = top + trackHeight),
+        Offset(0f, top),
+        Size(size.width, trackHeight),
+        corner,
+    )
+    drawRoundRect(shadow.copy(alpha = shadow.alpha * 0.25f), Offset(0f, top), Size(size.width, 1.dp.toPx().coerceAtMost(trackHeight / 2f)), corner)
 
     // The fill, shaded top to bottom.
     if (x > 0f) {
@@ -138,7 +159,7 @@ fun DrawScope.drawJewelSlider(
         val tick = 2.dp.toPx()
         for (i in 1 until steps) {
             val tx = start + (end - start) * i / steps
-            val color = if (tx <= x) Color.Black.copy(alpha = 0.30f) else Color.White.copy(alpha = 0.30f)
+            val color = if (tx <= x) Color.Black.copy(alpha = 0.30f) else trackTick
             drawCircle(color, tick / 2f, Offset(tx, y))
         }
     }
@@ -161,7 +182,7 @@ fun DrawScope.drawJewelSlider(
 
     // The thumb: a drop shadow, then white with a highlight toward its top
     // left, then the accent dot.
-    drawCircle(Color.Black.copy(alpha = 0.35f), radius + 0.5.dp.toPx(), Offset(x, y + 1.dp.toPx()))
+    drawCircle(shadow.copy(alpha = shadow.alpha * 0.35f), radius + 0.5.dp.toPx(), Offset(x, y + 1.dp.toPx()))
     drawCircle(
         Brush.radialGradient(
             listOf(Color.White, Color(0xFFE4E6E8)),

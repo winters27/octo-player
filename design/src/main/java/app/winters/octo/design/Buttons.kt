@@ -118,18 +118,20 @@ fun Modifier.buttonMotion(look: ButtonLook, shape: Shape, ring: Color): Modifier
     }
     .focusRing(shape, { look.ring }, ring)
 
-// The hover and press shades over a button's fill: white under the
-// pointer, black under the finger.
+// The hover and press shades over a button's fill: the theme's ink under
+// the pointer, its shadow under the finger.
 @Composable
 fun BoxScope.ButtonShades(look: ButtonLook, shape: Shape) {
+    val hoverTint = OctoColors.TextPrimary
+    val pressTint = shadowColor(1f)
     Box(
         Modifier
             .matchParentSize()
             .clip(shape)
             // Read while drawing, so the shades fade without recomposing.
             .drawBehind {
-                drawRect(Color.White.copy(alpha = look.hoverShade))
-                drawRect(Color.Black.copy(alpha = look.pressShade))
+                drawRect(hoverTint.copy(alpha = look.hoverShade))
+                drawRect(pressTint.copy(alpha = pressTint.alpha * look.pressShade))
             },
     )
 }

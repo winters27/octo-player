@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
 
 // A small turning arc, for something on its way.
 @Composable
-fun Spinner(modifier: Modifier = Modifier, size: Dp = 18.dp, color: Color = Color.White) {
+fun Spinner(modifier: Modifier = Modifier, size: Dp = 18.dp, color: Color = OctoColors.TextPrimary) {
     val turn = rememberInfiniteTransition(label = "spinner")
     val angle by turn.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "angle")
     Canvas(modifier.size(size)) {

@@ -37,7 +37,7 @@ private val Offsets = floatArrayOf(0f, 0.3f, 0.65f)
 // while it plays, still and quiet while it is paused.
 @Composable
 fun NowPlayingBars(playing: Boolean, modifier: Modifier = Modifier) {
-    val lit = OctoColors.TextPrimary
+    val lit = OctoColors.Highlight
     val quiet = OctoColors.TextMuted
     // With motion reduced a playing song's bars rest, still lit.
     if (playing && motionScale().still) {

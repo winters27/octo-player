@@ -85,8 +85,8 @@ fun Scrubber(
     live: Boolean = false,
     onScrub: ((Float?) -> Unit)? = null,
     hitHeight: Dp = 24.dp,
-    color: Color = Color.White,
-    trackColor: Color = Color.White.copy(alpha = 0.10f),
+    color: Color = OctoColors.TextPrimary,
+    trackColor: Color = OctoInk.Quaternary,
     interactionSource: MutableInteractionSource? = null,
 ) {
     val interaction = interactionSource ?: remember { MutableInteractionSource() }
@@ -113,6 +113,7 @@ fun Scrubber(
         label = "scrubber tick",
     )
     val shade by animateFloatAsState(if (held) 1f else 0f, octoTween(motion, OctoDuration.Card), label = "scrubber shade")
+    val shadow = shadowColor(1f)
 
     // The sweep at the end of a song: 0 is none, 1 is gone off the end.
     val sweep = remember { Animatable(0f) }
@@ -176,7 +177,7 @@ fun Scrubber(
                     for (i in 1..3) {
                         val spread = i * 2.dp.toPx()
                         drawRoundRect(
-                            Color.Black.copy(alpha = 0.035f * shade),
+                            shadow.copy(alpha = shadow.alpha * 0.035f * shade),
                             Offset(-spread / 2f, top + 4.dp.toPx() - spread / 2f),
                             Size(size.width + spread, h + spread),
                             CornerRadius(h / 2f + spread / 2f),
@@ -203,7 +204,7 @@ fun Scrubber(
                     val x = (size.width * f).coerceIn(tw / 2f, size.width - tw / 2f)
                     if (shade > 0f) {
                         drawRoundRect(
-                            Color.Black.copy(alpha = 0.25f * shade),
+                            shadow.copy(alpha = shadow.alpha * 0.25f * shade),
                             Offset(x - tw / 2f, size.height / 2f - th / 2f + 1.dp.toPx()),
                             Size(tw, th),
                             CornerRadius(tw / 2f),

@@ -24,8 +24,8 @@ import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.innerShadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.VisualTransformation
@@ -77,6 +77,10 @@ fun GlassInput(
             .then(if (contentType != null) Modifier.semantics { this.contentType = contentType } else Modifier),
         decorationBox = { field ->
             val accent = OctoColors.Accent
+            val shadeRest = shadowColor(0.5f)
+            val shadeDeep = shadowColor(0.6f)
+            val litRest = glassRim(0.10f)
+            val litDeep = glassRim(0.15f)
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -90,13 +94,13 @@ fun GlassInput(
                         val reach = 4f + depth
                         radius = shadowBlur(7f + 2f * depth).toPx()
                         offset = Offset(reach.dp.toPx(), reach.dp.toPx())
-                        color = Color.Black.copy(alpha = 0.5f + 0.1f * depth)
+                        color = lerp(shadeRest, shadeDeep, depth)
                     }
                     .innerShadow(InputShape) {
                         val reach = 4f + depth
                         radius = shadowBlur(7f + 2f * depth).toPx()
                         offset = Offset(-reach.dp.toPx(), -reach.dp.toPx())
-                        color = Color.White.copy(alpha = 0.10f + 0.05f * depth)
+                        color = lerp(litRest, litDeep, depth)
                     }
                     .border(1.dp, OctoColors.Accent.copy(alpha = 0.10f), InputShape)
                     .padding(horizontal = 14.dp),

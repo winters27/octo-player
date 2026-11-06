@@ -136,12 +136,26 @@ fun OverArt(enabled: Boolean = true, content: @Composable () -> Unit) {
 }
 
 // Inside a selected row's fill: secondary, muted and accent words read in
-// the color solved for that fill.
+// the color solved for that fill. `selected` false leaves the words as they
+// are, and the structure stays the same either way.
 @Composable
-fun SelectedFill(content: @Composable () -> Unit) {
+fun SelectedFill(selected: Boolean = true, content: @Composable () -> Unit) {
     val words = LocalOctoAccent.current.selectedWords
-    val surfaces = LocalOctoSurfaces.current.copy(secondary = words, muted = words, inkSecondary = words, accentWords = words)
+    val current = LocalOctoSurfaces.current
+    val surfaces = if (selected) current.copy(secondary = words, muted = words, inkSecondary = words, accentWords = words) else current
     CompositionLocalProvider(LocalOctoSurfaces provides surfaces, content = content)
+}
+
+// Draws a sheet or menu in the look in force when `open` last became true,
+// until it closes, so the player closing behind it changes nothing in it.
+@Composable
+fun HoldLook(open: Boolean, content: @Composable () -> Unit) {
+    val surfaces = LocalOctoSurfaces.current
+    val accent = LocalOctoAccent.current
+    val held = remember(open) { surfaces to accent }
+    CompositionLocalProvider(LocalOctoSurfaces provides held.first, LocalOctoAccent provides held.second) {
+        LocalThemeWrapper.current(content)
+    }
 }
 
 // A dark film's color in this theme: as it is on a dark theme; on a light

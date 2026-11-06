@@ -89,14 +89,14 @@ fun GlazeTabs(
     Glaze(
         modifier
             .height(height)
-            .dropShadow(CircleShape, Shadow(radius = shadowBlur(10f), color = Color.Black.copy(alpha = 0.20f), offset = DpOffset(0.dp, 2.dp))),
+            .dropShadow(CircleShape, Shadow(radius = shadowBlur(10f), color = shadowColor(0.20f), offset = DpOffset(0.dp, 2.dp))),
     ) {
         // Recessed: a shade falling from the top inside edge, and a hairline
         // of accent round the rim.
         Box(
             Modifier
                 .matchParentSize()
-                .innerShadow(CircleShape, Shadow(radius = shadowBlur(2f), spread = 1.6.dp, color = Color.Black.copy(alpha = 0.15f), offset = DpOffset(0.dp, 3.dp)))
+                .innerShadow(CircleShape, Shadow(radius = shadowBlur(2f), spread = 1.6.dp, color = shadowColor(0.15f), offset = DpOffset(0.dp, 3.dp)))
                 .innerShadow(CircleShape, Shadow(radius = 0.dp, spread = 0.5.dp, color = OctoColors.GlassAccent.copy(alpha = 0.25f))),
         )
         Layout(

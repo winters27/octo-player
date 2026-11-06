@@ -67,6 +67,14 @@ object OctoColors {
             return if (s.page == OctoDarkSurfaces.page && s.card == OctoDarkSurfaces.card) s.text else s.complement
         }
 
+    // A filled star: the accent in Octo, else the second color.
+    val Star: Color
+        @Composable @ReadOnlyComposable
+        get() {
+            val s = LocalOctoSurfaces.current
+            return if (s.page == OctoDarkSurfaces.page && s.card == OctoDarkSurfaces.card) LocalOctoAccent.current.accent else s.complement
+        }
+
     // The switch's track when it is off.
     val OffTrack: Color @Composable @ReadOnlyComposable get() = LocalOctoSurfaces.current.offTrack
 
