@@ -84,8 +84,11 @@ extension ResolvedPalette {
     /// The tint for Octo's glass, or nil where the glass is Apple's own with no film.
     var glassTintColor: Color? { glazeFilm == 0 ? nil : Color(argb: glazeFilm) }
 
-    /// Black at `alpha`, scaled by how strong this theme's shadows are.
-    func shadowColor(_ alpha: Double) -> Color { Color.black.opacity(alpha * Double(shadow) / 1000) }
+    /// A shadow at `alpha`, scaled by how strong this theme's shadows are: black on a dark theme,
+    /// the theme's own ink on a light one.
+    func shadowColor(_ alpha: Double) -> Color {
+        (light ? Color(argb: ink) : Color.black).opacity(alpha * Double(shadow) / 1000)
+    }
 
     /// A dark film's color in this theme: black on a dark theme; on a light one the sheet at half
     /// again the opacity, at most 0.92.

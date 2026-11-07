@@ -67,14 +67,14 @@ public struct ThemeBase: Sendable, Equatable {
         page: 0xFF0E_1512, card: 0xFF17_211B, raised: 0xFF20_2D26, sheet: 0xFF21_3029, sheetAlpha: 1000,
         edge: 0xFF3A_4D42, text: 0xFFED_F2EA, secondary: 0xFFB5_C9AE, muted: 0xFF97_AC92,
         accent: 0xFF9A_CB86, complement: 0xFFE2_B062, third: 0xFF7F_B8A8,
-        glow: [0xFF9A_CB86, 0xFFE2_B062, 0xFF7F_B8A8],
+        glow: [0xFF24_502A, 0xFF5E_4A18, 0xFF1A_4640],
         ink: 0xFFED_F2EA, inkSecondary: 560, inkTertiary: 250, offTrack: 390, shadow: 1000
     )
     private static let dusk = ThemeBase(
         page: 0xFF12_0E18, card: 0xFF1E_1726, raised: 0xFF29_2032, sheet: 0xFF2F_243B, sheetAlpha: 1000,
         edge: 0xFF47_395A, text: 0xFFF4_EEF8, secondary: 0xFFC9_B6DA, muted: 0xFFAB_9ABE,
         accent: 0xFFE7_A0C4, complement: 0xFFF2_BE85, third: 0xFF98_ADEB,
-        glow: [0xFFE7_A0C4, 0xFFF2_BE85, 0xFF98_ADEB],
+        glow: [0xFF5A_2466, 0xFF7A_3E30, 0xFF26_3A78],
         ink: 0xFFF4_EEF8, inkSecondary: 550, inkTertiary: 250, offTrack: 380, shadow: 1000
     )
     private static let daylight = ThemeBase(
@@ -82,14 +82,14 @@ public struct ThemeBase: Sendable, Equatable {
         edge: 0xFFC9_D2D8, text: 0xFF12_181C, secondary: 0xFF2F_4A55, muted: 0xFF50_6570,
         accent: 0xFF2E_6577, complement: 0xFF9A_4722, third: 0xFF5F_55A0,
         glow: [0xFFBF_D9E6, 0xFFF2_D3C0, 0xFFD8_D3F0],
-        ink: 0xFF12_181C, inkSecondary: 610, inkTertiary: 250, offTrack: 470, shadow: 450
+        ink: 0xFF12_181C, inkSecondary: 610, inkTertiary: 250, offTrack: 470, shadow: 250
     )
     private static let paper = ThemeBase(
         page: 0xFFEB_E2D2, card: 0xFFFA_F6EE, raised: 0xFFF2_EBDF, sheet: 0xFFFF_FBF4, sheetAlpha: 1000,
         edge: 0xFFCD_BEA4, text: 0xFF2A_1F14, secondary: 0xFF55_412B, muted: 0xFF6A_5742,
         accent: 0xFF8F_3F1D, complement: 0xFF3C_6646, third: 0xFF6F_540E,
         glow: [0xFFE8_C9A0, 0xFFC9_D6B8, 0xFFE7_C1AE],
-        ink: 0xFF2A_1F14, inkSecondary: 650, inkTertiary: 250, offTrack: 500, shadow: 450
+        ink: 0xFF2A_1F14, inkSecondary: 650, inkTertiary: 250, offTrack: 500, shadow: 250
     )
 
     /// Opacities and amounts are in thousandths.
@@ -340,6 +340,22 @@ public func overArtPalette(_ palette: ResolvedPalette) -> ResolvedPalette {
     return octo
 }
 
+/// Whether every word role on the page of `p` reads with `glow` at `alphaPerMille` over it: main
+/// and secondary words at 7:1, muted words, the theme's accent, complement and third, and `accent`
+/// when given, at 4.5:1.
+private func glowReads(_ p: ResolvedPalette, _ glow: UInt32, _ alphaPerMille: Int, _ accent: UInt32?) -> Bool {
+    let under = overArgb(alphaArgb(glow, alphaPerMille), p.page)
+    return contrastRatio(p.text, under) >= 7.0 && contrastRatio(p.secondary, under) >= 7.0 &&
+        contrastOn(p.muted, under) >= 4.5 &&
+        ([p.accents.accent, p.complement, p.third] + (accent.map { [$0] } ?? [])).allSatisfy { contrastRatio($0, under) >= 4.5 }
+}
+
+/// A color's lightness moved `k` hundredths: down on a dark theme, up on a light one.
+private func stepped(_ lch: Lch, _ k: Int, _ light: Bool) -> UInt32 {
+    let l = light ? lch.l + Double(k) * 0.01 : lch.l - Double(k) * 0.01
+    return lchToArgb(min(max(l, 0.0), 1.0), lch.c, lch.h)
+}
+
 /// A cover's color for the page glow in `theme`, so every word role still reads with the glow at
 /// `alphaPerMille` over the page: on a dark theme the color darkened in steps (no change for a
 /// cover that already reads); on a light one mixed 70% toward the page, then lightened in steps.
@@ -349,20 +365,30 @@ public func glowForCover(_ theme: ThemeChoice, _ art: UInt32, _ alphaPerMille: I
     let start = theme.light ? mixArgb(art, p.page, 700) : art
     let lch = toLch(start)
     for k in 0...60 {
-        let glow: UInt32
-        if k == 0 {
-            glow = start
-        } else {
-            let l = theme.light ? lch.l + Double(k) * 0.01 : lch.l - Double(k) * 0.01
-            glow = lchToArgb(min(max(l, 0.0), 1.0), lch.c, lch.h)
-        }
-        let under = overArgb(alphaArgb(glow, alphaPerMille), p.page)
-        let reads = contrastRatio(p.text, under) >= 7.0 && contrastRatio(p.secondary, under) >= 7.0 &&
-            contrastOn(p.muted, under) >= 4.5 &&
-            ([p.accents.accent, p.complement, p.third] + (accent.map { [$0] } ?? [])).allSatisfy { contrastRatio($0, under) >= 4.5 }
-        if reads { return glow }
+        let glow = k == 0 ? start : stepped(lch, k, theme.light)
+        if glowReads(p, glow, alphaPerMille, accent) { return glow }
     }
     return p.page
+}
+
+/// The colors of a glow mesh in `theme` (a cover's, or the theme's own at rest), each made readable
+/// by `glowForCover`, then, where the glow blends two of them, the even blend of every pair read
+/// too: while one does not, all of them darkened (a dark theme) or lightened (a light one) together
+/// in steps, so the mesh keeps its look.
+public func glowMesh(_ theme: ThemeChoice, _ colors: [UInt32], _ alphaPerMille: Int, _ accent: UInt32? = nil) -> [UInt32] {
+    let p = resolvePalette(theme, .octo, nil, false)
+    let each = colors.map { glowForCover(theme, $0, alphaPerMille, accent) }
+    if each.count < 2 { return each }
+    let lch = each.map(toLch)
+    for k in 0...100 {
+        let mesh = k == 0 ? each : lch.map { stepped($0, k, theme.light) }
+        var blends: [UInt32] = []
+        for i in mesh.indices {
+            for j in (i + 1)..<mesh.count { blends.append(mixArgb(mesh[i], mesh[j], 500)) }
+        }
+        if (mesh + blends).allSatisfy({ glowReads(p, $0, alphaPerMille, accent) }) { return mesh }
+    }
+    return each.map { _ in p.page }
 }
 
 /// The key color (an icon tint taken from the cover) in `theme`: as it is on a dark page; on a

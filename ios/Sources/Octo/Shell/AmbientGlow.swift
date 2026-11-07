@@ -179,20 +179,21 @@ final class AmbientDrift {
 /// Done as the glow is drawn, never kept with the cover's colors.
 func glowMesh(_ colors: ArtworkColors, palette: ResolvedPalette, alpha: Double) -> [UInt32] {
     let perMille = Int((alpha * 1000).rounded())
-    return colors.mesh.prefix(4).map { color in
+    let held = colors.mesh.prefix(4).map { color -> UInt32 in
         let argb = 0xFF00_0000 | color
-        return glowForCover(palette.theme, palette.light ? argb : ambientColor(argb), perMille, palette.accents.accent)
+        return palette.light ? argb : ambientColor(argb)
     }
+    return OctoKit.glowMesh(palette.theme, Array(held), perMille, palette.accents.accent)
 }
 
-/// The glow a theme rests in: its accent, complement, third and accent again, each through
-/// `glowForCover` at `alpha` so every word still reads over it; empty for a theme with none.
+/// The glow a theme rests in: its own glow colors in the order accent, complement, third and the
+/// first again, solved together by `glowMesh` at `alpha` so every word still reads over them and
+/// over the blends between them; empty for a theme with none.
 func restingMesh(_ palette: ResolvedPalette, alpha: Double) -> [UInt32] {
     guard palette.glow.count >= 3 else { return [] }
     let perMille = Int((alpha * 1000).rounded())
-    return [palette.glow[0], palette.glow[1], palette.glow[2], palette.glow[0]].map {
-        glowForCover(palette.theme, $0, perMille, palette.accents.accent)
-    }
+    return OctoKit.glowMesh(palette.theme, [palette.glow[0], palette.glow[1], palette.glow[2], palette.glow[0]],
+                            perMille, palette.accents.accent)
 }
 
 /// The glow behind every page: the artwork's colors, faint and soft, above the plain background

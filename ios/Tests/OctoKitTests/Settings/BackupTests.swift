@@ -479,4 +479,29 @@ import Testing
         #expect(old.player?.themeDark == .octo)
         #expect(old.player?.themeMatch == false)
     }
+
+    /// The backup file Android's test reads too: the same four fields read to the same settings on
+    /// both phones, a light theme in the dark slot included.
+    @Test func theSharedThemeBackupReadsAsOnAndroid() throws {
+        var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        var found: URL?
+        while dir.path != "/" && !dir.path.isEmpty {
+            let candidate = dir.appendingPathComponent("shared/core/src/commonTest/resources/backup/theme-player.json")
+            if FileManager.default.fileExists(atPath: candidate.path) { found = candidate; break }
+            dir = dir.deletingLastPathComponent()
+        }
+        guard let url = found else {
+            Issue.record("shared/core/src/commonTest/resources/backup/theme-player.json not found above \(#filePath)")
+            return
+        }
+        let root = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let backup = try JSONSerialization.data(withJSONObject: try #require(root["backup"]))
+        let want = try #require(root["themes"] as? [String: Any])
+        guard case .read(let read) = BackupFile.decode(String(decoding: backup, as: UTF8.self)) else {
+            Issue.record("not read"); return
+        }
+        let expected = themeSettings(want["theme"] as? String, want["light"] as? String, want["dark"] as? String,
+                                     want["match"] as? Bool ?? false)
+        #expect(read.player?.themes == expected)
+    }
 }
