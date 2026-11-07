@@ -4,14 +4,17 @@ import app.winters.octo.connection.ConnectionChooser
 import app.winters.octo.connection.ConnectionSecurity
 import app.winters.octo.connection.ConnectionSettings
 import app.winters.octo.connection.FolderChoice
+import app.winters.octo.connection.GatewayDraft
+import app.winters.octo.connection.GatewayWords
+import app.winters.octo.connection.ResolvedHeaders
 import app.winters.octo.connection.ServerClients
 import app.winters.octo.connection.StoredConnection
-import app.winters.octo.connection.cleanHeaders
 import app.winters.octo.connection.decodeConnection
 import app.winters.octo.connection.encodeConnection
-import app.winters.octo.connection.fingerprint
 import app.winters.octo.connection.mask
+import app.winters.octo.connection.needsHttps
 import app.winters.octo.connection.opened
+import app.winters.octo.connection.resolveConnectionHeaders
 import app.winters.octo.connection.sealed
 import app.winters.octo.server.PasswordChange
 import app.winters.octo.server.ServerCheck
@@ -26,9 +29,12 @@ import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.Credentials
 import app.winters.octo.subsonic.MusicFolder
 import app.winters.octo.subsonic.ScanStatus
-import app.winters.octo.subsonic.ServerInfo
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.subsonic.gateway.GatewayKind
+import app.winters.octo.subsonic.gateway.savedGatewayKind
+import app.winters.octo.subsonic.gateway.savedGatewayNames
+import app.winters.octo.subsonic.isPrivateHost
 import app.winters.octo.subsonic.normalizeServerUrl
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,13 +51,12 @@ import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
-import javax.net.ssl.SSLException
 
 // The OpenSubsonic extension a server lists when it takes API keys.
 const val API_KEY_EXTENSION = "apiKeyAuthentication"
 
 // How long the home address gets to answer before the main one is used.
-private const val HOME_PING_SECONDS = 2L
+internal const val HOME_PING_SECONDS = 2L
 
 // How long a kept server not in use gets to answer a quick look.
 private const val GLANCE_SECONDS = 6L
@@ -104,12 +109,16 @@ class SignInRequest(
     val clientCertAlias: String? = null,
     // A name of the listener's own, or null to keep the one it has.
     val label: String? = null,
+    // The sign-in page in front of the server, as the form has it.
+    val gateway: GatewayDraft = GatewayDraft(),
 ) {
     override fun toString() = "SignInRequest(address=$address, username=$username, secret=${mask(secret)}, authMode=$authMode)"
 }
 
 // A kept server's connection, as the form starts from when editing it. No
 // secret is in here: the password, key and header values stay sealed.
+// `gateway` is the kind of sign-in page saved for it; the headers that make
+// it up are not among `headers`.
 class ConnectionDraft(
     val address: String,
     val username: String,
@@ -120,6 +129,7 @@ class ConnectionDraft(
     val clientCertAlias: String?,
     val takesApiKeys: Boolean,
     val label: String = "",
+    val gateway: GatewayKind = GatewayKind.None,
 )
 
 // A quick look at the signed-in server: how long it took to answer (null
@@ -143,6 +153,10 @@ sealed interface SignInError {
 
     // The server being edited is no longer in the list.
     data object Gone : SignInError
+
+    // The form's headers or sign-in page fields can't be used as they are;
+    // `text` says why, in the words to show.
+    class Problem(val text: String) : SignInError
 }
 
 // How moving to another kept server went.
@@ -165,7 +179,7 @@ sealed interface SwitchResult {
 class SessionRepository @Inject constructor(
     private val store: SessionStore,
     private val vault: CredentialVault,
-    private val probe: OctoProbe,
+    private val checks: ConnectionCheck,
     private val http: OkHttpClient,
     private val security: ConnectionSecurity,
     private val chooser: ConnectionChooser,
@@ -281,53 +295,31 @@ class SessionRepository @Inject constructor(
         val before = base ?: twin
         val savedConnection = before?.let(::openedConnection)
         val secret = request.secret.ifEmpty { before?.let { savedSecret(it, request.authMode) } ?: return SignInError.MissingSecret }
+        // The headers typed, and the sign-in page's, built from its fields
+        // or kept as saved.
+        val resolved = resolveConnectionHeaders(request.headers, request.gateway, savedConnection?.headers.orEmpty(), main.isHttps, isPrivateHost(main))
+        val headers = when (resolved) {
+            is ResolvedHeaders.Ready -> resolved.headers
+            is ResolvedHeaders.Problem -> return SignInError.Problem(resolved.text)
+        }
         val settings = ConnectionSettings(
             home = home,
             authMode = request.authMode,
-            headers = cleanHeaders(resolveHeaders(request.headers, savedConnection?.headers.orEmpty())),
+            headers = headers,
             pins = request.pins,
             clientCertAlias = request.clientCertAlias,
             // The folder stays when only the way in changed.
             folder = savedConnection?.takeIf { before?.serverUrl == main.toString() }?.folder,
         )
-        var creds = Credentials(username, secret, request.authMode)
         val inUse = current
 
-        // Tries the connection with the new settings, and puts the ones in
-        // use back if it does not work, or once it has when the server is
-        // only being kept.
-        applySecurity(main, settings)
-        suspend fun putBack() = if (inUse != null) applySecurity(inUse.client.primaryUrl, inUse.connection) else security.clear()
-        val reached = try {
-            reach(main, home, creds)
-        } catch (e: SubsonicException) {
-            // The certificate is read before the settings go back, which forgets it.
-            val question = untrusted(e, main, home)
-            putBack()
-            return question ?: SignInError.Failed(e)
+        // The server is looked at through a client of its own; the shared
+        // one stays with the server in use until this one is activated.
+        val found = when (val checked = checks.look(main, settings, Credentials(username, secret, request.authMode))) {
+            is Checked.Found -> checked
+            is Checked.Refused -> return checked.error
         }
-        // A home address with a certificate the phone does not trust is
-        // asked about now, while the user is here to answer.
-        if (home != null && reached.url != home) {
-            val homeError = runCatching { SubsonicClient(home, creds, quick).ping() }.exceptionOrNull()
-            if (homeError is SubsonicException) {
-                untrusted(homeError, home, null)?.let { question ->
-                    putBack()
-                    return question
-                }
-            }
-        }
-
-        val client = SubsonicClient(reached.url, creds, http)
-        // With an API key the server says whose it is.
-        if (request.authMode == AuthMode.ApiKey) {
-            val owner = runCatching { client.tokenInfo() }.getOrNull()
-            if (!owner.isNullOrBlank()) creds = creds.named(owner)
-        }
-        val extensions = runCatching { client.extensions() }.getOrDefault(emptyList())
-            .flatMap { ext -> ext.versions.map { "${ext.name}:$it" } }.toSet()
-        // The status page is the only Octo signal for now, so the two match.
-        val admin = probe.adminReachable(reached.url)
+        val creds = found.creds
         val taken = kept.servers.map { it.id }.toSet() - setOfNotNull(before?.id)
         val id = when {
             before == null -> freshServerId(creds.username, main.toString(), taken)
@@ -339,17 +331,17 @@ class SessionRepository @Inject constructor(
             serverUrl = main.toString(),
             username = creds.username,
             passwordSealed = vault.seal(secret),
-            serverType = reached.info.type,
-            serverVersion = reached.info.serverVersion,
-            isOcto = admin,
-            octoAdminReachable = admin,
-            extensions = extensions,
+            serverType = found.info.type,
+            serverVersion = found.info.serverVersion,
+            // The status page is the only Octo signal for now, so the two match.
+            isOcto = found.octo,
+            octoAdminReachable = found.octo,
+            extensions = found.extensions,
             connection = encodeConnection(settings.sealed(vault::seal)),
             id = id,
             label = request.label?.trim() ?: before?.label.orEmpty(),
         )
         if (!use) {
-            putBack()
             _servers.value = store.update { now ->
                 val list = if (before == null) now.servers + saved else now.servers.map { if (it.id == before.id) saved else it }
                 now.copy(servers = list)
@@ -380,6 +372,9 @@ class SessionRepository @Inject constructor(
         val main = server.serverUrl.toHttpUrlOrNull()
             ?: return@withLock SwitchResult.Failed("That server's address can't be read. Edit it and try again.")
         val creds = Credentials(server.username, secret, settings.authMode)
+        // A sign-in page's password that would cross the internet readable
+        // is never sent.
+        if (needsHttps(main, settings.headers)) return@withLock SwitchResult.Failed(switchFailedWords(server.name, GatewayWords.NEEDS_HTTPS))
         val own = clients.forServer(main, settings, GLANCE_SECONDS)
         val info = try {
             reachWith(own, main, settings.home, creds).info
@@ -402,7 +397,8 @@ class SessionRepository @Inject constructor(
     }
 
     // How a kept server answers a quick look, with a client of its own.
-    // One signed out of is not asked.
+    // One signed out of is not asked. A sign-in page in front of it is
+    // named, never taken for a refused password.
     suspend fun check(id: String): ServerCheck {
         val server = _servers.value.find(id) ?: return ServerCheck(Reach.Unknown)
         val inUse = current?.takeIf { it.id == id }
@@ -413,6 +409,7 @@ class SessionRepository @Inject constructor(
             val secret = vault.open(server.passwordSealed) ?: return ServerCheck(Reach.Unknown)
             val settings = openedConnection(server) ?: return ServerCheck(Reach.Unknown)
             val main = server.serverUrl.toHttpUrlOrNull() ?: return ServerCheck(Reach.Unreachable)
+            if (needsHttps(main, settings.headers)) return ServerCheck(Reach.NeedsHttps)
             SubsonicClient(main, Credentials(server.username, secret, settings.authMode), clients.forServer(main, settings, GLANCE_SECONDS))
         }
         val start = System.nanoTime()
@@ -420,7 +417,7 @@ class SessionRepository @Inject constructor(
             client.ping()
             ServerCheck(Reach.Answers, (System.nanoTime() - start) / 1_000_000)
         } catch (e: SubsonicException) {
-            ServerCheck(if (e is SubsonicException.WrongCredentials) Reach.WrongPassword else Reach.Unreachable)
+            ServerCheck(reachOf(e))
         }
     }
 
@@ -520,16 +517,22 @@ class SessionRepository @Inject constructor(
             // Secrets that can no longer be opened are asked for again.
             ConnectionSettings(home = stored.homeUrl?.toHttpUrlOrNull(), authMode = stored.authMode, pins = stored.pins, folder = stored.folder)
         } ?: ConnectionSettings()
+        // The headers that make up the saved sign-in page show in its own
+        // section, not among the headers.
+        val pairs = connection.headers.map { it.name to it.value }
+        val gateway = savedGatewayKind(pairs)
+        val hidden = savedGatewayNames(pairs, gateway)
         return ConnectionDraft(
             address = server.serverUrl.removeSuffix("/"),
             username = server.username,
             authMode = connection.authMode,
             home = connection.home?.toString()?.removeSuffix("/").orEmpty(),
-            headers = connection.headers.map { HeaderDraft(it.name, "", saved = true) },
+            headers = connection.headers.filterNot { it.name in hidden }.map { HeaderDraft(it.name, "", saved = true) },
             pins = connection.pins,
             clientCertAlias = connection.clientCertAlias,
             takesApiKeys = server.extensions.any { it.startsWith("$API_KEY_EXTENSION:") },
             label = server.label,
+            gateway = gateway,
         )
     }
 
@@ -601,20 +604,6 @@ class SessionRepository @Inject constructor(
         return if (sameKind) vault.open(server.passwordSealed) else null
     }
 
-    private class Reached(val url: HttpUrl, val info: ServerInfo)
-
-    private suspend fun reach(main: HttpUrl, home: HttpUrl?, creds: Credentials): Reached = reachWith(http, main, home, creds)
-
-    // Pings the main address. When that cannot connect and there is a home
-    // address, pings that instead: at home the main address may not loop back.
-    private suspend fun reachWith(client: OkHttpClient, main: HttpUrl, home: HttpUrl?, creds: Credentials): Reached = try {
-        Reached(main, SubsonicClient(main, creds, client).ping())
-    } catch (e: SubsonicException.Unreachable) {
-        if (home == null || e.cause is SSLException) throw e
-        val info = runCatching { SubsonicClient(home, creds, client).ping() }.getOrNull() ?: throw e
-        Reached(home, info)
-    }
-
     // Whether the home address answers like the server does.
     private suspend fun answersAt(url: HttpUrl, creds: Credentials): Boolean = try {
         SubsonicClient(url, creds, quick).ping()
@@ -622,16 +611,5 @@ class SessionRepository @Inject constructor(
     } catch (e: SubsonicException) {
         // An error from the server itself still means it is there.
         e !is SubsonicException.Unreachable && e !is SubsonicException.NotSubsonic
-    }
-
-    // A failure caused by a certificate the phone does not trust, as a
-    // question for the user. Null for any other failure.
-    private fun untrusted(e: SubsonicException, vararg urls: HttpUrl?): SignInError.Untrusted? {
-        if (e !is SubsonicException.Unreachable || e.cause !is SSLException) return null
-        for (url in urls.filterNotNull()) {
-            val leaf = security.takeRejected(url.host) ?: continue
-            return SignInError.Untrusted(url.host, leaf.fingerprint())
-        }
-        return null
     }
 }

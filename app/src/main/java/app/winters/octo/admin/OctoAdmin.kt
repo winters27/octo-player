@@ -4,12 +4,18 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import app.winters.octo.connection.GatewayWords
 import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.data.accountId
 import app.winters.octo.serverupdate.AdminPlace
 import app.winters.octo.subsonic.SubsonicClient
+import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.subsonic.gateway.Gateway
+import app.winters.octo.subsonic.gateway.isHtml
+import app.winters.octo.subsonic.gateway.jsonBody
+import app.winters.octo.subsonic.gateway.notSubsonic
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -31,6 +37,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -127,7 +134,42 @@ data class LibraryStatus(
     val rescanAuthenticated: Boolean = false,
 )
 
-class AdminUnavailable(message: String) : IOException(message)
+// Octo's admin pages could not be used: not signed in, out of reach, or
+// something else answered. `gateway` names a sign-in page in front of the
+// server, when that is what answered.
+class AdminUnavailable(message: String, val gateway: Gateway? = null, val loginSent: Boolean = false) : IOException(message)
+
+// Octo's answer to an admin call, read as `serializer` through the answer
+// reader. Anything that is not Octo's JSON (an error, a sign-in page in
+// front of the server) is AdminUnavailable.
+internal fun <T> readAdminAnswer(response: Response, path: String, json: Json, serializer: KSerializer<T>): T {
+    val text = try {
+        response.jsonBody(path)
+    } catch (e: SubsonicException.NotSubsonic) {
+        throw adminRefusal(e, path)
+    }
+    return try {
+        json.decodeFromString(serializer, text)
+    } catch (e: SerializationException) {
+        throw AdminUnavailable(NOT_UNDERSTOOD)
+    }
+}
+
+// Why an admin call's answer is not Octo's: a sign-in page in front of the
+// server (named, with how to get through), a Navidrome account that is not
+// an admin, the status, or a page Octo would not send.
+internal fun adminRefusal(answer: SubsonicException.NotSubsonic, path: String): AdminUnavailable {
+    val gateway = answer.gateway
+    val status = answer.status
+    return when {
+        gateway != null -> AdminUnavailable(GatewayWords.failure(gateway, answer.loginSent), gateway, answer.loginSent)
+        status == 403 -> AdminUnavailable("Needs a Navidrome admin account")
+        status != null -> AdminUnavailable("HTTP $status from $path")
+        else -> AdminUnavailable(NOT_UNDERSTOOD)
+    }
+}
+
+private const val NOT_UNDERSTOOD = "Octo answered in a way the app does not understand"
 
 private val Context.adminData by preferencesDataStore("octo_admin")
 
@@ -249,15 +291,9 @@ class OctoAdmin @Inject constructor(
     ): T = withContext(Dispatchers.IO) {
         val url = sign(api(base, path).newBuilder().apply { query.forEach { (k, v) -> addQueryParameter(k, v) } }.build())
         try {
-            calls.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                if (response.code == 403) throw AdminUnavailable("Needs a Navidrome admin account")
-                if (!response.isSuccessful) throw AdminUnavailable("HTTP ${response.code} from $path")
-                json.decodeFromString(serializer, response.body.string())
-            }
+            calls.newCall(Request.Builder().url(url).build()).execute().use { response -> readAdminAnswer(response, path, json, serializer) }
         } catch (e: IOException) {
             throw e as? AdminUnavailable ?: AdminUnavailable("Octo did not answer")
-        } catch (e: SerializationException) {
-            throw AdminUnavailable("Octo answered in a way the app does not understand")
         }
     }
 
@@ -270,7 +306,8 @@ class OctoAdmin @Inject constructor(
             .build()
         try {
             calls.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw AdminUnavailable("HTTP ${response.code} from $path")
+                // A sign-in page answering in place of Octo has not taken the change.
+                if (!response.isSuccessful || isHtml(response.header("Content-Type"))) throw adminRefusal(response.notSubsonic(path), path)
             }
         } catch (e: IOException) {
             throw e as? AdminUnavailable ?: AdminUnavailable("Octo did not answer")

@@ -6,6 +6,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.admin.AdminStatus
+import app.winters.octo.admin.AdminUnavailable
+import app.winters.octo.connection.GatewayWords
 import app.winters.octo.admin.DownloadRecord
 import app.winters.octo.admin.LibraryStatus
 import app.winters.octo.admin.OctoAdmin
@@ -150,6 +152,9 @@ class OctoAdminViewModel @Inject constructor(private val admin: OctoAdmin) : Vie
         LoadState.Ready(block())
     } catch (e: CancellationException) {
         throw e
+    } catch (e: AdminUnavailable) {
+        // A sign-in page in front of the server is named, with how to get through.
+        LoadState.Failed(e.gateway?.let { GatewayWords.failure(it, e.loginSent) } ?: "Couldn't load $what just now. Pull down to try again.")
     } catch (e: Exception) {
         LoadState.Failed("Couldn't load $what just now. Pull down to try again.")
     }

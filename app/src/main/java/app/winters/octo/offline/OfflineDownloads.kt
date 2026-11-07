@@ -24,6 +24,7 @@ import app.winters.octo.playback.StreamUnavailable
 import app.winters.octo.playback.Streams
 import app.winters.octo.playback.bitrateOf
 import app.winters.octo.playback.compareQuality
+import app.winters.octo.playback.signInPageIn
 import app.winters.octo.playback.streamRequest
 import app.winters.octo.playback.streamUri
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -321,6 +322,22 @@ class OfflineDownloads @Inject constructor(
         present.associateBy { it.trackId }
     }
 
+    // A downloaded file that turns out to be an HTML page (a sign-in page's
+    // answer kept before such answers were refused) is deleted, and its song
+    // downloads again. True when it was one.
+    suspend fun dropStoredHtml(uri: String): Boolean = withContext(Dispatchers.IO) {
+        val path = uri.toUri().takeIf { it.scheme == "file" }?.path ?: return@withContext false
+        if (!isHtmlFile(File(path))) return@withContext false
+        lock.withLock {
+            dao.all().filter { it.path == path }.forEach { row ->
+                File(row.path).delete()
+                dao.setState(row.sourceId, row.serverId, DownloadStatus.Queued, 0f)
+            }
+        }
+        poke()
+        true
+    }
+
     private fun poke() {
         wake.trySend(Unit)
         loops.poke()
@@ -485,6 +502,13 @@ class OfflineDownloads @Inject constructor(
                     tries.remove(key)
                     dao.setState(row.sourceId, row.serverId, DownloadStatus.Queued, 0f)
                 }
+                // A sign-in page answered in place of the song: nothing is
+                // kept, a saved copy that is one goes, and the download
+                // waits to be tried again by hand.
+                signInPageIn(e) -> {
+                    streams.dropStoredHtml(streamUri(ref))
+                    dao.setState(row.sourceId, row.serverId, DownloadStatus.Failed, 0f)
+                }
                 // The server said no; asking again will not change that.
                 e is HttpDataSource.InvalidResponseCodeException || tried >= TRIES ->
                     dao.setState(row.sourceId, row.serverId, DownloadStatus.Failed, 0f)
@@ -510,6 +534,9 @@ class OfflineDownloads @Inject constructor(
                     ensureActive()
                     val read = source.read(buffer, 0, buffer.size)
                     if (read == C.RESULT_END_OF_INPUT) break
+                    // A sign-in page saved as the song before such answers
+                    // were refused is never downloaded as it.
+                    if (written == 0L) refuseHtmlStart(buffer, read)
                     out.write(buffer, 0, read)
                     written += read
                     val now = System.currentTimeMillis()

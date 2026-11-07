@@ -30,6 +30,7 @@ import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy.LoadErrorInfo
 import androidx.media3.extractor.DefaultExtractorsFactory
 import app.winters.octo.catalog.SourceTrackEntity
+import app.winters.octo.connection.ConnectionSecurity
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.offline.StreamCache
@@ -74,6 +75,7 @@ class Streams @Inject constructor(
     private val sessions: SessionRepository,
     private val settings: PlayerSettings,
     private val http: OkHttpClient,
+    private val security: ConnectionSecurity,
     private val saved: StreamCache,
     // A family account's device left to its account plays the file as it
     // is, and the server applies the account's quality.
@@ -139,7 +141,7 @@ class Streams @Inject constructor(
     // and saved as they play. Radio stations open their streams as they are
     // and keep trying through a dropped connection. One for each deck.
     fun mediaSourceFactory(): MediaSource.Factory = RadioAwareSources(
-        songs = DefaultMediaSourceFactory(dataSourceFactory(networkFactory()), extractors()).setLoadErrorHandlingPolicy(Retries()),
+        songs = DefaultMediaSourceFactory(dataSourceFactory(networkFactory()), extractors()).setLoadErrorHandlingPolicy(Retries(::online)),
         hls = DefaultMediaSourceFactory(networkFactory(), extractors()).setLoadErrorHandlingPolicy(RadioRetries()),
         streams = DefaultMediaSourceFactory(ReconnectingDataSource.Factory(networkFactory()), extractors()).setLoadErrorHandlingPolicy(RadioRetries()),
     )
@@ -213,7 +215,7 @@ class Streams @Inject constructor(
         return withContext(Dispatchers.IO) {
             runCatching {
                 val probe = Request.Builder().url(address).header("Range", "bytes=0-0").purpose(OctoPurpose.Offline).build()
-                http.newCall(probe).execute().use { answer -> if (answer.isSuccessful) plainType(answer.header("Content-Type")) else null }
+                bytes.newCall(probe).execute().use { answer -> if (answer.isSuccessful) plainType(answer.header("Content-Type")) else null }
             }.getOrNull()
         }
     }
@@ -224,14 +226,27 @@ class Streams @Inject constructor(
         return savedCopyKey(source, ref, ref.request(quality(current.value)), saved.copies)
     }
 
-    private fun networkFactory(): DataSource.Factory = DefaultDataSource.Factory(context, OkHttpDataSource.Factory(http))
+    // Lets a server song's saved copy go when it is an HTML page, a sign-in
+    // page's answer saved before such answers were refused, so the song is
+    // fetched from the server next time. True when it went.
+    fun dropStoredHtml(uri: String): Boolean {
+        val ref = parseStreamUri(uri) ?: return false
+        val key = cacheKey(pinned(ref)) ?: return false
+        return saved.dropIfHtml(key)
+    }
+
+    // Songs come through the client that refuses a sign-in page's HTML from
+    // the server's addresses in place of one (see ConnectionSecurity.byteClient).
+    private val bytes: OkHttpClient by lazy { security.byteClient(http) }
+
+    private fun networkFactory(): DataSource.Factory = DefaultDataSource.Factory(context, OkHttpDataSource.Factory(bytes))
 
     // The same, with every request marked as an offline copy. The server's
     // own addresses are told so (X-Octo-Purpose), and an Octo server does
     // not count it as playing; no other host hears of it.
     private fun offlineNetworkFactory(): DataSource.Factory = DefaultDataSource.Factory(context, OkHttpDataSource.Factory(offlineHttp))
 
-    private val offlineHttp: OkHttpClient by lazy { http.markedFor(OctoPurpose.Offline) }
+    private val offlineHttp: OkHttpClient by lazy { bytes.markedFor(OctoPurpose.Offline) }
 
     private fun signedFactory(upstream: DataSource.Factory): DataSource.Factory = signedSources(upstream, ::isStream, ::sign)
 
@@ -280,19 +295,23 @@ class Streams @Inject constructor(
         return client.url("stream", mapOf("id" to ref.serverId) + request.params).toString().toUri()
     }
 
-    // A failed load is tried again as usual, except with no connection or
-    // no server: then the song fails at once and is skipped, not waited on.
-    // Another file for the song fails at once too, and the song is opened
-    // again from its start (see the service's error handling).
-    private inner class Retries : DefaultLoadErrorHandlingPolicy() {
-        override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorInfo): Long =
-            if (loadErrorInfo.exception is StreamUnavailable || loadErrorInfo.exception is StreamChanged || !online()) {
-                C.TIME_UNSET
-            } else {
-                super.getRetryDelayMsFor(loadErrorInfo)
-            }
-    }
 }
+
+// A failed load is tried again as usual, except when that cannot help (see
+// finalLoadError): then the song fails at once and is skipped, not waited
+// on. Another file for the song fails at once too, and the song is opened
+// again from its start (see the service's error handling).
+@OptIn(UnstableApi::class)
+internal class Retries(private val online: () -> Boolean) : DefaultLoadErrorHandlingPolicy() {
+    override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorInfo): Long =
+        if (finalLoadError(loadErrorInfo.exception, online())) C.TIME_UNSET else super.getRetryDelayMsFor(loadErrorInfo)
+}
+
+// Whether a failed load of a song is not worth trying again: no connection
+// or no server, another file for the song, or a sign-in page answering in
+// place of the server, which only the listener can get past.
+internal fun finalLoadError(error: IOException, online: Boolean): Boolean =
+    error is StreamUnavailable || error is StreamChanged || !online || signInPageIn(error)
 
 // A station's stream is opened again after it drops, a few times, waiting
 // longer each time, even with no connection for a moment. A stream that

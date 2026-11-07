@@ -18,12 +18,13 @@ fun isOctoServer(probed: Boolean, serverType: String?, extensions: Set<String>):
 
 val Session.runsOcto: Boolean get() = isOctoServer(isOcto, serverType, extensions)
 
-// Asks whether the server is Octo by reading its status page. Only answers
-// on the home network: the admin pages are not exposed through the tunnel.
-class OctoProbe @Inject constructor(http: OkHttpClient) {
-    private val quick = http.newBuilder().callTimeout(5, TimeUnit.SECONDS).build()
-
-    suspend fun adminReachable(base: HttpUrl): Boolean = withContext(Dispatchers.IO) {
+// Asks whether the server is Octo by reading its status page, through the
+// client checking the server, so its headers, certificates and sign-in page
+// session are the check's own. Only answers on the home network: the admin
+// pages are not exposed through the tunnel.
+class OctoProbe @Inject constructor() {
+    suspend fun adminReachable(http: OkHttpClient, base: HttpUrl): Boolean = withContext(Dispatchers.IO) {
+        val quick = http.newBuilder().callTimeout(5, TimeUnit.SECONDS).build()
         val url = base.newBuilder().addPathSegments("api/admin/status").build()
         runCatching {
             quick.newCall(Request.Builder().url(url).build()).execute().use { response ->

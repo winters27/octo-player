@@ -31,6 +31,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.winters.octo.connection.GatewayWords
+import app.winters.octo.connection.hasGatewaySignIn
+import app.winters.octo.data.SessionRepository
+import app.winters.octo.data.SessionState
 import app.winters.octo.data.userMessage
 import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.OctoColors
@@ -82,7 +86,15 @@ class ShareSheetState {
 val LocalShareSheet = staticCompositionLocalOf<ShareSheetState> { error("No share sheet") }
 
 @HiltViewModel
-class ShareViewModel @Inject constructor(private val controls: ServerControls) : ViewModel() {
+class ShareViewModel @Inject constructor(
+    private val controls: ServerControls,
+    private val sessions: SessionRepository,
+) : ViewModel() {
+    // Whether a sign-in page sits in front of the server in use, so people
+    // need an account there to open a link to it.
+    val behindSignInPage: Boolean
+        get() = (sessions.state.value as? SessionState.SignedIn)?.session?.connection?.hasGatewaySignIn == true
+
     // The expiry whose link is being made, if any.
     var making by mutableStateOf<ShareExpiry?>(null)
         private set
@@ -154,6 +166,7 @@ fun ShareLinkPage(request: ShareRequest, onBack: (() -> Unit)?, onDone: () -> Un
         },
     ) {
         GlassMenuNote("Anyone with the link can listen.")
+        if (vm.behindSignInPage) GlassMenuNote(GatewayWords.SHARE_LINE)
         GlassMenuTitle("Link expires")
         ShareExpiry.entries.forEach { expiry ->
             ExpiryLine(expiry.label, busy = vm.making == expiry, enabled = vm.making == null) {

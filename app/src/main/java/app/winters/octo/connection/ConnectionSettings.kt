@@ -1,6 +1,7 @@
 package app.winters.octo.connection
 
 import app.winters.octo.subsonic.AuthMode
+import app.winters.octo.subsonic.gateway.GatewayNames
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -28,6 +29,11 @@ data class ConnectionSettings(
         "ConnectionSettings(home=$home, authMode=$authMode, headers=${headers.map { it.name }}, " +
             "pins=${pins.keys}, clientCert=${clientCertAlias?.let(::mask)}, folder=${folder?.name})"
 }
+
+// Whether a sign-in page sits in front of the server that the app gets
+// through with headers: any of the gateway names, whatever the kind.
+val ConnectionSettings.hasGatewaySignIn: Boolean
+    get() = headers.any { GatewayNames.isGatewayName(it.name) }
 
 // What is written to disk. The header list and the certificate name are
 // sealed by the vault before they get here; the rest is not secret.

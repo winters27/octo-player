@@ -2,6 +2,8 @@ package app.winters.octo.playback
 
 import androidx.media3.common.PlaybackException
 import androidx.media3.datasource.HttpDataSource
+import app.winters.octo.connection.GatewayWords
+import app.winters.octo.subsonic.gateway.SignInPageAnswer
 
 // Which of the shared reasons a player error is, from Media3's error code
 // and, for an HTTP answer, its status. A song found online (`outside`) was
@@ -31,3 +33,13 @@ fun playFailureOf(errorCode: Int, httpStatus: Int? = null, outside: Boolean = fa
 
 fun playFailureOf(error: PlaybackException, outside: Boolean = false): PlayFailure =
     playFailureOf(error.errorCode, (error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode, outside)
+
+// The words for a song that would not play: a sign-in page answering in
+// place of the server says so, wherever it sits in the error's causes
+// (Media3 wraps what the HTTP client threw); anything else, its reason's.
+fun playFailureWords(error: PlaybackException, outside: Boolean = false): String =
+    if (signInPageIn(error)) GatewayWords.PLAY_FAILURE else playFailureOf(error, outside).words
+
+// Whether a sign-in page answered in place of the server, anywhere in this
+// error's causes.
+fun signInPageIn(error: Throwable): Boolean = generateSequence(error) { it.cause }.take(16).any { it is SignInPageAnswer }

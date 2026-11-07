@@ -7,9 +7,18 @@ import app.winters.octo.subsonic.FamilyInviteLink
 import app.winters.octo.subsonic.FamilyLink
 import app.winters.octo.connection.fingerprint
 import app.winters.octo.connection.ConnectionSettings
-import app.winters.octo.data.resolveHeaders
-import app.winters.octo.connection.cleanHeaders
+import app.winters.octo.connection.GatewayDraft
+import app.winters.octo.connection.GatewayFormState
+import app.winters.octo.connection.GatewayWords
+import app.winters.octo.connection.ResolvedHeaders
+import app.winters.octo.connection.addressChanged
+import app.winters.octo.connection.reactToFailure
+import app.winters.octo.connection.resolveConnectionHeaders
 import app.winters.octo.connection.ServerClients
+import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.subsonic.gateway.Gateway
+import app.winters.octo.subsonic.gateway.GatewayKind
+import app.winters.octo.ui.family.HandOverSignIn
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import app.winters.octo.ui.family.JoinOutcome
@@ -77,6 +86,11 @@ class SignInViewModel @Inject constructor(
     // Signed up from an invite, kept until signed in: an invite works once,
     // so a certificate asked about afterwards does not sign up again.
     private var signedUp: JoinOutcome.SignedUp? = null
+
+    // A sign-in received from another device, kept until signed in with: a
+    // hand-over works once, so a certificate asked about afterwards does not
+    // redeem it again.
+    private var received: HandOverSignIn? = null
 
     // An invite opened: the new member's name and the password they choose,
     // twice. Signing up runs the invite's steps, then signs this phone in.
@@ -146,6 +160,22 @@ class SignInViewModel @Inject constructor(
     var home by mutableStateOf("")
     val headers = mutableStateListOf<HeaderDraft>()
 
+    // The sign-in page in front of the server: the kind of sign-in it takes
+    // from apps, what is typed for it, and the kind saved for this server,
+    // whose values are kept while its fields are left empty.
+    var gatewayKind by mutableStateOf(GatewayKind.None)
+        private set
+    var gatewayFirst by mutableStateOf("")
+    var gatewaySecond by mutableStateOf("")
+    var gatewaySaved by mutableStateOf(GatewayKind.None)
+        private set
+
+    // The sign-in page the last failed attempt met, and the address it met
+    // it at.
+    var gateway by mutableStateOf<Gateway?>(null)
+        private set
+    private var gatewayFor: String? = null
+
     // The client certificate's name in the phone's store, once picked.
     var clientCert by mutableStateOf<String?>(null)
 
@@ -185,6 +215,8 @@ class SignInViewModel @Inject constructor(
             if (!schemePicked) scheme = automaticScheme(text)
         }
         error = null
+        // A sign-in page met at another address is forgotten.
+        useGatewayForm(addressChanged(gatewayForm, sentAddress))
     }
 
     // Takes a family link (the https form a QR code carries, or the app's
@@ -210,6 +242,7 @@ class SignInViewModel @Inject constructor(
         // app uses the home network at home and the outside address away.
         link.home?.let { home = it }
         signedUp = null
+        received = null
         invite = null
         handOver = null
         handOverStep = null
@@ -237,6 +270,7 @@ class SignInViewModel @Inject constructor(
         invite = null
         handOver = null
         handOverStep = null
+        received = null
         error = null
     }
 
@@ -251,33 +285,54 @@ class SignInViewModel @Inject constructor(
     // Takes the sign-in another device of one's own hands over: redeems the
     // token from its link, waits for that device to allow it, opens what it
     // sends with the key from the link, and signs in with it like a typed one.
+    // The form's sign-in page fields, headers and certificates go with it,
+    // so a server behind a sign-in page or with a certificate of its own is
+    // reached; a sign-in page that turns it away opens Advanced at its fields.
     fun receive() {
         val link = handOver ?: return
         if (busy) return
         val base = link.base.toHttpUrlOrNull() ?: return
+        val connection = when (val form = formConnection(base, home, headers.toList(), gatewayDraft, pins.toMap(), clientCert)) {
+            is FormConnection.Ready -> form.settings
+            is FormConnection.Problem -> {
+                error = form.text
+                return
+            }
+        }
+        val attempt = sentAddress
         busy = true
         error = null
         viewModelScope.launch {
-            val (http, _) = clients.forJoin(base, ConnectionSettings())
-            val got = withContext(Dispatchers.IO) {
-                receiveHandOver(link, http, devices.current().name, FamilyPlatform.Android, step = { handOverStep = it })
-            }
-            if (got !is HandOverResult.Received) {
+            val signIn = received ?: run {
+                val (http, security) = clients.forJoin(base, connection)
+                val got = withContext(Dispatchers.IO) {
+                    receiveHandOver(link, http, devices.current().name, FamilyPlatform.Android, step = { handOverStep = it })
+                }
+                if (got is HandOverResult.Received) return@run got.signIn.also { received = it }
+                val refused = got as HandOverResult.Refused
                 handOverStep = null
-                error = (got as HandOverResult.Refused).message
+                // A certificate the phone does not trust is asked about, as
+                // signing in asks; trusting it tries again.
+                val leaf = security.takeRejected(base.host)
+                if (leaf != null) {
+                    question = SignInError.Untrusted(base.host, leaf.fingerprint())
+                } else {
+                    error = refused.gateway?.let { GatewayWords.failure(it, refused.loginSent) } ?: refused.message
+                    met(attempt, refused.gateway)
+                }
                 busy = false
                 return@launch
             }
-            val signIn = got.signIn
             val request = SignInRequest(
                 address = signIn.server,
                 username = signIn.username,
                 secret = signIn.secret,
                 authMode = runCatching { AuthMode.valueOf(signIn.mode) }.getOrDefault(AuthMode.Token),
                 home = signIn.home.orEmpty(),
-                headers = emptyList(),
-                pins = emptyMap(),
-                clientCertAlias = null,
+                headers = headers.toList(),
+                pins = pins.toMap(),
+                clientCertAlias = clientCert,
+                gateway = gatewayDraft,
             )
             val (failed, words) = switcher.signIn(request)
             when (failed) {
@@ -285,12 +340,14 @@ class SignInViewModel @Inject constructor(
                     handOverStep = HANDOVER_SIGNED_IN
                     notice = words
                     handOver = null
+                    received = null
                     signedIn = true
                 }
                 is SignInError.Untrusted -> question = failed
                 else -> {
                     handOverStep = null
                     error = failed.userMessage()
+                    met(attempt, gatewayOf(failed))
                 }
             }
             busy = false
@@ -303,16 +360,24 @@ class SignInViewModel @Inject constructor(
     fun join() {
         val url = url
         if (busy || joinProblem != null || url == null) return
+        // Set up as signing in to the server would be: the certificates
+        // trusted for it, its headers, its sign-in page fields and its client
+        // certificate.
+        val connection = when (val form = formConnection(url, home, headers.toList(), gatewayDraft, pins.toMap(), clientCert)) {
+            is FormConnection.Ready -> form.settings
+            is FormConnection.Problem -> {
+                error = form.text
+                return
+            }
+        }
+        val attempt = sentAddress
         busy = true
         error = null
         viewModelScope.launch {
-            // Set up as signing in to the server would be: the certificates
-            // trusted for it, its headers and its client certificate.
-            val homeUrl = home.trim().takeIf(String::isNotEmpty)?.let(::normalizeServerUrl)
-            val (http, security) = clients.forJoin(url, ConnectionSettings(home = homeUrl, headers = cleanHeaders(resolveHeaders(headers.toList(), emptyList())), pins = pins.toMap(), clientCertAlias = clientCert))
+            val (http, security) = clients.forJoin(url, connection)
             val invited = invite ?: return@launch
             val account = signedUp ?: when (val joined = withContext(Dispatchers.IO) {
-                joinWithInvite(url, invited.token, inviteName, invitePassword, http, home = homeUrl)
+                joinWithInvite(url, invited.token, inviteName, invitePassword, http, home = connection.home)
             }) {
                 is JoinOutcome.SignedUp -> joined.also { signedUp = it }
                 // A certificate of the server's own is asked about as signing
@@ -323,8 +388,11 @@ class SignInViewModel @Inject constructor(
                     busy = false
                     return@launch
                 }
+                // A sign-in page that turns the invite away opens Advanced at
+                // its fields.
                 is JoinOutcome.Failed -> {
-                    error = joined.message
+                    error = joined.gateway?.let { GatewayWords.failure(it, joined.loginSent) } ?: joined.message
+                    met(attempt, joined.gateway)
                     busy = false
                     return@launch
                 }
@@ -338,6 +406,7 @@ class SignInViewModel @Inject constructor(
                 headers = headers.toList(),
                 pins = pins.toMap(),
                 clientCertAlias = clientCert,
+                gateway = gatewayDraft,
             )
             val (failed, words) = switcher.signIn(request)
             when (failed) {
@@ -350,7 +419,10 @@ class SignInViewModel @Inject constructor(
                     signedIn = true
                 }
                 is SignInError.Untrusted -> question = failed
-                else -> error = failed.userMessage()
+                else -> {
+                    error = failed.userMessage()
+                    met(attempt, gatewayOf(failed))
+                }
             }
             busy = false
         }
@@ -361,6 +433,7 @@ class SignInViewModel @Inject constructor(
         scheme = if (scheme == Scheme.Https) Scheme.Http else Scheme.Https
         schemePicked = true
         error = null
+        useGatewayForm(addressChanged(gatewayForm, sentAddress))
     }
 
     // Starts from the saved connection of the server in use. Nothing secret
@@ -422,8 +495,14 @@ class SignInViewModel @Inject constructor(
         takesApiKeys = draft.takesApiKeys
         savedKey = useApiKey
         savedPassword = !useApiKey
+        // The saved sign-in page's kind; its values stay sealed and are kept
+        // while its fields are left empty.
+        gatewaySaved = draft.gateway
+        gatewayKind = draft.gateway
+        gatewayFirst = ""
+        gatewaySecond = ""
         advancedOpen = draft.authMode != AuthMode.Token || draft.home.isNotEmpty() ||
-            draft.headers.isNotEmpty() || draft.clientCertAlias != null
+            draft.headers.isNotEmpty() || draft.clientCertAlias != null || draft.gateway != GatewayKind.None
     }
 
     fun addHeader() {
@@ -444,6 +523,38 @@ class SignInViewModel @Inject constructor(
         val old = headers.getOrNull(index) ?: return
         headers[index] = old.copy(value = value)
     }
+
+    // Picks the kind of sign-in the sign-in page takes. Another kind starts
+    // with empty fields, since they mean other things.
+    fun pickGateway(kind: GatewayKind) {
+        if (kind != gatewayKind) {
+            gatewayFirst = ""
+            gatewaySecond = ""
+        }
+        gatewayKind = kind
+        error = null
+    }
+
+    private val gatewayDraft: GatewayDraft
+        get() = GatewayDraft(gatewayKind, gatewayFirst, gatewaySecond, gatewaySaved)
+
+    private val gatewayForm: GatewayFormState
+        get() = GatewayFormState(advancedOpen, gatewayKind, gateway, gatewayFor)
+
+    private fun useGatewayForm(state: GatewayFormState) {
+        advancedOpen = state.advancedOpen
+        gatewayKind = state.kind
+        gateway = state.detected
+        gatewayFor = state.detectedFor
+    }
+
+    // The address as a sign-in sends it, which what it met belongs to.
+    private val sentAddress: String
+        get() = url?.toString() ?: (scheme.prefix + address.trim())
+
+    // An attempt at `attempt` that met a sign-in page opens Advanced at its
+    // fields, unless the address has changed since.
+    private fun met(attempt: String, found: Gateway?) = useGatewayForm(reactToFailure(gatewayForm, attempt, sentAddress, found))
 
     private val mode: AuthMode
         get() = when {
@@ -485,12 +596,13 @@ class SignInViewModel @Inject constructor(
             pins = pins.toMap(),
             clientCertAlias = clientCert,
             label = label.takeIf { form == ServerForm.Add || form == ServerForm.Edit },
+            gateway = gatewayDraft,
         )
         viewModelScope.launch {
             val id = serverId
             val failed = when {
                 // A new name alone needs nothing from the server.
-                form == ServerForm.Edit && id != null && !changesConnection(request) -> {
+                form == ServerForm.Edit && id != null && !connectionChanged(request, started) -> {
                     switcher.onItsOwn { sessions.rename(id, label) }
                     notice = "Saved ${sessions.servers.value.find(id)?.name.orEmpty()}."
                     null
@@ -509,10 +621,15 @@ class SignInViewModel @Inject constructor(
                     // Once in, the secrets are kept only in the sealed vault.
                     password = ""
                     apiKey = ""
+                    gatewayFirst = ""
+                    gatewaySecond = ""
                     signedIn = true
                 }
                 is SignInError.Untrusted -> question = failed
                 else -> {
+                    // A sign-in page in front of the server opens Advanced
+                    // at its fields.
+                    met(request.address, gatewayOf(failed))
                     // A server that cannot check tokens gets the password
                     // itself where that is safe, and the switch shows it.
                     val retry = (failed as? SignInError.Failed)?.cause
@@ -533,21 +650,6 @@ class SignInViewModel @Inject constructor(
         }
     }
 
-    // Whether the form changes more than the name: the address, the sign-in,
-    // a secret typed in, or anything under Advanced.
-    private fun changesConnection(request: SignInRequest): Boolean {
-        val was = started ?: return true
-        return request.address.trim().removeSuffix("/") != was.address ||
-            request.username.trim() != was.username ||
-            request.secret.isNotEmpty() ||
-            request.authMode != was.authMode ||
-            request.home.trim().removeSuffix("/") != was.home ||
-            request.headers.any { !it.saved || it.value.isNotEmpty() } ||
-            request.headers.map { it.name.trim().lowercase() }.filter(String::isNotEmpty) != was.headers.map { it.name.trim().lowercase() } ||
-            request.pins != was.pins ||
-            request.clientCertAlias != was.clientCertAlias
-    }
-
     private fun savedWords(id: String): String {
         // An edit that changed the username keeps the server under a new id.
         val name = sessions.servers.value.find(id)?.name ?: label.trim().ifEmpty { url?.host ?: address }
@@ -562,7 +664,11 @@ class SignInViewModel @Inject constructor(
         val asked = question ?: return
         pins[pinKey(asked.host)] = asked.fingerprint
         question = null
-        if (joining) join() else submit()
+        when {
+            handOver != null -> receive()
+            joining -> join()
+            else -> submit()
+        }
     }
 
     fun distrust() {
@@ -570,3 +676,53 @@ class SignInViewModel @Inject constructor(
         error = "Not connected. The server's certificate wasn't trusted."
     }
 }
+
+// The connection a join or a hand-over checks with, from the form: its home
+// address, headers (the sign-in page's built from its fields), trusted
+// certificates and client certificate; or what is wrong with the form.
+internal sealed interface FormConnection {
+    class Ready(val settings: ConnectionSettings) : FormConnection
+    class Problem(val text: String) : FormConnection
+}
+
+internal fun formConnection(
+    main: HttpUrl,
+    home: String,
+    rows: List<HeaderDraft>,
+    gateway: GatewayDraft,
+    pins: Map<String, String>,
+    clientCert: String?,
+): FormConnection = when (val resolved = resolveConnectionHeaders(rows, gateway, emptyList(), main.isHttps, isPrivateHost(main))) {
+    is ResolvedHeaders.Problem -> FormConnection.Problem(resolved.text)
+    is ResolvedHeaders.Ready -> FormConnection.Ready(
+        ConnectionSettings(
+            home = home.trim().takeIf(String::isNotEmpty)?.let(::normalizeServerUrl),
+            headers = resolved.headers,
+            pins = pins,
+            clientCertAlias = clientCert,
+        ),
+    )
+}
+
+// Whether the form changes more than the server's name: the address, the
+// sign-in, a secret typed in, or anything under Advanced, the sign-in page
+// in front of the server included. With nothing to compare with, it does.
+internal fun connectionChanged(request: SignInRequest, was: ConnectionDraft?): Boolean {
+    was ?: return true
+    return request.address.trim().removeSuffix("/") != was.address ||
+        request.username.trim() != was.username ||
+        request.secret.isNotEmpty() ||
+        request.authMode != was.authMode ||
+        request.home.trim().removeSuffix("/") != was.home ||
+        request.headers.any { !it.saved || it.value.isNotEmpty() } ||
+        request.headers.map { it.name.trim().lowercase() }.filter(String::isNotEmpty) != was.headers.map { it.name.trim().lowercase() } ||
+        request.pins != was.pins ||
+        request.clientCertAlias != was.clientCertAlias ||
+        request.gateway.kind != was.gateway ||
+        request.gateway.first.isNotEmpty() ||
+        request.gateway.second.isNotEmpty()
+}
+
+// The sign-in page a failed sign-in met, if it met one.
+internal fun gatewayOf(error: SignInError): Gateway? =
+    ((error as? SignInError.Failed)?.cause as? SubsonicException.NotSubsonic)?.gateway

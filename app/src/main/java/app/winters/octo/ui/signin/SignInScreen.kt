@@ -70,6 +70,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import app.winters.octo.R
+import app.winters.octo.connection.GatewayWords
 import app.winters.octo.connection.formatFingerprint
 import app.winters.octo.data.SignInError
 import app.winters.octo.design.AccentButton
@@ -82,12 +83,14 @@ import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.glassPanel
 import app.winters.octo.subsonic.Scheme
+import app.winters.octo.subsonic.gateway.GatewayKind
 import app.winters.octo.ui.common.BackButton
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.LocalFeedback
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.LocalReduceMotion
 import app.winters.octo.ui.common.PopupQuestion
+import app.winters.octo.ui.common.Segmented
 import app.winters.octo.ui.common.rememberLast
 import app.winters.octo.ui.nav.ServerForm
 import kotlinx.coroutines.delay
@@ -266,6 +269,10 @@ private fun SignInForm(vm: SignInViewModel) {
 
                 if (vm.joining) {
                     JoinButtons(vm)
+                    // Advanced shows for a family link too: a server behind a
+                    // sign-in page needs its fields before the link can go.
+                    AdvancedToggle(vm.advancedOpen) { vm.advancedOpen = !vm.advancedOpen }
+                    AnimatedVisibility(vm.advancedOpen) { Advanced(vm) }
                     return@Column
                 }
                 AccentButton(
@@ -566,8 +573,10 @@ private fun AdvancedToggle(open: Boolean, onClick: () -> Unit) {
     }
 }
 
-// The settings most servers never need: other ways of signing in, a home
-// address, extra headers and a client certificate.
+// The settings most servers never need: a sign-in page in front of the
+// server, other ways of signing in, a home address, extra headers and a
+// client certificate. For a family link the way of signing in is the
+// link's, so only the rest shows.
 @Composable
 private fun Advanced(vm: SignInViewModel) {
     var revealKey by remember { mutableStateOf(false) }
@@ -579,30 +588,34 @@ private fun Advanced(vm: SignInViewModel) {
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        SwitchRow(
-            "Legacy sign-in",
-            "Only for older servers that reject the normal sign-in.",
-            checked = vm.legacyPassword && !vm.useApiKey,
-            enabled = !vm.useApiKey,
-        ) { vm.legacyPassword = it }
+        GatewaySignIn(vm)
 
-        // Before signing in nobody knows whether the server takes keys, so
-        // one may be tried; once known, the switch shows only where it works.
-        if (vm.takesApiKeys != false || vm.useApiKey) {
+        if (!vm.joining) {
             SwitchRow(
-                "Sign in with an API key",
-                if (vm.takesApiKeys == true) "Your server gives out API keys." else "For servers that give out API keys.",
-                checked = vm.useApiKey,
-            ) { vm.useApiKey = it }
-            if (vm.useApiKey) {
-                GlassInput(
-                    value = vm.apiKey,
-                    onValueChange = { vm.apiKey = it },
-                    placeholder = if (vm.editing) "API key (unchanged)" else "API key",
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                    visualTransformation = if (revealKey) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailing = { RevealToggle(revealKey) { revealKey = !revealKey } },
-                )
+                "Legacy sign-in",
+                "Only for older servers that reject the normal sign-in.",
+                checked = vm.legacyPassword && !vm.useApiKey,
+                enabled = !vm.useApiKey,
+            ) { vm.legacyPassword = it }
+
+            // Before signing in nobody knows whether the server takes keys, so
+            // one may be tried; once known, the switch shows only where it works.
+            if (vm.takesApiKeys != false || vm.useApiKey) {
+                SwitchRow(
+                    "Sign in with an API key",
+                    if (vm.takesApiKeys == true) "Your server gives out API keys." else "For servers that give out API keys.",
+                    checked = vm.useApiKey,
+                ) { vm.useApiKey = it }
+                if (vm.useApiKey) {
+                    GlassInput(
+                        value = vm.apiKey,
+                        onValueChange = { vm.apiKey = it },
+                        placeholder = if (vm.editing) "API key (unchanged)" else "API key",
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                        visualTransformation = if (revealKey) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailing = { RevealToggle(revealKey) { revealKey = !revealKey } },
+                    )
+                }
             }
         }
 
@@ -647,6 +660,51 @@ private fun Advanced(vm: SignInViewModel) {
         }
 
         ClientCertificate(vm)
+    }
+}
+
+// The sign-in page in front of the server (Authentik, Authelia, a proxy's
+// password or Cloudflare Access): which sign-in it takes from apps, its two
+// fields, and what to know about it. A sign-in that met one opens here, at
+// the kind it takes.
+@Composable
+private fun GatewaySignIn(vm: SignInViewModel) {
+    var revealSecond by remember { mutableStateOf(false) }
+    Section(GatewayWords.LABEL_SECTION, GatewayWords.LABEL_CAPTION) {
+        val kinds = GatewayKind.entries
+        Segmented(
+            options = kinds.map(GatewayWords::kindLabel),
+            selected = kinds.indexOf(vm.gatewayKind),
+            onSelect = { vm.pickGateway(kinds[it]) },
+            title = GatewayWords.LABEL_SECTION,
+        )
+        if (vm.gatewayKind != GatewayKind.None) {
+            val password = vm.gatewayKind == GatewayKind.Password
+            GlassInput(
+                value = vm.gatewayFirst,
+                onValueChange = { vm.gatewayFirst = it },
+                placeholder = if (password) GatewayWords.LABEL_USERNAME else GatewayWords.LABEL_CLIENT_ID,
+                keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Text else KeyboardType.Ascii, imeAction = ImeAction.Next),
+                leading = { FieldIcon(if (password) OctoIcons.Artist else OctoIcons.Key) },
+            )
+            GlassInput(
+                value = vm.gatewaySecond,
+                onValueChange = { vm.gatewaySecond = it },
+                placeholder = if (password) GatewayWords.LABEL_PASSWORD else GatewayWords.LABEL_CLIENT_SECRET,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
+                visualTransformation = if (revealSecond) VisualTransformation.None else PasswordVisualTransformation(),
+                leading = { FieldIcon(if (password) OctoIcons.Key else OctoIcons.Lock) },
+                trailing = { RevealToggle(revealSecond) { revealSecond = !revealSecond } },
+            )
+            // Values saved for this kind stay while its fields are left empty.
+            if (vm.gatewayKind == vm.gatewaySaved) Text(GatewayWords.LABEL_SAVED, style = OctoType.caption, color = OctoColors.TextMuted)
+            // A sign-in page's password never crosses the internet readable.
+            if (vm.insecure) Text(GatewayWords.NEEDS_HTTPS, style = OctoType.caption, color = OctoColors.Error)
+        }
+        // How to get through the one a sign-in met, and for a family link
+        // who to ask for an account there.
+        vm.gateway?.let { Text(GatewayWords.hint(it), style = OctoType.caption, color = OctoColors.TextSecondary) }
+        if (vm.joining) Text(GatewayWords.JOIN_HINT, style = OctoType.caption, color = OctoColors.TextMuted)
     }
 }
 

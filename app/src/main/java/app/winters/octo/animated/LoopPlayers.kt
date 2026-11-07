@@ -27,6 +27,8 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import app.winters.octo.connection.ConnectionSecurity
+import app.winters.octo.offline.dropHtmlCopies
 import app.winters.octo.subsonic.AnimatedClip
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.sync.Mutex
@@ -53,25 +55,32 @@ private const val PICKS_KEPT = 64
 class LoopPlayers @Inject constructor(
     @ApplicationContext private val context: Context,
     http: OkHttpClient,
+    security: ConnectionSecurity,
 ) {
-    private val fetcher = LoopFetcher(http)
+    // Loops come from Apple or the server; one from the server that is a
+    // sign-in page's HTML is refused, never played or kept.
+    private val loopHttp = security.byteClient(http)
+
+    private val fetcher = LoopFetcher(loopHttp)
 
     // The formats picked from: HEVC too where the phone decodes it in
     // hardware (Apple's H.264 stops short of a large screen's size).
     val codecs: Set<LoopCodec> by lazy { playableLoopCodecs() }
 
+    // A loop kept before sign-in pages were refused can be one: such copies
+    // go as the store opens, and are fetched again.
     private val cache: SimpleCache by lazy {
         SimpleCache(
             File(context.cacheDir, "animated-loops"),
             LeastRecentlyUsedCacheEvictor(LOOP_CACHE_BYTES),
             StandaloneDatabaseProvider(context),
-        )
+        ).also { it.dropHtmlCopies() }
     }
 
     private val streamed by lazy {
         CacheDataSource.Factory()
             .setCache(cache)
-            .setUpstreamDataSourceFactory(OkHttpDataSource.Factory(http))
+            .setUpstreamDataSourceFactory(OkHttpDataSource.Factory(loopHttp))
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     }
 

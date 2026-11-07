@@ -9,10 +9,11 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// A client of its own for a kept server that is not the one in use: its
-// headers, trusted certificates and client certificate, and a short time to
-// answer, without touching the shared client, which stays with the server
-// in use.
+// A client of its own for a kept server that is not the one in use, or for
+// checking a sign-in before it is kept: its headers, trusted certificates
+// and client certificate, a sign-in page cookie jar that starts empty, and
+// a short time to answer, without touching the shared client, which stays
+// with the server in use.
 @Singleton
 class ServerClients @Inject constructor(
     @ApplicationContext private val context: Context,

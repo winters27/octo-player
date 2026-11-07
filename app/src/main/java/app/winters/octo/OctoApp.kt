@@ -3,6 +3,7 @@ package app.winters.octo
 import android.app.Application
 import app.winters.octo.admin.ServerUpdates
 import app.winters.octo.animated.AnimatedArts
+import app.winters.octo.connection.ConnectionSecurity
 import app.winters.octo.data.ServerDownloads
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.LibraryFiles
@@ -56,6 +57,7 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var family: FamilyHub
     @Inject lateinit var serverUpdates: ServerUpdates
     @Inject lateinit var animatedArts: AnimatedArts
+    @Inject lateinit var security: ConnectionSecurity
     @Inject lateinit var themes: ThemeStore
 
     // Whether a main screen has been created in this process yet, for the
@@ -97,8 +99,9 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {
         // Covers from a server load through the same connection pool as the
-        // API, with calls of their own.
-        val covers = http.newBuilder().dispatcher(Dispatcher().apply { maxRequestsPerHost = COVER_REQUESTS_PER_HOST }).build()
+        // API, with calls of their own. A sign-in page's HTML in place of one
+        // is refused, never kept as the cover.
+        val covers = security.byteClient(http.newBuilder().dispatcher(Dispatcher().apply { maxRequestsPerHost = COVER_REQUESTS_PER_HOST }).build())
         return ImageLoader.Builder(context)
             .components {
                 add(OkHttpNetworkFetcherFactory(callFactory = { covers }))

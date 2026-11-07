@@ -1,13 +1,15 @@
 package app.winters.octo.data
 
+import app.winters.octo.connection.GatewayWords
 import app.winters.octo.subsonic.SubsonicException
 
 // What to tell someone when a request fails.
 fun Throwable.userMessage(): String = when (this) {
     is SubsonicException.Unreachable ->
         "Couldn't reach the server. Check the address, and that you're on the right network."
-    is SubsonicException.NotSubsonic ->
-        if (serverBusy) "The server isn't answering right now. It may be restarting, so try again in a moment."
+    // A sign-in page in front of the server is named, with how to get through.
+    is SubsonicException.NotSubsonic -> GatewayWords.failureFor(this)
+        ?: if (serverBusy) "The server isn't answering right now. It may be restarting, so try again in a moment."
         else "That address answered, but not like a music server. Check the port."
     is SubsonicException.WrongCredentials -> "Wrong username or password."
     is SubsonicException.AuthNotSupported ->
@@ -26,4 +28,5 @@ fun SignInError.userMessage(): String = when (this) {
     is SignInError.Untrusted -> "The server's certificate isn't trusted by this phone."
     is SignInError.AlreadyKept -> "$name is already in your list with that address and username."
     SignInError.Gone -> "That server isn't in your list any more."
+    is SignInError.Problem -> text
 }

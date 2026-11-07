@@ -79,6 +79,15 @@ class StreamCache @Inject constructor(
     // Whether any of a song is saved under this name.
     fun isPartlySaved(key: String): Boolean = _enabled.value && cache.getCachedSpans(key).isNotEmpty()
 
+    // Lets the song saved under this name go, with what it was made from,
+    // when it starts like an HTML page: a sign-in page's answer saved before
+    // such answers were refused. True when it went.
+    fun dropIfHtml(key: String): Boolean {
+        if (!_enabled.value || !cache.startsLikeHtml(key)) return false
+        shapes.drop(key)
+        return true
+    }
+
     // The names of every song saved whole.
     fun fullySavedKeys(): Set<String> = if (!_enabled.value) emptySet() else cache.keys.filterTo(HashSet(), ::isFullySaved)
 

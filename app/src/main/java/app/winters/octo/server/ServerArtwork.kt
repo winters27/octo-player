@@ -10,6 +10,8 @@ import app.winters.octo.covers.CoverDownloads
 import app.winters.octo.covers.CoverLanes
 import app.winters.octo.covers.coverBucket
 import app.winters.octo.covers.keptCoverOrder
+import app.winters.octo.offline.HTML_SNIFF_BYTES
+import app.winters.octo.subsonic.gateway.looksLikeHtmlFile
 import coil3.ImageLoader
 import coil3.decode.DataSource
 import coil3.decode.ImageSource
@@ -94,9 +96,15 @@ class ServerArtworkFetcher(
         suspend fun download(cover: ArtworkRef.Server, size: Int): FetchResult? {
             val key = serverCoverDiskKey(cover, size)
             if (key in standIns) return null
-            val url = client.coverArtUrl(cover.coverId, size).toString().toUri()
-            val (fetcher, _) = imageLoader.components.newFetcher(url, options.copy(diskCacheKey = key), imageLoader) ?: return null
-            return fetcher.fetch()?.let { checked(it, key) }
+            // A sign-in page kept under this key before such answers were
+            // refused is let go, and the cover fetched once more.
+            repeat(2) {
+                val url = client.coverArtUrl(cover.coverId, size).toString().toUri()
+                val (fetcher, _) = imageLoader.components.newFetcher(url, options.copy(diskCacheKey = key), imageLoader) ?: return null
+                val result = fetcher.fetch() ?: return null
+                if (!storedHtml(result, key)) return checked(result, key)
+            }
+            return null
         }
         suspend fun picture(cover: ArtworkRef.Server): FetchResult? {
             val name = serverCoverKey(cover)
@@ -121,6 +129,7 @@ class ServerArtworkFetcher(
         for (key in keptCoverKeys(cover, px, anySize)) {
             val snapshot = disk.openSnapshot(key) ?: continue
             val result = SourceFetchResult(ImageSource(snapshot.data, disk.fileSystem, key, snapshot, null), null, DataSource.DISK)
+            if (storedHtml(result, key)) continue
             checked(result, key)?.let { return it }
         }
         return null
@@ -134,6 +143,15 @@ class ServerArtworkFetcher(
         imageLoader.diskCache?.remove(key)
         standIns += key
         return null
+    }
+
+    // Whether a cover is an HTML page, a sign-in page's answer kept as the
+    // cover before such answers were refused. It is let go, from the disk too.
+    private fun storedHtml(result: FetchResult, key: String): Boolean {
+        if (!startsLikeHtml(result)) return false
+        (result as? SourceFetchResult)?.source?.close()
+        imageLoader.diskCache?.remove(key)
+        return true
     }
 
     class Factory(private val sessions: SessionRepository) : Fetcher.Factory<ArtworkRef.Server> {
@@ -167,6 +185,15 @@ internal fun isStandIn(result: FetchResult): Boolean {
     if (ahead.request(StandInCovers.longest + 1L)) return false
     val bytes = ahead.readByteArray()
     return StandInCovers.mayBe(bytes.size.toLong()) && StandInCovers.isStandIn(bytes)
+}
+
+// Whether a fetched cover starts like an HTML page. Only its first bytes
+// are read, ahead of the decoder, which still reads it all.
+internal fun startsLikeHtml(result: FetchResult): Boolean {
+    val source = (result as? SourceFetchResult)?.source ?: return false
+    val ahead = source.source().peek()
+    ahead.request(HTML_SNIFF_BYTES.toLong())
+    return looksLikeHtmlFile(ahead.readByteArray(minOf(ahead.buffer.size, HTML_SNIFF_BYTES.toLong())))
 }
 
 // A cover is remembered by its server and id, whatever address fetched it,

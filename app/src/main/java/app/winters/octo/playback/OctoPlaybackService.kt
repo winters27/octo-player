@@ -38,6 +38,7 @@ import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.FindLengths
 import app.winters.octo.discovery.asTrack
 import app.winters.octo.liveradio.LiveLookup
+import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.offline.Prefetcher
 import app.winters.octo.output.Casting
 import app.winters.octo.output.DeviceMedia
@@ -160,6 +161,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var outputs: Outputs
     @Inject lateinit var deviceMedia: DeviceMedia
     @Inject lateinit var feedback: Feedback
+    @Inject lateinit var offlineDownloads: OfflineDownloads
     @Inject lateinit var switcher: ServerSwitch
     @Inject lateinit var sessions: SessionRepository
     @Inject lateinit var liveLookup: LiveLookup
@@ -662,10 +664,19 @@ class OctoPlaybackService : MediaLibraryService() {
                 scope.launch { player.prepare() }
                 return
             }
+            // A file kept before sign-in pages were refused can be one: it is
+            // let go, so the song comes from the server next time.
+            if (error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED) {
+                player.currentMediaItem?.localConfiguration?.uri?.toString()?.let { uri ->
+                    scope.launch(Dispatchers.IO) {
+                        if (!streams.dropStoredHtml(uri)) offlineDownloads.dropStoredHtml(uri)
+                    }
+                }
+            }
             if (!player.playWhenReady) return
             failedInARow++
             val title = player.currentMediaItem?.mediaMetadata?.title?.toString()?.takeIf(String::isNotBlank) ?: "a song"
-            val why = playFailureOf(error, isFind(player.currentMediaItem?.mediaId.orEmpty())).words
+            val why = playFailureWords(error, isFind(player.currentMediaItem?.mediaId.orEmpty()))
             // A station that cannot play stops there: the next station is
             // the listener's to choose.
             if (failedInARow >= player.mediaItemCount || !player.hasNextMediaItem() || isRadio(player.currentMediaItem?.mediaId.orEmpty())) {
