@@ -66,6 +66,7 @@ import app.winters.octo.design.hoverLift
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.library.LibraryState
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.OCTO_LYRICS
 import app.winters.octo.connection.GatewayWords
@@ -275,15 +276,27 @@ fun switchServer(app: AppState, id: String) {
     if (server.signedOut) return signInTo(app, server)
     val page = if (app.navigator.current.page == Page.Settings) Page.Settings else Page.Home
     app.switchTo(id, page) { outcome ->
-        if (outcome !is SwitchOutcome.NeedsPassword) return@switchTo
-        // Moving the address to https needs the address field, which the
-        // edit sheet has.
-        if (outcome.note == GatewayWords.NEEDS_HTTPS) editServer(app, outcome.server, outcome.note) else signInTo(app, outcome.server, outcome.note)
+        if (outcome is SwitchOutcome.NeedsPassword) serverSheet(app, sheetFor(outcome), outcome.server, outcome.note)
     }
 }
 
-// What a server sheet is for.
-private enum class SheetKind { Add, Edit, SignIn }
+// What a server sheet is for. Secure is a switch to a kept server whose
+// sign-in page needs https: the edit sheet's fields, for the address, and
+// a sign-in again that makes it the one in use once it works.
+internal enum class SheetKind { Add, Edit, SignIn, Secure }
+
+// The sheet a switch that asks for the password opens: moving the address
+// to https needs the address field, which the secure sheet has.
+internal fun sheetFor(outcome: SwitchOutcome.NeedsPassword): SheetKind =
+    if (outcome.note == GatewayWords.NEEDS_HTTPS) SheetKind.Secure else SheetKind.SignIn
+
+// What saving a server sheet asks of the accounts, under `ticket`.
+internal suspend fun saveSheet(accounts: Accounts, kind: SheetKind, server: SavedServer?, form: SignInForm, ticket: Long): SignInOutcome = when (kind) {
+    SheetKind.Add -> accounts.add(form.request())
+    SheetKind.Edit -> accounts.edit(server!!.id, form.request(), form.label, ticket)
+    SheetKind.SignIn -> accounts.signInAgain(server!!.id, form.request(), ticket)
+    SheetKind.Secure -> accounts.signInAgain(server!!.id, form.request(), ticket, form.label)
+}
 
 fun addServer(app: AppState) = serverSheet(app, SheetKind.Add, null)
 
@@ -297,7 +310,7 @@ private fun serverSheet(app: AppState, kind: SheetKind, server: SavedServer?, no
     val opening = Any()
     app.popups.showCentred(width = SettingsSize.Sheet, maxHeight = SettingsSize.SheetMax) { close ->
         key(opening) {
-            val form = remember { SignInForm(server, keepsSecret = kind == SheetKind.Edit).also { f -> note?.let { f.result = false to it } } }
+            val form = remember { SignInForm(server, keepsSecret = kind == SheetKind.Edit || kind == SheetKind.Secure).also { f -> note?.let { f.result = false to it } } }
             ServerSheet(app, kind, server, form, close)
         }
     }
@@ -320,7 +333,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
         form.result = null
         val tried = form.attemptAddress
         scope.launch {
-            val request = if (kind == SheetKind.Edit && server != null && form.password.isEmpty() && form.apiKey.isEmpty()) null else form.request()
+            val request = if (form.keepsSecret && server != null && form.password.isEmpty() && form.apiKey.isEmpty()) null else form.request()
             val tested = if (request == null) null else app.accounts.test(request)
             when (tested) {
                 null -> form.result = false to "Enter the password to test the connection."
@@ -355,11 +368,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
         val ticket = app.accounts.ticket()
         val tried = form.attemptAddress
         scope.launch {
-            val outcome = when (kind) {
-                SheetKind.Add -> app.accounts.add(form.request())
-                SheetKind.Edit -> app.accounts.edit(server!!.id, form.request(), form.label, ticket)
-                SheetKind.SignIn -> app.accounts.signInAgain(server!!.id, form.request(), ticket)
-            }
+            val outcome = saveSheet(app.accounts, kind, server, form, ticket)
             form.busy = false
             when (outcome) {
                 is SignInOutcome.Done -> {
@@ -410,14 +419,14 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
         when (kind) {
             SheetKind.Add -> "Add a server"
             SheetKind.Edit -> "Edit ${server?.name.orEmpty()}"
-            SheetKind.SignIn -> "Sign in to ${server?.name.orEmpty()}"
+            SheetKind.SignIn, SheetKind.Secure -> "Sign in to ${server?.name.orEmpty()}"
         },
     )
     PopupPadding {
         when (kind) {
             SheetKind.Add -> Unit
             SheetKind.Edit -> Txt("Octo signs in with the new details before it saves them.", DesktopType.meta, OctoColors.TextSecondary, maxLines = 2)
-            SheetKind.SignIn -> Txt(server?.let(::accountLine).orEmpty(), DesktopType.meta, OctoColors.TextSecondary)
+            SheetKind.SignIn, SheetKind.Secure -> Txt(server?.let(::accountLine).orEmpty(), DesktopType.meta, OctoColors.TextSecondary)
         }
         if (kind != SheetKind.SignIn) {
             Field("Server address") {
@@ -426,7 +435,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
                     form::typeAddress,
                     Modifier.fillMaxWidth(),
                     placeholder = "music.example.com or 192.168.1.20:4533",
-                    focusRequester = if (kind == SheetKind.Add) first else null,
+                    focusRequester = if (kind == SheetKind.Add || kind == SheetKind.Secure) first else null,
                     onSubmit = ::save,
                     leading = { SchemeToggle(form.scheme.prefix, form::toggleScheme) },
                 )
@@ -445,7 +454,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
                 SecretField(
                     form.password,
                     { form.password = it; form.result = null },
-                    if (kind == SheetKind.Edit) "Leave empty to keep the saved one" else "Password",
+                    if (form.keepsSecret) "Leave empty to keep the saved one" else "Password",
                     ::save,
                     if (kind == SheetKind.SignIn) first else null,
                 )
@@ -475,7 +484,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
                 when (kind) {
                     SheetKind.Add -> "Add"
                     SheetKind.Edit -> "Save"
-                    SheetKind.SignIn -> "Sign in"
+                    SheetKind.SignIn, SheetKind.Secure -> "Sign in"
                 },
                 ::save,
                 lit = true,

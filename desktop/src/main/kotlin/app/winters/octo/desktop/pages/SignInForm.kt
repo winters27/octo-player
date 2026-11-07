@@ -33,6 +33,7 @@ import app.winters.octo.subsonic.isPrivateHost
 import app.winters.octo.subsonic.serverUrl
 import app.winters.octo.subsonic.splitScheme
 import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 // What the sign-in page holds while someone fills it in, as the phone's
 // sign-in keeps it: the address in two parts (the scheme, and the rest as
@@ -118,8 +119,23 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
 
     // The kept server this form signs in to again, when it was filled in
     // for one (AppState.fillSignIn): signing in then brings that server up
-    // to date rather than keeping another.
+    // to date rather than keeping another. Another host typed lets go of it
+    // for good.
     var keptId: String? = null
+
+    // The kept server a sign-in brings up to date: the one the form was
+    // filled in for, while its host is still the one typed and, unless an
+    // API key says whose it is, its username too. Anything else is signed in
+    // to as a server of its own, never in place of the kept one.
+    val signsInAgainTo: String?
+        get() {
+            val kept = lastServer?.takeIf { it.id == keptId } ?: return null
+            if (url?.host != keptHost) return null
+            return kept.id.takeIf { useApiKey || username.trim() == kept.username }
+        }
+
+    // The host of the server the form started from.
+    private val keptHost: String? = last?.address?.toHttpUrlOrNull()?.host
 
     init {
         if (last != null) {
@@ -145,6 +161,7 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
             address = text
             if (!schemePicked) scheme = automaticScheme(text)
         }
+        if (url?.host != keptHost) keptId = null
         result = null
         movedFrom(before)
     }

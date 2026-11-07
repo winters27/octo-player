@@ -305,7 +305,7 @@ class GatewaySignInTest {
         assertTrue(withContext(Dispatchers.IO) { asked.await(5, TimeUnit.SECONDS) })
         held.hold = true
         val id = first.connection.server.id
-        val stop = accounts.stopTicket()
+        val stop = accounts.stopTicket(id)
         val out = launch(Dispatchers.IO, start = CoroutineStart.UNDISPATCHED) { accounts.signOut(id, stop) }
         fun signedOut(store: SettingsStore) = store.current.activeServer == null && store.current.servers.single { it.id == id }.signedOut
         assertTrue("written at once", signedOut(settings))

@@ -152,7 +152,9 @@ class ConnectionOrderTest {
         assertEquals(workId, accounts.active!!.id)
         work.calls.clear()
         runBlocking { app.connection!!.client.ping() }
-        assertEquals("work", work.calls.single().headers["X-Token"])
+        // The window reads work's library meanwhile, so every call there,
+        // the ping among them, carries work's header.
+        assertEquals(setOf("work"), work.calls.map { it.headers["X-Token"] }.toSet())
     }
 
     // An edit finishing after a sign-out stays signed out: saved, not made

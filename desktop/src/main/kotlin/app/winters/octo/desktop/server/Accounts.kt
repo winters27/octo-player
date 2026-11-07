@@ -266,14 +266,28 @@ class Accounts(
     // so a change begun before it never undoes it.
     private val signedOutAt = ConcurrentHashMap<String, Long>()
 
+    // The ticket each kept server was last removed under, so a change begun
+    // before it never brings it back, under its id or a new one.
+    private val removedAt = ConcurrentHashMap<String, Long>()
+
     // A ticket for a sign-in, edit or switch, taken when it is asked for.
     fun ticket(): Long = tickets.incrementAndGet()
 
-    // A ticket for signing out of or removing the server in use, taken when
-    // it is asked for, before anything waits: from then on, a sign-in, edit
-    // or switch begun earlier no longer counts as the one in use, here or in
-    // the window.
-    fun stopTicket(): Long = ticket().also { taken -> stopped.accumulateAndGet(taken) { a, b -> maxOf(a, b) } }
+    // A ticket for signing out of or removing the server in use, `id`,
+    // taken when it is asked for, before anything waits: from then on, a
+    // sign-in, edit or switch begun earlier no longer counts as the one in
+    // use, here or in the window, and one of `id` begun earlier leaves it
+    // signed out (or, `removing`, not kept), even when it lands before the
+    // sign-out or removal itself.
+    fun stopTicket(id: String?, removing: Boolean = false): Long = synchronized(handover) {
+        ticket().also { taken ->
+            stopped.accumulateAndGet(taken) { a, b -> maxOf(a, b) }
+            if (id != null) {
+                signedOutAt[id] = taken
+                if (removing) removedAt[id] = taken
+            }
+        }
+    }
 
     // Whether a connection is the one in use now: made by the last sign-in,
     // edit or switch to finish, and begun after any sign-out or removal of
@@ -319,30 +333,32 @@ class Accounts(
     suspend fun edit(id: String, request: SignInRequest, label: String? = null, generation: Long = ticket()): SignInOutcome =
         writer.withLock {
             val old = find(id) ?: return@withLock SignInOutcome.Failed("That server isn't in your list any more.")
-            val filled = if (request.secret.isNotEmpty()) {
-                request
-            } else {
-                val saved = savedSecret(old) ?: return@withLock SignInOutcome.Failed(if (request.mode == AuthMode.ApiKey) "Enter the API key." else "Enter the password.")
-                request.withSecret(saved)
-            }
+            val filled = filled(old, request) ?: return@withLock missingSecret(request)
             keep(filled, use = id == settings.current.activeServer, generation, replacing = old, label = label)
         }
 
     // Signs in again to a kept server and makes it the one in use: the same
     // server, brought up to date with the form's details (an address moved
-    // to https, say). An empty password keeps the saved one, and empty
-    // sign-in page fields their saved values, as an edit does.
-    suspend fun signInAgain(id: String, request: SignInRequest, generation: Long = ticket()): SignInOutcome =
+    // to https, say), and `label` its name when given. An empty password
+    // keeps the saved one, and empty sign-in page fields their saved values,
+    // as an edit does.
+    suspend fun signInAgain(id: String, request: SignInRequest, generation: Long = ticket(), label: String? = null): SignInOutcome =
         writer.withLock {
             val old = find(id) ?: return@withLock SignInOutcome.Failed("That server isn't in your list any more.")
-            val filled = if (request.secret.isNotEmpty()) {
-                request
-            } else {
-                val saved = savedSecret(old) ?: return@withLock SignInOutcome.Failed(if (request.mode == AuthMode.ApiKey) "Enter the API key." else "Enter the password.")
-                request.withSecret(saved)
-            }
-            keep(filled, use = true, generation, replacing = old)
+            val filled = filled(old, request) ?: return@withLock missingSecret(request)
+            keep(filled, use = true, generation, replacing = old, label = label)
         }
+
+    // The request with its secret: the one typed, or else the kept server's
+    // saved one. A server signed out of has none to fall back on, whatever
+    // the store still holds while its sign-out finishes.
+    private suspend fun filled(old: SavedServer, request: SignInRequest): SignInRequest? = when {
+        request.secret.isNotEmpty() -> request
+        old.signedOut -> null
+        else -> savedSecret(old)?.let(request::withSecret)
+    }
+
+    private fun missingSecret(request: SignInRequest) = SignInOutcome.Failed(if (request.mode == AuthMode.ApiKey) "Enter the API key." else "Enter the password.")
 
     // Gives a kept server a name of its own; an empty one shows its host.
     fun rename(id: String, label: String) {
@@ -408,8 +424,8 @@ class Accounts(
         memory[id] = secret
         memoryHeaders[id] = reached.headers
         val made = synchronized(handover) {
-            // Removed while this ran: it is not brought back.
-            if (base != null && find(base.id) == null) return@synchronized null
+            // Removed while this ran, or asked to be: it is not brought back.
+            if (base != null && (find(base.id) == null || (removedAt[base.id] ?: 0L) > generation)) return@synchronized null
             // A sign-out or removal of the server in use asked for after this
             // change began leaves the server saved but not in use, and a
             // sign-out of this server asked for after it began keeps it
@@ -431,11 +447,15 @@ class Accounts(
             stored to if (activates) activate(stored, secret, reached.headers, generation) else null
         }
         // Removed or signed out of meanwhile: nothing of this sign-in is
-        // kept, in memory or in the store, whatever address it was for.
+        // kept, in memory or in the store, whatever address it was for; a
+        // removed server's header values go too, under whichever id.
         if (made == null || made.first.signedOut) {
             memory.remove(id)
             memoryHeaders.remove(id)
-            withContext(keychain) { runCatching { secrets.delete(secretAccount(username, address)) } }
+            withContext(keychain) {
+                runCatching { secrets.delete(secretAccount(username, address)) }
+                if (made == null) runCatching { secrets.delete(headersAccount(saved)) }
+            }
         }
         val (kept, connection) = made ?: return SignInOutcome.Failed("That server isn't in your list any more.")
         // Header values an older version filed by address go once no kept

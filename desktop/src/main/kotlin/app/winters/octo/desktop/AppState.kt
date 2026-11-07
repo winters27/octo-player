@@ -826,7 +826,7 @@ class AppState(
         // made the one in use meanwhile; the ticket lets go of that one.
         val shown = connection?.server?.id
         leaveServer()
-        val stop = accounts.stopTicket()
+        val stop = accounts.stopTicket(shown)
         // The server is forgotten at once; the password store is left to
         // finish off the window's thread.
         scope.launch(start = CoroutineStart.UNDISPATCHED) { accounts.signOut(shown, stop) }
@@ -952,7 +952,7 @@ class AppState(
         val inUse = id == connection?.server?.id
         if (inUse) leaveServer()
         // Taken now, as a sign-out takes its own.
-        val stop = if (inUse) accounts.stopTicket() else null
+        val stop = if (inUse) accounts.stopTicket(id, removing = true) else null
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             accounts.remove(id, stop)
             if (forgetHere && listeningRoot != null) {
