@@ -48,21 +48,20 @@ extension SubsonicClient {
     /// device. Never logged or sent anywhere else.
     public func handOverSecret() -> String { credentials.secret }
 
-    /// Runs one request and hands back its body once it is known to be an ok answer.
+    /// Runs one request through `ServerExchange` and hands back its body once it is known to be
+    /// an ok answer.
     func exchange(_ request: URLRequest, endpoint: String) async throws -> Data {
         let data: Data
-        let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, _) = try await ServerExchange.data(for: request, client: self, endpoint: endpoint)
+        } catch let error as SubsonicError {
+            throw error
         } catch is CancellationError {
             throw CancellationError()
         } catch let error as URLError where error.code == .cancelled && Task.isCancelled {
             throw CancellationError()
         } catch {
             throw SubsonicError(error)
-        }
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw SubsonicError.notSubsonic("HTTP \(http.statusCode) from \(endpoint)", status: http.statusCode)
         }
         _ = try Self.payload(data, key: nil)
         return data
@@ -120,16 +119,16 @@ extension SubsonicClient {
     }
 
     /// Whether the server lists an extension at this version, or nil when it could not be
-    /// asked: out of reach, a proxy answering while it restarts, a page that is not the
-    /// server's, or the sign-in refused. A server that answers with an error, or has no such
-    /// address (a 404), has no extensions to list, which is a no.
+    /// asked: out of reach, a proxy answering while it restarts, a sign-in page in front of the
+    /// server, a page that is not the server's, or the sign-in refused. A server that answers
+    /// with an error, or has no such address (a 404), has no extensions to list, which is a no.
     public func supportsIfKnown(_ name: String, version: Int = 1) async -> Bool? {
         do {
             return try await extensionList().contains("\(name):\(version)")
         } catch let error as SubsonicError {
             switch error {
             case .unreachable, .wrongCredentials: return nil
-            case .notSubsonic(_, let status): return status != nil && !error.serverBusy ? false : nil
+            case .notSubsonic(_, let status, let gateway, _): return gateway == nil && status != nil && !error.serverBusy ? false : nil
             default: return false
             }
         } catch {

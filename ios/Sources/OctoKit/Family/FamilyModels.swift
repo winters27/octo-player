@@ -604,43 +604,42 @@ extension SubsonicClient {
     }
 }
 
-/// The new device's open calls: no sign-in goes with them.
+/// The new device's open calls: no sign-in goes with them. They go through a client made for
+/// the link's address (its headers, certificates and sign-in page fields), whose credentials
+/// are never used.
 public enum FamilyOpenCalls {
     /// Redeems the token from the QR code, naming this device, and answers the id to wait on.
-    public static func redeem(server: URL, session: URLSession, token: String, deviceName: String, platform: FamilyPlatform,
-                              headers: [String: String] = [:]) async throws -> String {
+    public static func redeem(client: SubsonicClient, token: String, deviceName: String, platform: FamilyPlatform) async throws -> String {
         let redeemed: FamilySignInRedeemed = try await openCall(
-            server, session, "redeemFamilySignIn",
+            client, "redeemFamilySignIn",
             [("token", token), ("deviceName", deviceName.trimmingCharacters(in: .whitespacesAndNewlines)), ("platform", platform.wire)],
-            key: "familySignInRedeemed", headers: headers)
+            key: "familySignInRedeemed")
         return redeemed.id
     }
 
     /// How the redeemed hand-over stands, with the sealed sign-in once allowed.
-    public static func status(server: URL, session: URLSession, id: String, headers: [String: String] = [:]) async throws -> FamilySignInStatus {
-        try await openCall(server, session, "getFamilySignInRedeem", [("id", id)], key: "familySignInRedeem", headers: headers)
+    public static func status(client: SubsonicClient, id: String) async throws -> FamilySignInStatus {
+        try await openCall(client, "getFamilySignInRedeem", [("id", id)], key: "familySignInRedeem")
     }
 
-    static func openCall<T: Decodable>(_ server: URL, _ session: URLSession, _ endpoint: String, _ params: [(String, String)],
-                                       key: String, headers: [String: String]) async throws -> T {
-        var parts = URLComponents(url: server.appendingPathComponent("rest").appendingPathComponent(endpoint), resolvingAgainstBaseURL: false)!
+    static func openCall<T: Decodable>(_ client: SubsonicClient, _ endpoint: String, _ params: [(String, String)],
+                                       key: String) async throws -> T {
+        var parts = URLComponents(url: client.baseURL.appendingPathComponent("rest").appendingPathComponent(endpoint),
+                                  resolvingAgainstBaseURL: false)!
         let query = [("v", SubsonicClient.apiVersion), ("c", SubsonicClient.clientName), ("f", "json")] + params
         parts.percentEncodedQueryItems = query.map {
             URLQueryItem(name: $0.0, value: $0.1.addingPercentEncoding(withAllowedCharacters: SubsonicClient.queryValue))
         }
-        var request = URLRequest(url: parts.url!, timeoutInterval: 20)
-        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+        let request = URLRequest(url: parts.url!, timeoutInterval: 20)
         let data: Data
-        let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, _) = try await ServerExchange.data(for: request, client: client, endpoint: endpoint)
+        } catch let error as SubsonicError {
+            throw error
         } catch is CancellationError {
             throw CancellationError()
         } catch {
             throw SubsonicError(error)
-        }
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw SubsonicError.notSubsonic("HTTP \(http.statusCode) from \(endpoint)", status: http.statusCode)
         }
         return try SubsonicClient.read(data, key: key, fallback: nil)
     }

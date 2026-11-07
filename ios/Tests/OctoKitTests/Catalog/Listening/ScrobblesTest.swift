@@ -36,7 +36,7 @@ import Testing
     @Test func onlyPassingTroubleIsRetried() {
         #expect(worthRetrying(URLError(.notConnectedToInternet)))
         #expect(worthRetrying(OctoError.http(502)))
-        #expect(worthRetrying(OctoError.notSubsonic))
+        #expect(worthRetrying(OctoError.notSubsonic()))
         #expect(worthRetrying(OctoError.wrongCredentials("Wrong username or password")))
         #expect(!worthRetrying(OctoError.notFound("Song not found")))
         #expect(!worthRetrying(OctoError.server(code: 0, message: "Failed")))

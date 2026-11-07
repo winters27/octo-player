@@ -32,9 +32,11 @@ public func userMessage(for error: Error) -> String? {
     }
     guard let error = error as? OctoError else { return "Something went wrong." }
     switch error {
+    case .notSubsonic(let gateway?, let loginSent), .http(_, let gateway?, let loginSent):
+        return GatewayWords.failure(gateway, loginSent: loginSent)
     case .notSubsonic:
         return "That address answered, but not like a music server. Check the port."
-    case .http(let status):
+    case .http(let status, _, _):
         return busyStatuses.contains(status)
             ? "The server isn't answering right now. It may be restarting, so try again in a moment."
             : "That address answered, but not like a music server. Check the port."

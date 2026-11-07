@@ -62,12 +62,14 @@ public func changeOwnPassword(_ client: SubsonicClient, current: String, new: St
 }
 
 private func passwordFailure(_ error: Error) -> PasswordChange {
+    // A sign-in page in front of the server that answered in its place says so in its own words.
+    if let words = GatewayWords.failureFor(error) { return .failed(words) }
     let failure = SubsonicError(error)
     switch failure {
     case .server(50, _): return .notAllowed
     // A server that ignored the form body misses the new password.
     case .server(10, _): return .notOffered
-    case .notSubsonic(_, let status?) where [404, 405, 501].contains(status): return .notOffered
+    case .notSubsonic(_, let status?, _, _) where [404, 405, 501].contains(status): return .notOffered
     case .unreachable: return .failed("Couldn't reach the server, so nothing changed. Try again in a moment.")
     case .notSubsonic where failure.serverBusy:
         return .failed("The server isn't answering right now, so nothing changed. Try again in a moment.")

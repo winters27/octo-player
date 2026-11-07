@@ -65,23 +65,22 @@ public enum FamilyPreset: String, CaseIterable, Sendable {
     case coAdmin = "CoAdmin", member = "Member", listener = "Listener", kid = "Kid"
 }
 
-/// The family page's own calls (/api/family): JSON both ways. From an app signed in to the
-/// server, each call carries the same sign-in as every Subsonic call, so no password is ever
-/// asked for. Without one (joining with an invite) the page's cookies, kept only by this
-/// object, sign the new member in once the invite is accepted.
+/// The family page's own calls (/api/family): JSON both ways, through the client's connection
+/// (`ServerExchange`). From an app signed in to the server, each call carries the same sign-in
+/// as every Subsonic call, so no password is ever asked for. Without one (joining with an
+/// invite) the page's cookies, kept only by this object, sign the new member in once the invite
+/// is accepted. A sign-in page's cookies are the client's, never kept here.
 public final class FamilyWeb: @unchecked Sendable {
-    private let server: URL
-    private let session: URLSession
-    private let headers: [String: String]
-    private let sign: (@Sendable (URL) -> URL)?
+    private let client: SubsonicClient
+    private let signs: Bool
     private let lock = NSLock()
     private var cookies: [String: String] = [:]
 
-    public init(server: URL, session: URLSession, headers: [String: String] = [:], sign: (@Sendable (URL) -> URL)? = nil) {
-        self.server = server
-        self.session = session
-        self.headers = headers
-        self.sign = sign
+    /// `signs`: each call carries the client's sign-in in its address. A client made for an
+    /// invite (no account yet) leaves it out.
+    public init(client: SubsonicClient, signs: Bool = false) {
+        self.client = client
+        self.signs = signs
     }
 
     /// Accepts an invite: the new member's name and the password they chose. Answers their username.
@@ -118,40 +117,41 @@ public final class FamilyWeb: @unchecked Sendable {
     }
 
     private func call<T: Decodable>(_ method: String, _ path: String, body: [String: Any]?) async throws -> T {
+        let server = client.baseURL
         guard var parts = URLComponents(url: server, resolvingAgainstBaseURL: false) else {
             throw SubsonicError.unreachable(server.absoluteString, certificate: false)
         }
         let basePath = parts.percentEncodedPath.hasSuffix("/") ? String(parts.percentEncodedPath.dropLast()) : parts.percentEncodedPath
         parts.percentEncodedPath = basePath + "/api/family/" + path
         guard let plain = parts.url else { throw SubsonicError.unreachable(server.absoluteString, certificate: false) }
-        var request = URLRequest(url: sign?(plain) ?? plain, timeoutInterval: 20)
+        var request = URLRequest(url: signs ? client.signed(plain) : plain, timeoutInterval: 20)
         request.httpMethod = method
-        // The page's cookies live only in this object, never in the phone's cookie store.
-        request.httpShouldHandleCookies = false
-        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         request.setValue("1", forHTTPHeaderField: "X-Octo-Family")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        // The page's cookies live only in this object, never in the phone's cookie store.
         let cookieHeader = lock.withLock { cookies.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: "; ") }
         if !cookieHeader.isEmpty { request.setValue(cookieHeader, forHTTPHeaderField: "Cookie") }
         if method != "GET" {
             request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body ?? [:])
         }
-        let data: Data
-        let response: URLResponse
+        let answer: ServerAnswer
         do {
-            (data, response) = try await session.data(for: request)
+            answer = try await ServerExchange.answer(for: request, client: client)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
             throw SubsonicError(error)
         }
-        if let http = response as? HTTPURLResponse {
-            keep(http)
-            if !(200..<300).contains(http.statusCode) { throw failure(http.statusCode, data) }
+        keep(answer.response)
+        if !answer.isOK {
+            // A sign-in page in front of the server is named; the family page's own refusals
+            // keep their own words.
+            if answer.gateway != nil { throw ServerExchange.notSubsonic(answer, endpoint: path) }
+            throw failure(answer.status, answer.data)
         }
-        let text = String(decoding: data, as: UTF8.self)
-        let json = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Data("{}".utf8) : data
+        if !answer.isBlank && !looksLikeJson(answer.data) { throw ServerExchange.notSubsonic(answer, endpoint: path) }
+        let json = answer.isBlank ? Data("{}".utf8) : answer.data
         do {
             return try JSONDecoder().decode(T.self, from: json)
         } catch {
@@ -159,13 +159,14 @@ public final class FamilyWeb: @unchecked Sendable {
         }
     }
 
-    /// The page's cookies, a later one with the same name replacing the earlier.
+    /// The page's cookies, a later one with the same name replacing the earlier. A sign-in
+    /// page's are the client's store's, never kept here, so a request never carries one twice.
     private func keep(_ response: HTTPURLResponse) {
         guard let url = response.url else { return }
         let fields = response.allHeaderFields.reduce(into: [String: String]()) { out, pair in
             if let name = pair.key as? String, let value = pair.value as? String { out[name] = value }
         }
-        let found = HTTPCookie.cookies(withResponseHeaderFields: fields, for: url)
+        let found = HTTPCookie.cookies(withResponseHeaderFields: fields, for: url).filter { !isGatewayCookie($0.name) }
         guard !found.isEmpty else { return }
         lock.withLock { for cookie in found { cookies[cookie.name] = cookie.value } }
     }
@@ -198,10 +199,9 @@ struct FamilyWebUser: Decodable {
 }
 
 extension SubsonicClient {
-    /// The family page's calls on this server, through this client's headers, each signed as
+    /// The family page's calls on this server, through this client's connection, each signed as
     /// every Subsonic call is.
     public func familyWeb() -> FamilyWeb {
-        let client = self
-        return FamilyWeb(server: baseURL, session: session, headers: headers) { url in client.signed(url) }
+        FamilyWeb(client: self, signs: true)
     }
 }

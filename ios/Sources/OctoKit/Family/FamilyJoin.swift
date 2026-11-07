@@ -5,17 +5,18 @@ import FoundationNetworking
 
 /// What signing up from an invite came to: the member's username and the password they chose,
 /// to sign in with like any typed one; a certificate the device does not trust yet; or why it
-/// did not work, and whether the server could not be reached at all.
+/// did not work, whether the server could not be reached at all, and the sign-in page in front
+/// of the server when one answered (`loginSent`: the app's sign-in for it went along).
 public enum JoinOutcome: Sendable, Equatable, CustomStringConvertible {
     case signedUp(username: String, password: String, at: URL?)
     case untrusted(host: String)
-    case failed(String, unreachable: Bool)
+    case failed(String, unreachable: Bool, gateway: Gateway? = nil, loginSent: Bool = false)
 
     public var description: String {
         switch self {
         case .signedUp(let username, _, let at): "SignedUp(username=\(username), at=\(at?.absoluteString ?? "null"))"
         case .untrusted(let host): "Untrusted(host=\(host))"
-        case .failed(let message, _): "Failed(\(message))"
+        case .failed(let message, _, _, _): "Failed(\(message))"
         }
     }
 }
@@ -51,41 +52,47 @@ public func passwordStrength(_ password: String) -> String? {
 
 /// Accepts an invite on this device: the new member's name and the password they choose go to
 /// the family page, which makes the account. The caller then signs in with that username and
-/// password. `home`, from the link, is tried when `address` can't be reached at all (no
-/// connection, or its certificate failed), never after the server turned the invite down.
-public func joinWithInvite(address: URL, token: String, displayName: String, password: String, session: URLSession,
-                           headers: [String: String] = [:], home: URL? = nil) async -> JoinOutcome {
-    let first = await joining(at: address, token: token, displayName: displayName, password: password, session: session, headers: headers)
+/// password. `client` is made for the invite's address with the sign-in form's headers,
+/// certificates and sign-in page fields, and the home address in its scope. `home`, from the
+/// link, is tried when that address can't be reached at all (no connection, or its certificate
+/// failed), never after the server or a sign-in page turned the invite down.
+public func joinWithInvite(client: SubsonicClient, token: String, displayName: String, password: String,
+                           home: URL? = nil) async -> JoinOutcome {
+    let first = await joining(client, token: token, displayName: displayName, password: password)
     let unreached: Bool = switch first {
-    case .failed(_, let unreachable): unreachable
+    case .failed(_, let unreachable, _, _): unreachable
     case .untrusted: true
     case .signedUp: false
     }
-    guard let home, home != address, unreached else { return first }
-    let second = await joining(at: home, token: token, displayName: displayName, password: password, session: session, headers: headers)
+    guard let home, home != client.baseURL, unreached else { return first }
+    let second = await joining(client.at(home), token: token, displayName: displayName, password: password)
     if case .signedUp = second { return second }
     if case .untrusted = second, !{ if case .untrusted = first { true } else { false } }() { return second }
     return first
 }
 
-private func joining(at address: URL, token: String, displayName: String, password: String, session: URLSession,
-                     headers: [String: String]) async -> JoinOutcome {
+private func joining(_ client: SubsonicClient, token: String, displayName: String, password: String) async -> JoinOutcome {
+    let address = client.baseURL
     let refused = "That invite did not work. Ask for a new one."
     do {
-        let username = try await FamilyWeb(server: address, session: session, headers: headers)
-            .join(token: token, password: password, displayName: displayName)
+        let username = try await FamilyWeb(client: client).join(token: token, password: password, displayName: displayName)
         if username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return .failed("The server did not answer with a username. Ask for a new invite.", unreachable: false)
         }
         return .signedUp(username: username, password: password, at: address)
     } catch {
-        switch SubsonicError(error) {
+        let failure = SubsonicError(error)
+        if let gateway = failure.gateway {
+            return .failed(GatewayWords.failure(gateway, loginSent: failure.loginSent), unreachable: false, gateway: gateway,
+                           loginSent: failure.loginSent)
+        }
+        switch failure {
         case .wrongCredentials(let message):
             return .failed(message.isEmpty ? refused : message, unreachable: false)
         case .unreachable(_, let certificate):
             return certificate ? .untrusted(host: address.host ?? "")
                 : .failed("Octo can't reach that address. Check it and try again.", unreachable: true)
-        case .notSubsonic(let message, let status):
+        case .notSubsonic(let message, let status, _, _):
             if status == 404 { return .failed("That server has no family sign-up. Check the address, or update Octo on the server.", unreachable: false) }
             return .failed(status != nil ? message : "That address did not answer like an Octo server.", unreachable: false)
         case let other:

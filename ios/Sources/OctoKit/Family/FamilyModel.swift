@@ -189,6 +189,7 @@ public final class FamilyModel {
     }
 
     static func readProblem(_ error: Error) -> String {
+        if let words = GatewayWords.failureFor(error) { return words }
         let failure = SubsonicError(error)
         if failure.isUnreachable { return "Octo can't reach the server right now." }
         return failure.message.isEmpty ? "The server did not answer." : failure.message
@@ -211,7 +212,7 @@ public final class FamilyModel {
             requests = [made] + requests.filter { $0.id != made.id }
             return made
         } catch {
-            let message = SubsonicError(error).message
+            let message = GatewayWords.failureFor(error) ?? SubsonicError(error).message
             said = message.isEmpty ? "The request did not go through." : message
             return nil
         }
@@ -350,6 +351,7 @@ public final class FamilyModel {
     }
 
     static func actionProblem(_ error: Error) -> String {
+        if let words = GatewayWords.failureFor(error) { return words }
         let failure = SubsonicError(error)
         if failure.isUnreachable { return "Octo can't reach the server right now." }
         return failure.message.isEmpty ? "The server said no." : failure.message

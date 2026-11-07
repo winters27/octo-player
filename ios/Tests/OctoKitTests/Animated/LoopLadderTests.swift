@@ -112,9 +112,7 @@ loop-.mp4
             default: FakeServer.Reply(status: 404, body: Data())
             }
         }
-        let fetcher = LoopFetcher(session: FakeServer.session) { url in
-            url.host == server.host ? ["X-Token": "abc"] : [:]
-        }
+        let fetcher = LoopFetcher(session: FakeServer.session, client: server.client(headers: ["X-Token": "abc"]))
         let clip = AnimatedClip(video: server.base.appendingPathComponent("m/default.m3u8").absoluteString)
         let file = try #require(await fetcher.locate(clip, width: 450, height: 450))
         #expect(file.url.absoluteString == "https://\(server.host)/m/loop-.mp4")

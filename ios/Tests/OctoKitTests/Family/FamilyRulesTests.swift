@@ -151,7 +151,7 @@ import Testing
     @Test func anInviteSignsUpWithTheChosenPassword() async {
         let fake = FamilyFake()
         fake.raw("join") { _ in #"{"username":"alex"}"# }
-        let joined = await joinWithInvite(address: fake.url, token: "tok_1", displayName: "Alex", password: "long enough", session: FakeServer.session)
+        let joined = await joinWithInvite(client: fake.server.joinClient(), token: "tok_1", displayName: "Alex", password: "long enough")
         #expect(joined == .signedUp(username: "alex", password: "long enough", at: fake.url))
         #expect(!joined.description.contains("long enough"))
         let body = fake.called("join").first?.text ?? ""
@@ -163,16 +163,16 @@ import Testing
     @Test func aUsedInviteSaysSo() async {
         let fake = FamilyFake()
         fake.raw("join") { _ in nil }
-        let refused = await joinWithInvite(address: fake.url, token: "tok_1", displayName: "Alex", password: "long enough", session: FakeServer.session)
+        let refused = await joinWithInvite(client: fake.server.joinClient(), token: "tok_1", displayName: "Alex", password: "long enough")
         #expect(refused == .failed("The server did not take this sign-in for that.", unreachable: false))
         fake.server.route { _ in FakeServer.Reply(status: 410, body: Data()) }
-        #expect(await joinWithInvite(address: fake.url, token: "t", displayName: "A", password: "long enough", session: FakeServer.session)
+        #expect(await joinWithInvite(client: fake.server.joinClient(), token: "t", displayName: "A", password: "long enough")
             == .failed("That invite has been used or has expired. Ask for a new one.", unreachable: false))
         fake.server.route { _ in FakeServer.Reply(status: 404, body: Data(#"{"message":"nope"}"#.utf8)) }
-        #expect(await joinWithInvite(address: fake.url, token: "t", displayName: "A", password: "long enough", session: FakeServer.session)
+        #expect(await joinWithInvite(client: fake.server.joinClient(), token: "t", displayName: "A", password: "long enough")
             == .failed("That server has no family sign-up. Check the address, or update Octo on the server.", unreachable: false))
         fake.server.route { _ in FakeServer.Reply(status: 200, body: Data(#"{"username":" "}"#.utf8)) }
-        #expect(await joinWithInvite(address: fake.url, token: "t", displayName: "A", password: "long enough", session: FakeServer.session)
+        #expect(await joinWithInvite(client: fake.server.joinClient(), token: "t", displayName: "A", password: "long enough")
             == .failed("The server did not answer with a username. Ask for a new invite.", unreachable: false))
     }
 
@@ -181,11 +181,11 @@ import Testing
         home.raw("join") { _ in #"{"username":"alex"}"# }
         let outside = FakeServer()
         outside.close()
-        let joined = await joinWithInvite(address: outside.base, token: "tok_1", displayName: "Alex", password: "long enough",
-                                          session: FakeServer.session, home: home.url)
+        let joined = await joinWithInvite(client: outside.joinClient(home: home.url), token: "tok_1", displayName: "Alex",
+                                          password: "long enough", home: home.url)
         #expect(joined == .signedUp(username: "alex", password: "long enough", at: home.url))
         #expect(home.called("join").count == 1)
-        let alone = await joinWithInvite(address: outside.base, token: "tok_1", displayName: "Alex", password: "long enough", session: FakeServer.session)
+        let alone = await joinWithInvite(client: outside.joinClient(), token: "tok_1", displayName: "Alex", password: "long enough")
         #expect(alone == .failed("Octo can't reach that address. Check it and try again.", unreachable: true))
     }
 

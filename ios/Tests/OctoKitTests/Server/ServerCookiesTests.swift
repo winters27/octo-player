@@ -1,0 +1,236 @@
+import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+import Testing
+@testable import OctoKit
+
+/// A sign-in page's session cookies: which are kept, where they go, when they end. Expiries are
+/// given as Expires dates, read against the store's own clock, the same vectors as the other apps.
+@Suite struct ServerCookiesTests {
+    let clock = GatewayTestClock("2026-11-06T18:00:00Z")
+    let music = URL(string: "https://music.example.com/rest/ping.view")!
+
+    var jar: ServerCookies {
+        let clock = self.clock
+        return ServerCookies(now: { clock.now })
+    }
+
+    func expires(_ day: Int) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "GMT")!
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+        return formatter.string(from: calendar.date(from: DateComponents(year: 2026, month: 12, day: day))!)
+    }
+
+    @Test func onlyASignInPagesOwnCookiesAreKept() {
+        let jar = self.jar
+        jar.keep(["octo_admin=a1; Path=/; HttpOnly", "octo_family=f1; Path=/", "authentik_proxy_3c=p1; Path=/",
+                  "authelia_session=s1; Path=/", "CF_Authorization=c1; Path=/", "session=x; Path=/"], from: music)
+        #expect(jar.cookieHeader(for: music) == "authentik_proxy_3c=p1; authelia_session=s1; CF_Authorization=c1")
+    }
+
+    @Test func anExpiryInThePastRemovesTheCookie() {
+        let jar = self.jar
+        jar.keep(["authentik_proxy_a=p1; Path=/"], from: music)
+        jar.keep(["authentik_proxy_a=; Path=/; Expires=Thu, 01 Jan 2026 00:00:00 GMT"], from: music)
+        #expect(jar.cookieHeader(for: music) == nil)
+        #expect(jar.isEmpty)
+    }
+
+    @Test func aDeleteThenASetInOneAnswerKeepsTheNewOne() {
+        let jar = self.jar
+        jar.keep(["authentik_proxy_a=old; Path=/"], from: music)
+        jar.keep(["authentik_proxy_a=; Path=/; Expires=Thu, 01 Jan 2026 00:00:00 GMT", "authentik_proxy_a=new; Path=/"], from: music)
+        #expect(jar.cookieHeader(for: music) == "authentik_proxy_a=new")
+    }
+
+    @Test func aSecureCookieNeverGoesOverHttp() {
+        let jar = self.jar
+        jar.keep(["authentik_proxy_a=p1; Path=/; Secure"], from: music)
+        #expect(jar.cookieHeader(for: music) == "authentik_proxy_a=p1")
+        #expect(jar.cookieHeader(for: URL(string: "http://music.example.com/rest/ping.view")!) == nil)
+    }
+
+    @Test func aHostOnlyCookieNeverGoesToASubdomainAndADomainOneDoes() {
+        let jar = self.jar
+        jar.keep(["authentik_proxy_a=p1; Path=/"], from: music)
+        #expect(jar.cookieHeader(for: URL(string: "https://home.music.example.com/rest/ping.view")!) == nil)
+        jar.keep(["authelia_session=s1; Path=/; Domain=.example.com"], from: music)
+        #expect(jar.cookieHeader(for: URL(string: "https://auth.example.com/")!) == "authelia_session=s1")
+        jar.keep(["CF_Authorization=c1; Path=/; Domain=other.net"], from: music)
+        #expect(jar.cookieHeader(for: URL(string: "https://other.net/")!) == nil)
+    }
+
+    @Test func aCookieWithNoPathKeepsToItsFolder() {
+        let jar = self.jar
+        jar.keep(["authentik_proxy_p=1"], from: URL(string: "https://music.example.com/octo/rest/ping")!)
+        #expect(jar.cookieHeader(for: URL(string: "https://music.example.com/octo/rest/stream")!) == "authentik_proxy_p=1")
+        #expect(jar.cookieHeader(for: URL(string: "https://music.example.com/octo/api/x")!) == nil)
+        #expect(jar.cookieHeader(for: URL(string: "https://music.example.com/octo/restless")!) == nil)
+    }
+
+    @Test func theCookieThatExpiresFirstMakesRoom() throws {
+        let jar = self.jar
+        for day in [2, 3, 4, 5, 1] + Array(6...17) {
+            jar.keep(["authentik_proxy_\(day)=v; Path=/; Expires=\(expires(day))"], from: music)
+        }
+        let sent = try #require(jar.cookieHeader(for: music)).components(separatedBy: "; ")
+        #expect(sent.count == 16)
+        #expect(!sent.contains("authentik_proxy_1=v"))
+        #expect(sent.contains("authentik_proxy_17=v"))
+        #expect(sent.contains("authentik_proxy_2=v"))
+    }
+
+    @Test func theStoreReadsItsOwnClock() {
+        let jar = self.jar
+        jar.keep(["authentik_proxy_a=p1; Path=/; Expires=Sat, 07 Nov 2026 18:00:00 GMT", "authelia_session=s1; Path=/; Max-Age=60"], from: music)
+        #expect(jar.cookieHeader(for: music) == "authentik_proxy_a=p1; authelia_session=s1")
+        clock.now = clock.now.addingTimeInterval(61)
+        #expect(jar.cookieHeader(for: music) == "authentik_proxy_a=p1")
+        clock.now = ISO8601DateFormatter().date(from: "2026-11-07T18:00:01Z")!
+        #expect(jar.cookieHeader(for: music) == nil)
+    }
+
+    @Test func theStoreNeverPrintsItsValues() {
+        let jar = self.jar
+        jar.keep(["authentik_proxy_a=p1-secret; Path=/"], from: music)
+        #expect(!jar.description.contains("p1-secret"))
+    }
+
+    @Test func aByteAnswersCookieIsKeptOnlyFromTheServer() {
+        let jar = self.jar
+        let scope = ServerScope(main: URL(string: "https://music.example.com/octo")!, home: nil)
+        storeCookies(of: HTTPURLResponse(url: URL(string: "https://music.example.com/octo/rest/stream")!, statusCode: 206, httpVersion: nil,
+                                         headerFields: ["Set-Cookie": "authentik_proxy_s=1; Path=/"])!, in: jar, scope: scope)
+        storeCookies(of: HTTPURLResponse(url: URL(string: "https://cdn.example.net/x")!, statusCode: 200, httpVersion: nil,
+                                         headerFields: ["Set-Cookie": "authentik_proxy_o=9; Path=/"])!, in: jar, scope: scope)
+        #expect(jar.cookieHeader(for: music) == "authentik_proxy_s=1")
+        #expect(jar.cookieHeader(for: URL(string: "https://cdn.example.net/x")!) == nil)
+    }
+
+    @Test func theFunnelKeepsAnAnswersCookieAndSendsItNextTime() async throws {
+        let server = FakeServer()
+        server.route { request in
+            if request.headers["Cookie"] == nil {
+                return FakeServer.Reply(status: 200, body: Data(FakeServer.okBody().utf8),
+                                        headers: ["Content-Type": "application/json", "Set-Cookie": "octo_admin=a1; Path=/, authentik_proxy_a=1; Path=/"])
+            }
+            return FakeServer.Reply(status: 200, body: Data(FakeServer.okBody().utf8))
+        }
+        let client = server.client()
+        _ = try await client.ping()
+        _ = try await client.with(Credentials(username: "winters", password: "old")).ping()
+        #expect(server.requests[0].headers["Cookie"] == nil)
+        #expect(server.requests[1].headers["Cookie"] == "authentik_proxy_a=1")
+        // Another configuration is another client with an empty store.
+        let fresh = server.client()
+        #expect(fresh.cookies.isEmpty)
+        _ = try await fresh.ping()
+        #expect(server.requests[2].headers["Cookie"] == nil)
+    }
+
+    @Test func aStaleCookieWithTheHeaderPassesAndTheNewCookieReplacesIt() async throws {
+        let server = FakeServer()
+        let basic = basicCredentials(username: "alice", password: "app password")
+        server.route { request in
+            let cookie = request.headers["Cookie"] ?? ""
+            if cookie.contains("authentik_proxy_s=fresh") { return FakeServer.Reply(status: 200, body: Data(FakeServer.okBody().utf8)) }
+            if request.headers["Authorization"] == basic {
+                return FakeServer.Reply(status: 200, body: Data(FakeServer.okBody().utf8),
+                                        headers: ["Content-Type": "application/json", "Set-Cookie": "authentik_proxy_s=fresh; Path=/"])
+            }
+            return GatewayPages.reply(401)
+        }
+        let client = server.client(headers: ["Authorization": basic])
+        client.cookies.keep(["authentik_proxy_s=stale; Path=/"], from: server.base)
+        _ = try await client.ping()
+        _ = try await client.ping()
+        #expect(server.requests[0].headers["Cookie"] == "authentik_proxy_s=stale")
+        #expect(server.requests[0].headers["Authorization"] == basic)
+        #expect(server.requests[1].headers["Cookie"] == "authentik_proxy_s=fresh")
+        #expect(server.requests[1].headers["Authorization"] == basic)
+    }
+
+    @Test func theFirstLaunchPurgeTakesEveryCookieOfTheKeptHosts() {
+        let hosts: Set<String> = ["music.example.com", "192.168.1.20"]
+        #expect(isKeptServerCookie(domain: "music.example.com", hosts: hosts))
+        #expect(isKeptServerCookie(domain: ".example.com", hosts: hosts))
+        #expect(isKeptServerCookie(domain: "192.168.1.20", hosts: hosts))
+        #expect(!isKeptServerCookie(domain: "other.net", hosts: hosts))
+        #expect(!isKeptServerCookie(domain: "home.music.example.com", hosts: hosts))
+    }
+}
+
+/// One redirect hop, tested directly (Linux cannot follow one through URLProtocol): the hop's
+/// cookie kept and sent on the next hop, and the headers each address may have.
+@Suite struct ServerHopTests {
+    let main = URL(string: "https://music.example.com/octo")!
+    let home = URL(string: "http://192.168.1.20:4533")!
+    let first = URL(string: "https://music.example.com/octo/rest/ping")!
+    let basic = basicCredentials(username: "alice", password: "app password")
+
+    func redirect(_ from: URL, to location: String, cookie: String? = nil) -> HTTPURLResponse {
+        var fields = ["Location": location]
+        if let cookie { fields["Set-Cookie"] = cookie }
+        return HTTPURLResponse(url: from, statusCode: 302, httpVersion: "HTTP/1.1", headerFields: fields)!
+    }
+
+    /// The next hop's request as URLSession makes it: the first request's headers on the new address.
+    func carried(_ to: String) -> URLRequest {
+        var request = URLRequest(url: URL(string: to)!)
+        request.setValue(basic, forHTTPHeaderField: "Authorization")
+        request.setValue("p", forHTTPHeaderField: "X-Proxy-Token")
+        request.setValue("abc", forHTTPHeaderField: "X-Octo-Device-Id")
+        request.setValue("Octo/1.0 (iPhone)", forHTTPHeaderField: "User-Agent")
+        request.setValue("octo_family=f1; authentik_proxy_old=0", forHTTPHeaderField: "Cookie")
+        return request
+    }
+
+    @Test func aRedirectHopsCookieIsKeptAndGoesWithTheNextHop() throws {
+        let cookies = ServerCookies()
+        let to = "https://music.example.com/outpost.goauthentik.io/start?rd=x"
+        let next = try #require(hop(response: redirect(first, to: to, cookie: "authentik_proxy_a=1; Path=/"), newRequest: carried(to),
+                                    first: first, cookies: cookies, scope: ServerScope(main: main, home: home)))
+        #expect(next.value(forHTTPHeaderField: "Cookie") == "octo_family=f1; authentik_proxy_a=1")
+        #expect(next.value(forHTTPHeaderField: "Authorization") == basic)
+        #expect(next.value(forHTTPHeaderField: "X-Proxy-Token") == "p")
+        #expect(!next.httpShouldHandleCookies)
+        #expect(cookies.cookieHeader(for: first) == "authentik_proxy_a=1")
+    }
+
+    @Test func aHopToTheHttpHomeLosesTheSignInPagesHeaders() throws {
+        let to = "http://192.168.1.20:4533/rest/ping"
+        let next = try #require(hop(response: redirect(first, to: to), newRequest: carried(to), first: first, cookies: ServerCookies(),
+                                    scope: ServerScope(main: main, home: home)))
+        #expect(next.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(next.value(forHTTPHeaderField: "X-Proxy-Token") == "p")
+        #expect(next.value(forHTTPHeaderField: "Cookie") == "octo_family=f1")
+    }
+
+    @Test func aHopElsewhereLosesEverythingButThePlainHeaders() throws {
+        let cookies = ServerCookies()
+        let to = "https://auth.example.com/if/flow/default-authentication-flow/"
+        let next = try #require(hop(response: redirect(first, to: to, cookie: "authentik_proxy_a=1; Path=/"), newRequest: carried(to),
+                                    first: first, cookies: cookies, scope: ServerScope(main: main, home: home)))
+        #expect(next.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(next.value(forHTTPHeaderField: "X-Proxy-Token") == nil)
+        #expect(next.value(forHTTPHeaderField: "X-Octo-Device-Id") == nil)
+        #expect(next.value(forHTTPHeaderField: "Cookie") == nil)
+        #expect(next.value(forHTTPHeaderField: "User-Agent") == "Octo/1.0 (iPhone)")
+        // A cookie the other host sets on its own hop is never kept.
+        let away = URL(string: to)!
+        _ = hop(response: redirect(away, to: "https://auth.example.com/next", cookie: "authentik_proxy_z=9; Path=/"),
+                newRequest: URLRequest(url: URL(string: "https://auth.example.com/next")!), first: first, cookies: cookies,
+                scope: ServerScope(main: main, home: home))
+        #expect(cookies.cookieHeader(for: away) == nil)
+    }
+
+    @Test func aHopToAnotherSchemeIsRefused() {
+        #expect(hop(response: redirect(first, to: "ftp://music.example.com/x"), newRequest: URLRequest(url: URL(string: "ftp://music.example.com/x")!),
+                    first: first, cookies: ServerCookies(), scope: ServerScope(main: main, home: home)) == nil)
+    }
+}

@@ -15,7 +15,12 @@ public struct ServerCheck: Sendable, Equatable {
     }
 
     /// Whether a row's status line is a warning.
-    public var isWarning: Bool { reach == .unreachable || reach == .wrongPassword }
+    public var isWarning: Bool {
+        switch reach {
+        case .unreachable, .wrongPassword, .signInPage, .needsHttps: true
+        case .answers, .unknown: false
+        }
+    }
 }
 
 public enum Reach: Sendable, Equatable {
@@ -25,6 +30,21 @@ public enum Reach: Sendable, Equatable {
     case unreachable
     /// Signed out, so not asked.
     case unknown
+    /// A sign-in page in front of the server answered in its place. `loginSent`: the saved
+    /// sign-in for it went along and it said no.
+    case signInPage(Gateway, loginSent: Bool)
+    /// Kept with a sign-in page's password for a plain http address outside the home network,
+    /// where the app never sends it.
+    case needsHttps
+}
+
+/// How a kept server's quick look ended, from the error it ended with: a refused password, a
+/// sign-in page in front of it, or out of reach. Never a sign-out.
+public func reachOf(_ error: Error) -> Reach {
+    let failure = SubsonicError(error)
+    if let gateway = failure.gateway { return .signInPage(gateway, loginSent: failure.loginSent) }
+    if case .wrongCredentials = failure { return .wrongPassword }
+    return .unreachable
 }
 
 /// What a server is called: the name the listener gave it, else its host.
@@ -53,6 +73,8 @@ public func statusLine(serverType: String?, serverVersion: String?, signedOut: B
     switch check.reach {
     case .answers: return ([kind] + [check.ms.map(answerWords)].compactMap { $0 }).joined(separator: " · ")
     case .wrongPassword: return "\(kind) · Didn't take the saved password"
+    case .signInPage(let gateway, let loginSent): return "\(kind) · \(GatewayWords.row(gateway, loginSent: loginSent))"
+    case .needsHttps: return "\(kind) · \(GatewayWords.rowNeedsHttps)"
     default: return "\(kind) · Out of reach right now"
     }
 }

@@ -8,6 +8,7 @@ public enum PlayFailure: String, Sendable, CaseIterable {
     case unsupported = "Octo can't play that kind of file."
     case damaged = "That song's file is damaged."
     case device = "The sound device stopped working. Pick another output."
+    case signInPage = "A sign-in page answered instead of the server."
     case other = "That song couldn't play."
 
     public var words: String { rawValue }
@@ -37,6 +38,9 @@ public enum PlayErrorCode: Sendable, Equatable {
     /// The server began sending another file for the song than the one being played, after the
     /// player had read from it: the song is opened again from where it is.
     case sourceChanged
+    /// A sign-in page answered where the song was asked of the server: a web page, refused
+    /// before the player read it.
+    case signInPage
     /// Reading failed some other way, such as a load refused before the server was asked.
     case ioUnspecified
     case unspecified
@@ -69,6 +73,7 @@ public func playFailureOf(_ code: PlayErrorCode, httpStatus: Int? = nil, outside
         .unsupported
     case .parsingContainerMalformed, .parsingManifestMalformed, .decodingFailed: .damaged
     case .audioTrackInitFailed, .audioTrackWriteFailed: .device
+    case .signInPage: .signInPage
     case .sourceChanged, .ioUnspecified, .unspecified: .other
     }
 }

@@ -630,10 +630,10 @@ public enum ServerUpdateWords {
 // MARK: Calls
 
 public enum ServerUpdateCalls {
-    /// The update page on the server in use, signed with its sign-in.
+    /// The update page on the server in use, signed with its sign-in. The server's headers and
+    /// its sign-in page's cookies are added on the way, by `ServerExchange`.
     public static func stateRequest(_ client: SubsonicClient) -> URLRequest {
         var request = URLRequest(url: client.signed(address(client)), timeoutInterval: ServerUpdateTiming.callSeconds)
-        client.headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         return request
     }
@@ -642,7 +642,6 @@ public enum ServerUpdateCalls {
     public static func startRequest(_ client: SubsonicClient, tag: String) -> URLRequest {
         var request = URLRequest(url: client.signed(address(client)), timeoutInterval: ServerUpdateTiming.callSeconds)
         request.httpMethod = "POST"
-        client.headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         request.setValue("1", forHTTPHeaderField: "X-Octo-Admin")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["tag": tag])
@@ -682,6 +681,24 @@ public enum ServerUpdateCalls {
         if status == 409 { return .refused(words ?? ServerUpdateWords.wouldNotStart) }
         if notOffered.contains(status) { return .refused(ServerUpdateWords.adminOnly) }
         return .refused(words ?? ServerUpdateWords.noAnswer)
+    }
+
+    /// Reads the update page through the server's own connection. A sign-in page in front of the
+    /// server is no answer, never the server saying no.
+    public static func readState(_ client: SubsonicClient) async -> ServerUpdateAnswer {
+        guard let answer = try? await ServerExchange.answer(for: stateRequest(client), client: client) else { return .missed }
+        if answer.gateway != nil { return .missed }
+        return readAnswer(status: answer.status, data: answer.data)
+    }
+
+    /// Asks the server to bring in `tag`, through its own connection. A sign-in page in front of
+    /// the server refuses with its own words.
+    public static func start(_ client: SubsonicClient, tag: String) async -> ServerUpdateStart {
+        guard let answer = try? await ServerExchange.answer(for: startRequest(client, tag: tag), client: client) else {
+            return startAnswer(status: nil, data: Data(), tag: tag)
+        }
+        if let gateway = answer.gateway { return .refused(GatewayWords.failure(gateway, loginSent: answer.loginSent)) }
+        return startAnswer(status: answer.status, data: answer.data, tag: tag)
     }
 
     private static let notOffered: Set<Int> = [401, 403, 404]

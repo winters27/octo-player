@@ -1,0 +1,199 @@
+import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+
+/// The most of a web page read to tell which sign-in page sent it.
+let htmlPeek = 16 * 1024
+
+/// One answer from the server, whatever its status: its body, how it ended, the sign-in page in
+/// front of the server that gave it when one did, and whether the app's own sign-in for that
+/// page went with the request.
+public struct ServerAnswer: Sendable {
+    public let data: Data
+    public let response: HTTPURLResponse
+    public let gateway: Gateway?
+    public let loginSent: Bool
+
+    public var status: Int { response.statusCode }
+    public var isOK: Bool { (200..<300).contains(status) }
+    /// Nothing to read: a 204 or 205, or a body of nothing but whitespace.
+    public var isBlank: Bool { status == 204 || status == 205 || isBlankBody(data) }
+}
+
+/// The one way server code asks the server for anything. Each request gets the client's headers
+/// for its address and the sign-in page's cookies (`SubsonicClient.prepared`); every redirect
+/// goes through `hop`, which keeps the server's rules for headers and cookies; the final
+/// answer's cookies are kept whatever its status; and the answer is read for a sign-in page in
+/// front of the server. A failure to reach the server comes out as URLSession gave it.
+public enum ServerExchange {
+    /// The answer as it came, whatever its status, with the sign-in page that gave it named.
+    public static func answer(for request: URLRequest, client: SubsonicClient) async throws -> ServerAnswer {
+        let sent = client.prepared(request)
+        let (data, response, hops) = try await send(sent, client: client)
+        return try read(data, response, hops: hops, sent: sent, client: client)
+    }
+
+    /// A JSON route's body. An error status, or a body that is neither JSON nor empty, is
+    /// `SubsonicError.notSubsonic`, naming the sign-in page in front of the server when one
+    /// answered. A 204, a 205 or a blank body comes back as no data.
+    public static func data(for request: URLRequest, client: SubsonicClient, endpoint: String) async throws -> (Data, HTTPURLResponse) {
+        let got = try await answer(for: request, client: client)
+        guard got.isOK else { throw notSubsonic(got, endpoint: endpoint) }
+        if got.isBlank { return (Data(), got.response) }
+        guard looksLikeJson(got.data) else { throw notSubsonic(got, endpoint: endpoint) }
+        return (got.data, got.response)
+    }
+
+    /// A song's, cover's or file's bytes, whole. An error status, or a web page where media was
+    /// asked for, is refused (`refusal`).
+    public static func media(for request: URLRequest, client: SubsonicClient, endpoint: String) async throws -> (Data, HTTPURLResponse) {
+        let got = try await answer(for: request, client: client)
+        if let refused = refusal(got, endpoint: endpoint) { throw refused }
+        return (got.data, got.response)
+    }
+
+    /// The error for an answer a JSON route cannot use: "HTTP <code> from <endpoint>" for an
+    /// error status, else the plain words, with the sign-in page that gave it.
+    public static func notSubsonic(_ answer: ServerAnswer, endpoint: String) -> SubsonicError {
+        if answer.isOK {
+            return .notSubsonic(SubsonicError.notSubsonicWords, status: nil, gateway: answer.gateway, loginSent: answer.loginSent)
+        }
+        return .notSubsonic("HTTP \(answer.status) from \(endpoint)", status: answer.status, gateway: answer.gateway, loginSent: answer.loginSent)
+    }
+
+    /// Why an answer where a song, cover or file was asked for cannot be played or kept: an error
+    /// status, or a web page, which only a sign-in page sends there (named when it is known, else
+    /// an unknown sign-in page). Nil for a usable answer.
+    public static func refusal(_ answer: ServerAnswer, endpoint: String) -> SubsonicError? {
+        if !answer.isOK { return notSubsonic(answer, endpoint: endpoint) }
+        guard isHtml(answer.response.value(forHTTPHeaderField: "Content-Type")) else { return nil }
+        return .notSubsonic(GatewayWords.playFailure, status: nil, gateway: answer.gateway ?? .signInPage, loginSent: answer.loginSent)
+    }
+
+    #if canImport(Darwin)
+    /// A song's bytes as they come, by the same rules as `media`: an error status or a web page
+    /// is read for its sign-in page and refused, its task cancelled.
+    public static func bytes(for request: URLRequest, client: SubsonicClient, endpoint: String) async throws -> (URLSession.AsyncBytes, HTTPURLResponse) {
+        let sent = client.prepared(request)
+        let hops = ExchangeHops(client: client, first: sent.url)
+        let (bytes, response) = try await client.session.bytes(for: sent, delegate: hops)
+        guard let http = response as? HTTPURLResponse else {
+            bytes.task.cancel()
+            throw URLError(.badServerResponse)
+        }
+        let page = isHtml(http.value(forHTTPHeaderField: "Content-Type"))
+        if (200..<300).contains(http.statusCode) && !page {
+            storeCookies(of: http, in: client.cookies, scope: client.scope)
+            return (bytes, http)
+        }
+        var peek = Data()
+        if page {
+            for try await byte in bytes {
+                peek.append(byte)
+                if peek.count >= htmlPeek { break }
+            }
+        }
+        bytes.task.cancel()
+        let got = try read(peek, http, hops: hops.recorded, sent: sent, client: client)
+        throw refusal(got, endpoint: endpoint) ?? notSubsonic(got, endpoint: endpoint)
+    }
+
+    /// A file fetched to disk by the same rules as `media`. A refused one is deleted.
+    public static func download(for request: URLRequest, client: SubsonicClient, endpoint: String) async throws -> (URL, HTTPURLResponse) {
+        let sent = client.prepared(request)
+        let hops = ExchangeHops(client: client, first: sent.url)
+        let (file, response) = try await client.session.download(for: sent, delegate: hops)
+        guard let http = response as? HTTPURLResponse else {
+            try? FileManager.default.removeItem(at: file)
+            throw URLError(.badServerResponse)
+        }
+        var peek = Data()
+        if !(200..<300).contains(http.statusCode) || isHtml(http.value(forHTTPHeaderField: "Content-Type")),
+           let handle = try? FileHandle(forReadingFrom: file) {
+            peek = (try? handle.read(upToCount: htmlPeek)) ?? Data()
+            try? handle.close()
+        }
+        let got = try read(peek, http, hops: hops.recorded, sent: sent, client: client)
+        if let refused = refusal(got, endpoint: endpoint) {
+            try? FileManager.default.removeItem(at: file)
+            throw refused
+        }
+        return (file, http)
+    }
+    #endif
+
+    static func send(_ request: URLRequest, client: SubsonicClient) async throws -> (Data, URLResponse, [AnswerHop]) {
+        #if canImport(Darwin)
+        let hops = ExchangeHops(client: client, first: request.url)
+        let (data, response) = try await client.session.data(for: request, delegate: hops)
+        return (data, response, hops.recorded)
+        #else
+        let (data, response) = try await client.session.data(for: request)
+        return (data, response, [])
+        #endif
+    }
+
+    /// The final answer: its cookies kept, whatever its status, and read for a sign-in page.
+    static func read(_ data: Data, _ response: URLResponse, hops: [AnswerHop], sent: URLRequest,
+                     client: SubsonicClient) throws -> ServerAnswer {
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        storeCookies(of: http, in: client.cookies, scope: client.scope)
+        let loginSent = (sent.allHTTPHeaderFields ?? [:]).keys.contains(where: GatewayNames.isGatewayName)
+        let html = isHtml(http.value(forHTTPHeaderField: "Content-Type")) ? String(decoding: data.prefix(htmlPeek), as: UTF8.self) : nil
+        let facts = AnswerFacts(requested: sent.url, hops: hops + [AnswerHop(http)], htmlBody: html, loginSent: loginSent)
+        return ServerAnswer(data: data, response: http, gateway: recognizeGateway(facts), loginSent: loginSent)
+    }
+}
+
+/// One redirect hop of a request to the server: the hop's sign-in page cookies are kept, the
+/// next request loses what may not go where it leads (every header but the plain ones once it
+/// leaves the server and where it was first sent, a sign-in page's headers anywhere but its
+/// gateway addresses), and gets the store's cookies for its address. Nil refuses the redirect:
+/// one that leads anywhere but http or https.
+public func hop(response: HTTPURLResponse, newRequest: URLRequest, first: URL?, cookies: ServerCookies,
+                scope: ServerScope) -> URLRequest? {
+    guard let url = newRequest.url, let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+    storeCookies(of: response, in: cookies, scope: scope)
+    var next = newRequest
+    next.httpShouldHandleCookies = false
+    for name in scope.headersToDrop(next.allHTTPHeaderFields ?? [:], to: url, first: first) {
+        next.setValue(nil, forHTTPHeaderField: name)
+    }
+    if !scope.isGatewayOrigin(url) {
+        for name in (next.allHTTPHeaderFields ?? [:]).keys where GatewayNames.isGatewayName(name) {
+            next.setValue(nil, forHTTPHeaderField: name)
+        }
+    }
+    let kept = scope.covers(url) ? cookies.cookieHeader(for: url) : nil
+    next.setValue(cookieLine(next.value(forHTTPHeaderField: "Cookie"), adding: kept), forHTTPHeaderField: "Cookie")
+    return next
+}
+
+#if canImport(Darwin)
+/// The hops of one call, as its own task delegate sees them: each redirect is kept for the
+/// recognizer and goes through `hop`. It answers nothing else, so the session's own delegate
+/// keeps the certificate checks, the client certificate and its notes on how a call ended.
+final class ExchangeHops: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let cookies: ServerCookies
+    private let scope: ServerScope
+    private let first: URL?
+    private let lock = NSLock()
+    private var hops: [AnswerHop] = []
+
+    init(client: SubsonicClient, first: URL?) {
+        cookies = client.cookies
+        scope = client.scope
+        self.first = first
+        super.init()
+    }
+
+    var recorded: [AnswerHop] { lock.withLock { hops } }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? {
+        lock.withLock { hops.append(AnswerHop(response)) }
+        return hop(response: response, newRequest: request, first: first, cookies: cookies, scope: scope)
+    }
+}
+#endif

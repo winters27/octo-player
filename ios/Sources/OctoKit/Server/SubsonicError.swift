@@ -14,8 +14,9 @@ public enum SubsonicError: Error, Equatable, Sendable, LocalizedError {
     /// Any other error the server reported.
     case server(code: Int, message: String)
     /// Something answered, but not a Subsonic server. `status` is the HTTP status when the
-    /// answer was an error page.
-    case notSubsonic(String, status: Int?)
+    /// answer was an error page. `gateway` names the sign-in page in front of the server when
+    /// one answered, and `loginSent` is whether the app's own sign-in for that page went along.
+    case notSubsonic(String, status: Int?, gateway: Gateway? = nil, loginSent: Bool = false)
     /// The server could not be reached at all. `certificate` when its certificate was refused.
     case unreachable(String, certificate: Bool)
 
@@ -24,7 +25,7 @@ public enum SubsonicError: Error, Equatable, Sendable, LocalizedError {
 
     public var message: String {
         switch self {
-        case .wrongCredentials(let text), .notFound(let text), .notSubsonic(let text, _), .unreachable(let text, _): text
+        case .wrongCredentials(let text), .notFound(let text), .notSubsonic(let text, _, _, _), .unreachable(let text, _): text
         case .authNotSupported(_, let text), .server(_, let text): text
         }
     }
@@ -33,7 +34,7 @@ public enum SubsonicError: Error, Equatable, Sendable, LocalizedError {
 
     /// A proxy in front of the server saying the server behind it is not answering.
     public var serverBusy: Bool {
-        if case .notSubsonic(_, let status?) = self { return Self.busyStatuses.contains(status) }
+        if case .notSubsonic(_, let status?, _, _) = self { return Self.busyStatuses.contains(status) }
         return false
     }
 
@@ -44,8 +45,20 @@ public enum SubsonicError: Error, Equatable, Sendable, LocalizedError {
 
     /// The HTTP status of an error page, if the answer was one.
     public var status: Int? {
-        if case .notSubsonic(_, let status) = self { return status }
+        if case .notSubsonic(_, let status, _, _) = self { return status }
         return nil
+    }
+
+    /// The sign-in page in front of the server that answered in its place, if one did.
+    public var gateway: Gateway? {
+        if case .notSubsonic(_, _, let gateway, _) = self { return gateway }
+        return nil
+    }
+
+    /// Whether the app's own sign-in for that sign-in page went with the request.
+    public var loginSent: Bool {
+        if case .notSubsonic(_, _, _, let loginSent) = self { return loginSent }
+        return false
     }
 
     /// The server's error code, for the kinds that carry one.
@@ -69,8 +82,10 @@ public enum SubsonicError: Error, Equatable, Sendable, LocalizedError {
             case .authUnsupported(let code, let message): self = .authNotSupported(code: code, message: message)
             case .notFound(let message): self = .notFound(message)
             case .server(let code, let message): self = .server(code: code, message: message)
-            case .notSubsonic: self = .notSubsonic(Self.notSubsonicWords, status: nil)
-            case .http(let status): self = .notSubsonic("HTTP \(status)", status: status)
+            case .notSubsonic(let gateway, let loginSent):
+                self = .notSubsonic(Self.notSubsonicWords, status: nil, gateway: gateway, loginSent: loginSent)
+            case .http(let status, let gateway, let loginSent):
+                self = .notSubsonic("HTTP \(status)", status: status, gateway: gateway, loginSent: loginSent)
             }
         case let url as URLError:
             self = .unreachable(Self.words(url), certificate: Self.isCertificate(url))
@@ -103,8 +118,8 @@ public enum SubsonicError: Error, Equatable, Sendable, LocalizedError {
 }
 
 /// An error as the app's plain kinds read it, for the words people see (`userMessage`): these
-/// kinds as the matching `OctoError`, a failure to reach the server as a connection error, and
-/// anything else as it is.
+/// kinds as the matching `OctoError` (a sign-in page in front of the server kept with it), a
+/// failure to reach the server as a connection error, and anything else as it is.
 public func plainError(_ error: Error) -> Error {
     guard let known = error as? SubsonicError else { return error }
     switch known {
@@ -112,7 +127,9 @@ public func plainError(_ error: Error) -> Error {
     case .authNotSupported(let code, let message): return OctoError.authUnsupported(code: code, message: message)
     case .notFound(let message): return OctoError.notFound(message)
     case .server(let code, let message): return OctoError.server(code: code, message: message)
-    case .notSubsonic(_, let status): return status.map(OctoError.http) ?? OctoError.notSubsonic
+    case .notSubsonic(_, let status, let gateway, let loginSent):
+        if let status { return OctoError.http(status, gateway: gateway, loginSent: loginSent) }
+        return OctoError.notSubsonic(gateway: gateway, loginSent: loginSent)
     case .unreachable: return URLError(.cannotConnectToHost)
     }
 }

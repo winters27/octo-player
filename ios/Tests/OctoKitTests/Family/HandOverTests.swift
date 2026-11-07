@@ -206,7 +206,7 @@ final class HandOverClock: @unchecked Sendable {
                 : #""familySignInRedeem":{"state":"Allowed","box":"\#(box)"}"#
         }
         let steps = StepLog()
-        let result = await receiveHandOver(link, session: FakeServer.session, deviceName: "Pixel 9", platform: .android,
+        let result = await receiveHandOver(link, connect: { fake.server.joinClient(at: $0) }, deviceName: "Pixel 9", platform: .android,
                                            step: { await steps.add($0) }, pollMs: 10)
         #expect(result == .received(signIn))
         #expect(await steps.all == [handOverWaiting, handOverAllowed])
@@ -226,19 +226,19 @@ final class HandOverClock: @unchecked Sendable {
         let link = FamilyHandOverLink(base: fake.url.absoluteString, token: "tok_9", key: HandOverBox.newKey(), server: "https://music.example.com")
         fake.answer("redeemFamilySignIn") { _ in #""familySignInRedeemed":{"id":"r_1"}"# }
         fake.answer("getFamilySignInRedeem") { _ in #""familySignInRedeem":{"state":"Denied"}"# }
-        #expect(await receiveHandOver(link, session: FakeServer.session, deviceName: "Pixel 9", platform: .android, pollMs: 10) == .refused(handOverDenied))
+        #expect(await receiveHandOver(link, connect: { fake.server.joinClient(at: $0) }, deviceName: "Pixel 9", platform: .android, pollMs: 10) == .refused(handOverDenied))
         fake.answer("getFamilySignInRedeem") { _ in #""familySignInRedeem":{"state":"Expired"}"# }
-        #expect(await receiveHandOver(link, session: FakeServer.session, deviceName: "Pixel 9", platform: .android, pollMs: 10) == .refused(handOverExpired))
+        #expect(await receiveHandOver(link, connect: { fake.server.joinClient(at: $0) }, deviceName: "Pixel 9", platform: .android, pollMs: 10) == .refused(handOverExpired))
         fake.answer("getFamilySignInRedeem") { _ in #""familySignInRedeem":{"state":"Waiting"}"# }
-        #expect(await receiveHandOver(link, session: FakeServer.session, deviceName: "Pixel 9", platform: .android, pollMs: 10, waitMs: 50)
+        #expect(await receiveHandOver(link, connect: { fake.server.joinClient(at: $0) }, deviceName: "Pixel 9", platform: .android, pollMs: 10, waitMs: 50)
             == .refused(handOverExpired))
         fake.fail("redeemFamilySignIn", 40, "That sign-in code has been used or has expired.")
-        #expect(await receiveHandOver(link, session: FakeServer.session, deviceName: "Pixel 9", platform: .android, pollMs: 10) == .refused(handOverExpired))
+        #expect(await receiveHandOver(link, connect: { fake.server.joinClient(at: $0) }, deviceName: "Pixel 9", platform: .android, pollMs: 10) == .refused(handOverExpired))
         let gone = FakeServer()
         gone.close()
         let unreachable = FamilyHandOverLink(base: gone.base.absoluteString, token: "t", key: "k", server: "https://x")
-        #expect(await receiveHandOver(unreachable, session: FakeServer.session, deviceName: "P", platform: .iOS) == .refused(handOverUnreachable))
-        #expect(await receiveHandOver(FamilyHandOverLink(base: "not an address", token: "t", key: "k", server: "x"), session: FakeServer.session,
+        #expect(await receiveHandOver(unreachable, connect: { gone.joinClient(at: $0) }, deviceName: "P", platform: .iOS) == .refused(handOverUnreachable))
+        #expect(await receiveHandOver(FamilyHandOverLink(base: "not an address", token: "t", key: "k", server: "x"), connect: { fake.server.joinClient(at: $0) },
                                       deviceName: "P", platform: .iOS) == .refused("This sign-in link has no server in it. Scan the QR code again."))
     }
 
@@ -248,7 +248,7 @@ final class HandOverClock: @unchecked Sendable {
         let other = try HandOverBox.seal(signIn, key: HandOverBox.newKey())
         fake.answer("redeemFamilySignIn") { _ in #""familySignInRedeemed":{"id":"r_1"}"# }
         fake.answer("getFamilySignInRedeem") { _ in #""familySignInRedeem":{"state":"Allowed","box":"\#(other)"}"# }
-        #expect(await receiveHandOver(link, session: FakeServer.session, deviceName: "Pixel 9", platform: .android, pollMs: 10)
+        #expect(await receiveHandOver(link, connect: { fake.server.joinClient(at: $0) }, deviceName: "Pixel 9", platform: .android, pollMs: 10)
             == .refused("This sign-in could not be opened here. Make a new QR code on your other device."))
     }
 }

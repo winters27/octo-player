@@ -275,7 +275,7 @@ enum FamilyFixtures {
         server.ok(#""familySignInRedeemed":{"id":"r_1"}"#)
         server.ok(#""familySignInRedeem":{"state":"Waiting"}"#)
         server.ok(#""familySignInRedeem":{"state":"Allowed","box":"c2VhbGVk"}"#)
-        #expect(try await FamilyOpenCalls.redeem(server: server.base, session: FakeServer.session, token: "tok_9", deviceName: " Pixel 9 ", platform: .android) == "r_1")
+        #expect(try await FamilyOpenCalls.redeem(client: server.joinClient(), token: "tok_9", deviceName: " Pixel 9 ", platform: .android) == "r_1")
         let redeem = server.requests[0]
         #expect(redeem.path == "/rest/redeemFamilySignIn")
         #expect(redeem.query["token"] == "tok_9")
@@ -284,8 +284,8 @@ enum FamilyFixtures {
         #expect(redeem.query["u"] == nil)
         #expect(redeem.query["t"] == nil)
         #expect(redeem.query["p"] == nil)
-        #expect(try await FamilyOpenCalls.status(server: server.base, session: FakeServer.session, id: "r_1").state == .waiting)
-        let allowed = try await FamilyOpenCalls.status(server: server.base, session: FakeServer.session, id: "r_1")
+        #expect(try await FamilyOpenCalls.status(client: server.joinClient(), id: "r_1").state == .waiting)
+        let allowed = try await FamilyOpenCalls.status(client: server.joinClient(), id: "r_1")
         #expect(allowed.state == .allowed)
         #expect(allowed.box == "c2VhbGVk")
         #expect(!allowed.description.contains("c2VhbGVk"))
@@ -295,17 +295,17 @@ enum FamilyFixtures {
     @Test func aWrongTokenIsRefusedInPlainWords() async {
         server.error(40, "That sign-in code has been used or has expired.")
         await #expect(throws: SubsonicError.wrongCredentials("That sign-in code has been used or has expired.")) {
-            _ = try await FamilyOpenCalls.redeem(server: server.base, session: FakeServer.session, token: "old", deviceName: "Pixel 9", platform: .android)
+            _ = try await FamilyOpenCalls.redeem(client: server.joinClient(), token: "old", deviceName: "Pixel 9", platform: .android)
         }
     }
 
     @Test func aServerBehindAPathKeepsItInEveryCall() async throws {
         server.ok(#""familySignInRedeemed":{"id":"r_1"}"#)
-        _ = try await FamilyOpenCalls.redeem(server: server.base.appendingPathComponent("octo"), session: FakeServer.session, token: "tok",
+        _ = try await FamilyOpenCalls.redeem(client: server.joinClient(at: server.base.appendingPathComponent("octo")), token: "tok",
                                              deviceName: "Phone", platform: .android)
         #expect(server.requests[0].path == "/octo/rest/redeemFamilySignIn")
         server.enqueue(#"{"inviteLink":"x"}"#)
-        _ = try await FamilyWeb(server: URL(string: server.base.absoluteString + "/octo/")!, session: FakeServer.session).resetMember(username: "sam")
+        _ = try await FamilyWeb(client: server.joinClient(at: URL(string: server.base.absoluteString + "/octo/")!)).resetMember(username: "sam")
         #expect(server.requests[1].path == "/octo/api/family/members/sam/reset")
     }
 
@@ -321,7 +321,7 @@ enum FamilyFixtures {
 /// The family page's calls: an invite accepted, a manager's member and link, and plain words on errors.
 @Suite struct FamilyWebTests {
     let server = FakeServer()
-    var web: FamilyWeb { FamilyWeb(server: server.base, session: FakeServer.session) }
+    var web: FamilyWeb { FamilyWeb(client: server.joinClient()) }
 
     @Test func anInviteIsAcceptedWithTheChosenPassword() async throws {
         server.enqueue(#"{"username":"alex"}"#)

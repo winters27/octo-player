@@ -139,7 +139,7 @@ import Testing
         #expect(userMessage(for: CancellationError()) == nil)
         #expect(userMessage(for: OctoError.http(503)) == "The server isn't answering right now. It may be restarting, so try again in a moment.")
         #expect(userMessage(for: OctoError.http(404)) == "That address answered, but not like a music server. Check the port.")
-        #expect(userMessage(for: OctoError.notSubsonic) == "That address answered, but not like a music server. Check the port.")
+        #expect(userMessage(for: OctoError.notSubsonic()) == "That address answered, but not like a music server. Check the port.")
         #expect(userMessage(for: OctoError.wrongCredentials("x")) == "Wrong username or password.")
         #expect(userMessage(for: OctoError.authUnsupported(code: 41, message: "")) == "This account can't sign in with a token. Turn on Legacy sign-in under Advanced.")
         #expect(userMessage(for: OctoError.authUnsupported(code: 42, message: "")) == "The server doesn't take this way of signing in.")

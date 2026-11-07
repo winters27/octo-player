@@ -409,12 +409,12 @@ public final class OctoAdmin: @unchecked Sendable {
         let ownKeys = Set(own.compactMap(rootKey))
         setTrust(signIn.server, ownKeys)
         let saved = lastFound(signIn)
-        var found = await first([client.baseURL, signIn.primary] + [saved].compactMap { $0 }, tried: &tried, session: client.session)
+        var found = await first([client.baseURL, signIn.primary] + [saved].compactMap { $0 }, tried: &tried, client: client)
         if found == nil {
             // The station addresses cost a server call, so they are only asked for last.
             let announced = await stationHosts(client).compactMap(adminRoot)
             setTrust(signIn.server, ownKeys.union(announced.compactMap(rootKey)))
-            found = await first(announced, tried: &tried, session: client.session)
+            found = await first(announced, tried: &tried, client: client)
         }
         guard let found else { return nil }
         store.set(found.absoluteString, Self.addressKey(signIn.server))
@@ -434,10 +434,10 @@ public final class OctoAdmin: @unchecked Sendable {
         return (store.string(Self.addressKey(signIn.server)) ?? older).flatMap(URL.init(string:))
     }
 
-    private func first(_ candidates: [URL], tried: inout Set<String>, session: URLSession) async -> URL? {
+    private func first(_ candidates: [URL], tried: inout Set<String>, client: SubsonicClient) async -> URL? {
         for candidate in candidates {
             guard let root = adminRoot(candidate), let key = rootKey(root), tried.insert(key).inserted else { continue }
-            if await answers(root, session: session) { return root }
+            if await answers(root, client: client) { return root }
         }
         return nil
     }
@@ -447,13 +447,13 @@ public final class OctoAdmin: @unchecked Sendable {
     }
 
     /// Whether Octo's status page answers at a root: unsigned, since it asks addresses that may
-    /// not be Octo.
-    private func answers(_ root: URL, session: URLSession) async -> Bool {
+    /// not be Octo, and through the client's connection, whose headers and sign-in page cookies
+    /// go only as far as the server's own addresses.
+    private func answers(_ root: URL, client: SubsonicClient) async -> Bool {
         let request = URLRequest(url: Self.api(root, "status"), timeoutInterval: probeTimeout)
         let answered = try? await Self.within(probeTimeout) { () async throws -> Bool in
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+            let answer = try await ServerExchange.answer(for: request, client: client)
+            guard answer.isOK, let object = try? JSONSerialization.jsonObject(with: answer.data) as? [String: Any] else { return false }
             return object["octo"] != nil
         }
         return answered ?? false
@@ -494,16 +494,8 @@ public final class OctoAdmin: @unchecked Sendable {
         request.httpBody = body
         request.setValue("1", forHTTPHeaderField: "X-Octo-Admin")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        headers(for: request.url, signIn).forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
-        let response: URLResponse
-        do {
-            (_, response) = try await (signIn.client.session).data(for: request)
-        } catch {
-            throw AdminUnavailable("Octo did not answer")
-        }
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw AdminUnavailable("HTTP \(http.statusCode) from lastfm/radio/refresh")
-        }
+        let answer = try await call(request, signIn.client)
+        if !answer.isOK { throw AdminUnavailable("HTTP \(answer.status) from lastfm/radio/refresh") }
     }
 
     /// The full admin pages, for everything the app does not show, opened at the card `section`
@@ -522,24 +514,29 @@ public final class OctoAdmin: @unchecked Sendable {
             parts.queryItems = query.map { URLQueryItem(name: $0.0, value: $0.1) }
             address = parts.url ?? address
         }
-        var request = URLRequest(url: sign(address, signIn), timeoutInterval: callTimeout)
-        headers(for: request.url, signIn).forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
-        let session = signIn?.client.session ?? .shared
-        let (data, response): (Data, URLResponse)
+        guard let signIn else { throw AdminUnavailable("Not signed in") }
+        let request = URLRequest(url: sign(address, signIn), timeoutInterval: callTimeout)
+        let answer = try await call(request, signIn.client)
+        if answer.status == 403 { throw AdminUnavailable("Needs a Navidrome admin account") }
+        if !answer.isOK { throw AdminUnavailable("HTTP \(answer.status) from \(path)") }
         do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            throw AdminUnavailable("Octo did not answer")
-        }
-        if let http = response as? HTTPURLResponse {
-            if http.statusCode == 403 { throw AdminUnavailable("Needs a Navidrome admin account") }
-            if !(200..<300).contains(http.statusCode) { throw AdminUnavailable("HTTP \(http.statusCode) from \(path)") }
-        }
-        do {
-            return try read(data)
+            return try read(answer.data)
         } catch {
             throw AdminUnavailable("Octo answered in a way the app does not understand")
         }
+    }
+
+    /// One admin call through the server's own connection: its headers as far as the server's
+    /// addresses go, and its sign-in page's cookies. A sign-in page in front of the server says so.
+    private func call(_ request: URLRequest, _ client: SubsonicClient) async throws -> ServerAnswer {
+        let answer: ServerAnswer
+        do {
+            answer = try await ServerExchange.answer(for: request, client: client)
+        } catch {
+            throw AdminUnavailable("Octo did not answer")
+        }
+        if let gateway = answer.gateway { throw AdminUnavailable(GatewayWords.failure(gateway, loginSent: answer.loginSent)) }
+        return answer
     }
 
     static func api(_ base: URL, _ path: String) -> URL {
@@ -554,13 +551,6 @@ public final class OctoAdmin: @unchecked Sendable {
     func sign(_ url: URL, _ signIn: AdminSignIn?) -> URL {
         guard let signIn, carries(url, signIn) else { return url }
         return signIn.client.signed(url)
-    }
-
-    /// The server's own headers go where its sign-in goes; elsewhere only who is asking.
-    private func headers(for url: URL?, _ signIn: AdminSignIn?) -> [String: String] {
-        guard let signIn else { return [:] }
-        guard let url, carries(url, signIn) else { return ["User-Agent": signIn.client.userAgent] }
-        return signIn.client.headers
     }
 
     private func carries(_ url: URL, _ signIn: AdminSignIn) -> Bool {

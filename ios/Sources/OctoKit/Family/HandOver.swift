@@ -132,33 +132,39 @@ public let handOverDenied = "Your other device said no. Nothing was shared."
 public let handOverExpired = "This sign-in link expired. Make a new one on your other device."
 public let handOverUnreachable = "Octo can't reach the server. Check this device is online, then try again."
 
-/// How the new device's side ended: the sign-in to keep, or why not.
+/// How the new device's side ended: the sign-in to keep, or why not. A refusal names the sign-in
+/// page in front of the server when one answered, and whether the app's sign-in for it went
+/// along.
 public enum HandOverResult: Sendable, Equatable {
     case received(HandOverSignIn)
-    case refused(String)
+    case refused(String, gateway: Gateway? = nil, loginSent: Bool = false)
 }
 
-/// The new device's side: redeems the token on the address the link was opened on, says what is
-/// happening, waits for the other device, and opens the sealed sign-in with the key from the
-/// link. The key is never sent.
-public func receiveHandOver(_ link: FamilyHandOverLink, session: URLSession, deviceName: String, platform: FamilyPlatform,
-                            headers: [String: String] = [:], step: @Sendable (String) async -> Void = { _ in },
+/// The new device's side: redeems the token on the address the link was opened on, through the
+/// client `connect` makes for that address (the sign-in form's headers, certificates and sign-in
+/// page fields), says what is happening, waits for the other device, and opens the sealed
+/// sign-in with the key from the link. The key is never sent. A sign-in page in front of the
+/// server stops it with its own words, never as an expired link.
+public func receiveHandOver(_ link: FamilyHandOverLink, connect: @Sendable (URL) -> SubsonicClient, deviceName: String, platform: FamilyPlatform,
+                            step: @Sendable (String) async -> Void = { _ in },
                             pollMs: Int = 1_500, waitMs: Int = 130_000) async -> HandOverResult {
     guard let base = ServerAddress.httpURL(link.base) else {
         return .refused("This sign-in link has no server in it. Scan the QR code again.")
     }
+    let client = connect(base)
     await step(handOverWaiting)
     let id: String
     do {
-        id = try await FamilyOpenCalls.redeem(server: base, session: session, token: link.token, deviceName: deviceName,
-                                              platform: platform, headers: headers)
+        id = try await FamilyOpenCalls.redeem(client: client, token: link.token, deviceName: deviceName, platform: platform)
     } catch is CancellationError {
         return .refused(handOverExpired)
     } catch {
-        switch SubsonicError(error) {
+        let failure = SubsonicError(error)
+        if let refusal = gatewayRefusal(failure) { return refusal }
+        switch failure {
         case .unreachable: return .refused(handOverUnreachable)
         case .notFound, .wrongCredentials: return .refused(handOverExpired)
-        case .notSubsonic(_, 404): return .refused(handOverExpired)
+        case .notSubsonic(_, 404, _, _): return .refused(handOverExpired)
         case let other: return .refused(other.message.isEmpty ? handOverExpired : other.message)
         }
     }
@@ -167,11 +173,13 @@ public func receiveHandOver(_ link: FamilyHandOverLink, session: URLSession, dev
         if Task.isCancelled { return .refused(handOverExpired) }
         var status: FamilySignInStatus?
         do {
-            status = try await FamilyOpenCalls.status(server: base, session: session, id: id, headers: headers)
+            status = try await FamilyOpenCalls.status(client: client, id: id)
         } catch is CancellationError {
             return .refused(handOverExpired)
         } catch {
-            if case .unreachable = SubsonicError(error) { status = nil } else { return .refused(handOverExpired) }
+            let failure = SubsonicError(error)
+            if let refusal = gatewayRefusal(failure) { return refusal }
+            if case .unreachable = failure { status = nil } else { return .refused(handOverExpired) }
         }
         switch status?.state {
         case .allowed?:
@@ -193,4 +201,11 @@ public func receiveHandOver(_ link: FamilyHandOverLink, session: URLSession, dev
         waited += pollMs
     }
     return .refused(handOverExpired)
+}
+
+/// A sign-in page in front of the server, as a refusal that says so: never an expired link,
+/// since the link may well still be good.
+private func gatewayRefusal(_ failure: SubsonicError) -> HandOverResult? {
+    guard let gateway = failure.gateway else { return nil }
+    return .refused(GatewayWords.failure(gateway, loginSent: failure.loginSent), gateway: gateway, loginSent: failure.loginSent)
 }

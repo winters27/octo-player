@@ -61,9 +61,10 @@ import Testing
     }
 
     @Test func deviceHeaders() {
-        #expect(client.headers["X-Octo-Device-Id"] == "abc")
-        #expect(client.headers["X-Octo-Device-Name"] == "Sam%E2%80%99s%20iPhone")
-        #expect(client.headers["User-Agent"] == "Octo/0.1.0 (iPhone)")
+        let headers = client.headers(for: client.baseURL)
+        #expect(headers["X-Octo-Device-Id"] == "abc")
+        #expect(headers["X-Octo-Device-Name"] == "Sam%E2%80%99s%20iPhone")
+        #expect(headers["User-Agent"] == "Octo/0.1.0 (iPhone)")
     }
 
     /// The server reads the app and the platform from the User-Agent, as Android's
@@ -124,7 +125,7 @@ import Testing
     }
 
     @Test func notAMusicServer() {
-        #expect(throws: OctoError.notSubsonic) {
+        #expect(throws: OctoError.notSubsonic()) {
             let _: ServerInfo = try SubsonicClient.decode(Data("<html>".utf8), key: nil)
         }
     }

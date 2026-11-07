@@ -273,8 +273,6 @@ extension SubsonicClient {
             "\(name.addingPercentEncoding(withAllowedCharacters: Self.queryValue) ?? name)="
                 + (value.addingPercentEncoding(withAllowedCharacters: Self.queryValue) ?? value)
         }.joined(separator: "&").utf8)
-        let (data, response) = try await session.data(for: post)
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { throw OctoError.http(http.statusCode) }
-        return try Self.decode(data, key: nil)
+        return try Self.decode(try await body(of: post), key: nil)
     }
 }

@@ -72,9 +72,20 @@ final class FakeServer: @unchecked Sendable {
 
     func close() { lock.withLock { down = true } }
 
-    func client(username: String = "winters", password: String = "old", mode: AuthMode = .token) -> SubsonicClient {
+    func client(username: String = "winters", password: String = "old", mode: AuthMode = .token,
+                headers: [String: String] = [:]) -> SubsonicClient {
         SubsonicClient(baseURL: base, credentials: Credentials(username: username, password: password, mode: mode),
-                       device: DeviceIdentity(id: "test-device", name: "Test phone"), appVersion: "1.0", session: Self.session)
+                       device: DeviceIdentity(id: "test-device", name: "Test phone"), appVersion: "1.0", customHeaders: headers,
+                       session: Self.session)
+    }
+
+    /// A client for calls that carry no sign-in (an invite, a hand-over): `address` (this
+    /// server's by default) as its main address, `home` in its scope, and these headers.
+    func joinClient(at address: URL? = nil, home: URL? = nil, headers: [String: String] = [:]) -> SubsonicClient {
+        let main = address ?? base
+        return SubsonicClient(baseURL: main, credentials: Credentials(username: "", password: ""),
+                              device: DeviceIdentity(id: "test-device", name: "Test phone"), appVersion: "1.0",
+                              customHeaders: headers, session: Self.session, scope: ServerScope(main: main, home: home))
     }
 
     static let session: URLSession = {

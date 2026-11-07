@@ -117,8 +117,8 @@ import Testing
         server.ok()
         server.ok()
         let client = server.client()
-        await #expect(throws: OctoError.notSubsonic) { _ = try await client.setChartCountry("jp") }
-        await #expect(throws: OctoError.notSubsonic) { _ = try await client.pinChartCountry("jp", pinned: true) }
+        await #expect(throws: OctoError.notSubsonic()) { _ = try await client.setChartCountry("jp") }
+        await #expect(throws: OctoError.notSubsonic()) { _ = try await client.pinChartCountry("jp", pinned: true) }
     }
 
     @Test func aRefusalThrowsTheServersWords() async {

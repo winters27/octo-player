@@ -142,8 +142,10 @@ public enum SignInWords {
             case .authUnsupported: return wayRefused
             case .notFound(let message), .server(_, let message):
                 return message.isEmpty ? somethingWrong : "The server said: \(message)"
+            case .notSubsonic(let gateway?, let loginSent), .http(_, let gateway?, let loginSent):
+                return GatewayWords.failure(gateway, loginSent: loginSent)
             case .notSubsonic: return notMusic
-            case .http(let status):
+            case .http(let status, _, _):
                 return [502, 503, 504, 520, 521, 522, 523, 524, 530].contains(status) ? restarting : notMusic
             }
         }

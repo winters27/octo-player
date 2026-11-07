@@ -42,7 +42,7 @@ public func sharingUnavailable(_ error: Error) -> Bool {
     switch error as? OctoError {
     case .notFound: true
     case .server(let code, _): code == 50 || code == 70
-    case .http(let status): status == 501
+    case .http(let status, _, _): status == 501
     default: false
     }
 }

@@ -10,15 +10,16 @@ let loopFileLimit: Int64 = 64 * 1024 * 1024
 let loopPosterLimit: Int64 = 16 * 1024 * 1024
 
 /// Finds and fetches loop files: the version of a clip that suits a space on screen, as the one
-/// file it is kept in. `headers` returns what a request to an address carries: a relayed clip's
-/// addresses lead to the server, which may sit behind a proxy wanting its own headers.
+/// file it is kept in. A relayed clip's addresses lead to the server, which may sit behind a
+/// proxy or a sign-in page wanting its own headers and cookies: an address of `client`'s server
+/// goes through its connection (`ServerExchange`), any other plainly through `session`.
 public struct LoopFetcher: Sendable {
     let session: URLSession
-    let headers: @Sendable (URL) -> [String: String]
+    let client: SubsonicClient?
 
-    public init(session: URLSession, headers: @escaping @Sendable (URL) -> [String: String] = { _ in [:] }) {
+    public init(session: URLSession = .shared, client: SubsonicClient? = nil) {
         self.session = session
-        self.headers = headers
+        self.client = client
     }
 
     /// The file of the clip's version that suits a space `width` by `height` pixels in a format
@@ -52,17 +53,28 @@ public struct LoopFetcher: Sendable {
         return await fetch(url, to: target, limit: loopPosterLimit)
     }
 
-    private func request(_ url: URL) -> URLRequest {
-        var request = URLRequest(url: url, timeoutInterval: 60)
-        for (name, value) in headers(url) { request.setValue(value, forHTTPHeaderField: name) }
-        return request
+    /// One answer for an address, or nil when none came.
+    private func get(_ url: URL) async -> (Data, HTTPURLResponse)? {
+        let request = URLRequest(url: url, timeoutInterval: 60)
+        if let client, client.scope.covers(url) {
+            guard let answer = try? await ServerExchange.answer(for: request, client: client) else { return nil }
+            return (answer.data, answer.response)
+        }
+        guard let (data, response) = try? await session.data(for: request), let http = response as? HTTPURLResponse else { return nil }
+        return (data, http)
     }
 
     private func fetch(_ url: URL, to target: URL, limit: Int64) async -> Bool {
         let files = FileManager.default
-        if let size = (try? files.attributesOfItem(atPath: target.path)[.size] as? NSNumber)?.int64Value, size > 0 { return true }
-        guard let (data, response) = try? await session.data(for: request(url)),
-              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
+        if let size = (try? files.attributesOfItem(atPath: target.path)[.size] as? NSNumber)?.int64Value, size > 0 {
+            // A web page an older version kept as a loop is let go and fetched again.
+            guard Self.storedPage(target) else { return true }
+            try? files.removeItem(at: target)
+        }
+        // No loop file or still is ever a web page, so a sign-in page in front of the server is
+        // never kept as one.
+        guard let (data, http) = await get(url), (200..<300).contains(http.statusCode),
+              !isHtml(http.value(forHTTPHeaderField: "Content-Type"))
         else { return false }
         let length = http.expectedContentLength
         guard !data.isEmpty, Int64(data.count) <= limit, length < 0 || Int64(data.count) == length else { return false }
@@ -82,12 +94,18 @@ public struct LoopFetcher: Sendable {
     }
 
     private func text(_ url: URL) async -> String? {
-        guard let (data, response) = try? await session.data(for: request(url)),
-              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+        guard let (data, http) = await get(url), (200..<300).contains(http.statusCode),
               data.count <= loopPlaylistLimit,
               let body = String(data: data, encoding: .utf8), body.hasPrefix("#EXTM3U")
         else { return nil }
         return body
+    }
+
+    /// Whether a kept file starts like a web page.
+    static func storedPage(_ file: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return false }
+        defer { try? handle.close() }
+        return looksLikeHtmlFile((try? handle.read(upToCount: 64)) ?? Data())
     }
 }
 
