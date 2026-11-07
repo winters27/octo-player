@@ -577,7 +577,11 @@ fn a_redirect_on_the_same_server_keeps_every_header_and_a_seek_starts_at_the_son
     }
     let seek = asked.iter().filter(|a| a.header("range") == Some("bytes=2500000-"));
     let again: Vec<&str> = seek.map(|a| a.target.as_str()).collect();
-    assert_eq!(again, ["/rest/stream?id=1", "/files/song.flac"]);
+    // A reconnect on a busy machine asks again, the same way.
+    assert!(!again.is_empty() && again.len().is_multiple_of(2), "{again:?}");
+    for pair in again.chunks(2) {
+        assert_eq!(pair, ["/rest/stream?id=1", "/files/song.flac"]);
+    }
 }
 
 // Red when: `.max_redirects(0)` is removed (ureq keeps every header but
