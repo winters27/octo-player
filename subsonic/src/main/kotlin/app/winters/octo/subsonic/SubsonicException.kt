@@ -1,5 +1,6 @@
 package app.winters.octo.subsonic
 
+import app.winters.octo.subsonic.gateway.Gateway
 import java.io.IOException
 
 sealed class SubsonicException(message: String, cause: Throwable? = null) :
@@ -18,8 +19,15 @@ sealed class SubsonicException(message: String, cause: Throwable? = null) :
     class Server(val code: Int, message: String) : SubsonicException(message)
 
     // Something answered, but not a Subsonic server. `status` is the HTTP
-    // status when the answer was an error page.
-    class NotSubsonic(message: String, val status: Int? = null) : SubsonicException(message) {
+    // status when the answer was an error page. `gateway` names the sign-in
+    // page in front of the server when one answered, and `loginSent` is
+    // whether the app's own sign-in for that page went with the request.
+    class NotSubsonic(
+        message: String,
+        val status: Int? = null,
+        val gateway: Gateway? = null,
+        val loginSent: Boolean = false,
+    ) : SubsonicException(message) {
         // A proxy in front of the server saying the server behind it isn't
         // answering (restarting, or down for a moment), not a wrong address.
         val serverBusy: Boolean get() = status in BUSY_STATUSES
@@ -29,6 +37,9 @@ sealed class SubsonicException(message: String, cause: Throwable? = null) :
     class Unreachable(cause: IOException) :
         SubsonicException(cause.message ?: "Could not reach the server", cause)
 }
+
+// What a 2xx answer that is not the server's own JSON is called.
+internal const val NOT_LIKE_SUBSONIC = "The server did not answer like a Subsonic server"
 
 // What a proxy or tunnel answers while the server behind it is restarting
 // or down: bad gateway, unavailable, gateway timeout, and Cloudflare's own

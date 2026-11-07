@@ -15,12 +15,14 @@ import java.util.concurrent.CopyOnWriteArrayList
 class FamilyFakeServer : AutoCloseable {
     private val server = MockWebServer()
     private val answers = ConcurrentHashMap<String, (RecordedRequest) -> String>()
+    private val pages = ConcurrentHashMap<String, () -> MockResponse>()
     val calls = CopyOnWriteArrayList<RecordedRequest>()
 
     init {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 calls += request
+                pages.entries.firstOrNull { request.url.encodedPath.startsWith(it.key) }?.let { return it.value() }
                 val endpoint = request.url.pathSegments.lastOrNull().orEmpty()
                 val body = try {
                     answers[endpoint]?.invoke(request) ?: fail(70, "Not found")
@@ -49,6 +51,12 @@ class FamilyFakeServer : AutoCloseable {
     // Answers with this body as it is, as the family page's JSON calls do.
     fun raw(endpoint: String, body: (RecordedRequest) -> String) {
         answers[endpoint] = body
+    }
+
+    // Answers every call whose path starts with `pathStart` with this
+    // response, as a sign-in page in front of the server does.
+    fun page(pathStart: String, response: () -> MockResponse) {
+        pages[pathStart] = response
     }
 
     fun failWith(endpoint: String, code: Int, message: String) {

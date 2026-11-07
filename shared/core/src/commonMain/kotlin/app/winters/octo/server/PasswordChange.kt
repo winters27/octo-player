@@ -1,5 +1,6 @@
 package app.winters.octo.server
 
+import app.winters.octo.connection.GatewayWords
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
@@ -61,7 +62,9 @@ suspend fun changeOwnPassword(client: SubsonicClient, current: String, new: Stri
     }
 }
 
-private fun failure(e: SubsonicException): PasswordChange = when {
+// A sign-in page in front of the server that answered in its place says
+// so in its own words.
+private fun failure(e: SubsonicException): PasswordChange = GatewayWords.failureFor(e)?.let { PasswordChange.Failed(it) } ?: when {
     e is SubsonicException.Server && e.code == 50 -> PasswordChange.NotAllowed
     // A server that ignored the form body misses the new password.
     e is SubsonicException.Server && e.code == 10 -> PasswordChange.NotOffered

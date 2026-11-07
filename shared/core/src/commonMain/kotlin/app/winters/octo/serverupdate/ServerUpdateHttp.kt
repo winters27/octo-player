@@ -1,6 +1,11 @@
 package app.winters.octo.serverupdate
 
+import app.winters.octo.connection.GatewayWords
 import app.winters.octo.subsonic.SubsonicClient
+import app.winters.octo.subsonic.gateway.Gateway
+import app.winters.octo.subsonic.gateway.answerFacts
+import app.winters.octo.subsonic.gateway.isHtml
+import app.winters.octo.subsonic.gateway.recognizeGateway
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
@@ -10,6 +15,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -20,20 +26,21 @@ interface ServerUpdateCalls {
     suspend fun start(tag: String): UpdateStart
 }
 
-// Where Octo's admin pages answer, how a call to them is signed, and the
-// server's own extra headers (a proxy's access token), which go only there.
+// Where Octo's admin pages answer, and how a call to them is signed. The
+// server's own extra headers (a proxy's access token, a sign-in page's
+// password) come from the security installed on the client, which keeps
+// them to the server's addresses on every hop.
 class AdminPlace(
     val base: HttpUrl,
     val sign: (HttpUrl) -> HttpUrl,
-    val headers: Map<String, String> = emptyMap(),
 )
 
 // The server's own addresses as the place: the one calls go to now. The
 // sign-in is only ever added for the server's own addresses, never for an
 // address that merely answers like it.
-fun ownAddresses(client: SubsonicClient, headers: Map<String, String> = emptyMap()): AdminPlace {
+fun ownAddresses(client: SubsonicClient): AdminPlace {
     val trusted = setOf(rootOf(client.baseUrl), rootOf(client.primaryUrl))
-    return AdminPlace(rootOf(client.baseUrl), { url -> if (rootOf(url) in trusted) client.signed(url) else url }, headers)
+    return AdminPlace(rootOf(client.baseUrl), { url -> if (rootOf(url) in trusted) client.signed(url) else url })
 }
 
 private fun rootOf(url: HttpUrl): HttpUrl = url.newBuilder().encodedPath("/").query(null).fragment(null).build()
@@ -53,6 +60,9 @@ class ServerUpdateHttp(
             try {
                 quick.newCall(request(place).get().build()).execute().use { response ->
                     when {
+                        // A sign-in page in front of the server is not the
+                        // server saying no.
+                        response.signInPage() != null -> UpdateRead.NoAnswer
                         response.code in NOT_OFFERED -> UpdateRead.NotOffered
                         !response.isSuccessful -> UpdateRead.NoAnswer
                         else -> parseServerUpdate(response.body.string())?.let { UpdateRead.Answered(it) } ?: UpdateRead.NoAnswer
@@ -70,8 +80,10 @@ class ServerUpdateHttp(
         return withContext(Dispatchers.IO) {
             try {
                 quick.newCall(request(place).header("X-Octo-Admin", "1").post(body).build()).execute().use { response ->
-                    val answer = parseStartAnswer(response.body.string())
+                    val page = response.signInPage()
+                    val answer = if (page == null) parseStartAnswer(response.body.string()) else null
                     when {
+                        page != null -> UpdateStart.Refused(GatewayWords.failure(page.first, page.second))
                         response.isSuccessful -> UpdateStart.Started(answer?.id, answer?.tag ?: tag)
                         response.code == 409 -> UpdateStart.Refused(answer?.error?.takeIf(String::isNotBlank) ?: "Octo would not start the update just now.")
                         response.code in NOT_OFFERED -> UpdateStart.Refused("Only a Navidrome admin can update the server.")
@@ -86,7 +98,16 @@ class ServerUpdateHttp(
 
     private fun request(place: AdminPlace): Request.Builder {
         val url = place.sign(place.base.newBuilder().encodedPath("/api/admin/update").query(null).build())
-        return Request.Builder().url(url).apply { place.headers.forEach { (name, value) -> header(name, value) } }
+        return Request.Builder().url(url)
+    }
+
+    // The sign-in page in front of the server that gave this answer, and
+    // whether the app's sign-in for it went along; null when the server
+    // itself answered.
+    private fun Response.signInPage(): Pair<Gateway, Boolean>? {
+        if (isSuccessful && !isHtml(header("Content-Type"))) return null
+        val facts = answerFacts()
+        return recognizeGateway(facts)?.let { it to facts.loginSent }
     }
 
     private companion object {

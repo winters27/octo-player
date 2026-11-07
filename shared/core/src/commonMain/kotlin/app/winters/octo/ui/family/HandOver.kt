@@ -1,11 +1,13 @@
 package app.winters.octo.ui.family
 
+import app.winters.octo.connection.GatewayWords
 import app.winters.octo.subsonic.FamilyHandOverLink
 import app.winters.octo.subsonic.FamilyPlatform
 import app.winters.octo.subsonic.FamilySignInState
 import app.winters.octo.subsonic.familySignInRedeem
 import app.winters.octo.subsonic.redeemFamilySignIn
 import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.subsonic.gateway.Gateway
 import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -106,7 +108,9 @@ const val HANDOVER_UNREACHABLE = "Octo can't reach the server. Check this device
 // How the new device's side ended: the sign-in to keep, or why not.
 sealed interface HandOverResult {
     class Received(val signIn: HandOverSignIn) : HandOverResult
-    class Refused(val message: String) : HandOverResult
+    // `gateway` is the sign-in page in front of the server that answered in
+    // its place, and `loginSent` whether the app's sign-in for it went along.
+    class Refused(val message: String, val gateway: Gateway? = null, val loginSent: Boolean = false) : HandOverResult
 }
 
 // The new device's side: redeems the token on the address the link was
@@ -130,7 +134,8 @@ suspend fun receiveHandOver(
     } catch (e: SubsonicException.NotFound) {
         return HandOverResult.Refused(HANDOVER_EXPIRED)
     } catch (e: SubsonicException) {
-        return HandOverResult.Refused(if (e is SubsonicException.WrongCredentials || (e is SubsonicException.NotSubsonic && e.status == 404)) HANDOVER_EXPIRED else e.message ?: HANDOVER_EXPIRED)
+        return gatewayRefusal(e)
+            ?: HandOverResult.Refused(if (e is SubsonicException.WrongCredentials || (e is SubsonicException.NotSubsonic && e.status == 404)) HANDOVER_EXPIRED else e.message ?: HANDOVER_EXPIRED)
     }
     var waited = 0L
     while (waited < waitMs) {
@@ -139,7 +144,7 @@ suspend fun receiveHandOver(
         } catch (e: SubsonicException.Unreachable) {
             null
         } catch (e: SubsonicException) {
-            return HandOverResult.Refused(HANDOVER_EXPIRED)
+            return gatewayRefusal(e) ?: HandOverResult.Refused(HANDOVER_EXPIRED)
         }
         when (status?.state) {
             FamilySignInState.Allowed -> {
@@ -162,4 +167,12 @@ suspend fun receiveHandOver(
         waited += pollMs
     }
     return HandOverResult.Refused(HANDOVER_EXPIRED)
+}
+
+// A sign-in page in front of the server, as a refusal that says so: never
+// an expired link, since the link may well still be good.
+private fun gatewayRefusal(e: SubsonicException): HandOverResult.Refused? {
+    val page = e as? SubsonicException.NotSubsonic ?: return null
+    val gateway = page.gateway ?: return null
+    return HandOverResult.Refused(GatewayWords.failure(gateway, page.loginSent), gateway, page.loginSent)
 }

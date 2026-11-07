@@ -1,6 +1,7 @@
 package app.winters.octo.animated
 
 import app.winters.octo.subsonic.AnimatedClip
+import app.winters.octo.subsonic.gateway.isHtml
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -62,7 +63,9 @@ class LoopFetcher(private val http: OkHttpClient) {
         val response = runCatching { http.newCall(Request.Builder().url(url).build()).awaitResponse() }.getOrNull() ?: return false
         return withContext(Dispatchers.IO) {
             response.use {
-                if (!it.isSuccessful) return@withContext false
+                // A sign-in page in front of the server is never kept as a
+                // loop or its still: no loop file is ever a web page.
+                if (!it.isSuccessful || isHtml(it.header("Content-Type"))) return@withContext false
                 val length = it.body.contentLength()
                 if (length > limit) return@withContext false
                 target.parentFile?.mkdirs()

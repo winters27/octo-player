@@ -1,5 +1,8 @@
 package app.winters.octo.subsonic
 
+import app.winters.octo.subsonic.gateway.isGatewayCookie
+import app.winters.octo.subsonic.gateway.jsonBody
+import app.winters.octo.subsonic.gateway.notSubsonic
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -70,10 +73,13 @@ class FamilyWeb(
     private val cookies = object : CookieJar {
         private val kept = mutableListOf<Cookie>()
 
+        // A sign-in page's cookies are kept by the client's own security,
+        // never here, so a request never carries one twice.
         @Synchronized
         override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-            kept.removeAll { old -> cookies.any { it.name == old.name } }
-            kept += cookies
+            val own = cookies.filterNot { isGatewayCookie(it.name) }
+            kept.removeAll { old -> own.any { it.name == old.name } }
+            kept += own
         }
 
         @Synchronized
@@ -131,16 +137,21 @@ class FamilyWeb(
             val response = http.newCall(request).await()
             withContext(Dispatchers.IO) {
                 response.use {
-                    val answer = it.body.string()
-                    if (!it.isSuccessful) throw failure(it.code, answer)
-                    answer
+                    // A sign-in page in front of the server is named; the
+                    // family page's own refusals keep their own words.
+                    if (!it.isSuccessful) throw it.notSubsonic(path).takeIf { page -> page.gateway != null } ?: failure(it.code, it.body.string())
+                    it.jsonBody(path)
                 }
             }
         } catch (e: IOException) {
             throw SubsonicException.Unreachable(e)
         }
         if (text.isBlank()) return null
-        return json.decodeFromString(serializer, text)
+        return try {
+            json.decodeFromString(serializer, text)
+        } catch (e: IllegalArgumentException) {
+            throw SubsonicException.NotSubsonic(NOT_LIKE_SUBSONIC)
+        }
     }
 
     // The server's own words when it gives them, else plain ones.

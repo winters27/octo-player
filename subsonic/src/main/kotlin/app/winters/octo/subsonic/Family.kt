@@ -1,5 +1,6 @@
 package app.winters.octo.subsonic
 
+import app.winters.octo.subsonic.gateway.jsonBody
 import java.io.IOException
 import okhttp3.Request
 import okhttp3.OkHttpClient
@@ -444,10 +445,5 @@ private suspend fun <T> openCall(
 
 internal suspend fun okhttp3.Call.awaitBody(endpoint: String): String {
     val response = await()
-    return withContext(Dispatchers.IO) {
-        response.use {
-            if (!it.isSuccessful) throw SubsonicException.NotSubsonic("HTTP ${it.code} from $endpoint", it.code)
-            it.body.string()
-        }
-    }
+    return withContext(Dispatchers.IO) { response.use { it.jsonBody(endpoint) } }
 }

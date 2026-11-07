@@ -1,7 +1,9 @@
 package app.winters.octo.ui.family
 
+import app.winters.octo.connection.GatewayWords
 import app.winters.octo.subsonic.FamilyWeb
 import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.subsonic.gateway.Gateway
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import javax.net.ssl.SSLException
@@ -16,7 +18,14 @@ sealed interface JoinOutcome {
         override fun toString() = "SignedUp(username=$username, at=$at)"
     }
     class Untrusted(val host: String) : JoinOutcome
-    class Failed(val message: String, val unreachable: Boolean = false) : JoinOutcome
+    // `gateway` is the sign-in page in front of the server that answered in
+    // its place, and `loginSent` whether the app's sign-in for it went along.
+    class Failed(
+        val message: String,
+        val unreachable: Boolean = false,
+        val gateway: Gateway? = null,
+        val loginSent: Boolean = false,
+    ) : JoinOutcome
 }
 
 // What an invite still needs before it is accepted, or null when it can go.
@@ -88,7 +97,12 @@ private suspend fun joining(address: HttpUrl, refused: String, join: suspend () 
 } catch (e: SubsonicException.Unreachable) {
     if (e.cause is SSLException) JoinOutcome.Untrusted(address.host) else JoinOutcome.Failed("Octo can't reach that address. Check it and try again.", unreachable = true)
 } catch (e: SubsonicException.NotSubsonic) {
-    JoinOutcome.Failed(if (e.status == 404) "That server has no family sign-up. Check the address, or update Octo on the server." else e.message?.takeIf { e.status != null } ?: "That address did not answer like an Octo server.")
+    val gateway = e.gateway
+    if (gateway != null) {
+        JoinOutcome.Failed(GatewayWords.failure(gateway, e.loginSent), gateway = gateway, loginSent = e.loginSent)
+    } else {
+        JoinOutcome.Failed(if (e.status == 404) "That server has no family sign-up. Check the address, or update Octo on the server." else e.message?.takeIf { e.status != null } ?: "That address did not answer like an Octo server.")
+    }
 } catch (e: SubsonicException) {
     JoinOutcome.Failed(e.message ?: refused)
 }

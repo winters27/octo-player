@@ -1,5 +1,7 @@
 package app.winters.octo.subsonic
 
+import app.winters.octo.subsonic.gateway.GatewayCookies
+import app.winters.octo.subsonic.gateway.securedClient
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -91,7 +93,7 @@ class ConnectionTest {
         ok()
         ok()
         val headers = mapOf("CF-Access-Client-Id" to "id.access", "X-Proxy-Token" to "abc")
-        val client = SubsonicClient(server.url("/"), Credentials("u", "p"), OkHttpClient(), headers = headers)
+        val client = SubsonicClient(server.url("/"), Credentials("u", "p"), securedClient(server.url("/"), headers))
         client.ping()
         client.star(listOf("1"))
         repeat(2) {
@@ -107,8 +109,7 @@ class ConnectionTest {
         // code; the same interceptor on that client adds the headers.
         server.enqueue(MockResponse.Builder().body("image").build())
         val base = server.url("/")
-        val scope = HeaderScope(setOf(origin(base)), mapOf("X-Proxy-Token" to "abc"))
-        val http = OkHttpClient.Builder().addNetworkInterceptor(ServerHeaders { scope }).build()
+        val http = securedClient(base, mapOf("X-Proxy-Token" to "abc"))
         val client = SubsonicClient(base, Credentials("u", "p"), http)
         http.newCall(Request.Builder().url(client.coverArtUrl("al-1", 300)).build()).execute().close()
         assertEquals("abc", server.takeRequest().headers["X-Proxy-Token"])
@@ -116,7 +117,8 @@ class ConnectionTest {
 
     @Test
     fun headersNeverGoToAnotherHost() {
-        val scope = HeaderScope(setOf(origin("https://music.example.com/".toHttpUrl())), mapOf("X" to "secret"))
+        val main = "https://music.example.com/".toHttpUrl()
+        val scope = HeaderScope(setOf(origin(main)), mapOf("X" to "secret"), gatewayOrigins(main, null), GatewayCookies())
         assertTrue(scope.covers("https://music.example.com/rest/ping".toHttpUrl()))
         assertTrue(scope.covers("https://MUSIC.example.com:443/x".toHttpUrl()))
         assertFalse(scope.covers("https://other.example.com/".toHttpUrl()))

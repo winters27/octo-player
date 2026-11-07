@@ -1,7 +1,13 @@
 package app.winters.octo.serverupdate
 
+import app.winters.octo.connection.GATEWAY_PAGE
+import app.winters.octo.connection.GatewayWords
+import app.winters.octo.connection.PAGE_TYPE
+import app.winters.octo.connection.securedHttp
 import app.winters.octo.subsonic.Credentials
 import app.winters.octo.subsonic.SubsonicClient
+import app.winters.octo.subsonic.gateway.Gateway
+import app.winters.octo.subsonic.gateway.basicCredentials
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -27,7 +33,8 @@ class ServerUpdateHttpTest {
 
     private val client get() = SubsonicClient(server.url("/"), Credentials("winters", "secret"), http)
 
-    private fun calls(headers: Map<String, String> = emptyMap()) = ServerUpdateHttp(http) { ownAddresses(client, headers) }
+    // The server's headers come from the client's security, as in the apps.
+    private fun calls(headers: Map<String, String> = emptyMap()) = ServerUpdateHttp(securedHttp(server.url("/"), headers)) { ownAddresses(client) }
 
     private val answer =
         """{"enabled":true,"repo":"winters27/octo","running":"2026.10.11","latest":{"tag":"2026.10.13"},"newer":[{"tag":"2026.10.13"}],"updateAvailable":true,"standing":"behind","helper":{"installed":true,"mode":"image","outdated":false},"pending":false,"run":null}"""
@@ -50,6 +57,14 @@ class ServerUpdateHttpTest {
             server.enqueue(MockResponse.Builder().code(code).body("{}").build())
             assertEquals(UpdateRead.NotOffered, calls().read())
         }
+    }
+
+    @Test
+    fun aSignInPageIsNoAnswerNeverNotOffered() = runBlocking {
+        server.enqueue(MockResponse.Builder().code(401).addHeader("Content-Type", PAGE_TYPE).body(GATEWAY_PAGE).build())
+        assertEquals(UpdateRead.NoAnswer, calls().read())
+        server.enqueue(MockResponse.Builder().code(401).addHeader("WWW-Authenticate", "Basic realm=\"Restricted\"").body("").build())
+        assertEquals(UpdateRead.NoAnswer, calls().read())
     }
 
     @Test
@@ -77,6 +92,14 @@ class ServerUpdateHttpTest {
         assertEquals("POST", request.method)
         assertEquals("1", request.headers["X-Octo-Admin"])
         assertEquals("""{"tag":"2026.10.13"}""", request.body?.utf8())
+    }
+
+    @Test
+    fun startingBehindASignInPageSaysWhatAnswered() = runBlocking {
+        server.enqueue(MockResponse.Builder().code(302).addHeader("Location", "/outpost.goauthentik.io/start?rd=x").build())
+        server.enqueue(MockResponse.Builder().addHeader("Content-Type", PAGE_TYPE).body(GATEWAY_PAGE).build())
+        val started = calls(mapOf("Authorization" to basicCredentials("winters", "app password"))).start("2026.10.13")
+        assertEquals(UpdateStart.Refused(GatewayWords.failure(Gateway.Authentik, true)), started)
     }
 
     @Test

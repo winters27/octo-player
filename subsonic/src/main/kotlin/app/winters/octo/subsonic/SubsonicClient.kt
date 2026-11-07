@@ -1,5 +1,6 @@
 package app.winters.octo.subsonic
 
+import app.winters.octo.subsonic.gateway.jsonBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -32,11 +33,11 @@ class SubsonicClient(
     // address whichever one the calls go to.
     val primaryUrl: HttpUrl,
     credentials: Credentials,
-    http: OkHttpClient,
+    // The server's headers, certificates and sign-in page cookies come with
+    // the client, from the security installed on it, so every route keeps
+    // to the same rules.
+    private val http: OkHttpClient,
     private val clientName: String = "Octo",
-    // Headers every request to the server carries, such as a proxy's
-    // access token. They go only to the server's own addresses.
-    private val headers: Map<String, String> = emptyMap(),
     // The library folder calls are limited to, or null for all of them.
     val musicFolderId: String? = null,
     // Where calls go right now, when the server has more than one address.
@@ -53,15 +54,6 @@ class SubsonicClient(
     val username: String get() = credentials.username
 
     val authMode: AuthMode get() = credentials.mode
-
-    // The client as it was given, before this server's headers were added.
-    private val plainHttp: OkHttpClient = http
-
-    private val http: OkHttpClient =
-        if (headers.isEmpty()) http
-        else http.newBuilder()
-            .addNetworkInterceptor(ServerHeaders { HeaderScope(setOf(origin(primaryUrl), origin(baseUrl)), headers) })
-            .build()
 
     // For the one call that can take minutes: Octo builds the stations the
     // first time they are asked for after it starts.
@@ -109,17 +101,18 @@ class SubsonicClient(
 
     // Whether the server lists an extension at this version, or null when it
     // could not be asked: out of reach, a proxy answering while it restarts,
-    // a page that is not the server's, or the sign-in refused. Only a yes or
-    // no is the server's own answer, worth keeping; a null is worth asking
-    // again. A server that answers the call with an error, or has no such
-    // address (a 404), has no extensions to list, which is a no.
+    // a sign-in page in front of the server, a page that is not the
+    // server's, or the sign-in refused. Only a yes or no is the server's own
+    // answer, worth keeping; a null is worth asking again. A server that
+    // answers the call with an error, or has no such address (a 404), has no
+    // extensions to list, which is a no.
     suspend fun supportsIfKnown(name: String, version: Int = 1): Boolean? =
         try {
             extensions().lists(name, version)
         } catch (e: SubsonicException.Unreachable) {
             null
         } catch (e: SubsonicException.NotSubsonic) {
-            if (e.status != null && !e.serverBusy) false else null
+            if (e.gateway == null && e.status != null && !e.serverBusy) false else null
         } catch (e: SubsonicException.WrongCredentials) {
             null
         } catch (e: SubsonicException) {
@@ -664,12 +657,7 @@ class SubsonicClient(
     private suspend fun exchange(request: Request, endpoint: String, http: OkHttpClient = this.http): String {
         val body = try {
             val response = http.newCall(request).await()
-            withContext(Dispatchers.IO) {
-                response.use {
-                    if (!it.isSuccessful) throw SubsonicException.NotSubsonic("HTTP ${it.code} from $endpoint", it.code)
-                    it.body.string()
-                }
-            }
+            withContext(Dispatchers.IO) { response.use { it.jsonBody(endpoint) } }
         } catch (e: IOException) {
             throw SubsonicException.Unreachable(e)
         }
@@ -707,7 +695,7 @@ class SubsonicClient(
     // The same server, headers and route signed in with another secret, for
     // checking a password without touching this client.
     fun withSecret(secret: String): SubsonicClient =
-        SubsonicClient(primaryUrl, Credentials(username, secret, authMode), plainHttp, clientName, headers, musicFolderId, route)
+        SubsonicClient(primaryUrl, Credentials(username, secret, authMode), http, clientName, musicFolderId, route)
 
     // A call that only answers ok or an error. The params may repeat a name.
     internal suspend fun send(endpoint: String, params: List<Pair<String, String>>) {
@@ -750,18 +738,15 @@ class SubsonicClient(
         return withContext(Dispatchers.Default) { decode(body, key, serializer, default) }
     }
 
+    // The answer's body once it is known to be JSON or empty. Anything else
+    // (an error status, a sign-in page, a page that is not the server's) is
+    // NotSubsonic, naming the gateway in front of the server when one
+    // answered.
     private suspend fun fetch(url: HttpUrl, endpoint: String, http: OkHttpClient = this.http): String {
         val request = Request.Builder().url(url).build()
         return try {
             val response = http.newCall(request).await()
-            withContext(Dispatchers.IO) {
-                response.use {
-                    if (!it.isSuccessful) {
-                        throw SubsonicException.NotSubsonic("HTTP ${it.code} from $endpoint", it.code)
-                    }
-                    it.body.string()
-                }
-            }
+            withContext(Dispatchers.IO) { response.use { it.jsonBody(endpoint) } }
         } catch (e: IOException) {
             throw SubsonicException.Unreachable(e)
         }
@@ -770,7 +755,7 @@ class SubsonicClient(
     internal fun <T> decode(body: String, key: String?, serializer: KSerializer<T>, default: T?): T {
         val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
             ?.get("subsonic-response")?.jsonObject
-            ?: throw SubsonicException.NotSubsonic("The server did not answer like a Subsonic server")
+            ?: throw SubsonicException.NotSubsonic(NOT_LIKE_SUBSONIC)
         if (root["status"]?.jsonPrimitive?.contentOrNull != "ok") {
             val error = root["error"]?.jsonObject
             val code = error?.get("code")?.jsonPrimitive?.intOrNull ?: 0

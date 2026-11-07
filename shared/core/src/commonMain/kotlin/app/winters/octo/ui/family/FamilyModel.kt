@@ -1,5 +1,6 @@
 package app.winters.octo.ui.family
 
+import app.winters.octo.connection.GatewayWords
 import app.winters.octo.subsonic.setFamilyDeviceQuality
 import app.winters.octo.subsonic.setFamilyQuality
 import app.winters.octo.subsonic.StreamQuality
@@ -227,7 +228,7 @@ class FamilyModel(
         } catch (e: SubsonicException.Unreachable) {
             problem = "Octo can't reach the server right now."
         } catch (e: SubsonicException) {
-            problem = e.message ?: "The server did not answer."
+            problem = GatewayWords.failureFor(e) ?: e.message ?: "The server did not answer."
         }
     }
 
@@ -243,7 +244,7 @@ class FamilyModel(
                 requests = listOf(made) + requests.filterNot { it.id == made.id }
             }
         } catch (e: SubsonicException) {
-            said = e.message ?: "The request did not go through."
+            said = GatewayWords.failureFor(e) ?: e.message ?: "The request did not go through."
             null
         } finally {
             working = false
@@ -350,7 +351,7 @@ class FamilyModel(
             } catch (e: SubsonicException.Unreachable) {
                 said = "Octo can't reach the server right now."
             } catch (e: SubsonicException) {
-                said = e.message ?: "The server said no."
+                said = GatewayWords.failureFor(e) ?: e.message ?: "The server said no."
             } finally {
                 working = false
             }
@@ -371,7 +372,7 @@ class FamilyModel(
             } catch (e: SubsonicException.Unreachable) {
                 said = "Octo can't reach the server right now."
             } catch (e: SubsonicException) {
-                said = e.message ?: "The server said no."
+                said = GatewayWords.failureFor(e) ?: e.message ?: "The server said no."
             } finally {
                 working = false
             }
