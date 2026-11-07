@@ -36,18 +36,25 @@ class GatewayRowsTest {
         assertTrue(ServerCheck(Reach.NeedsHttps).isWarning())
     }
 
-    // The server in use says it needs https in its row, as a warning;
+    // The server in use says in its row, as a warning, that it needs https
+    // or that its sign-in page turned it away, since nothing else says so;
     // its other troubles stay below the list. Red when the in-use branch of
-    // statusLine comes before NeedsHttps, or warnsInRow hides it.
+    // statusLine comes before either, or warnsInRow hides one.
     @Test
-    fun theServerInUseSaysItNeedsHttpsInItsRow() {
+    fun theServerInUseSaysItsSignInPageTroubleInItsRow() {
         val needs = ServerCheck(Reach.NeedsHttps)
         assertEquals("Octo 0.9.3 · Needs https for its sign-in page", statusLine("octo", "0.9.3", false, needs, inUse = true))
         assertTrue(needs.warnsInRow(inUse = true))
+        val refused = ServerCheck(Reach.SignInPage(Gateway.Authentik, loginSent = true))
+        assertEquals("Octo 0.9.3 · Authentik didn't accept the sign-in", statusLine("octo", "0.9.3", false, refused, inUse = true))
+        assertTrue(refused.warnsInRow(inUse = true))
         val page = ServerCheck(Reach.SignInPage(Gateway.Authentik, loginSent = false))
-        assertEquals("Octo 0.9.3", statusLine("octo", "0.9.3", false, page, inUse = true))
-        assertEquals(false, page.warnsInRow(inUse = true))
+        assertEquals("Octo 0.9.3 · Authentik is in front of this server", statusLine("octo", "0.9.3", false, page, inUse = true))
+        assertTrue(page.warnsInRow(inUse = true))
         assertTrue(page.warnsInRow(inUse = false))
+        val gone = ServerCheck(Reach.Unreachable)
+        assertEquals("Octo 0.9.3", statusLine("octo", "0.9.3", false, gone, inUse = true))
+        assertEquals(false, gone.warnsInRow(inUse = true))
         assertEquals("Signed out. Sign in again to use it.", statusLine("octo", "0.9.3", true, needs))
     }
 

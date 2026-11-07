@@ -26,15 +26,18 @@ import Testing
         #expect(serverRestore(signedOut: false, hasSecret: false, headers: ["Authorization": basic], scope: publicPlain) == .signOut)
     }
 
-    /// Red when `statusLine` hides every check for the server in use again, or `warns(inUse:)`
-    /// warns for anything else on it.
-    @Test func theRowOfTheServerInUseShowsOnlyThatItNeedsHttps() {
+    /// Red when `statusLine` hides the https need or a sign-in page's refusal for the server in
+    /// use, or `warns(inUse:)` warns for anything else on it.
+    @Test func theRowOfTheServerInUseShowsOnlyItsSignInPageTrouble() {
         #expect(statusLine(serverType: "octo", serverVersion: "0.9.3", signedOut: false, check: ServerCheck(.needsHttps), inUse: true)
             == "Octo 0.9.3 · \(GatewayWords.rowNeedsHttps)")
         #expect(statusLine(serverType: "octo", serverVersion: "0.9.3", signedOut: false, check: ServerCheck(.unreachable), inUse: true)
             == "Octo 0.9.3")
         #expect(statusLine(serverType: "octo", serverVersion: "0.9.3", signedOut: false,
-                           check: ServerCheck(.signInPage(.authentik, loginSent: true)), inUse: true) == "Octo 0.9.3")
+                           check: ServerCheck(.signInPage(.authentik, loginSent: true)), inUse: true)
+            == "Octo 0.9.3 · \(GatewayWords.row(.authentik, loginSent: true))")
+        #expect(ServerCheck(.signInPage(.authentik, loginSent: true)).warns(inUse: true))
+        #expect(ServerCheck(.signInPage(.authelia, loginSent: false)).warns(inUse: true))
         #expect(ServerCheck(.needsHttps).warns(inUse: true))
         #expect(!ServerCheck(.unreachable).warns(inUse: true))
         #expect(ServerCheck(.unreachable).warns(inUse: false))

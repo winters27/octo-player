@@ -45,7 +45,8 @@ fun accountLine(username: String, address: String): String {
 
 // A server's quiet status in its row: what it is, and how it answered.
 // The one in use shows only its kind here, the rest being said below the
-// list, unless its sign-in page needs https, which nothing else says.
+// list, unless its sign-in page needs https or turns it away, which
+// nothing else says.
 fun statusLine(
     serverType: String?,
     serverVersion: String?,
@@ -59,10 +60,10 @@ fun statusLine(
         switching -> "Switching to it now"
         signedOut -> "Signed out. Sign in again to use it."
         check?.reach == Reach.NeedsHttps -> "$kind · ${GatewayWords.ROW_NEEDS_HTTPS}"
+        check != null && check.reach is Reach.SignInPage -> "$kind · ${GatewayWords.row(check.reach.gateway, check.reach.loginSent)}"
         inUse || check == null || check.reach == Reach.Unknown -> kind
         check.reach == Reach.Answers -> listOfNotNull(kind, check.ms?.let(::answerWords)).joinToString(" · ")
         check.reach == Reach.WrongPassword -> "$kind · Didn't take the saved password"
-        check.reach is Reach.SignInPage -> "$kind · ${GatewayWords.row(check.reach.gateway, check.reach.loginSent)}"
         else -> "$kind · Out of reach right now"
     }
 }
@@ -74,9 +75,10 @@ fun ServerCheck?.isWarning(): Boolean = when (this?.reach) {
 }
 
 // Whether a row's status line shows as a warning. The one in use warns
-// only that its sign-in page needs https; its other troubles are said
-// below the list.
-fun ServerCheck?.warnsInRow(inUse: Boolean): Boolean = isWarning() && (!inUse || this?.reach == Reach.NeedsHttps)
+// only that its sign-in page needs https or turns it away; its other
+// troubles are said below the list.
+fun ServerCheck?.warnsInRow(inUse: Boolean): Boolean =
+    isWarning() && (!inUse || this?.reach == Reach.NeedsHttps || this?.reach is Reach.SignInPage)
 
 // The notice once another server is in use, and plainly when music was
 // stopped for it. Null when nothing was in use before.

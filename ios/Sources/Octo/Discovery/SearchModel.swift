@@ -23,6 +23,8 @@ final class SearchModel {
     /// Nil until at least two characters are typed.
     private(set) var results: LibraryResults?
     private(set) var discover: DiscoverState = .idle
+    /// Why the server could not be asked, in words for the line; nil while nothing failed.
+    private(set) var discoverWhy: String?
     private(set) var topSongs: RankedSongs<Song>?
     private(set) var chart: RankedSongs<Song>?
     private(set) var recent: [String] = []
@@ -143,6 +145,7 @@ final class SearchModel {
         askedText = query
         askedServer = .some(server)
         discoverTask?.cancel()
+        discoverWhy = nil
         guard let query, let discovery else {
             discover = .idle
             return
@@ -169,6 +172,7 @@ final class SearchModel {
                 self.discover = found.map { .done($0) } ?? .idle
             } catch {
                 guard !Task.isCancelled else { return }
+                self.discoverWhy = userMessage(error)
                 self.discover = .failed
             }
             self.askTopSongs()

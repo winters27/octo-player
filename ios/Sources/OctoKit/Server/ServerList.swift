@@ -23,8 +23,8 @@ public struct ServerCheck: Sendable, Equatable {
     }
 
     /// Whether the row shows its status line as a warning: the server in use only when it needs
-    /// https, since its row shows nothing else of how it answered.
-    public func warns(inUse: Bool) -> Bool { inUse ? reach == .needsHttps : isWarning }
+    /// https or its sign-in page turns it away, since its row shows nothing else of how it answered.
+    public func warns(inUse: Bool) -> Bool { inUse ? reach == .needsHttps || reach.isSignInPage : isWarning }
 }
 
 public enum Reach: Sendable, Equatable {
@@ -40,6 +40,11 @@ public enum Reach: Sendable, Equatable {
     /// Kept with a sign-in page's password for a plain http address outside the home network,
     /// where the app never sends it.
     case needsHttps
+
+    /// Whether a sign-in page answered in the server's place.
+    public var isSignInPage: Bool {
+        if case .signInPage = self { true } else { false }
+    }
 }
 
 /// How a kept server's quick look ended, from the error it ended with: a refused password, a
@@ -89,13 +94,13 @@ public func accountLine(username: String, address: String) -> String {
 }
 
 /// A server's quiet status in its row: what it is, and how it answered. The one in use shows
-/// only its kind here, unless it needs https for its sign-in page.
+/// only its kind here, unless it needs https for its sign-in page or that page turns it away.
 public func statusLine(serverType: String?, serverVersion: String?, signedOut: Bool, check: ServerCheck?,
                        switching: Bool = false, inUse: Bool = false) -> String {
     let kind = serverKind(serverType, serverVersion)
     if switching { return "Switching to it now" }
     if signedOut { return "Signed out. Sign in again to use it." }
-    guard let check, check.reach != .unknown, !inUse || check.reach == .needsHttps else { return kind }
+    guard let check, check.reach != .unknown, !inUse || check.reach == .needsHttps || check.reach.isSignInPage else { return kind }
     switch check.reach {
     case .answers: return ([kind] + [check.ms.map(answerWords)].compactMap { $0 }).joined(separator: " · ")
     case .wrongPassword: return "\(kind) · Didn't take the saved password"

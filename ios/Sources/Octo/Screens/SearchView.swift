@@ -459,7 +459,8 @@ struct SearchView: View {
         case .noneFound:
             OutsideLine(look: look, text: outsideLine(look, query: trimmed, kind: kind) ?? "")
         case .failed:
-            OutsideLine(look: look, text: outsideLine(look, query: trimmed, kind: kind) ?? "", retry: model.retryOnline)
+            OutsideLine(look: look, text: (outsideLine(look, query: trimmed, kind: kind) ?? "") + (model.discoverWhy.map { ". \($0)" } ?? ""),
+                        retry: model.retryOnline)
         case .found:
             // The line stays where it said it was looking, quieter, over the finds that took the
             // waiting rows' places.

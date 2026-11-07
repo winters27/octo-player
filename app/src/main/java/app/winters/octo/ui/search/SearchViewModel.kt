@@ -105,7 +105,8 @@ sealed interface DiscoverState {
     data object Idle : DiscoverState
     data object Loading : DiscoverState
     class Done(val found: Discovered) : DiscoverState
-    data object Failed : DiscoverState
+    // The server could not be asked, and why, in words for the line.
+    class Failed(val why: String) : DiscoverState
 }
 
 @HiltViewModel
@@ -214,7 +215,7 @@ class SearchViewModel @Inject constructor(
                 emit(
                     when (state) {
                         is LoadState.Ready -> state.data?.let { DiscoverState.Done(it) } ?: DiscoverState.Idle
-                        is LoadState.Failed -> DiscoverState.Failed
+                        is LoadState.Failed -> DiscoverState.Failed(state.message)
                         LoadState.Loading -> DiscoverState.Loading
                     },
                 )
