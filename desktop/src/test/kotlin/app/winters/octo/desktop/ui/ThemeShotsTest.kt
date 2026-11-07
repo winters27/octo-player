@@ -28,6 +28,7 @@ import app.winters.octo.desktop.readIn
 import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.desktop.settings.themes
 import app.winters.octo.desktop.songJson
+import app.winters.octo.player.immersive.CoverFadeMs
 import app.winters.octo.theme.AccentChoice
 import app.winters.octo.theme.ThemeChoice
 import app.winters.octo.theme.pickTheme
@@ -223,11 +224,13 @@ class ThemeShotsTest {
                     s.settle(800).close()
                 }
                 if (name == "menu") open(s)
-                s.settle(1_200)
+                // The colors fade into the new theme: compared once the fade
+                // has finished.
+                s.settleStill(1_200, quiet = CoverFadeMs)
             }
             fun freshStart() = A11yScene(folder.newFolder(), reduceMotion = true, look = inTheme(last, glow = true, before = listOf(ThemeChoice.Octo) + picks.dropLast(1))).use { s ->
                 open(s)
-                s.settle(2_000)
+                s.settleStill(2_000, quiet = CoverFadeMs)
             }
             val fresh = freshStart()
             val again = freshStart()

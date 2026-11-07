@@ -77,6 +77,8 @@ fun LineSlider(
     val bubbleFill = glassFilm(0.85f)
     val bubbleWords = OctoColors.TextPrimary
     val jewelTick = OctoColors.TextPrimary.copy(alpha = 0.30f)
+    // On a light theme the white thumb keeps an edge on the pale page.
+    val thumbEdge = if (LocalOctoSurfaces.current.light) OctoColors.Edge else Color.Transparent
 
     val glowPaint = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG) }
     val glowFilters = remember { GlowFilters() }
@@ -116,7 +118,7 @@ fun LineSlider(
                 val y = size.height / 2
                 if (jewel != null) {
                     val shown = if (dragging) dragFraction else followed?.value ?: fraction()
-                    drawJewelSlider(y, shown, jewel, fill, jewelTrack, bubbleFill, bubbleWords, steps, valueLabel?.invoke(shown), measurer, jewelTrackBottom, jewelShadow, jewelTick)
+                    drawJewelSlider(y, shown, jewel, fill, jewelTrack, bubbleFill, bubbleWords, steps, valueLabel?.invoke(shown), measurer, jewelTrackBottom, jewelShadow, jewelTick, thumbEdge)
                     return@drawBehind
                 }
                 val stroke = thickness.toPx()

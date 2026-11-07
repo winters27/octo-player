@@ -35,7 +35,6 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.player.immersive.CoverFadeMs
 import app.winters.octo.player.immersive.FinalGain
 import app.winters.octo.player.immersive.FpsChoices
-import app.winters.octo.player.immersive.WashSize
 import app.winters.octo.player.immersive.WashTuning
 import app.winters.octo.player.immersive.overlay
 import app.winters.octo.player.immersive.paceBpm
@@ -46,6 +45,9 @@ import app.winters.octo.theme.contrastOn
 import app.winters.octo.theme.glowMesh
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import app.winters.octo.covers.toLch
+import app.winters.octo.player.immersive.relativeLuminance
+import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.Image
@@ -129,57 +131,100 @@ val WashCover.darkest: Int get() = range.scaled(minOf(FinalGain, 1f)).low
 val WashCover.washPatches: List<Int> get() = listOf(darkest, peak)
 val WashCover.glowPatches: List<Int> get() = listOf(darkest, glowPeak)
 
-// The theme's own colors as a still wash, for a theme that has them: its
-// glow colors (accent, complement, third and accent again, one to a
-// corner), kept readable at `alpha` over the page, where they blend too
-// (glowMesh). Made once for each set of colors, untouched by the wash's tuning.
+// The theme's own colors as a slow wash, for a theme that has them: Octo's
+// icon (drawn from the vector at ART_PX) recolored into the theme's three
+// glow colors (accent, complement and third), each kept readable at `alpha`
+// over the page, where they blend too (glowMesh). The icon's darkest parts
+// take the darkest of the three, its middle tones the middle one and its
+// brightest the brightest, blended evenly between. Prepared with the wash's
+// own tuning, as Octo's icon is, once for each set of colors and tuning.
 internal object ThemeArt {
-    private val untouched = WashTuning(contrast = 1f, saturation = 1f, brightnessCap = 1f)
+    private const val ART_PX = 512
     @Volatile private var made: WashCover? = null
 
-    fun corners(theme: ThemeChoice, glow: List<Int>, alpha: Float): List<Int> {
+    // The icon's pixels as levels from 0 (its darkest) to 1 (its
+    // brightest), with each pixel's alpha, read once for the whole run.
+    private class Levels(val levels: FloatArray, val alphas: ByteArray)
+    @Volatile private var icon: Levels? = null
+
+    // The three glow colors, readable at `alpha` (with `accent` too), from
+    // darkest to brightest.
+    fun trio(theme: ThemeChoice, glow: List<Int>, alpha: Float, accent: Int? = null): List<Int> {
         val perMille = kotlin.math.floor(alpha * 1000.0 + 0.5).toInt()
-        return glowMesh(theme, listOf(glow[0], glow[1], glow[2], glow[0]), perMille)
+        return glowMesh(theme, listOf(glow[0], glow[1], glow[2]), perMille, accent).sortedBy { toLch(it).l }
     }
 
     @Synchronized
-    fun cover(theme: ThemeChoice, glow: List<Int>, alpha: Float): WashCover {
-        val corners = corners(theme, glow, alpha)
-        val key = "theme|" + corners.joinToString("|") { "%08X".format(it) }
+    fun cover(theme: ThemeChoice, glow: List<Int>, alpha: Float, tuning: WashTuning, accent: Int? = null): WashCover {
+        val trio = trio(theme, glow, alpha, accent)
+        val key = "theme|${theme.name}|" + trio.joinToString("|") { "%08X".format(it) } +
+            "|${tuning.contrast}|${tuning.saturation}|${tuning.brightnessCap}"
         made?.takeIf { it.key == key }?.let { return it }
-        val image = picture(corners)
+        val image = runCatching { picture(trio) }.getOrNull()
         return try {
-            WashCovers.prepared(key, image, untouched).also { next ->
+            WashCovers.prepared(key, image, tuning).also { next ->
                 // Whoever draws the one before draws from a hold of their own.
                 made?.retire()
                 made = next
             }
         } finally {
-            image.close()
+            image?.close()
         }
     }
 
-    // The four colors blended corner to corner across the wash's square.
-    private fun picture(corners: List<Int>): Image {
-        val side = WashSize
-        val bytes = ByteArray(side * side * 4)
-        for (y in 0 until side) for (x in 0 until side) {
-            val u = x / (side - 1f)
-            val v = y / (side - 1f)
-            fun channel(shift: Int): Byte {
-                fun c(i: Int) = (corners[i] shr shift and 0xFF).toFloat()
-                val top = c(0) + (c(1) - c(0)) * u
-                val bottom = c(2) + (c(3) - c(2)) * u
-                return (top + (bottom - top) * v).roundToInt().coerceIn(0, 255).toByte()
+    private fun levels(): Levels = icon ?: run {
+        val info = ImageInfo(ART_PX, ART_PX, ColorType.BGRA_8888, ColorAlphaType.UNPREMUL)
+        val bytes = OctopusArt.icon(ART_PX, shape = null).use { art ->
+            val bitmap = Bitmap()
+            try {
+                bitmap.allocPixels(info)
+                art.readPixels(bitmap, 0, 0)
+                bitmap.readPixels(info, ART_PX * 4, 0, 0) ?: ByteArray(ART_PX * ART_PX * 4)
+            } finally {
+                bitmap.close()
             }
-            val o = (y * side + x) * 4
+        }
+        val count = ART_PX * ART_PX
+        val luminance = DoubleArray(count)
+        val alphas = ByteArray(count)
+        var low = Double.MAX_VALUE
+        var high = -Double.MAX_VALUE
+        for (i in 0 until count) {
+            val o = i * 4
+            // BGRA in memory.
+            val argb = (0xFF shl 24) or ((bytes[o + 2].toInt() and 0xFF) shl 16) or ((bytes[o + 1].toInt() and 0xFF) shl 8) or (bytes[o].toInt() and 0xFF)
+            alphas[i] = bytes[o + 3]
+            luminance[i] = relativeLuminance(argb)
+            if (bytes[o + 3].toInt() and 0xFF > 0) {
+                low = minOf(low, luminance[i])
+                high = maxOf(high, luminance[i])
+            }
+        }
+        val span = (high - low).coerceAtLeast(1e-9)
+        Levels(FloatArray(count) { ((luminance[it] - low) / span).coerceIn(0.0, 1.0).toFloat() }, alphas).also { icon = it }
+    }
+
+    // The icon in `trio` (darkest, middle, brightest), each pixel keeping
+    // its own alpha.
+    private fun picture(trio: List<Int>): Image {
+        val art = levels()
+        val bytes = ByteArray(ART_PX * ART_PX * 4)
+        for (i in art.levels.indices) {
+            val t = art.levels[i]
+            val (from, to, at) = if (t <= 0.5f) Triple(trio[0], trio[1], t * 2f) else Triple(trio[1], trio[2], (t - 0.5f) * 2f)
+            fun channel(shift: Int): Byte {
+                val a = (from shr shift and 0xFF).toFloat()
+                val b = (to shr shift and 0xFF).toFloat()
+                return (a + (b - a) * at).roundToInt().coerceIn(0, 255).toByte()
+            }
+            val o = i * 4
             // BGRA in memory.
             bytes[o] = channel(0)
             bytes[o + 1] = channel(8)
             bytes[o + 2] = channel(16)
-            bytes[o + 3] = 0xFF.toByte()
+            bytes[o + 3] = art.alphas[i]
         }
-        return Image.makeRaster(ImageInfo(side, side, ColorType.BGRA_8888, ColorAlphaType.PREMUL), bytes, side * 4)
+        return Image.makeRaster(ImageInfo(ART_PX, ART_PX, ColorType.BGRA_8888, ColorAlphaType.UNPREMUL), bytes, ART_PX * 4)
     }
 }
 
@@ -198,11 +243,11 @@ fun windowGlow(look: Appearance, signedIn: Boolean, cover: String?): WindowGlow 
     else -> WindowGlow.Cover
 }
 
-// What stands in while nothing with a cover plays: the theme's own colors
-// (`glow`, kept readable at `quietOpacity`), or Octo's icon for a theme
-// with none.
-internal fun quietCover(theme: ThemeChoice, glow: List<Int>, strength: Float, tuning: WashTuning): WashCover =
-    if (glow.size >= 3) ThemeArt.cover(theme, glow, quietOpacity(strength)) else OctoArt.cover(tuning)
+// What stands in while nothing with a cover plays: Octo's icon in the
+// theme's own colors (`glow`, kept readable at `quietOpacity`, with the
+// chosen `accent` too), or as it is for a theme with none.
+internal fun quietCover(theme: ThemeChoice, glow: List<Int>, strength: Float, tuning: WashTuning, accent: Int? = null): WashCover =
+    if (glow.size >= 3) ThemeArt.cover(theme, glow, quietOpacity(strength), tuning, accent) else OctoArt.cover(tuning)
 
 // The veil over the glow of the cover `coverId` on a light theme, worked
 // out from the same prepared copy the page's shade reads, as if black
@@ -257,8 +302,9 @@ fun OctoAmbience(app: AppState, moving: Boolean, veil: Float, modifier: Modifier
     val tuning = WashTuning(wash.contrast, wash.saturation / 100f, wash.brightnessCap / 100f)
     val theme = app.palette.collectAsState().value.theme
     val glow = LocalOctoSurfaces.current.glow.map { it.toArgb() }
-    val cover by produceState<WashCover?>(null, tuning, theme, glow, look.glowStrength) {
-        value = withContext(Dispatchers.Default) { quietCover(theme, glow, look.glowStrength, tuning) }
+    val accent = OctoColors.Accent.toArgb()
+    val cover by produceState<WashCover?>(null, tuning, theme, glow, look.glowStrength, accent) {
+        value = withContext(Dispatchers.Default) { quietCover(theme, glow, look.glowStrength, tuning, accent) }
     }
     val words = currentPageWords()
     val light = cover?.let { words.veil(it.washPatches, glowOpacity(1f)) } ?: 0f
@@ -357,9 +403,10 @@ fun ImmersiveAmbience(app: AppState, modifier: Modifier = Modifier) {
     val connection = app.connection
     val theme = app.palette.collectAsState().value.theme
     val glow = LocalOctoSurfaces.current.glow.map { it.toArgb() }
-    val cover by produceState<WashCover?>(null, song?.coverArt, song == null, connection, tuning, theme, glow, look.glowStrength) {
+    val accent = OctoColors.Accent.toArgb()
+    val cover by produceState<WashCover?>(null, song?.coverArt, song == null, connection, tuning, theme, glow, look.glowStrength, accent) {
         if (song == null || connection == null) {
-            value = withContext(Dispatchers.Default) { quietCover(theme, glow, look.glowStrength, tuning) }
+            value = withContext(Dispatchers.Default) { quietCover(theme, glow, look.glowStrength, tuning, accent) }
         } else {
             app.washCovers.follow(connection.client, song.coverArt, tuning).collect { value = it }
         }

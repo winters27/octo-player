@@ -185,6 +185,27 @@ class A11yScene(
         return image!!
     }
 
+    // Draws in real time for at least `ms`, then on until nothing has been
+    // left to redraw (no fade still running) for `quiet` ms in a row, or
+    // until `most` has passed, and gives the last frame.
+    fun settleStill(ms: Long, quiet: Long, most: Long = 6_000): org.jetbrains.skia.Image {
+        val begin = System.nanoTime()
+        var stillSince: Long? = null
+        var image: org.jetbrains.skia.Image? = null
+        while (true) {
+            image?.close()
+            val now = System.nanoTime()
+            image = frameAt(now)
+            var busy = true
+            SwingUtilities.invokeAndWait { busy = scene.hasInvalidations() }
+            stillSince = if (busy) null else stillSince ?: now
+            val elapsed = (now - begin) / 1_000_000
+            val still = stillSince?.let { (now - it) / 1_000_000 >= quiet } ?: false
+            if ((elapsed >= ms && still) || elapsed >= most) return image
+            Thread.sleep(30)
+        }
+    }
+
     // One frame drawn at a given moment of the scene's clock.
     fun frameAt(nanos: Long): org.jetbrains.skia.Image {
         lateinit var image: org.jetbrains.skia.Image

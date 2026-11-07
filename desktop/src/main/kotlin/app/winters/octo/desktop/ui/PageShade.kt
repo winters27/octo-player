@@ -168,10 +168,11 @@ fun rememberPageShade(app: AppState): PageShade {
     val connection = app.connection
     val theme = app.palette.collectAsState().value.theme
     val glow = LocalOctoSurfaces.current.glow.map { it.toArgb() }
+    val accent = OctoColors.Accent.toArgb()
     // The same prepared copy the ambience draws from (kept, so no extra work).
-    val cover by produceState<WashCover?>(null, coverId, playing, connection, tuning, theme, glow, look.glowStrength) {
+    val cover by produceState<WashCover?>(null, coverId, playing, connection, tuning, theme, glow, look.glowStrength, accent) {
         if (!playing || connection == null) {
-            value = withContext(Dispatchers.Default) { quietCover(theme, glow, look.glowStrength, tuning) }
+            value = withContext(Dispatchers.Default) { quietCover(theme, glow, look.glowStrength, tuning, accent) }
         } else {
             app.washCovers.follow(connection.client, coverId, tuning).collect { value = it }
         }
