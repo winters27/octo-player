@@ -69,7 +69,7 @@ import Testing
             let base = root.appendingPathComponent(folder).standardizedFileURL
             guard let walk = FileManager.default.enumerator(at: base, includingPropertiesForKeys: nil) else { continue }
             for case let file as URL in walk where file.pathExtension == "swift" {
-                let text = try String(contentsOf: file, encoding: .utf8)
+                let text = try String(contentsOf: file, encoding: .utf8).replacingOccurrences(of: "\r\n", with: "\n")
                 let relative = folder + "/" + String(file.standardizedFileURL.path.dropFirst(base.path.count + 1))
                 found.append(Source(path: relative, text: text, lines: text.components(separatedBy: "\n")))
             }
