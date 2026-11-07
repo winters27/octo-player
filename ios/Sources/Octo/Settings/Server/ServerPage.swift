@@ -25,10 +25,19 @@ struct ServerPage: View {
     @Environment(\.dataServices) private var data
     @State private var queueSync = ServerSyncChoices().syncQueue
 
+    /// Whether a debug launch step gave the servers list sample rows to show.
+    private var hasSampleServers: Bool {
+        #if DEBUG
+        return !ServersSection.sample.isEmpty
+        #else
+        return false
+        #endif
+    }
+
     var body: some View {
         SettingsPageFrame(title: SettingsPage.server.title, highlight: highlight) {
             ServerUpdateSection()
-            if !session.servers.isEmpty { ServersSection(changePassword: { changingPassword = true }) }
+            if !session.servers.isEmpty || hasSampleServers { ServersSection(changePassword: { changingPassword = true }) }
             if let server = session.active, session.client != nil {
                 connection(server)
                 facts(server)

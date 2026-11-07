@@ -53,6 +53,11 @@ import UIKit
 /// - `settings:PAGE`, `settings:PAGE@ROW`, `settings-search:TEXT`, `popup:ROW`, `whatsnew`,
 ///   `settings-state:NAME`: see `SettingsNavigator.drive`
 /// - `account:WHAT`: the account pages, sheets, sign-in modes and ways in; see `AccountDrive`
+/// - `signin:STATE` opens the sign-in page in a sign-in page state, with sample values only:
+///   `signin:plain`, `signin:authentik`, `signin:cloudflare`, `signin:saved`, `signin:https`,
+///   `signin:join` (see `GatewayDrive`)
+/// - `servers:rows` opens Server and sync with two sample rows after the kept servers: one a
+///   sign-in page turned away, one that needs https
 @MainActor
 enum Drive {
     static func run(session: Session, player: Player, router: Router, motion: MotionSettings,
@@ -112,6 +117,8 @@ enum Drive {
                 if let strength = AmbientStrength(rawValue: value.capitalized) { ambience?.setStrength(strength) }
             case "sound": SoundDrive.run(value, router: router)
             case "settings", "settings-search", "popup", "whatsnew", "settings-state": await SettingsNavigator.shared.drive(name, value, router: router)
+            case "signin": GatewayDrive.signIn(value, router: router)
+            case "servers": await GatewayDrive.servers(value, router: router)
             case "list":
                 guard let client = session.client,
                       let list = try? await client.playlists().first(where: { $0.name.caseInsensitiveCompare(value) == .orderedSame }),
@@ -226,6 +233,83 @@ enum DriveSamples {
         ask.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         ask.popoverPresentationController?.sourceView = top.view
         top.present(ask, animated: true)
+    }
+}
+
+/// The sign-in page in each state a sign-in page in front of the server leaves it, and the
+/// servers list's rows for one. Every value is a sample ("example"), held in memory only:
+/// nothing goes to the keychain, the settings or the kept servers.
+@MainActor
+enum GatewayDrive {
+    private static let address = "music.example.com"
+
+    /// Opens the sign-in page in `state`; an unknown state opens nothing.
+    static func signIn(_ state: String, router: Router) {
+        var form: SignInModel.Form = .signIn
+        let sample: (SignInModel) -> Void
+        switch state {
+        case "plain":
+            // Add a server, Advanced open, the sign-in page section at None.
+            form = .add
+            sample = { model in
+                model.label = "Example"
+                model.rest = address
+                model.username = "example"
+                model.advancedOpen = true
+            }
+        case "authentik":
+            // As a sign-in left it after Authentik answered in the server's place.
+            sample = { model in
+                model.rest = address
+                model.username = "example"
+                model.driveSample(met: .authentik, words: GatewayWords.failure(.authentik, loginSent: false))
+            }
+        case "cloudflare":
+            sample = { model in
+                model.rest = address
+                model.username = "example"
+                model.driveSample(met: .cloudflareAccess, words: GatewayWords.failure(.cloudflareAccess, loginSent: false))
+            }
+        case "saved":
+            // An edit of a kept server whose sign-in page fields are saved.
+            form = .edit(StoredServer(id: "drive-sample-saved", label: "Example", address: URL(string: "https://\(address)")!,
+                                      username: "example"))
+            sample = { model in model.driveSample(saved: .password) }
+        case "https":
+            // A plain http address across the internet with the sign-in page fields filled.
+            sample = { model in
+                model.rest = "http://\(address)"
+                model.username = "example"
+                model.pickGateway(.password)
+                model.gatewayFirst = "example"
+                model.gatewaySecond = "example"
+                model.advancedOpen = true
+            }
+        case "join":
+            sample = { model in
+                model.rest = address
+                model.startJoin()
+                model.advancedOpen = true
+            }
+        default:
+            return
+        }
+        SignInView.sampleOnOpen = sample
+        router.signIn = form
+    }
+
+    /// `rows`: Server and sync with two sample rows after the kept servers.
+    static func servers(_ state: String, router: Router) async {
+        guard state == "rows" else { return }
+        ServersSection.sample = [
+            (StoredServer(id: "drive-sample-authentik", label: "Example behind Authentik", address: URL(string: "https://\(address)")!,
+                          username: "example", serverType: "navidrome", serverVersion: "0.58.0"),
+             ServerCheck(.signInPage(.authentik, loginSent: true))),
+            (StoredServer(id: "drive-sample-https", label: "Example over http", address: URL(string: "http://example.net")!,
+                          username: "example", serverType: "navidrome", serverVersion: "0.58.0"),
+             ServerCheck(.needsHttps)),
+        ]
+        await SettingsNavigator.shared.drive("settings", SettingsPage.server.rawValue, router: router)
     }
 }
 

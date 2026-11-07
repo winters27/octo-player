@@ -703,6 +703,23 @@ final class SignInModel {
     }
 }
 
+#if DEBUG
+extension SignInModel {
+    /// A launch step's sample state, in memory only: the kind saved for the server, and the
+    /// sign-in page an attempt at the typed address met with the words it showed, as a failed
+    /// sign-in leaves them.
+    func driveSample(saved: GatewayKind? = nil, met gateway: Gateway? = nil, words: String? = nil) {
+        if let saved {
+            gatewaySaved = saved
+            gatewayKind = saved
+            advancedOpen = true
+        }
+        if let gateway { met(sentAddress, gateway) }
+        if let words { error = words }
+    }
+}
+#endif
+
 extension SignInModel.Form {
     var server: StoredServer? {
         switch self {

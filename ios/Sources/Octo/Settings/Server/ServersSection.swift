@@ -12,10 +12,25 @@ struct ServersSection: View {
     @State private var checks: [String: ServerCheck] = [:]
     @State private var removing: StoredServer?
 
+    #if DEBUG
+    /// Set by a launch step: rows shown after the kept servers, each with how it answered, held
+    /// in memory only and never kept.
+    static var sample: [(server: StoredServer, check: ServerCheck)] = []
+    #endif
+
+    /// The kept servers, and in a debug build the launch step's sample rows after them.
+    private var shown: [StoredServer] {
+        #if DEBUG
+        return session.servers + Self.sample.map(\.server)
+        #else
+        return session.servers
+        #endif
+    }
+
     var body: some View {
         let inUse = session.client == nil ? nil : session.active
         SettingsGroup(title: SettingsIndex.yourServers.title, icon: "server.rack") {
-            ForEach(Array(session.servers.enumerated()), id: \.element.id) { index, server in
+            ForEach(Array(shown.enumerated()), id: \.element.id) { index, server in
                 row(server, inUse: server.id == inUse?.id, entry: index == 0 ? SettingsIndex.yourServers : nil)
             }
             ActionRow(SettingsIndex.addServer,
@@ -34,6 +49,9 @@ struct ServersSection: View {
 
     /// Every kept server is asked how it is, all at once; earlier answers stay until replaced.
     private func checkAll() async {
+        #if DEBUG
+        for (server, check) in Self.sample { checks[server.id] = check }
+        #endif
         for server in session.servers {
             let id = server.id
             Task { checks[id] = await session.check(id) }

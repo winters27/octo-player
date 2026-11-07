@@ -27,6 +27,8 @@ struct SignInView: View {
     #if DEBUG
     /// Set by a launch step: the next sign-in screen opens with the family QR scanner.
     static var scanOnOpen = false
+    /// Set by a launch step: the next sign-in screen opens with this sample state, in memory only.
+    static var sampleOnOpen: ((SignInModel) -> Void)?
     #endif
 
     init(form: SignInModel.Form, session: Session, done: @escaping (String?) -> Void = { _ in }) {
@@ -113,6 +115,10 @@ struct SignInView: View {
                 Self.scanOnOpen = false
                 model.startJoin()
                 model.scanning = true
+            }
+            if let sample = Self.sampleOnOpen {
+                Self.sampleOnOpen = nil
+                sample(model)
             }
             #endif
             if case .join(let text) = model.form, let link = parseFamilyLink(text) { model.startJoin(link, session: session) }
