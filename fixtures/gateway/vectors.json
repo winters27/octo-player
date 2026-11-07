@@ -1,0 +1,336 @@
+{
+  "vectors": [
+    {
+      "name": "authentik-302-chain",
+      "requested": "https://music.example.com/rest/ping.view?u=a",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=a", "status": 302,
+          "headers": [["Location", "https://music.example.com/outpost.goauthentik.io/start?rd=x"],
+                      ["Set-Cookie", "authentik_proxy_abc=1; Path=/; HttpOnly"]] },
+        { "url": "https://auth.example.com/if/flow/default-authentication-flow/?next=x",
+          "status": 200, "headers": [["Content-Type", "text/html; charset=utf-8"]] }
+      ],
+      "htmlBody": "<html><body aria-label=\"authentik\"></body></html>",
+      "loginSent": false,
+      "expect": "Authentik"
+    },
+    {
+      "name": "authentik-302-full-chain",
+      "requested": "https://music.example.com/rest/ping.view?u=alice&t=26719a1196d2a940705a59634eb18eab&s=c19b2d&v=1.16.1&c=Octo&f=json",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice&t=26719a1196d2a940705a59634eb18eab&s=c19b2d&v=1.16.1&c=Octo&f=json", "status": 302,
+          "headers": [["Server", "nginx"], ["Date", "Fri, 06 Nov 2026 18:00:00 GMT"], ["Content-Length", "0"],
+                      ["Location", "/outpost.goauthentik.io/start?rd=https%3A%2F%2Fmusic.example.com%2Frest%2Fping.view"],
+                      ["Set-Cookie", "authentik_proxy_3c4b1a=MTczMDkxNjAwMHxEdi1CQkFFQ; Path=/; Expires=Sat, 07 Nov 2026 18:00:00 GMT; HttpOnly; Secure; SameSite=Lax"]] },
+        { "url": "https://music.example.com/outpost.goauthentik.io/start?rd=https%3A%2F%2Fmusic.example.com%2Frest%2Fping.view", "status": 302,
+          "headers": [["Server", "nginx"], ["Content-Length", "0"],
+                      ["Location", "https://auth.example.com/application/o/authorize/?client_id=Lq3mV9&redirect_uri=https%3A%2F%2Fmusic.example.com%2Foutpost.goauthentik.io%2Fcallback%3FX-authentik-auth-callback%3Dtrue&response_type=code&scope=openid+profile+email&state=hVb2"]] },
+        { "url": "https://auth.example.com/application/o/authorize/?client_id=Lq3mV9&redirect_uri=https%3A%2F%2Fmusic.example.com%2Foutpost.goauthentik.io%2Fcallback%3FX-authentik-auth-callback%3Dtrue&response_type=code&scope=openid+profile+email&state=hVb2", "status": 302,
+          "headers": [["Server", "authentik"], ["Location", "/if/flow/default-authentication-flow/?next=%2Fapplication%2Fo%2Fauthorize%2F"],
+                      ["Set-Cookie", "authentik_session=eyJhbGciOiJIUzI1NiJ9; Path=/; HttpOnly; Secure; SameSite=Lax"]] },
+        { "url": "https://auth.example.com/if/flow/default-authentication-flow/?next=%2Fapplication%2Fo%2Fauthorize%2F", "status": 200,
+          "headers": [["Server", "authentik"], ["Content-Type", "text/html; charset=utf-8"], ["Vary", "Cookie"]] }
+      ],
+      "htmlBody": "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\"><title>authentik</title><link rel=\"icon\" href=\"/static/dist/assets/icons/icon.png\"></head><body><ak-flow-executor aria-label=\"authentik\" flowSlug=\"default-authentication-flow\"></ak-flow-executor></body></html>",
+      "loginSent": false,
+      "expect": "Authentik"
+    },
+    {
+      "name": "authentik-intercept-401-html",
+      "requested": "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e&v=1.16.1&c=Octo&f=json",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e&v=1.16.1&c=Octo&f=json", "status": 401,
+          "headers": [["Server", "nginx"], ["Date", "Fri, 06 Nov 2026 18:00:00 GMT"], ["Content-Type", "text/html; charset=utf-8"], ["Cache-Control", "no-store"]] }
+      ],
+      "htmlBody": "<!DOCTYPE html><html><head><title>authentik</title></head><body><div class=\"pf-c-login\"><ak-flow-executor aria-label=\"authentik\"></ak-flow-executor></div></body></html>",
+      "loginSent": true,
+      "expect": "Authentik"
+    },
+    {
+      "name": "authentik-cookie-on-302",
+      "requested": "https://music.example.com/rest/getAlbum.view?id=al-1&u=alice&t=5a1f&s=9c2e",
+      "hops": [
+        { "url": "https://music.example.com/rest/getAlbum.view?id=al-1&u=alice&t=5a1f&s=9c2e", "status": 302,
+          "headers": [["Location", "https://auth.example.com/application/o/authorize/?client_id=Lq3mV9&state=pQ7"],
+                      ["Set-Cookie", "authentik_proxy_9f3=MTczMDkxNjAwMHxEdi1C; Path=/; HttpOnly; Secure; SameSite=Lax"]] },
+        { "url": "https://auth.example.com/application/o/authorize/?client_id=Lq3mV9&state=pQ7", "status": 200,
+          "headers": [["Content-Type", "text/html; charset=utf-8"]] }
+      ],
+      "htmlBody": "<html><body>Sign in</body></html>",
+      "loginSent": false,
+      "expect": "Authentik"
+    },
+    {
+      "name": "authentik-body-only",
+      "requested": "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e", "status": 200,
+          "headers": [["Content-Type", "text/html"]] }
+      ],
+      "htmlBody": "<html><head><script>window.authentik = { locale: \"en\" };</script><link rel=\"stylesheet\" href=\"https://cdn.goauthentik.io/static/dist/authentik.css\"></head><body></body></html>",
+      "loginSent": false,
+      "expect": "Authentik"
+    },
+    {
+      "name": "authelia-401-location",
+      "requested": "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e&v=1.16.1&c=Octo&f=json",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e&v=1.16.1&c=Octo&f=json", "status": 401,
+          "headers": [["Server", "nginx"], ["Content-Type", "text/html; charset=utf-8"],
+                      ["Location", "https://auth.example.com/?rd=https%3A%2F%2Fmusic.example.com%2Frest%2Fping.view&rm=GET"]] }
+      ],
+      "htmlBody": "<a href=\"https://auth.example.com/?rd=https%3A%2F%2Fmusic.example.com%2Frest%2Fping.view&amp;rm=GET\">401 Unauthorized</a>",
+      "loginSent": false,
+      "expect": "Authelia"
+    },
+    {
+      "name": "authelia-401-basic-realm",
+      "requested": "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e&v=1.16.1&c=Octo&f=json",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e&v=1.16.1&c=Octo&f=json", "status": 401,
+          "headers": [["Server", "nginx"], ["Content-Type", "text/plain; charset=utf-8"],
+                      ["WWW-Authenticate", "Basic realm=\"Authorization Required\""]] }
+      ],
+      "htmlBody": null,
+      "loginSent": true,
+      "expect": "PasswordPrompt"
+    },
+    {
+      "name": "authelia-session-cookie",
+      "requested": "https://music.example.com/rest/ping.view?u=alice",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice", "status": 302,
+          "headers": [["Location", "https://auth.example.com/"],
+                      ["Set-Cookie", "authelia_session=Wq2dX9kPz; Path=/; Domain=example.com; HttpOnly; Secure; SameSite=Lax"]] },
+        { "url": "https://auth.example.com/", "status": 200,
+          "headers": [["Content-Type", "text/html; charset=utf-8"]] }
+      ],
+      "htmlBody": "<html><head><title>Login - Authelia</title></head><body><div id=\"root\"></div></body></html>",
+      "loginSent": false,
+      "expect": "Authelia"
+    },
+    {
+      "name": "cloudflare-302-team-domain",
+      "requested": "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e&v=1.16.1&c=Octo&f=json",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e&v=1.16.1&c=Octo&f=json", "status": 302,
+          "headers": [["Server", "cloudflare"], ["CF-RAY", "8d1f2a3b4c5d6e7f-AMS"],
+                      ["Location", "https://myteam.cloudflareaccess.com/cdn-cgi/access/login/music.example.com?kid=4714c1358e65fe4b408ad6d432a5f878f08194bdb4752441fd56faefa9b2b6f2&redirect_url=%2Frest%2Fping.view&meta=eyJraWQiOiI"]] },
+        { "url": "https://myteam.cloudflareaccess.com/cdn-cgi/access/login/music.example.com?kid=4714c1358e65fe4b408ad6d432a5f878f08194bdb4752441fd56faefa9b2b6f2&redirect_url=%2Frest%2Fping.view&meta=eyJraWQiOiI", "status": 200,
+          "headers": [["Server", "cloudflare"], ["Content-Type", "text/html; charset=utf-8"]] }
+      ],
+      "htmlBody": "<!DOCTYPE html><html><head><title>Sign in - Cloudflare Access</title></head><body><div id=\"app\"></div></body></html>",
+      "loginSent": false,
+      "expect": "CloudflareAccess"
+    },
+    {
+      "name": "cloudflare-403-aud",
+      "requested": "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e&v=1.16.1&c=Octo&f=json",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e&v=1.16.1&c=Octo&f=json", "status": 403,
+          "headers": [["Server", "cloudflare"], ["CF-RAY", "8d1f2a3b4c5d6e7f-AMS"], ["Content-Type", "text/html"],
+                      ["cf-access-aud", "4714c1358e65fe4b408ad6d432a5f878f08194bdb4752441fd56faefa9b2b6f2"],
+                      ["cf-access-domain", "music.example.com"]] }
+      ],
+      "htmlBody": "<html><head><title>Forbidden</title></head><body>Forbidden. You don't have permission to view this.</body></html>",
+      "loginSent": true,
+      "expect": "CloudflareAccess"
+    },
+    {
+      "name": "cloudflare-cookie-on-302",
+      "requested": "https://music.example.com/rest/ping.view?u=alice",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice", "status": 302,
+          "headers": [["Location", "https://music.example.com/login"],
+                      ["Set-Cookie", "CF_Authorization=eyJhbGciOiJSUzI1NiIsImtpZCI6IjQ3MTQifQ; Path=/; Expires=Sat, 07 Nov 2026 18:00:00 GMT; HttpOnly; Secure; SameSite=Lax"]] },
+        { "url": "https://music.example.com/login", "status": 200,
+          "headers": [["Content-Type", "text/html; charset=utf-8"]] }
+      ],
+      "htmlBody": "<html><body>Sign in</body></html>",
+      "loginSent": false,
+      "expect": "CloudflareAccess"
+    },
+    {
+      "name": "plain-proxy-401-basic",
+      "requested": "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e&v=1.16.1&c=Octo&f=json",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e&v=1.16.1&c=Octo&f=json", "status": 401,
+          "headers": [["Server", "nginx/1.27.2"], ["Content-Type", "text/html"],
+                      ["WWW-Authenticate", "Basic realm=\"Restricted\""]] }
+      ],
+      "htmlBody": "<html><head><title>401 Authorization Required</title></head><body><center><h1>401 Authorization Required</h1></center><hr><center>nginx/1.27.2</center></body></html>",
+      "loginSent": false,
+      "expect": "PasswordPrompt"
+    },
+    {
+      "name": "foreign-origin-html",
+      "requested": "http://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e",
+      "hops": [
+        { "url": "http://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e", "status": 302,
+          "headers": [["Location", "http://portal.hotel-wifi.example.net/login?orig=http%3A%2F%2Fmusic.example.com%2F"]] },
+        { "url": "http://portal.hotel-wifi.example.net/login?orig=http%3A%2F%2Fmusic.example.com%2F", "status": 200,
+          "headers": [["Content-Type", "text/html; charset=iso-8859-1"]] }
+      ],
+      "htmlBody": "<html><head><title>Welcome to Hotel Wi-Fi</title></head><body><form method=\"post\"><button>Connect</button></form></body></html>",
+      "loginSent": false,
+      "expect": "SignInPage"
+    },
+    {
+      "name": "http-to-https-same-host",
+      "requested": "http://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e",
+      "hops": [
+        { "url": "http://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e", "status": 301,
+          "headers": [["Server", "nginx"], ["Location", "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e"]] },
+        { "url": "https://music.example.com/rest/ping.view?u=alice&t=5a1f&s=9c2e", "status": 200,
+          "headers": [["Content-Type", "text/html; charset=utf-8"]] }
+      ],
+      "htmlBody": "<html><head><title>Navidrome</title></head><body><div id=\"root\"></div></body></html>",
+      "loginSent": false,
+      "expect": null
+    },
+    {
+      "name": "same-origin-json-500",
+      "requested": "https://music.example.com/rest/ping.view?u=alice",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice", "status": 500,
+          "headers": [["Content-Type", "application/json"]] }
+      ],
+      "htmlBody": null,
+      "loginSent": true,
+      "expect": null
+    },
+    {
+      "name": "json-503-authentik-cookie",
+      "requested": "https://music.example.com/rest/getAlbum.view?id=al-1&u=alice",
+      "hops": [
+        { "url": "https://music.example.com/rest/getAlbum.view?id=al-1&u=alice", "status": 503,
+          "headers": [["Content-Type", "application/json"],
+                      ["Set-Cookie", "authentik_proxy_x=MTczMDkx; Path=/; HttpOnly; Secure"]] }
+      ],
+      "htmlBody": null,
+      "loginSent": true,
+      "expect": null
+    },
+    {
+      "name": "json-404-cf-cookie",
+      "requested": "https://music.example.com/rest/getSong.view?id=tr-9&u=alice",
+      "hops": [
+        { "url": "https://music.example.com/rest/getSong.view?id=tr-9&u=alice", "status": 404,
+          "headers": [["Content-Type", "application/json; charset=utf-8"],
+                      ["Set-Cookie", "CF_Authorization=eyJhbGciOiJSUzI1NiJ9; Path=/; HttpOnly; Secure; SameSite=Lax"]] }
+      ],
+      "htmlBody": null,
+      "loginSent": true,
+      "expect": null
+    },
+    {
+      "name": "json-401-authentik-cookie",
+      "requested": "https://music.example.com/api/admin/update?u=alice",
+      "hops": [
+        { "url": "https://music.example.com/api/admin/update?u=alice", "status": 401,
+          "headers": [["Content-Type", "application/json"],
+                      ["Set-Cookie", "authentik_proxy_x=MTczMDkx; Path=/; HttpOnly; Secure"]] }
+      ],
+      "htmlBody": null,
+      "loginSent": true,
+      "expect": null
+    },
+    {
+      "name": "authentik-cookie-on-plain-answer",
+      "requested": "https://music.example.com/rest/stream.view?id=tr-9&u=alice",
+      "hops": [
+        { "url": "https://music.example.com/rest/stream.view?id=tr-9&u=alice", "status": 200,
+          "headers": [["Content-Type", "text/plain"],
+                      ["Set-Cookie", "authentik_proxy_x=MTczMDkx; Path=/; HttpOnly; Secure"]] }
+      ],
+      "htmlBody": null,
+      "loginSent": true,
+      "expect": null
+    },
+    {
+      "name": "cf-header-on-plain-answer",
+      "requested": "https://music.example.com/rest/getLyrics.view?u=alice",
+      "hops": [
+        { "url": "https://music.example.com/rest/getLyrics.view?u=alice", "status": 200,
+          "headers": [["Content-Type", "text/plain"],
+                      ["cf-access-aud", "4714c1358e65fe4b408ad6d432a5f878f08194bdb4752441fd56faefa9b2b6f2"]] }
+      ],
+      "htmlBody": null,
+      "loginSent": true,
+      "expect": null
+    },
+    {
+      "name": "order-authentik-before-cloudflare",
+      "requested": "https://music.example.com/rest/ping.view?u=alice",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice", "status": 403,
+          "headers": [["Content-Type", "text/html; charset=utf-8"],
+                      ["cf-access-aud", "4714c1358e65fe4b408ad6d432a5f878f08194bdb4752441fd56faefa9b2b6f2"]] }
+      ],
+      "htmlBody": "<html><head><link rel=\"stylesheet\" href=\"https://cdn.goauthentik.io/static/dist/authentik.css\"></head><body></body></html>",
+      "loginSent": true,
+      "expect": "Authentik"
+    },
+    {
+      "name": "order-cloudflare-before-authelia",
+      "requested": "https://music.example.com/rest/ping.view?u=alice",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice", "status": 302,
+          "headers": [["Location", "https://myteam.cloudflareaccess.com/cdn-cgi/access/login/music.example.com?rd=x&rm=GET"]] },
+        { "url": "https://myteam.cloudflareaccess.com/cdn-cgi/access/login/music.example.com?rd=x&rm=GET", "status": 200,
+          "headers": [["Content-Type", "text/html"]] }
+      ],
+      "htmlBody": "<html><body>Sign in</body></html>",
+      "loginSent": false,
+      "expect": "CloudflareAccess"
+    },
+    {
+      "name": "order-authelia-before-password-prompt",
+      "requested": "https://music.example.com/rest/ping.view?u=alice",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice", "status": 401,
+          "headers": [["Content-Type", "text/html; charset=utf-8"],
+                      ["WWW-Authenticate", "Basic realm=\"Authorization Required\""],
+                      ["Location", "https://auth.example.com/?rd=https%3A%2F%2Fmusic.example.com%2Frest%2Fping.view&rm=GET"]] }
+      ],
+      "htmlBody": "<a href=\"https://auth.example.com/\">401 Unauthorized</a>",
+      "loginSent": true,
+      "expect": "Authelia"
+    },
+    {
+      "name": "order-password-prompt-before-sign-in-page",
+      "requested": "https://music.example.com/rest/ping.view?u=alice",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice", "status": 302,
+          "headers": [["Location", "https://gate.example.net/music/rest/ping.view?u=alice"]] },
+        { "url": "https://gate.example.net/music/rest/ping.view?u=alice", "status": 401,
+          "headers": [["Content-Type", "text/html"], ["WWW-Authenticate", "basic realm=\"Gate\""]] }
+      ],
+      "htmlBody": "<html><body>401 Authorization Required</body></html>",
+      "loginSent": false,
+      "expect": "PasswordPrompt"
+    },
+    {
+      "name": "refused-with-login-sent",
+      "requested": "https://music.example.com/rest/ping.view?u=alice",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice", "status": 403,
+          "headers": [["Content-Type", "text/plain; charset=utf-8"]] }
+      ],
+      "htmlBody": null,
+      "loginSent": true,
+      "expect": "SignInPage"
+    },
+    {
+      "name": "refused-without-login-sent",
+      "requested": "https://music.example.com/rest/ping.view?u=alice",
+      "hops": [
+        { "url": "https://music.example.com/rest/ping.view?u=alice", "status": 403,
+          "headers": [["Content-Type", "text/plain; charset=utf-8"]] }
+      ],
+      "htmlBody": null,
+      "loginSent": false,
+      "expect": null
+    }
+  ]
+}
