@@ -61,8 +61,9 @@ fun Txt(
     modifier: Modifier = Modifier,
     maxLines: Int = 1,
     align: TextAlign? = null,
+    control: Boolean = false,
 ) {
-    val drawn = weighed(style)
+    val drawn = if (control) style else weighed(style, color)
     BasicText(
         text,
         modifier = if (isHeading(style)) modifier.semantics { heading() } else modifier,
@@ -74,12 +75,17 @@ fun Txt(
 
 // A style as this theme draws it: dark words on a light page read thinner
 // than light words on a dark one, so on a light theme the semibold styles
-// (titles, emphasis, row titles) are drawn one weight up, in bold. Body
-// words stay as they are.
+// drawn in the main word color (`color` is TextPrimary: titles, emphasis,
+// row titles) are drawn one weight up, in bold. Secondary and muted words,
+// body words and a control's label (`control` on Txt) stay as they are.
 @Composable
 @ReadOnlyComposable
-fun weighed(style: TextStyle): TextStyle =
-    if (LocalOctoSurfaces.current.light && style.fontWeight == FontWeight.SemiBold) style.copy(fontWeight = FontWeight.Bold) else style
+fun weighed(style: TextStyle, color: Color): TextStyle =
+    if (LocalOctoSurfaces.current.light && style.fontWeight == FontWeight.SemiBold && color == OctoColors.TextPrimary) {
+        style.copy(fontWeight = FontWeight.Bold)
+    } else {
+        style
+    }
 
 // Whether words in this style are a heading: a page's title, a section's name.
 fun isHeading(style: TextStyle): Boolean =

@@ -70,6 +70,7 @@ import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlassField
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconSize
+import app.winters.octo.design.LocalOctoSurfaces
 import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -390,10 +391,13 @@ private fun AccountCard(app: AppState, onOpen: () -> Unit) {
     }
 }
 
-// Four covers in a square, two by two; empty glass where there are fewer.
+// Four covers in a square, two by two; empty glass where there are fewer
+// (on a light theme a faint fill of the main word color, as the card
+// itself is the card color there).
 @Composable
 private fun CoverMosaic(covers: List<String?>) {
     val tile = SettingsSize.AccountArt / 2
+    val empty = if (LocalOctoSurfaces.current.light) OctoColors.TextPrimary.copy(alpha = 0.06f) else CardFill
     Column(Modifier.size(SettingsSize.AccountArt).clip(Corner.ArtLShape)) {
         for (row in 0 until 2) {
             Row {
@@ -402,7 +406,7 @@ private fun CoverMosaic(covers: List<String?>) {
                     if (at < covers.size) {
                         Cover(covers[at], Modifier.size(tile).testTag(accountTileTag(covers[at])), shape = RectangleShape)
                     } else {
-                        Box(Modifier.size(tile).background(CardFill).testTag(accountTileTag(null)))
+                        Box(Modifier.size(tile).background(empty).testTag(accountTileTag(null)))
                     }
                 }
             }

@@ -9,6 +9,7 @@ import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -26,6 +27,7 @@ import app.winters.octo.desktop.pages.addServer
 import app.winters.octo.desktop.readIn
 import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.desktop.settings.themes
+import app.winters.octo.desktop.songJson
 import app.winters.octo.theme.AccentChoice
 import app.winters.octo.theme.ThemeChoice
 import app.winters.octo.theme.pickTheme
@@ -274,15 +276,24 @@ class ThemeShotsTest {
         assertTrue("hints under 4.5:1: $low", low.isEmpty())
     }
 
+    // The pretend server's OK Computer, with its three songs, for the album
+    // page.
+    private val okComputer = listOf(
+        songJson("s1", "Airbag", artist = "Radiohead", album = "OK Computer", albumId = "a1", duration = 284),
+        songJson("s2", "Paranoid Android", artist = "Radiohead", album = "OK Computer", albumId = "a1", duration = 387),
+        songJson("s3", "Karma Police", artist = "Radiohead", album = "OK Computer", albumId = "a1", duration = 261),
+    ).joinToString(",").let { """"album":{"id":"a1","name":"OK Computer","artist":"Radiohead","year":1997,"songCount":3,"song":[$it]}""" }
+
     // Every theme's main places, kept as pictures for looking at with
     // OCTO_SHOTS=1: Settings > Appearance, the Songs list, an album, a song
-    // menu, the add a server sheet and the full player.
+    // menu, the add a server sheet (also with Remember password off), the
+    // full player and the sign-in page.
     @Test(timeout = 600_000)
     fun everyThemesPlacesAsPictures() {
         if (System.getenv("OCTO_SHOTS") != "1") return
         for (theme in ThemeChoice.entries) {
             val tag = theme.name.lowercase()
-            A11yScene(folder.newFolder(), height = 1_000, look = inTheme(theme, glow = true)).use { s ->
+            A11yScene(folder.newFolder(), height = 1_000, look = inTheme(theme, glow = true), serve = { it.answer("getAlbum", okComputer) }).use { s ->
                 s.onUi { s.app.openSettings(SettingsKey.Look) }
                 keep(s.settle(1_500), "theme-$tag-1-settings-appearance")
                 s.onUi { s.app.navigator.go(Page.Songs) }
@@ -299,6 +310,12 @@ class ThemeShotsTest {
                     addServer(s.app)
                 }
                 keep(s.settle(1_200), "theme-$tag-5-sheet")
+                val remember = s.nodes(merged = true).first { node ->
+                    node.config.getOrNull(SemanticsProperties.ToggleableState) != null &&
+                        node.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text == "Remember password" }
+                }
+                s.onUi { remember.config[SemanticsActions.OnClick].action?.invoke() }
+                keep(s.settle(1_200), "theme-$tag-5-sheet-remember-off")
                 s.onUi {
                     s.app.popups.close()
                     s.app.play(s.app.library!!.index!!.songs, 0)
@@ -306,6 +323,12 @@ class ThemeShotsTest {
                     s.app.fullPlayer = true
                 }
                 keep(s.settle(2_000), "theme-$tag-6-full-player")
+                s.onUi {
+                    s.app.fullPlayer = false
+                    s.app.player.togglePlay()
+                    s.app.signOut()
+                }
+                keep(s.settle(1_500), "theme-$tag-7-sign-in")
             }
         }
     }

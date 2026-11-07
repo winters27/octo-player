@@ -115,6 +115,8 @@ fun LineSlider(
     val jewelTrack = OctoColors.OffTrack
     val jewelShadow = shadowColor(1f)
     val jewelTick = OctoColors.TextPrimary.copy(alpha = 0.30f)
+    // On a light theme the white thumb keeps an edge on the pale page.
+    val thumbEdge = if (LocalOctoSurfaces.current.light) OctoColors.Edge else Color.Transparent
     val bubbleFill = glassFilm(0.72f)
     val bubbleWords = OctoColors.TextPrimary
 
@@ -181,7 +183,7 @@ fun LineSlider(
                 val y = size.height / 2
                 if (jewel != null) {
                     val shown = if (dragging) dragFraction else followed?.value ?: current()
-                    drawJewelSlider(y, shown, jewel, fill, jewelTrack, bubbleFill, bubbleWords, steps, valueLabel?.invoke(shown), measurer, jewelTrack, jewelShadow, jewelTick)
+                    drawJewelSlider(y, shown, jewel, fill, jewelTrack, bubbleFill, bubbleWords, steps, valueLabel?.invoke(shown), measurer, jewelTrack, jewelShadow, jewelTick, thumbEdge)
                     return@drawBehind
                 }
                 val stroke = thickness.toPx()

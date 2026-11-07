@@ -146,7 +146,7 @@ fun GlazeCapsule(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (icon != null) Glyph(icon, size = IconSize.Table, tint = ink)
-            Txt(text, OctoType.label, ink)
+            Txt(text, OctoType.label, ink, control = true)
             Glyph(OctoIcons.Chevron, Modifier.rotate(90f), size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextMuted, exact = true)
         }
         return
@@ -169,7 +169,7 @@ fun GlazeCapsule(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (icon != null) Glyph(icon, size = IconSize.Transport)
-            Txt(text, OctoType.label)
+            Txt(text, OctoType.label, control = true)
         }
     }
 }
@@ -240,7 +240,7 @@ fun TextAction(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (icon != null) Glyph(icon, size = IconSize.Table, tint = tint)
-        Txt(text, style, tint)
+        Txt(text, style, tint, control = true)
     }
 }
 

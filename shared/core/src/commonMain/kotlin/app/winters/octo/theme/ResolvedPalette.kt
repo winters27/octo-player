@@ -56,14 +56,14 @@ val ThemeChoice.base: ThemeBase get() = when (this) {
         page = 0xFF0E1512.toInt(), card = 0xFF17211B.toInt(), raised = 0xFF202D26.toInt(), sheet = 0xFF213029.toInt(), sheetAlpha = 1000,
         edge = 0xFF3A4D42.toInt(), text = 0xFFEDF2EA.toInt(), secondary = 0xFFB5C9AE.toInt(), muted = 0xFF97AC92.toInt(),
         accent = 0xFF9ACB86.toInt(), complement = 0xFFE2B062.toInt(), third = 0xFF7FB8A8.toInt(),
-        glow = listOf(0xFF24502A.toInt(), 0xFF5E4A18.toInt(), 0xFF1A4640.toInt()),
+        glow = listOf(0xFF2E6A36.toInt(), 0xFF7A6020.toInt(), 0xFF0F2A26.toInt()),
         ink = 0xFFEDF2EA.toInt(), inkSecondary = 560, inkTertiary = 250, offTrack = 390, shadow = 1000,
     )
     ThemeChoice.Dusk -> ThemeBase(
         page = 0xFF120E18.toInt(), card = 0xFF1E1726.toInt(), raised = 0xFF292032.toInt(), sheet = 0xFF2F243B.toInt(), sheetAlpha = 1000,
         edge = 0xFF47395A.toInt(), text = 0xFFF4EEF8.toInt(), secondary = 0xFFC9B6DA.toInt(), muted = 0xFFAB9ABE.toInt(),
         accent = 0xFFE7A0C4.toInt(), complement = 0xFFF2BE85.toInt(), third = 0xFF98ADEB.toInt(),
-        glow = listOf(0xFF5A2466.toInt(), 0xFF7A3E30.toInt(), 0xFF263A78.toInt()),
+        glow = listOf(0xFF74308A.toInt(), 0xFF9A5040.toInt(), 0xFF1A2A5C.toInt()),
         ink = 0xFFF4EEF8.toInt(), inkSecondary = 550, inkTertiary = 250, offTrack = 380, shadow = 1000,
     )
     ThemeChoice.Daylight -> ThemeBase(

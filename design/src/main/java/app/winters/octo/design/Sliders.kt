@@ -109,7 +109,8 @@ val JewelTrackBottom: Color
 // `fraction`, ticks for `steps`, the thumb, and while dragging its ring,
 // glow and value bubble (a film of `bubbleFill` with words in
 // `bubbleWords`). `shadow` is the color of the track's top shade and the
-// thumb's drop.
+// thumb's drop; `thumbEdge` a 1 px ring round the white thumb (a light
+// theme's edge line, so the thumb keeps its outline on a pale page).
 fun DrawScope.drawJewelSlider(
     y: Float,
     fraction: Float,
@@ -124,6 +125,7 @@ fun DrawScope.drawJewelSlider(
     trackBottom: Color = track,
     shadow: Color = Color.Black,
     trackTick: Color = Color.White.copy(alpha = 0.30f),
+    thumbEdge: Color = Color.Transparent,
 ) {
     val trackHeight = 4.dp.toPx()
     val radius = look.thumb.dp.toPx() / 2f
@@ -192,6 +194,7 @@ fun DrawScope.drawJewelSlider(
         radius,
         Offset(x, y),
     )
+    if (thumbEdge.alpha > 0f) drawCircle(thumbEdge, radius - 0.5f, Offset(x, y), style = Stroke(1f))
     drawCircle(fill, radius * look.dot, Offset(x, y))
 
     // The value bubble, 14 dp above the thumb, with a small arrow pointing
