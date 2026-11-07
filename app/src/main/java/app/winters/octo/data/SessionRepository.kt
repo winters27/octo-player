@@ -197,6 +197,33 @@ internal fun atStart(secret: String?, settings: ConnectionSettings?, main: HttpU
 internal fun inUseReach(session: Session): Reach? =
     if (needsHttps(session.client.primaryUrl, session.connection.headers)) Reach.NeedsHttps else null
 
+// What a sign-in form's keep builds on.
+internal sealed interface KeepBase {
+    // A server not kept yet.
+    data object New : KeepBase
+
+    // This kept server: the one the form was opened for (an edit, or
+    // signing in to it again), whatever its address is now; for any other
+    // form, the kept one with the same address and username.
+    data class Kept(val server: StoredServer) : KeepBase
+
+    // The server the form was opened for is no longer kept.
+    data object Gone : KeepBase
+
+    // Another kept server already has this address and username.
+    data class AlreadyKept(val twin: StoredServer) : KeepBase
+}
+
+// What a keep at `address` for `username` builds on. `formFor` is the id
+// of the kept server the form was opened for, null for a new sign-in or an
+// add.
+internal fun keepBase(formFor: String?, address: String, username: String, servers: List<StoredServer>): KeepBase {
+    val base = formFor?.let { id -> servers.firstOrNull { it.id == id } ?: return KeepBase.Gone }
+    val twin = servers.firstOrNull { it.serverUrl == address && it.username == username && it.id != base?.id }
+    if (base != null && twin != null) return KeepBase.AlreadyKept(twin)
+    return (base ?: twin)?.let(KeepBase::Kept) ?: KeepBase.New
+}
+
 // A kept server's sign-in form for the app to open by itself, with the
 // words to show first: the server in use at the last start that could not
 // be signed in to as kept.
@@ -300,27 +327,25 @@ class SessionRepository @Inject constructor(
 
     // Signs in and makes the server the one in use: a new server joins the
     // list, one already kept is brought up to date. Returns null on success.
-    suspend fun signIn(request: SignInRequest): SignInError? = changes.withLock { keep(request, base = null, use = true) }
+    suspend fun signIn(request: SignInRequest): SignInError? = changes.withLock { keep(request, formFor = null, use = true) }
 
     // Keeps a server beside the others without leaving the one in use. The
     // same account again is brought up to date rather than kept twice.
-    suspend fun add(request: SignInRequest): SignInError? = changes.withLock { keep(request, base = null, use = false) }
+    suspend fun add(request: SignInRequest): SignInError? = changes.withLock { keep(request, formFor = null, use = false) }
 
     // Signs in again to a kept server, which then is the one in use: the
     // same server, brought up to date with the form's details (an address
     // moved to https, say), its saved headers and sign-in page values kept
     // where the form leaves them empty.
     suspend fun signInAgain(id: String, request: SignInRequest): SignInError? = changes.withLock {
-        val base = _servers.value.find(id) ?: return@withLock SignInError.Gone
-        keep(request, base, use = true)
+        keep(request, formFor = id, use = true)
     }
 
     // Changes a kept server's address, username, headers or way of signing
     // in, after signing in with the new details works. Empty secrets keep
     // the saved ones. The server in use is signed in to again.
     suspend fun edit(id: String, request: SignInRequest): SignInError? = changes.withLock {
-        val base = _servers.value.find(id) ?: return@withLock SignInError.Gone
-        keep(request, base, use = id == _servers.value.active && current != null)
+        keep(request, formFor = id, use = id == _servers.value.active && current != null)
     }
 
     // Gives a kept server a name of its own; an empty one shows its host.
@@ -332,16 +357,18 @@ class SessionRepository @Inject constructor(
         }
     }
 
-    private suspend fun keep(request: SignInRequest, base: StoredServer?, use: Boolean): SignInError? {
+    private suspend fun keep(request: SignInRequest, formFor: String?, use: Boolean): SignInError? {
+        val kept = _servers.value
         val main = normalizeServerUrl(request.address) ?: return SignInError.BadAddress
         val home = if (request.home.isBlank()) null
         else (normalizeServerUrl(request.home) ?: return SignInError.BadHomeAddress).takeIf { it != main }
         val username = request.username.trim()
-        val kept = _servers.value
-        // The same account already kept, when not the one edited.
-        val twin = kept.servers.firstOrNull { it.serverUrl == main.toString() && it.username == username && it.id != base?.id }
-        if (base != null && twin != null) return SignInError.AlreadyKept(twin.name)
-        val before = base ?: twin
+        val before = when (val found = keepBase(formFor, main.toString(), username, kept.servers)) {
+            KeepBase.New -> null
+            KeepBase.Gone -> return SignInError.Gone
+            is KeepBase.AlreadyKept -> return SignInError.AlreadyKept(found.twin.name)
+            is KeepBase.Kept -> found.server
+        }
         val savedConnection = before?.let(::openedConnection)
         val secret = request.secret.ifEmpty { before?.let { savedSecret(it, request.authMode) } ?: return SignInError.MissingSecret }
         // The headers typed, and the sign-in page's, built from its fields

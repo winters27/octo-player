@@ -192,7 +192,9 @@ class SignInViewModel @Inject constructor(
     // Certificates the user trusted, by host.
     private val pins = HashMap<String, String>()
 
-    // Whether a secret is saved for each way of signing in, when editing.
+    // Whether a saved secret stands in for each way of signing in when its
+    // field is left empty: when editing, or signing in again to a kept
+    // server not signed out of.
     private var savedPassword = false
     private var savedKey = false
 
@@ -480,12 +482,15 @@ class SignInViewModel @Inject constructor(
         val draft = sessions.connectionDraft(id) ?: return
         editing = form == ServerForm.Edit
         fill(draft)
-        if (form == ServerForm.SignIn) {
-            // Signed out, so no password or key is kept to fall back on.
+        if (!keepsSavedSecret(form, kept?.signedOut != false)) {
             savedPassword = false
             savedKey = false
         }
     }
+
+    // Whether the password or key may be left empty to keep the saved one.
+    val keepsPassword: Boolean get() = savedPassword
+    val keepsKey: Boolean get() = savedKey
 
     private fun fill(draft: ConnectionDraft) {
         started = draft
@@ -579,8 +584,8 @@ class SignInViewModel @Inject constructor(
     // Whether the form has what the chosen way of signing in needs.
     val ready: Boolean
         get() = url != null && when (mode) {
-            AuthMode.ApiKey -> apiKey.isNotBlank() || (editing && savedKey)
-            else -> username.isNotBlank() && (password.isNotEmpty() || (editing && savedPassword))
+            AuthMode.ApiKey -> apiKey.isNotBlank() || savedKey
+            else -> username.isNotBlank() && (password.isNotEmpty() || savedPassword)
         }
 
     fun submit() {
@@ -624,7 +629,7 @@ class SignInViewModel @Inject constructor(
                 form == ServerForm.Add -> switcher.onItsOwn { sessions.add(request) }.also { failed ->
                     if (failed == null) notice = "Added ${addedName(request)}. Switch to it whenever you like."
                 }
-                else -> switcher.signIn(request, serverId.takeIf { form == ServerForm.SignIn }).let { (failed, words) ->
+                else -> switcher.signIn(request, signsInAgainTo(form, serverId)).let { (failed, words) ->
                     notice = words
                     failed
                 }
@@ -735,6 +740,16 @@ internal fun connectionChanged(request: SignInRequest, was: ConnectionDraft?): B
         request.gateway.first.isNotEmpty() ||
         request.gateway.second.isNotEmpty()
 }
+
+// Whether a form for a kept server can leave the password or key empty to
+// keep the saved one: an edit, or a sign-in again to a server not signed
+// out of (one whose address must move to https first). A server signed out
+// of has none kept to fall back on.
+internal fun keepsSavedSecret(form: ServerForm, signedOut: Boolean): Boolean = form != ServerForm.Add && !signedOut
+
+// The kept server a form's sign-in brings up to date: the one a sign-in
+// form was opened for; any other sign-in keeps a server of its own.
+internal fun signsInAgainTo(form: ServerForm?, id: String?): String? = id.takeIf { form == ServerForm.SignIn }
 
 // The sign-in page a failed sign-in met, if it met one.
 internal fun gatewayOf(error: SignInError): Gateway? =

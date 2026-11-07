@@ -9,10 +9,14 @@ import app.winters.octo.server.Reach
 import app.winters.octo.subsonic.gateway.GatewayKind
 import app.winters.octo.subsonic.Credentials
 import app.winters.octo.subsonic.SubsonicClient
+import app.winters.octo.ui.nav.ServerForm
+import app.winters.octo.ui.signin.keepsSavedSecret
+import app.winters.octo.ui.signin.signsInAgainTo
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -80,18 +84,64 @@ class NeedsHttpsStartTest {
         assertTrue(resolveConnectionHeaders(emptyList(), draft, signIn.headers, false, false) is ResolvedHeaders.Problem)
     }
 
-    // The form opened for a kept server signs in to that server again (one
-    // server, its id, its saved values as the base), and a switch to a
-    // server that needs https opens that form. Red when the form, the
-    // switcher or signInAgain go back to signing in as a new server, or
-    // switchTo answers Failed.
+    private val kept = StoredServer("http://music.example.com/", "alice", id = "alice-plain")
+
+    // A keep from the form opened for a kept server builds on that server,
+    // whatever its address is now, so one moved to https stays one server
+    // under its id with its saved values as the base. Red when keepBase
+    // stops building on the server the form was opened for, or a sign-in
+    // form stops naming it.
     @Test
-    fun theFormForAKeptServerSignsInToItAgain() {
+    fun theFormForAKeptServerBuildsOnItAtItsHttpsAddress() {
+        val secure = "https://music.example.com/"
+        assertEquals(KeepBase.Kept(kept), keepBase("alice-plain", secure, "alice", listOf(kept)))
+        assertEquals(KeepBase.Kept(kept), keepBase("alice-plain", secure, "bob", listOf(kept)))
+        // A new sign-in at the new address builds on nothing, which is why
+        // the form names its server.
+        assertEquals(KeepBase.New, keepBase(null, secure, "alice", listOf(kept)))
+        assertEquals(KeepBase.Kept(kept), keepBase(null, kept.serverUrl, "alice", listOf(kept)))
+        assertEquals("alice-plain", signsInAgainTo(ServerForm.SignIn, "alice-plain"))
+        assertNull(signsInAgainTo(ServerForm.Edit, "alice-plain"))
+        assertNull(signsInAgainTo(ServerForm.Add, null))
+        assertNull(signsInAgainTo(null, "alice-plain"))
+    }
+
+    // Red when a gone server or another kept one with the same account is
+    // let through.
+    @Test
+    fun aFormForAKeptServerThatIsGoneOrMeetsAnotherSaysSo() {
+        val secure = "https://music.example.com/"
+        val other = StoredServer(secure, "alice", id = "alice-secure")
+        assertEquals(KeepBase.Gone, keepBase("missing", secure, "alice", listOf(kept)))
+        assertEquals(KeepBase.AlreadyKept(other), keepBase("alice-plain", secure, "alice", listOf(kept, other)))
+        assertEquals(KeepBase.Kept(other), keepBase(null, secure, "alice", listOf(kept, other)))
+    }
+
+    // The sign-in form a server that needs https opens (not signed out of)
+    // keeps its saved password and key, as an edit does; a server signed
+    // out of has none. Red when the sign-in form always asks for the
+    // password again, or a signed-out one falls back on a saved one.
+    @Test
+    fun aSignInFormForAServerNotSignedOutOfKeepsItsSavedPassword() {
+        assertTrue(keepsSavedSecret(ServerForm.SignIn, signedOut = false))
+        assertFalse(keepsSavedSecret(ServerForm.SignIn, signedOut = true))
+        assertTrue(keepsSavedSecret(ServerForm.Edit, signedOut = false))
+        assertFalse(keepsSavedSecret(ServerForm.Edit, signedOut = true))
+        assertFalse(keepsSavedSecret(ServerForm.Add, signedOut = false))
+    }
+
+    // The wiring the pure rules above do not reach: signInAgain and edit
+    // name the server their form was opened for, the switcher signs in
+    // again to a named server, and a switch to a server that needs https
+    // opens its form. Red when any of them goes back to signing in as a new
+    // server, or switchTo answers Failed.
+    @Test
+    fun signInAgainTheSwitcherAndTheSwitchGoByThem() {
         val sessions = source("data/SessionRepository.kt")
         val again = sessions.substringAfter("suspend fun signInAgain(").substringBefore("suspend fun edit(")
-        assertTrue(again.contains("keep(request, base, use = true)"))
+        assertTrue(again.contains("keep(request, formFor = id, use = true)"))
         assertTrue(sessions.contains("SwitchResult.NeedsPassword(server, GatewayWords.NEEDS_HTTPS)"))
         assertTrue(source("playback/ServerSwitch.kt").contains("sessions.signInAgain(keptId, request)"))
-        assertTrue(source("ui/signin/SignInViewModel.kt").contains("switcher.signIn(request, serverId.takeIf { form == ServerForm.SignIn })"))
+        assertTrue(source("ui/signin/SignInViewModel.kt").contains("switcher.signIn(request, signsInAgainTo(form, serverId))"))
     }
 }

@@ -254,7 +254,7 @@ private fun SignInForm(vm: SignInViewModel) {
                         GlassInput(
                             value = vm.password,
                             onValueChange = { vm.password = it },
-                            placeholder = if (vm.editing) "Password (unchanged)" else "Password",
+                            placeholder = if (vm.keepsPassword) "Password (unchanged)" else "Password",
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(onDone = { vm.submit() }),
                             visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
@@ -610,7 +610,7 @@ private fun Advanced(vm: SignInViewModel) {
                     GlassInput(
                         value = vm.apiKey,
                         onValueChange = { vm.apiKey = it },
-                        placeholder = if (vm.editing) "API key (unchanged)" else "API key",
+                        placeholder = if (vm.keepsKey) "API key (unchanged)" else "API key",
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
                         visualTransformation = if (revealKey) VisualTransformation.None else PasswordVisualTransformation(),
                         trailing = { RevealToggle(revealKey) { revealKey = !revealKey } },
