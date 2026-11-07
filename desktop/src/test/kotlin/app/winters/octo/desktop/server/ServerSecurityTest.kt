@@ -6,6 +6,7 @@ import app.winters.octo.connection.pinKey
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.server.Reach
 import kotlinx.coroutines.test.runTest
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -89,6 +90,18 @@ class ServerSecurityTest {
         val outcome = accounts.signIn(server.address, "winters", "pw")
         assertTrue(outcome is SignInOutcome.Untrusted)
         assertEquals(null, settings.current.server)
+    }
+
+    // A kept server is looked at through a client of its own, which honors
+    // the certificate trusted for it. Red when the check client is built
+    // without the trusted certificates.
+    @Test
+    fun aKeptServerIsLookedAtWithItsTrustedCertificate() = runTest {
+        server.answer("ping")
+        val asked = asked()
+        security.trust(asked.host, asked.fingerprint)
+        val done = accounts.signIn(server.address, "winters", "pw") as SignInOutcome.Done
+        assertEquals(Reach.Answers, accounts.check(done.connection.server.id).reach)
     }
 
     private companion object {

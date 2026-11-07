@@ -94,6 +94,7 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.pages.openJoinLink
 import app.winters.octo.desktop.system.openInBrowser
 import app.winters.octo.desktop.ui.LocalWindowShown
+import app.winters.octo.connection.GatewayWords
 import app.winters.octo.subsonic.FamilyRole
 import app.winters.octo.ui.family.ASK_OWNER_OUTSIDE
 import app.winters.octo.ui.family.COPIED
@@ -170,6 +171,7 @@ private fun ColumnScope.InvitePopup(app: AppState, model: FamilyModel, invite: (
             owner = model.me?.role == FamilyRole.Owner,
         ),
         copy = ::copyText,
+        signInPage = app.connection?.behindSignInPage == true,
     )
 }
 
@@ -450,7 +452,7 @@ private val ChoiceShape = RoundedCornerShape(12.dp)
 private val ChoiceType = DesktopType.emphasis.copy(fontSize = 15.sp)
 
 @Composable
-fun ColumnScope.InviteCard(invite: InviteSheet, server: String, newLink: () -> Unit, actions: SheetActions, copy: (String) -> Unit) {
+fun ColumnScope.InviteCard(invite: InviteSheet, server: String, newLink: () -> Unit, actions: SheetActions, copy: (String) -> Unit, signInPage: Boolean = false) {
     val focus = remember { FocusRequester() }
     FocusOnDone(focus)
     val options = invite.options
@@ -482,6 +484,9 @@ fun ColumnScope.InviteCard(invite: InviteSheet, server: String, newLink: () -> U
                 Label("Then")
                 Txt(inviteNext(invite.name), DesktopType.body, OctoColors.TextPrimary, Modifier.bringIntoViewRequester(target), maxLines = 3)
                 invite.error?.let { Txt(it, DesktopType.meta, OctoColors.SignalOrange, maxLines = 2) }
+                // A sign-in page in front of the server asks the new member
+                // for an account there first.
+                if (signInPage) Txt(GatewayWords.SHARE_LINE, DesktopType.meta, OctoColors.TextMuted, maxLines = 3)
             },
         )
     }

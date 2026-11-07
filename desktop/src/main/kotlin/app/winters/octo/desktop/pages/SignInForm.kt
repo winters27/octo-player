@@ -12,14 +12,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import app.winters.octo.connection.GatewayDraft
+import app.winters.octo.connection.GatewayFormState
+import app.winters.octo.connection.GatewayWords
+import app.winters.octo.connection.addressChanged
+import app.winters.octo.connection.gatewayAllowed
+import app.winters.octo.connection.reactToFailure
 import app.winters.octo.data.HeaderDraft
 import app.winters.octo.desktop.server.API_KEY_EXTENSION
 import app.winters.octo.desktop.server.CertificateQuestion
+import app.winters.octo.desktop.server.SavedGateway
 import app.winters.octo.desktop.server.SignInRequest
 import app.winters.octo.desktop.settings.SavedServer
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.Scheme
 import app.winters.octo.subsonic.automaticScheme
+import app.winters.octo.subsonic.gateway.Gateway
+import app.winters.octo.subsonic.gateway.GatewayKind
 import app.winters.octo.subsonic.isPrivateHost
 import app.winters.octo.subsonic.serverUrl
 import app.winters.octo.subsonic.splitScheme
@@ -27,9 +36,10 @@ import okhttp3.HttpUrl
 
 // What the sign-in page holds while someone fills it in, as the phone's
 // sign-in keeps it: the address in two parts (the scheme, and the rest as
-// typed), the sign-in, and the advanced settings. It starts from the
-// server signed in to last, if any. With `keepsSecret` (editing a kept
-// server) the password or key may be left empty to keep the saved one.
+// typed), the sign-in, and the advanced settings, the sign-in page in front
+// of the server among them. It starts from the server signed in to last, if
+// any. With `keepsSecret` (editing a kept server) the password or key may be
+// left empty to keep the saved one.
 @Stable
 class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
     // The name the listener gives the server; empty shows its host.
@@ -58,6 +68,28 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
     var home by mutableStateOf(last?.home?.removeSuffix("/").orEmpty())
     val headers = mutableStateListOf<HeaderDraft>()
 
+    // The sign-in page in front of the server: the kind of sign-in it takes,
+    // its two fields (a username and password, or a Client ID and Secret),
+    // and the kind the kept server's saved headers make up, kept while the
+    // fields stay empty. The saved values never reach the form.
+    var gatewayKind by mutableStateOf(GatewayKind.None)
+        private set
+    var gatewayFirst by mutableStateOf("")
+        private set
+    var gatewaySecond by mutableStateOf("")
+        private set
+    var savedGateway by mutableStateOf(GatewayKind.None)
+        private set
+
+    // The saved headers that make up the saved kind: shown as the kind,
+    // not as rows.
+    private var gatewayRows: List<String> = emptyList()
+
+    // The sign-in page a failed try met, and the address it was met at.
+    var detected by mutableStateOf<Gateway?>(null)
+        private set
+    private var detectedFor: String? = null
+
     var busy by mutableStateOf(false)
 
     // The last test or sign-in's answer: whether it worked, and what to say.
@@ -81,6 +113,9 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
     // The server's extensions from last time, when it is the one typed.
     private val lastServer = last
 
+    // The kept server the form started from, if any.
+    val keptServer: SavedServer? get() = lastServer
+
     init {
         if (last != null) {
             typeAddress(last.address.removeSuffix("/"))
@@ -95,6 +130,7 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
     // sets the scheme and leaves the rest; otherwise the scheme follows the
     // address until one is picked: http at home, https anywhere else.
     fun typeAddress(text: String) {
+        val before = attemptAddress
         val (typed, rest) = splitScheme(text)
         if (typed != null) {
             scheme = typed
@@ -105,16 +141,22 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
             if (!schemePicked) scheme = automaticScheme(text)
         }
         result = null
+        movedFrom(before)
     }
 
     // Switches between https and http by hand.
     fun toggleScheme() {
+        val before = attemptAddress
         scheme = if (scheme == Scheme.Https) Scheme.Http else Scheme.Https
         schemePicked = true
         result = null
+        movedFrom(before)
     }
 
     val url: HttpUrl? get() = serverUrl(scheme, address)
+
+    // The address a try goes to, as its result is tagged with.
+    val attemptAddress: String get() = url?.toString() ?: (scheme.prefix + address.trim())
 
     // Plain http to an address outside the home network.
     val insecure: Boolean get() = url?.let { !it.isHttps && !isPrivateHost(it) } == true
@@ -143,11 +185,14 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
         }
 
     // Whether anything but the name differs from the kept server, so the
-    // details need a sign-in test before they are saved.
+    // details need a sign-in test before they are saved. The sign-in page is
+    // part of it: its kind, and anything typed in its fields.
     fun changesConnection(server: SavedServer): Boolean =
         url?.toString() != server.address || username.trim() != server.username || mode != server.authMode ||
             home.trim().removeSuffix("/") != server.home?.removeSuffix("/").orEmpty() || password.isNotEmpty() || apiKey.isNotEmpty() ||
-            rememberPassword != server.rememberSignIn || headers.any { !it.saved } || headers.map { it.name } != server.headerNames
+            rememberPassword != server.rememberSignIn || headers.any { !it.saved } ||
+            (headers.map { it.name } + gatewayRows).sortedBy { it.lowercase() } != server.headerNames.sortedBy { it.lowercase() } ||
+            gatewayKind != savedGateway || gatewayFirst.isNotEmpty() || gatewaySecond.isNotEmpty()
 
     fun addHeader() {
         headers.add(HeaderDraft("", ""))
@@ -168,6 +213,80 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
         headers[index] = old.copy(value = value)
     }
 
+    // Picks the kind of sign-in the sign-in page takes. Another kind starts
+    // with empty fields.
+    fun pickGateway(kind: GatewayKind) {
+        if (kind != gatewayKind) {
+            gatewayFirst = ""
+            gatewaySecond = ""
+        }
+        gatewayKind = kind
+        result = null
+    }
+
+    fun typeGatewayFirst(text: String) {
+        gatewayFirst = text
+        result = null
+    }
+
+    fun typeGatewaySecond(text: String) {
+        gatewaySecond = text
+        result = null
+    }
+
+    // Whether the fields show the saved sign-in page, kept while they stay
+    // empty.
+    val keepsSavedGateway: Boolean get() = savedGateway != GatewayKind.None && gatewayKind == savedGateway
+
+    // How to get through the sign-in page met, or the one picked.
+    val gatewayHint: String?
+        get() = detected?.let(GatewayWords::hint)
+            ?: if (gatewayKind == GatewayKind.CloudflareToken) GatewayWords.hint(Gateway.CloudflareAccess) else null
+
+    // Sign-in page fields over plain http to an address outside the home
+    // network: refused when tried, said beforehand.
+    val gatewayNeedsHttps: Boolean
+        get() = gatewayKind != GatewayKind.None && url?.let { !gatewayAllowed(it.isHttps, isPrivateHost(it)) } == true
+
+    // The sign-in page fields as a try sends them.
+    fun gatewayDraft(): GatewayDraft = GatewayDraft(gatewayKind, gatewayFirst, gatewaySecond, savedGateway)
+
+    // The kind of sign-in page the kept server's saved headers make up, read
+    // off the window's thread: its rows show as that kind, saved, rather
+    // than as headers, and Advanced opens on it. Nothing changes once
+    // another address is typed.
+    fun knowSavedGateway(server: SavedServer, saved: SavedGateway) {
+        if (saved.kind == GatewayKind.None || url?.toString() != server.address) return
+        savedGateway = saved.kind
+        val moved = headers.filter { row -> row.saved && saved.names.any { it.equals(row.name.trim(), ignoreCase = true) } }
+        gatewayRows = moved.map { it.name }
+        headers.removeAll(moved)
+        if (gatewayKind == GatewayKind.None) gatewayKind = saved.kind
+        advancedOpen = true
+    }
+
+    // A try at `attempted` failed, meeting `gateway` if any: Advanced opens
+    // on the sign-in page fields with the kind it takes picked, and the most
+    // telling page met at this address is kept. A result for an address no
+    // longer typed changes nothing.
+    fun failed(attempted: String, gateway: Gateway?) {
+        follow(reactToFailure(gatewayState, attempted, attemptAddress, gateway))
+    }
+
+    private val gatewayState: GatewayFormState get() = GatewayFormState(advancedOpen, gatewayKind, detected, detectedFor)
+
+    private fun follow(state: GatewayFormState) {
+        advancedOpen = state.advancedOpen
+        gatewayKind = state.kind
+        detected = state.detected
+        detectedFor = state.detectedFor
+    }
+
+    // Another address forgets the sign-in page met at the last one.
+    private fun movedFrom(before: String) {
+        if (attemptAddress != before) follow(addressChanged(gatewayState, attemptAddress))
+    }
+
     // Takes a family link, pasted or opened: an invite to sign up with, a
     // sign-in from another device of one's own, or a server and username
     // to fill in. False for any other text, which a field takes as typed.
@@ -178,9 +297,13 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
     }
 
     // A link's home address becomes this account's home address, so the
-    // app uses the home network at home and the outside address away.
+    // app uses the home network at home and the outside address away. A
+    // link to another server than the one filled in leaves that one's
+    // headers and sign-in page behind.
     fun take(link: FamilyLink) {
+        val before = url?.toString()
         typeAddress(link.server)
+        if (url?.toString() != before) forgetServerDetails()
         link.home?.let { home = it }
         invite = null
         handOver = null
@@ -195,6 +318,15 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
             }
         }
         result = null
+    }
+
+    private fun forgetServerDetails() {
+        headers.clear()
+        gatewayRows = emptyList()
+        savedGateway = GatewayKind.None
+        gatewayKind = GatewayKind.None
+        gatewayFirst = ""
+        gatewaySecond = ""
     }
 
     // Back to the plain sign-in.
@@ -224,6 +356,7 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
         home = home,
         headers = headers.toList(),
         rememberPassword = rememberPassword,
+        gateway = gatewayDraft(),
     )
 
     fun request(): SignInRequest = SignInRequest(
@@ -234,6 +367,7 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
         home = home,
         headers = headers.toList(),
         rememberPassword = rememberPassword,
+        gateway = gatewayDraft(),
     )
 
     // A way of signing in that worked other than the one asked for (the

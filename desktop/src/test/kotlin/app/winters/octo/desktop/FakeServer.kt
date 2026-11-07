@@ -22,6 +22,7 @@ class FakeServer(tls: SSLSocketFactory? = null) : AutoCloseable {
     private val rules = HashMap<String, (RecordedRequest) -> String>()
     private val files = HashMap<String, ByteArray>()
     private val fileRules = HashMap<String, (RecordedRequest) -> ByteArray>()
+    private val responses = HashMap<String, (RecordedRequest) -> MockResponse>()
     val calls = CopyOnWriteArrayList<RecordedRequest>()
 
     init {
@@ -29,6 +30,7 @@ class FakeServer(tls: SSLSocketFactory? = null) : AutoCloseable {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 calls += request
                 val endpoint = request.url.pathSegments.lastOrNull().orEmpty()
+                synchronized(responses) { responses[endpoint] }?.let { rule -> return rule(request) }
                 synchronized(files) { files[endpoint] }?.let { bytes ->
                     return MockResponse.Builder().body(okio.Buffer().write(bytes)).build()
                 }
@@ -72,10 +74,21 @@ class FakeServer(tls: SSLSocketFactory? = null) : AutoCloseable {
         synchronized(rules) { rules[endpoint] = rule }
     }
 
+    // Answers `endpoint` with whatever response the rule makes, its status
+    // and headers included, as a sign-in page in front of the server would.
+    // It wins over every other answer for that endpoint.
+    fun respond(endpoint: String, rule: (RecordedRequest) -> MockResponse) {
+        synchronized(responses) { responses[endpoint] = rule }
+    }
+
     fun ok(payload: String = "", type: String = "navidrome"): String {
         val extra = if (payload.isEmpty()) "" else ",$payload"
         return """{"subsonic-response":{"status":"ok","version":"1.16.1","type":"$type","serverVersion":"0.58.0","openSubsonic":true$extra}}"""
     }
+
+    // An ok answer as a whole response, setting a cookie when given one.
+    fun okResponse(payload: String = "", type: String = "navidrome", setCookie: String? = null): MockResponse =
+        MockResponse.Builder().body(ok(payload, type)).apply { if (setCookie != null) addHeader("Set-Cookie", setCookie) }.build()
 
     fun failed(code: Int, message: String) = error(code, message)
 
@@ -94,6 +107,26 @@ class FakeServer(tls: SSLSocketFactory? = null) : AutoCloseable {
 
     private fun error(code: Int, message: String) =
         """{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":$code,"message":"$message"}}}"""
+}
+
+// What sign-in pages in front of a server answer an app, as their own code
+// answers a request with no browser in it: Authentik refusing, with its
+// page; Authelia pointing at its portal; a proxy's password prompt; a
+// redirect, and the page it leads to.
+object SignInPages {
+    fun authentik(): MockResponse =
+        MockResponse.Builder().code(401).setHeader("Content-Type", "text/html; charset=utf-8").body("<html><body aria-label=\"authentik\"></body></html>").build()
+
+    fun authelia(): MockResponse =
+        MockResponse.Builder().code(401).setHeader("Location", "https://auth.example.com/?rd=https%3A%2F%2Fmusic.example.com%2F&rm=GET").build()
+
+    fun prompt(): MockResponse =
+        MockResponse.Builder().code(401).setHeader("WWW-Authenticate", "Basic realm=\"Music\"").body("Unauthorized").build()
+
+    fun redirect(to: String): MockResponse = MockResponse.Builder().code(302).setHeader("Location", to).build()
+
+    fun page(): MockResponse =
+        MockResponse.Builder().setHeader("Content-Type", "text/html; charset=utf-8").body("<!DOCTYPE html><html><body>Sign in</body></html>").build()
 }
 
 // A song as a server lists it, in JSON.

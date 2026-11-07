@@ -37,6 +37,7 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.artworkRim
 import app.winters.octo.subsonic.SubsonicClient
+import app.winters.octo.subsonic.gateway.looksLikeHtmlFile
 import coil3.Extras
 import coil3.ImageLoader
 import coil3.PlatformContext
@@ -73,6 +74,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.withContext
 import okhttp3.Dispatcher
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
 import org.jetbrains.skia.Bitmap
@@ -184,7 +186,7 @@ class KeptCoverFetcher(
         val disk = loader.diskCache ?: return null
         for (size in keptCoverOrder(ask.bucket, anySize)) {
             val key = ask.keyAt(size)
-            val snapshot = disk.openSnapshot(key) ?: continue
+            val snapshot = disk.openCover(key) ?: continue
             return SourceFetchResult(ImageSource(snapshot.data, disk.fileSystem, key, snapshot, null), null, DataSource.DISK)
         }
         return null
@@ -206,6 +208,27 @@ class KeptCoverFetcher(
     }
 }
 
+// A cover kept on the disk, or null when there is none. A sign-in page an
+// older version kept in a cover's place is dropped, so the cover is fetched
+// again.
+internal fun DiskCache.openCover(key: String): DiskCache.Snapshot? {
+    val snapshot = openSnapshot(key) ?: return null
+    val head = runCatching {
+        fileSystem.read(snapshot.data) {
+            val bytes = ByteArray(HTML_SNIFF_BYTES)
+            val read = read(bytes)
+            if (read <= 0) ByteArray(0) else bytes.copyOf(read)
+        }
+    }.getOrDefault(ByteArray(0))
+    if (!looksLikeHtmlFile(head)) return snapshot
+    snapshot.close()
+    remove(key)
+    return null
+}
+
+// How much of a kept file is read to tell a page from a picture.
+private const val HTML_SNIFF_BYTES = 64
+
 // The key of a copy of the cover in memory at another size, the nearest
 // larger first, to show while the one asked for loads; null for none.
 fun coverInMemory(loader: ImageLoader, host: String, coverId: String, bucket: Int, online: Boolean = false): String? {
@@ -223,7 +246,7 @@ suspend fun coverBytes(loader: ImageLoader, client: SubsonicClient, coverId: Str
     fun read(): ByteArray? {
         val disk = loader.diskCache ?: return null
         for (size in keptCoverOrder(px)) {
-            disk.openSnapshot(coverKey(host, coverId, size))?.use { snapshot ->
+            disk.openCover(coverKey(host, coverId, size))?.use { snapshot ->
                 return disk.fileSystem.read(snapshot.data) { readByteArray() }
             }
         }
@@ -272,9 +295,13 @@ const val COVER_MEMORY_BYTES = 64L * 1024 * 1024
 private const val COVER_REQUESTS_PER_HOST = 16
 
 // The image loader for the whole app: the app's own HTTP client (with calls
-// of its own), a memory cache, and a disk cache in the app's cache folder.
-fun coverLoader(context: PlatformContext, http: OkHttpClient, cacheDir: File): ImageLoader {
-    val covers = http.newBuilder().dispatcher(Dispatcher().apply { maxRequestsPerHost = COVER_REQUESTS_PER_HOST }).build()
+// of its own, and `refuse`, which turns away a sign-in page answering in a
+// cover's place), a memory cache, and a disk cache in the app's cache folder.
+fun coverLoader(context: PlatformContext, http: OkHttpClient, cacheDir: File, refuse: Interceptor? = null): ImageLoader {
+    val covers = http.newBuilder()
+        .apply { if (refuse != null) addInterceptor(refuse) }
+        .dispatcher(Dispatcher().apply { maxRequestsPerHost = COVER_REQUESTS_PER_HOST })
+        .build()
     return ImageLoader.Builder(context)
         .components {
             add(SmoothCoverDecoder.Factory())

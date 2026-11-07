@@ -31,7 +31,9 @@ private const val ERROR_RECHECK_MS = 5_000L
 // when the computer joins another network, and after a request to the
 // server fails to connect. A join is heard from the system's own address
 // change notice when it has one, with a rare look as a safety net, and found
-// by a look every minute otherwise. The client asks it where each call goes.
+// by a look every minute otherwise. The client asks it where each call goes;
+// `moved` hears each move between the two, and `closing` (the client its
+// checks go through) is closed with it.
 class HomeRoute(
     val main: HttpUrl,
     val home: HttpUrl,
@@ -39,6 +41,8 @@ class HomeRoute(
     private val network: () -> Set<String> = ::localAddresses,
     private val changes: AddressChanges = systemAddressChanges(),
     private val watchEveryMs: Long? = null,
+    private val moved: () -> Unit = {},
+    private val closing: AutoCloseable? = null,
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val checks = Channel<Unit>(Channel.CONFLATED)
@@ -55,7 +59,11 @@ class HomeRoute(
         scope.launch {
             while (true) {
                 checks.receive()
-                place = choosePlace(hasHome = true, onLocalNetwork = true, homeAnswered = answers(home))
+                val next = choosePlace(hasHome = true, onLocalNetwork = true, homeAnswered = answers(home))
+                if (next != place) {
+                    place = next
+                    moved()
+                }
             }
         }
         val interval = watchEveryMs ?: if (watcher != null) NETWORK_FALLBACK_MS else NETWORK_POLL_MS
@@ -92,6 +100,7 @@ class HomeRoute(
     override fun close() {
         runCatching { watcher?.close() }
         scope.cancel()
+        runCatching { closing?.close() }
     }
 }
 

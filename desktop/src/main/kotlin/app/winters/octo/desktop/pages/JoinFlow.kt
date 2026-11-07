@@ -16,6 +16,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import app.winters.octo.connection.GatewayWords
+import app.winters.octo.connection.ResolvedHeaders
 import app.winters.octo.connection.fingerprint
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
@@ -30,6 +32,7 @@ import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.CertificateQuestion
 import app.winters.octo.desktop.server.SignInOutcome
 import app.winters.octo.desktop.server.SignInRequest
@@ -37,6 +40,7 @@ import app.winters.octo.desktop.server.familyPlatform
 import app.winters.octo.desktop.system.openInBrowser
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.FamilyLink
+import app.winters.octo.subsonic.FamilyPlatform
 import app.winters.octo.subsonic.parseFamilyLink
 import app.winters.octo.ui.family.HANDOVER_SIGNED_IN
 import app.winters.octo.ui.family.HandOverResult
@@ -46,23 +50,42 @@ import app.winters.octo.ui.family.joinWithInvite
 import app.winters.octo.ui.family.passwordStrength
 import app.winters.octo.ui.family.receiveHandOver
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 // Signs up from the invite the form holds: the new member's name and the
 // password they chose go to the family page, then this app signs in with
-// that username and password like any typed sign-in. A server with a
-// certificate of its own is asked about first, as signing in asks. Answers
-// the sign-in once done; otherwise the form says why, or holds the
-// certificate question.
-suspend fun signUpFromForm(app: AppState, form: SignInForm): SignInOutcome.Done? {
+// that username and password like any typed sign-in. The family page is
+// asked through a client of its own, with the form's addresses, headers and
+// sign-in page fields. A server with a certificate of its own is asked
+// about first, as signing in asks. Answers the sign-in once done; otherwise
+// the form says why (opening the sign-in page fields when one answered),
+// or holds the certificate question.
+suspend fun signUpFromForm(accounts: Accounts, form: SignInForm): SignInOutcome.Done? {
     val url = form.url ?: return null
     val invite = form.invite ?: return null
-    when (val joined = joinWithInvite(url, invite.token, form.inviteName, form.invitePassword, app.http, home = form.homeUrl)) {
-        is JoinOutcome.Failed -> form.result = false to joined.message
-        is JoinOutcome.Untrusted -> {
-            val leaf = app.accounts.security.takeRejected(joined.host)
-            if (leaf != null) form.question = CertificateQuestion(joined.host, leaf.fingerprint()) else form.result = false to "This server's certificate is not trusted."
+    val tried = form.attemptAddress
+    val headers = when (val resolved = accounts.joinHeaders(form.request())) {
+        is ResolvedHeaders.Problem -> {
+            form.result = false to resolved.text
+            return null
         }
-        is JoinOutcome.SignedUp -> when (val done = app.accounts.signIn(form.signUpRequest(joined.username, joined.password))) {
+        is ResolvedHeaders.Ready -> resolved.headers.associate { it.name to it.value }
+    }
+    val joined = accounts.checkClient(listOfNotNull(url, form.homeUrl), headers).use { join ->
+        val outcome = joinWithInvite(url, invite.token, form.inviteName, form.invitePassword, join.http, home = form.homeUrl)
+        if (outcome is JoinOutcome.Untrusted) {
+            val leaf = join.security.takeRejected(outcome.host)
+            if (leaf != null) form.question = CertificateQuestion(outcome.host, leaf.fingerprint()) else form.result = false to "This server's certificate is not trusted."
+        }
+        outcome
+    }
+    when (joined) {
+        is JoinOutcome.Failed -> {
+            form.result = false to (joined.gateway?.let { GatewayWords.failure(it, joined.loginSent) } ?: joined.message)
+            form.failed(tried, joined.gateway)
+        }
+        is JoinOutcome.Untrusted -> Unit
+        is JoinOutcome.SignedUp -> when (val done = accounts.signIn(form.signUpRequest(joined.username, joined.password))) {
             is SignInOutcome.Done -> {
                 form.invitePassword = ""
                 form.inviteAgain = ""
@@ -70,7 +93,10 @@ suspend fun signUpFromForm(app: AppState, form: SignInForm): SignInOutcome.Done?
                 return done
             }
             is SignInOutcome.Saved -> Unit
-            is SignInOutcome.Failed -> form.result = false to done.message
+            is SignInOutcome.Failed -> {
+                form.result = false to done.message
+                form.failed(tried, done.gateway)
+            }
             is SignInOutcome.Untrusted -> form.question = done.question
         }
     }
@@ -79,14 +105,30 @@ suspend fun signUpFromForm(app: AppState, form: SignInForm): SignInOutcome.Done?
 
 // Takes the sign-in another device of one's own hands over: redeems the
 // token from its link, waits for that device to allow it, opens what it
-// sends with the key from the link, and signs in with it like a typed one.
-// The form shows each step in plain words.
-suspend fun receiveFromForm(app: AppState, form: SignInForm): SignInOutcome.Done? {
+// sends with the key from the link, and signs in with it like a typed one,
+// with the form's headers and sign-in page fields. Every call goes through
+// a client of its own with those. The form shows each step in plain words;
+// a sign-in page that answers stops it and opens its fields, and Try again
+// uses them.
+suspend fun receiveFromForm(accounts: Accounts, platform: FamilyPlatform, form: SignInForm): SignInOutcome.Done? {
     val link = form.handOver ?: return null
-    val got = receiveHandOver(link, app.http, app.accounts.security.deviceName(), familyPlatform(app.os), step = { form.handOverStep = it })
+    val tried = form.attemptAddress
+    val headers = when (val resolved = accounts.joinHeaders(form.request())) {
+        is ResolvedHeaders.Problem -> {
+            form.handOverStep = null
+            form.result = false to resolved.text
+            return null
+        }
+        is ResolvedHeaders.Ready -> resolved.headers.associate { it.name to it.value }
+    }
+    val got = accounts.checkClient(listOfNotNull(link.base.toHttpUrlOrNull(), form.homeUrl), headers).use { join ->
+        receiveHandOver(link, join.http, accounts.security.deviceName(), platform, step = { form.handOverStep = it })
+    }
     if (got !is HandOverResult.Received) {
+        val refused = got as HandOverResult.Refused
         form.handOverStep = null
-        form.result = false to (got as HandOverResult.Refused).message
+        form.result = false to (refused.gateway?.let { GatewayWords.failure(it, refused.loginSent) } ?: refused.message)
+        form.failed(tried, refused.gateway)
         return null
     }
     val signIn = got.signIn
@@ -96,16 +138,21 @@ suspend fun receiveFromForm(app: AppState, form: SignInForm): SignInOutcome.Done
         secret = signIn.secret,
         mode = runCatching { AuthMode.valueOf(signIn.mode) }.getOrDefault(AuthMode.Token),
         home = signIn.home.orEmpty(),
+        headers = form.headers.toList(),
         rememberPassword = true,
+        gateway = form.gatewayDraft(),
     )
-    when (val done = app.accounts.signIn(request)) {
+    when (val done = accounts.signIn(request)) {
         is SignInOutcome.Done -> {
             form.handOverStep = HANDOVER_SIGNED_IN
             form.handOver = null
             return done
         }
         is SignInOutcome.Saved -> Unit
-        is SignInOutcome.Failed -> form.result = false to done.message
+        is SignInOutcome.Failed -> {
+            form.result = false to done.message
+            form.failed(tried, done.gateway)
+        }
         is SignInOutcome.Untrusted -> form.question = done.question
     }
     form.handOverStep = null
@@ -149,13 +196,17 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
         if (form.busy) return
         form.busy = true
         form.result = null
+        val tried = form.attemptAddress
         scope.launch {
             val done = when {
-                form.invite != null -> signUpFromForm(app, form)
-                form.handOver != null -> receiveFromForm(app, form)
+                form.invite != null -> signUpFromForm(app.accounts, form)
+                form.handOver != null -> receiveFromForm(app.accounts, familyPlatform(app.os), form)
                 else -> when (val signedIn = app.accounts.signIn(form.request())) {
                     is SignInOutcome.Done -> signedIn
-                    is SignInOutcome.Failed -> null.also { form.result = false to signedIn.message }
+                    is SignInOutcome.Failed -> null.also {
+                        form.result = false to signedIn.message
+                        form.failed(tried, signedIn.gateway)
+                    }
                     is SignInOutcome.Untrusted -> null.also { form.question = signedIn.question }
                     is SignInOutcome.Saved -> null
                 }
@@ -196,9 +247,11 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
 // The part of the sign-in card a family link fills: signing up from an
 // invite (a name and a password, twice, with how strong it looks), a
 // sign-in coming from another device (what is happening, step by step), or
-// the server and username filled in, waiting for the password.
+// the server and username filled in, waiting for the password. Advanced,
+// with the sign-in page fields, shows here too: an invite or hand-over to a
+// server behind a sign-in page needs them.
 @Composable
-internal fun LinkCard(form: SignInForm, go: () -> Unit, onLeave: () -> Unit) {
+internal fun ColumnScope.LinkCard(form: SignInForm, go: () -> Unit, onLeave: () -> Unit) {
     val invite = form.invite
     val handOver = form.handOver
     when {
@@ -226,6 +279,8 @@ internal fun LinkCard(form: SignInForm, go: () -> Unit, onLeave: () -> Unit) {
             SecretField(form.password, { form.password = it; form.result = null }, "Password", go, null)
         }
     }
+    AdvancedToggle(form.advancedOpen) { form.advancedOpen = !form.advancedOpen }
+    if (form.advancedOpen) Advanced(form, go, joining = invite != null || handOver != null)
     form.result?.let { (ok, text) ->
         Txt(text, OctoType.bodySmall, if (ok) OctoColors.TextSecondary else OctoColors.Error, maxLines = 4)
     }

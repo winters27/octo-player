@@ -23,6 +23,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.ProvideWindowLook
+import app.winters.octo.connection.GatewayWords
 import app.winters.octo.subsonic.FamilyLinkChoices
 import app.winters.octo.subsonic.FamilySignInPending
 import app.winters.octo.subsonic.FamilySignInStart
@@ -60,6 +61,7 @@ class FamilyDialogsTest {
     private var invite by mutableStateOf<InviteSheet?>(null)
     private var asking by mutableStateOf<FamilySignInPending?>(null)
     private var owner = false
+    private var signInPage = false
     private var scene: ImageComposeScene? = null
 
     private val host = PopupHost()
@@ -78,7 +80,7 @@ class FamilyDialogsTest {
                 val shownInvite = invite
                 val shownAsking = asking
                 when {
-                    shownInvite != null -> InviteCard(shownInvite, "https://music.example.com", {}, actions, copied::add)
+                    shownInvite != null -> InviteCard(shownInvite, "https://music.example.com", {}, actions, copied::add, signInPage = signInPage)
                     shownAsking != null -> AskingCard(shownAsking, sending = false, allow = { decided += "allow" }, deny = { decided += "deny" })
                     else -> HandOverCard(handOver, awayAllowed = true, server = "https://music.example.com", avatarName = "Alex", actions = actions, copy = copied::add, now = { now })
                 }
@@ -237,5 +239,22 @@ class FamilyDialogsTest {
         invite = InviteSheet("Sam", "sam", "https://music.example.com/family/join#invite=r1", reset = true)
         draw()
         assertTrue(has("New sign-in link for Sam"))
+    }
+
+    // An invite to a server behind a sign-in page says the new member needs
+    // an account there. Red when the card ignores `signInPage`.
+    @Test
+    fun anInviteBehindASignInPageSaysAnAccountIsNeededThere() {
+        signInPage = true
+        invite = InviteSheet("Sam", "sam", "https://music.example.com/family/join#invite=t9")
+        draw()
+        assertTrue(has(GatewayWords.SHARE_LINE))
+    }
+
+    @Test
+    fun anInviteWithNoSignInPageSaysNothingOfOne() {
+        invite = InviteSheet("Sam", "sam", "https://music.example.com/family/join#invite=t9")
+        draw()
+        assertFalse(has(GatewayWords.SHARE_LINE))
     }
 }

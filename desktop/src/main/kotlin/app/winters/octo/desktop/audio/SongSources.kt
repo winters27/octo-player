@@ -12,7 +12,10 @@ import app.winters.octo.playback.isRadio
 import app.winters.octo.playback.radioOf
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
+import app.winters.octo.subsonic.gateway.GatewayNames
+import app.winters.octo.subsonic.origin
 import app.winters.octo.playback.radioIsHls
+import okhttp3.HttpUrl
 
 // Where the engine fetches a song from: a file path, or a signed stream
 // address, with any extra request headers it needs.
@@ -27,11 +30,12 @@ fun interface SongSources {
 // Songs from the signed-in server, as the phone streams them: the file as
 // it is ("format=raw", the original quality) or, at a smaller `quality`, an
 // MP3 the server makes on the way, at an address signed the way every
-// other call is, with the server's extra headers. The engine reuses the
-// address for range requests and reconnects (a made MP3 it opens again at
-// a time instead), so it is signed when the song is queued. A song found
-// online that the server has since fetched into the library (`landed`
-// names its library id) plays from that file.
+// other call is, with the server's extra headers (a sign-in page's only
+// where `gatewayOrigins` lets them go). The engine reuses the address for
+// range requests and reconnects (a made MP3 it opens again at a time
+// instead), so it is signed when the song is queued. A song found online
+// that the server has since fetched into the library (`landed` names its
+// library id) plays from that file.
 class ServerSongs(
     private val headers: () -> Map<String, String> = { emptyMap() },
     private val landed: (String) -> String? = { null },
@@ -39,13 +43,22 @@ class ServerSongs(
     // lower quality (see streamParams).
     private val params: () -> Map<String, String> = { mapOf("format" to "raw") },
     private val client: () -> SubsonicClient?,
+    // The addresses the server's sign-in page headers may go to.
+    private val gatewayOrigins: () -> Set<String> = { emptySet() },
 ) : SongSources {
     override fun addressOf(song: Song): SongAddress? {
         val server = client() ?: return null
         val id = landed(song.id) ?: song.id
-        return SongAddress(server.url("stream", mapOf("id" to id) + params()).toString(), headers())
+        val url = server.url("stream", mapOf("id" to id) + params())
+        return SongAddress(url.toString(), streamHeaders(headers(), url, gatewayOrigins()))
     }
 }
+
+// The headers a stream at `url` carries: the server's own, less the ones a
+// sign-in page reads unless `url` is at an address they may go to (the
+// main one, or a home one over https).
+fun streamHeaders(headers: Map<String, String>, url: HttpUrl, gatewayOrigins: Set<String>): Map<String, String> =
+    if (origin(url) in gatewayOrigins) headers else headers.filterKeys { !GatewayNames.isGatewayName(it) }
 
 // A song's id on the server, for asking the server about it: the library
 // copy of a song found online once it has one, and nothing for a file on

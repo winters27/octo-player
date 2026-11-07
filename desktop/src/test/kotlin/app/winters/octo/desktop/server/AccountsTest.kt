@@ -205,7 +205,8 @@ class AccountsTest {
         val address = settings.current.server!!.address
         assertEquals(listOf("X-Token"), settings.current.server!!.headerNames)
         assertFalse(settingsFile.readText().contains("top-secret"))
-        assertTrue(secrets.kept[headersAccount(address)]!!.contains("top-secret"))
+        assertTrue(secrets.kept[headersAccount(settings.current.server!!)]!!.contains("top-secret"))
+        assertNull("nothing filed by address", secrets.kept[headersAccount(address)])
         assertEquals(mapOf("X-Token" to "top-secret"), done.connection.headers)
 
         // The next run reads them back, and the shared client sends them.

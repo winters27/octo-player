@@ -437,7 +437,7 @@ class EngineSyncTest {
     @Test
     fun streamsAreSignedForTheOriginalFile() {
         FakeServer().use { server ->
-            val address = ServerSongs { server.client() }.addressOf(Song("abc", "A"))!!
+            val address = ServerSongs(client = { server.client() }).addressOf(Song("abc", "A"))!!
             val url = address.source.toHttpUrl()
             assertEquals("stream", url.pathSegments.last())
             assertEquals("abc", url.queryParameter("id"))
@@ -445,7 +445,7 @@ class EngineSyncTest {
             assertEquals("winters", url.queryParameter("u"))
             assertTrue("signed", url.queryParameter("t") != null || url.queryParameter("p") != null)
         }
-        assertNull(ServerSongs { null }.addressOf(Song("abc", "A")))
+        assertNull(ServerSongs(client = { null }).addressOf(Song("abc", "A")))
     }
 
     @Test

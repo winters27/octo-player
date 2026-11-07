@@ -1,11 +1,13 @@
 package app.winters.octo.desktop.offline
 
 import app.winters.octo.desktop.FakeServer
+import app.winters.octo.desktop.SignInPages
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.subsonic.gateway.GatewayCookies
 import app.winters.octo.subsonic.DeviceIdentity
 import app.winters.octo.subsonic.HeaderScope
 import app.winters.octo.subsonic.PURPOSE_HEADER
-import app.winters.octo.subsonic.ServerHeaders
+import app.winters.octo.subsonic.serverHeaders
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.origin
 import app.winters.octo.ui.family.FamilyModel
@@ -52,7 +54,15 @@ class DesktopOfflineTest {
         val connection = server.connection(if (familyOn) listOf("octoFamily:1") else emptyList())
         // The server's own addresses hear what the request is for.
         val http = OkHttpClient.Builder()
-            .addNetworkInterceptor(ServerHeaders { HeaderScope(setOf(origin(server.address.toHttpUrl())), emptyMap(), DeviceIdentity("id", "Studio PC")) })
+            .serverHeaders {
+                HeaderScope(
+                    origins = setOf(origin(server.address.toHttpUrl())),
+                    headers = emptyMap(),
+                    gatewayOrigins = emptySet(),
+                    cookies = GatewayCookies(),
+                    device = DeviceIdentity("id", "Studio PC"),
+                )
+            }
             .build()
         val family = FamilyModel({ connection.client }, { familyOn }, scope)
         return DesktopOffline(settings, http, scope, File(folder.root, "kept"), { connection }, { liked }, family, { said += it }).also { it.start() }
@@ -196,5 +206,33 @@ class DesktopOfflineTest {
         until("kept") { first.localFile("tr-1") != null }
         val again = offline()
         until("read back") { again.localFile("tr-1") != null }
+    }
+
+    // A sign-in page answering in the server's place is never kept as a
+    // song. Red when the HTML check before saving is removed.
+    @Test
+    fun aSignInPageInPlaceOfASongIsNeverKept() {
+        server.respond("stream") { SignInPages.page() }
+        val offline = offline()
+        offline.keep(listOf(song("tr-1", "One")), true)
+        until("tried") { offline.status.failed == 1 }
+        assertNull(offline.localFile("tr-1"))
+        assertTrue(File(folder.root, "kept").walk().none { it.isFile && it.name != DesktopOffline.INDEX })
+    }
+
+    // A sign-in page an older version kept in a song's place is dropped and
+    // the song fetched again. Red when kept files are not looked at.
+    @Test
+    fun aSignInPageKeptAsASongBeforeIsDroppedAndFetchedAgain() {
+        val audio = ByteArray(1000) { 7 }
+        server.file("stream", audio)
+        val first = offline()
+        first.keep(listOf(song("tr-1", "One")), true)
+        until("kept") { first.localFile("tr-1") != null }
+        first.localFile("tr-1")!!.writeText("\n<!DOCTYPE html><html><body>Sign in</body></html>")
+        server.answer("getSong", """"song":{"id":"tr-1","title":"One","artist":"Artist","album":"Album","track":1,"suffix":"flac"}""")
+        val next = offline()
+        until("fetched again") { next.localFile("tr-1")?.readBytes()?.contentEquals(audio) == true }
+        assertEquals(2, server.calls.count { it.url.pathSegments.last() == "stream" })
     }
 }

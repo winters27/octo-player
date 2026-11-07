@@ -92,7 +92,7 @@ import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.nav.SettingsKey
 import app.winters.octo.desktop.nav.SettingsPageInfo
 import app.winters.octo.desktop.nav.settingsPages
-import app.winters.octo.desktop.server.Reach
+import app.winters.octo.server.isWarning
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.name
 import app.winters.octo.desktop.system.LocalSystem
@@ -349,7 +349,7 @@ private fun AccountCard(app: AppState, onOpen: () -> Unit) {
     LaunchedEffect(inUse, home) { home?.refresh() }
     LaunchedEffect(inUse) { app.serverFacts.refresh() }
     val check = app.serverFacts.checks[inUse]?.takeIf { switching == null }
-    val cantReach = check?.reach == Reach.Unreachable || check?.reach == Reach.WrongPassword
+    val cantReach = check.isWarning()
     val status = when {
         switching != null -> "Switching"
         check == null -> null

@@ -27,6 +27,7 @@ import app.winters.octo.desktop.player.lineupStep
 import app.winters.octo.desktop.player.liveNow
 import app.winters.octo.desktop.player.shownLive
 import app.winters.octo.discovery.knownLengthMs
+import app.winters.octo.connection.GatewayWords
 import app.winters.octo.playback.PlayFailure
 import app.winters.octo.playback.QueueSource
 import app.winters.octo.playback.RealLengths
@@ -517,6 +518,22 @@ class EnginePlayer(
         setRepeat(saved.repeat)
     }
 
+    // The server's address, sign-in or headers changed: every queued song is
+    // asked for afresh where it is now, from the same place in the song,
+    // still playing when it was. The engine's queue is loaded anew rather
+    // than replaced, so nothing of the old one (its decks' options, a song
+    // marked failed) carries over. A station is an outside server's, so it
+    // plays on.
+    override fun reconnect() {
+        val heard = engine.heard()
+        synchronized(lock) {
+            val current = queue.currentEntry ?: return
+            if (isRadio(current.song.id)) return
+            load(startMs = positionLocked(heard), play = playing)
+            publish()
+        }
+    }
+
     // The repeat the engine plays by: the listener's, and off while a
     // station plays.
     private fun repeatForEngine(): EngineRepeat = when {
@@ -852,13 +869,17 @@ fun loudness(volume: Float): Float = volume.coerceIn(0f, 1f).let { it * it }
 
 // Why a song would not play, in plain words, the same as the phone's. A
 // song found online (`outside`) was never on the server, so a "not found"
-// for it is the server not sending it.
-fun plainWords(kind: ErrorKind, outside: Boolean = false): String = when (kind) {
-    ErrorKind.NOT_FOUND -> if (outside) PlayFailure.Refused else PlayFailure.Missing
-    ErrorKind.HTTP -> PlayFailure.Refused
-    ErrorKind.NETWORK -> PlayFailure.Unreachable
-    ErrorKind.UNSUPPORTED -> PlayFailure.Unsupported
-    ErrorKind.DECODE -> PlayFailure.Damaged
-    ErrorKind.DEVICE -> PlayFailure.Device
-    else -> PlayFailure.Other
-}.words
+// for it is the server not sending it. A sign-in page that answered in the
+// song's place is said as such.
+fun plainWords(kind: ErrorKind, outside: Boolean = false): String {
+    if (kind == ErrorKind.SIGN_IN_PAGE) return GatewayWords.PLAY_FAILURE
+    return when (kind) {
+        ErrorKind.NOT_FOUND -> if (outside) PlayFailure.Refused else PlayFailure.Missing
+        ErrorKind.HTTP -> PlayFailure.Refused
+        ErrorKind.NETWORK -> PlayFailure.Unreachable
+        ErrorKind.UNSUPPORTED -> PlayFailure.Unsupported
+        ErrorKind.DECODE -> PlayFailure.Damaged
+        ErrorKind.DEVICE -> PlayFailure.Device
+        else -> PlayFailure.Other
+    }.words
+}

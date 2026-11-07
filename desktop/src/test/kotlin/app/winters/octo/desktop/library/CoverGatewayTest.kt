@@ -1,0 +1,88 @@
+package app.winters.octo.desktop.library
+
+import app.winters.octo.covers.coverBucket
+import app.winters.octo.desktop.FakeServer
+import app.winters.octo.desktop.SignInPages
+import app.winters.octo.desktop.server.ServerSecurity
+import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.subsonic.Credentials
+import app.winters.octo.subsonic.SubsonicClient
+import coil3.ImageLoader
+import coil3.PlatformContext
+import kotlinx.coroutines.runBlocking
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
+import org.jetbrains.skia.Color
+import org.jetbrains.skia.EncodedImageFormat
+import org.jetbrains.skia.Surface
+import org.junit.After
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.File
+
+// Covers when a sign-in page answers in their place: never kept, a cover
+// moved elsewhere still loads, and a page an older version kept as a cover
+// is dropped and the cover fetched again.
+class CoverGatewayTest {
+    @get:Rule val folder = TemporaryFolder()
+    private val server = FakeServer()
+    private val elsewhere = FakeServer()
+    private val png: ByteArray = Surface.makeRasterN32Premul(8, 8).run {
+        canvas.clear(Color.RED)
+        makeImageSnapshot().encodeToData(EncodedImageFormat.PNG)!!.bytes
+    }
+
+    @After
+    fun stop() {
+        server.close()
+        elsewhere.close()
+    }
+
+    // The covers client as the app makes it: the shared client set up for
+    // the server, refusing a sign-in page.
+    private fun covers(): Pair<ImageLoader, SubsonicClient> {
+        val security = ServerSecurity(SettingsStore(File(folder.root, "settings.json")))
+        val main = server.address.toHttpUrl()
+        security.configure(main, null, emptyMap())
+        val http = security.install(OkHttpClient.Builder()).build()
+        val loader = coverLoader(PlatformContext.INSTANCE, http, File(folder.root, "cache"), security.refuseHtml())
+        return loader to SubsonicClient(main, Credentials("winters", "pw"), http)
+    }
+
+    // Red when the covers client goes without RefuseHtml.
+    @Test
+    fun aSignInPageInPlaceOfACoverIsNeverKept() = runBlocking {
+        server.respond("getCoverArt") { SignInPages.redirect("/if/flow/login") }
+        server.respond("login") { SignInPages.page() }
+        val (loader, client) = covers()
+        assertNull(coverBytes(loader, client, "c1", 100))
+        assertNull(loader.diskCache!!.openSnapshot(coverKey(client.primaryUrl.host, "c1", coverBucket(100))))
+    }
+
+    // Red when an origin rule is added to the refusal.
+    @Test
+    fun aCoverMovedElsewhereStillLoads() = runBlocking {
+        elsewhere.file("art.png", png)
+        server.respond("getCoverArt") { SignInPages.redirect(elsewhere.address + "art.png") }
+        val (loader, client) = covers()
+        assertArrayEquals(png, coverBytes(loader, client, "c1", 100))
+    }
+
+    // Red when kept covers are not looked at before use.
+    @Test
+    fun aSignInPageKeptAsACoverBeforeIsDroppedAndFetchedAgain() = runBlocking {
+        server.file("getCoverArt", png)
+        val (loader, client) = covers()
+        val disk = loader.diskCache!!
+        val editor = disk.openEditor(coverKey(client.primaryUrl.host, "c1", coverBucket(100)))!!
+        disk.fileSystem.write(editor.metadata) {}
+        disk.fileSystem.write(editor.data) { writeUtf8("﻿ <!DOCTYPE html><html></html>") }
+        editor.commit()
+        assertArrayEquals(png, coverBytes(loader, client, "c1", 100))
+        assertEquals(1, server.calls.count { it.url.pathSegments.last() == "getCoverArt" })
+    }
+}

@@ -181,6 +181,10 @@ interface DesktopPlayer : AutoCloseable {
 
     // Puts a saved queue back, paused where it was left.
     fun restore(saved: SavedQueue)
+
+    // The server's address, sign-in or headers changed: songs already
+    // queued are fetched afresh with the new ones.
+    fun reconnect() {}
 }
 
 // The output that follows whatever the system uses.

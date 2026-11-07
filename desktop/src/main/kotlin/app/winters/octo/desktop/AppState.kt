@@ -362,8 +362,9 @@ class AppState(
         onFinished = { serverFacts.refresh() },
     )
 
-    // Asked only at the server's own addresses, signed as every other call.
-    private val serverUpdateCalls = ServerUpdateHttp(http) { connection?.let { ownAddresses(it.client, it.headers) } }
+    // Asked only at the server's own addresses, signed as every other call;
+    // the shared client adds the server's headers where they may go.
+    private val serverUpdateCalls = ServerUpdateHttp(http) { connection?.let { ownAddresses(it.client) } }
 
     private fun followServerUpdate(connection: Connection?) {
         serverUpdate.bind(connection?.takeIf { it.isOcto }?.server?.id, serverUpdateCalls)
@@ -551,6 +552,9 @@ class AppState(
         watchProblems()
         followLive()
         followAnimatedArt()
+        // Songs queued at one of the server's addresses are asked for again
+        // at the other once it moves between them.
+        accounts.onRouteMoved = player::reconnect
         restored?.let(::signedIn)
     }
 
@@ -806,12 +810,15 @@ class AppState(
     }
 
     // Signs out of the server in use. It stays in the list of servers,
-    // without its password, and the sign-in page opens.
+    // without its password, and the sign-in page opens. Its ticket is taken
+    // now, so a sign-in, edit or switch still on its way does not bring a
+    // server back after.
     fun signOut() {
         leaveServer()
+        val stop = accounts.stopTicket()
         // The server is forgotten at once; the password store is left to
         // finish off the window's thread.
-        scope.launch(start = CoroutineStart.UNDISPATCHED) { accounts.signOut() }
+        scope.launch(start = CoroutineStart.UNDISPATCHED) { accounts.signOut(stop = stop) }
         signedOut()
     }
 
@@ -857,9 +864,10 @@ class AppState(
         val target = accounts.find(id) ?: return
         if (switching != null || id == connection?.server?.id) return
         switching = target
+        val ticket = accounts.ticket()
         scope.launch {
             val outcome = try {
-                accounts.switchTo(id)
+                accounts.switchTo(id, ticket)
             } finally {
                 switching = null
             }
@@ -873,8 +881,14 @@ class AppState(
     }
 
     // Moves the window over to another server's connection, saying so in
-    // the notice line, and plainly when music was stopped for it.
+    // the notice line, and plainly when music was stopped for it. A
+    // connection begun before a later switch, sign-out or removal is left
+    // alone, as the accounts left it.
     fun arrive(connection: Connection, page: Page = Page.Home, note: String? = null) {
+        if (accounts.isInUse(connection)) moveTo(connection, page, note)
+    }
+
+    private fun moveTo(connection: Connection, page: Page, note: String?) {
         val from = this.connection?.server
         val playing = player.state.value.let { it.current != null && it.playing }
         if (from != null) leaveServer()
@@ -882,13 +896,25 @@ class AppState(
         signedIn(connection, listOfNotNull(words, note).joinToString(" ").ifEmpty { null }, page)
     }
 
-    // A kept server's connection changed (its address, headers or way of
-    // signing in were edited). The same account keeps playing; another
-    // account on it is a switch.
+    // A kept server's connection changed (its address, headers, sign-in
+    // page or way of signing in were edited). The same account keeps
+    // playing, its queued songs asked for afresh with the new details;
+    // another account on it is a switch. An edit that finishes after a later
+    // switch, sign-out or removal is left alone.
     fun reconnected(connection: Connection) {
+        if (!accounts.isInUse(connection)) return
         val now = this.connection
-        if (now != null && now.server.key == connection.server.key) useConnection(connection) else arrive(connection, Page.Settings)
+        if (now != null && now.server.key == connection.server.key) {
+            useConnection(connection)
+            player.reconnect()
+        } else {
+            moveTo(connection, Page.Settings, null)
+        }
     }
+
+    // The password of the server in use changed: songs queued with the old
+    // one are asked for again with the new.
+    fun passwordChanged() = player.reconnect()
 
     // Signs out of a kept server that is not the one in use; the one in use
     // signs out as above.
@@ -904,8 +930,10 @@ class AppState(
         val server = accounts.find(id) ?: return
         val inUse = id == connection?.server?.id
         if (inUse) leaveServer()
+        // Taken now, as a sign-out takes its own.
+        val stop = if (inUse) accounts.stopTicket() else null
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            accounts.remove(id)
+            accounts.remove(id, stop)
             if (forgetHere && listeningRoot != null) {
                 withContext(Dispatchers.IO) { runCatching { listeningFolder(listeningRoot, server).deleteRecursively() } }
             }

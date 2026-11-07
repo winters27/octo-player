@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.server
 
 import app.winters.octo.desktop.settings.SavedServer
+import app.winters.octo.server.Reach
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.ScanStatus
 import app.winters.octo.subsonic.User

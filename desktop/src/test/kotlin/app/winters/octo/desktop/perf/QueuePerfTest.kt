@@ -30,8 +30,8 @@ class QueuePerfTest {
             val tone = File(folder.root, "tone.wav").also { writeSine(it, seconds = 2) }
             server.file("stream", tone.readBytes())
             val client = server.client()
-            val player = EnginePlayer(NativeAudioEngine.open(silent = true), LocalOrServer(ServerSongs { client }))
-            val lines = mutableListOf("Octo queue performance (the engine player, silent device)")
+            val player = EnginePlayer(NativeAudioEngine.open(silent = true), LocalOrServer(ServerSongs(client = { client })))
+val lines = mutableListOf("Octo queue performance (the engine player, silent device)")
             for (size in listOf(2_500, 20_000)) {
                 val songs = madeUpLibrary(size).songs
                 val times = List(7) {
@@ -44,7 +44,7 @@ class QueuePerfTest {
                     }
                     took
                 }.drop(2).sorted()
-                val sources = LocalOrServer(ServerSongs { client })
+                val sources = LocalOrServer(ServerSongs(client = { client }))
                 val signing = List(7) {
                     val start = System.nanoTime()
                     songs.forEachIndexed { i, song -> queueItem(QueueEntry(i.toLong(), song), sources) }

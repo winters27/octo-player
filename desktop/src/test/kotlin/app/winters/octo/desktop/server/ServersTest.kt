@@ -7,6 +7,7 @@ import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.settings.name
 import app.winters.octo.livelists.accountKey
 import app.winters.octo.server.PasswordChange
+import app.winters.octo.server.Reach
 import app.winters.octo.subsonic.AuthMode
 import java.io.File
 import java.net.URLDecoder
@@ -167,7 +168,8 @@ class ServersTest {
         val guest = accounts.add(SignInRequest(home.address, "guest", "guest pw", headers = listOf(HeaderDraft("X-Token", "t0ken")))) as SignInOutcome.Saved
         accounts.remove(guest.server.id)
         assertNull(secrets.kept[secretAccount("guest", home.address)])
-        assertNotNull("winters still needs the headers", secrets.kept[headersAccount(home.address)])
+        assertNull("the guest's own go with it", secrets.kept[headersAccount(guest.server)])
+        assertNotNull("winters keeps its own", secrets.kept[headersAccount(accounts.servers.single())])
         val homeId = accounts.servers.single().id
         accounts.remove(homeId)
         assertTrue(secrets.kept.isEmpty())

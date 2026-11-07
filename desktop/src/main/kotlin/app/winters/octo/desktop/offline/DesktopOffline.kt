@@ -20,6 +20,8 @@ import app.winters.octo.offline.wantedCopies
 import app.winters.octo.subsonic.OctoPurpose
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.subsonic.gateway.isHtml
+import app.winters.octo.subsonic.gateway.looksLikeHtmlFile
 import app.winters.octo.subsonic.markedFor
 import app.winters.octo.ui.family.FamilyModel
 import app.winters.octo.ui.family.OFFLINE_COPIES_OFF
@@ -121,6 +123,10 @@ class DesktopOffline(
     // Songs picked by hand, as they were picked, so they are fetched without
     // asking the server about each again.
     private val picked = java.util.concurrent.ConcurrentHashMap<String, Song>()
+
+    // Kept files already looked at this run for a sign-in page kept in a
+    // song's place, by path.
+    private val sniffed: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     var files by mutableStateOf<List<KeptFile>>(emptyList())
         private set
@@ -324,6 +330,8 @@ class DesktopOffline(
             val request = Request.Builder().url(client.url("stream", mapOf("id" to song.id) + params)).build()
             http.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withContext null
+                // A sign-in page that answered in the server's place is no song.
+                if (isHtml(response.header("Content-Type"))) return@withContext null
                 val suffix = keptSuffix(params["format"], response.header("Content-Type"), song.suffix)
                 val path = "${app.winters.octo.offline.fileSafe(server)}/" + keptPath(song.displayArtist ?: song.artist, song.album, song.track, song.title, suffix)
                 val target = File(folder, path)
@@ -344,11 +352,14 @@ class DesktopOffline(
     // under the same id. A kept file of an old one goes, so it never plays,
     // and is fetched again with the rest. Files kept before the server's
     // size was noted have it noted here. A family account without offline
-    // copies keeps what it has.
+    // copies keeps what it has. A sign-in page an older version kept in a
+    // song's place goes whatever the family allows, since it never plays,
+    // and is fetched again with the rest where copies are allowed.
     private suspend fun checkFiles(server: String, now: Map<String, Song>) {
+        val pages = storedPages(server)
         var changed = false
         val swapped = ArrayList<KeptFile>()
-        val checked = files.map { kept ->
+        val checked = files.filterNot { it.path in pages }.map { kept ->
             val song = now[kept.id]?.takeIf { kept.server == server } ?: return@map kept
             // Files kept before their album was noted have it noted here.
             val noted = if (kept.album.isEmpty() && !song.albumId.isNullOrBlank()) kept.copy(album = song.albumId.orEmpty()).also { changed = true } else kept
@@ -361,11 +372,27 @@ class DesktopOffline(
         val refused = swapped.isNotEmpty() && connection()?.family == true && !offlineCopiesAllowed(family.plan())
         val going = if (refused) emptySet() else swapped.toSet()
         going.forEach { File(folder, it.path).delete() }
-        if (changed || going.isNotEmpty()) {
+        pages.forEach { File(folder, it).delete() }
+        if (changed || going.isNotEmpty() || pages.isNotEmpty()) {
             files = checked - going
             writeIndex(files)
         }
     }
+
+    // The paths of `server`'s kept files that hold a sign-in page instead of
+    // a song. Each file is looked at once a run.
+    private fun storedPages(server: String): Set<String> =
+        files.filter { it.server == server && sniffed.add(it.path) && looksLikeHtmlFile(firstBytes(File(folder, it.path))) }
+            .mapTo(HashSet()) { it.path }
+
+    // The start of a file, enough to tell a page from a song.
+    private fun firstBytes(file: File): ByteArray = runCatching {
+        file.inputStream().use { stream ->
+            val bytes = ByteArray(64)
+            val read = stream.read(bytes)
+            if (read <= 0) ByteArray(0) else bytes.copyOf(read)
+        }
+    }.getOrDefault(ByteArray(0))
 
     private fun statusOf(all: List<KeptFile>): KeepStatus {
         val server = connection()?.server?.id

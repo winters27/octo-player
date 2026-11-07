@@ -89,6 +89,10 @@ import app.winters.octo.desktop.server.TestOutcome
 import app.winters.octo.desktop.settings.name
 import app.winters.octo.desktop.ui.LocalKeyColour
 import app.winters.octo.desktop.ui.keyRim
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import app.winters.octo.connection.GatewayWords
+import app.winters.octo.subsonic.gateway.GatewayKind
 import app.winters.octo.subsonic.shownAddress
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
@@ -105,18 +109,24 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
     // Which of test or sign-in ran last, to run again once a certificate is trusted.
     var again by remember { mutableStateOf<(() -> Unit)?>(null) }
 
+    // Each try is tagged with the address it went to, so a sign-in page it
+    // met counts only while that address is still the one typed.
     fun test() {
         if (!form.ready) return
         again = ::test
         form.busy = true
         form.result = null
+        val tried = form.attemptAddress
         scope.launch {
             when (val tested = app.accounts.test(form.request())) {
                 is TestOutcome.Reached -> {
                     form.worked(tested.mode)
                     form.result = true to tested.facts.summary()
                 }
-                is TestOutcome.Failed -> form.result = false to tested.message
+                is TestOutcome.Failed -> {
+                    form.result = false to tested.message
+                    form.failed(tried, tested.gateway)
+                }
                 is TestOutcome.Untrusted -> form.question = tested.question
             }
             form.busy = false
@@ -128,6 +138,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
         again = ::signIn
         form.busy = true
         form.result = null
+        val tried = form.attemptAddress
         scope.launch {
             when (val done = app.accounts.signIn(form.request())) {
                 is SignInOutcome.Done -> {
@@ -136,7 +147,10 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                     app.signedIn(done.connection, done.note)
                 }
                 is SignInOutcome.Saved -> Unit
-                is SignInOutcome.Failed -> form.result = false to done.message
+                is SignInOutcome.Failed -> {
+                    form.result = false to done.message
+                    form.failed(tried, done.gateway)
+                }
                 is SignInOutcome.Untrusted -> form.question = done.question
             }
             form.busy = false
@@ -152,7 +166,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
         form.busy = true
         form.result = null
         scope.launch {
-            val done = if (form.invite != null) signUpFromForm(app, form) else receiveFromForm(app, form)
+            val done = if (form.invite != null) signUpFromForm(app.accounts, form) else receiveFromForm(app.accounts, familyPlatform(app.os), form)
             done?.let { app.signedIn(it.connection, it.note) }
             form.busy = false
         }
@@ -160,6 +174,10 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
 
     // A sign-in from another device starts at once: there is nothing to type.
     LaunchedEffect(form.handOver) { if (form.handOver != null && form.handOverStep == null && form.result == null) go() }
+
+    // The kept server's sign-in page shows as its kind, saved, without its
+    // values.
+    LaunchedEffect(form) { form.keptServer?.let { form.knowSavedGateway(it, app.accounts.savedGateway(it)) } }
 
     // Focus starts in the address, or in the password when the server and
     // user are already filled in.
@@ -323,26 +341,31 @@ internal fun rememberCaption(on: Boolean): String =
 private val CardFilm = Color(0xFF1A1A1E).copy(alpha = 0.79f)
 
 // The settings most servers never need: other ways of signing in, a home
-// address and extra headers.
+// address, extra headers and a sign-in page in front of the server.
+// `joining` (an invite or a hand-over) has no way of signing in to pick:
+// an invite signs in with the password chosen, a hand-over with what it
+// brings.
 @Composable
-internal fun ColumnScope.Advanced(form: SignInForm, submit: () -> Unit) {
+internal fun ColumnScope.Advanced(form: SignInForm, submit: () -> Unit, joining: Boolean = false) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        SwitchRow(
-            "Legacy sign-in",
-            "Only for older servers that reject the normal sign-in.",
-            checked = form.legacyPassword && !form.useApiKey,
-            enabled = !form.useApiKey,
-        ) { form.legacyPassword = it; form.result = null }
-
-        // Before signing in nobody knows whether the server takes keys, so
-        // one may be tried; once known, the switch shows only where it works.
-        if (form.takesApiKeys != false || form.useApiKey) {
+        if (!joining) {
             SwitchRow(
-                "Sign in with an API key",
-                if (form.takesApiKeys == true) "Your server gives out API keys." else "For servers that give out API keys.",
-                checked = form.useApiKey,
-            ) { form.useApiKey = it; form.result = null }
-            if (form.useApiKey) SecretField(form.apiKey, { form.apiKey = it; form.result = null }, "API key", submit)
+                "Legacy sign-in",
+                "Only for older servers that reject the normal sign-in.",
+                checked = form.legacyPassword && !form.useApiKey,
+                enabled = !form.useApiKey,
+            ) { form.legacyPassword = it; form.result = null }
+
+            // Before signing in nobody knows whether the server takes keys, so
+            // one may be tried; once known, the switch shows only where it works.
+            if (form.takesApiKeys != false || form.useApiKey) {
+                SwitchRow(
+                    "Sign in with an API key",
+                    if (form.takesApiKeys == true) "Your server gives out API keys." else "For servers that give out API keys.",
+                    checked = form.useApiKey,
+                ) { form.useApiKey = it; form.result = null }
+                if (form.useApiKey) SecretField(form.apiKey, { form.apiKey = it; form.result = null }, "API key", submit)
+            }
         }
 
         Section("Home network address", "Optional. At home, Octo uses it when it answers, and the main address otherwise.") {
@@ -365,6 +388,65 @@ internal fun ColumnScope.Advanced(form: SignInForm, submit: () -> Unit) {
                 }
             }
             GlazeCapsule(null, "Add header", form::addHeader, height = 32.dp)
+        }
+
+        GatewaySection(form, submit, joining)
+    }
+}
+
+// A sign-in page in front of the server (Authentik, Authelia, a proxy's
+// password, Cloudflare Access): the kind of sign-in it takes, its two
+// fields, and how to get through. A saved one shows as saved and is kept
+// while its fields stay empty.
+@Composable
+private fun GatewaySection(form: SignInForm, submit: () -> Unit, joining: Boolean) {
+    Section(GatewayWords.LABEL_SECTION, GatewayWords.LABEL_CAPTION) {
+        KindChoice(form.gatewayKind, form::pickGateway)
+        val saved = if (form.keepsSavedGateway) GatewayWords.LABEL_SAVED else ""
+        when (form.gatewayKind) {
+            GatewayKind.None -> Unit
+            GatewayKind.Password -> {
+                Label(GatewayWords.LABEL_USERNAME)
+                GlassField(form.gatewayFirst, form::typeGatewayFirst, Modifier.fillMaxWidth(), placeholder = saved, onSubmit = submit)
+                Label(GatewayWords.LABEL_PASSWORD)
+                SecretField(form.gatewaySecond, form::typeGatewaySecond, saved, submit)
+            }
+            GatewayKind.CloudflareToken -> {
+                Label(GatewayWords.LABEL_CLIENT_ID)
+                GlassField(form.gatewayFirst, form::typeGatewayFirst, Modifier.fillMaxWidth(), placeholder = saved, onSubmit = submit)
+                Label(GatewayWords.LABEL_CLIENT_SECRET)
+                SecretField(form.gatewaySecond, form::typeGatewaySecond, saved, submit)
+            }
+        }
+        form.gatewayHint?.let { Txt(it, OctoType.caption, OctoColors.TextMuted, maxLines = 4) }
+        if (joining && form.gatewayKind != GatewayKind.None) Txt(GatewayWords.JOIN_HINT, OctoType.caption, OctoColors.TextMuted, maxLines = 2)
+        if (form.gatewayNeedsHttps) Txt(GatewayWords.NEEDS_HTTPS, OctoType.caption, OctoColors.Error, maxLines = 3)
+    }
+}
+
+// The kinds of sign-in, one under another, the chosen one on the accent
+// fill with a check: three choices whose words are too long to sit side by
+// side in the card, at any text size.
+@Composable
+private fun KindChoice(chosen: GatewayKind, pick: (GatewayKind) -> Unit) {
+    val shape = RoundedCornerShape(8.dp)
+    Column(Modifier.fillMaxWidth().selectableGroup()) {
+        GatewayKind.entries.forEach { kind ->
+            val on = kind == chosen
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 36.dp)
+                    .hoverLift(shape)
+                    .selectable(on, role = Role.RadioButton) { pick(kind) },
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                ChosenFill(on, Modifier.matchParentSize(), shape)
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Txt(GatewayWords.kindLabel(kind), OctoType.bodySmall, if (on) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f))
+                    if (on) Glyph(OctoIcons.Check, size = IconSize.Table, tint = OctoColors.Accent)
+                }
+            }
         }
     }
 }

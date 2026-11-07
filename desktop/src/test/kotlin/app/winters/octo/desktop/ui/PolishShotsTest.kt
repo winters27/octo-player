@@ -431,7 +431,7 @@ class PolishShotsTest {
             val tone = File(root, "tone.wav").also { writeSine(it, seconds = 30, level = 0.0) }
             PolishData.serve(server, library, tone.readBytes())
             settings.update { it.copy(lyrics = it.lyrics.copy(online = false)) }
-            player = EnginePlayer(NativeAudioEngine.open(silent = true), LocalOrServer(ServerSongs { app.connection?.client }))
+            player = EnginePlayer(NativeAudioEngine.open(silent = true), LocalOrServer(ServerSongs(client = { app.connection?.client })))
             SwingUtilities.invokeAndWait {
                 app = AppState(settings, accounts, http, CoroutineScope(SupervisorJob() + Dispatchers.Main), DesktopOs.Windows, player, OnlineLyrics(http, server.address.toHttpUrl()), listeningRoot = File(root, "listening"), browse = {})
             }

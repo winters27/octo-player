@@ -99,7 +99,7 @@ class MiniPlayerScreenShotsTest {
             val http = OkHttpClient()
             val accounts = Accounts(settings, SessionOnlySecrets(), http)
             lateinit var app: AppState
-            val player = EnginePlayer(NativeAudioEngine.open(silent = true), LocalOrServer(ServerSongs { app.connection?.client }))
+            val player = EnginePlayer(NativeAudioEngine.open(silent = true), LocalOrServer(ServerSongs(client = { app.connection?.client })))
             SwingUtilities.invokeAndWait {
                 app = AppState(settings, accounts, http, CoroutineScope(SupervisorJob() + Dispatchers.Main), DesktopOs.Windows, player, OnlineLyrics(http, server.address.toHttpUrl()), listeningRoot = File(folder.root, "listening"))
             }

@@ -3,6 +3,7 @@ package app.winters.octo.desktop.server
 import app.winters.octo.connection.Place
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -85,5 +86,37 @@ class HomeRouteTest {
             Thread.sleep(200)
             assertEquals(2, asks.get())
         }
+    }
+
+    // Each move between the addresses is heard once, and a check that
+    // stays put is not a move. Red when `moved` is never called, or called
+    // on every check.
+    @Test
+    fun eachMoveIsHeardOnce() {
+        val answering = AtomicBoolean(true)
+        val network = AtomicReference(setOf("192.168.1.10"))
+        val moves = AtomicInteger()
+        val checks = AtomicInteger()
+        HomeRoute(main, home, { checks.incrementAndGet(); answering.get() }, network = { network.get() }, watchEveryMs = 20, moved = { moves.incrementAndGet() }).use { route ->
+            waitFor { moves.get() == 1 }
+            assertEquals(Place.Home, route.place)
+            val before = checks.get()
+            route.recheck()
+            waitFor { checks.get() > before }
+            assertEquals(1, moves.get())
+            answering.set(false)
+            network.set(setOf("10.20.30.40"))
+            waitFor { moves.get() == 2 }
+            assertEquals(Place.Away, route.place)
+        }
+    }
+
+    // The client the route's checks go through is closed with it. Red when
+    // close leaves it open.
+    @Test
+    fun closingClosesTheClientItsChecksUse() {
+        val closed = AtomicBoolean(false)
+        HomeRoute(main, home, { true }, network = { emptySet() }, changes = FakeChanges(), watchEveryMs = 60_000, closing = AutoCloseable { closed.set(true) }).close()
+        assertTrue(closed.get())
     }
 }

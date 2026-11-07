@@ -68,7 +68,7 @@ import app.winters.octo.desktop.library.LibraryState
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.OCTO_LYRICS
-import app.winters.octo.desktop.server.Reach
+import app.winters.octo.server.isWarning
 import app.winters.octo.desktop.server.SignInOutcome
 import app.winters.octo.desktop.server.SwitchOutcome
 import app.winters.octo.desktop.server.TestOutcome
@@ -147,7 +147,7 @@ private fun ServerRow(app: AppState, server: SavedServer, inUse: Boolean) {
                 // The one in use has its kind said under the list, and one
                 // being switched to says so at the row's end, so neither
                 // says it here too unless it has a problem to tell.
-                val quiet = check?.reach == Reach.Unreachable || check?.reach == Reach.WrongPassword
+                val quiet = check.isWarning()
                 if (!switching && (!inUse || quiet)) {
                     Txt(statusLine(server, check, false, inUse), DesktopType.meta, if (quiet) OctoColors.SignalOrange else OctoColors.TextMuted, Modifier.padding(top = Space.Xxs))
                 }
@@ -313,6 +313,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
         again = ::test
         form.busy = true
         form.result = null
+        val tried = form.attemptAddress
         scope.launch {
             val request = if (kind == SheetKind.Edit && server != null && form.password.isEmpty() && form.apiKey.isEmpty()) null else form.request()
             val tested = if (request == null) null else app.accounts.test(request)
@@ -322,7 +323,10 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
                     form.worked(tested.mode)
                     form.result = true to tested.facts.summary()
                 }
-                is TestOutcome.Failed -> form.result = false to tested.message
+                is TestOutcome.Failed -> {
+                    form.result = false to tested.message
+                    form.failed(tried, tested.gateway)
+                }
                 is TestOutcome.Untrusted -> form.question = tested.question
             }
             form.busy = false
@@ -332,7 +336,8 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
     fun save() {
         if (!form.ready) return
         again = ::save
-        // A new name alone needs nothing from the server.
+        // A new name alone needs nothing from the server; a change to the
+        // sign-in page in front of it does.
         if (kind == SheetKind.Edit && server != null && !form.changesConnection(server)) {
             app.accounts.rename(server.id, form.label)
             close()
@@ -340,11 +345,15 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
         }
         form.busy = true
         form.result = null
+        // Taken now, so a switch, sign-out or removal asked for while this
+        // is checked comes after it.
+        val ticket = app.accounts.ticket()
+        val tried = form.attemptAddress
         scope.launch {
             val outcome = when (kind) {
                 SheetKind.Add -> app.accounts.add(form.request())
-                SheetKind.Edit -> app.accounts.edit(server!!.id, form.request(), form.label)
-                SheetKind.SignIn -> app.accounts.signIn(form.request())
+                SheetKind.Edit -> app.accounts.edit(server!!.id, form.request(), form.label, ticket)
+                SheetKind.SignIn -> app.accounts.signIn(form.request(), ticket)
             }
             form.busy = false
             when (outcome) {
@@ -363,13 +372,20 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
                     app.notice = listOfNotNull(done, outcome.note).joinToString(" ")
                     app.scope.launch { app.serverFacts.refresh() }
                 }
-                is SignInOutcome.Failed -> form.result = false to outcome.message
+                is SignInOutcome.Failed -> {
+                    form.result = false to outcome.message
+                    form.failed(tried, outcome.gateway)
+                }
                 is SignInOutcome.Untrusted -> form.question = outcome.question
             }
         }
     }
 
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
+
+    // A kept server's sign-in page shows as its kind, saved, without its
+    // values.
+    LaunchedEffect(form) { if (server != null) form.knowSavedGateway(server, app.accounts.savedGateway(server)) }
 
     val asked = form.question
     if (asked != null) {
@@ -437,7 +453,9 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
             rememberCaption(form.rememberPassword),
             form.rememberPassword,
         ) { form.rememberPassword = it }
-        if (kind != SheetKind.SignIn) {
+        // Signing in again shows Advanced only once a sign-in page answered,
+        // for its fields.
+        if (kind != SheetKind.SignIn || form.detected != null) {
             AdvancedToggle(form.advancedOpen) { form.advancedOpen = !form.advancedOpen }
             if (form.advancedOpen) Advanced(form, ::save)
         }
@@ -496,6 +514,7 @@ private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, clo
             busy = false
             if (outcome.result == PasswordChange.Changed) {
                 close()
+                app.passwordChanged()
                 app.notice = listOfNotNull(passwordChangeWords(outcome.result, family), outcome.note).joinToString(" ")
             } else {
                 problem = passwordChangeWords(outcome.result)

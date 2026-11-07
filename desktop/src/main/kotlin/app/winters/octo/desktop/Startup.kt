@@ -54,16 +54,20 @@ class Startup(
 
     private val rest = CompletableFuture.supplyAsync({
         // One client for everything, set up for the signed-in server's
-        // headers and the certificates the listener trusted.
+        // headers and the certificates the listener trusted. Each check of a
+        // server starts from the same name and limits, with a security of
+        // its own.
         val security = ServerSecurity(settings)
         val userAgent = desktopUserAgent(os = os)
-        val http = security.install(OkHttpClient.Builder().addInterceptor(userAgentOf(userAgent)))
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .build()
+        val base = {
+            OkHttpClient.Builder().addInterceptor(userAgentOf(userAgent))
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(60, TimeUnit.SECONDS)
+        }
+        val http = security.install(base()).build()
         // The computer's name can take a moment to read; read it here.
         security.deviceHeaders()
-        val accounts = Accounts(settings, SecretStore.forSystem(os), http, security)
+        val accounts = Accounts(settings, SecretStore.forSystem(os), http, security, base)
         val restored = accounts.restore()
         Rest(http, accounts, restored, DesktopUpdates.forThisApp(settings, places.cache, os), systemReducesMotion(os), systemTextScale(os))
     }, thread("octo-start"))

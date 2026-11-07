@@ -247,6 +247,7 @@ fun main(args: Array<String>) {
                 transitions = { made?.connection?.supports(OCTO_TRANSITIONS) == true },
                 params = { made?.streamParams() ?: mapOf("format" to "raw") },
                 kept = { id -> made?.offline?.localFile(id) },
+                gatewayOrigins = { made?.connection?.gatewayOrigins.orEmpty() },
                 opened = parts.engine,
             )
             val app = AppState(settings, parts.accounts, parts.http, scope, os, player.player, restored = parts.restored, listeningRoot = places.config, updates = parts.updates, homeShelves = File(places.cache, "home"), deviceDark = deviceDark, portal = portal).also {
@@ -283,7 +284,7 @@ fun main(args: Array<String>) {
             }
         }
         // Covers load only once the app is made, so the client is ready.
-        setSingletonImageLoaderFactory { context -> coverLoader(context, startup.now().http, places.cache) }
+        setSingletonImageLoaderFactory { context -> coverLoader(context, startup.now().http, places.cache, startup.now().accounts.security.refuseHtml()) }
 
         Window(
             onCloseRequest = ::closeWindow,
