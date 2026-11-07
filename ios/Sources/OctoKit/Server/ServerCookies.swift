@@ -27,6 +27,10 @@ public final class ServerCookies: @unchecked Sendable, CustomStringConvertible {
 
     static let most = 16
 
+    /// This store's own id, never another store's: what tells one client configuration's store
+    /// from the next one's. Copies of a client share the store, and so the id.
+    public let id = UUID()
+
     private let now: @Sendable () -> Date
     private let lock = NSLock()
     private var kept: [Kept] = []

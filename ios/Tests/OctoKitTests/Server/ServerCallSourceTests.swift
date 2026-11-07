@@ -39,8 +39,12 @@ import Testing
     static let byteDelegates = ["Octo/Playback/ByteSource.swift", "Octo/Data/CachingStream.swift", "Octo/Player/TrustedStream.swift"]
 
     /// Files with an exact number of plain calls, each named: LoopFetcher's one is for Apple's
-    /// own loop addresses, a server's going through ServerExchange.
-    static let counted: [String: [String: Int]] = ["OctoKit/Animated/LoopFiles.swift": ["data(for:": 1]]
+    /// own loop addresses, a server's going through ServerExchange; the admin screen's picture is
+    /// for outside covers, the server's own going through ServerExchange.media.
+    static let counted: [String: [String: Int]] = [
+        "OctoKit/Animated/LoopFiles.swift": ["data(for:": 1],
+        "Octo/Admin/OctoAdminScreen.swift": ["AsyncImage(": 1],
+    ]
 
     static let network: [(token: String, pattern: String)] = [
         ("URLSession(configuration:", #"URLSession\(configuration:"#),
@@ -51,6 +55,7 @@ import Testing
         ("bytes(for:", #"(?<!ServerExchange)\.bytes\((for|from):"#),
         ("download(for:", #"(?<!ServerExchange)\.download\((for|from):"#),
         ("upload(for:", #"\.upload\((for|from):"#),
+        ("AsyncImage(", #"\bAsyncImage\("#),
     ]
 
     static func sources() throws -> [Source] {
@@ -138,6 +143,35 @@ import Testing
             let code = Self.code(try #require(sources.first { $0.path == name }))
             #expect(code.contains("hop(response:"), "\(name): its redirects go through hop")
             #expect(code.contains("storeCookies(of:"), "\(name): its final answers keep their cookies")
+        }
+    }
+
+    /// Red when a byte delegate goes back to a page check of its own.
+    @Test func everyByteDelegateRefusesASignInPageByTheSharedRule() throws {
+        let sources = try Self.sources()
+        for name in Self.byteDelegates {
+            let code = Self.code(try #require(sources.first { $0.path == name }))
+            #expect(code.contains("signInPageInstead(of:"), "\(name): a sign-in page's refusal is judged by the shared rule")
+            #expect(!code.contains("isHtml("), "\(name): a page check of its own beside the shared rule")
+        }
+    }
+
+    /// Red when the download requeue watches `ObjectIdentifier` of the store again.
+    @Test func theDownloadRequeueWatchesTheStoresOwnId() throws {
+        let sources = try Self.sources()
+        let code = Self.code(try #require(sources.first { $0.path == "Octo/Data/OfflineDownloads.swift" }))
+        #expect(code.contains("cookies.id"))
+        #expect(!code.contains("ObjectIdentifier("))
+    }
+
+    /// Red when a file shows a picture with `AsyncImage` and does not first send the server's own
+    /// pictures through the exchange.
+    @Test func everyOutsidePictureLeavesTheServersOwnToTheExchange() throws {
+        for source in try Self.sources() where !Self.outsideOnly.contains(source.path) {
+            let code = Self.code(source)
+            guard Self.count(#"\bAsyncImage\("#, in: code) > 0 else { continue }
+            #expect(code.contains("isServerPicture("), "\(source.path): a picture with no look at whether it is the server's")
+            #expect(code.contains("ServerExchange.media("), "\(source.path): the server's own pictures do not come through the exchange")
         }
     }
 

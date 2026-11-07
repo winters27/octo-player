@@ -62,18 +62,21 @@ public enum ServerExchange {
         return .notSubsonic("HTTP \(answer.status) from \(endpoint)", status: answer.status, gateway: answer.gateway, loginSent: answer.loginSent)
     }
 
-    /// Why an answer where a song, cover or file was asked for cannot be played or kept: an error
-    /// status, or a web page, which only a sign-in page sends there (named when it is known, else
-    /// an unknown sign-in page). Nil for a usable answer.
+    /// Why an answer where a song, cover or file was asked for cannot be played or kept: a sign-in
+    /// page in the server's place (`signInPageInstead`: a web page, or a 401 or 403 it is known
+    /// by), named when it is known, else an unknown sign-in page; or any other error status. Nil
+    /// for a usable answer.
     public static func refusal(_ answer: ServerAnswer, endpoint: String) -> SubsonicError? {
-        if !answer.isOK { return notSubsonic(answer, endpoint: endpoint) }
-        guard isHtml(answer.response.value(forHTTPHeaderField: "Content-Type")) else { return nil }
-        return .notSubsonic(GatewayWords.playFailure, status: nil, gateway: answer.gateway ?? .signInPage, loginSent: answer.loginSent)
+        if let page = signInPageInstead(status: answer.status, contentType: answer.response.value(forHTTPHeaderField: "Content-Type"),
+                                        gateway: answer.gateway) {
+            return .notSubsonic(GatewayWords.playFailure, status: answer.isOK ? nil : answer.status, gateway: page, loginSent: answer.loginSent)
+        }
+        return answer.isOK ? nil : notSubsonic(answer, endpoint: endpoint)
     }
 
     #if canImport(Darwin)
     /// A song's bytes as they come, by the same rules as `media`: an error status or a web page
-    /// is read for its sign-in page and refused, its task cancelled.
+    /// is read for its sign-in page and refused, its task canceled.
     public static func bytes(for request: URLRequest, client: SubsonicClient, endpoint: String) async throws -> (URLSession.AsyncBytes, HTTPURLResponse) {
         let sent = client.prepared(request)
         let hops = ExchangeHops(client: client, first: sent.url)
@@ -139,11 +142,38 @@ public enum ServerExchange {
                      client: SubsonicClient) throws -> ServerAnswer {
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         storeCookies(of: http, in: client.cookies, scope: client.scope)
-        let loginSent = (sent.allHTTPHeaderFields ?? [:]).keys.contains(where: GatewayNames.isGatewayName)
+        let loginSent = carriesGatewayLogin(sent)
         let html = isHtml(http.value(forHTTPHeaderField: "Content-Type")) ? String(decoding: data.prefix(htmlPeek), as: UTF8.self) : nil
         let facts = AnswerFacts(requested: sent.url, hops: hops + [AnswerHop(http)], htmlBody: html, loginSent: loginSent)
         return ServerAnswer(data: data, response: http, gateway: recognizeGateway(facts), loginSent: loginSent)
     }
+}
+
+/// Whether an answer where a song, cover or file was asked of the server is a sign-in page in its
+/// place, and which: a web page with a success status (only a sign-in page sends one there), or a
+/// 401 or 403 the recognizer names (`gateway`, what `recognizeGateway` made of it) or that is a web
+/// page. Such an answer fails once: never played or kept, and not asked for again. Nil for any
+/// other answer, which each route handles by its own rules.
+public func signInPageInstead(status: Int, contentType: String?, gateway: Gateway?) -> Gateway? {
+    let page = isHtml(contentType)
+    if (200..<300).contains(status) { return page ? gateway ?? .signInPage : nil }
+    guard status == 401 || status == 403 else { return nil }
+    return gateway ?? (page ? Gateway.signInPage : nil)
+}
+
+/// The same for a byte delegate's answer as it starts, read from its status and headers alone
+/// (no body has come yet), for a request sent to one of the server's own addresses. Nil for a
+/// request sent anywhere else.
+public func signInPageInstead(of response: HTTPURLResponse, sent: URLRequest?, scope: ServerScope) -> Gateway? {
+    guard scope.covers(sent?.url) else { return nil }
+    let facts = AnswerFacts(requested: sent?.url, hops: [AnswerHop(response)], htmlBody: nil, loginSent: carriesGatewayLogin(sent))
+    return signInPageInstead(status: response.statusCode, contentType: response.value(forHTTPHeaderField: "Content-Type"),
+                             gateway: recognizeGateway(facts))
+}
+
+/// Whether a request carries the app's own sign-in for a sign-in page (one of `GatewayNames`).
+func carriesGatewayLogin(_ request: URLRequest?) -> Bool {
+    (request?.allHTTPHeaderFields ?? [:]).keys.contains(where: GatewayNames.isGatewayName)
 }
 
 /// One redirect hop of a request to the server: the hop's sign-in page cookies are kept, the

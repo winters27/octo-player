@@ -74,9 +74,13 @@ public struct DownloadRecord: Sendable, Equatable {
     public var sizeBytes: Int64 = 0
     public var downloadedAt = ""
     public var requestedBy: [String] = []
+    /// Where Octo serves the cover (read from the song's file, else from the address saved with
+    /// it), as a path on the admin pages' own address. Older servers name none.
+    public var cover: String?
 
     public init(artist: String = "", title: String = "", album: String = "", format: String = "", source: String = "",
-                coverArtUrl: String? = nil, sizeBytes: Int64 = 0, downloadedAt: String = "", requestedBy: [String] = []) {
+                coverArtUrl: String? = nil, sizeBytes: Int64 = 0, downloadedAt: String = "", requestedBy: [String] = [],
+                cover: String? = nil) {
         self.artist = artist
         self.title = title
         self.album = album
@@ -86,6 +90,7 @@ public struct DownloadRecord: Sendable, Equatable {
         self.sizeBytes = sizeBytes
         self.downloadedAt = downloadedAt
         self.requestedBy = requestedBy
+        self.cover = cover
     }
 
     init(_ json: Any?) {
@@ -99,12 +104,34 @@ public struct DownloadRecord: Sendable, Equatable {
         sizeBytes = AdminJSON.int(object["sizeBytes"]) ?? 0
         downloadedAt = AdminJSON.string(object["downloadedAt"]) ?? ""
         requestedBy = (object["requestedBy"] as? [Any])?.compactMap { AdminJSON.string($0) } ?? []
+        cover = AdminJSON.string(object["cover"])
     }
 
     static func list(_ data: Data) throws -> [DownloadRecord] {
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw AdminJSON.notObject }
         return (object["downloads"] as? [Any] ?? []).map(DownloadRecord.init)
     }
+}
+
+/// A download as the app shows it: its cover from the address Octo serves it at, on the admin
+/// pages' own address and signed like every admin call (`sign`). A server that names none (an
+/// older one), or names another host, keeps the cover address the log saved.
+func withServedCover(_ record: DownloadRecord, base: URL, sign: (URL) -> URL) -> DownloadRecord {
+    guard let path = record.cover, path.hasPrefix("/"), !path.hasPrefix("//"),
+          let served = URL(string: path, relativeTo: base)?.absoluteURL
+    else { return record }
+    var shown = record
+    shown.coverArtUrl = sign(served).absoluteString
+    return shown
+}
+
+/// Whether a picture the admin pages name is the server's own: at one of its addresses, or where
+/// its admin pages answer. Those come through the server's connection (`ServerExchange.media`);
+/// any other is an outside picture, fetched with nothing of the server's.
+public func isServerPicture(_ url: URL, client: SubsonicClient, adminBase: URL?) -> Bool {
+    if client.scope.covers(url) { return true }
+    guard let adminBase, let origin = ServerAddress.origin(url) else { return false }
+    return origin == ServerAddress.origin(adminBase)
 }
 
 /// How far Octo's stations have learned one listener's taste.
@@ -473,7 +500,8 @@ public final class OctoAdmin: @unchecked Sendable {
     }
 
     public func downloads(_ base: URL, _ signIn: AdminSignIn?) async throws -> [DownloadRecord] {
-        try await get(base, "downloads", signIn) { try DownloadRecord.list($0) }
+        let records = try await get(base, "downloads", signIn) { try DownloadRecord.list($0) }
+        return records.map { record in withServedCover(record, base: base) { sign($0, signIn) } }
     }
 
     public func radio(_ base: URL, _ signIn: AdminSignIn?) async throws -> RadioState {

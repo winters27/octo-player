@@ -101,6 +101,17 @@ import Testing
         #expect(!jar.description.contains("p1-secret"))
     }
 
+    /// Red when `id` is made anew on each read, or is one value for every store.
+    @Test func eachStoreHasAnIdOfItsOwnThatItsClientsCopiesShare() {
+        let store = ServerCookies()
+        #expect(store.id == store.id)
+        #expect(store.id != ServerCookies().id)
+        let client = SubsonicClient(baseURL: music, credentials: Credentials(username: "a", password: "b"),
+                                    device: DeviceIdentity(id: "abc", name: "Phone"), appVersion: "1.0", cookies: store)
+        #expect(client.with(Credentials(username: "c", password: "d")).cookies.id == store.id)
+        #expect(client.at(URL(string: "http://192.168.1.20:4533")!).cookies.id == store.id)
+    }
+
     @Test func aByteAnswersCookieIsKeptOnlyFromTheServer() {
         let jar = self.jar
         let scope = ServerScope(main: URL(string: "https://music.example.com/octo")!, home: nil)
@@ -227,6 +238,56 @@ import Testing
                 newRequest: URLRequest(url: URL(string: "https://auth.example.com/next")!), first: first, cookies: cookies,
                 scope: ServerScope(main: main, home: home))
         #expect(cookies.cookieHeader(for: away) == nil)
+    }
+
+    /// Red when `ServerScope.reached` (headers and cookies dropped) or `gatewayOrigins`'s
+    /// `secureOrigin` lines (Authorization dropped) are taken out.
+    @Test func aMoveUpToHttpsOnTheSameHostKeepsTheHeadersAndCookies() throws {
+        let lan = URL(string: "http://192.168.1.20:4533")!
+        let plainFirst = URL(string: "http://192.168.1.20:4533/rest/ping")!
+        let cookies = ServerCookies()
+        let to = "https://192.168.1.20/rest/ping"
+        let next = try #require(hop(response: redirect(plainFirst, to: to, cookie: "authentik_proxy_a=1; Path=/"), newRequest: carried(to),
+                                    first: plainFirst, cookies: cookies, scope: ServerScope(main: lan, home: nil)))
+        #expect(next.value(forHTTPHeaderField: "Authorization") == basic)
+        #expect(next.value(forHTTPHeaderField: "X-Proxy-Token") == "p")
+        #expect(next.value(forHTTPHeaderField: "X-Octo-Device-Id") == "abc")
+        #expect(next.value(forHTTPHeaderField: "Cookie") == "octo_family=f1; authentik_proxy_a=1")
+        // The http home of an https server moves up the same way.
+        let fromHome = URL(string: "http://192.168.1.20:4533/rest/stream")!
+        let upHome = "https://192.168.1.20/rest/stream"
+        let homeNext = try #require(hop(response: redirect(fromHome, to: upHome), newRequest: carried(upHome), first: fromHome,
+                                        cookies: ServerCookies(), scope: ServerScope(main: main, home: home)))
+        #expect(homeNext.value(forHTTPHeaderField: "Authorization") == basic)
+        #expect(homeNext.value(forHTTPHeaderField: "X-Proxy-Token") == "p")
+    }
+
+    /// Red when the move up is counted for any host, not the address's own.
+    @Test func aMoveUpToAnotherHostKeepsNone() throws {
+        let lan = URL(string: "http://192.168.1.20:4533")!
+        let plainFirst = URL(string: "http://192.168.1.20:4533/rest/ping")!
+        let cookies = ServerCookies()
+        cookies.keep(["authentik_proxy_a=1; Path=/"], from: plainFirst)
+        let to = "https://192.168.1.21/rest/ping"
+        let next = try #require(hop(response: redirect(plainFirst, to: to), newRequest: carried(to), first: plainFirst, cookies: cookies,
+                                    scope: ServerScope(main: lan, home: nil)))
+        #expect(next.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(next.value(forHTTPHeaderField: "X-Proxy-Token") == nil)
+        #expect(next.value(forHTTPHeaderField: "X-Octo-Device-Id") == nil)
+        #expect(next.value(forHTTPHeaderField: "Cookie") == nil)
+        #expect(next.value(forHTTPHeaderField: "User-Agent") == "Octo/1.0 (iPhone)")
+    }
+
+    /// Red when a public plain http main address gets gateway origins from its move up.
+    @Test func aPublicHttpAddressMovedUpKeepsItsCookiesButNeverGetsTheSignIn() throws {
+        let plain = URL(string: "http://music.example.com")!
+        let plainFirst = URL(string: "http://music.example.com/rest/ping")!
+        let to = "https://music.example.com/rest/ping"
+        let next = try #require(hop(response: redirect(plainFirst, to: to, cookie: "authentik_proxy_a=1; Path=/"), newRequest: carried(to),
+                                    first: plainFirst, cookies: ServerCookies(), scope: ServerScope(main: plain, home: nil)))
+        #expect(next.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(next.value(forHTTPHeaderField: "X-Proxy-Token") == "p")
+        #expect(next.value(forHTTPHeaderField: "Cookie") == "octo_family=f1; authentik_proxy_a=1")
     }
 
     @Test func aHopToAnotherSchemeIsRefused() {

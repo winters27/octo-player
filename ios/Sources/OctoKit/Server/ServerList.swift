@@ -21,6 +21,10 @@ public struct ServerCheck: Sendable, Equatable {
         case .answers, .unknown: false
         }
     }
+
+    /// Whether the row shows its status line as a warning: the server in use only when it needs
+    /// https, since its row shows nothing else of how it answered.
+    public func warns(inUse: Bool) -> Bool { inUse ? reach == .needsHttps : isWarning }
 }
 
 public enum Reach: Sendable, Equatable {
@@ -47,6 +51,28 @@ public func reachOf(_ error: Error) -> Reach {
     return .unreachable
 }
 
+/// What app start does with the server that was in use.
+public enum ServerRestore: Sendable, Equatable {
+    /// It signs in again with its saved secret.
+    case signIn
+    /// It was signed out of: none is in use.
+    case leave
+    /// Its secret can no longer be read: it stays in the list signed out, and none is in use.
+    case signOut
+    /// It keeps a sign-in page's password for a plain http address outside the home network,
+    /// which the app never sends: none is in use, and its sign-in form opens asking for https.
+    case needsHttps
+}
+
+/// What app start does with the server that was in use, from whether it was signed out of,
+/// whether its secret can be read, and its saved headers in its scope.
+public func serverRestore(signedOut: Bool, hasSecret: Bool, headers: [String: String], scope: ServerScope) -> ServerRestore {
+    if signedOut { return .leave }
+    if !hasSecret { return .signOut }
+    if needsHttps(headers, scope: scope) { return .needsHttps }
+    return .signIn
+}
+
 /// What a server is called: the name the listener gave it, else its host.
 public func serverName(label: String, address: String) -> String {
     let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -63,13 +89,13 @@ public func accountLine(username: String, address: String) -> String {
 }
 
 /// A server's quiet status in its row: what it is, and how it answered. The one in use shows
-/// only its kind here.
+/// only its kind here, unless it needs https for its sign-in page.
 public func statusLine(serverType: String?, serverVersion: String?, signedOut: Bool, check: ServerCheck?,
                        switching: Bool = false, inUse: Bool = false) -> String {
     let kind = serverKind(serverType, serverVersion)
     if switching { return "Switching to it now" }
     if signedOut { return "Signed out. Sign in again to use it." }
-    guard !inUse, let check, check.reach != .unknown else { return kind }
+    guard let check, check.reach != .unknown, !inUse || check.reach == .needsHttps else { return kind }
     switch check.reach {
     case .answers: return ([kind] + [check.ms.map(answerWords)].compactMap { $0 }).joined(separator: " · ")
     case .wrongPassword: return "\(kind) · Didn't take the saved password"
@@ -77,6 +103,49 @@ public func statusLine(serverType: String?, serverVersion: String?, signedOut: B
     case .needsHttps: return "\(kind) · \(GatewayWords.rowNeedsHttps)"
     default: return "\(kind) · Out of reach right now"
     }
+}
+
+/// What a sign-in form's keep builds on.
+public enum KeepBase: Sendable, Equatable {
+    /// A server not kept yet.
+    case new
+    /// This kept server: the one the form was opened for (an edit, or signing in to it again),
+    /// whatever its address is now; for any other form, the kept one with the same address and
+    /// username.
+    case kept(StoredServer)
+    /// The server the form was opened for is no longer kept.
+    case gone
+    /// Another kept server already has this address and username.
+    case alreadyKept(StoredServer)
+}
+
+/// What a keep builds on. `formFor` is the id of the kept server the form was opened for, nil for
+/// a new sign-in or an add.
+public func keepBase(formFor id: String?, address: URL, username: String, servers: [StoredServer]) -> KeepBase {
+    var base: StoredServer?
+    if let id {
+        guard let found = servers.first(where: { $0.id == id }) else { return .gone }
+        base = found
+    }
+    let twin = servers.first { $0.address == address && $0.username == username && $0.id != base?.id }
+    if base != nil, let twin { return .alreadyKept(twin) }
+    if let before = base ?? twin { return .kept(before) }
+    return .new
+}
+
+/// The id a kept server takes: the one it was kept under while its username stays, else a new
+/// one for the other account.
+public func keptServerId(before: StoredServer?, username: String, address: URL, taken: Set<String>) -> String {
+    if let before, before.username == username { return before.id }
+    return freshServerId(username: username, address: ServerAddress.written(address), taken: taken)
+}
+
+/// The kept servers after a keep: the one it built on replaced where it was, else the new one
+/// added at the end.
+public func serversAfterKeep(_ servers: [StoredServer], before: StoredServer?, now server: StoredServer) -> [StoredServer] {
+    var out = servers
+    if let before, let index = out.firstIndex(where: { $0.id == before.id }) { out[index] = server } else { out.append(server) }
+    return out
 }
 
 /// An id for a newly kept server: the account's key, unless another kept server has it already.

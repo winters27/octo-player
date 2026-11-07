@@ -283,6 +283,11 @@ struct MainShell: View {
             }
             .environment(drift)
         }
+        // A server app start did not sign in to again opens its sign-in form with why, the same
+        // form a switch to it opens.
+        .task {
+            if case .needsPassword(let server, let note)? = session.takeStartAsk() { router.signIn = .again(server, note: note) }
+        }
     }
 
     /// The server in use as the downloads sheet follows it: which, signed in or not, and what it

@@ -101,8 +101,9 @@ final class OfflineDownloads {
                 await self?.pump()
             }
         })
-        // Every new connection (an edit, a sign-out, another server) comes with a new cookie store.
-        watches.append(Watch({ [weak self] in self?.session.client.map { ObjectIdentifier($0.cookies) } }) { [weak self] _ in
+        // Every new connection (an edit, a sign-out, another server) comes with a new cookie
+        // store, told apart by its own id.
+        watches.append(Watch({ [weak self] in self?.session.client.map { $0.cookies.id } }) { [weak self] _ in
             Task { await self?.connectionReplaced() }
         })
         // Rules follow likes, kept playlists and their songs, once they settle.

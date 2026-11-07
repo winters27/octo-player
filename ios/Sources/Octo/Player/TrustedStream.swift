@@ -7,8 +7,8 @@ import UniformTypeIdentifiers
 /// server with a certificate the person trusted, or one that asks for the phone's certificate.
 /// The song's address gets a scheme only this loader answers, and every range the player asks
 /// for is fetched with the app's own session, the signed request's headers and the sign-in page's
-/// cookies of the client that signed it. A web page where the song was asked for is a sign-in
-/// page in front of the server, refused.
+/// cookies of the client that signed it. A sign-in page answering in the song's place (a web page,
+/// or a 401 or 403 it is known by) is refused, and so is any other error status.
 final class TrustedStream: NSObject, AVAssetResourceLoaderDelegate, URLSessionDataDelegate, @unchecked Sendable {
     static let scheme = "octo-trusted"
 
@@ -80,10 +80,18 @@ final class TrustedStream: NSObject, AVAssetResourceLoaderDelegate, URLSessionDa
         async -> URLSession.ResponseDisposition {
         guard let request = requests[dataTask.taskIdentifier], let http = response as? HTTPURLResponse else { return .cancel }
         storeCookies(of: http, in: signed.cookies, scope: signed.scope)
-        // A web page where the song was asked for is a sign-in page in front of the server.
-        if isHtml(http.value(forHTTPHeaderField: "Content-Type")), signed.scope.covers(dataTask.originalRequest?.url) {
+        // A sign-in page answering in the song's place (a web page, or a 401 or 403 it is known
+        // by) is refused, and not asked for again.
+        if signInPageInstead(of: http, sent: dataTask.originalRequest, scope: signed.scope) != nil {
             requests[dataTask.taskIdentifier] = nil
-            request.finishLoading(with: PlayError(.signInPage, httpStatus: http.statusCode, detail: "a web page answered"))
+            request.finishLoading(with: PlayError(.signInPage, httpStatus: http.statusCode, detail: "a sign-in page answered"))
+            return .cancel
+        }
+        // Any other error status is the server's own refusal: the player hears it, and never reads
+        // the page that came with it as the song.
+        if !(200..<300).contains(http.statusCode) {
+            requests[dataTask.taskIdentifier] = nil
+            request.finishLoading(with: PlayError(.badHttpStatus, httpStatus: http.statusCode, detail: "HTTP \(http.statusCode)"))
             return .cancel
         }
         if let info = request.contentInformationRequest {

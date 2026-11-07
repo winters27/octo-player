@@ -90,10 +90,11 @@ final class SavedCopy: ByteSource, @unchecked Sendable {
 /// A song read from the server by parts: what is asked for downloads into a file of its own on
 /// the phone, from the place a read needs onwards, so the player can jump about and a part read
 /// once is not fetched again. Each request is signed as it goes out (`sign`), so no address is
-/// kept, and goes with the store its answers keep a sign-in page's cookies in. A web page where a
-/// server song was asked for is a sign-in page in front of the server, refused at once. A failed
-/// request is tried again after 0, 1 and 2 seconds; a refusal to load at all (no connection, no
-/// server) fails at once.
+/// kept, and goes with the store its answers keep a sign-in page's cookies in. A sign-in page
+/// answering in the server's place (a web page where a server song was asked for, or a 401 or 403
+/// it is known by) is refused at once and not asked again. Any other failed request is tried
+/// again after 0, 1 and 2 seconds; a refusal to load at all (no connection, no server) fails at
+/// once.
 final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked Sendable {
     private let sign: @Sendable () throws -> SignedStream
     /// The name the song is saved under among the songs kept on the phone, when it is kept.
@@ -422,6 +423,17 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
             completionHandler(.cancel)
             return
         }
+        // A sign-in page answering in the server's place (a web page where a server song was
+        // asked for, or a 401 or 403 it is known by) is never played or saved, and not asked for
+        // again.
+        if let signed = asked[dataTask.taskIdentifier],
+           signInPageInstead(of: http, sent: dataTask.originalRequest, scope: signed.scope) != nil {
+            task = nil
+            failure = PlayError(.signInPage, httpStatus: http.statusCode, detail: "a sign-in page answered")
+            condition.broadcast()
+            completionHandler(.cancel)
+            return
+        }
         guard (200..<300).contains(http.statusCode) else {
             task = nil
             errorsInARow += 1
@@ -431,16 +443,6 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
             } else {
                 failure = PlayError(.badHttpStatus, httpStatus: http.statusCode, detail: "HTTP \(http.statusCode)")
             }
-            condition.broadcast()
-            completionHandler(.cancel)
-            return
-        }
-        // A web page where a server song was asked for is a sign-in page answering in the
-        // server's place: never played or saved, and not asked for again.
-        if isHtml(http.value(forHTTPHeaderField: "Content-Type")),
-           asked[dataTask.taskIdentifier]?.scope.covers(dataTask.originalRequest?.url) == true {
-            task = nil
-            failure = PlayError(.signInPage, httpStatus: http.statusCode, detail: "a web page answered")
             condition.broadcast()
             completionHandler(.cancel)
             return

@@ -19,10 +19,10 @@ import Testing
     }
 
     @Test func gatewayAddressesAreTheMainOneAndAnHttpsHome() {
-        #expect(ServerScope(main: main, home: home).gatewayOrigins == ["https://music.example.com:443"])
+        #expect(ServerScope(main: main, home: home).gatewayOrigins == ["https://music.example.com:443", "https://192.168.1.20:443"])
         #expect(ServerScope(main: main, home: URL(string: "https://home.example.com:8443")!).gatewayOrigins
             == ["https://music.example.com:443", "https://home.example.com:8443"])
-        #expect(ServerScope(main: home, home: nil).gatewayOrigins == ["http://192.168.1.20:4533"])
+        #expect(ServerScope(main: home, home: nil).gatewayOrigins == ["http://192.168.1.20:4533", "https://192.168.1.20:443"])
         #expect(ServerScope(main: URL(string: "http://music.example.com")!, home: URL(string: "https://home.example.com")!).gatewayOrigins.isEmpty)
         #expect(ServerScope([main, home]).gatewayOrigins.isEmpty)
         #expect(ServerScope(main: main, home: home).covers(URL(string: "http://192.168.1.20:4533/rest/ping")!))
@@ -47,6 +47,27 @@ import Testing
     @Test func anHttpsHomeGetsThemToo() {
         let secureHome = URL(string: "https://192.168.1.20:4534")!
         #expect(client(ServerScope(main: main, home: secureHome)).headers(for: secureHome.appendingPathComponent("rest/ping"))["Authorization"] == basic)
+    }
+
+    /// Red when `ServerScope.reached` or the `secureOrigin` lines of `gatewayOrigins` are taken out.
+    @Test func anHttpAddressAlsoReachesItsOwnHostOverHttps() {
+        let scope = ServerScope(main: main, home: home)
+        let movedUp = URL(string: "https://192.168.1.20/rest/stream")!
+        #expect(scope.origins == ["https://music.example.com:443", "http://192.168.1.20:4533", "https://192.168.1.20:443"])
+        #expect(scope.hosts == ["music.example.com", "192.168.1.20"])
+        #expect(scope.isGatewayOrigin(movedUp))
+        #expect(!scope.isGatewayOrigin(home))
+        #expect(!scope.covers(URL(string: "https://192.168.1.21/rest/stream")!))
+        #expect(!scope.covers(URL(string: "https://192.168.1.20:4534/rest/stream")!))
+        let atMovedUp = client(scope).headers(for: movedUp)
+        #expect(atMovedUp["Authorization"] == basic)
+        #expect(atMovedUp["X-Proxy-Token"] == "p")
+        #expect(atMovedUp["X-Octo-Device-Id"] == "abc")
+        let plain = ServerScope(main: URL(string: "http://music.example.com")!, home: nil)
+        #expect(plain.covers(URL(string: "https://music.example.com/rest/ping")!))
+        #expect(plain.gatewayOrigins.isEmpty)
+        #expect(ServerScope([home]).covers(movedUp))
+        #expect(ServerScope(main: main, home: nil).origins == ["https://music.example.com:443"])
     }
 
     @Test func aPublicHttpAddressNeverGetsThem() {

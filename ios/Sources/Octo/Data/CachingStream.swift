@@ -6,9 +6,9 @@ import UniformTypeIdentifiers
 /// Streams a server song through the saved songs: every range the player asks for is answered
 /// from the phone when it is saved there, and otherwise fetched from the server (with the app's
 /// trusted session, the signed request's headers and the sign-in page's cookies of the client
-/// that signed it) and saved as it plays, under the song's stable key. A web page where the song
-/// was asked for is a sign-in page in front of the server: refused, never saved. Keep the stream
-/// alive as long as its asset.
+/// that signed it) and saved as it plays, under the song's stable key. A sign-in page answering in
+/// the song's place (a web page, or a 401 or 403 it is known by) is refused, never saved. Keep the
+/// stream alive as long as its asset.
 final class CachingStream: NSObject, AVAssetResourceLoaderDelegate, URLSessionDataDelegate, @unchecked Sendable {
     static let scheme = "octo-saved"
 
@@ -116,14 +116,14 @@ final class CachingStream: NSObject, AVAssetResourceLoaderDelegate, URLSessionDa
         async -> URLSession.ResponseDisposition {
         guard let waiting = requests[dataTask.taskIdentifier], let http = response as? HTTPURLResponse else { return .cancel }
         storeCookies(of: http, in: signed.cookies, scope: signed.scope)
-        guard (200..<300).contains(http.statusCode) else { return .cancel }
-        // A web page where the song was asked for is a sign-in page in front of the server: never
-        // played, never saved as the song.
-        if isHtml(http.value(forHTTPHeaderField: "Content-Type")), signed.scope.covers(dataTask.originalRequest?.url) {
+        // A sign-in page answering in the song's place (a web page, or a 401 or 403 it is known
+        // by) is never played, never saved as the song, and not asked for again.
+        if signInPageInstead(of: http, sent: dataTask.originalRequest, scope: signed.scope) != nil {
             requests[dataTask.taskIdentifier] = nil
-            waiting.request.finishLoading(with: PlayError(.signInPage, httpStatus: http.statusCode, detail: "a web page answered"))
+            waiting.request.finishLoading(with: PlayError(.signInPage, httpStatus: http.statusCode, detail: "a sign-in page answered"))
             return .cancel
         }
+        guard (200..<300).contains(http.statusCode) else { return .cancel }
         let length = TrustedStream.totalLength(http)
         // A whole answer to a ranged ask starts at the top of the file.
         if http.statusCode == 200 { requests[dataTask.taskIdentifier]?.offset = 0 }

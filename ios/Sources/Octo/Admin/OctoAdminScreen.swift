@@ -1,5 +1,6 @@
 import OctoKit
 import SwiftUI
+import UIKit
 
 /// What Octo is doing, from its own admin pages on the home network: its health and its
 /// services', the stations and how far they have learned, the latest downloads, and where
@@ -144,8 +145,9 @@ struct OctoAdminScreen: View {
                 note("Nothing downloaded yet")
             } else {
                 let now = epochNowMs()
+                let base = adminBase(model)
                 ForEach(Array((showAll ? records : Array(records.prefix(30))).enumerated()), id: \.offset) { _, record in
-                    DownloadRow(record: record, nowMs: now)
+                    DownloadRow(record: record, nowMs: now, client: session.client, base: base)
                 }
                 if records.count > 30 {
                     GlazeButton(showAll ? "Show fewer" : "Show all") { showAll.toggle() }
@@ -154,6 +156,11 @@ struct OctoAdminScreen: View {
                 }
             }
         }
+    }
+
+    /// Where the admin pages answer, once found.
+    private func adminBase(_ model: OctoAdminModel) -> URL? {
+        if case .found(let base) = model.place { base } else { nil }
     }
 
     // MARK: Library
@@ -264,13 +271,17 @@ private struct HealthRow: View {
 private struct DownloadRow: View {
     let record: DownloadRecord
     let nowMs: Int64
+    /// The server in use, which the server's own covers come through.
+    let client: SubsonicClient?
+    /// Where the admin pages answer.
+    let base: URL?
 
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 6).fill(OctoColor.backgroundTertiary)
                 if let cover = record.coverArtUrl, let url = URL(string: cover) {
-                    AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.clear }
+                    DownloadCover(url: url, client: client, base: base)
                         .accessibilityHidden(true)
                 }
             }
@@ -287,6 +298,34 @@ private struct DownloadRow: View {
         }
         .padding(.horizontal, 20)
         .frame(minHeight: 56)
+    }
+}
+
+/// A fetched song's cover. One at the server's own addresses, or where its admin pages answer,
+/// comes through the server's connection (its headers and its sign-in page's cookies, a sign-in
+/// page refused, never shown); any other comes from where it is, with nothing of the server's.
+private struct DownloadCover: View {
+    let url: URL
+    let client: SubsonicClient?
+    let base: URL?
+    @State private var picture: UIImage?
+
+    var body: some View {
+        if let client, isServerPicture(url, client: client, adminBase: base) {
+            Color.clear
+                .overlay {
+                    if let picture { Image(uiImage: picture).resizable().scaledToFill() }
+                }
+                .task(id: url) { picture = await Self.load(url, client: client) }
+        } else {
+            AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.clear }
+        }
+    }
+
+    private static func load(_ url: URL, client: SubsonicClient) async -> UIImage? {
+        guard let (data, _) = try? await ServerExchange.media(for: URLRequest(url: url), client: client, endpoint: "downloads/cover")
+        else { return nil }
+        return UIImage(data: data)
     }
 }
 

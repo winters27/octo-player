@@ -63,6 +63,9 @@ final class Session {
     @ObservationIgnored private let prefs = UserDefaults.standard
     /// When the app started, for anything that waits on the saved sign-in only as it comes back.
     @ObservationIgnored let startedAt = Date()
+    /// What app start left for the person: the sign-in form of the server that was in use, when it
+    /// was not signed in to again, with why. Taken once (`takeStartAsk`).
+    @ObservationIgnored private var startAsk: SwitchResult?
 
     private static let serversKey = "servers"
     private static let activeKey = "servers.active"
@@ -119,6 +122,18 @@ final class Session {
         case add
         /// Changes a kept server; the one in use is signed in to again.
         case edit(String)
+        /// Signs in to a kept server from its own form (signed out of, a refused password, a
+        /// sign-in page in front of it, https asked for) and makes it the one in use: the same
+        /// server, whatever its address is now.
+        case signInAgain(String)
+
+        /// The kept server the form was opened for, nil for a new one.
+        var serverId: String? {
+            switch self {
+            case .edit(let id), .signInAgain(let id): id
+            case .signIn, .add: nil
+            }
+        }
     }
 
     /// What a finished keep came to: the server kept, and whether its main address changed.
@@ -135,22 +150,21 @@ final class Session {
         switch purpose {
         case .add: return "Added \(kept.server.name). Switch to it whenever you like."
         case .edit: return "Saved \(kept.server.name)."
-        case .signIn: return nil
+        case .signIn, .signInAgain: return nil
         }
     }
 
     func keepServer(_ form: Form, for purpose: Purpose) async throws -> Kept {
-        var base: StoredServer?
-        if case .edit(let id) = purpose {
-            guard let found = servers.first(where: { $0.id == id }) else { throw SignInFailure.words(SignInWords.gone) }
-            base = found
-        }
         let main = form.address
         let home = form.homeAddress.flatMap { $0 == main ? nil : $0 }
         let username = form.username.trimmingCharacters(in: .whitespacesAndNewlines)
-        let twin = servers.first { $0.address == main && $0.username == username && $0.id != base?.id }
-        if base != nil, let twin { throw SignInFailure.words(SignInWords.alreadyKept(twin.name)) }
-        let before = base ?? twin
+        let before: StoredServer?
+        switch keepBase(formFor: purpose.serverId, address: main, username: username, servers: servers) {
+        case .gone: throw SignInFailure.words(SignInWords.gone)
+        case .alreadyKept(let twin): throw SignInFailure.words(SignInWords.alreadyKept(twin.name))
+        case .kept(let server): before = server
+        case .new: before = nil
+        }
 
         var secret = form.secret
         if secret.isEmpty, let before, Self.sameKind(before.mode, form.mode), !before.signedOut {
@@ -172,7 +186,7 @@ final class Session {
         defer { own.finishTasksAndInvalidate() }
 
         let use: Bool = switch purpose {
-        case .signIn: true
+        case .signIn, .signInAgain: true
         case .add: false
         case .edit(let id): id == activeId && client != nil
         }
@@ -201,11 +215,7 @@ final class Session {
         }
         let probed = await Self.probeOcto(client)
         let taken = Set(servers.map(\.id)).subtracting([before?.id].compactMap { $0 })
-        let id: String = if let before, before.username == credentials.username {
-            before.id
-        } else {
-            freshServerId(username: credentials.username, address: ServerAddress.written(main), taken: taken)
-        }
+        let id = keptServerId(before: before, username: credentials.username, address: main, taken: taken)
         let label = form.label.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? before?.label
         let keepsCertificate = form.certificate != nil || (before?.hasClientCertificate == true && !form.removesCertificate)
         let certificateName = form.certificate != nil ? form.certificateName : keepsCertificate ? before?.clientCertificateName : nil
@@ -233,13 +243,13 @@ final class Session {
 
         guard use else {
             restoreSecurity()
-            if let before, let index = servers.firstIndex(where: { $0.id == before.id }) { servers[index] = server } else { servers.append(server) }
+            servers = serversAfterKeep(servers, before: before, now: server)
             save()
             return Kept(server: server, addressChanged: addressChanged)
         }
         let from = self.client == nil ? nil : active.flatMap { $0.id == id || $0.id == before?.id || $0.signedOut ? nil : $0 }
         if let from { await leaving?(from, id) }
-        if let before, let index = servers.firstIndex(where: { $0.id == before.id }) { servers[index] = server } else { servers.append(server) }
+        servers = serversAfterKeep(servers, before: before, now: server)
         activate(server, credentials: client.credentials, headers: headers, profile: profile)
         return Kept(server: server, addressChanged: addressChanged)
     }
@@ -481,24 +491,38 @@ final class Session {
     // MARK: Connecting
 
     /// At app start, the server in use signs in again with its saved secret. One whose secret can
-    /// no longer be read stays in the list signed out, and nothing is in use.
+    /// no longer be read stays in the list signed out, and nothing is in use. One kept with a
+    /// sign-in page's password for a plain http address across the internet is never signed in to,
+    /// since that password never goes: nothing is in use, and its sign-in form opens asking for
+    /// https, as a switch to it does.
     private func restore() {
         guard let server = active else { return }
-        if server.signedOut {
+        let secret = server.signedOut ? "" : Keychain.read(for: Self.secretAccount(server.id)) ?? ""
+        let home = Self.homeAddress(of: server)
+        let headers = Self.headers(for: server.id)
+        switch serverRestore(signedOut: server.signedOut, hasSecret: !secret.isEmpty, headers: headers,
+                             scope: ServerScope(main: server.address, home: home)) {
+        case .leave:
             activeId = nil
             save()
             return
-        }
-        guard let secret = Keychain.read(for: Self.secretAccount(server.id)), !secret.isEmpty else {
+        case .signOut:
             if let index = servers.firstIndex(where: { $0.id == server.id }) { servers[index].signedOut = true }
             activeId = nil
             save()
             return
+        case .needsHttps:
+            activeId = nil
+            save()
+            startAsk = .needsPassword(server, GatewayWords.needsHttps)
+            return
+        case .signIn:
+            break
         }
         useSecurity(of: server)
-        client = makeClient(server.address, home: Self.homeAddress(of: server),
+        client = makeClient(server.address, home: home,
                             Credentials(username: server.username, password: secret, mode: server.mode),
-                            Self.headers(for: server.id)).limited(to: folder(for: server.id)?.id)
+                            headers).limited(to: folder(for: server.id)?.id)
         generation += 1
         let id = server.id
         Task {
@@ -507,6 +531,13 @@ final class Session {
             profile = read
             refreshDetails(read, for: id)
         }
+    }
+
+    /// What app start left for the person, once: the sign-in form to open, with why. Nil when
+    /// there is nothing, or once it was taken.
+    func takeStartAsk() -> SwitchResult? {
+        defer { startAsk = nil }
+        return startAsk
     }
 
     /// A server is updated over time, so each start asks again: its kind and version, and its

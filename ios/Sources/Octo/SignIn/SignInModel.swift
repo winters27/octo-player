@@ -376,7 +376,9 @@ final class SignInModel {
             removesCertificate: removesCertificate || (staleCertificate && certificate == nil),
             certificateName: certificate?.name)
         let purpose: Session.Purpose = switch form {
-        case .signIn, .again, .join: .signIn
+        case .signIn, .join: .signIn
+        // A kept server's own form signs in to that server, whatever its address is now.
+        case .again(let server, _): .signInAgain(server.id)
         case .add: .add
         case .edit(let server), .editConnection(let server): .edit(server.id)
         }
@@ -393,7 +395,7 @@ final class SignInModel {
             notice = switch purpose {
             case .add: "Added \(kept.server.name). Switch to it whenever you like."
             case .edit: "Saved \(kept.server.name)."
-            case .signIn: serverSwitch?.signInNotice(previous: previous)
+            case .signIn, .signInAgain: serverSwitch?.signInNotice(previous: previous)
             }
             password = ""
             apiKey = ""
