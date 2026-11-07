@@ -977,10 +977,11 @@ fn is_html(content_type: Option<&str>) -> bool {
     bare.is_some_and(|t| t.eq_ignore_ascii_case("text/html"))
 }
 
-// Whether a content type is JSON ("application/json", or any "+json" type).
+// Whether a content type is JSON ("application/json", "text/json", or any
+// "+json" type).
 fn is_json(content_type: Option<&str>) -> bool {
     let bare = content_type.and_then(|t| t.split(';').next()).map(|t| t.trim().to_ascii_lowercase());
-    bare.is_some_and(|t| t == "application/json" || t.ends_with("+json"))
+    bare.is_some_and(|t| t == "application/json" || t == "text/json" || t.ends_with("+json"))
 }
 
 // The values a header has, trimmed, leaving out any that are not text.
@@ -991,16 +992,20 @@ fn header_values<'a>(headers: &'a ureq::http::HeaderMap, name: &str) -> impl Ite
 // Whether a 401 or 403 is a gateway refusing in the server's place, by what
 // only gateways send: a web page, a Basic challenge, Cloudflare Access's own
 // headers, an address to sign in at, a gateway's session cookie, or, to a
-// request that carried a sign-in, anything but JSON.
+// request that carried a sign-in, anything at all. A JSON answer is the
+// server's own, whatever else it carries.
 fn refusal_is_sign_in_page(status: u16, headers: &ureq::http::HeaderMap, login_sent: bool) -> bool {
     let media = header_values(headers, "content-type").next();
+    if is_json(media) {
+        return false;
+    }
     let challenge = |c: &str| c.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("basic"));
     let basic = status == 401 && header_values(headers, "www-authenticate").any(challenge);
     let access = headers.contains_key("cf-access-aud") || headers.contains_key("cf-access-domain");
     let sent_on = header_values(headers, "location").any(sign_in_address);
     let mut cookies = header_values(headers, "set-cookie").filter_map(|c| c.split('=').next());
     let cookie = cookies.any(|name| is_gateway_cookie(name.trim()));
-    is_html(media) || basic || access || sent_on || cookie || (login_sent && !is_json(media))
+    is_html(media) || basic || access || sent_on || cookie || login_sent
 }
 
 // Whether a Location sends the request on to a gateway's sign-in: one that

@@ -1001,8 +1001,7 @@ fn a_sign_in_page_refusing_the_song_fails_at_once() {
 }
 
 // Red when: the 401/403 arm in `HttpSource::open` loses its guard, or
-// `login_sent && !is_json(media)` becomes `!is_json(media)` (every refusal
-// is taken for a sign-in page).
+// `login_sent` becomes `true` (every refusal is taken for a sign-in page).
 #[test]
 fn a_refusal_that_is_not_a_web_page_stays_a_refusal() {
     use crate::testing::http_server::ScriptServer;
@@ -1106,9 +1105,10 @@ fn an_authelia_session_cookie_is_a_sign_in_page() {
     assert_eq!(refused_as(401, own, "", quick()), (ErrorKind::Http, Some(401), 1));
 }
 
-// Red when: `login_sent && !is_json(media)` is left out, `sends_login` misses
-// one of its names or reads their case as it is, or `is_json` stops dropping
-// the type's parameters (the JSON refusal is then named a sign-in page).
+// Red when: `login_sent` is left out of `refusal_is_sign_in_page`,
+// `sends_login` misses one of its names or reads their case as it is, or
+// `is_json` stops dropping the type's parameters (the JSON refusal is then
+// named a sign-in page).
 #[test]
 fn a_refusal_of_a_sign_in_that_was_sent_is_a_sign_in_page_unless_it_is_json() {
     for name in ["authorization", "CF-Access-Client-Id", "cf-access-client-secret"] {
@@ -1122,6 +1122,25 @@ fn a_refusal_of_a_sign_in_that_was_sent_is_a_sign_in_page_unless_it_is_json() {
     // The server's own refusal of a request that carried no sign-in.
     let plain = refused_as(401, &["Content-Type: text/plain"], "Unauthorized", quick());
     assert_eq!(plain, (ErrorKind::Http, Some(401), 1));
+}
+
+// Red when: the `is_json(media)` early return in `refusal_is_sign_in_page`
+// is left out or moved after a marker, or `is_json` misses `text/json` or
+// "+json" types (a JSON refusal with a gateway's cookie is then named a
+// sign-in page).
+#[test]
+fn a_json_refusal_is_the_servers_own_whatever_markers_it_carries() {
+    let login = HttpOptions { headers: vec![("Authorization".into(), "x".into())], ..quick() };
+    let body = "{\"error\":\"denied\"}";
+    let cookie = &["Content-Type: application/json", "Set-Cookie: authentik_proxy_x=1"];
+    assert_eq!(refused_as(403, cookie, body, login.clone()), (ErrorKind::Http, Some(403), 1));
+    let text = &["Content-Type: Text/JSON; charset=utf-8", "CF-Access-Aud: 5a1b2c3d"];
+    assert_eq!(refused_as(403, text, body, login.clone()), (ErrorKind::Http, Some(403), 1));
+    let problem = &["Content-Type: application/problem+json", "WWW-Authenticate: Basic realm=\"x\""];
+    assert_eq!(refused_as(401, problem, body, login), (ErrorKind::Http, Some(401), 1));
+    // The same cookie on a web page is still a gateway's.
+    let page = &["Content-Type: text/html", "Set-Cookie: authentik_proxy_x=1"];
+    assert_eq!(refused_as(403, page, SIGN_IN, quick()), (ErrorKind::SignInPage, Some(403), 1));
 }
 
 // Red when: `sends_login` reads the secure headers on an http address (they
