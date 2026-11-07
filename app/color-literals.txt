@@ -47,5 +47,6 @@ app/src/main/java/app/winters/octo/ui/family/FamilyQrViews.kt | Color.White | sc
 app/src/main/java/app/winters/octo/ui/family/FamilySheets.kt | Color.White | scanner
 app/src/main/java/app/winters/octo/ui/family/FamilySheets.kt | Color.Black | scanner
 app/src/main/java/app/winters/octo/ui/output/OutputSheet.kt | Color.Black | over-art
+app/src/main/java/app/winters/octo/ui/signin/SignInScreen.kt | Color.Black | mask
 app/src/main/java/app/winters/octo/ui/sound/ResponseGraph.kt | Color.White | self-contained pill
 app/src/main/java/app/winters/octo/ui/sound/ResponseGraph.kt | Color.Black | self-contained pill

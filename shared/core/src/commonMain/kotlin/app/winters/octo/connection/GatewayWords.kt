@@ -11,7 +11,7 @@ object GatewayWords {
     const val LABEL_SECTION = "Sign-in page in front of the server"
     const val LABEL_CAPTION = "For Authentik, Authelia, a proxy password or Cloudflare Access in front of the server."
     const val LABEL_USERNAME = "Username"
-    const val LABEL_PASSWORD = "Password or app password"
+    const val LABEL_PASSWORD = "Password"
     const val LABEL_CLIENT_ID = "Client ID"
     const val LABEL_CLIENT_SECRET = "Client Secret"
     const val LABEL_SAVED = "Saved. Leave empty to keep it."

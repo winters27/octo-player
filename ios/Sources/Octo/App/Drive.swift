@@ -55,7 +55,7 @@ import UIKit
 /// - `account:WHAT`: the account pages, sheets, sign-in modes and ways in; see `AccountDrive`
 /// - `signin:STATE` opens the sign-in page in a sign-in page state, with sample values only:
 ///   `signin:plain`, `signin:authentik`, `signin:cloudflare`, `signin:saved`, `signin:https`,
-///   `signin:join` (see `GatewayDrive`)
+///   `signin:join`, each also as `STATE@end`, scrolled to the page's end (see `GatewayDrive`)
 /// - `servers:rows` opens Server and sync with two sample rows after the kept servers: one a
 ///   sign-in page turned away, one that needs https
 @MainActor
@@ -243,8 +243,10 @@ enum DriveSamples {
 enum GatewayDrive {
     private static let address = "music.example.com"
 
-    /// Opens the sign-in page in `state`; an unknown state opens nothing.
-    static func signIn(_ state: String, router: Router) {
+    /// Opens the sign-in page in `state`; an unknown state opens nothing. `STATE@end` opens it
+    /// scrolled to its end, where the sign-in page fields are.
+    static func signIn(_ step: String, router: Router) {
+        let state = step.hasSuffix("@end") ? String(step.dropLast(4)) : step
         var form: SignInModel.Form = .signIn
         let sample: (SignInModel) -> Void
         switch state {
@@ -295,6 +297,7 @@ enum GatewayDrive {
             return
         }
         SignInView.sampleOnOpen = sample
+        SignInView.endOnOpen = state != step
         router.signIn = form
     }
 

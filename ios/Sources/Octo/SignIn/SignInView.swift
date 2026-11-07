@@ -29,7 +29,10 @@ struct SignInView: View {
     static var scanOnOpen = false
     /// Set by a launch step: the next sign-in screen opens with this sample state, in memory only.
     static var sampleOnOpen: ((SignInModel) -> Void)?
+    /// Set by a launch step: the next sign-in screen opens scrolled to its end.
+    static var endOnOpen = false
     #endif
+    @State private var scroll = ScrollPosition(edge: .top)
 
     init(form: SignInModel.Form, session: Session, done: @escaping (String?) -> Void = { _ in }) {
         _model = State(initialValue: SignInModel(form: form, session: session))
@@ -74,7 +77,24 @@ struct SignInView: View {
             .frame(maxWidth: 420)
             .frame(maxWidth: .infinity)
         }
+        .scrollPosition($scroll)
         .scrollDismissesKeyboard(.interactively)
+        // What scrolls up under the clock and the back button melts away over the gap above
+        // the octopus instead of showing through behind them.
+        .mask {
+            GeometryReader { geo in
+                let top = geo.safeAreaInsets.top
+                VStack(spacing: 0) {
+                    LinearGradient(stops: [.init(color: .clear, location: 0),
+                                           .init(color: .clear, location: top / (top + 56)),
+                                           .init(color: .black, location: 1)],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: top + 56)
+                    Color.black
+                }
+                .ignoresSafeArea()
+            }
+        }
         .background { PageBackdrop(page: glowPage, route: nil) }
         .overlay(alignment: .topLeading) {
             Button { dismiss() } label: {
@@ -119,6 +139,13 @@ struct SignInView: View {
             if let sample = Self.sampleOnOpen {
                 Self.sampleOnOpen = nil
                 sample(model)
+            }
+            if Self.endOnOpen {
+                Self.endOnOpen = false
+                Task {
+                    try? await Task.sleep(for: .milliseconds(600))
+                    scroll.scrollTo(edge: .bottom)
+                }
             }
             #endif
             if case .join(let text) = model.form, let link = parseFamilyLink(text) { model.startJoin(link, session: session) }

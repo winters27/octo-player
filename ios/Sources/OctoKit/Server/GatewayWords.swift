@@ -6,7 +6,7 @@ public enum GatewayWords {
     public static let sectionLabel = "Sign-in page in front of the server"
     public static let caption = "For Authentik, Authelia, a proxy password or Cloudflare Access in front of the server."
     public static let usernameLabel = "Username"
-    public static let passwordLabel = "Password or app password"
+    public static let passwordLabel = "Password"
     public static let clientIdLabel = "Client ID"
     public static let clientSecretLabel = "Client Secret"
     public static let savedLabel = "Saved. Leave empty to keep it."

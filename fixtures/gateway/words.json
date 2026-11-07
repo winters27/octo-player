@@ -36,7 +36,7 @@
   "label.kind.Password": "Username and password",
   "label.kind.CloudflareToken": "Cloudflare service token",
   "label.username": "Username",
-  "label.password": "Password or app password",
+  "label.password": "Password",
   "label.clientId": "Client ID",
   "label.clientSecret": "Client Secret",
   "label.saved": "Saved. Leave empty to keep it.",

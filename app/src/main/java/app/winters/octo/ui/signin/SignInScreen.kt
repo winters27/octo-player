@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -51,9 +52,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -97,6 +102,22 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val CardShape = RoundedCornerShape(20.dp)
+
+// Once the page has scrolled, what runs up under the back button melts away
+// over the top gap instead of showing through behind it.
+private fun Modifier.topFade(scroll: ScrollState): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        if (scroll.value > 0) {
+            val edge = DetailTopGap.toPx()
+            drawRect(
+                Brush.verticalGradient(0f to Color.Transparent, 0.4f to Color.Transparent, 1f to Color.Black, endY = edge),
+                size = Size(size.width, edge),
+                blendMode = BlendMode.DstIn,
+            )
+        }
+    }
 
 // Opened from Settings. Signing in goes back there, and the server's
 // music starts copying on its own. When editing, it starts from the saved
@@ -161,13 +182,15 @@ private fun SignInForm(vm: SignInViewModel) {
         }
     }
     val rise = with(LocalDensity.current) { 14.dp.toPx() }
+    val scroll = rememberScrollState()
 
     Box(
         Modifier
             .fillMaxSize()
             .systemBarsPadding()
             .imePadding()
-            .verticalScroll(rememberScrollState()),
+            .topFade(scroll)
+            .verticalScroll(scroll),
         contentAlignment = Alignment.Center,
     ) {
         Column(
