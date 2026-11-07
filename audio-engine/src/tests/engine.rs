@@ -129,11 +129,22 @@ fn item(id: &str, path: &Path) -> QueueItem {
         duration_ms: None,
         replay_gain: None,
         headers: Vec::new(),
+        secure_headers: Vec::new(),
         genre: None,
         bpm: None,
         live: false,
         hls: false,
     }
+}
+
+// Red when: `HttpHeader`'s `Debug` shows its value again (a queue item's
+// `Debug` then shows its gateway sign-in).
+#[test]
+fn a_queue_items_secure_header_values_never_show_in_debug_output() {
+    let login = crate::api::HttpHeader { name: "Authorization".into(), value: "Basic c2VjcmV0".into() };
+    let song = QueueItem { secure_headers: vec![login], ..item("s", Path::new("")) };
+    let shown = format!("{song:?}");
+    assert!(shown.contains("Authorization") && !shown.contains("c2VjcmV0"), "{shown}");
 }
 
 #[test]

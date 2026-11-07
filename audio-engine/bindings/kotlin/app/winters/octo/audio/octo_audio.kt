@@ -4491,6 +4491,14 @@ data class QueueItem (
     val `headers`: List<HttpHeader> = listOf() 
     , 
     /**
+     * More headers, such as a gateway's sign-in, sent on top of `headers`
+     * only over https to the song's own server (its address, or the https
+     * address an http one moves up to on the same host at port 443), never
+     * over plain http and never to another server.
+     */
+    val `secureHeaders`: List<HttpHeader> = listOf() 
+    , 
+    /**
      * The song's genre; some genres are never mixed into the next song.
      */
     val `genre`: kotlin.String? = null 
@@ -4536,6 +4544,7 @@ public object FfiConverterTypeQueueItem: FfiConverterRustBuffer<QueueItem> {
             FfiConverterOptionalULong.read(buf),
             FfiConverterOptionalTypeReplayGainInfo.read(buf),
             FfiConverterSequenceTypeHttpHeader.read(buf),
+            FfiConverterSequenceTypeHttpHeader.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalDouble.read(buf),
             FfiConverterBoolean.read(buf),
@@ -4551,6 +4560,7 @@ public object FfiConverterTypeQueueItem: FfiConverterRustBuffer<QueueItem> {
             FfiConverterOptionalULong.allocationSize(value.`durationMs`) +
             FfiConverterOptionalTypeReplayGainInfo.allocationSize(value.`replayGain`) +
             FfiConverterSequenceTypeHttpHeader.allocationSize(value.`headers`) +
+            FfiConverterSequenceTypeHttpHeader.allocationSize(value.`secureHeaders`) +
             FfiConverterOptionalString.allocationSize(value.`genre`) +
             FfiConverterOptionalDouble.allocationSize(value.`bpm`) +
             FfiConverterBoolean.allocationSize(value.`live`) +
@@ -4565,6 +4575,7 @@ public object FfiConverterTypeQueueItem: FfiConverterRustBuffer<QueueItem> {
             FfiConverterOptionalULong.write(value.`durationMs`, buf)
             FfiConverterOptionalTypeReplayGainInfo.write(value.`replayGain`, buf)
             FfiConverterSequenceTypeHttpHeader.write(value.`headers`, buf)
+            FfiConverterSequenceTypeHttpHeader.write(value.`secureHeaders`, buf)
             FfiConverterOptionalString.write(value.`genre`, buf)
             FfiConverterOptionalDouble.write(value.`bpm`, buf)
             FfiConverterBoolean.write(value.`live`, buf)

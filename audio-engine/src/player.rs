@@ -695,6 +695,7 @@ impl Player {
         HttpOptions {
             agent: self.shared.agent.clone(),
             headers: item.headers.iter().map(|h| (h.name.clone(), h.value.clone())).collect(),
+            secure_headers: item.secure_headers.iter().map(|h| (h.name.clone(), h.value.clone())).collect(),
             live: item.live,
             hls: item.hls,
             ..Default::default()

@@ -70,7 +70,7 @@ pub struct TestServer {
     ranges: Arc<Mutex<Vec<u64>>>,
     requests: Arc<AtomicUsize>,
     stopped: Arc<AtomicBool>,
-    targets: Arc<Mutex<Vec<String>>>,
+    asked: Arc<Mutex<Vec<Asked>>>,
 }
 
 impl TestServer {
@@ -97,9 +97,9 @@ impl TestServer {
         let ranges = Arc::new(Mutex::new(Vec::new()));
         let requests = Arc::new(AtomicUsize::new(0));
         let stopped = Arc::new(AtomicBool::new(false));
-        let targets = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::new(Mutex::new(Vec::new()));
         let body = Arc::new(body);
-        let (log, count, stop, asked) = (ranges.clone(), requests.clone(), stopped.clone(), targets.clone());
+        let (log, count, stop, asked) = (ranges.clone(), requests.clone(), stopped.clone(), seen.clone());
         let scheme = if tls.is_some() { "https" } else { "http" };
         thread::spawn(move || {
             for stream in listener.incoming().flatten() {
@@ -122,7 +122,7 @@ impl TestServer {
                 });
             }
         });
-        Self { scheme, port, ranges, requests, stopped, targets }
+        Self { scheme, port, ranges, requests, stopped, asked: seen }
     }
 
     pub fn url(&self) -> String {
@@ -140,7 +140,12 @@ impl TestServer {
 
     /// The path and query of each request, in order.
     pub fn targets_asked(&self) -> Vec<String> {
-        self.targets.lock().unwrap().clone()
+        self.asked.lock().unwrap().iter().map(|a| a.target.clone()).collect()
+    }
+
+    /// Every request so far, in order, with its headers.
+    pub fn asked(&self) -> Vec<Asked> {
+        self.asked.lock().unwrap().clone()
     }
 }
 
@@ -176,9 +181,10 @@ fn serve(
     log: &Mutex<Vec<u64>>,
     count: &AtomicUsize,
     stopped: &AtomicBool,
-    targets: &Mutex<Vec<String>>,
+    asked: &Mutex<Vec<Asked>>,
 ) {
     let mut range = None;
+    let mut request = Asked { target: String::new(), headers: Vec::new() };
     {
         let mut reader = BufReader::new(&mut stream);
         let mut line = String::new();
@@ -190,13 +196,15 @@ fn serve(
             }
             if first {
                 first = false;
-                if let Some(target) = line.split_whitespace().nth(1) {
-                    targets.lock().unwrap().push(target.to_string());
-                }
+                request.target = line.split_whitespace().nth(1).unwrap_or_default().to_string();
+                continue;
             }
             let trimmed = line.trim_end();
             if trimmed.is_empty() {
                 break;
+            }
+            if let Some((name, value)) = trimmed.split_once(':') {
+                request.headers.push((name.trim().to_ascii_lowercase(), value.trim().to_string()));
             }
             let lower = trimmed.to_ascii_lowercase();
             if let Some(value) = lower.strip_prefix("range:") {
@@ -207,6 +215,7 @@ fn serve(
             }
         }
     }
+    asked.lock().unwrap().push(request);
     let nth = count.fetch_add(1, Ordering::SeqCst);
     if let Some(start) = range {
         log.lock().unwrap().push(start);

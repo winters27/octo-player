@@ -2,6 +2,7 @@ use super::*;
 use crate::source::trust::Trust;
 use crate::testing::http_server::{Behaviour, SelfSigned, TestServer};
 use std::io::{Read, Seek, SeekFrom, Write};
+use ureq::unversioned::resolver::{ResolvedSocketAddrs, Resolver};
 
 fn data(len: usize) -> Vec<u8> {
     (0..len).map(|i| (i * 7 + i / 251) as u8).collect()
@@ -782,4 +783,392 @@ fn no_log_line_formats_a_value_with_debug() {
         }
     }
     assert!(found.is_empty(), "log lines formatting a value with Debug:\n{}", found.join("\n"));
+}
+
+// Every http address goes to `plain` and every https one to `secure`, on
+// this machine, whatever host and port it names: the test servers then
+// stand in at the ports a real server uses, 80 and 443.
+#[derive(Debug)]
+struct Ports {
+    plain: u16,
+    secure: u16,
+}
+
+impl Resolver for Ports {
+    fn resolve(
+        &self,
+        uri: &ureq::http::Uri,
+        _config: &ureq::config::Config,
+        _timeout: NextTimeout,
+    ) -> Result<ResolvedSocketAddrs, ureq::Error> {
+        let port = if uri.scheme_str() == Some("https") { self.secure } else { self.plain };
+        let mut found = self.empty();
+        found.push(std::net::SocketAddr::from(([127, 0, 0, 1], port)));
+        Ok(found)
+    }
+}
+
+// The port a test server listens on, from its address.
+fn port_of(url: &str) -> u16 {
+    url.parse::<ureq::http::Uri>().unwrap().port_u16().unwrap()
+}
+
+// Options sending the gateway's headers through a client that finds every
+// address with `ports` and trusts `certificate` for these hosts.
+fn through(ports: Ports, certificate: &SelfSigned, hosts: &[&str]) -> HttpOptions {
+    let trust = Arc::new(Trust::default());
+    trust.replace(hosts.iter().map(|host| (host.to_string(), certificate.fingerprint())));
+    HttpOptions { agent: agent_with_parts(trust, IDLE_LIMIT, ports), headers: gateway_headers(), ..quick() }
+}
+
+// A refusal with this status, these header lines and this body.
+fn refused_with(conn: &mut std::net::TcpStream, status: u16, lines: &[&str], body: &str) {
+    let _ = write!(conn, "HTTP/1.1 {status} Refused\r\n");
+    for line in lines {
+        let _ = write!(conn, "{line}\r\n");
+    }
+    let _ = write!(conn, "Content-Length: {}\r\n\r\n{body}", body.len());
+}
+
+// A refusal with this status, content type and body.
+fn refusal(conn: &mut std::net::TcpStream, status: u16, content_type: &str, body: &str) {
+    refused_with(conn, status, &[format!("Content-Type: {content_type}").as_str()], body);
+}
+
+// A gateway's sign-in page.
+const SIGN_IN: &str = "<!doctype html><title>Sign in</title><form method=post></form>";
+
+// What opening a song refused this way fails as, and how many requests it
+// took.
+fn refused_as(
+    status: u16,
+    lines: &'static [&'static str],
+    body: &'static str,
+    opts: HttpOptions,
+) -> (ErrorKind, Option<u16>, usize) {
+    use crate::testing::http_server::ScriptServer;
+    let server = ScriptServer::start(move |_, conn, _| refused_with(conn, status, lines, body));
+    let err = HttpSource::open(&server.url("/rest/stream"), opts).err().unwrap();
+    (err.kind, err.status, server.asked().len())
+}
+
+// Red when: `follow` goes back to comparing origins only
+// (`home.is_some() && origin(&at) == home`), `same_server` becomes
+// `home == to`, or its port rule is dropped.
+#[test]
+fn a_move_up_to_https_on_the_same_host_keeps_every_header() {
+    use crate::testing::http_server::ScriptServer;
+    let body = data(100_000);
+    let certificate = SelfSigned::new(&["127.0.0.1"]);
+    for (from, to) in [
+        // From http's own port to https's own port.
+        ("http://127.0.0.1/rest/stream", "https://127.0.0.1/song.flac"),
+        // From a port of the server's own to https's own port.
+        ("http://127.0.0.1:4533/rest/stream", "https://127.0.0.1/song.flac"),
+    ] {
+        let secure = TestServer::start_tls(body.clone(), Behaviour::default(), &certificate);
+        let server = ScriptServer::start(move |_, conn, _| redirect(conn, to));
+        let ports = Ports { plain: port_of(&server.url("/")), secure: port_of(&secure.url()) };
+        let mut source = HttpSource::open(from, through(ports, &certificate, &["127.0.0.1"])).unwrap();
+        assert!(read_all(&mut source) == body, "the song came through changed");
+        let hop = &secure.asked()[0];
+        for (name, value) in gateway_headers() {
+            assert_eq!(hop.header(&name), Some(value.as_str()), "{name} left off {to} from {from}");
+        }
+        assert_eq!(hop.header("range"), Some("bytes=0-"));
+    }
+}
+
+// Red when: `same_server` drops `host == to_host` (another host over https
+// is taken for the server), or drops its port rule (`*to_port == 443`).
+#[test]
+fn a_move_to_https_on_another_host_or_port_takes_none_of_the_headers() {
+    use crate::testing::http_server::ScriptServer;
+    let body = data(100_000);
+    let certificate = SelfSigned::new(&["127.0.0.1"]);
+    for (from, to) in [
+        // Another host at https's own port; `Ports` sends it to this machine too.
+        ("http://127.0.0.1/rest/stream", "https://127.0.0.2/song.flac"),
+        // The same host, but neither port is its scheme's own.
+        ("http://127.0.0.1:4533/rest/stream", "https://127.0.0.1:8443/song.flac"),
+        // The same host from http's own port, but not to https's own port.
+        ("http://127.0.0.1/rest/stream", "https://127.0.0.1:8443/song.flac"),
+    ] {
+        let secure = TestServer::start_tls(body.clone(), Behaviour::default(), &certificate);
+        let server = ScriptServer::start(move |_, conn, _| redirect(conn, to));
+        let ports = Ports { plain: port_of(&server.url("/")), secure: port_of(&secure.url()) };
+        let opts = through(ports, &certificate, &["127.0.0.1", "127.0.0.2"]);
+        let mut source = HttpSource::open(from, opts).unwrap();
+        assert!(read_all(&mut source) == body, "the song came through changed");
+        assert_eq!(server.asked()[0].header("authorization"), Some("Basic YWxpY2U6cGFzcw=="));
+        let hop = &secure.asked()[0];
+        for (name, _) in gateway_headers() {
+            assert_eq!(hop.header(&name), None, "{name} went to {to} from {from}");
+        }
+        assert_eq!(hop.header("range"), Some("bytes=0-"));
+    }
+}
+
+// Red when: `same_server` loses `scheme == "http"` (https on another port
+// moving to 443 keeps the headers), `to_scheme == "https"` (http on port 80
+// moving to another http port keeps them), the host check or the port
+// check.
+#[test]
+fn the_same_server_is_its_origin_or_its_host_moved_up_to_https() {
+    let same = |a: &str, b: &str| same_server(&origin(a).unwrap(), &origin(b).unwrap());
+    assert!(same("http://Music.Example.com/rest", "http://music.example.com:80/x"));
+    assert!(same("https://music.example.com/rest", "https://music.example.com/x"));
+    assert!(same("http://music.example.com/rest", "https://music.example.com/x"));
+    assert!(!same("http://music.example.com/rest", "https://music.example.com:8443/x"));
+    assert!(same("http://music.example.com:4533/rest", "https://music.example.com:443/x"));
+    assert!(!same("http://music.example.com:4533/rest", "https://music.example.com:8443/x"));
+    assert!(!same("http://music.example.com/rest", "https://cdn.example.com/x"));
+    assert!(!same("http://music.example.com/rest", "http://music.example.com:8080/x"));
+    assert!(!same("https://music.example.com/rest", "http://music.example.com/x"));
+    assert!(!same("https://music.example.com:8443/rest", "https://music.example.com/x"));
+}
+
+// Red when: `follow` sends `secure` without the `to.0 == "https"` check (the
+// item's own http address then carries the sign-in in the clear), sends it
+// outside `if let Some((_, to)) = own` (another host gets it), or never sends
+// it (the https hop of the server's own goes without).
+#[test]
+fn secure_headers_go_only_over_https_to_the_same_server() {
+    use crate::testing::http_server::ScriptServer;
+    let body = data(100_000);
+    let certificate = SelfSigned::new(&["127.0.0.1"]);
+    let own = vec![("X-Octo-Key".to_string(), "key".to_string())];
+    let login = vec![("Authorization".to_string(), "Basic YWxpY2U6cGFzcw==".to_string())];
+    for (to, kept) in [("https://127.0.0.1/song.flac", true), ("https://127.0.0.2/song.flac", false)] {
+        let secure = TestServer::start_tls(body.clone(), Behaviour::default(), &certificate);
+        let server = ScriptServer::start(move |_, conn, _| redirect(conn, to));
+        let ports = Ports { plain: port_of(&server.url("/")), secure: port_of(&secure.url()) };
+        let opts = HttpOptions {
+            headers: own.clone(),
+            secure_headers: login.clone(),
+            ..through(ports, &certificate, &["127.0.0.1", "127.0.0.2"])
+        };
+        let mut source = HttpSource::open("http://127.0.0.1/rest/stream", opts).unwrap();
+        assert!(read_all(&mut source) == body, "the song came through changed");
+        // The item's own http address: its own header, never the sign-in.
+        let first = &server.asked()[0];
+        assert_eq!(first.header("x-octo-key"), Some("key"));
+        assert_eq!(first.header("authorization"), None, "the sign-in crossed plain http");
+        // Its https twin gets both; another host neither.
+        let hop = &secure.asked()[0];
+        assert_eq!(hop.header("authorization"), kept.then_some("Basic YWxpY2U6cGFzcw=="), "{to}");
+        assert_eq!(hop.header("x-octo-key"), kept.then_some("key"), "{to}");
+    }
+    // An https address of the server's own carries it from the first request.
+    let secure = TestServer::start_tls(body.clone(), Behaviour::default(), &certificate);
+    let ports = Ports { plain: 1, secure: port_of(&secure.url()) };
+    let opts = HttpOptions {
+        headers: Vec::new(),
+        secure_headers: login,
+        ..through(ports, &certificate, &["127.0.0.1"])
+    };
+    let mut source = HttpSource::open("https://127.0.0.1/song.flac", opts).unwrap();
+    assert!(read_all(&mut source) == body, "the song came through changed");
+    assert_eq!(secure.asked()[0].header("authorization"), Some("Basic YWxpY2U6cGFzcw=="));
+}
+
+// Red when: the `Debug` of `HttpOptions` shows `secure_headers` as they are,
+// or leaves them out.
+#[test]
+fn secure_header_values_never_show_in_debug_output() {
+    let login = vec![("Authorization".to_string(), "Basic c2VjcmV0".to_string())];
+    let opts = HttpOptions { secure_headers: login, ..quick() };
+    let shown = format!("{opts:?}");
+    assert!(shown.contains("Authorization") && !shown.contains("c2VjcmV0"), "{shown}");
+}
+
+// Red when: the 401/403 arm in `HttpSource::open` is removed, or
+// `refusal_is_sign_in_page` loses `is_html(media)` (the page fails as a
+// plain refusal, `Http`).
+#[test]
+fn a_sign_in_page_refusing_the_song_fails_at_once() {
+    use crate::testing::http_server::ScriptServer;
+    let server = ScriptServer::start(|_, conn, _| refusal(conn, 401, "text/html; charset=utf-8", SIGN_IN));
+    let err = HttpSource::open(&server.url("/rest/stream"), quick()).err().unwrap();
+    assert_eq!((err.kind, err.status), (ErrorKind::SignInPage, Some(401)));
+    assert!(err.message.contains("401"), "{err}");
+    assert_eq!(server.asked().len(), 1, "the sign-in page was asked again");
+    // The same through the way songs open, for a 403 in any case.
+    let forbidden = ScriptServer::start(|_, conn, _| refusal(conn, 403, "Text/HTML", SIGN_IN));
+    let err = crate::source::open(&forbidden.url("/rest/stream"), quick()).err().unwrap();
+    assert_eq!((err.kind, err.status), (ErrorKind::SignInPage, Some(403)));
+    assert_eq!(forbidden.asked().len(), 1, "the sign-in page was asked again");
+}
+
+// Red when: the 401/403 arm in `HttpSource::open` loses its guard, or
+// `login_sent && !is_json(media)` becomes `!is_json(media)` (every refusal
+// is taken for a sign-in page).
+#[test]
+fn a_refusal_that_is_not_a_web_page_stays_a_refusal() {
+    use crate::testing::http_server::ScriptServer;
+    let server = ScriptServer::start(|_, conn, _| refusal(conn, 403, "text/plain", "Forbidden"));
+    let err = HttpSource::open(&server.url("/rest/stream"), quick()).err().unwrap();
+    assert_eq!((err.kind, err.status), (ErrorKind::Http, Some(403)));
+    assert_eq!(server.asked().len(), 1);
+}
+
+// Red when: the 401/403 guard in `HttpSource::open` loses `!live &&` (a
+// station's own refusal is named a sign-in page).
+#[test]
+fn a_live_station_refusing_with_a_web_page_stays_a_refusal() {
+    use crate::testing::http_server::ScriptServer;
+    let server = ScriptServer::start(|_, conn, _| refusal(conn, 401, "text/html", SIGN_IN));
+    let err = HttpSource::open(&server.url("/radio"), live()).err().unwrap();
+    assert_eq!((err.kind, err.status), (ErrorKind::Http, Some(401)));
+}
+
+// Red when: `basic` is left out of `refusal_is_sign_in_page`, loses its
+// `status == 401`, or reads the challenge's case as it is.
+#[test]
+fn a_basic_challenge_on_a_401_is_a_sign_in_page() {
+    let basic = &["WWW-Authenticate: BASIC realm=\"Sign in\""];
+    assert_eq!(refused_as(401, basic, "", quick()), (ErrorKind::SignInPage, Some(401), 1));
+    assert_eq!(refused_as(403, basic, "", quick()), (ErrorKind::Http, Some(403), 1));
+    let bearer = &["WWW-Authenticate: Bearer realm=\"api\""];
+    assert_eq!(refused_as(401, bearer, "", quick()), (ErrorKind::Http, Some(401), 1));
+}
+
+// Red when: `headers.contains_key("cf-access-aud")` is left out.
+#[test]
+fn a_cloudflare_access_audience_header_is_a_sign_in_page() {
+    let aud = &["CF-Access-Aud: 5a1b2c3d"];
+    assert_eq!(refused_as(403, aud, "", quick()), (ErrorKind::SignInPage, Some(403), 1));
+}
+
+// Red when: `headers.contains_key("cf-access-domain")` is left out.
+#[test]
+fn a_cloudflare_access_domain_header_is_a_sign_in_page() {
+    let domain = &["Cf-Access-Domain: team.cloudflareaccess.com"];
+    assert_eq!(refused_as(401, domain, "", quick()), (ErrorKind::SignInPage, Some(401), 1));
+}
+
+// Red when: `back` is left out of `sign_in_address`, or needs only one of
+// `rd` and `rm`.
+#[test]
+fn an_address_that_comes_back_after_a_sign_in_is_a_sign_in_page() {
+    let back = &["Location: https://auth.example.com/?rd=https%3A%2F%2Fmusic.example.com%2F&rm=GET"];
+    assert_eq!(refused_as(401, back, "", quick()), (ErrorKind::SignInPage, Some(401), 1));
+    let half = &["Location: https://music.example.com/rest/stream?rd=1"];
+    assert_eq!(refused_as(401, half, "", quick()), (ErrorKind::Http, Some(401), 1));
+}
+
+// Red when: `sign_in_address` stops looking for `/outpost.goauthentik.io/`.
+#[test]
+fn an_authentik_outpost_address_is_a_sign_in_page() {
+    let outpost = &["Location: /outpost.goauthentik.io/start?rd=%2Frest%2Fstream"];
+    assert_eq!(refused_as(401, outpost, "", quick()), (ErrorKind::SignInPage, Some(401), 1));
+}
+
+// Red when: `sign_in_address` stops looking for `/cdn-cgi/access/`.
+#[test]
+fn a_cloudflare_access_sign_in_path_is_a_sign_in_page() {
+    let path = &["Location: /cdn-cgi/access/login/music.example.com"];
+    assert_eq!(refused_as(403, path, "", quick()), (ErrorKind::SignInPage, Some(403), 1));
+}
+
+// Red when: `sign_in_address` stops reading the host, reads its case as it
+// is, or checks `contains` in place of `ends_with`.
+#[test]
+fn a_cloudflare_access_host_is_a_sign_in_page() {
+    let host = &["Location: https://team.CloudflareAccess.com/login"];
+    assert_eq!(refused_as(403, host, "", quick()), (ErrorKind::SignInPage, Some(403), 1));
+    let other = &["Location: https://team.cloudflareaccess.com.example.net/login"];
+    assert_eq!(refused_as(403, other, "", quick()), (ErrorKind::Http, Some(403), 1));
+}
+
+// Red when: `is_gateway_cookie` stops matching names that start
+// `authentik_proxy`.
+#[test]
+fn an_authentik_session_cookie_is_a_sign_in_page() {
+    let cookie = &["Set-Cookie: authentik_proxy_5f2e=abc; Path=/; HttpOnly"];
+    assert_eq!(refused_as(401, cookie, "", quick()), (ErrorKind::SignInPage, Some(401), 1));
+}
+
+// Red when: `is_gateway_cookie` stops matching `CF_Authorization`.
+#[test]
+fn a_cloudflare_access_session_cookie_is_a_sign_in_page() {
+    let cookie = &["Set-Cookie: CF_Authorization=eyJhbGciOi; Path=/; Secure"];
+    assert_eq!(refused_as(403, cookie, "", quick()), (ErrorKind::SignInPage, Some(403), 1));
+}
+
+// Red when: `is_gateway_cookie` stops matching `authelia_session`, or the
+// cookie check takes any cookie at all.
+#[test]
+fn an_authelia_session_cookie_is_a_sign_in_page() {
+    let cookie = &["Set-Cookie: authelia_session=abc; Path=/"];
+    assert_eq!(refused_as(401, cookie, "", quick()), (ErrorKind::SignInPage, Some(401), 1));
+    let own = &["Set-Cookie: navidrome_session=abc; Path=/"];
+    assert_eq!(refused_as(401, own, "", quick()), (ErrorKind::Http, Some(401), 1));
+}
+
+// Red when: `login_sent && !is_json(media)` is left out, `sends_login` misses
+// one of its names or reads their case as it is, or `is_json` stops dropping
+// the type's parameters (the JSON refusal is then named a sign-in page).
+#[test]
+fn a_refusal_of_a_sign_in_that_was_sent_is_a_sign_in_page_unless_it_is_json() {
+    for name in ["authorization", "CF-Access-Client-Id", "cf-access-client-secret"] {
+        let opts = HttpOptions { headers: vec![(name.to_string(), "x".to_string())], ..quick() };
+        let plain = refused_as(401, &["Content-Type: text/plain"], "Unauthorized", opts.clone());
+        assert_eq!(plain, (ErrorKind::SignInPage, Some(401), 1), "{name}");
+        let json = &["Content-Type: application/json; charset=utf-8"];
+        let refused = refused_as(403, json, "{\"error\":\"denied\"}", opts);
+        assert_eq!(refused, (ErrorKind::Http, Some(403), 1), "{name}");
+    }
+    // The server's own refusal of a request that carried no sign-in.
+    let plain = refused_as(401, &["Content-Type: text/plain"], "Unauthorized", quick());
+    assert_eq!(plain, (ErrorKind::Http, Some(401), 1));
+}
+
+// Red when: `sends_login` reads the secure headers on an http address (they
+// never go there) or leaves them out on an https one.
+#[test]
+fn a_sign_in_counts_as_sent_where_it_goes_on_the_first_request() {
+    let login = vec![("Authorization".to_string(), "Basic YWxpY2U6cGFzcw==".to_string())];
+    let secure = HttpOptions { secure_headers: login.clone(), ..quick() };
+    assert!(sends_login("https://music.example.com/rest/stream", &secure));
+    assert!(!sends_login("http://music.example.com/rest/stream", &secure));
+    let own = HttpOptions { headers: login, ..quick() };
+    assert!(sends_login("http://music.example.com/rest/stream", &own));
+    let key = HttpOptions { headers: vec![("X-Octo-Key".into(), "key".into())], ..quick() };
+    assert!(!sends_login("https://music.example.com/rest/stream", &key));
+}
+
+// Red when: the 401/403 arm in `open_at` is removed, or judges by `html`
+// alone (the Basic challenge then ends the song as `Http`).
+#[test]
+fn a_sign_in_page_refusing_a_later_request_ends_the_song() {
+    use crate::testing::http_server::ScriptServer;
+    type Refuse = fn(&mut std::net::TcpStream);
+    let refusals: [(u16, Refuse); 2] = [
+        (403, |conn| refusal(conn, 403, "text/html; charset=utf-8", SIGN_IN)),
+        (401, |conn| refused_with(conn, 401, &["WWW-Authenticate: Basic realm=\"Sign in\""], "")),
+    ];
+    for (status, refuse) in refusals {
+        // The first answer breaks off; by the time the stream asks again, a
+        // gateway's session has run out and it refuses.
+        let body = data(200_000);
+        let first = body[..50_000].to_vec();
+        let answers = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let server = ScriptServer::start(move |_, conn, _| {
+            if answers.fetch_add(1, Ordering::SeqCst) == 0 {
+                let _ = conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 200000\r\n\r\n");
+                let _ = conn.write_all(&first);
+            } else {
+                refuse(conn);
+            }
+        });
+        let opts = HttpOptions { max_retries: 1, ..quick() };
+        let mut source = HttpSource::open(&server.url("/rest/stream"), opts).unwrap();
+        let mut out = Vec::new();
+        let err = source.read_to_end(&mut out).unwrap_err();
+        assert!(out == body[..50_000], "the sound before the break came through changed");
+        let failure = err.get_ref().and_then(|e| e.downcast_ref::<Failure>()).unwrap();
+        assert_eq!((failure.kind, failure.status), (ErrorKind::SignInPage, Some(status)));
+        assert_eq!(server.asked().len(), 2, "the sign-in page was asked again");
+    }
 }

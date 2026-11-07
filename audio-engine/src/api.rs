@@ -68,6 +68,12 @@ pub struct QueueItem {
     pub replay_gain: Option<ReplayGainInfo>,
     #[uniffi(default)]
     pub headers: Vec<HttpHeader>,
+    /// More headers, such as a gateway's sign-in, sent on top of `headers`
+    /// only over https to the song's own server (its address, or the https
+    /// address an http one moves up to on the same host at port 443), never
+    /// over plain http and never to another server.
+    #[uniffi(default)]
+    pub secure_headers: Vec<HttpHeader>,
     /// The song's genre; some genres are never mixed into the next song.
     #[uniffi(default)]
     pub genre: Option<String>,

@@ -585,7 +585,8 @@ fn get(url: &str, range: Option<(u64, u64)>, opts: &HttpOptions) -> Result<(Answ
             .ok_or_else(|| Failure::new(ErrorKind::InvalidArgument, "an HLS byte range runs past the end"))?;
         extra.push(("Range", format!("bytes={offset}-{end}")));
     }
-    let (response, at) = follow(&opts.agent, url, &opts.headers, &extra, Some(Duration::from_secs(30)))?;
+    let limit = Some(Duration::from_secs(30));
+    let (response, at) = follow(&opts.agent, url, &opts.headers, &opts.secure_headers, &extra, limit)?;
     match response.status().as_u16() {
         200..300 => Ok((response, at)),
         other => Err(Failure::http(other)),
