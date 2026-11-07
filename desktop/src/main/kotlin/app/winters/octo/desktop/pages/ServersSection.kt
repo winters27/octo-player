@@ -434,7 +434,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
         }
         SheetSwitch(
             if (form.useApiKey) "Remember API key" else "Remember password",
-            "Off, Octo asks again each time it opens.",
+            rememberCaption(form.rememberPassword),
             form.rememberPassword,
         ) { form.rememberPassword = it }
         if (kind != SheetKind.SignIn) {

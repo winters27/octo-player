@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.Composable
@@ -23,7 +24,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -36,6 +41,7 @@ import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconSize
+import app.winters.octo.design.LocalOctoSurfaces
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.SeparatorColor
@@ -102,8 +108,29 @@ internal fun PictureChoice(text: String, chosen: Boolean, onPick: () -> Unit, mo
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Txt(text, PictureWords, OctoColors.TextPrimary, Modifier.weight(1f))
-            if (chosen) Glyph(OctoIcons.Check, size = IconSize.Table, tint = OctoColors.TextPrimary)
+            if (chosen) ChosenCheck(OctoColors.TextPrimary)
         }
+    }
+}
+
+// The check after a chosen tile's name, in the name's color: the icon on a
+// dark theme; on a light one drawn as a 2 px stroke, which a thin icon line
+// on a light tile does not match.
+@Composable
+internal fun ChosenCheck(color: Color) {
+    if (!LocalOctoSurfaces.current.light) {
+        Glyph(OctoIcons.Check, size = IconSize.Table, tint = color)
+        return
+    }
+    Canvas(Modifier.size(IconSize.Table)) {
+        val w = size.width
+        val h = size.height
+        val path = Path().apply {
+            moveTo(w * 0.20f, h * 0.52f)
+            lineTo(w * 0.42f, h * 0.73f)
+            lineTo(w * 0.80f, h * 0.30f)
+        }
+        drawPath(path, color, style = Stroke(width = 2f, cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }
 

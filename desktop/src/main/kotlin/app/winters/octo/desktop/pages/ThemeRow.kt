@@ -32,10 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
-import app.winters.octo.design.Glyph
-import app.winters.octo.design.IconSize
 import app.winters.octo.design.OctoColors
-import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoTooltip
 import app.winters.octo.design.SeparatorColor
 import app.winters.octo.design.SettingsSize
@@ -132,7 +129,7 @@ private fun ThemeCard(choice: ThemeChoice, look: ResolvedPalette, chosen: Boolea
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Txt(choice.label, NameWords, if (chosen) OctoColors.OnAccent else OctoColors.TextPrimary, Modifier.weight(1f), maxLines = 2)
-            if (chosen) Glyph(OctoIcons.Check, size = IconSize.Table, tint = OctoColors.OnAccent)
+            if (chosen) ChosenCheck(OctoColors.OnAccent)
         }
     }
 }

@@ -25,6 +25,7 @@ import app.winters.octo.theme.ThemeChoice
 import app.winters.octo.desktop.ui.SongMenu
 import app.winters.octo.design.POPUP_TAG
 import app.winters.octo.desktop.pages.addServer
+import app.winters.octo.desktop.pages.rememberCaption
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
@@ -427,7 +428,7 @@ class ContrastTest {
                     Triple("Octo", "name (main)", 7.0),
                     Triple("Sign in to your music server...", "line (secondary)", 7.0),
                     Triple("Server address", "field name (muted)", 4.5),
-                    Triple("Off, Octo asks again each time it opens.", "switch caption (muted)", 4.5),
+                    Triple(rememberCaption(true), "switch caption (muted)", 4.5),
                 ))
             }
         }

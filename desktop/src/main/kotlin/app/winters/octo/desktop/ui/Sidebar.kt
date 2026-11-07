@@ -55,6 +55,8 @@ import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlassField
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.GlazeSelected
+import app.winters.octo.design.LocalOctoSurfaces
+import app.winters.octo.design.SelectedFill
 import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
@@ -340,15 +342,17 @@ private fun NavRow(
             contentAlignment = if (rail) Alignment.Center else Alignment.CenterStart,
         ) {
             if (selected) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
-            Row(Modifier.padding(horizontal = if (rail) Space.None else Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
-                Box {
-                    Glyph(icon, size = IconSize.Toolbar, tint = if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary)
-                    // On the rail the dot sits on the icon's corner.
-                    if (mark != null && rail) NavMark(Modifier.align(Alignment.TopEnd))
+            SelectedFill(selected && LocalOctoSurfaces.current.light) {
+                Row(Modifier.padding(horizontal = if (rail) Space.None else Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.L)) {
+                    Box {
+                        Glyph(icon, size = IconSize.Toolbar, tint = if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary)
+                        // On the rail the dot sits on the icon's corner.
+                        if (mark != null && rail) NavMark(Modifier.align(Alignment.TopEnd))
+                    }
+                    if (!rail) Txt(label, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f, fill = trailing != null))
+                    if (mark != null && !rail) NavMark()
+                    if (trailing != null && !rail) trailing()
                 }
-                if (!rail) Txt(label, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f, fill = trailing != null))
-                if (mark != null && !rail) NavMark()
-                if (trailing != null && !rail) trailing()
             }
         }
     }
@@ -392,11 +396,13 @@ private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, ra
         ) {
             if (selected) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
             if (lit) Box(Modifier.matchParentSize().background(DropLit, Corner.ControlShape))
-            Row(Modifier.padding(horizontal = if (rail) Space.None else Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs)) {
-                PlaylistPicture(app, playlist, Modifier.size(FrameSize.PlaylistCover), Corner.ArtSShape)
-                if (!rail) {
-                    CompositionLocalProvider(LocalKeyboardHere provides (here && keyboard)) { CutTxt(playlist.name, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f)) }
-                    if (pinned) Glyph(OctoIcons.Pinned, size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextMuted, exact = true)
+            SelectedFill(selected && LocalOctoSurfaces.current.light) {
+                Row(Modifier.padding(horizontal = if (rail) Space.None else Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs)) {
+                    PlaylistPicture(app, playlist, Modifier.size(FrameSize.PlaylistCover), Corner.ArtSShape)
+                    if (!rail) {
+                        CompositionLocalProvider(LocalKeyboardHere provides (here && keyboard)) { CutTxt(playlist.name, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f)) }
+                        if (pinned) Glyph(OctoIcons.Pinned, size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextMuted, exact = true)
+                    }
                 }
             }
         }

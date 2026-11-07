@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -40,11 +41,14 @@ val SeparatorColor: Color @Composable @ReadOnlyComposable get() = OctoColors.Tex
 // What a row or button shows under the pointer: a faint lift, never a border.
 val HoverFill: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.06f)
 
-// A card of settings: a faint glaze of the words' own ink off the page, its
-// edge a hairline of the same. Read while composing, so a new palette
-// redraws them.
-val CardFill: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.045f)
-val CardEdge: Color @Composable @ReadOnlyComposable get() = OctoColors.TextPrimary.copy(alpha = 0.085f)
+// A card of settings: on a dark theme a faint glaze of the words' own ink
+// off the page, its edge a hairline of the same; on a light one the card
+// color, nearly opaque, lifted off the page by the theme's edge line. Read
+// while composing, so a new palette redraws them.
+val CardFill: Color @Composable @ReadOnlyComposable get() =
+    if (LocalOctoSurfaces.current.light) LocalOctoSurfaces.current.card.copy(alpha = 0.92f) else OctoColors.TextPrimary.copy(alpha = 0.045f)
+val CardEdge: Color @Composable @ReadOnlyComposable get() =
+    if (LocalOctoSurfaces.current.light) OctoColors.Edge else OctoColors.TextPrimary.copy(alpha = 0.085f)
 
 // Text in the app's type, one line and cut with an ellipsis unless told
 // otherwise. A page's title and a section's name are headings, so a screen
@@ -58,14 +62,24 @@ fun Txt(
     maxLines: Int = 1,
     align: TextAlign? = null,
 ) {
+    val drawn = weighed(style)
     BasicText(
         text,
         modifier = if (isHeading(style)) modifier.semantics { heading() } else modifier,
-        style = if (align != null) style.copy(color = color, textAlign = align) else style.copy(color = color),
+        style = if (align != null) drawn.copy(color = color, textAlign = align) else drawn.copy(color = color),
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
     )
 }
+
+// A style as this theme draws it: dark words on a light page read thinner
+// than light words on a dark one, so on a light theme the semibold styles
+// (titles, emphasis, row titles) are drawn one weight up, in bold. Body
+// words stay as they are.
+@Composable
+@ReadOnlyComposable
+fun weighed(style: TextStyle): TextStyle =
+    if (LocalOctoSurfaces.current.light && style.fontWeight == FontWeight.SemiBold) style.copy(fontWeight = FontWeight.Bold) else style
 
 // Whether words in this style are a heading: a page's title, a section's name.
 fun isHeading(style: TextStyle): Boolean =

@@ -56,14 +56,14 @@ val ThemeChoice.base: ThemeBase get() = when (this) {
         page = 0xFF0E1512.toInt(), card = 0xFF17211B.toInt(), raised = 0xFF202D26.toInt(), sheet = 0xFF213029.toInt(), sheetAlpha = 1000,
         edge = 0xFF3A4D42.toInt(), text = 0xFFEDF2EA.toInt(), secondary = 0xFFB5C9AE.toInt(), muted = 0xFF97AC92.toInt(),
         accent = 0xFF9ACB86.toInt(), complement = 0xFFE2B062.toInt(), third = 0xFF7FB8A8.toInt(),
-        glow = listOf(0xFF9ACB86.toInt(), 0xFFE2B062.toInt(), 0xFF7FB8A8.toInt()),
+        glow = listOf(0xFF24502A.toInt(), 0xFF5E4A18.toInt(), 0xFF1A4640.toInt()),
         ink = 0xFFEDF2EA.toInt(), inkSecondary = 560, inkTertiary = 250, offTrack = 390, shadow = 1000,
     )
     ThemeChoice.Dusk -> ThemeBase(
         page = 0xFF120E18.toInt(), card = 0xFF1E1726.toInt(), raised = 0xFF292032.toInt(), sheet = 0xFF2F243B.toInt(), sheetAlpha = 1000,
         edge = 0xFF47395A.toInt(), text = 0xFFF4EEF8.toInt(), secondary = 0xFFC9B6DA.toInt(), muted = 0xFFAB9ABE.toInt(),
         accent = 0xFFE7A0C4.toInt(), complement = 0xFFF2BE85.toInt(), third = 0xFF98ADEB.toInt(),
-        glow = listOf(0xFFE7A0C4.toInt(), 0xFFF2BE85.toInt(), 0xFF98ADEB.toInt()),
+        glow = listOf(0xFF5A2466.toInt(), 0xFF7A3E30.toInt(), 0xFF263A78.toInt()),
         ink = 0xFFF4EEF8.toInt(), inkSecondary = 550, inkTertiary = 250, offTrack = 380, shadow = 1000,
     )
     ThemeChoice.Daylight -> ThemeBase(
@@ -71,14 +71,14 @@ val ThemeChoice.base: ThemeBase get() = when (this) {
         edge = 0xFFC9D2D8.toInt(), text = 0xFF12181C.toInt(), secondary = 0xFF2F4A55.toInt(), muted = 0xFF506570.toInt(),
         accent = 0xFF2E6577.toInt(), complement = 0xFF9A4722.toInt(), third = 0xFF5F55A0.toInt(),
         glow = listOf(0xFFBFD9E6.toInt(), 0xFFF2D3C0.toInt(), 0xFFD8D3F0.toInt()),
-        ink = 0xFF12181C.toInt(), inkSecondary = 610, inkTertiary = 250, offTrack = 470, shadow = 450,
+        ink = 0xFF12181C.toInt(), inkSecondary = 610, inkTertiary = 250, offTrack = 470, shadow = 250,
     )
     ThemeChoice.Paper -> ThemeBase(
         page = 0xFFEBE2D2.toInt(), card = 0xFFFAF6EE.toInt(), raised = 0xFFF2EBDF.toInt(), sheet = 0xFFFFFBF4.toInt(), sheetAlpha = 1000,
         edge = 0xFFCDBEA4.toInt(), text = 0xFF2A1F14.toInt(), secondary = 0xFF55412B.toInt(), muted = 0xFF6A5742.toInt(),
         accent = 0xFF8F3F1D.toInt(), complement = 0xFF3C6646.toInt(), third = 0xFF6F540E.toInt(),
         glow = listOf(0xFFE8C9A0.toInt(), 0xFFC9D6B8.toInt(), 0xFFE7C1AE.toInt()),
-        ink = 0xFF2A1F14.toInt(), inkSecondary = 650, inkTertiary = 250, offTrack = 500, shadow = 450,
+        ink = 0xFF2A1F14.toInt(), inkSecondary = 650, inkTertiary = 250, offTrack = 500, shadow = 250,
     )
 }
 

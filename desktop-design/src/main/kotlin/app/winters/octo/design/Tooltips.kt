@@ -226,7 +226,7 @@ fun CutTxt(
         BasicText(
             text,
             modifier = if (isHeading(style)) Modifier.semantics { heading() } else Modifier,
-            style = style.copy(color = color),
+            style = weighed(style).copy(color = color),
             maxLines = maxLines,
             overflow = TextOverflow.Ellipsis,
             onTextLayout = { cut = it.hasVisualOverflow },

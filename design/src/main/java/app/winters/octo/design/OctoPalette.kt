@@ -177,15 +177,19 @@ fun glassFilm(darkAlpha: Float): Color {
 }
 
 // A white rim's color in this theme: as it is on a dark theme; the edge
-// color at four times its opacity on a light one.
+// color at twice its opacity, at most 0.35, on a light one.
 @Composable
 @ReadOnlyComposable
 fun glassRim(darkAlpha: Float): Color {
     val s = LocalOctoSurfaces.current
-    return if (s.light) s.edge.copy(alpha = (darkAlpha * 4f).coerceAtMost(1f)) else Color.White.copy(alpha = darkAlpha)
+    return if (s.light) s.edge.copy(alpha = (darkAlpha * 2f).coerceAtMost(0.35f)) else Color.White.copy(alpha = darkAlpha)
 }
 
-// A shadow's color in this theme.
+// A shadow's color in this theme: black on a dark theme, the theme's own ink
+// on a light one, at the theme's shadow strength.
 @Composable
 @ReadOnlyComposable
-fun shadowColor(darkAlpha: Float): Color = Color.Black.copy(alpha = darkAlpha * LocalOctoSurfaces.current.shadow)
+fun shadowColor(darkAlpha: Float): Color {
+    val s = LocalOctoSurfaces.current
+    return (if (s.light) s.ink else Color.Black).copy(alpha = darkAlpha * s.shadow)
+}

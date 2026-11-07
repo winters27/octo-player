@@ -1,6 +1,7 @@
 package app.winters.octo.design
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.WindowInsets
@@ -215,7 +216,9 @@ fun Glaze(
                     },
                 )
                 .background(film)
-                .background(accent(light.lift))
+                // A lifted glaze takes a hint of the accent; on a light theme
+                // at most 6%, so a lit disc stays glass.
+                .background(accent(if (LocalOctoSurfaces.current.light) light.lift.coerceAtMost(0.06f) else light.lift))
                 .then(if (focused) Modifier.litRim(shape, light) else Modifier),
         )
         // Specular: a brighter rim, masked to the middle.
@@ -298,19 +301,31 @@ fun FloatingGlaze(
                     Shadow(radius = shadowBlur(24f), color = shadowColor(0.45f), offset = DpOffset(0.dp, 8.dp)),
                 ),
         )
-        Glaze(Modifier.matchParentSize(), shape = shape, backdrop = backdrop, film = film, frost = frost, saturation = saturation, seesAll = seesAll, picture = picture)
+        // On a light theme a plate's edge is the theme's hairline alone, with
+        // no accent-lit rim.
+        val plain = halo && LocalOctoSurfaces.current.light
+        Glaze(
+            Modifier.matchParentSize(), shape = shape, backdrop = backdrop, film = film, frost = frost, saturation = saturation, seesAll = seesAll, picture = picture,
+            focused = LocalWindowFocused.current && !plain,
+        )
         if (halo) {
-            Box(Modifier.matchParentSize().innerShadow(shape, Shadow(radius = 0.dp, spread = 1.dp, color = glassRim(0.06f))))
+            Box(Modifier.matchParentSize().innerShadow(shape, Shadow(radius = 0.dp, spread = 1.dp, color = if (plain) OctoColors.Edge else glassRim(0.06f))))
         }
         content()
     }
 }
 
 // The chosen item inside a glaze: a darker pill set into the glass, unlit,
-// so only the glaze around it carries the light.
+// so only the glaze around it carries the light. On a light theme the
+// theme's selected row color with an edge of the accent, as a chosen row in
+// a list shows; words on it read through SelectedFill.
 @Composable
 fun GlazeSelected(modifier: Modifier = Modifier, shape: Shape = CircleShape) {
-    Box(modifier.clip(shape).background(GlazeSelectedFill))
+    if (LocalOctoSurfaces.current.light) {
+        Box(modifier.clip(shape).background(OctoColors.AccentSelected).border(1.dp, OctoColors.Accent.copy(alpha = 0.25f), shape))
+    } else {
+        Box(modifier.clip(shape).background(GlazeSelectedFill))
+    }
 }
 
 // A chosen row in a list: the same darker pill, lightly tinted with the

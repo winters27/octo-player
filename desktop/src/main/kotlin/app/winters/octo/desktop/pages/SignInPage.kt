@@ -70,6 +70,7 @@ import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
 import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.MenuTitle
+import app.winters.octo.design.LocalOctoSurfaces
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoSwitch
@@ -237,7 +238,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                 }
                 SwitchRow(
                     if (form.useApiKey) "Remember API key" else "Remember password",
-                    "Off, Octo asks again each time it opens.",
+                    rememberCaption(form.rememberPassword),
                     form.rememberPassword,
                 ) { form.rememberPassword = it }
 
@@ -311,6 +312,10 @@ private fun SignInCard(backdrop: HazeState, short: Boolean, content: @Composable
         Column(Modifier.fillMaxWidth().padding(if (short) 20.dp else 32.dp), verticalArrangement = Arrangement.spacedBy(if (short) 6.dp else 12.dp), content = content)
     }
 }
+
+// The line under Remember password, saying what the switch does as it is set.
+internal fun rememberCaption(on: Boolean): String =
+    if (on) "On, Octo keeps it on this computer and signs in by itself." else "Off, Octo asks again each time it opens."
 
 // The card's film: a dark gray that lets the colors through, as dark as
 // every word on the card needs over the brightest of them (main and
@@ -393,16 +398,18 @@ internal fun SecretField(value: String, onChange: (String) -> Unit, placeholder:
 }
 
 // The scheme at the start of the address: a small darker pill set into
-// the field that switches between https:// and http:// when clicked.
+// the field that switches between https:// and http:// when clicked. On a
+// light theme a faint shade of the words' own ink.
 @Composable
 internal fun SchemeToggle(prefix: String, onClick: () -> Unit) {
     val shape = RoundedCornerShape(8.dp)
     val other = if (prefix == "https://") "http://" else "https://"
+    val fill = if (LocalOctoSurfaces.current.light) OctoColors.TextPrimary.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.35f)
     OctoTooltip("Switch to $other") {
         Box(
             Modifier
                 .focusProperties { canFocus = false }
-                .background(Color.Black.copy(alpha = 0.35f), shape)
+                .background(fill, shape)
                 .hoverLift(shape)
                 .clickable(role = Role.Button, onClick = onClick)
                 .semantics { contentDescription = "Switch to $other" }
